@@ -1,0 +1,129 @@
+use anyhow::{Context, Result};
+use tokio::process::Command;
+
+/// A discovered tmux session.
+#[derive(Debug, Clone)]
+pub struct TmuxSessionInfo {
+    pub name: String,
+    pub windows: Vec<TmuxWindowInfo>,
+}
+
+/// A tmux window within a session.
+#[derive(Debug, Clone)]
+pub struct TmuxWindowInfo {
+    pub index: u32,
+    pub name: String,
+    pub panes: Vec<TmuxPaneInfo>,
+}
+
+/// A tmux pane within a window.
+#[derive(Debug, Clone)]
+pub struct TmuxPaneInfo {
+    pub index: u32,
+    /// Full target string, e.g., "claude-myrepo:0.0"
+    pub target: String,
+}
+
+/// Check if tmux is available.
+pub async fn tmux_available() -> bool {
+    Command::new("tmux")
+        .arg("-V")
+        .output()
+        .await
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// List all tmux sessions.
+pub async fn list_sessions() -> Result<Vec<String>> {
+    let output = Command::new("tmux")
+        .args(["list-sessions", "-F", "#{session_name}"])
+        .output()
+        .await
+        .context("Failed to run tmux list-sessions")?;
+
+    if !output.status.success() {
+        // No server running = no sessions
+        return Ok(vec![]);
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(stdout.lines().map(|s| s.to_string()).collect())
+}
+
+/// Discover agent sessions matching known prefixes (claude-, codex-, droid-, gemini-).
+pub async fn discover_agent_sessions() -> Result<Vec<String>> {
+    let prefixes = ["claude-", "codex-", "droid-", "gemini-"];
+    let sessions = list_sessions().await?;
+    Ok(sessions
+        .into_iter()
+        .filter(|s| prefixes.iter().any(|p| s.starts_with(p)))
+        .collect())
+}
+
+/// Check if a specific session exists.
+pub async fn has_session(name: &str) -> bool {
+    Command::new("tmux")
+        .args(["has-session", "-t", name])
+        .output()
+        .await
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// List panes in a session, returning window/pane info.
+pub async fn list_panes(session: &str) -> Result<TmuxSessionInfo> {
+    let output = Command::new("tmux")
+        .args([
+            "list-panes",
+            "-s",
+            "-t",
+            session,
+            "-F",
+            "#{window_index}\t#{window_name}\t#{pane_index}",
+        ])
+        .output()
+        .await
+        .context("Failed to list tmux panes")?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "tmux list-panes failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut windows: Vec<TmuxWindowInfo> = Vec::new();
+
+    for line in stdout.lines() {
+        let parts: Vec<&str> = line.splitn(3, '\t').collect();
+        if parts.len() < 3 {
+            continue;
+        }
+        let win_idx: u32 = parts[0].parse().unwrap_or(0);
+        let win_name = parts[1].to_string();
+        let pane_idx: u32 = parts[2].parse().unwrap_or(0);
+
+        let target = format!("{session}:{win_idx}.{pane_idx}");
+        let pane = TmuxPaneInfo {
+            index: pane_idx,
+            target,
+        };
+
+        if let Some(window) = windows.iter_mut().find(|w| w.index == win_idx) {
+            window.panes.push(pane);
+        } else {
+            windows.push(TmuxWindowInfo {
+                index: win_idx,
+                name: win_name,
+                panes: vec![pane],
+            });
+        }
+    }
+
+    Ok(TmuxSessionInfo {
+        name: session.to_string(),
+        windows,
+    })
+}
