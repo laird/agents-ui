@@ -183,30 +183,8 @@ impl App {
             return Ok(());
         }
 
-        // Global Alt shortcuts: Alt+0 swarm view, Alt+1-9 workers, Alt+z stop swarm
+        // Global Alt shortcuts: Alt+0 swarm view, Alt+1-9 workers
         if key.modifiers.contains(KeyModifiers::ALT) {
-            // Alt+z: tear down the current swarm
-            if key.code == KeyCode::Char('z') {
-                let swarm_idx = match &self.screen {
-                    Screen::RepoView { swarm_idx } => *swarm_idx,
-                    Screen::AgentView { swarm_idx, .. } => *swarm_idx,
-                    _ => self.repos_list.selected().unwrap_or(0),
-                };
-                if let Some(swarm) = self.swarms.get(swarm_idx) {
-                    let project = swarm.project_name.clone();
-                    tracing::info!("Tearing down swarm for {project}");
-                    if let Err(e) = self.adapter.teardown(swarm).await {
-                        tracing::error!("Teardown failed: {e}");
-                        self.status_message = Some(format!("Teardown failed: {e}"));
-                    } else {
-                        self.swarms.remove(swarm_idx);
-                        self.status_message = Some(format!("Swarm {project} shut down"));
-                        self.screen = Screen::ReposList;
-                    }
-                }
-                return Ok(());
-            }
-
             if let KeyCode::Char(c @ '0'..='9') = key.code {
                 // Find the current swarm index (use 0 if on repos list)
                 let swarm_idx = match &self.screen {
@@ -569,7 +547,27 @@ impl App {
                         }
                     }
                 }
-                _ => {}
+                _ => {
+                    // Alt+z: tear down the entire swarm (only from repo view)
+                    if key.modifiers.contains(KeyModifiers::ALT)
+                        && key.code == KeyCode::Char('z')
+                    {
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            let project = swarm.project_name.clone();
+                            tracing::info!("Tearing down swarm for {project}");
+                            if let Err(e) = self.adapter.teardown(swarm).await {
+                                tracing::error!("Teardown failed: {e}");
+                                self.status_message =
+                                    Some(format!("Teardown failed: {e}"));
+                            } else {
+                                self.swarms.remove(swarm_idx);
+                                self.status_message =
+                                    Some(format!("Swarm {project} shut down"));
+                                self.screen = Screen::ReposList;
+                            }
+                        }
+                    }
+                }
             }
         }
         Ok(())
