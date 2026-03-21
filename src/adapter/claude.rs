@@ -23,15 +23,16 @@ impl ClaudeAdapter {
             .unwrap_or_else(|| "unknown".to_string())
     }
 
-    /// Expected tmux session name for a given project.
-    fn session_name(project: &str) -> String {
-        format!("claude-{project}")
+    /// Expected tmux session name for a given project and agent type.
+    fn session_name(agent_type: &AgentType, project: &str) -> String {
+        format!("{}-{project}", agent_type.session_prefix())
     }
 
     /// Build a Swarm model from an existing tmux session.
     async fn build_swarm_from_session(
         session_name: &str,
         repo_path: PathBuf,
+        agent_type: AgentType,
     ) -> Result<Swarm> {
         let project_name = Self::project_name(&repo_path);
         let session_info = session::list_panes(session_name).await?;
@@ -66,7 +67,7 @@ impl ClaudeAdapter {
                         .join(format!("{}-wt-{}", project_name, worker_idx + 1));
 
                     let status_file = worktree_path
-                        .join(AgentType::Claude.status_dir())
+                        .join(agent_type.status_dir())
                         .join("fix-loop.status");
 
                     let agent_status = status::read_status_file(&status_file);
@@ -86,7 +87,7 @@ impl ClaudeAdapter {
         Ok(Swarm {
             repo_path,
             project_name,
-            agent_type: AgentType::Claude,
+            agent_type,
             workflow: None, // Can't determine from session alone
             tmux_session: session_name.to_string(),
             manager,
@@ -98,12 +99,12 @@ impl ClaudeAdapter {
 impl AgentRuntime for ClaudeAdapter {
     async fn launch(&self, config: &SwarmConfig) -> Result<Swarm> {
         let project_name = Self::project_name(&config.repo_path);
-        let session_name = Self::session_name(&project_name);
+        let session_name = Self::session_name(&config.agent_type, &project_name);
 
         // Check if session already exists
         if session::has_session(&session_name).await {
             tracing::info!("Session {session_name} already exists, reconnecting");
-            return Self::build_swarm_from_session(&session_name, config.repo_path.clone()).await;
+            return Self::build_swarm_from_session(&session_name, config.repo_path.clone(), config.agent_type.clone()).await;
         }
 
         let script_path = crate::scripts::launcher::find_script("start-parallel-agents.sh")
@@ -167,7 +168,7 @@ impl AgentRuntime for ClaudeAdapter {
             tracing::warn!("Failed to resize session {session_name}: {e}");
         }
 
-        Self::build_swarm_from_session(&session_name, config.repo_path.clone()).await
+        Self::build_swarm_from_session(&session_name, config.repo_path.clone(), config.agent_type.clone()).await
     }
 
     async fn discover(&self, _agents_dir: &Path) -> Result<Vec<Swarm>> {
@@ -175,14 +176,18 @@ impl AgentRuntime for ClaudeAdapter {
         let mut swarms = Vec::new();
 
         for session_name in sessions {
-            if !session_name.starts_with("claude-") {
+            // Infer agent type and project name from session name prefix
+            let (agent_type, project_name) = if let Some(rest) = session_name.strip_prefix("claude-") {
+                (AgentType::Claude, rest.to_string())
+            } else if let Some(rest) = session_name.strip_prefix("codex-") {
+                (AgentType::Codex, rest.to_string())
+            } else if let Some(rest) = session_name.strip_prefix("droid-") {
+                (AgentType::Droid, rest.to_string())
+            } else if let Some(rest) = session_name.strip_prefix("gemini-") {
+                (AgentType::Gemini, rest.to_string())
+            } else {
                 continue;
-            }
-
-            let project_name = session_name
-                .strip_prefix("claude-")
-                .unwrap_or(&session_name)
-                .to_string();
+            };
 
             // Try to find the repo path from git worktree in one of the panes,
             // or fall back to looking in common locations
@@ -194,7 +199,7 @@ impl AgentRuntime for ClaudeAdapter {
                     tracing::warn!("Failed to resize session {session_name}: {e}");
                 }
 
-                match Self::build_swarm_from_session(&session_name, repo_path).await {
+                match Self::build_swarm_from_session(&session_name, repo_path, agent_type).await {
                     Ok(swarm) => swarms.push(swarm),
                     Err(e) => tracing::warn!("Failed to build swarm from {session_name}: {e}"),
                 }
@@ -308,14 +313,14 @@ impl AgentRuntime for ClaudeAdapter {
         proxy::send_keys(&tmux_target, &format!("cd '{}'", worktree_path.display())).await?;
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-        // Launch claude
-        proxy::send_keys(&tmux_target, "claude code --dangerously-skip-permissions .").await?;
+        // Launch the agent
+        proxy::send_keys(&tmux_target, swarm.agent_type.launch_cmd()).await?;
 
-        // Wait for Claude to initialize
+        // Wait for agent to initialize
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
-        // Send /fix-loop
-        self.start_worker_loop(&tmux_target).await?;
+        // Send worker loop command
+        proxy::send_keys(&tmux_target, swarm.agent_type.worker_loop_cmd()).await?;
 
         Ok(AgentInfo {
             id: format!("worker-{next_idx}"),
@@ -349,6 +354,7 @@ impl AgentRuntime for ClaudeAdapter {
         let mut repairs = Vec::new();
         let session_name = &swarm.tmux_session;
         let repo_path = &swarm.repo_path;
+        let launch_cmd = swarm.agent_type.launch_cmd().to_string();
 
         // Check which tmux panes actually exist in the agents window
         let existing_panes = session::list_panes(session_name).await.ok();
@@ -474,7 +480,7 @@ impl AgentRuntime for ClaudeAdapter {
                         // Launch agent
                         let _ = proxy::send_keys(
                             &worker.tmux_target,
-                            "claude code --dangerously-skip-permissions .",
+                            &launch_cmd,
                         )
                         .await;
 
@@ -502,10 +508,10 @@ impl AgentRuntime for ClaudeAdapter {
                                 "Healing {}: agent not running (shell prompt detected), restarting",
                                 worker.id
                             );
-                            // cd to worktree and restart Claude
+                            // cd to worktree and restart agent
                             let _ = proxy::send_keys(
                                 &worker.tmux_target,
-                                &format!("cd '{}' && claude code --dangerously-skip-permissions .", wt_path.display()),
+                                &format!("cd '{}' && {}", wt_path.display(), launch_cmd),
                             )
                             .await;
 
@@ -545,26 +551,28 @@ impl AgentRuntime for ClaudeAdapter {
 }
 
 /// Try to find a repo path given a project name.
-/// Checks the current directory and common parent directories.
+/// Checks tmux environment, the current directory, and common parent directories.
 async fn find_repo_path(project_name: &str) -> Option<PathBuf> {
-    // Check if there's a tmux environment variable with the path
-    let output = Command::new("tmux")
-        .args([
-            "show-environment",
-            "-t",
-            &format!("claude-{project_name}"),
-            "PWD",
-        ])
-        .output()
-        .await
-        .ok()?;
-
-    if output.status.success() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        if let Some(path_str) = stdout.trim().strip_prefix("PWD=") {
-            let path = PathBuf::from(path_str);
-            if path.exists() {
-                return Some(path);
+    // Try all known session prefixes to find the tmux environment variable
+    for prefix in &["claude", "codex", "droid", "gemini"] {
+        if let Ok(output) = Command::new("tmux")
+            .args([
+                "show-environment",
+                "-t",
+                &format!("{prefix}-{project_name}"),
+                "PWD",
+            ])
+            .output()
+            .await
+        {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if let Some(path_str) = stdout.trim().strip_prefix("PWD=") {
+                    let path = PathBuf::from(path_str);
+                    if path.exists() {
+                        return Some(path);
+                    }
+                }
             }
         }
     }
