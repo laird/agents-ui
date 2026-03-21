@@ -214,6 +214,44 @@ impl App {
             return Ok(());
         }
 
+        // Global: Alt+0 jumps to Repo View (swarm view), Alt+1-9 jumps to worker
+        if key.modifiers.contains(KeyModifiers::ALT) {
+            if let KeyCode::Char(c @ '0'..='9') = key.code {
+                // Find the current swarm index (use 0 if on repos list)
+                let swarm_idx = match &self.screen {
+                    Screen::RepoView { swarm_idx } => *swarm_idx,
+                    Screen::AgentView { swarm_idx, .. } => *swarm_idx,
+                    _ => {
+                        // From repos list, use the selected swarm or first one
+                        self.repos_list.selected().unwrap_or(0)
+                    }
+                };
+
+                if swarm_idx < self.swarms.len() {
+                    if c == '0' {
+                        // Alt+0: go to Repo View
+                        self.repo_view = RepoView::new();
+                        self.screen = Screen::RepoView { swarm_idx };
+                        return Ok(());
+                    } else {
+                        // Alt+1-9: jump to worker agent view
+                        let worker_idx = (c as usize) - ('1' as usize);
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            if let Some(worker) = swarm.workers.get(worker_idx) {
+                                self.agent_view = AgentView::new();
+                                self.agent_view.scroll_to_bottom();
+                                self.screen = Screen::AgentView {
+                                    swarm_idx,
+                                    agent_id: worker.id.clone(),
+                                };
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         match &self.screen.clone() {
             Screen::ReposList => self.handle_repos_list_key(key).await?,
             Screen::NewSwarm { field } => {
