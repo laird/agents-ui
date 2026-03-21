@@ -157,59 +157,112 @@ impl AgentRuntime for ClaudeAdapter {
             return Self::build_swarm(&project_name, config.repo_path.clone()).await;
         }
 
-        let script_path = crate::scripts::launcher::find_script("start-parallel-agents.sh")
-            .or_else(|| {
-                let p = config.agents_dir.join("plugins/autocoder/scripts/start-parallel-agents.sh");
-                p.exists().then_some(p)
-            });
-
-        let script_path = match script_path {
-            Some(p) => p,
-            None => anyhow::bail!(
-                "start-parallel-agents.sh not found. Install the autocoder plugin or set AGENTS_DIR."
-            ),
-        };
-
         tracing::info!(
-            "Launching swarm: {} workers for {} via {}",
+            "Launching swarm: {} workers for {} (separate sessions)",
             config.num_workers,
             project_name,
-            script_path.display()
         );
 
-        // Launch the script in a detached manner.
-        let mut child = Command::new("bash")
-            .args([
-                script_path.to_string_lossy().as_ref(),
-                &config.num_workers.to_string(),
-                "--mux",
-                "tmux",
-                "--agent",
-                config.agent_type.script_flag(),
-            ])
-            .current_dir(&config.repo_path)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .context("Failed to spawn start-parallel-agents.sh")?;
+        let repo_path = &config.repo_path;
+        let current_branch = Command::new("git")
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .current_dir(repo_path)
+            .output()
+            .await
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_else(|_| "main".to_string());
 
-        // Wait for the tmux session to appear
-        let mut attempts = 0;
-        loop {
-            if session::has_session(&session_name).await {
-                break;
-            }
-            attempts += 1;
-            if attempts > 60 {
-                child.kill().await.ok();
-                anyhow::bail!("Timed out waiting for tmux session {session_name}");
-            }
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        // Create manager session in the base repo
+        let output = Command::new("tmux")
+            .args(["new-session", "-d", "-s", &session_name, "-c", &repo_path.to_string_lossy()])
+            .output()
+            .await
+            .context("Failed to create manager tmux session")?;
+
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux new-session failed for manager: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
 
-        // Kill the script process (it's blocking on tmux attach which we don't need)
-        child.kill().await.ok();
+        // Launch agent in manager session
+        let manager_target = format!("{session_name}:0.0");
+        proxy::send_keys(&manager_target, config.agent_type.launch_cmd()).await?;
+
+        // Create worker sessions, each in its own worktree
+        for i in 0..config.num_workers {
+            let worktree_path = repo_path
+                .parent()
+                .unwrap_or(repo_path)
+                .join(format!("{project_name}-wt-{}", i + 1));
+
+            let worktree_branch = format!("{current_branch}-wt-{}", i + 1);
+
+            if !worktree_path.exists() {
+                let _ = Command::new("git")
+                    .args(["branch", &worktree_branch, &current_branch])
+                    .current_dir(repo_path)
+                    .output()
+                    .await;
+
+                let output = Command::new("git")
+                    .args([
+                        "worktree", "add",
+                        &worktree_path.to_string_lossy(),
+                        &worktree_branch,
+                    ])
+                    .current_dir(repo_path)
+                    .output()
+                    .await
+                    .context("Failed to create git worktree")?;
+
+                if !output.status.success() {
+                    tracing::warn!(
+                        "git worktree add failed for worker {i}: {}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                    continue;
+                }
+            }
+
+            let worker_session = Self::worker_session_name(&project_name, i as usize);
+
+            let output = Command::new("tmux")
+                .args([
+                    "new-session", "-d", "-s", &worker_session,
+                    "-c", &worktree_path.to_string_lossy(),
+                ])
+                .output()
+                .await
+                .context("Failed to create worker tmux session")?;
+
+            if !output.status.success() {
+                tracing::warn!(
+                    "tmux new-session failed for {worker_session}: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                continue;
+            }
+
+            let worker_target = format!("{worker_session}:0.0");
+
+            // Launch agent
+            proxy::send_keys(&worker_target, config.agent_type.launch_cmd()).await?;
+
+            // Stagger launches to avoid overwhelming the system
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+
+            // Send fix-loop command
+            proxy::send_keys(&worker_target, config.agent_type.worker_loop_cmd()).await?;
+
+            // Wait between workers for initialization
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        }
+
+        // Send manager command after workers are up
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        proxy::send_keys(&manager_target, "/autocoder:monitor-loop").await?;
 
         Self::build_swarm(&project_name, config.repo_path.clone()).await
     }
