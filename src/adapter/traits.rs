@@ -25,6 +25,12 @@ pub trait AgentRuntime {
     /// Capture current pane output for an agent.
     async fn capture_output(&self, tmux_target: &str) -> Result<String>;
 
+    /// Add a new worker to an existing swarm. Returns the new AgentInfo.
+    async fn add_worker(&self, swarm: &Swarm) -> Result<crate::model::swarm::AgentInfo>;
+
+    /// Send `/fix-loop` (or equivalent) to a worker to start it working.
+    async fn start_worker_loop(&self, tmux_target: &str) -> Result<()>;
+
     /// Stop a swarm gracefully.
     async fn stop(&self, swarm: &Swarm) -> Result<()>;
 
