@@ -1,5 +1,6 @@
 use ratatui::style::{Color, Modifier, Style};
 
+use crate::model::issue::IssuePriority;
 use crate::model::status::AgentState;
 
 pub fn title_style() -> Style {
@@ -44,4 +45,20 @@ pub fn attention_style() -> Style {
     Style::default()
         .fg(Color::Red)
         .add_modifier(Modifier::BOLD)
+}
+
+pub fn priority_style(priority: &IssuePriority) -> Style {
+    match priority {
+        IssuePriority::P0 => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        IssuePriority::P1 => Style::default().fg(Color::Yellow),
+        IssuePriority::P2 => Style::default().fg(Color::Blue),
+        IssuePriority::P3 => Style::default().fg(Color::DarkGray),
+        IssuePriority::None => Style::default().fg(Color::DarkGray),
+    }
+}
+
+pub fn active_filter_style() -> Style {
+    Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
 }

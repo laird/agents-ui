@@ -1,224 +1,407 @@
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState, Wrap},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Frame,
 };
 
+use crate::model::issue::IssuePriority;
 use crate::model::swarm::Swarm;
 use super::theme;
 
+/// Which panel has focus in the repo view.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RepoViewFocus {
+    Workers,
+    Issues,
+    ManagerInput,
+}
+
 pub struct RepoView {
-    pub worker_table_state: TableState,
-    pub focus_manager: bool,
+    pub focus: RepoViewFocus,
+    pub worker_list_state: ListState,
+    pub issue_list_state: ListState,
+    pub priority_filter: Option<IssuePriority>,
     pub input: String,
 }
 
 impl RepoView {
     pub fn new() -> Self {
-        let mut worker_table_state = TableState::default();
-        worker_table_state.select(Some(0));
+        let mut worker_list_state = ListState::default();
+        worker_list_state.select(Some(0));
+        let mut issue_list_state = ListState::default();
+        issue_list_state.select(Some(0));
         Self {
-            worker_table_state,
-            focus_manager: false,
+            focus: RepoViewFocus::Workers,
+            worker_list_state,
+            issue_list_state,
+            priority_filter: None,
             input: String::new(),
         }
     }
 
     pub fn render(&mut self, f: &mut Frame, area: Rect, swarm: &Swarm) {
-        // Workers table height: header + 1 row per worker + borders, capped
-        let worker_rows = swarm.workers.len().max(1);
-        let workers_height = (worker_rows as u16 + 3).min(12); // header + rows + borders
-
-        // Calculate input height based on content (2 for borders, content lines capped at 5)
+        // Calculate input height
         let input_display = format!("> {}█", self.input);
-        let avail_width = area.width.saturating_sub(2) as usize; // minus borders
+        let avail_width = area.width.saturating_sub(2) as usize;
         let input_lines = if avail_width > 0 {
             ((input_display.len() + avail_width - 1) / avail_width).max(1)
         } else {
             1
         };
-        let input_height = (input_lines as u16).min(5) + 2; // content + borders
+        let input_height = (input_lines as u16).min(5) + 2;
 
         let chunks = Layout::vertical([
-            Constraint::Length(1),        // Title bar
-            Constraint::Min(8),           // Manager session (primary, fills screen)
-            Constraint::Length(input_height), // Input line (expands with content)
-            Constraint::Length(workers_height), // Workers table (compact)
-            Constraint::Length(1),         // Help bar
+            Constraint::Length(1), // Title bar
+            Constraint::Min(8),   // Two-column area
+            Constraint::Length(input_height), // Input
+            Constraint::Length(1), // Help bar
         ])
         .split(area);
 
-        // Title bar (compact)
+        self.render_title_bar(f, chunks[0], swarm);
+        self.render_columns(f, chunks[1], swarm);
+        self.render_input(f, chunks[2], &input_display);
+        self.render_help(f, chunks[3]);
+    }
+
+    fn render_title_bar(&self, f: &mut Frame, area: Rect, swarm: &Swarm) {
+        let busy = swarm.busy_count();
+        let idle = swarm.attention_count();
+        let total = swarm.workers.len();
+        let stopped = total - busy - idle;
+
+        let (p0, p1, p2, p3) = swarm.issue_cache.priority_counts();
+
         let project_label = format!("  {} ", swarm.project_name);
         let workflow_label = format!(
-            " [{}] ",
+            "[{}] ",
             swarm
                 .workflow
                 .as_ref()
                 .map(|w| w.to_string())
                 .unwrap_or_else(|| "—".to_string())
         );
-        let runtime_label = format!(" {} ", swarm.agent_type);
-        let status_text = swarm.manager.status.state.to_string();
+        let workers_label = format!(" {busy}/{total} busy ");
+        let idle_label = if idle > 0 {
+            format!("{idle} idle ")
+        } else {
+            String::new()
+        };
+        let stopped_label = if stopped > 0 {
+            format!("{stopped} stopped ")
+        } else {
+            String::new()
+        };
+        let issues_label = format!(" P0:{p0} P1:{p1} P2:{p2} P3:{p3}");
+
         let title = Paragraph::new(Line::from(vec![
             Span::styled(project_label, theme::title_style()),
             Span::styled(workflow_label, theme::help_style()),
-            Span::styled(runtime_label, theme::help_style()),
-            Span::styled(" Manager: ", theme::help_style()),
-            Span::styled(status_text, theme::status_style(&swarm.manager.status.state)),
+            Span::styled(workers_label, theme::status_style(
+                &crate::model::status::AgentState::Working { issue: None },
+            )),
+            Span::styled(idle_label, theme::status_style(
+                &crate::model::status::AgentState::Idle,
+            )),
+            Span::styled(stopped_label, theme::status_style(
+                &crate::model::status::AgentState::Stopped,
+            )),
+            Span::styled(issues_label, theme::help_style()),
         ]));
-        f.render_widget(title, chunks[0]);
+        f.render_widget(title, area);
+    }
 
-        // Manager session output (primary content area — fills available space)
-        let inner_height = chunks[1].height.saturating_sub(2) as usize; // minus borders
-        let content_lines: Vec<Line> = swarm
-            .manager
-            .pane_content
-            .lines()
-            .rev()
-            .take(inner_height)
-            .map(|s| Line::from(s.to_string()))
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
+    fn render_columns(&mut self, f: &mut Frame, area: Rect, swarm: &Swarm) {
+        let cols = Layout::horizontal([
+            Constraint::Percentage(40),
+            Constraint::Percentage(60),
+        ])
+        .split(area);
+
+        self.render_workers_column(f, cols[0], swarm);
+        self.render_issues_column(f, cols[1], swarm);
+    }
+
+    fn render_workers_column(&mut self, f: &mut Frame, area: Rect, swarm: &Swarm) {
+        let items: Vec<ListItem> = swarm
+            .workers
+            .iter()
+            .map(|w| {
+                let dot = match &w.status.state {
+                    crate::model::status::AgentState::Working { .. } => "● ",
+                    crate::model::status::AgentState::Starting => "◐ ",
+                    crate::model::status::AgentState::Idle => "○ ",
+                    crate::model::status::AgentState::Stopped => "◌ ",
+                    _ => "  ",
+                };
+
+                let status_text = w.status.state.to_string();
+
+                let elapsed = w
+                    .status
+                    .timestamp
+                    .map(|ts| {
+                        let now = chrono::Local::now().naive_local();
+                        let dur = now - ts;
+                        if dur.num_hours() > 0 {
+                            format!("{}h ago", dur.num_hours())
+                        } else if dur.num_minutes() > 0 {
+                            format!("{}m ago", dur.num_minutes())
+                        } else {
+                            "just now".to_string()
+                        }
+                    })
+                    .unwrap_or_default();
+
+                let line1 = Line::from(vec![
+                    Span::styled(dot, theme::status_style(&w.status.state)),
+                    Span::styled(&w.id, theme::title_style()),
+                ]);
+                let line2 = Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(status_text, theme::status_style(&w.status.state)),
+                ]);
+                let mut lines = vec![line1, line2];
+                if !elapsed.is_empty() {
+                    lines.push(Line::from(vec![
+                        Span::raw("  "),
+                        Span::styled(elapsed, theme::help_style()),
+                    ]));
+                }
+                ListItem::new(lines)
+            })
             .collect();
 
-        let manager_block = Block::default()
+        let workers_title = format!(" Workers ({}) ", swarm.workers.len());
+        let block = Block::default()
             .borders(Borders::ALL)
-            .title(" Manager Session ")
-            .border_style(if self.focus_manager {
+            .title(workers_title)
+            .border_style(if self.focus == RepoViewFocus::Workers {
                 theme::title_style()
             } else {
                 ratatui::style::Style::default()
             });
 
-        let manager_para = Paragraph::new(content_lines).block(manager_block);
-        f.render_widget(manager_para, chunks[1]);
+        let list = List::new(items)
+            .block(block)
+            .highlight_style(theme::selected_style());
 
-        // Input line (always visible, wraps to show all content)
-        let input_style = if self.focus_manager {
+        f.render_stateful_widget(list, area, &mut self.worker_list_state);
+    }
+
+    fn render_issues_column(&mut self, f: &mut Frame, area: Rect, swarm: &Swarm) {
+        let (p0, p1, p2, p3) = swarm.issue_cache.priority_counts();
+        let total = swarm.issue_cache.issues.len();
+
+        // Build filter header
+        let filter_spans: Vec<Span> = vec![
+            if self.priority_filter.is_none() {
+                Span::styled(format!("All({total}) "), theme::active_filter_style())
+            } else {
+                Span::styled(format!("All({total}) "), theme::help_style())
+            },
+            if self.priority_filter == Some(IssuePriority::P0) {
+                Span::styled(format!("P0({p0}) "), theme::active_filter_style())
+            } else {
+                Span::styled(format!("P0({p0}) "), theme::priority_style(&IssuePriority::P0))
+            },
+            if self.priority_filter == Some(IssuePriority::P1) {
+                Span::styled(format!("P1({p1}) "), theme::active_filter_style())
+            } else {
+                Span::styled(format!("P1({p1}) "), theme::priority_style(&IssuePriority::P1))
+            },
+            if self.priority_filter == Some(IssuePriority::P2) {
+                Span::styled(format!("P2({p2}) "), theme::active_filter_style())
+            } else {
+                Span::styled(format!("P2({p2}) "), theme::priority_style(&IssuePriority::P2))
+            },
+            if self.priority_filter == Some(IssuePriority::P3) {
+                Span::styled(format!("P3({p3}) "), theme::active_filter_style())
+            } else {
+                Span::styled(format!("P3({p3}) "), theme::priority_style(&IssuePriority::P3))
+            },
+        ];
+
+        let filtered = swarm.issue_cache.filtered(self.priority_filter.as_ref());
+
+        let mut items: Vec<ListItem> = Vec::new();
+        // Filter header as first item
+        items.push(ListItem::new(Line::from(filter_spans)));
+
+        for issue in &filtered {
+            let working_label = if issue.is_working { " [working]" } else { "" };
+            let type_label = format!("{}", issue.issue_type);
+
+            let line = Line::from(vec![
+                Span::styled(
+                    format!("{} ", issue.priority),
+                    theme::priority_style(&issue.priority),
+                ),
+                Span::styled(format!("#{} ", issue.number), theme::title_style()),
+                Span::raw(truncate_str(&issue.title, 30)),
+                Span::styled(
+                    format!(" {type_label}"),
+                    theme::help_style(),
+                ),
+                Span::styled(
+                    working_label.to_string(),
+                    theme::status_style(&crate::model::status::AgentState::Working { issue: None }),
+                ),
+            ]);
+            items.push(ListItem::new(line));
+        }
+
+        if swarm.issue_cache.is_loading {
+            items.push(ListItem::new(Line::from(Span::styled(
+                "  Loading...",
+                theme::help_style(),
+            ))));
+        } else if filtered.is_empty() {
+            items.push(ListItem::new(Line::from(Span::styled(
+                "  No issues",
+                theme::help_style(),
+            ))));
+        }
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(" Issues ")
+            .border_style(if self.focus == RepoViewFocus::Issues {
+                theme::title_style()
+            } else {
+                ratatui::style::Style::default()
+            });
+
+        let list = List::new(items)
+            .block(block)
+            .highlight_style(if self.focus == RepoViewFocus::Issues {
+                theme::selected_style()
+            } else {
+                ratatui::style::Style::default()
+            });
+
+        f.render_stateful_widget(list, area, &mut self.issue_list_state);
+    }
+
+    fn render_input(&self, f: &mut Frame, area: Rect, input_display: &str) {
+        let input_style = if self.focus == RepoViewFocus::ManagerInput {
             theme::title_style()
         } else {
             theme::help_style()
         };
         let input_block = Block::default()
             .borders(Borders::ALL)
+            .title(" Manager ")
             .border_style(input_style);
-        let input_para = Paragraph::new(Span::styled(&input_display, input_style))
+        let input_para = Paragraph::new(Span::styled(input_display, input_style))
             .block(input_block)
             .wrap(Wrap { trim: false });
-        f.render_widget(input_para, chunks[2]);
+        f.render_widget(input_para, area);
+    }
 
-        // Workers table (compact summary)
-        let header = Row::new(vec![
-            Cell::from("Worker"),
-            Cell::from("Status"),
-            Cell::from("Current Task"),
-            Cell::from("Worktree"),
-        ])
-        .style(theme::header_style());
-
-        let rows: Vec<Row> = swarm
-            .workers
-            .iter()
-            .map(|w| {
-                let task = match &w.status.state {
-                    crate::model::status::AgentState::Working { issue: Some(n) } => {
-                        format!("Issue #{n}")
-                    }
-                    _ => "—".to_string(),
-                };
-                let wt_name = w
-                    .worktree_path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                Row::new(vec![
-                    Cell::from(w.id.clone()),
-                    Cell::from(w.status.state.to_string())
-                        .style(theme::status_style(&w.status.state)),
-                    Cell::from(task),
-                    Cell::from(wt_name),
-                ])
-            })
-            .collect();
-
-        let workers_title = format!(" Workers ({}) ", swarm.workers.len());
-        let table = Table::new(
-            rows,
-            [
-                Constraint::Percentage(20),
-                Constraint::Percentage(20),
-                Constraint::Percentage(30),
-                Constraint::Percentage(30),
-            ],
-        )
-        .header(header)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(workers_title)
-                .border_style(if !self.focus_manager {
-                    theme::title_style()
-                } else {
-                    ratatui::style::Style::default()
-                }),
-        )
-        .row_highlight_style(theme::selected_style());
-
-        f.render_stateful_widget(table, chunks[3], &mut self.worker_table_state);
-
-        // Help bar (compact, single line)
-        let help = if self.focus_manager {
-            Paragraph::new(Line::from(vec![
-                Span::styled(" Enter", theme::title_style()),
-                Span::styled(" send  ", theme::help_style()),
-                Span::styled("↓", theme::title_style()),
-                Span::styled(" workers  ", theme::help_style()),
-                Span::styled("Esc", theme::title_style()),
-                Span::styled(" workers  ", theme::help_style()),
-            ]))
-        } else {
-            Paragraph::new(Line::from(vec![
+    fn render_help(&self, f: &mut Frame, area: Rect) {
+        let help = match self.focus {
+            RepoViewFocus::Workers => Paragraph::new(Line::from(vec![
                 Span::styled(" Enter", theme::title_style()),
                 Span::styled(" drill in  ", theme::help_style()),
-                Span::styled("↑", theme::title_style()),
-                Span::styled(" manager  ", theme::help_style()),
+                Span::styled("Tab", theme::title_style()),
+                Span::styled(" issues  ", theme::help_style()),
+                Span::styled("↑/↓", theme::title_style()),
+                Span::styled(" select  ", theme::help_style()),
                 Span::styled("a", theme::title_style()),
                 Span::styled(" add worker  ", theme::help_style()),
+                Span::styled("m", theme::title_style()),
+                Span::styled(" manager  ", theme::help_style()),
                 Span::styled("Esc", theme::title_style()),
-                Span::styled(" back  ", theme::help_style()),
-                Span::styled("q", theme::title_style()),
-                Span::styled(" quit", theme::help_style()),
-            ]))
+                Span::styled(" back", theme::help_style()),
+            ])),
+            RepoViewFocus::Issues => Paragraph::new(Line::from(vec![
+                Span::styled(" Enter", theme::title_style()),
+                Span::styled(" assign  ", theme::help_style()),
+                Span::styled("Tab", theme::title_style()),
+                Span::styled(" workers  ", theme::help_style()),
+                Span::styled("0-4", theme::title_style()),
+                Span::styled(" filter  ", theme::help_style()),
+                Span::styled("↑/↓", theme::title_style()),
+                Span::styled(" select  ", theme::help_style()),
+                Span::styled("r", theme::title_style()),
+                Span::styled(" refresh  ", theme::help_style()),
+                Span::styled("Esc", theme::title_style()),
+                Span::styled(" back", theme::help_style()),
+            ])),
+            RepoViewFocus::ManagerInput => Paragraph::new(Line::from(vec![
+                Span::styled(" Enter", theme::title_style()),
+                Span::styled(" send  ", theme::help_style()),
+                Span::styled("Tab", theme::title_style()),
+                Span::styled(" workers  ", theme::help_style()),
+                Span::styled("Esc", theme::title_style()),
+                Span::styled(" workers", theme::help_style()),
+            ])),
         };
-        f.render_widget(help, chunks[4]);
+        f.render_widget(help, area);
     }
+
+    // Navigation helpers
 
     pub fn next_worker(&mut self, len: usize) {
         if len == 0 {
             return;
         }
-        let i = self.worker_table_state.selected().unwrap_or(0);
-        self.worker_table_state.select(Some((i + 1) % len));
+        let i = self.worker_list_state.selected().unwrap_or(0);
+        self.worker_list_state.select(Some((i + 1) % len));
     }
 
-    /// Move selection up. Returns `true` if already at the top (caller should
-    /// move focus to the manager panel).
     pub fn previous_worker(&mut self, len: usize) -> bool {
         if len == 0 {
             return true;
         }
-        let i = self.worker_table_state.selected().unwrap_or(0);
+        let i = self.worker_list_state.selected().unwrap_or(0);
         if i == 0 {
-            return true; // At top — signal to focus manager
+            return true; // Signal to focus manager input
         }
-        self.worker_table_state.select(Some(i - 1));
+        self.worker_list_state.select(Some(i - 1));
         false
     }
 
     pub fn selected_worker(&self) -> Option<usize> {
-        self.worker_table_state.selected()
+        self.worker_list_state.selected()
+    }
+
+    pub fn next_issue(&mut self, len: usize) {
+        if len == 0 {
+            return;
+        }
+        // +1 because first item is the filter header
+        let max = len; // filtered issues count (header is index 0)
+        let i = self.issue_list_state.selected().unwrap_or(0);
+        if i < max {
+            self.issue_list_state.select(Some(i + 1));
+        }
+    }
+
+    pub fn previous_issue(&mut self) -> bool {
+        let i = self.issue_list_state.selected().unwrap_or(0);
+        if i <= 1 {
+            // At top of issue list (0 is header, 1 is first issue)
+            return true; // Signal to focus manager input
+        }
+        self.issue_list_state.select(Some(i - 1));
+        false
+    }
+
+    /// Returns the index into the filtered issues list (0-based), accounting for the header row.
+    pub fn selected_issue_idx(&self) -> Option<usize> {
+        self.issue_list_state
+            .selected()
+            .and_then(|i| if i >= 1 { Some(i - 1) } else { None })
+    }
+}
+
+fn truncate_str(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}…", &s[..max_len - 1])
     }
 }

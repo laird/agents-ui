@@ -3,6 +3,7 @@ use futures::StreamExt;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
+use crate::model::issue::GitHubIssue;
 use crate::model::status::AgentStatus;
 
 /// All events the app processes.
@@ -26,6 +27,11 @@ pub enum Event {
     SwarmDiscovered {
         session_name: String,
         repo_path: String,
+    },
+    /// GitHub issues refreshed for a swarm
+    IssuesRefreshed {
+        swarm_idx: usize,
+        issues: Vec<GitHubIssue>,
     },
     /// Error from a background task
     Error(String),

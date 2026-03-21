@@ -49,6 +49,8 @@ pub struct App {
     pub new_swarm_repo: String,
     /// Status message shown at bottom of repos list.
     pub status_message: Option<String>,
+    /// Counter for periodic issue refresh (every ~60 ticks = 15 seconds at 250ms tick).
+    issue_refresh_counter: u32,
 }
 
 impl App {
@@ -83,6 +85,7 @@ impl App {
             dialog_input: String::new(),
             new_swarm_repo: String::new(),
             status_message: None,
+            issue_refresh_counter: 0,
         };
 
         // Start pane watchers for discovered swarms
@@ -142,8 +145,16 @@ impl App {
         match event {
             Event::Key(key) => self.handle_key(key).await?,
             Event::Tick => {
-                // Periodic refresh — status files could be re-read here
                 self.refresh_statuses();
+                // Periodic issue refresh (~every 60 seconds when viewing a repo)
+                self.issue_refresh_counter += 1;
+                if self.issue_refresh_counter >= 240 {
+                    // 240 ticks * 250ms = 60 seconds
+                    self.issue_refresh_counter = 0;
+                    if let Screen::RepoView { swarm_idx } = &self.screen {
+                        self.start_issue_refresh(*swarm_idx);
+                    }
+                }
             }
             Event::PaneOutput { agent_id, content } => {
                 // Update the agent's pane content
@@ -167,6 +178,12 @@ impl App {
                 if let Ok(swarms) = self.adapter.discover(&self.agents_dir).await {
                     self.swarms = swarms;
                     self.start_all_pane_watchers();
+                }
+            }
+            Event::IssuesRefreshed { swarm_idx, issues } => {
+                if let Some(swarm) = self.swarms.get_mut(swarm_idx) {
+                    swarm.issue_cache.issues = issues;
+                    swarm.issue_cache.is_loading = false;
                 }
             }
             Event::Error(msg) => {
@@ -252,6 +269,7 @@ impl App {
                     if idx < self.swarms.len() {
                         self.repo_view = RepoView::new();
                         self.screen = Screen::RepoView { swarm_idx: idx };
+                        self.start_issue_refresh(idx);
                     }
                 }
             }
@@ -409,76 +427,165 @@ impl App {
     }
 
     async fn handle_repo_view_key(&mut self, key: KeyEvent, swarm_idx: usize) -> Result<()> {
-        if self.repo_view.focus_manager {
-            // In manager chat mode
-            match key.code {
-                KeyCode::Esc => {
-                    self.repo_view.focus_manager = false;
-                }
-                KeyCode::Down if self.repo_view.input.is_empty() => {
-                    self.repo_view.focus_manager = false;
-                }
-                KeyCode::Enter => {
-                    if !self.repo_view.input.is_empty() {
-                        let input = self.repo_view.input.drain(..).collect::<String>();
-                        if let Some(swarm) = self.swarms.get(swarm_idx) {
-                            let target = swarm.manager.tmux_target.clone();
-                            self.adapter.send_input(&target, &input).await?;
-                        }
+        use crate::ui::repo_view::RepoViewFocus;
+        use crate::model::issue::IssuePriority;
+
+        match self.repo_view.focus.clone() {
+            RepoViewFocus::ManagerInput => {
+                match key.code {
+                    KeyCode::Esc | KeyCode::Tab => {
+                        self.repo_view.focus = RepoViewFocus::Workers;
                     }
-                }
-                KeyCode::Char(c) => {
-                    self.repo_view.input.push(c);
-                }
-                KeyCode::Backspace => {
-                    self.repo_view.input.pop();
-                }
-                _ => {}
-            }
-        } else {
-            // Worker table focused
-            match key.code {
-                KeyCode::Char('q') => self.running = false,
-                KeyCode::Esc => {
-                    self.screen = Screen::ReposList;
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    if let Some(swarm) = self.swarms.get(swarm_idx) {
-                        self.repo_view.next_worker(swarm.workers.len());
+                    KeyCode::Down if self.repo_view.input.is_empty() => {
+                        self.repo_view.focus = RepoViewFocus::Workers;
                     }
-                }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    if let Some(swarm) = self.swarms.get(swarm_idx) {
-                        if self.repo_view.previous_worker(swarm.workers.len()) {
-                            // At top of workers list — move focus to manager input
-                            self.repo_view.focus_manager = true;
-                        }
-                    }
-                }
-                KeyCode::Enter => {
-                    if let Some(swarm) = self.swarms.get(swarm_idx) {
-                        if let Some(worker_idx) = self.repo_view.selected_worker() {
-                            if let Some(worker) = swarm.workers.get(worker_idx) {
-                                self.agent_view = AgentView::new();
-                                self.agent_view.scroll_to_bottom();
-                                self.screen = Screen::AgentView {
-                                    swarm_idx,
-                                    agent_id: worker.id.clone(),
-                                };
+                    KeyCode::Enter => {
+                        if !self.repo_view.input.is_empty() {
+                            let input = self.repo_view.input.drain(..).collect::<String>();
+                            if let Some(swarm) = self.swarms.get(swarm_idx) {
+                                let target = swarm.manager.tmux_target.clone();
+                                self.adapter.send_input(&target, &input).await?;
                             }
                         }
                     }
+                    KeyCode::Char(c) => {
+                        self.repo_view.input.push(c);
+                    }
+                    KeyCode::Backspace => {
+                        self.repo_view.input.pop();
+                    }
+                    _ => {}
                 }
-                KeyCode::Char('m') => {
-                    // Switch to manager chat
-                    self.agent_view = AgentView::new();
-                    self.agent_view.scroll_to_bottom();
-                    self.screen = Screen::AgentView {
-                        swarm_idx,
-                        agent_id: "manager".to_string(),
-                    };
+            }
+            RepoViewFocus::Workers => {
+                match key.code {
+                    KeyCode::Char('q') => self.running = false,
+                    KeyCode::Esc => {
+                        self.screen = Screen::ReposList;
+                    }
+                    KeyCode::Tab => {
+                        self.repo_view.focus = RepoViewFocus::Issues;
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            self.repo_view.next_worker(swarm.workers.len());
+                        }
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            if self.repo_view.previous_worker(swarm.workers.len()) {
+                                self.repo_view.focus = RepoViewFocus::ManagerInput;
+                            }
+                        }
+                    }
+                    KeyCode::Enter => {
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            if let Some(worker_idx) = self.repo_view.selected_worker() {
+                                if let Some(worker) = swarm.workers.get(worker_idx) {
+                                    self.agent_view = AgentView::new();
+                                    self.agent_view.scroll_to_bottom();
+                                    self.screen = Screen::AgentView {
+                                        swarm_idx,
+                                        agent_id: worker.id.clone(),
+                                    };
+                                }
+                            }
+                        }
+                    }
+                    KeyCode::Char('m') => {
+                        self.agent_view = AgentView::new();
+                        self.agent_view.scroll_to_bottom();
+                        self.screen = Screen::AgentView {
+                            swarm_idx,
+                            agent_id: "manager".to_string(),
+                        };
+                    }
+                    KeyCode::Char('a') => {
+                        // TODO: add worker
+                    }
+                    _ => {}
                 }
-                _ => {}
+            }
+            RepoViewFocus::Issues => {
+                match key.code {
+                    KeyCode::Char('q') => self.running = false,
+                    KeyCode::Esc => {
+                        self.screen = Screen::ReposList;
+                    }
+                    KeyCode::Tab => {
+                        self.repo_view.focus = RepoViewFocus::Workers;
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            let filtered_len = swarm
+                                .issue_cache
+                                .filtered(self.repo_view.priority_filter.as_ref())
+                                .len();
+                            self.repo_view.next_issue(filtered_len);
+                        }
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        if self.repo_view.previous_issue() {
+                            self.repo_view.focus = RepoViewFocus::ManagerInput;
+                        }
+                    }
+                    KeyCode::Enter => {
+                        // Dispatch selected issue to manager
+                        if let Some(issue_idx) = self.repo_view.selected_issue_idx() {
+                            if let Some(swarm) = self.swarms.get(swarm_idx) {
+                                let filtered = swarm
+                                    .issue_cache
+                                    .filtered(self.repo_view.priority_filter.as_ref());
+                                if let Some(issue) = filtered.get(issue_idx) {
+                                    let cmd = if issue.labels.iter().any(|l| {
+                                        l == "needs-approval"
+                                            || l == "needs-design"
+                                            || l == "needs-clarification"
+                                            || l == "too-complex"
+                                    }) {
+                                        format!("/review-blocked {}", issue.number)
+                                    } else if issue.labels.iter().any(|l| l == "proposal") {
+                                        format!("/refine-proposal {}", issue.number)
+                                    } else {
+                                        format!(
+                                            "Please assign issue #{} ({}) to an idle worker",
+                                            issue.number, issue.title
+                                        )
+                                    };
+                                    let target = swarm.manager.tmux_target.clone();
+                                    self.adapter.send_input(&target, &cmd).await?;
+                                    self.status_message =
+                                        Some(format!("Sent to manager: {}", cmd));
+                                }
+                            }
+                        }
+                    }
+                    KeyCode::Char('0') => {
+                        self.repo_view.priority_filter = None;
+                        self.repo_view.issue_list_state.select(Some(0));
+                    }
+                    KeyCode::Char('1') => {
+                        self.repo_view.priority_filter = Some(IssuePriority::P0);
+                        self.repo_view.issue_list_state.select(Some(0));
+                    }
+                    KeyCode::Char('2') => {
+                        self.repo_view.priority_filter = Some(IssuePriority::P1);
+                        self.repo_view.issue_list_state.select(Some(0));
+                    }
+                    KeyCode::Char('3') => {
+                        self.repo_view.priority_filter = Some(IssuePriority::P2);
+                        self.repo_view.issue_list_state.select(Some(0));
+                    }
+                    KeyCode::Char('4') => {
+                        self.repo_view.priority_filter = Some(IssuePriority::P3);
+                        self.repo_view.issue_list_state.select(Some(0));
+                    }
+                    KeyCode::Char('r') => {
+                        // Manual refresh
+                        self.start_issue_refresh(swarm_idx);
+                    }
+                    _ => {}
+                }
             }
         }
         Ok(())
@@ -526,6 +633,24 @@ impl App {
     /// Start pane watchers for all agents in all swarms.
     /// Send post-launch commands to manager and worker sessions.
     /// Spawns a background task that waits for sessions to initialize,
+    /// Spawn a background task to fetch GitHub issues for a swarm.
+    fn start_issue_refresh(&self, swarm_idx: usize) {
+        if let Some(swarm) = self.swarms.get(swarm_idx) {
+            let repo_path = swarm.repo_path.clone();
+            let tx = self.events.tx();
+            tokio::spawn(async move {
+                match crate::model::issue::fetch_issues(&repo_path).await {
+                    Ok(issues) => {
+                        let _ = tx.send(Event::IssuesRefreshed { swarm_idx, issues });
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to fetch issues: {e}");
+                    }
+                }
+            });
+        }
+    }
+
     /// then sends `/autocoder:monitor-loop` to the manager and
     /// `/autocoder:fix-loop` to each worker.
     fn send_post_launch_commands(&self, swarm: &Swarm) {
