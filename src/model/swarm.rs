@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use super::issue::IssueCache;
 use super::status::AgentStatus;
 
 /// The type of agent runtime.
@@ -101,6 +102,8 @@ pub struct Swarm {
     pub manager: AgentInfo,
     /// Worker agents (each in their own worktree)
     pub workers: Vec<AgentInfo>,
+    /// Cached GitHub issues
+    pub issue_cache: IssueCache,
 }
 
 impl Swarm {

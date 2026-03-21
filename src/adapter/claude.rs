@@ -98,6 +98,7 @@ impl ClaudeAdapter {
             tmux_session: session_name.to_string(),
             manager,
             workers,
+            issue_cache: Default::default(),
         })
     }
 }
