@@ -190,7 +190,7 @@ impl RepoView {
                 Span::styled(" fix-loop  ", theme::help_style()),
                 Span::styled("a", theme::title_style()),
                 Span::styled(" add worker  ", theme::help_style()),
-                Span::styled("D", theme::title_style()),
+                Span::styled("Alt+z", theme::title_style()),
                 Span::styled(" stop swarm  ", theme::help_style()),
                 Span::styled("Esc", theme::title_style()),
                 Span::styled(" back  ", theme::help_style()),
