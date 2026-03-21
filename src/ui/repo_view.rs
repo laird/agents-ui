@@ -28,14 +28,10 @@ impl RepoView {
     }
 
     pub fn render(&mut self, f: &mut Frame, area: Rect, swarm: &Swarm) {
-        // Calculate worker table height: header + rows + borders, min 4 max 10
-        let agent_rows = (1 + swarm.workers.len()) as u16; // manager + workers
-        let table_height = (agent_rows + 3).max(5).min(12); // +3 for header, borders
-
         let chunks = Layout::vertical([
             Constraint::Length(3),          // Title
-            Constraint::Length(table_height), // Workers table (compact)
-            Constraint::Min(8),             // Manager session output
+            Constraint::Percentage(25),    // Workers table (compact ~25%)
+            Constraint::Min(10),           // Manager session output (~70%)
             Constraint::Length(3),          // Manager input
             Constraint::Length(3),          // Help bar
         ])
