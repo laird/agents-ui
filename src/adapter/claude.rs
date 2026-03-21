@@ -23,47 +23,59 @@ impl ClaudeAdapter {
             .unwrap_or_else(|| "unknown".to_string())
     }
 
-    /// Expected tmux session name for a given project.
+    /// Expected tmux session name for a given project (manager session).
     fn session_name(project: &str) -> String {
         format!("claude-{project}")
     }
 
-    /// Build a Swarm model from an existing tmux session.
-    async fn build_swarm_from_session(
-        session_name: &str,
+    /// Worker session name: claude-<project>-w<N>
+    fn worker_session_name(project: &str, worker_idx: usize) -> String {
+        format!("claude-{project}-w{worker_idx}")
+    }
+
+    /// Build a Swarm model by discovering the manager session and worker sessions.
+    async fn build_swarm(
+        project_name: &str,
         repo_path: PathBuf,
     ) -> Result<Swarm> {
-        let project_name = Self::project_name(&repo_path);
-        let session_info = session::list_panes(session_name).await?;
+        let manager_session = Self::session_name(project_name);
 
-        // Convention from start-parallel-agents.sh:
-        // Window 0 ("agents"): panes 0..N-1 are workers
-        // Window 1 ("review"): pane 0 is manager
-        let mut manager = AgentInfo {
+        // Manager lives in its own session (or window 1 of the main session for legacy compat)
+        let manager_target = if session::has_session(&manager_session).await {
+            // Check if legacy layout: window 1 is "review" (manager)
+            let session_info = session::list_panes(&manager_session).await?;
+            let review_window = session_info.windows.iter().find(|w| w.name == "review" || w.index == 1);
+            if let Some(window) = review_window {
+                window.panes.first().map(|p| p.target.clone())
+                    .unwrap_or_else(|| format!("{manager_session}:0.0"))
+            } else {
+                format!("{manager_session}:0.0")
+            }
+        } else {
+            format!("{manager_session}:0.0")
+        };
+
+        let manager = AgentInfo {
             id: "manager".to_string(),
             worktree_path: repo_path.clone(),
-            tmux_target: format!("{session_name}:1.0"),
+            tmux_target: manager_target,
             status: AgentStatus::default(),
             is_manager: true,
             pane_content: String::new(),
         };
 
+        // Discover worker sessions: claude-<project>-wN
+        let all_sessions = session::list_sessions().await?;
+        let worker_prefix = format!("claude-{project_name}-w");
         let mut workers = Vec::new();
 
-        for window in &session_info.windows {
-            if window.name == "review" || window.index == 1 {
-                // Manager pane
-                if let Some(pane) = window.panes.first() {
-                    manager.tmux_target = pane.target.clone();
-                }
-            } else if window.name == "agents" || window.index == 0 {
-                // Worker panes
-                for pane in &window.panes {
-                    let worker_idx = pane.index as usize;
+        for sess_name in &all_sessions {
+            if let Some(suffix) = sess_name.strip_prefix(&worker_prefix) {
+                if let Ok(idx) = suffix.parse::<usize>() {
                     let worktree_path = repo_path
                         .parent()
                         .unwrap_or(&repo_path)
-                        .join(format!("{}-wt-{}", project_name, worker_idx + 1));
+                        .join(format!("{project_name}-wt-{}", idx + 1));
 
                     let status_file = worktree_path
                         .join(AgentType::Claude.status_dir())
@@ -72,9 +84,9 @@ impl ClaudeAdapter {
                     let agent_status = status::read_status_file(&status_file);
 
                     workers.push(AgentInfo {
-                        id: format!("worker-{worker_idx}"),
+                        id: format!("worker-{idx}"),
                         worktree_path,
-                        tmux_target: pane.target.clone(),
+                        tmux_target: format!("{sess_name}:0.0"),
                         status: agent_status,
                         is_manager: false,
                         pane_content: String::new(),
@@ -83,12 +95,51 @@ impl ClaudeAdapter {
             }
         }
 
+        // Also check legacy layout: panes in window 0 of the main session
+        if workers.is_empty() && session::has_session(&manager_session).await {
+            if let Ok(session_info) = session::list_panes(&manager_session).await {
+                for window in &session_info.windows {
+                    if window.name == "agents" || window.index == 0 {
+                        for pane in &window.panes {
+                            let worker_idx = pane.index as usize;
+                            let worktree_path = repo_path
+                                .parent()
+                                .unwrap_or(&repo_path)
+                                .join(format!("{project_name}-wt-{}", worker_idx + 1));
+
+                            let status_file = worktree_path
+                                .join(AgentType::Claude.status_dir())
+                                .join("fix-loop.status");
+
+                            let agent_status = status::read_status_file(&status_file);
+
+                            workers.push(AgentInfo {
+                                id: format!("worker-{worker_idx}"),
+                                worktree_path,
+                                tmux_target: pane.target.clone(),
+                                status: agent_status,
+                                is_manager: false,
+                                pane_content: String::new(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Sort workers by index
+        workers.sort_by_key(|w| {
+            w.id.strip_prefix("worker-")
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(0)
+        });
+
         Ok(Swarm {
             repo_path,
-            project_name,
+            project_name: project_name.to_string(),
             agent_type: AgentType::Claude,
-            workflow: None, // Can't determine from session alone
-            tmux_session: session_name.to_string(),
+            workflow: None,
+            tmux_session: manager_session,
             manager,
             workers,
         })
@@ -103,7 +154,7 @@ impl AgentRuntime for ClaudeAdapter {
         // Check if session already exists
         if session::has_session(&session_name).await {
             tracing::info!("Session {session_name} already exists, reconnecting");
-            return Self::build_swarm_from_session(&session_name, config.repo_path.clone()).await;
+            return Self::build_swarm(&project_name, config.repo_path.clone()).await;
         }
 
         let script_path = crate::scripts::launcher::find_script("start-parallel-agents.sh")
@@ -127,8 +178,6 @@ impl AgentRuntime for ClaudeAdapter {
         );
 
         // Launch the script in a detached manner.
-        // start-parallel-agents.sh ends with `tmux attach`, so we spawn it
-        // in the background and wait for the session to appear.
         let mut child = Command::new("bash")
             .args([
                 script_path.to_string_lossy().as_ref(),
@@ -145,7 +194,7 @@ impl AgentRuntime for ClaudeAdapter {
             .spawn()
             .context("Failed to spawn start-parallel-agents.sh")?;
 
-        // Wait for the tmux session to appear (the script creates it before attaching)
+        // Wait for the tmux session to appear
         let mut attempts = 0;
         loop {
             if session::has_session(&session_name).await {
@@ -162,34 +211,48 @@ impl AgentRuntime for ClaudeAdapter {
         // Kill the script process (it's blocking on tmux attach which we don't need)
         child.kill().await.ok();
 
-        Self::build_swarm_from_session(&session_name, config.repo_path.clone()).await
+        Self::build_swarm(&project_name, config.repo_path.clone()).await
     }
 
     async fn discover(&self, _agents_dir: &Path) -> Result<Vec<Swarm>> {
-        let sessions = session::discover_agent_sessions().await?;
+        let sessions = session::list_sessions().await?;
+        let mut seen_projects = std::collections::HashSet::new();
         let mut swarms = Vec::new();
 
-        for session_name in sessions {
+        for session_name in &sessions {
             if !session_name.starts_with("claude-") {
                 continue;
             }
 
-            let project_name = session_name
-                .strip_prefix("claude-")
-                .unwrap_or(&session_name)
-                .to_string();
+            // Extract project name, handling both "claude-<project>" and "claude-<project>-wN"
+            let after_prefix = session_name.strip_prefix("claude-").unwrap_or(session_name);
 
-            // Try to find the repo path from git worktree in one of the panes,
-            // or fall back to looking in common locations
-            let repo_path = find_repo_path(&project_name).await;
-
-            if let Some(repo_path) = repo_path {
-                match Self::build_swarm_from_session(&session_name, repo_path).await {
-                    Ok(swarm) => swarms.push(swarm),
-                    Err(e) => tracing::warn!("Failed to build swarm from {session_name}: {e}"),
+            // Strip -wN suffix if present to get base project name
+            let project_name = if let Some(base) = after_prefix.strip_suffix(
+                &after_prefix.chars().rev().take_while(|c| c.is_ascii_digit()).collect::<String>()
+                    .chars().rev().collect::<String>()
+            ) {
+                if let Some(base) = base.strip_suffix("-w") {
+                    base.to_string()
+                } else {
+                    after_prefix.to_string()
                 }
             } else {
-                tracing::warn!("Could not determine repo path for session {session_name}");
+                after_prefix.to_string()
+            };
+
+            if !seen_projects.insert(project_name.clone()) {
+                continue; // Already processed this project
+            }
+
+            let repo_path = find_repo_path(&project_name).await;
+            if let Some(repo_path) = repo_path {
+                match Self::build_swarm(&project_name, repo_path).await {
+                    Ok(swarm) => swarms.push(swarm),
+                    Err(e) => tracing::warn!("Failed to build swarm for {project_name}: {e}"),
+                }
+            } else {
+                tracing::warn!("Could not determine repo path for project {project_name}");
             }
         }
 
@@ -208,7 +271,6 @@ impl AgentRuntime for ClaudeAdapter {
         let next_idx = swarm.workers.len();
         let project_name = &swarm.project_name;
         let repo_path = &swarm.repo_path;
-        let session_name = &swarm.tmux_session;
 
         // Create a git worktree for the new worker
         let worktree_path = repo_path
@@ -227,7 +289,6 @@ impl AgentRuntime for ClaudeAdapter {
         let worktree_branch = format!("{current_branch}-wt-{}", next_idx + 1);
 
         if !worktree_path.exists() {
-            // Create branch if it doesn't exist
             let _ = Command::new("git")
                 .args(["branch", &worktree_branch, &current_branch])
                 .current_dir(repo_path)
@@ -254,49 +315,30 @@ impl AgentRuntime for ClaudeAdapter {
             }
         }
 
-        // Create a new tmux pane in window 0 (agents window)
+        // Create a new tmux SESSION for this worker (full terminal width)
+        let worker_session = Self::worker_session_name(project_name, next_idx);
+
         let output = Command::new("tmux")
-            .args(["split-window", "-h", "-t", &format!("{session_name}:0")])
+            .args([
+                "new-session",
+                "-d",
+                "-s",
+                &worker_session,
+                "-c",
+                &worktree_path.to_string_lossy(),
+            ])
             .output()
             .await
-            .context("Failed to create tmux pane")?;
+            .context("Failed to create tmux session")?;
 
         if !output.status.success() {
             anyhow::bail!(
-                "tmux split-window failed: {}",
+                "tmux new-session failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             );
         }
 
-        // Rebalance panes
-        let _ = Command::new("tmux")
-            .args(["select-layout", "-t", &format!("{session_name}:0"), "even-horizontal"])
-            .output()
-            .await;
-
-        // Figure out the new pane index (it's the highest pane index now)
-        let pane_output = Command::new("tmux")
-            .args([
-                "list-panes",
-                "-t",
-                &format!("{session_name}:0"),
-                "-F",
-                "#{pane_index}",
-            ])
-            .output()
-            .await
-            .context("Failed to list panes")?;
-
-        let pane_indices: Vec<u32> = String::from_utf8_lossy(&pane_output.stdout)
-            .lines()
-            .filter_map(|l| l.parse().ok())
-            .collect();
-        let new_pane_idx = pane_indices.into_iter().max().unwrap_or(next_idx as u32);
-        let tmux_target = format!("{session_name}:0.{new_pane_idx}");
-
-        // cd to worktree
-        proxy::send_keys(&tmux_target, &format!("cd '{}'", worktree_path.display())).await?;
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let tmux_target = format!("{worker_session}:0.0");
 
         // Launch the agent with autonomous permissions
         proxy::send_keys(&tmux_target, swarm.agent_type.launch_cmd()).await?;
@@ -322,7 +364,6 @@ impl AgentRuntime for ClaudeAdapter {
     }
 
     async fn stop(&self, swarm: &Swarm) -> Result<()> {
-        // Write stop files for each worker
         for worker in &swarm.workers {
             let stop_file = worker
                 .worktree_path
@@ -336,29 +377,28 @@ impl AgentRuntime for ClaudeAdapter {
     }
 
     async fn teardown(&self, swarm: &Swarm) -> Result<()> {
-        let script_path = crate::scripts::launcher::find_script("stop-parallel-agents.sh")
-            .unwrap_or_else(|| PathBuf::from("../agents/plugins/autocoder/scripts/stop-parallel-agents.sh"));
-
-        let output = Command::new("bash")
-            .arg(&script_path)
-            .current_dir(&swarm.repo_path)
-            .output()
-            .await
-            .context("Failed to run stop-parallel-agents.sh")?;
-
-        if !output.status.success() {
-            tracing::warn!(
-                "stop-parallel-agents.sh failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
+        // Kill worker sessions
+        for worker in &swarm.workers {
+            let session = worker.tmux_target.split(':').next().unwrap_or("");
+            if !session.is_empty() {
+                let _ = Command::new("tmux")
+                    .args(["kill-session", "-t", session])
+                    .output()
+                    .await;
+            }
         }
+
+        // Kill manager session
+        let _ = Command::new("tmux")
+            .args(["kill-session", "-t", &swarm.tmux_session])
+            .output()
+            .await;
 
         Ok(())
     }
 }
 
 /// Try to find a repo path given a project name.
-/// Checks the current directory and common parent directories.
 async fn find_repo_path(project_name: &str) -> Option<PathBuf> {
     // Check if there's a tmux environment variable with the path
     let output = Command::new("tmux")
@@ -388,7 +428,6 @@ async fn find_repo_path(project_name: &str) -> Option<PathBuf> {
         {
             return Some(cwd);
         }
-        // Check siblings
         if let Some(parent) = cwd.parent() {
             let candidate = parent.join(project_name);
             if candidate.exists() {
