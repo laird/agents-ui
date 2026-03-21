@@ -162,7 +162,15 @@ impl AgentRuntime for ClaudeAdapter {
         // Kill the script process (it's blocking on tmux attach which we don't need)
         child.kill().await.ok();
 
-        Self::build_swarm_from_session(&session_name, config.repo_path.clone()).await
+        let swarm = Self::build_swarm_from_session(&session_name, config.repo_path.clone()).await?;
+
+        // Auto-start /manage-loop on the manager session
+        tracing::info!("Sending /manage-loop to manager pane {}", swarm.manager.tmux_target);
+        if let Err(e) = proxy::send_keys(&swarm.manager.tmux_target, "/manage-loop").await {
+            tracing::warn!("Failed to send /manage-loop to manager: {e}");
+        }
+
+        Ok(swarm)
     }
 
     async fn discover(&self, _agents_dir: &Path) -> Result<Vec<Swarm>> {
