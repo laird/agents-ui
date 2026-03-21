@@ -46,6 +46,32 @@ pub async fn send_keys(target: &str, input: &str) -> Result<()> {
     Ok(())
 }
 
+/// Resize a tmux pane to given dimensions.
+pub async fn resize_pane(target: &str, width: u16, height: u16) -> Result<()> {
+    let output = Command::new("tmux")
+        .args([
+            "resize-pane",
+            "-t",
+            target,
+            "-x",
+            &width.to_string(),
+            "-y",
+            &height.to_string(),
+        ])
+        .output()
+        .await
+        .context("Failed to resize tmux pane")?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "tmux resize-pane failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    Ok(())
+}
+
 /// Spawn a background task that polls a tmux pane and sends content updates.
 pub fn spawn_pane_watcher(
     target: String,

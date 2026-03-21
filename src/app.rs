@@ -413,24 +413,15 @@ impl App {
                     if let Some(swarm) = self.swarms.get(swarm_idx) {
                         if let Some(worker_idx) = self.repo_view.selected_worker() {
                             if let Some(worker) = swarm.workers.get(worker_idx) {
-                                self.agent_view = AgentView::new();
-                                self.agent_view.scroll_to_bottom();
-                                self.screen = Screen::AgentView {
-                                    swarm_idx,
-                                    agent_id: worker.id.clone(),
-                                };
+                                let id = worker.id.clone();
+                                self.enter_agent_view(swarm_idx, id).await;
                             }
                         }
                     }
                 }
                 KeyCode::Char('m') => {
                     // Switch to manager chat
-                    self.agent_view = AgentView::new();
-                    self.agent_view.scroll_to_bottom();
-                    self.screen = Screen::AgentView {
-                        swarm_idx,
-                        agent_id: "manager".to_string(),
-                    };
+                    self.enter_agent_view(swarm_idx, "manager".to_string()).await;
                 }
                 _ => {}
             }
@@ -475,6 +466,27 @@ impl App {
             _ => {}
         }
         Ok(())
+    }
+
+    /// Enter agent view for a given agent, resizing its tmux pane to fill the terminal.
+    async fn enter_agent_view(&mut self, swarm_idx: usize, agent_id: String) {
+        if let Some(swarm) = self.swarms.get(swarm_idx) {
+            if let Some(agent) = swarm.agent(&agent_id) {
+                let target = agent.tmux_target.clone();
+                // Resize pane to current terminal size so captured content fills the view
+                if let Ok((width, height)) = crossterm::terminal::size() {
+                    if let Err(e) = proxy::resize_pane(&target, width, height).await {
+                        tracing::warn!("Failed to resize pane {target}: {e}");
+                    }
+                }
+            }
+        }
+        self.agent_view = AgentView::new();
+        self.agent_view.scroll_to_bottom();
+        self.screen = Screen::AgentView {
+            swarm_idx,
+            agent_id,
+        };
     }
 
     /// Start pane watchers for all agents in all swarms.
