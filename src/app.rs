@@ -526,28 +526,36 @@ impl App {
     /// Start pane watchers for all agents in all swarms.
     /// Send post-launch commands to manager and worker sessions.
     /// Spawns a background task that waits for sessions to initialize,
-    /// then sends `/manage-loop` to the manager and `/fix-loop` to each worker.
+    /// then sends `/autocoder:monitor-loop` to the manager and
+    /// `/autocoder:fix-loop` to each worker.
     fn send_post_launch_commands(&self, swarm: &Swarm) {
         let manager_target = swarm.manager.tmux_target.clone();
         let worker_targets: Vec<String> = swarm.workers.iter().map(|w| w.tmux_target.clone()).collect();
+        let plugin_installed = self.agents_dir.exists()
+            && self.agents_dir.join("scripts/start-parallel-agents.sh").exists();
 
         tokio::spawn(async move {
+            if !plugin_installed {
+                tracing::warn!("Autocoder plugin not found; skipping post-launch commands");
+                return;
+            }
+
             // Wait for Claude sessions to initialize before sending commands
             tokio::time::sleep(Duration::from_secs(5)).await;
 
-            // Send /manage-loop to manager
-            if let Err(e) = proxy::send_keys(&manager_target, "/manage-loop").await {
-                tracing::warn!("Failed to send /manage-loop to manager: {e}");
+            // Send /autocoder:monitor-loop to manager
+            if let Err(e) = proxy::send_keys(&manager_target, "/autocoder:monitor-loop").await {
+                tracing::warn!("Failed to send /autocoder:monitor-loop to manager: {e}");
             } else {
-                tracing::info!("Sent /manage-loop to manager at {manager_target}");
+                tracing::info!("Sent /autocoder:monitor-loop to manager at {manager_target}");
             }
 
-            // Send /fix-loop to each worker
+            // Send /autocoder:fix-loop to each worker
             for target in &worker_targets {
-                if let Err(e) = proxy::send_keys(target, "/fix-loop").await {
-                    tracing::warn!("Failed to send /fix-loop to worker at {target}: {e}");
+                if let Err(e) = proxy::send_keys(target, "/autocoder:fix-loop").await {
+                    tracing::warn!("Failed to send /autocoder:fix-loop to worker at {target}: {e}");
                 } else {
-                    tracing::info!("Sent /fix-loop to worker at {target}");
+                    tracing::info!("Sent /autocoder:fix-loop to worker at {target}");
                 }
             }
         });
