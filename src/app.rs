@@ -533,6 +533,23 @@ impl App {
                         }
                     }
                 }
+                KeyCode::Char('D') => {
+                    // Tear down the entire swarm (kill all sessions)
+                    if let Some(swarm) = self.swarms.get(swarm_idx) {
+                        let project = swarm.project_name.clone();
+                        tracing::info!("Tearing down swarm for {project}");
+                        if let Err(e) = self.adapter.teardown(swarm).await {
+                            tracing::error!("Teardown failed: {e}");
+                            self.status_message =
+                                Some(format!("Teardown failed: {e}"));
+                        } else {
+                            self.swarms.remove(swarm_idx);
+                            self.status_message =
+                                Some(format!("Swarm {project} shut down"));
+                            self.screen = Screen::ReposList;
+                        }
+                    }
+                }
                 KeyCode::Char(c @ '1'..='9') => {
                     // Jump directly to worker by number (1=worker-0, 2=worker-1, etc.)
                     let worker_idx = (c as usize) - ('1' as usize);
