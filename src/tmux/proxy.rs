@@ -46,6 +46,42 @@ pub async fn send_keys(target: &str, input: &str) -> Result<()> {
     Ok(())
 }
 
+/// Send a literal string to a tmux pane (no key name lookups, no Enter appended).
+pub async fn send_literal(target: &str, text: &str) -> Result<()> {
+    let output = Command::new("tmux")
+        .args(["send-keys", "-t", target, "-l", text])
+        .output()
+        .await
+        .context("Failed to send literal keys to tmux pane")?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "tmux send-keys literal failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    Ok(())
+}
+
+/// Send a named key (e.g., "Enter", "BSpace", "C-c") to a tmux pane.
+pub async fn send_named_key(target: &str, key: &str) -> Result<()> {
+    let output = Command::new("tmux")
+        .args(["send-keys", "-t", target, key])
+        .output()
+        .await
+        .context("Failed to send named key to tmux pane")?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "tmux send-keys named failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    Ok(())
+}
+
 /// Spawn a background task that polls a tmux pane and sends content updates.
 pub fn spawn_pane_watcher(
     target: String,

@@ -57,6 +57,12 @@ pub fn priority_style(priority: &IssuePriority) -> Style {
     }
 }
 
+pub fn waiting_style() -> Style {
+    Style::default()
+        .fg(Color::Magenta)
+        .add_modifier(Modifier::BOLD)
+}
+
 pub fn active_filter_style() -> Style {
     Style::default()
         .fg(Color::Cyan)

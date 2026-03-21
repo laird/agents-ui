@@ -46,6 +46,7 @@ impl ClaudeAdapter {
             status: AgentStatus::default(),
             is_manager: true,
             pane_content: String::new(),
+            waiting_for_input: false,
         };
 
         let mut workers = Vec::new();
@@ -85,6 +86,7 @@ impl ClaudeAdapter {
                     status: agent_status,
                     is_manager: false,
                     pane_content: String::new(),
+            waiting_for_input: false,
                 });
                 worker_count += 1;
             }
@@ -206,6 +208,14 @@ impl AgentRuntime for ClaudeAdapter {
 
     async fn send_input(&self, tmux_target: &str, input: &str) -> Result<()> {
         proxy::send_keys(tmux_target, input).await
+    }
+
+    async fn send_raw_key(&self, tmux_target: &str, key: &str, literal: bool) -> Result<()> {
+        if literal {
+            proxy::send_literal(tmux_target, key).await
+        } else {
+            proxy::send_named_key(tmux_target, key).await
+        }
     }
 
     async fn capture_output(&self, tmux_target: &str) -> Result<String> {
