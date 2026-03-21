@@ -569,6 +569,54 @@ impl App {
                         }
                     }
                 }
+                KeyCode::Char('R') => {
+                    // Restart all idle workers (send fix-loop to each)
+                    if let Some(swarm) = self.swarms.get(swarm_idx) {
+                        let idle_workers: Vec<(String, String)> = swarm
+                            .workers
+                            .iter()
+                            .filter(|w| {
+                                matches!(
+                                    w.status.state,
+                                    crate::model::status::AgentState::Idle
+                                        | crate::model::status::AgentState::Unknown(_)
+                                )
+                            })
+                            .map(|w| (w.id.clone(), w.tmux_target.clone()))
+                            .collect();
+
+                        let count = idle_workers.len();
+                        let loop_cmd = swarm.agent_type.worker_loop_cmd().to_string();
+                        for (id, target) in idle_workers {
+                            tracing::info!("Restarting idle worker {id}");
+                            if let Err(e) = proxy::send_keys(&target, &loop_cmd).await {
+                                tracing::error!("Failed to restart {id}: {e}");
+                            }
+                        }
+                        self.status_message =
+                            Some(format!("Restarted {count} idle worker(s)"));
+                    }
+                }
+                KeyCode::Char('D') => {
+                    // Stop all workers (send stop to each)
+                    if let Some(swarm) = self.swarms.get(swarm_idx) {
+                        let workers: Vec<(String, String)> = swarm
+                            .workers
+                            .iter()
+                            .map(|w| (w.id.clone(), w.tmux_target.clone()))
+                            .collect();
+
+                        let count = workers.len();
+                        for (id, target) in workers {
+                            tracing::info!("Stopping worker {id}");
+                            if let Err(e) = proxy::kill_pane(&target).await {
+                                tracing::error!("Failed to stop {id}: {e}");
+                            }
+                        }
+                        self.status_message =
+                            Some(format!("Stopping all {count} worker(s)..."));
+                    }
+                }
                 _ => {}
             }
         }
