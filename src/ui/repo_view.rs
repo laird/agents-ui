@@ -161,21 +161,32 @@ impl RepoView {
         self.manager_scroll_offset = u16::MAX;
     }
 
-    pub fn next_worker(&mut self, len: usize) {
+    /// Move to next worker. Returns true if wrapped past the end (should focus manager).
+    pub fn next_worker(&mut self, len: usize) -> bool {
         if len == 0 {
-            return;
+            return true;
         }
         let i = self.worker_table_state.selected().unwrap_or(0);
-        self.worker_table_state.select(Some((i + 1) % len));
+        if i + 1 >= len {
+            // Past the end — signal to focus manager
+            return true;
+        }
+        self.worker_table_state.select(Some(i + 1));
+        false
     }
 
-    pub fn previous_worker(&mut self, len: usize) {
+    /// Move to previous worker. Returns true if wrapped past the top (should focus manager).
+    pub fn previous_worker(&mut self, len: usize) -> bool {
         if len == 0 {
-            return;
+            return true;
         }
         let i = self.worker_table_state.selected().unwrap_or(0);
-        self.worker_table_state
-            .select(Some(if i == 0 { len - 1 } else { i - 1 }));
+        if i == 0 {
+            // Past the top — signal to focus manager
+            return true;
+        }
+        self.worker_table_state.select(Some(i - 1));
+        false
     }
 
     pub fn selected_worker(&self) -> Option<usize> {
