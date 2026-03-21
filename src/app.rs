@@ -157,9 +157,11 @@ impl App {
                 }
             }
             Event::PaneOutput { agent_id, content } => {
-                // Update the agent's pane content
+                // Update the agent's pane content and detect waiting state
                 for swarm in &mut self.swarms {
                     if let Some(agent) = swarm.agent_mut(&agent_id) {
+                        agent.waiting_for_input =
+                            crate::model::swarm::detect_waiting_for_input(&content);
                         agent.pane_content = content;
                         break;
                     }
@@ -193,9 +195,51 @@ impl App {
         Ok(())
     }
 
+    /// Convert a crossterm KeyEvent to a tmux send-keys argument.
+    /// Returns (key_string, literal) where literal means use -l flag.
+    fn key_to_tmux(key: &KeyEvent) -> Option<(String, bool)> {
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            if let KeyCode::Char(c) = key.code {
+                return Some((format!("C-{c}"), false));
+            }
+        }
+        if key.modifiers.contains(KeyModifiers::ALT) {
+            if let KeyCode::Char(c) = key.code {
+                return Some((format!("M-{c}"), false));
+            }
+        }
+        match key.code {
+            KeyCode::Char(c) => Some((c.to_string(), true)),
+            KeyCode::Enter => Some(("Enter".to_string(), false)),
+            KeyCode::Backspace => Some(("BSpace".to_string(), false)),
+            KeyCode::Tab => Some(("Tab".to_string(), false)),
+            KeyCode::Esc => Some(("Escape".to_string(), false)),
+            KeyCode::Up => Some(("Up".to_string(), false)),
+            KeyCode::Down => Some(("Down".to_string(), false)),
+            KeyCode::Left => Some(("Left".to_string(), false)),
+            KeyCode::Right => Some(("Right".to_string(), false)),
+            KeyCode::Home => Some(("Home".to_string(), false)),
+            KeyCode::End => Some(("End".to_string(), false)),
+            KeyCode::Delete => Some(("DC".to_string(), false)),
+            _ => None,
+        }
+    }
+
+    /// Returns true if we're in a passthrough mode where keystrokes go directly to tmux.
+    fn is_passthrough_mode(&self) -> bool {
+        matches!(&self.screen, Screen::AgentView { .. })
+            || matches!(
+                (&self.screen, &self.repo_view.focus),
+                (Screen::RepoView { .. }, crate::ui::repo_view::RepoViewFocus::ManagerInput)
+            )
+    }
+
     async fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
-        // Global: Ctrl+C always quits
-        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+        // Global: Ctrl+C quits (but not in passthrough mode — there it goes to tmux)
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && key.code == KeyCode::Char('c')
+            && !self.is_passthrough_mode()
+        {
             self.running = false;
             return Ok(());
         }
@@ -432,29 +476,20 @@ impl App {
 
         match self.repo_view.focus.clone() {
             RepoViewFocus::ManagerInput => {
-                match key.code {
-                    KeyCode::Esc | KeyCode::Tab => {
-                        self.repo_view.focus = RepoViewFocus::Workers;
+                // Ctrl+] escapes back to Workers focus (like ssh escape)
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && key.code == KeyCode::Char(']')
+                {
+                    self.repo_view.focus = RepoViewFocus::Workers;
+                    return Ok(());
+                }
+
+                // Everything else passes through directly to the manager tmux pane
+                if let Some((tmux_key, literal)) = Self::key_to_tmux(&key) {
+                    if let Some(swarm) = self.swarms.get(swarm_idx) {
+                        let target = swarm.manager.tmux_target.clone();
+                        self.adapter.send_raw_key(&target, &tmux_key, literal).await?;
                     }
-                    KeyCode::Down if self.repo_view.input.is_empty() => {
-                        self.repo_view.focus = RepoViewFocus::Workers;
-                    }
-                    KeyCode::Enter => {
-                        if !self.repo_view.input.is_empty() {
-                            let input = self.repo_view.input.drain(..).collect::<String>();
-                            if let Some(swarm) = self.swarms.get(swarm_idx) {
-                                let target = swarm.manager.tmux_target.clone();
-                                self.adapter.send_input(&target, &input).await?;
-                            }
-                        }
-                    }
-                    KeyCode::Char(c) => {
-                        self.repo_view.input.push(c);
-                    }
-                    KeyCode::Backspace => {
-                        self.repo_view.input.pop();
-                    }
-                    _ => {}
                 }
             }
             RepoViewFocus::Workers => {
@@ -502,6 +537,10 @@ impl App {
                     }
                     KeyCode::Char('a') => {
                         // TODO: add worker
+                    }
+                    KeyCode::Char('n') | KeyCode::Char('!') => {
+                        // Jump to next session waiting for input
+                        self.jump_to_next_waiting(swarm_idx);
                     }
                     _ => {}
                 }
@@ -584,6 +623,10 @@ impl App {
                         // Manual refresh
                         self.start_issue_refresh(swarm_idx);
                     }
+                    KeyCode::Char('n') | KeyCode::Char('!') => {
+                        // Jump to next session waiting for input
+                        self.jump_to_next_waiting(swarm_idx);
+                    }
                     _ => {}
                 }
             }
@@ -597,35 +640,36 @@ impl App {
         swarm_idx: usize,
         agent_id: String,
     ) -> Result<()> {
+        // Ctrl+] escapes back to repo view (like ssh escape)
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && key.code == KeyCode::Char(']')
+        {
+            self.screen = Screen::RepoView { swarm_idx };
+            return Ok(());
+        }
+
+        // PageUp/PageDown for scrolling (not passed to tmux)
         match key.code {
-            KeyCode::Esc => {
-                self.screen = Screen::RepoView { swarm_idx };
-            }
-            KeyCode::Enter => {
-                if !self.agent_view.input.is_empty() {
-                    let input = self.agent_view.input.drain(..).collect::<String>();
-                    if let Some(swarm) = self.swarms.get(swarm_idx) {
-                        if let Some(agent) = swarm.agent(&agent_id) {
-                            let target = agent.tmux_target.clone();
-                            self.adapter.send_input(&target, &input).await?;
-                        }
-                    }
-                    self.agent_view.scroll_to_bottom();
-                }
-            }
-            KeyCode::Char(c) => {
-                self.agent_view.input.push(c);
-            }
-            KeyCode::Backspace => {
-                self.agent_view.input.pop();
-            }
             KeyCode::PageUp => {
                 self.agent_view.scroll_up(10);
+                return Ok(());
             }
             KeyCode::PageDown => {
                 self.agent_view.scroll_down(10);
+                return Ok(());
             }
             _ => {}
+        }
+
+        // Everything else passes through directly to the tmux pane
+        if let Some((tmux_key, literal)) = Self::key_to_tmux(&key) {
+            if let Some(swarm) = self.swarms.get(swarm_idx) {
+                if let Some(agent) = swarm.agent(&agent_id) {
+                    let target = agent.tmux_target.clone();
+                    self.adapter.send_raw_key(&target, &tmux_key, literal).await?;
+                }
+            }
+            self.agent_view.scroll_to_bottom();
         }
         Ok(())
     }
@@ -634,6 +678,29 @@ impl App {
     /// Send post-launch commands to manager and worker sessions.
     /// Spawns a background task that waits for sessions to initialize,
     /// Spawn a background task to fetch GitHub issues for a swarm.
+    /// Jump to the next agent session that is waiting for user input.
+    fn jump_to_next_waiting(&mut self, swarm_idx: usize) {
+        // Get the current agent ID if we're in an agent view
+        let current_id = match &self.screen {
+            Screen::AgentView { agent_id, .. } => Some(agent_id.clone()),
+            _ => None,
+        };
+
+        if let Some(swarm) = self.swarms.get(swarm_idx) {
+            if let Some(agent) = swarm.next_waiting_agent(current_id.as_deref()) {
+                let agent_id = agent.id.clone();
+                self.agent_view = AgentView::new();
+                self.agent_view.scroll_to_bottom();
+                self.screen = Screen::AgentView {
+                    swarm_idx,
+                    agent_id,
+                };
+            } else {
+                self.status_message = Some("No sessions waiting for input".to_string());
+            }
+        }
+    }
+
     fn start_issue_refresh(&self, swarm_idx: usize) {
         if let Some(swarm) = self.swarms.get(swarm_idx) {
             let repo_path = swarm.repo_path.clone();

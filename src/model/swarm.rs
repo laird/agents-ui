@@ -83,6 +83,55 @@ pub struct AgentInfo {
     pub is_manager: bool,
     /// Captured pane output (latest snapshot)
     pub pane_content: String,
+    /// Whether the agent is waiting for user input (detected from pane content)
+    pub waiting_for_input: bool,
+}
+
+/// Detect if pane content indicates the session is waiting for user input.
+pub fn detect_waiting_for_input(content: &str) -> bool {
+    // Look at the last ~15 lines for waiting indicators
+    let tail: Vec<&str> = content.lines().rev().take(15).collect();
+    let tail_text = tail.iter().rev().copied().collect::<Vec<_>>().join("\n");
+
+    // Permission prompts
+    if tail_text.contains("bypass permissions")
+        || tail_text.contains("Allow?")
+        || tail_text.contains("allow this action")
+        || tail_text.contains("(y/n)")
+        || tail_text.contains("[Y/n]")
+        || tail_text.contains("[y/N]")
+    {
+        return true;
+    }
+
+    // Interrupted state
+    if tail_text.contains("What should Claude do instead?") {
+        return true;
+    }
+
+    // AskUserQuestion or similar prompts
+    if tail_text.contains("Interrupted") && tail_text.contains("❯") {
+        return true;
+    }
+
+    // Bare prompt at end with no active work (idle at prompt after interruption)
+    // Check if the very last non-empty line is just a prompt
+    let last_lines: Vec<&str> = content
+        .lines()
+        .rev()
+        .filter(|l| !l.trim().is_empty())
+        .take(3)
+        .collect();
+
+    if let Some(last) = last_lines.first() {
+        let trimmed = last.trim();
+        // Permission bypass prompt line
+        if trimmed.contains("bypass permissions on") && trimmed.contains("shift+tab") {
+            return true;
+        }
+    }
+
+    false
 }
 
 /// A swarm of agents working on one repo.
@@ -131,6 +180,35 @@ impl Swarm {
             .iter()
             .filter(|w| matches!(w.status.state, super::status::AgentState::Idle))
             .count()
+    }
+
+    /// Count of agents waiting for user input
+    pub fn waiting_count(&self) -> usize {
+        let mut count = 0;
+        if self.manager.waiting_for_input {
+            count += 1;
+        }
+        count += self.workers.iter().filter(|w| w.waiting_for_input).count();
+        count
+    }
+
+    /// Get the next agent waiting for input, starting after `after_id`.
+    /// Returns None if no agent is waiting.
+    pub fn next_waiting_agent(&self, after_id: Option<&str>) -> Option<&AgentInfo> {
+        let all = self.all_agents();
+        let start_idx = after_id
+            .and_then(|id| all.iter().position(|a| a.id == id))
+            .map(|i| i + 1)
+            .unwrap_or(0);
+
+        // Search from start_idx, wrapping around
+        for i in 0..all.len() {
+            let idx = (start_idx + i) % all.len();
+            if all[idx].waiting_for_input {
+                return Some(all[idx]);
+            }
+        }
+        None
     }
 
     /// Get a specific agent by ID

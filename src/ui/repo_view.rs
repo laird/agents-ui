@@ -1,7 +1,7 @@
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
     Frame,
 };
 
@@ -22,7 +22,6 @@ pub struct RepoView {
     pub worker_list_state: ListState,
     pub issue_list_state: ListState,
     pub priority_filter: Option<IssuePriority>,
-    pub input: String,
 }
 
 impl RepoView {
@@ -36,33 +35,20 @@ impl RepoView {
             worker_list_state,
             issue_list_state,
             priority_filter: None,
-            input: String::new(),
         }
     }
 
     pub fn render(&mut self, f: &mut Frame, area: Rect, swarm: &Swarm) {
-        // Calculate input height
-        let input_display = format!("> {}█", self.input);
-        let avail_width = area.width.saturating_sub(2) as usize;
-        let input_lines = if avail_width > 0 {
-            ((input_display.len() + avail_width - 1) / avail_width).max(1)
-        } else {
-            1
-        };
-        let input_height = (input_lines as u16).min(5) + 2;
-
         let chunks = Layout::vertical([
             Constraint::Length(1), // Title bar
             Constraint::Min(8),   // Two-column area
-            Constraint::Length(input_height), // Input
             Constraint::Length(1), // Help bar
         ])
         .split(area);
 
         self.render_title_bar(f, chunks[0], swarm);
         self.render_columns(f, chunks[1], swarm);
-        self.render_input(f, chunks[2], &input_display);
-        self.render_help(f, chunks[3]);
+        self.render_help(f, chunks[2]);
     }
 
     fn render_title_bar(&self, f: &mut Frame, area: Rect, swarm: &Swarm) {
@@ -70,6 +56,7 @@ impl RepoView {
         let idle = swarm.attention_count();
         let total = swarm.workers.len();
         let stopped = total - busy - idle;
+        let waiting = swarm.waiting_count();
 
         let (p0, p1, p2, p3) = swarm.issue_cache.priority_counts();
 
@@ -83,6 +70,11 @@ impl RepoView {
                 .unwrap_or_else(|| "—".to_string())
         );
         let workers_label = format!(" {busy}/{total} busy ");
+        let waiting_label = if waiting > 0 {
+            format!("{waiting} NEED INPUT ")
+        } else {
+            String::new()
+        };
         let idle_label = if idle > 0 {
             format!("{idle} idle ")
         } else {
@@ -101,6 +93,7 @@ impl RepoView {
             Span::styled(workers_label, theme::status_style(
                 &crate::model::status::AgentState::Working { issue: None },
             )),
+            Span::styled(waiting_label, theme::waiting_style()),
             Span::styled(idle_label, theme::status_style(
                 &crate::model::status::AgentState::Idle,
             )),
@@ -128,15 +121,36 @@ impl RepoView {
             .workers
             .iter()
             .map(|w| {
-                let dot = match &w.status.state {
-                    crate::model::status::AgentState::Working { .. } => "● ",
-                    crate::model::status::AgentState::Starting => "◐ ",
-                    crate::model::status::AgentState::Idle => "○ ",
-                    crate::model::status::AgentState::Stopped => "◌ ",
-                    _ => "  ",
+                let (dot, dot_style) = if w.waiting_for_input {
+                    ("⚠ ", theme::waiting_style())
+                } else {
+                    match &w.status.state {
+                        crate::model::status::AgentState::Working { .. } => {
+                            ("● ", theme::status_style(&w.status.state))
+                        }
+                        crate::model::status::AgentState::Starting => {
+                            ("◐ ", theme::status_style(&w.status.state))
+                        }
+                        crate::model::status::AgentState::Idle => {
+                            ("○ ", theme::status_style(&w.status.state))
+                        }
+                        crate::model::status::AgentState::Stopped => {
+                            ("◌ ", theme::status_style(&w.status.state))
+                        }
+                        _ => ("  ", theme::help_style()),
+                    }
                 };
 
-                let status_text = w.status.state.to_string();
+                let status_text = if w.waiting_for_input {
+                    "NEEDS INPUT".to_string()
+                } else {
+                    w.status.state.to_string()
+                };
+                let status_style = if w.waiting_for_input {
+                    theme::waiting_style()
+                } else {
+                    theme::status_style(&w.status.state)
+                };
 
                 let elapsed = w
                     .status
@@ -155,12 +169,12 @@ impl RepoView {
                     .unwrap_or_default();
 
                 let line1 = Line::from(vec![
-                    Span::styled(dot, theme::status_style(&w.status.state)),
+                    Span::styled(dot, dot_style),
                     Span::styled(&w.id, theme::title_style()),
                 ]);
                 let line2 = Line::from(vec![
                     Span::raw("  "),
-                    Span::styled(status_text, theme::status_style(&w.status.state)),
+                    Span::styled(status_text, status_style),
                 ]);
                 let mut lines = vec![line1, line2];
                 if !elapsed.is_empty() {
@@ -284,22 +298,6 @@ impl RepoView {
         f.render_stateful_widget(list, area, &mut self.issue_list_state);
     }
 
-    fn render_input(&self, f: &mut Frame, area: Rect, input_display: &str) {
-        let input_style = if self.focus == RepoViewFocus::ManagerInput {
-            theme::title_style()
-        } else {
-            theme::help_style()
-        };
-        let input_block = Block::default()
-            .borders(Borders::ALL)
-            .title(" Manager ")
-            .border_style(input_style);
-        let input_para = Paragraph::new(Span::styled(input_display, input_style))
-            .block(input_block)
-            .wrap(Wrap { trim: false });
-        f.render_widget(input_para, area);
-    }
-
     fn render_help(&self, f: &mut Frame, area: Rect) {
         let help = match self.focus {
             RepoViewFocus::Workers => Paragraph::new(Line::from(vec![
@@ -311,6 +309,8 @@ impl RepoView {
                 Span::styled(" select  ", theme::help_style()),
                 Span::styled("a", theme::title_style()),
                 Span::styled(" add worker  ", theme::help_style()),
+                Span::styled("n", theme::waiting_style()),
+                Span::styled(" next waiting  ", theme::help_style()),
                 Span::styled("m", theme::title_style()),
                 Span::styled(" manager  ", theme::help_style()),
                 Span::styled("Esc", theme::title_style()),
@@ -331,11 +331,8 @@ impl RepoView {
                 Span::styled(" back", theme::help_style()),
             ])),
             RepoViewFocus::ManagerInput => Paragraph::new(Line::from(vec![
-                Span::styled(" Enter", theme::title_style()),
-                Span::styled(" send  ", theme::help_style()),
-                Span::styled("Tab", theme::title_style()),
-                Span::styled(" workers  ", theme::help_style()),
-                Span::styled("Esc", theme::title_style()),
+                Span::styled(" Typing goes to manager  ", theme::help_style()),
+                Span::styled("Ctrl+]", theme::title_style()),
                 Span::styled(" workers", theme::help_style()),
             ])),
         };
