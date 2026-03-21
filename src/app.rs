@@ -402,12 +402,18 @@ impl App {
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
                     if let Some(swarm) = self.swarms.get(swarm_idx) {
-                        self.repo_view.next_worker(swarm.workers.len());
+                        if self.repo_view.next_worker(swarm.workers.len()) {
+                            // Wrapped past end — focus manager input
+                            self.repo_view.focus_manager = false;
+                        }
                     }
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
                     if let Some(swarm) = self.swarms.get(swarm_idx) {
-                        self.repo_view.previous_worker(swarm.workers.len());
+                        if self.repo_view.previous_worker(swarm.workers.len()) {
+                            // Wrapped past top — focus manager input
+                            self.repo_view.focus_manager = false;
+                        }
                     }
                 }
                 KeyCode::Enter => {
