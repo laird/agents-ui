@@ -198,8 +198,10 @@ impl App {
 
                 if swarm_idx < self.swarms.len() {
                     if c == '0' {
-                        // Alt+0: go to Repo View
+                        // Alt+0: go to Repo View with manager focused
                         self.repo_view = RepoView::new();
+                        self.repo_view.focus_manager = true;
+                        self.repo_view.manager_scroll = u16::MAX;
                         self.screen = Screen::RepoView { swarm_idx };
                         return Ok(());
                     } else {
