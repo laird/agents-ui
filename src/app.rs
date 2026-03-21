@@ -432,6 +432,65 @@ impl App {
                         agent_id: "manager".to_string(),
                     };
                 }
+                KeyCode::Char('a') => {
+                    // Add a new worker to this swarm
+                    if let Some(swarm) = self.swarms.get(swarm_idx) {
+                        let swarm_clone = swarm.clone();
+                        self.status_message = Some("Adding worker...".to_string());
+                        match self.adapter.add_worker(&swarm_clone).await {
+                            Ok(worker) => {
+                                let id = worker.id.clone();
+                                if let Some(swarm) = self.swarms.get_mut(swarm_idx) {
+                                    swarm.workers.push(worker);
+                                }
+                                self.start_all_pane_watchers();
+                                self.status_message =
+                                    Some(format!("Added {id} (running /fix-loop)"));
+                            }
+                            Err(e) => {
+                                self.status_message =
+                                    Some(format!("Failed to add worker: {e}"));
+                            }
+                        }
+                    }
+                }
+                KeyCode::Char('f') => {
+                    // Send /fix-loop to the selected worker
+                    if let Some(swarm) = self.swarms.get(swarm_idx) {
+                        if let Some(worker_idx) = self.repo_view.selected_worker() {
+                            if let Some(worker) = swarm.workers.get(worker_idx) {
+                                let target = worker.tmux_target.clone();
+                                let id = worker.id.clone();
+                                tracing::info!("Sending /fix-loop to {id} at {target}");
+                                if let Err(e) = self.adapter.start_worker_loop(&target).await {
+                                    tracing::error!("Failed to send /fix-loop to {id}: {e}");
+                                    self.status_message =
+                                        Some(format!("Failed to start {id}: {e}"));
+                                } else {
+                                    self.status_message =
+                                        Some(format!("Sent /fix-loop to {id}"));
+                                }
+                            }
+                        }
+                    }
+                }
+                KeyCode::Char('d') => {
+                    // Shut down the selected worker's session
+                    if let Some(swarm) = self.swarms.get(swarm_idx) {
+                        if let Some(worker_idx) = self.repo_view.selected_worker() {
+                            if let Some(worker) = swarm.workers.get(worker_idx) {
+                                let target = worker.tmux_target.clone();
+                                let id = worker.id.clone();
+                                tracing::info!("Shutting down worker {id} at {target}");
+                                if let Err(e) = proxy::kill_pane(&target).await {
+                                    tracing::error!("Failed to kill pane for {id}: {e}");
+                                }
+                                self.status_message =
+                                    Some(format!("Shutting down {id}..."));
+                            }
+                        }
+                    }
+                }
                 _ => {}
             }
         }

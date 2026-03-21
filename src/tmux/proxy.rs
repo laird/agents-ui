@@ -46,6 +46,25 @@ pub async fn send_keys(target: &str, input: &str) -> Result<()> {
     Ok(())
 }
 
+/// Send Ctrl+C followed by kill to a tmux pane to shut down the session.
+pub async fn kill_pane(target: &str) -> Result<()> {
+    // Send Ctrl+C to interrupt any running process
+    let _ = Command::new("tmux")
+        .args(["send-keys", "-t", target, "C-c", ""])
+        .output()
+        .await;
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // Send "exit" to close the shell
+    let _ = Command::new("tmux")
+        .args(["send-keys", "-t", target, "exit", "Enter"])
+        .output()
+        .await;
+
+    Ok(())
+}
+
 /// Spawn a background task that polls a tmux pane and sends content updates.
 pub fn spawn_pane_watcher(
     target: String,

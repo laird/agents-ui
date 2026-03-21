@@ -204,6 +204,123 @@ impl AgentRuntime for ClaudeAdapter {
         proxy::capture_pane(tmux_target, 500).await
     }
 
+    async fn add_worker(&self, swarm: &Swarm) -> Result<AgentInfo> {
+        let next_idx = swarm.workers.len();
+        let project_name = &swarm.project_name;
+        let repo_path = &swarm.repo_path;
+        let session_name = &swarm.tmux_session;
+
+        // Create a git worktree for the new worker
+        let worktree_path = repo_path
+            .parent()
+            .unwrap_or(repo_path)
+            .join(format!("{project_name}-wt-{}", next_idx + 1));
+
+        let current_branch = Command::new("git")
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .current_dir(repo_path)
+            .output()
+            .await
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_else(|_| "main".to_string());
+
+        let worktree_branch = format!("{current_branch}-wt-{}", next_idx + 1);
+
+        if !worktree_path.exists() {
+            // Create branch if it doesn't exist
+            let _ = Command::new("git")
+                .args(["branch", &worktree_branch, &current_branch])
+                .current_dir(repo_path)
+                .output()
+                .await;
+
+            let output = Command::new("git")
+                .args([
+                    "worktree",
+                    "add",
+                    &worktree_path.to_string_lossy(),
+                    &worktree_branch,
+                ])
+                .current_dir(repo_path)
+                .output()
+                .await
+                .context("Failed to create git worktree")?;
+
+            if !output.status.success() {
+                anyhow::bail!(
+                    "git worktree add failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+        }
+
+        // Create a new tmux pane in window 0 (agents window)
+        let output = Command::new("tmux")
+            .args(["split-window", "-h", "-t", &format!("{session_name}:0")])
+            .output()
+            .await
+            .context("Failed to create tmux pane")?;
+
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux split-window failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        // Rebalance panes
+        let _ = Command::new("tmux")
+            .args(["select-layout", "-t", &format!("{session_name}:0"), "even-horizontal"])
+            .output()
+            .await;
+
+        // Figure out the new pane index (it's the highest pane index now)
+        let pane_output = Command::new("tmux")
+            .args([
+                "list-panes",
+                "-t",
+                &format!("{session_name}:0"),
+                "-F",
+                "#{pane_index}",
+            ])
+            .output()
+            .await
+            .context("Failed to list panes")?;
+
+        let pane_indices: Vec<u32> = String::from_utf8_lossy(&pane_output.stdout)
+            .lines()
+            .filter_map(|l| l.parse().ok())
+            .collect();
+        let new_pane_idx = pane_indices.into_iter().max().unwrap_or(next_idx as u32);
+        let tmux_target = format!("{session_name}:0.{new_pane_idx}");
+
+        // cd to worktree
+        proxy::send_keys(&tmux_target, &format!("cd '{}'", worktree_path.display())).await?;
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        // Launch claude
+        proxy::send_keys(&tmux_target, "claude code --dangerously-skip-permissions .").await?;
+
+        // Wait for Claude to initialize
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+
+        // Send /fix-loop
+        self.start_worker_loop(&tmux_target).await?;
+
+        Ok(AgentInfo {
+            id: format!("worker-{next_idx}"),
+            worktree_path,
+            tmux_target,
+            status: AgentStatus::default(),
+            is_manager: false,
+            pane_content: String::new(),
+        })
+    }
+
+    async fn start_worker_loop(&self, tmux_target: &str) -> Result<()> {
+        proxy::send_keys(tmux_target, "/autocoder:fix-loop").await
+    }
+
     async fn stop(&self, swarm: &Swarm) -> Result<()> {
         // Write stop files for each worker
         for worker in &swarm.workers {
