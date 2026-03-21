@@ -36,4 +36,8 @@ pub trait AgentRuntime {
 
     /// Terminate and clean up a swarm.
     async fn teardown(&self, swarm: &Swarm) -> Result<()>;
+
+    /// Validate and heal worker infrastructure. Returns descriptions of repairs made.
+    /// Ensures each worker has a worktree, tmux pane, and active agent.
+    async fn heal_workers(&self, swarm: &mut Swarm) -> Result<Vec<String>>;
 }

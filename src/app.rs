@@ -1,7 +1,7 @@
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::adapter::claude::ClaudeAdapter;
 use crate::adapter::traits::{AgentRuntime, SwarmConfig};
@@ -49,6 +49,8 @@ pub struct App {
     pub new_swarm_repo: String,
     /// Status message shown at bottom of repos list.
     pub status_message: Option<String>,
+    /// Last time worker healing was run.
+    last_heal: Instant,
 }
 
 impl App {
@@ -83,6 +85,7 @@ impl App {
             dialog_input: String::new(),
             new_swarm_repo: String::new(),
             status_message: None,
+            last_heal: Instant::now(),
         };
 
         // Start pane watchers for discovered swarms
@@ -144,6 +147,12 @@ impl App {
             Event::Tick => {
                 // Periodic refresh — status files could be re-read here
                 self.refresh_statuses();
+
+                // Periodically heal worker infrastructure (every 30 seconds)
+                if self.last_heal.elapsed() >= Duration::from_secs(30) {
+                    self.last_heal = Instant::now();
+                    self.heal_all_workers().await;
+                }
             }
             Event::PaneOutput { agent_id, content } => {
                 // Update the agent's pane content
@@ -592,6 +601,33 @@ impl App {
                 );
                 self.pane_watchers.push(handle);
             }
+        }
+    }
+
+    /// Validate and heal all worker infrastructure across all swarms.
+    async fn heal_all_workers(&mut self) {
+        let mut any_repairs = false;
+        let mut all_repairs = Vec::new();
+
+        for i in 0..self.swarms.len() {
+            match self.adapter.heal_workers(&mut self.swarms[i]).await {
+                Ok(repairs) => {
+                    if !repairs.is_empty() {
+                        any_repairs = true;
+                        all_repairs.extend(repairs);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Worker healing failed: {e}");
+                }
+            }
+        }
+
+        if any_repairs {
+            let msg = all_repairs.join("; ");
+            tracing::info!("Healed workers: {msg}");
+            self.status_message = Some(format!("Healed: {msg}"));
+            self.start_all_pane_watchers();
         }
     }
 
