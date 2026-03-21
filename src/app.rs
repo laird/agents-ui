@@ -433,7 +433,7 @@ impl App {
 
     async fn handle_repo_view_key(&mut self, key: KeyEvent, swarm_idx: usize) -> Result<()> {
         if self.repo_view.focus_manager {
-            // In manager chat mode
+            // In manager interactive mode
             match key.code {
                 KeyCode::Esc => {
                     self.repo_view.focus_manager = false;
@@ -445,7 +445,26 @@ impl App {
                             let target = swarm.manager.tmux_target.clone();
                             self.adapter.send_input(&target, &input).await?;
                         }
+                        self.repo_view.manager_scroll_to_bottom();
                     }
+                }
+                KeyCode::Up => {
+                    self.repo_view.manager_scroll_up(1);
+                }
+                KeyCode::Down => {
+                    self.repo_view.manager_scroll_down(1);
+                }
+                KeyCode::PageUp => {
+                    self.repo_view.manager_page_up();
+                }
+                KeyCode::PageDown => {
+                    self.repo_view.manager_page_down();
+                }
+                KeyCode::Home => {
+                    self.repo_view.manager_scroll_to_top();
+                }
+                KeyCode::End => {
+                    self.repo_view.manager_scroll_to_bottom();
                 }
                 KeyCode::Char(c) => {
                     self.repo_view.input.push(c);
@@ -487,13 +506,9 @@ impl App {
                     }
                 }
                 KeyCode::Char('m') => {
-                    // Switch to manager chat
-                    self.agent_view = AgentView::new();
-                    self.agent_view.scroll_to_bottom();
-                    self.screen = Screen::AgentView {
-                        swarm_idx,
-                        agent_id: "manager".to_string(),
-                    };
+                    // Focus the manager panel (interactive mode with scrolling)
+                    self.repo_view.focus_manager = true;
+                    self.repo_view.manager_scroll_to_bottom();
                 }
                 KeyCode::Char('a') => {
                     // Add a new worker to this swarm
