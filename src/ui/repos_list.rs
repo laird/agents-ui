@@ -1,5 +1,7 @@
+use std::path::PathBuf;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
+    style::Style,
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
     Frame,
@@ -7,6 +9,12 @@ use ratatui::{
 
 use crate::model::swarm::Swarm;
 use super::theme;
+
+/// Combined list item: either an active swarm or an available repo.
+pub enum RepoEntry<'a> {
+    Active(&'a Swarm),
+    Available(&'a PathBuf),
+}
 
 pub struct ReposListView {
     pub table_state: TableState,
@@ -24,88 +32,120 @@ impl ReposListView {
         f: &mut Frame,
         area: Rect,
         swarms: &[Swarm],
+        available: &[PathBuf],
         status_msg: Option<&str>,
     ) {
+        let total_items = swarms.len() + available.len();
+
         let chunks = Layout::vertical([
             Constraint::Length(3),
             Constraint::Min(5),
-            Constraint::Length(1), // Status line
+            Constraint::Length(1),
             Constraint::Length(3),
         ])
         .split(area);
 
         // Title
-        let repo_count = format!(
-            "  ({} repo{})",
-            swarms.len(),
-            if swarms.len() == 1 { "" } else { "s" }
-        );
+        let active_count = swarms.len();
+        let avail_count = available.len();
+        let title_info = if active_count > 0 && avail_count > 0 {
+            format!("  ({active_count} active, {avail_count} available)")
+        } else if active_count > 0 {
+            format!("  ({active_count} active)")
+        } else if avail_count > 0 {
+            format!("  ({avail_count} repos found)")
+        } else {
+            String::new()
+        };
         let title = Paragraph::new(Line::from(vec![
             Span::styled("  Agents UI", theme::title_style()),
-            Span::styled(repo_count, theme::help_style()),
+            Span::styled(title_info, theme::help_style()),
         ]))
         .block(Block::default().borders(Borders::BOTTOM));
         f.render_widget(title, chunks[0]);
 
         // Table
-        if swarms.is_empty() {
+        if total_items == 0 {
             let empty = Paragraph::new(Line::from(vec![
-                Span::styled("  No active swarms. Press ", theme::help_style()),
+                Span::styled("  No repos found. Press ", theme::help_style()),
                 Span::styled("n", theme::title_style()),
-                Span::styled(" to launch a new one.", theme::help_style()),
+                Span::styled(" to launch a new swarm.", theme::help_style()),
             ]));
             f.render_widget(empty, chunks[1]);
         } else {
             let header = Row::new(vec![
+                Cell::from("#"),
                 Cell::from("Repo"),
+                Cell::from("Status"),
                 Cell::from("Workflow"),
                 Cell::from("Runtime"),
                 Cell::from("Agents"),
-                Cell::from("Status"),
                 Cell::from("Attention"),
             ])
             .style(theme::header_style());
 
-            let rows: Vec<Row> = swarms
-                .iter()
-                .map(|s| {
-                    let busy = s.busy_count();
-                    let total = s.workers.len();
-                    let attention = s.attention_count();
-                    Row::new(vec![
-                        Cell::from(s.project_name.clone()),
-                        Cell::from(
-                            s.workflow
-                                .as_ref()
-                                .map(|w| w.to_string())
-                                .unwrap_or_else(|| "—".to_string()),
-                        ),
-                        Cell::from(s.agent_type.to_string()),
-                        Cell::from(format!("{busy}/{total} busy")),
-                        Cell::from("Active"),
-                        Cell::from(if attention > 0 {
-                            format!("{attention} items")
-                        } else {
-                            "—".to_string()
-                        })
-                        .style(if attention > 0 {
-                            theme::attention_style()
-                        } else {
-                            theme::help_style()
-                        }),
-                    ])
-                })
-                .collect();
+            let mut rows: Vec<Row> = Vec::new();
+            let mut row_num = 1;
+
+            // Active swarms first
+            for s in swarms {
+                let busy = s.busy_count();
+                let total = s.workers.len();
+                let attention = s.attention_count();
+                rows.push(Row::new(vec![
+                    Cell::from(format!("{row_num}")).style(theme::title_style()),
+                    Cell::from(s.project_name.clone()),
+                    Cell::from("Active").style(Style::default().fg(ratatui::style::Color::Green)),
+                    Cell::from(
+                        s.workflow
+                            .as_ref()
+                            .map(|w| w.to_string())
+                            .unwrap_or_else(|| "—".to_string()),
+                    ),
+                    Cell::from(s.agent_type.to_string()),
+                    Cell::from(format!("{busy}/{total} busy")),
+                    Cell::from(if attention > 0 {
+                        format!("{attention} items")
+                    } else {
+                        "—".to_string()
+                    })
+                    .style(if attention > 0 {
+                        theme::attention_style()
+                    } else {
+                        theme::help_style()
+                    }),
+                ]));
+                row_num += 1;
+            }
+
+            // Available repos
+            for repo in available {
+                let name = repo
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| repo.to_string_lossy().to_string());
+                rows.push(Row::new(vec![
+                    Cell::from(format!("{row_num}")).style(theme::help_style()),
+                    Cell::from(name),
+                    Cell::from("—").style(theme::help_style()),
+                    Cell::from("—").style(theme::help_style()),
+                    Cell::from("—").style(theme::help_style()),
+                    Cell::from("—").style(theme::help_style()),
+                    Cell::from("—").style(theme::help_style()),
+                ]));
+                row_num += 1;
+            }
 
             let table = Table::new(
                 rows,
                 [
-                    Constraint::Percentage(25),
-                    Constraint::Percentage(15),
-                    Constraint::Percentage(15),
-                    Constraint::Percentage(15),
-                    Constraint::Percentage(15),
-                    Constraint::Percentage(15),
+                    Constraint::Length(3),
+                    Constraint::Percentage(22),
+                    Constraint::Percentage(12),
+                    Constraint::Percentage(14),
+                    Constraint::Percentage(12),
+                    Constraint::Percentage(14),
+                    Constraint::Percentage(14),
                 ],
             )
             .header(header)
@@ -126,7 +166,9 @@ impl ReposListView {
 
         // Help bar
         let help = Paragraph::new(Line::from(vec![
-            Span::styled(" Enter", theme::title_style()),
+            Span::styled(" 1-9", theme::title_style()),
+            Span::styled("/", theme::help_style()),
+            Span::styled("Enter", theme::title_style()),
             Span::styled(" select  ", theme::help_style()),
             Span::styled("n", theme::title_style()),
             Span::styled(" new swarm  ", theme::help_style()),

@@ -1,6 +1,7 @@
+use ansi_to_tui::IntoText;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
-    text::{Line, Span},
+    text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };
@@ -50,10 +51,13 @@ impl AgentView {
         .block(Block::default().borders(Borders::BOTTOM));
         f.render_widget(title, chunks[0]);
 
-        // Pane output
+        // Pane output — parse ANSI escape codes for colors
         let content = &agent.pane_content;
-        let lines: Vec<Line> = content.lines().map(|l| Line::from(l.to_string())).collect();
-        let total_lines = lines.len() as u16;
+        let text = content
+            .as_bytes()
+            .into_text()
+            .unwrap_or_else(|_| Text::raw(content.clone()));
+        let total_lines = text.lines.len() as u16;
 
         let visible_height = chunks[1].height.saturating_sub(2);
         let max_scroll = total_lines.saturating_sub(visible_height);
@@ -62,31 +66,32 @@ impl AgentView {
         }
 
         let session_title = format!(" Session — {} ", agent.tmux_target);
-        let pane_output = Paragraph::new(lines)
+        let pane_output = Paragraph::new(text)
             .block(Block::default().borders(Borders::ALL).title(session_title))
             .wrap(Wrap { trim: false })
             .scroll((self.scroll_offset, 0));
         f.render_widget(pane_output, chunks[1]);
 
-        // Input line
-        let input_display = format!("> {}█", self.input);
-        let input = Paragraph::new(Line::from(Span::styled(
-            input_display,
-            theme::input_style(),
+        // Passthrough mode indicator
+        let mode_info = Paragraph::new(Line::from(Span::styled(
+            " Keys forwarded to agent — Tab, /, etc. work natively",
+            theme::help_style(),
         )))
-        .block(Block::default().borders(Borders::ALL).title(" Input "));
-        f.render_widget(input, chunks[2]);
+        .block(Block::default().borders(Borders::ALL).title(" Passthrough Mode "));
+        f.render_widget(mode_info, chunks[2]);
 
         // Help
         let help = Paragraph::new(Line::from(vec![
-            Span::styled(" Enter", theme::title_style()),
-            Span::styled(" send  ", theme::help_style()),
-            Span::styled("PgUp/PgDn", theme::title_style()),
-            Span::styled(" scroll  ", theme::help_style()),
-            Span::styled("Esc", theme::title_style()),
+            Span::styled(" Esc Esc", theme::title_style()),
             Span::styled(" back  ", theme::help_style()),
-            Span::styled("Ctrl+C", theme::title_style()),
-            Span::styled(" quit", theme::help_style()),
+            Span::styled("⌥0", theme::title_style()),
+            Span::styled(" overview  ", theme::help_style()),
+            Span::styled("⌥m", theme::title_style()),
+            Span::styled(" mgr  ", theme::help_style()),
+            Span::styled("⌥1-9", theme::title_style()),
+            Span::styled(" worker  ", theme::help_style()),
+            Span::styled("PgUp/Dn", theme::title_style()),
+            Span::styled(" scroll  ", theme::help_style()),
         ]))
         .block(Block::default().borders(Borders::TOP));
         f.render_widget(help, chunks[3]);

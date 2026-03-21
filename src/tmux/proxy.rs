@@ -9,6 +9,7 @@ pub async fn capture_pane(target: &str, scrollback_lines: u32) -> Result<String>
         .args([
             "capture-pane",
             "-p",
+            "-e", // Preserve ANSI escape sequences (colors, etc.)
             "-t",
             target,
             "-S",

@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -49,6 +49,10 @@ pub struct App {
     pub new_swarm_repo: String,
     /// Status message shown at bottom of repos list.
     pub status_message: Option<String>,
+    /// Timestamp of last Esc press (for double-Esc detection).
+    last_esc: Option<std::time::Instant>,
+    /// Available repos (git directories found nearby) that don't have active swarms.
+    pub available_repos: Vec<PathBuf>,
 }
 
 impl App {
@@ -83,10 +87,32 @@ impl App {
             dialog_input: String::new(),
             new_swarm_repo: String::new(),
             status_message: None,
+            last_esc: None,
+            available_repos: Vec::new(),
         };
+
+        // Scan for available repos (git directories in cwd or children)
+        app.scan_available_repos();
 
         // Start pane watchers for discovered swarms
         app.start_all_pane_watchers();
+
+        // Auto-select: if launched inside a repo that has a running swarm, jump straight into it
+        if let Ok(cwd) = std::env::current_dir() {
+            let cwd_name = cwd
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if let Some(idx) = app
+                .swarms
+                .iter()
+                .position(|s| s.project_name == cwd_name)
+            {
+                app.repos_list.table_state.select(Some(idx));
+                app.repo_view = RepoView::new();
+                app.screen = Screen::RepoView { swarm_idx: idx };
+            }
+        }
 
         Ok(app)
     }
@@ -98,8 +124,13 @@ impl App {
                 let area = f.area();
                 match &self.screen {
                     Screen::ReposList => {
-                        self.repos_list
-                            .render(f, area, &self.swarms, self.status_message.as_deref());
+                        self.repos_list.render(
+                            f,
+                            area,
+                            &self.swarms,
+                            &self.available_repos,
+                            self.status_message.as_deref(),
+                        );
                     }
                     Screen::NewSwarm { field } => {
                         let field = field.clone();
@@ -203,21 +234,47 @@ impl App {
         Ok(())
     }
 
+    /// Total rows in the repos list (active swarms + available repos).
+    fn repos_list_len(&self) -> usize {
+        self.swarms.len() + self.available_repos.len()
+    }
+
+    /// Handle selecting a row in the repos list.
+    /// If it's an active swarm, jump to repo view.
+    /// If it's an available repo, open the new swarm dialog pre-filled.
+    async fn select_repo_row(&mut self, idx: usize) -> Result<()> {
+        if idx < self.swarms.len() {
+            // Active swarm — jump to repo view
+            self.repo_view = RepoView::new();
+            self.screen = Screen::RepoView { swarm_idx: idx };
+        } else {
+            // Available repo — open new swarm dialog pre-filled
+            let avail_idx = idx - self.swarms.len();
+            if let Some(repo_path) = self.available_repos.get(avail_idx) {
+                self.new_swarm_repo = repo_path.to_string_lossy().to_string();
+                self.dialog_input = "2".to_string();
+                self.status_message = None;
+                self.screen = Screen::NewSwarm {
+                    field: NewSwarmField::NumWorkers,
+                };
+            }
+        }
+        Ok(())
+    }
+
     async fn handle_repos_list_key(&mut self, key: KeyEvent) -> Result<()> {
+        let total = self.repos_list_len();
         match key.code {
             KeyCode::Char('q') => self.running = false,
             KeyCode::Down | KeyCode::Char('j') => {
-                self.repos_list.next(self.swarms.len());
+                self.repos_list.next(total);
             }
             KeyCode::Up | KeyCode::Char('k') => {
-                self.repos_list.previous(self.swarms.len());
+                self.repos_list.previous(total);
             }
             KeyCode::Enter => {
                 if let Some(idx) = self.repos_list.selected() {
-                    if idx < self.swarms.len() {
-                        self.repo_view = RepoView::new();
-                        self.screen = Screen::RepoView { swarm_idx: idx };
-                    }
+                    self.select_repo_row(idx).await?;
                 }
             }
             KeyCode::Char('n') => {
@@ -238,6 +295,14 @@ impl App {
                     self.swarms = swarms;
                     self.start_all_pane_watchers();
                     self.status_message = Some(format!("Found {} swarm(s)", self.swarms.len()));
+                }
+            }
+            KeyCode::Char(c @ '1'..='9') => {
+                // Jump to repo N (1-indexed, across active + available)
+                let idx = (c as usize) - ('1' as usize);
+                if idx < self.repos_list_len() {
+                    self.repos_list.table_state.select(Some(idx));
+                    self.select_repo_row(idx).await?;
                 }
             }
             _ => {}
@@ -423,15 +488,6 @@ impl App {
                         }
                     }
                 }
-                KeyCode::Char('m') => {
-                    // Switch to manager chat
-                    self.agent_view = AgentView::new();
-                    self.agent_view.scroll_to_bottom();
-                    self.screen = Screen::AgentView {
-                        swarm_idx,
-                        agent_id: "manager".to_string(),
-                    };
-                }
                 KeyCode::Char('a') => {
                     // Add a new worker to this swarm
                     if let Some(swarm) = self.swarms.get(swarm_idx) {
@@ -505,7 +561,35 @@ impl App {
                         }
                     }
                 }
-                _ => {}
+                _ => {
+                    // Alt+m → manager, Alt+1-9 → worker N
+                    if key.modifiers.contains(KeyModifiers::ALT) {
+                        match key.code {
+                            KeyCode::Char('m') => {
+                                self.agent_view = AgentView::new();
+                                self.agent_view.scroll_to_bottom();
+                                self.screen = Screen::AgentView {
+                                    swarm_idx,
+                                    agent_id: "manager".to_string(),
+                                };
+                            }
+                            KeyCode::Char(c @ '1'..='9') => {
+                                let worker_idx = (c as usize) - ('1' as usize);
+                                if let Some(swarm) = self.swarms.get(swarm_idx) {
+                                    if let Some(worker) = swarm.workers.get(worker_idx) {
+                                        self.agent_view = AgentView::new();
+                                        self.agent_view.scroll_to_bottom();
+                                        self.screen = Screen::AgentView {
+                                            swarm_idx,
+                                            agent_id: worker.id.clone(),
+                                        };
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
             }
         }
         Ok(())
@@ -517,36 +601,98 @@ impl App {
         swarm_idx: usize,
         agent_id: String,
     ) -> Result<()> {
-        match key.code {
-            KeyCode::Esc => {
+        let target = self
+            .swarms
+            .get(swarm_idx)
+            .and_then(|s| s.agent(&agent_id))
+            .map(|a| a.tmux_target.clone());
+
+        let target = match target {
+            Some(t) => t,
+            None => {
                 self.screen = Screen::RepoView { swarm_idx };
+                return Ok(());
             }
-            KeyCode::Enter => {
-                if !self.agent_view.input.is_empty() {
-                    let input = self.agent_view.input.drain(..).collect::<String>();
-                    if let Some(swarm) = self.swarms.get(swarm_idx) {
-                        if let Some(agent) = swarm.agent(&agent_id) {
-                            let target = agent.tmux_target.clone();
-                            self.adapter.send_input(&target, &input).await?;
-                        }
-                    }
-                    self.agent_view.scroll_to_bottom();
+        };
+
+        // Double-Esc to go back (single Esc is forwarded to the pane)
+        if key.code == KeyCode::Esc {
+            let now = std::time::Instant::now();
+            if let Some(last) = self.last_esc {
+                if now.duration_since(last) < Duration::from_millis(500) {
+                    self.last_esc = None;
+                    self.screen = Screen::RepoView { swarm_idx };
+                    return Ok(());
                 }
             }
-            KeyCode::Char(c) => {
-                self.agent_view.input.push(c);
+            self.last_esc = Some(now);
+            // Forward the single Esc to the pane
+            send_raw_key(&target, "Escape").await?;
+            return Ok(());
+        }
+        self.last_esc = None;
+
+        // Ctrl+] goes back
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char(']') {
+            self.screen = Screen::RepoView { swarm_idx };
+            return Ok(());
+        }
+
+        // Alt+0 → repo view, Alt+m → manager, Alt+1-9 → worker
+        if key.modifiers.contains(KeyModifiers::ALT) {
+            match key.code {
+                KeyCode::Char('0') => {
+                    self.screen = Screen::RepoView { swarm_idx };
+                    return Ok(());
+                }
+                KeyCode::Char('m') => {
+                    self.agent_view = AgentView::new();
+                    self.agent_view.scroll_to_bottom();
+                    self.screen = Screen::AgentView {
+                        swarm_idx,
+                        agent_id: "manager".to_string(),
+                    };
+                    return Ok(());
+                }
+                KeyCode::Char(c @ '1'..='9') => {
+                    let worker_idx = (c as usize) - ('1' as usize);
+                    if let Some(swarm) = self.swarms.get(swarm_idx) {
+                        if let Some(worker) = swarm.workers.get(worker_idx) {
+                            self.agent_view = AgentView::new();
+                            self.agent_view.scroll_to_bottom();
+                            self.screen = Screen::AgentView {
+                                swarm_idx,
+                                agent_id: worker.id.clone(),
+                            };
+                            return Ok(());
+                        }
+                    }
+                }
+                _ => {}
             }
-            KeyCode::Backspace => {
-                self.agent_view.input.pop();
-            }
+        }
+
+        // PageUp/PageDown scroll the view without sending to pane
+        match key.code {
             KeyCode::PageUp => {
                 self.agent_view.scroll_up(10);
+                return Ok(());
             }
             KeyCode::PageDown => {
                 self.agent_view.scroll_down(10);
+                return Ok(());
             }
             _ => {}
         }
+
+        // Everything else is forwarded directly to the tmux pane.
+        // This gives us Claude's native tab completion, slash commands, etc.
+        let tmux_key = key_event_to_tmux(key);
+        if let Some(tmux_key) = tmux_key {
+            send_raw_key(&target, &tmux_key).await?;
+            self.agent_view.scroll_to_bottom();
+        }
+
         Ok(())
     }
 
@@ -582,19 +728,72 @@ impl App {
         }
     }
 
-    /// Refresh agent statuses from status files.
+    /// Refresh agent statuses from status files and pane content.
     fn refresh_statuses(&mut self) {
         for swarm in &mut self.swarms {
-            for worker in &mut swarm.workers {
-                let status_file = worker
+            // Refresh all agents (manager + workers)
+            let agents = std::iter::once(&mut swarm.manager)
+                .chain(swarm.workers.iter_mut());
+
+            for agent in agents {
+                // Try status file first
+                let status_file = agent
                     .worktree_path
                     .join(swarm.agent_type.status_dir())
                     .join("fix-loop.status");
                 if status_file.exists() {
-                    worker.status = crate::model::status::read_status_file(&status_file);
+                    agent.status = crate::model::status::read_status_file(&status_file);
+                    continue;
+                }
+
+                // Infer status from pane content
+                if !agent.pane_content.is_empty() {
+                    agent.status = infer_status_from_pane(&agent.pane_content);
                 }
             }
         }
+    }
+
+    /// Scan for git repos in cwd and child directories.
+    fn scan_available_repos(&mut self) {
+        let mut repos = Vec::new();
+
+        if let Ok(cwd) = std::env::current_dir() {
+            // Check if cwd itself is a git repo
+            if cwd.join(".git").exists() {
+                let active_names: Vec<&str> =
+                    self.swarms.iter().map(|s| s.project_name.as_str()).collect();
+                let name = cwd
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                if !active_names.contains(&name.as_str()) {
+                    repos.push(cwd.clone());
+                }
+            }
+
+            // Check child directories
+            if let Ok(entries) = std::fs::read_dir(&cwd) {
+                let active_names: Vec<String> =
+                    self.swarms.iter().map(|s| s.project_name.clone()).collect();
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() && path.join(".git").exists() {
+                        let name = path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        // Skip if already has an active swarm, or is a worktree (contains "-wt-")
+                        if !active_names.contains(&name) && !name.contains("-wt-") {
+                            repos.push(path);
+                        }
+                    }
+                }
+            }
+        }
+
+        repos.sort();
+        self.available_repos = repos;
     }
 }
 
@@ -671,6 +870,128 @@ fn tab_complete_path(input: &str) -> Option<String> {
             None
         }
     }
+}
+
+/// Infer agent status from the last lines of tmux pane content.
+fn infer_status_from_pane(content: &str) -> crate::model::status::AgentStatus {
+    use crate::model::status::{AgentState, AgentStatus};
+
+    // Strip ANSI escape codes for matching
+    let stripped: String = content
+        .chars()
+        .fold((String::new(), false), |(mut s, in_esc), c| {
+            if c == '\x1b' {
+                (s, true)
+            } else if in_esc {
+                (s, c != 'm' && !c.is_ascii_uppercase())
+            } else {
+                s.push(c);
+                (s, false)
+            }
+        })
+        .0;
+
+    let last_lines: Vec<&str> = stripped
+        .lines()
+        .rev()
+        .take(15)
+        .collect();
+
+    let tail = last_lines.join(" ").to_lowercase();
+
+    let state = if tail.contains("waiting for input")
+        || tail.contains("> ")
+        || tail.contains("what would you like")
+        || tail.contains("how can i help")
+    {
+        AgentState::Idle
+    } else if tail.contains("working")
+        || tail.contains("reading")
+        || tail.contains("writing")
+        || tail.contains("editing")
+        || tail.contains("searching")
+        || tail.contains("running")
+        || tail.contains("executing")
+        || tail.contains("thinking")
+        || tail.contains("analyzing")
+    {
+        // Try to extract issue number
+        let issue = extract_issue_from_text(&tail);
+        AgentState::Working { issue }
+    } else if tail.contains("$") || tail.contains("%") {
+        // Shell prompt — claude hasn't started or has exited
+        AgentState::Unknown("Shell".into())
+    } else if !content.trim().is_empty() {
+        AgentState::Working { issue: None }
+    } else {
+        AgentState::Unknown("No output".into())
+    };
+
+    AgentStatus {
+        timestamp: None,
+        state,
+    }
+}
+
+/// Try to extract an issue number from text (e.g., "#42", "issue 42").
+fn extract_issue_from_text(text: &str) -> Option<u32> {
+    for word in text.split_whitespace() {
+        if let Some(stripped) = word.strip_prefix('#') {
+            if let Ok(n) = stripped.trim_end_matches(|c: char| !c.is_ascii_digit()).parse::<u32>() {
+                if n > 0 && n < 100000 {
+                    return Some(n);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Convert a crossterm KeyEvent to a tmux send-keys compatible string.
+fn key_event_to_tmux(key: KeyEvent) -> Option<String> {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+
+    match key.code {
+        KeyCode::Char(c) => {
+            if ctrl {
+                // tmux notation: C-a, C-c, etc.
+                Some(format!("C-{c}"))
+            } else {
+                // Literal character — needs to be sent without "Enter"
+                Some(c.to_string())
+            }
+        }
+        KeyCode::Enter => Some("Enter".to_string()),
+        KeyCode::Tab => Some("Tab".to_string()),
+        KeyCode::Backspace => Some("BSpace".to_string()),
+        KeyCode::Esc => Some("Escape".to_string()),
+        KeyCode::Up => Some("Up".to_string()),
+        KeyCode::Down => Some("Down".to_string()),
+        KeyCode::Left => Some("Left".to_string()),
+        KeyCode::Right => Some("Right".to_string()),
+        KeyCode::Home => Some("Home".to_string()),
+        KeyCode::End => Some("End".to_string()),
+        KeyCode::Delete => Some("DC".to_string()),
+        KeyCode::F(n) => Some(format!("F{n}")),
+        _ => None,
+    }
+}
+
+/// Send a raw key to a tmux pane (without appending Enter).
+async fn send_raw_key(target: &str, tmux_key: &str) -> Result<()> {
+    let output = tokio::process::Command::new("tmux")
+        .args(["send-keys", "-t", target, tmux_key])
+        .output()
+        .await
+        .context("Failed to send key to tmux")?;
+
+    if !output.status.success() {
+        tracing::warn!(
+            "tmux send-keys failed for {tmux_key}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(())
 }
 
 fn longest_common_prefix(strings: &[String]) -> String {

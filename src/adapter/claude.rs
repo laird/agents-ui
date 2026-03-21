@@ -28,6 +28,203 @@ impl ClaudeAdapter {
         format!("claude-{project}")
     }
 
+    /// Create git worktrees for workers.
+    async fn create_worktrees(repo_path: &Path, project_name: &str, num_workers: u32) -> Result<Vec<PathBuf>> {
+        let parent = repo_path.parent().unwrap_or(repo_path);
+        let mut worktree_paths = Vec::new();
+
+        for i in 1..=num_workers {
+            let wt_path = parent.join(format!("{project_name}-wt-{i}"));
+            let branch_name = format!("worker-{i}");
+
+            if wt_path.exists() {
+                tracing::info!("Worktree already exists: {}", wt_path.display());
+                worktree_paths.push(wt_path);
+                continue;
+            }
+
+            // Create a branch for this worker
+            let output = Command::new("git")
+                .args(["branch", &branch_name])
+                .current_dir(repo_path)
+                .output()
+                .await
+                .context("Failed to create branch")?;
+            // Ignore errors (branch may already exist)
+            if !output.status.success() {
+                tracing::info!("Branch {branch_name} may already exist, continuing");
+            }
+
+            // Create the worktree
+            let output = Command::new("git")
+                .args([
+                    "worktree",
+                    "add",
+                    wt_path.to_string_lossy().as_ref(),
+                    &branch_name,
+                ])
+                .current_dir(repo_path)
+                .output()
+                .await
+                .context("Failed to create worktree")?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                // If worktree already exists for this branch, try without branch
+                if stderr.contains("already checked out") || stderr.contains("already exists") {
+                    tracing::warn!("Worktree issue for {branch_name}: {stderr}");
+                    // Try with a detached head
+                    let output2 = Command::new("git")
+                        .args([
+                            "worktree",
+                            "add",
+                            "--detach",
+                            wt_path.to_string_lossy().as_ref(),
+                        ])
+                        .current_dir(repo_path)
+                        .output()
+                        .await?;
+                    if !output2.status.success() {
+                        anyhow::bail!(
+                            "Failed to create worktree at {}: {}",
+                            wt_path.display(),
+                            String::from_utf8_lossy(&output2.stderr)
+                        );
+                    }
+                } else {
+                    anyhow::bail!("Failed to create worktree: {stderr}");
+                }
+            }
+
+            worktree_paths.push(wt_path);
+        }
+
+        Ok(worktree_paths)
+    }
+
+    /// Create a tmux session with manager + worker panes.
+    async fn create_tmux_session(
+        session_name: &str,
+        repo_path: &Path,
+        worktree_paths: &[PathBuf],
+    ) -> Result<()> {
+        // Create session with first window "agents" starting in first worktree
+        let first_wt = worktree_paths
+            .first()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| repo_path.to_string_lossy().to_string());
+
+        let output = Command::new("tmux")
+            .args([
+                "new-session",
+                "-d",
+                "-s",
+                session_name,
+                "-n",
+                "agents",
+                "-c",
+                &first_wt,
+            ])
+            .output()
+            .await
+            .context("Failed to create tmux session")?;
+
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux new-session failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        // Set environment variables in the tmux session to force tmux mode
+        // This tells the autocoder plugin to use tmux, not cmux
+        Command::new("tmux")
+            .args(["set-environment", "-t", session_name, "AGENTS_MUX", "tmux"])
+            .output()
+            .await
+            .ok();
+        Command::new("tmux")
+            .args(["set-environment", "-t", session_name, "MUX", "tmux"])
+            .output()
+            .await
+            .ok();
+
+        // Create additional panes for remaining workers
+        for (i, wt_path) in worktree_paths.iter().enumerate().skip(1) {
+            let output = Command::new("tmux")
+                .args([
+                    "split-window",
+                    "-t",
+                    &format!("{session_name}:agents"),
+                    "-c",
+                    &wt_path.to_string_lossy(),
+                ])
+                .output()
+                .await?;
+            if !output.status.success() {
+                tracing::warn!(
+                    "Failed to split pane for worker {}: {}",
+                    i,
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+
+            // Tile the layout evenly
+            Command::new("tmux")
+                .args([
+                    "select-layout",
+                    "-t",
+                    &format!("{session_name}:agents"),
+                    "tiled",
+                ])
+                .output()
+                .await
+                .ok();
+        }
+
+        // Create "review" window for manager, in the base repo
+        let output = Command::new("tmux")
+            .args([
+                "new-window",
+                "-t",
+                session_name,
+                "-n",
+                "review",
+                "-c",
+                &repo_path.to_string_lossy(),
+            ])
+            .output()
+            .await?;
+
+        if !output.status.success() {
+            tracing::warn!(
+                "Failed to create review window: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        // Select the agents window as default
+        Command::new("tmux")
+            .args(["select-window", "-t", &format!("{session_name}:agents")])
+            .output()
+            .await
+            .ok();
+
+        Ok(())
+    }
+
+    /// Launch claude in a specific tmux pane.
+    async fn launch_claude_in_pane(target: &str, session_name: &str) -> Result<()> {
+        // Launch claude with system prompt instructing it to use tmux (not cmux)
+        let cmd = format!(
+            "claude --dangerously-skip-permissions --append-system-prompt 'This session is managed by agents-ui via tmux. \
+            IMPORTANT: Always use tmux commands (tmux capture-pane, tmux send-keys, etc.) \
+            for reading worker screens and dispatching work. Do NOT use cmux. \
+            The tmux session is named {session_name}.'"
+        );
+        proxy::send_keys(target, &cmd).await
+    }
+
     /// Build a Swarm model from an existing tmux session.
     async fn build_swarm_from_session(
         session_name: &str,
@@ -36,7 +233,7 @@ impl ClaudeAdapter {
         let project_name = Self::project_name(&repo_path);
         let session_info = session::list_panes(session_name).await?;
 
-        // Convention from start-parallel-agents.sh:
+        // Convention:
         // Window 0 ("agents"): panes 0..N-1 are workers
         // Window 1 ("review"): pane 0 is manager
         let mut manager = AgentInfo {
@@ -52,12 +249,10 @@ impl ClaudeAdapter {
 
         for window in &session_info.windows {
             if window.name == "review" || window.index == 1 {
-                // Manager pane
                 if let Some(pane) = window.panes.first() {
                     manager.tmux_target = pane.target.clone();
                 }
             } else if window.name == "agents" || window.index == 0 {
-                // Worker panes
                 for pane in &window.panes {
                     let worker_idx = pane.index as usize;
                     let worktree_path = repo_path
@@ -87,11 +282,90 @@ impl ClaudeAdapter {
             repo_path,
             project_name,
             agent_type: AgentType::Claude,
-            workflow: None, // Can't determine from session alone
+            workflow: None,
             tmux_session: session_name.to_string(),
             manager,
             workers,
         })
+    }
+
+    /// Check if the autocoder plugin is installed, and install it if not.
+    async fn ensure_plugin_installed() -> Result<()> {
+        // Check if autocoder plugin is already installed
+        let output = Command::new("claude")
+            .args(["plugin", "list"])
+            .output()
+            .await
+            .context("Failed to run 'claude plugin list'. Is claude CLI installed?")?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        if stdout.contains("autocoder") {
+            tracing::info!("Autocoder plugin already installed");
+            return Ok(());
+        }
+
+        tracing::info!("Autocoder plugin not found, installing...");
+
+        // Step 1: Add the laird/agents marketplace (if not already added)
+        let marketplace_output = Command::new("claude")
+            .args(["plugin", "marketplace", "list"])
+            .output()
+            .await?;
+
+        let marketplace_stdout = String::from_utf8_lossy(&marketplace_output.stdout);
+
+        if !marketplace_stdout.contains("laird/agents") && !marketplace_stdout.contains("plugin-marketplace") {
+            tracing::info!("Adding laird/agents marketplace...");
+            let add_output = Command::new("claude")
+                .args(["plugin", "marketplace", "add", "laird/agents"])
+                .output()
+                .await
+                .context("Failed to add marketplace")?;
+
+            if !add_output.status.success() {
+                let stderr = String::from_utf8_lossy(&add_output.stderr);
+                // Not fatal if it already exists
+                if !stderr.contains("already") {
+                    tracing::warn!("Marketplace add warning: {stderr}");
+                }
+            }
+        }
+
+        // Step 2: Install the autocoder plugin
+        tracing::info!("Installing autocoder plugin...");
+        let install_output = Command::new("claude")
+            .args(["plugin", "install", "autocoder"])
+            .output()
+            .await
+            .context("Failed to install autocoder plugin")?;
+
+        if !install_output.status.success() {
+            let stderr = String::from_utf8_lossy(&install_output.stderr);
+            anyhow::bail!("Failed to install autocoder plugin: {stderr}");
+        }
+
+        tracing::info!("Autocoder plugin installed successfully");
+        Ok(())
+    }
+
+    /// Remove worktrees for a swarm.
+    async fn remove_worktrees(repo_path: &Path, worktree_paths: &[PathBuf]) -> Result<()> {
+        for wt in worktree_paths {
+            let output = Command::new("git")
+                .args(["worktree", "remove", "--force", &wt.to_string_lossy()])
+                .current_dir(repo_path)
+                .output()
+                .await?;
+            if !output.status.success() {
+                tracing::warn!(
+                    "Failed to remove worktree {}: {}",
+                    wt.display(),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+        }
+        Ok(())
     }
 }
 
@@ -106,62 +380,39 @@ impl AgentRuntime for ClaudeAdapter {
             return Self::build_swarm_from_session(&session_name, config.repo_path.clone()).await;
         }
 
-        let script_path = crate::scripts::launcher::find_script("start-parallel-agents.sh")
-            .or_else(|| {
-                let p = config.agents_dir.join("plugins/autocoder/scripts/start-parallel-agents.sh");
-                p.exists().then_some(p)
-            });
-
-        let script_path = match script_path {
-            Some(p) => p,
-            None => anyhow::bail!(
-                "start-parallel-agents.sh not found. Install the autocoder plugin or set AGENTS_DIR."
-            ),
-        };
+        // Ensure the autocoder plugin is installed
+        Self::ensure_plugin_installed().await?;
 
         tracing::info!(
-            "Launching swarm: {} workers for {} via {}",
+            "Launching swarm: {} workers for {}",
             config.num_workers,
             project_name,
-            script_path.display()
         );
 
-        // Launch the script in a detached manner.
-        // start-parallel-agents.sh ends with `tmux attach`, so we spawn it
-        // in the background and wait for the session to appear.
-        let mut child = Command::new("bash")
-            .args([
-                script_path.to_string_lossy().as_ref(),
-                &config.num_workers.to_string(),
-                "--mux",
-                "tmux",
-                "--agent",
-                config.agent_type.script_flag(),
-            ])
-            .current_dir(&config.repo_path)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .context("Failed to spawn start-parallel-agents.sh")?;
+        // 1. Create git worktrees
+        let worktree_paths =
+            Self::create_worktrees(&config.repo_path, &project_name, config.num_workers).await?;
 
-        // Wait for the tmux session to appear (the script creates it before attaching)
-        let mut attempts = 0;
-        loop {
-            if session::has_session(&session_name).await {
-                break;
+        // 2. Create tmux session with windows/panes
+        Self::create_tmux_session(&session_name, &config.repo_path, &worktree_paths).await?;
+
+        // 3. Launch claude in each worker pane
+        for i in 0..worktree_paths.len() {
+            let target = format!("{session_name}:agents.{i}");
+            if let Err(e) = Self::launch_claude_in_pane(&target, &session_name).await {
+                tracing::warn!("Failed to launch claude in pane {i}: {e}");
             }
-            attempts += 1;
-            if attempts > 60 {
-                child.kill().await.ok();
-                anyhow::bail!("Timed out waiting for tmux session {session_name}");
-            }
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            // Small delay between launches to avoid overwhelming
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
 
-        // Kill the script process (it's blocking on tmux attach which we don't need)
-        child.kill().await.ok();
+        // 4. Launch claude in manager pane
+        let manager_target = format!("{session_name}:review.0");
+        if let Err(e) = Self::launch_claude_in_pane(&manager_target, &session_name).await {
+            tracing::warn!("Failed to launch claude in manager pane: {e}");
+        }
 
+        // 6. Build and return swarm model
         Self::build_swarm_from_session(&session_name, config.repo_path.clone()).await
     }
 
@@ -179,8 +430,6 @@ impl AgentRuntime for ClaudeAdapter {
                 .unwrap_or(&session_name)
                 .to_string();
 
-            // Try to find the repo path from git worktree in one of the panes,
-            // or fall back to looking in common locations
             let repo_path = find_repo_path(&project_name).await;
 
             if let Some(repo_path) = repo_path {
@@ -322,45 +571,47 @@ impl AgentRuntime for ClaudeAdapter {
     }
 
     async fn stop(&self, swarm: &Swarm) -> Result<()> {
-        // Write stop files for each worker
+        // Send Ctrl+C to each worker pane to interrupt claude
         for worker in &swarm.workers {
-            let stop_file = worker
-                .worktree_path
-                .join(swarm.agent_type.status_dir())
-                .join("fix-loop.stop");
-            if let Err(e) = std::fs::write(&stop_file, "stop") {
-                tracing::warn!("Failed to write stop file for {}: {e}", worker.id);
-            }
+            Command::new("tmux")
+                .args(["send-keys", "-t", &worker.tmux_target, "C-c", ""])
+                .output()
+                .await
+                .ok();
         }
         Ok(())
     }
 
     async fn teardown(&self, swarm: &Swarm) -> Result<()> {
-        let script_path = crate::scripts::launcher::find_script("stop-parallel-agents.sh")
-            .unwrap_or_else(|| PathBuf::from("../agents/plugins/autocoder/scripts/stop-parallel-agents.sh"));
-
-        let output = Command::new("bash")
-            .arg(&script_path)
-            .current_dir(&swarm.repo_path)
+        // Kill the tmux session
+        let output = Command::new("tmux")
+            .args(["kill-session", "-t", &swarm.tmux_session])
             .output()
             .await
-            .context("Failed to run stop-parallel-agents.sh")?;
+            .context("Failed to kill tmux session")?;
 
         if !output.status.success() {
             tracing::warn!(
-                "stop-parallel-agents.sh failed: {}",
+                "tmux kill-session failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             );
         }
+
+        // Remove worktrees
+        let worktree_paths: Vec<PathBuf> = swarm
+            .workers
+            .iter()
+            .map(|w| w.worktree_path.clone())
+            .collect();
+        Self::remove_worktrees(&swarm.repo_path, &worktree_paths).await?;
 
         Ok(())
     }
 }
 
 /// Try to find a repo path given a project name.
-/// Checks the current directory and common parent directories.
 async fn find_repo_path(project_name: &str) -> Option<PathBuf> {
-    // Check if there's a tmux environment variable with the path
+    // Check tmux environment
     let output = Command::new("tmux")
         .args([
             "show-environment",
@@ -384,11 +635,11 @@ async fn find_repo_path(project_name: &str) -> Option<PathBuf> {
 
     // Try current directory
     if let Ok(cwd) = std::env::current_dir() {
-        if cwd.file_name().map(|n| n.to_string_lossy().to_string()) == Some(project_name.to_string())
+        if cwd.file_name().map(|n| n.to_string_lossy().to_string())
+            == Some(project_name.to_string())
         {
             return Some(cwd);
         }
-        // Check siblings
         if let Some(parent) = cwd.parent() {
             let candidate = parent.join(project_name);
             if candidate.exists() {
@@ -397,7 +648,7 @@ async fn find_repo_path(project_name: &str) -> Option<PathBuf> {
         }
     }
 
-    // Try home/src
+    // Try ~/src
     if let Some(home) = dirs::home_dir() {
         let candidate = home.join("src").join(project_name);
         if candidate.exists() {
