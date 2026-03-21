@@ -1,7 +1,7 @@
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph, Wrap},
     Frame,
 };
 
@@ -15,8 +15,20 @@ pub fn render_new_swarm_dialog(
     input: &str,
     repo_path: &str,
 ) {
+    // Calculate dialog height based on input length (repo paths can be long)
+    let dialog_width_pct = 60u16;
+    let approx_inner_width = (area.width as usize * dialog_width_pct as usize / 100).saturating_sub(4);
+    let input_text = format!(" > {}█", input);
+    let input_lines = if approx_inner_width > 0 {
+        ((input_text.len() + approx_inner_width - 1) / approx_inner_width).max(1)
+    } else {
+        1
+    };
+    let input_field_height = (input_lines as u16).min(4).max(2);
+    let dialog_height = 8 + input_field_height; // instructions + input + workers + help + borders
+
     // Center a dialog box
-    let dialog_area = centered_rect(60, 12, area);
+    let dialog_area = centered_rect(dialog_width_pct, dialog_height, area);
 
     // Clear background
     f.render_widget(Clear, dialog_area);
@@ -30,10 +42,10 @@ pub fn render_new_swarm_dialog(
     f.render_widget(block, dialog_area);
 
     let chunks = Layout::vertical([
-        Constraint::Length(2), // Instructions
-        Constraint::Length(2), // Repo path field
-        Constraint::Length(2), // Workers field
-        Constraint::Length(2), // Help
+        Constraint::Length(2),                // Instructions
+        Constraint::Length(input_field_height), // Repo path / input field (expands)
+        Constraint::Length(2),                // Workers field
+        Constraint::Length(2),                // Help
     ])
     .split(inner);
 
@@ -45,11 +57,11 @@ pub fn render_new_swarm_dialog(
             )));
             f.render_widget(instructions, chunks[0]);
 
-            let input_display = format!(" > {}█", input);
-            let input_widget = Paragraph::new(Line::from(Span::styled(
-                input_display,
+            let input_widget = Paragraph::new(Span::styled(
+                &input_text,
                 theme::input_style(),
-            )));
+            ))
+            .wrap(Wrap { trim: false });
             f.render_widget(input_widget, chunks[1]);
 
             let help = Paragraph::new(Line::from(vec![
@@ -64,10 +76,11 @@ pub fn render_new_swarm_dialog(
         }
         NewSwarmField::NumWorkers => {
             let repo_display = format!(" Repo: {repo_path}");
-            let repo_line = Paragraph::new(Line::from(Span::styled(
+            let repo_line = Paragraph::new(Span::styled(
                 repo_display,
                 theme::help_style(),
-            )));
+            ))
+            .wrap(Wrap { trim: false });
             f.render_widget(repo_line, chunks[0]);
 
             let prompt = Paragraph::new(Line::from(Span::styled(
