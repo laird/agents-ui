@@ -1,7 +1,7 @@
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState, Wrap},
     Frame,
 };
 
@@ -12,6 +12,7 @@ pub struct RepoView {
     pub worker_table_state: TableState,
     pub focus_manager: bool,
     pub input: String,
+    pub manager_scroll: u16,
 }
 
 impl RepoView {
@@ -22,15 +23,21 @@ impl RepoView {
             worker_table_state,
             focus_manager: false,
             input: String::new(),
+            manager_scroll: u16::MAX, // Start scrolled to bottom
         }
     }
 
     pub fn render(&mut self, f: &mut Frame, area: Rect, swarm: &Swarm) {
+        // Calculate worker table height: header + rows + borders, min 4 max 10
+        let worker_rows = swarm.workers.len() as u16;
+        let table_height = (worker_rows + 3).max(4).min(10); // +3 for header, borders
+
         let chunks = Layout::vertical([
-            Constraint::Length(3),
-            Constraint::Length(8),
-            Constraint::Min(5),
-            Constraint::Length(3),
+            Constraint::Length(3),          // Title
+            Constraint::Length(table_height), // Workers table (compact)
+            Constraint::Min(8),             // Manager session output
+            Constraint::Length(3),          // Manager input
+            Constraint::Length(3),          // Help bar
         ])
         .split(area);
 
@@ -53,52 +60,7 @@ impl RepoView {
         .block(Block::default().borders(Borders::BOTTOM));
         f.render_widget(title, chunks[0]);
 
-        // Manager panel
-        let manager_status = &swarm.manager.status.state;
-        let manager_block = Block::default()
-            .borders(Borders::ALL)
-            .title(" Manager ")
-            .border_style(if self.focus_manager {
-                theme::title_style()
-            } else {
-                ratatui::style::Style::default()
-            });
-
-        let status_text = manager_status.to_string();
-        let worktree_text = format!("Worktree: {}", swarm.manager.worktree_path.display());
-
-        let last_lines: Vec<String> = swarm
-            .manager
-            .pane_content
-            .lines()
-            .rev()
-            .take(4)
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect();
-
-        let mut lines: Vec<Line> = vec![Line::from(vec![
-            Span::styled("Status: ", theme::help_style()),
-            Span::styled(status_text, theme::status_style(manager_status)),
-            Span::raw("  "),
-            Span::styled(worktree_text, theme::help_style()),
-        ])];
-
-        for l in &last_lines {
-            lines.push(Line::from(l.clone()));
-        }
-
-        if self.focus_manager {
-            let input_display = format!("> {}█", self.input);
-            lines.push(Line::from(Span::styled(input_display, theme::title_style())));
-        }
-
-        let manager_para = Paragraph::new(lines).block(manager_block);
-        f.render_widget(manager_para, chunks[1]);
-
-        // Workers table
+        // Workers table (compact)
         let header = Row::new(vec![
             Cell::from("Worker"),
             Cell::from("Status"),
@@ -155,13 +117,62 @@ impl RepoView {
         )
         .row_highlight_style(theme::selected_style());
 
-        f.render_stateful_widget(table, chunks[2], &mut self.worker_table_state);
+        f.render_stateful_widget(table, chunks[1], &mut self.worker_table_state);
+
+        // Manager session output (scrollable, like AgentView)
+        let content = &swarm.manager.pane_content;
+        let lines: Vec<Line> = content.lines().map(|l| Line::from(l.to_string())).collect();
+        let total_lines = lines.len() as u16;
+
+        let visible_height = chunks[2].height.saturating_sub(2); // subtract borders
+        let max_scroll = total_lines.saturating_sub(visible_height);
+        if self.manager_scroll > max_scroll {
+            self.manager_scroll = max_scroll;
+        }
+
+        let session_title = format!(" Manager — {} ", swarm.manager.tmux_target);
+        let manager_output = Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(session_title)
+                    .border_style(if self.focus_manager {
+                        theme::title_style()
+                    } else {
+                        ratatui::style::Style::default()
+                    }),
+            )
+            .wrap(Wrap { trim: false })
+            .scroll((self.manager_scroll, 0));
+        f.render_widget(manager_output, chunks[2]);
+
+        // Manager input line (always visible)
+        let input_display = format!("> {}█", self.input);
+        let input_style = if self.focus_manager {
+            theme::input_style()
+        } else {
+            theme::help_style()
+        };
+        let input = Paragraph::new(Line::from(Span::styled(input_display, input_style)))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Input ")
+                    .border_style(if self.focus_manager {
+                        theme::title_style()
+                    } else {
+                        ratatui::style::Style::default()
+                    }),
+            );
+        f.render_widget(input, chunks[3]);
 
         // Help bar
         let help = if self.focus_manager {
             Paragraph::new(Line::from(vec![
                 Span::styled(" Enter", theme::title_style()),
                 Span::styled(" send  ", theme::help_style()),
+                Span::styled("PgUp/PgDn", theme::title_style()),
+                Span::styled(" scroll  ", theme::help_style()),
                 Span::styled("Esc", theme::title_style()),
                 Span::styled(" back to workers  ", theme::help_style()),
             ]))
@@ -172,7 +183,7 @@ impl RepoView {
                 Span::styled("Enter", theme::title_style()),
                 Span::styled(" drill in  ", theme::help_style()),
                 Span::styled("m", theme::title_style()),
-                Span::styled(" manager  ", theme::help_style()),
+                Span::styled(" manager input  ", theme::help_style()),
                 Span::styled("d", theme::title_style()),
                 Span::styled(" shutdown  ", theme::help_style()),
                 Span::styled("f", theme::title_style()),
@@ -185,7 +196,7 @@ impl RepoView {
                 Span::styled(" quit", theme::help_style()),
             ]))
         };
-        f.render_widget(help.block(Block::default().borders(Borders::TOP)), chunks[3]);
+        f.render_widget(help.block(Block::default().borders(Borders::TOP)), chunks[4]);
     }
 
     pub fn next_worker(&mut self, len: usize) {
@@ -207,5 +218,13 @@ impl RepoView {
 
     pub fn selected_worker(&self) -> Option<usize> {
         self.worker_table_state.selected()
+    }
+
+    pub fn scroll_manager_up(&mut self, amount: u16) {
+        self.manager_scroll = self.manager_scroll.saturating_sub(amount);
+    }
+
+    pub fn scroll_manager_down(&mut self, amount: u16) {
+        self.manager_scroll = self.manager_scroll.saturating_add(amount);
     }
 }

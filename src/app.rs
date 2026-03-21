@@ -422,6 +422,12 @@ impl App {
                         }
                     }
                 }
+                KeyCode::PageUp => {
+                    self.repo_view.scroll_manager_up(10);
+                }
+                KeyCode::PageDown => {
+                    self.repo_view.scroll_manager_down(10);
+                }
                 KeyCode::Char(c) => {
                     self.repo_view.input.push(c);
                 }
@@ -462,13 +468,9 @@ impl App {
                     }
                 }
                 KeyCode::Char('m') => {
-                    // Switch to manager chat
-                    self.agent_view = AgentView::new();
-                    self.agent_view.scroll_to_bottom();
-                    self.screen = Screen::AgentView {
-                        swarm_idx,
-                        agent_id: "manager".to_string(),
-                    };
+                    // Focus manager input (inline in repo view)
+                    self.repo_view.focus_manager = true;
+                    self.repo_view.manager_scroll = u16::MAX; // scroll to bottom
                 }
                 KeyCode::Char('a') => {
                     // Add a new worker to this swarm
