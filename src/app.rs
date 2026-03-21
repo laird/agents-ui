@@ -491,6 +491,20 @@ impl App {
                         }
                     }
                 }
+                KeyCode::Char(c @ '1'..='9') => {
+                    // Jump directly to worker by number (1=worker-0, 2=worker-1, etc.)
+                    let worker_idx = (c as usize) - ('1' as usize);
+                    if let Some(swarm) = self.swarms.get(swarm_idx) {
+                        if let Some(worker) = swarm.workers.get(worker_idx) {
+                            self.agent_view = AgentView::new();
+                            self.agent_view.scroll_to_bottom();
+                            self.screen = Screen::AgentView {
+                                swarm_idx,
+                                agent_id: worker.id.clone(),
+                            };
+                        }
+                    }
+                }
                 _ => {}
             }
         }
