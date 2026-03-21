@@ -369,70 +369,101 @@ impl App {
     }
 
     async fn handle_repo_view_key(&mut self, key: KeyEvent, swarm_idx: usize) -> Result<()> {
-        if self.repo_view.focus_manager {
-            // In manager chat mode
-            match key.code {
-                KeyCode::Esc => {
-                    self.repo_view.focus_manager = false;
-                }
-                KeyCode::Enter => {
-                    if !self.repo_view.input.is_empty() {
-                        let input = self.repo_view.input.drain(..).collect::<String>();
-                        if let Some(swarm) = self.swarms.get(swarm_idx) {
-                            let target = swarm.manager.tmux_target.clone();
-                            self.adapter.send_input(&target, &input).await?;
+        use crate::ui::repo_view::RepoViewFocus;
+
+        match &self.repo_view.focus {
+            RepoViewFocus::Manager => {
+                // Manager session focused — typing goes to input, scrolling works
+                match key.code {
+                    KeyCode::Esc => {
+                        // If input is non-empty, clear it first; otherwise go back to repos list
+                        if !self.repo_view.input.is_empty() {
+                            self.repo_view.input.clear();
+                        } else {
+                            self.screen = Screen::ReposList;
                         }
                     }
+                    KeyCode::Down | KeyCode::Tab => {
+                        // Move focus down to workers table
+                        self.repo_view.focus_workers();
+                    }
+                    KeyCode::Enter => {
+                        if !self.repo_view.input.is_empty() {
+                            let input = self.repo_view.input.drain(..).collect::<String>();
+                            if let Some(swarm) = self.swarms.get(swarm_idx) {
+                                let target = swarm.manager.tmux_target.clone();
+                                self.adapter.send_input(&target, &input).await?;
+                            }
+                            self.repo_view.scroll_manager_to_bottom();
+                        }
+                    }
+                    KeyCode::Char('f') | KeyCode::Char('F') => {
+                        // Fullscreen: drill into manager AgentView
+                        self.agent_view = AgentView::new();
+                        self.agent_view.scroll_to_bottom();
+                        self.screen = Screen::AgentView {
+                            swarm_idx,
+                            agent_id: "manager".to_string(),
+                        };
+                    }
+                    KeyCode::PageUp => {
+                        self.repo_view.scroll_manager_up(10);
+                    }
+                    KeyCode::PageDown => {
+                        self.repo_view.scroll_manager_down(10);
+                    }
+                    KeyCode::Char('q') => self.running = false,
+                    KeyCode::Char(c) => {
+                        self.repo_view.input.push(c);
+                    }
+                    KeyCode::Backspace => {
+                        self.repo_view.input.pop();
+                    }
+                    _ => {}
                 }
-                KeyCode::Char(c) => {
-                    self.repo_view.input.push(c);
-                }
-                KeyCode::Backspace => {
-                    self.repo_view.input.pop();
-                }
-                _ => {}
             }
-        } else {
-            // Worker table focused
-            match key.code {
-                KeyCode::Char('q') => self.running = false,
-                KeyCode::Esc => {
-                    self.screen = Screen::ReposList;
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    if let Some(swarm) = self.swarms.get(swarm_idx) {
-                        self.repo_view.next_worker(swarm.workers.len());
+            RepoViewFocus::Workers => {
+                // Workers table focused
+                match key.code {
+                    KeyCode::Char('q') => self.running = false,
+                    KeyCode::Esc => {
+                        self.screen = Screen::ReposList;
                     }
-                }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    if let Some(swarm) = self.swarms.get(swarm_idx) {
-                        self.repo_view.previous_worker(swarm.workers.len());
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            self.repo_view.next_worker(swarm.workers.len());
+                        }
                     }
-                }
-                KeyCode::Enter => {
-                    if let Some(swarm) = self.swarms.get(swarm_idx) {
-                        if let Some(worker_idx) = self.repo_view.selected_worker() {
-                            if let Some(worker) = swarm.workers.get(worker_idx) {
-                                self.agent_view = AgentView::new();
-                                self.agent_view.scroll_to_bottom();
-                                self.screen = Screen::AgentView {
-                                    swarm_idx,
-                                    agent_id: worker.id.clone(),
-                                };
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            let at_top = self.repo_view.previous_worker(swarm.workers.len());
+                            if at_top {
+                                // Arrow-up from top of workers list → focus manager session
+                                self.repo_view.focus_manager();
                             }
                         }
                     }
+                    KeyCode::Enter => {
+                        // Drill into selected worker's full-screen AgentView
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            if let Some(worker_idx) = self.repo_view.selected_worker() {
+                                if let Some(worker) = swarm.workers.get(worker_idx) {
+                                    self.agent_view = AgentView::new();
+                                    self.agent_view.scroll_to_bottom();
+                                    self.screen = Screen::AgentView {
+                                        swarm_idx,
+                                        agent_id: worker.id.clone(),
+                                    };
+                                }
+                            }
+                        }
+                    }
+                    KeyCode::Char('m') => {
+                        // Focus the embedded manager session (not full-screen)
+                        self.repo_view.focus_manager();
+                    }
+                    _ => {}
                 }
-                KeyCode::Char('m') => {
-                    // Switch to manager chat
-                    self.agent_view = AgentView::new();
-                    self.agent_view.scroll_to_bottom();
-                    self.screen = Screen::AgentView {
-                        swarm_idx,
-                        agent_id: "manager".to_string(),
-                    };
-                }
-                _ => {}
             }
         }
         Ok(())
