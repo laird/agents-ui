@@ -103,4 +103,11 @@ impl AgentView {
     pub fn scroll_to_bottom(&mut self) {
         self.scroll_offset = u16::MAX;
     }
+
+    /// Returns true if the view is scrolled to the bottom (following new output).
+    pub fn is_at_bottom(&self) -> bool {
+        // u16::MAX means "follow bottom" — it gets clamped during render
+        // Any value within a screen height of u16::MAX is effectively at the bottom
+        self.scroll_offset >= u16::MAX - 500
+    }
 }
