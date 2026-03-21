@@ -231,6 +231,31 @@ impl App {
                     field: NewSwarmField::RepoPath,
                 };
             }
+            KeyCode::Char('d') => {
+                // Stop (teardown) selected swarm
+                if let Some(idx) = self.repos_list.selected() {
+                    if let Some(swarm) = self.swarms.get(idx) {
+                        let project = swarm.project_name.clone();
+                        let session = swarm.tmux_session.clone();
+                        tracing::info!("Stopping swarm {project} (session {session})");
+
+                        // Kill the tmux session
+                        if let Err(e) = proxy::kill_session(&session).await {
+                            tracing::warn!("Failed to kill session {session}: {e}");
+                        }
+
+                        self.swarms.remove(idx);
+                        self.start_all_pane_watchers();
+                        self.status_message = Some(format!("Stopped swarm for {project}"));
+
+                        // Adjust selection
+                        if !self.swarms.is_empty() {
+                            let new_idx = idx.min(self.swarms.len() - 1);
+                            self.repos_list.table_state.select(Some(new_idx));
+                        }
+                    }
+                }
+            }
             KeyCode::Char('r') => {
                 // Refresh: re-discover swarms
                 self.status_message = Some("Refreshing...".to_string());
@@ -422,6 +447,35 @@ impl App {
                 KeyCode::Char('m') => {
                     // Switch to manager chat
                     self.enter_agent_view(swarm_idx, "manager".to_string()).await;
+                }
+                KeyCode::Char('d') => {
+                    // Stop selected worker — extract info first, then mutate
+                    let worker_info = self.repo_view.selected_worker().and_then(|worker_idx| {
+                        self.swarms.get(swarm_idx).and_then(|swarm| {
+                            swarm.workers.get(worker_idx).map(|w| {
+                                (worker_idx, w.tmux_target.clone(), w.id.clone())
+                            })
+                        })
+                    });
+
+                    if let Some((worker_idx, target, id)) = worker_info {
+                        tracing::info!("Stopping worker {id} (pane {target})");
+
+                        if let Err(e) = proxy::kill_pane(&target).await {
+                            tracing::warn!("Failed to kill pane for {id}: {e}");
+                        }
+
+                        if let Some(swarm) = self.swarms.get_mut(swarm_idx) {
+                            swarm.workers.remove(worker_idx);
+                            let remaining = swarm.workers.len();
+                            self.start_all_pane_watchers();
+
+                            if remaining > 0 {
+                                let new_idx = worker_idx.min(remaining - 1);
+                                self.repo_view.worker_table_state.select(Some(new_idx));
+                            }
+                        }
+                    }
                 }
                 _ => {}
             }

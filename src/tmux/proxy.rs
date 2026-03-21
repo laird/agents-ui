@@ -72,6 +72,42 @@ pub async fn resize_pane(target: &str, width: u16, height: u16) -> Result<()> {
     Ok(())
 }
 
+/// Kill a specific tmux pane.
+pub async fn kill_pane(target: &str) -> Result<()> {
+    let output = Command::new("tmux")
+        .args(["kill-pane", "-t", target])
+        .output()
+        .await
+        .context("Failed to kill tmux pane")?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "tmux kill-pane failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    Ok(())
+}
+
+/// Kill an entire tmux session.
+pub async fn kill_session(session: &str) -> Result<()> {
+    let output = Command::new("tmux")
+        .args(["kill-session", "-t", session])
+        .output()
+        .await
+        .context("Failed to kill tmux session")?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "tmux kill-session failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    Ok(())
+}
+
 /// Spawn a background task that polls a tmux pane and sends content updates.
 pub fn spawn_pane_watcher(
     target: String,
