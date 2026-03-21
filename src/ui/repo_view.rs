@@ -314,4 +314,9 @@ impl RepoView {
     pub fn focus_workers(&mut self) {
         self.focus = RepoViewFocus::Workers;
     }
+
+    /// Returns true if the manager session is scrolled to the bottom (following new output).
+    pub fn is_manager_at_bottom(&self) -> bool {
+        self.manager_scroll >= u16::MAX - 500
+    }
 }

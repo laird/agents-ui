@@ -153,6 +153,20 @@ impl App {
                         break;
                     }
                 }
+
+                // Auto-scroll views that are following the bottom
+                // AgentView: if viewing this agent and at the bottom, stay there
+                if let Screen::AgentView { agent_id: ref viewing_id, .. } = self.screen {
+                    if *viewing_id == agent_id && self.agent_view.is_at_bottom() {
+                        self.agent_view.scroll_to_bottom();
+                    }
+                }
+                // RepoView: if manager pane updated and manager scroll is at bottom
+                if let Screen::RepoView { .. } = self.screen {
+                    if agent_id == "manager" && self.repo_view.is_manager_at_bottom() {
+                        self.repo_view.scroll_manager_to_bottom();
+                    }
+                }
             }
             Event::StatusChange { agent_id, status } => {
                 for swarm in &mut self.swarms {
