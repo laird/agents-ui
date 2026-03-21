@@ -395,34 +395,10 @@ impl App {
 
     async fn handle_repo_view_key(&mut self, key: KeyEvent, swarm_idx: usize) -> Result<()> {
         if self.repo_view.focus_manager {
-            // In manager chat mode
+            // Worker table focused (toggled via Tab)
             match key.code {
-                KeyCode::Esc => {
+                KeyCode::Tab | KeyCode::Esc => {
                     self.repo_view.focus_manager = false;
-                }
-                KeyCode::Enter => {
-                    if !self.repo_view.input.is_empty() {
-                        let input = self.repo_view.input.drain(..).collect::<String>();
-                        if let Some(swarm) = self.swarms.get(swarm_idx) {
-                            let target = swarm.manager.tmux_target.clone();
-                            self.adapter.send_input(&target, &input).await?;
-                        }
-                    }
-                }
-                KeyCode::Char(c) => {
-                    self.repo_view.input.push(c);
-                }
-                KeyCode::Backspace => {
-                    self.repo_view.input.pop();
-                }
-                _ => {}
-            }
-        } else {
-            // Worker table focused
-            match key.code {
-                KeyCode::Char('q') => self.running = false,
-                KeyCode::Esc => {
-                    self.screen = Screen::ReposList;
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
                     if let Some(swarm) = self.swarms.get(swarm_idx) {
@@ -435,6 +411,7 @@ impl App {
                     }
                 }
                 KeyCode::Enter => {
+                    // Drill into selected worker
                     if let Some(swarm) = self.swarms.get(swarm_idx) {
                         if let Some(worker_idx) = self.repo_view.selected_worker() {
                             if let Some(worker) = swarm.workers.get(worker_idx) {
@@ -444,12 +421,8 @@ impl App {
                         }
                     }
                 }
-                KeyCode::Char('m') => {
-                    // Switch to manager chat
-                    self.enter_agent_view(swarm_idx, "manager".to_string()).await;
-                }
                 KeyCode::Char('d') => {
-                    // Stop selected worker — extract info first, then mutate
+                    // Stop selected worker
                     let worker_info = self.repo_view.selected_worker().and_then(|worker_idx| {
                         self.swarms.get(swarm_idx).and_then(|swarm| {
                             swarm.workers.get(worker_idx).map(|w| {
@@ -476,6 +449,40 @@ impl App {
                             }
                         }
                     }
+                }
+                _ => {}
+            }
+        } else {
+            // Manager session focused (default) — typing goes to input
+            match key.code {
+                KeyCode::Esc => {
+                    self.screen = Screen::ReposList;
+                }
+                KeyCode::Enter => {
+                    if !self.repo_view.input.is_empty() {
+                        let input = self.repo_view.input.drain(..).collect::<String>();
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            let target = swarm.manager.tmux_target.clone();
+                            self.adapter.send_input(&target, &input).await?;
+                        }
+                        self.repo_view.scroll_manager_to_bottom();
+                    }
+                }
+                KeyCode::Tab => {
+                    // Toggle focus to worker table
+                    self.repo_view.focus_manager = true;
+                }
+                KeyCode::PageUp => {
+                    self.repo_view.scroll_manager_up(10);
+                }
+                KeyCode::PageDown => {
+                    self.repo_view.scroll_manager_down(10);
+                }
+                KeyCode::Char(c) => {
+                    self.repo_view.input.push(c);
+                }
+                KeyCode::Backspace => {
+                    self.repo_view.input.pop();
                 }
                 _ => {}
             }
