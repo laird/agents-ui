@@ -29,8 +29,8 @@ impl RepoView {
 
     pub fn render(&mut self, f: &mut Frame, area: Rect, swarm: &Swarm) {
         // Calculate worker table height: header + rows + borders, min 4 max 10
-        let worker_rows = swarm.workers.len() as u16;
-        let table_height = (worker_rows + 3).max(4).min(10); // +3 for header, borders
+        let agent_rows = (1 + swarm.workers.len()) as u16; // manager + workers
+        let table_height = (agent_rows + 3).max(5).min(12); // +3 for header, borders
 
         let chunks = Layout::vertical([
             Constraint::Length(3),          // Title
@@ -69,32 +69,32 @@ impl RepoView {
         ])
         .style(theme::header_style());
 
-        let rows: Vec<Row> = swarm
-            .workers
-            .iter()
-            .map(|w| {
-                let task = match &w.status.state {
-                    crate::model::status::AgentState::Working { issue: Some(n) } => {
-                        format!("Issue #{n}")
-                    }
-                    _ => "—".to_string(),
-                };
-                let wt_name = w
-                    .worktree_path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                Row::new(vec![
-                    Cell::from(w.id.clone()),
-                    Cell::from(w.status.state.to_string())
-                        .style(theme::status_style(&w.status.state)),
-                    Cell::from(task),
-                    Cell::from(wt_name),
-                ])
-            })
-            .collect();
+        let agent_to_row = |agent: &crate::model::swarm::AgentInfo| -> Row {
+            let task = match &agent.status.state {
+                crate::model::status::AgentState::Working { issue: Some(n) } => {
+                    format!("Issue #{n}")
+                }
+                _ => "—".to_string(),
+            };
+            let wt_name = agent
+                .worktree_path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            Row::new(vec![
+                Cell::from(agent.id.clone()),
+                Cell::from(agent.status.state.to_string())
+                    .style(theme::status_style(&agent.status.state)),
+                Cell::from(task),
+                Cell::from(wt_name),
+            ])
+        };
 
-        let workers_title = format!(" Workers ({}) ", swarm.workers.len());
+        // Manager as first row, then workers
+        let mut rows: Vec<Row> = vec![agent_to_row(&swarm.manager)];
+        rows.extend(swarm.workers.iter().map(|w| agent_to_row(w)));
+
+        let agents_title = format!(" Agents ({}) ", 1 + swarm.workers.len());
         let table = Table::new(
             rows,
             [
@@ -108,7 +108,7 @@ impl RepoView {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(workers_title)
+                .title(agents_title)
                 .border_style(if !self.focus_manager {
                     theme::title_style()
                 } else {
