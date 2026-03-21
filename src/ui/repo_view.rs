@@ -1,7 +1,7 @@
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
     Frame,
 };
 
@@ -17,11 +17,24 @@ pub enum RepoViewFocus {
     ManagerInput,
 }
 
+/// A notification banner shown temporarily.
+#[derive(Debug, Clone)]
+pub struct Banner {
+    pub message: String,
+    pub style: ratatui::style::Style,
+    /// Ticks remaining before auto-dismiss (at 250ms per tick).
+    pub ttl: u32,
+}
+
 pub struct RepoView {
     pub focus: RepoViewFocus,
     pub worker_list_state: ListState,
     pub issue_list_state: ListState,
     pub priority_filter: Option<IssuePriority>,
+    /// Worker index for quick peek popup (None = no popup).
+    pub peek_worker: Option<usize>,
+    /// Active notification banners (newest first).
+    pub banners: Vec<Banner>,
 }
 
 impl RepoView {
@@ -35,20 +48,109 @@ impl RepoView {
             worker_list_state,
             issue_list_state,
             priority_filter: None,
+            peek_worker: None,
+            banners: Vec::new(),
         }
     }
 
+    /// Add a notification banner that auto-dismisses after ~4 seconds (16 ticks).
+    pub fn add_banner(&mut self, message: String, style: ratatui::style::Style) {
+        self.banners.insert(0, Banner {
+            message,
+            style,
+            ttl: 16, // ~4 seconds at 250ms tick
+        });
+        // Keep max 5 banners
+        self.banners.truncate(5);
+    }
+
+    /// Tick banners down, removing expired ones.
+    pub fn tick_banners(&mut self) {
+        for banner in &mut self.banners {
+            banner.ttl = banner.ttl.saturating_sub(1);
+        }
+        self.banners.retain(|b| b.ttl > 0);
+    }
+
     pub fn render(&mut self, f: &mut Frame, area: Rect, swarm: &Swarm) {
+        // Reserve space for banners at top
+        let banner_height = self.banners.len().min(3) as u16;
+
         let chunks = Layout::vertical([
+            Constraint::Length(banner_height), // Banners
             Constraint::Length(1), // Title bar
             Constraint::Min(8),   // Two-column area
             Constraint::Length(1), // Help bar
         ])
         .split(area);
 
-        self.render_title_bar(f, chunks[0], swarm);
-        self.render_columns(f, chunks[1], swarm);
-        self.render_help(f, chunks[2]);
+        self.render_banners(f, chunks[0]);
+        self.render_title_bar(f, chunks[1], swarm);
+        self.render_columns(f, chunks[2], swarm);
+        self.render_help(f, chunks[3]);
+
+        // Render peek popup overlay if active
+        if let Some(worker_idx) = self.peek_worker {
+            if let Some(worker) = swarm.workers.get(worker_idx) {
+                self.render_peek_popup(f, area, worker);
+            }
+        }
+    }
+
+    fn render_banners(&self, f: &mut Frame, area: Rect) {
+        for (i, banner) in self.banners.iter().take(3).enumerate() {
+            if i as u16 >= area.height {
+                break;
+            }
+            let row = Rect {
+                x: area.x,
+                y: area.y + i as u16,
+                width: area.width,
+                height: 1,
+            };
+            let para = Paragraph::new(Line::from(Span::styled(
+                format!(" {} ", banner.message),
+                banner.style,
+            )));
+            f.render_widget(para, row);
+        }
+    }
+
+    fn render_peek_popup(&self, f: &mut Frame, area: Rect, worker: &crate::model::swarm::AgentInfo) {
+        // Center a popup showing the last 15 lines of the worker's pane
+        let popup_width = (area.width * 80 / 100).min(100);
+        let popup_height = 18u16; // 15 lines + borders + title
+
+        let popup_area = Rect {
+            x: area.x + (area.width.saturating_sub(popup_width)) / 2,
+            y: area.y + (area.height.saturating_sub(popup_height)) / 2,
+            width: popup_width.min(area.width),
+            height: popup_height.min(area.height),
+        };
+
+        f.render_widget(Clear, popup_area);
+
+        let lines: Vec<Line> = worker
+            .pane_content
+            .lines()
+            .rev()
+            .take(15)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .map(|l| Line::from(l.to_string()))
+            .collect();
+
+        let title = format!(" {} — {} ", worker.id, worker.status.state);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(title)
+            .border_style(theme::title_style());
+
+        let para = Paragraph::new(lines)
+            .block(block)
+            .wrap(Wrap { trim: false });
+        f.render_widget(para, popup_area);
     }
 
     fn render_title_bar(&self, f: &mut Frame, area: Rect, swarm: &Swarm) {
@@ -303,12 +405,10 @@ impl RepoView {
             RepoViewFocus::Workers => Paragraph::new(Line::from(vec![
                 Span::styled(" Enter", theme::title_style()),
                 Span::styled(" drill in  ", theme::help_style()),
+                Span::styled("Space", theme::title_style()),
+                Span::styled(" peek  ", theme::help_style()),
                 Span::styled("Tab", theme::title_style()),
                 Span::styled(" issues  ", theme::help_style()),
-                Span::styled("↑/↓", theme::title_style()),
-                Span::styled(" select  ", theme::help_style()),
-                Span::styled("a", theme::title_style()),
-                Span::styled(" add worker  ", theme::help_style()),
                 Span::styled("n", theme::waiting_style()),
                 Span::styled(" next waiting  ", theme::help_style()),
                 Span::styled("m", theme::title_style()),

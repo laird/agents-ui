@@ -146,6 +146,7 @@ impl App {
             Event::Key(key) => self.handle_key(key).await?,
             Event::Tick => {
                 self.refresh_statuses();
+                self.repo_view.tick_banners();
                 // Periodic issue refresh (~every 60 seconds when viewing a repo)
                 self.issue_refresh_counter += 1;
                 if self.issue_refresh_counter >= 240 {
@@ -493,6 +494,11 @@ impl App {
                 }
             }
             RepoViewFocus::Workers => {
+                // Dismiss peek popup on any non-Space key
+                if key.code != KeyCode::Char(' ') {
+                    self.repo_view.peek_worker = None;
+                }
+
                 match key.code {
                     KeyCode::Char('q') => self.running = false,
                     KeyCode::Esc => {
@@ -534,6 +540,14 @@ impl App {
                             swarm_idx,
                             agent_id: "manager".to_string(),
                         };
+                    }
+                    KeyCode::Char(' ') => {
+                        // Quick peek toggle
+                        if self.repo_view.peek_worker.is_some() {
+                            self.repo_view.peek_worker = None;
+                        } else if let Some(idx) = self.repo_view.selected_worker() {
+                            self.repo_view.peek_worker = Some(idx);
+                        }
                     }
                     KeyCode::Char('a') => {
                         // TODO: add worker
@@ -784,8 +798,10 @@ impl App {
         }
     }
 
-    /// Refresh agent statuses from status files.
+    /// Refresh agent statuses from status files and generate banners on state changes.
     fn refresh_statuses(&mut self) {
+        use crate::model::status::AgentState;
+
         for swarm in &mut self.swarms {
             for worker in &mut swarm.workers {
                 let status_file = worker
@@ -793,7 +809,38 @@ impl App {
                     .join(swarm.agent_type.status_dir())
                     .join("fix-loop.status");
                 if status_file.exists() {
+                    let old_state = worker.status.state.clone();
                     worker.status = crate::model::status::read_status_file(&status_file);
+                    let new_state = &worker.status.state;
+
+                    // Generate banners on state transitions
+                    if old_state != *new_state {
+                        let (msg, style) = match new_state {
+                            AgentState::Working { issue: Some(n) } => (
+                                format!("{} started working on #{n}", worker.id),
+                                ratatui::style::Style::default()
+                                    .fg(ratatui::style::Color::Green),
+                            ),
+                            AgentState::Idle => (
+                                format!("{} is now idle", worker.id),
+                                ratatui::style::Style::default()
+                                    .fg(ratatui::style::Color::Yellow),
+                            ),
+                            AgentState::Completed { detail } => (
+                                format!("{} completed: {detail}", worker.id),
+                                ratatui::style::Style::default()
+                                    .fg(ratatui::style::Color::Green)
+                                    .add_modifier(ratatui::style::Modifier::BOLD),
+                            ),
+                            AgentState::Stopped => (
+                                format!("{} stopped", worker.id),
+                                ratatui::style::Style::default()
+                                    .fg(ratatui::style::Color::Red),
+                            ),
+                            _ => continue,
+                        };
+                        self.repo_view.add_banner(msg, style);
+                    }
                 }
             }
         }
