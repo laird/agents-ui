@@ -190,13 +190,18 @@ impl RepoView {
         self.worker_table_state.select(Some((i + 1) % len));
     }
 
-    pub fn previous_worker(&mut self, len: usize) {
+    /// Move selection up. Returns `true` if already at the top (caller should
+    /// move focus to the manager panel).
+    pub fn previous_worker(&mut self, len: usize) -> bool {
         if len == 0 {
-            return;
+            return true;
         }
         let i = self.worker_table_state.selected().unwrap_or(0);
-        self.worker_table_state
-            .select(Some(if i == 0 { len - 1 } else { i - 1 }));
+        if i == 0 {
+            return true; // At top — signal to focus manager
+        }
+        self.worker_table_state.select(Some(i - 1));
+        false
     }
 
     pub fn selected_worker(&self) -> Option<usize> {
