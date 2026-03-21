@@ -183,6 +183,41 @@ impl App {
             return Ok(());
         }
 
+        // Global: Alt+0 navigates to Repo View, Alt+1..9 to worker/manager agent views
+        if key.modifiers.contains(KeyModifiers::ALT) {
+            if let KeyCode::Char(c) = key.code {
+                if let Some(digit) = c.to_digit(10) {
+                    // Determine the current swarm index (use 0 if on repos list with one swarm)
+                    let swarm_idx = match &self.screen {
+                        Screen::RepoView { swarm_idx } => Some(*swarm_idx),
+                        Screen::AgentView { swarm_idx, .. } => Some(*swarm_idx),
+                        Screen::ReposList if self.swarms.len() == 1 => Some(0),
+                        _ => None,
+                    };
+
+                    if let Some(swarm_idx) = swarm_idx {
+                        if digit == 0 {
+                            // Alt+0: go to Repo View (overview with workers list)
+                            self.screen = Screen::RepoView { swarm_idx };
+                            return Ok(());
+                        } else if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            // Alt+1..N: go to worker N-1 agent view
+                            let worker_idx = (digit as usize) - 1;
+                            if let Some(worker) = swarm.workers.get(worker_idx) {
+                                self.agent_view = AgentView::new();
+                                self.agent_view.scroll_to_bottom();
+                                self.screen = Screen::AgentView {
+                                    swarm_idx,
+                                    agent_id: worker.id.clone(),
+                                };
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         match &self.screen.clone() {
             Screen::ReposList => self.handle_repos_list_key(key).await?,
             Screen::NewSwarm { field } => {
