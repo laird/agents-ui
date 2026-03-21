@@ -410,6 +410,9 @@ impl App {
                 KeyCode::Esc => {
                     self.repo_view.focus_manager = false;
                 }
+                KeyCode::Down if self.repo_view.input.is_empty() => {
+                    self.repo_view.focus_manager = false;
+                }
                 KeyCode::Enter => {
                     if !self.repo_view.input.is_empty() {
                         let input = self.repo_view.input.drain(..).collect::<String>();
@@ -441,7 +444,10 @@ impl App {
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
                     if let Some(swarm) = self.swarms.get(swarm_idx) {
-                        self.repo_view.previous_worker(swarm.workers.len());
+                        if self.repo_view.previous_worker(swarm.workers.len()) {
+                            // At top of workers list — move focus to manager input
+                            self.repo_view.focus_manager = true;
+                        }
                     }
                 }
                 KeyCode::Enter => {
