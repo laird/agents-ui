@@ -167,10 +167,12 @@ impl RepoView {
             ]))
         } else {
             Paragraph::new(Line::from(vec![
-                Span::styled(" Enter", theme::title_style()),
-                Span::styled(" drill into agent  ", theme::help_style()),
+                Span::styled("1-9", theme::title_style()),
+                Span::styled(" jump to worker  ", theme::help_style()),
+                Span::styled("Enter", theme::title_style()),
+                Span::styled(" drill in  ", theme::help_style()),
                 Span::styled("m", theme::title_style()),
-                Span::styled(" manager session  ", theme::help_style()),
+                Span::styled(" manager  ", theme::help_style()),
                 Span::styled("d", theme::title_style()),
                 Span::styled(" shutdown  ", theme::help_style()),
                 Span::styled("f", theme::title_style()),
