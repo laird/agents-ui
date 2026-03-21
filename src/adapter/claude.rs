@@ -162,6 +162,11 @@ impl AgentRuntime for ClaudeAdapter {
         // Kill the script process (it's blocking on tmux attach which we don't need)
         child.kill().await.ok();
 
+        // Resize the tmux session to match the current terminal size
+        if let Err(e) = session::resize_session_to_terminal(&session_name).await {
+            tracing::warn!("Failed to resize session {session_name}: {e}");
+        }
+
         Self::build_swarm_from_session(&session_name, config.repo_path.clone()).await
     }
 
@@ -184,6 +189,11 @@ impl AgentRuntime for ClaudeAdapter {
             let repo_path = find_repo_path(&project_name).await;
 
             if let Some(repo_path) = repo_path {
+                // Resize discovered session to match current terminal
+                if let Err(e) = session::resize_session_to_terminal(&session_name).await {
+                    tracing::warn!("Failed to resize session {session_name}: {e}");
+                }
+
                 match Self::build_swarm_from_session(&session_name, repo_path).await {
                     Ok(swarm) => swarms.push(swarm),
                     Err(e) => tracing::warn!("Failed to build swarm from {session_name}: {e}"),
@@ -333,6 +343,183 @@ impl AgentRuntime for ClaudeAdapter {
             }
         }
         Ok(())
+    }
+
+    async fn heal_workers(&self, swarm: &mut Swarm) -> Result<Vec<String>> {
+        let mut repairs = Vec::new();
+        let session_name = &swarm.tmux_session;
+        let repo_path = &swarm.repo_path;
+
+        // Check which tmux panes actually exist in the agents window
+        let existing_panes = session::list_panes(session_name).await.ok();
+        let agents_window_panes: Vec<String> = existing_panes
+            .as_ref()
+            .and_then(|info| {
+                info.windows
+                    .iter()
+                    .find(|w| w.name == "agents" || w.index == 0)
+                    .map(|w| w.panes.iter().map(|p| p.target.clone()).collect())
+            })
+            .unwrap_or_default();
+
+        for worker in &mut swarm.workers {
+            let wt_path = &worker.worktree_path;
+
+            // 1. Check worktree exists
+            if !wt_path.exists() {
+                tracing::info!("Healing {}: recreating worktree at {}", worker.id, wt_path.display());
+
+                // Determine branch name from path
+                let wt_name = wt_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+
+                let current_branch = Command::new("git")
+                    .args(["rev-parse", "--abbrev-ref", "HEAD"])
+                    .current_dir(repo_path)
+                    .output()
+                    .await
+                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                    .unwrap_or_else(|_| "main".to_string());
+
+                // Extract wt index from name like "project-wt-3"
+                let branch_suffix = wt_name
+                    .rsplit_once("-wt-")
+                    .map(|(_, idx)| format!("-wt-{idx}"))
+                    .unwrap_or_else(|| format!("-{}", worker.id));
+                let worktree_branch = format!("{current_branch}{branch_suffix}");
+
+                // Create branch if needed
+                let _ = Command::new("git")
+                    .args(["branch", &worktree_branch, &current_branch])
+                    .current_dir(repo_path)
+                    .output()
+                    .await;
+
+                let output = Command::new("git")
+                    .args([
+                        "worktree",
+                        "add",
+                        &wt_path.to_string_lossy(),
+                        &worktree_branch,
+                    ])
+                    .current_dir(repo_path)
+                    .output()
+                    .await;
+
+                match output {
+                    Ok(o) if o.status.success() => {
+                        repairs.push(format!("Recreated worktree for {}", worker.id));
+                    }
+                    Ok(o) => {
+                        let err = String::from_utf8_lossy(&o.stderr);
+                        tracing::warn!("Failed to recreate worktree for {}: {err}", worker.id);
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to recreate worktree for {}: {e}", worker.id);
+                    }
+                }
+            }
+
+            // 2. Check tmux pane exists
+            let pane_exists = agents_window_panes.contains(&worker.tmux_target);
+            if !pane_exists {
+                tracing::info!("Healing {}: creating tmux pane", worker.id);
+
+                let output = Command::new("tmux")
+                    .args(["split-window", "-h", "-t", &format!("{session_name}:0")])
+                    .output()
+                    .await;
+
+                if let Ok(o) = output {
+                    if o.status.success() {
+                        // Rebalance
+                        let _ = Command::new("tmux")
+                            .args(["select-layout", "-t", &format!("{session_name}:0"), "even-horizontal"])
+                            .output()
+                            .await;
+
+                        // Get the new pane's target
+                        let pane_output = Command::new("tmux")
+                            .args([
+                                "list-panes",
+                                "-t",
+                                &format!("{session_name}:0"),
+                                "-F",
+                                "#{pane_index}",
+                            ])
+                            .output()
+                            .await;
+
+                        if let Ok(po) = pane_output {
+                            let max_idx: u32 = String::from_utf8_lossy(&po.stdout)
+                                .lines()
+                                .filter_map(|l| l.parse().ok())
+                                .max()
+                                .unwrap_or(0);
+                            worker.tmux_target = format!("{session_name}:0.{max_idx}");
+                        }
+
+                        // cd to worktree
+                        if wt_path.exists() {
+                            let _ = proxy::send_keys(
+                                &worker.tmux_target,
+                                &format!("cd '{}'", wt_path.display()),
+                            )
+                            .await;
+                            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                        }
+
+                        // Launch agent
+                        let _ = proxy::send_keys(
+                            &worker.tmux_target,
+                            "claude code --dangerously-skip-permissions .",
+                        )
+                        .await;
+
+                        repairs.push(format!("Created tmux pane and launched agent for {}", worker.id));
+                        continue; // Skip step 3 since we just launched
+                    }
+                }
+            }
+
+            // 3. Check if agent is running (look for shell prompt instead of active Claude)
+            if pane_exists && wt_path.exists() {
+                match proxy::capture_pane(&worker.tmux_target, 5).await {
+                    Ok(content) => {
+                        let trimmed = content.trim();
+                        // Detect shell prompt: ends with $ or %, or last non-empty line matches common prompts
+                        let last_line = trimmed.lines().last().unwrap_or("").trim();
+                        let looks_like_shell = last_line.ends_with('$')
+                            || last_line.ends_with('%')
+                            || last_line.ends_with('#')
+                            || last_line.ends_with("❯")
+                            || (last_line.contains("~") && (last_line.ends_with('$') || last_line.ends_with('%')));
+
+                        if looks_like_shell && !last_line.is_empty() {
+                            tracing::info!(
+                                "Healing {}: agent not running (shell prompt detected), restarting",
+                                worker.id
+                            );
+                            // cd to worktree and restart Claude
+                            let _ = proxy::send_keys(
+                                &worker.tmux_target,
+                                &format!("cd '{}' && claude code --dangerously-skip-permissions .", wt_path.display()),
+                            )
+                            .await;
+
+                            repairs.push(format!("Restarted agent for {} (was at shell prompt)", worker.id));
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("Could not capture pane for {}: {e}", worker.id);
+                    }
+                }
+            }
+        }
+
+        Ok(repairs)
     }
 
     async fn teardown(&self, swarm: &Swarm) -> Result<()> {
