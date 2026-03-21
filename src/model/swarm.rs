@@ -10,6 +10,14 @@ pub enum AgentType {
     Gemini,
 }
 
+/// All supported agent types, in display order.
+pub const ALL_AGENT_TYPES: &[AgentType] = &[
+    AgentType::Claude,
+    AgentType::Codex,
+    AgentType::Droid,
+    AgentType::Gemini,
+];
+
 impl std::fmt::Display for AgentType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -39,6 +47,37 @@ impl AgentType {
             AgentType::Codex => "codex",
             AgentType::Droid => "droid",
             AgentType::Gemini => "gemini",
+        }
+    }
+
+    /// Parse agent type from tmux session prefix (e.g., "claude" → Claude).
+    pub fn from_prefix(prefix: &str) -> Option<AgentType> {
+        match prefix {
+            "claude" => Some(AgentType::Claude),
+            "codex" => Some(AgentType::Codex),
+            "droid" => Some(AgentType::Droid),
+            "gemini" => Some(AgentType::Gemini),
+            _ => None,
+        }
+    }
+
+    /// The command to launch this agent in a tmux pane.
+    pub fn launch_cmd(&self) -> &str {
+        match self {
+            AgentType::Claude => "claude code --dangerously-skip-permissions .",
+            AgentType::Codex => "codex --dangerously-skip-permissions",
+            AgentType::Droid => "droid --dangerously-skip-permissions",
+            AgentType::Gemini => "gemini code --dangerously-skip-permissions .",
+        }
+    }
+
+    /// The worker loop command for this agent type.
+    pub fn worker_loop_cmd(&self) -> &str {
+        match self {
+            AgentType::Claude => "/autocoder:fix-loop",
+            AgentType::Codex => "/fix-loop",
+            AgentType::Droid => "/fix-loop",
+            AgentType::Gemini => "/fix-loop",
         }
     }
 
