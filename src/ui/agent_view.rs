@@ -11,6 +11,10 @@ use super::theme;
 pub struct AgentView {
     pub input: String,
     pub scroll_offset: u16,
+    /// Height of the visible pane area (updated each render).
+    pub visible_height: u16,
+    /// Whether the view should auto-follow new content (true when at bottom).
+    pub following: bool,
 }
 
 impl AgentView {
@@ -18,6 +22,8 @@ impl AgentView {
         Self {
             input: String::new(),
             scroll_offset: 0,
+            visible_height: 20,
+            following: true,
         }
     }
 
@@ -56,9 +62,19 @@ impl AgentView {
         let total_lines = lines.len() as u16;
 
         let visible_height = chunks[1].height.saturating_sub(2);
+        self.visible_height = visible_height;
         let max_scroll = total_lines.saturating_sub(visible_height);
-        if self.scroll_offset > max_scroll {
+
+        // Auto-follow: if following mode is on, snap to bottom
+        if self.following {
             self.scroll_offset = max_scroll;
+        } else if self.scroll_offset > max_scroll {
+            self.scroll_offset = max_scroll;
+        }
+
+        // If we're at the bottom, re-enable following
+        if self.scroll_offset >= max_scroll {
+            self.following = true;
         }
 
         let session_title = format!(" Session — {} ", agent.tmux_target);
@@ -81,8 +97,12 @@ impl AgentView {
         let help = Paragraph::new(Line::from(vec![
             Span::styled(" Enter", theme::title_style()),
             Span::styled(" send  ", theme::help_style()),
+            Span::styled("↑/↓", theme::title_style()),
+            Span::styled(" line  ", theme::help_style()),
             Span::styled("PgUp/PgDn", theme::title_style()),
-            Span::styled(" scroll  ", theme::help_style()),
+            Span::styled(" page  ", theme::help_style()),
+            Span::styled("Home/End", theme::title_style()),
+            Span::styled(" top/btm  ", theme::help_style()),
             Span::styled("Esc", theme::title_style()),
             Span::styled(" back  ", theme::help_style()),
             Span::styled("Ctrl+C", theme::title_style()),
@@ -94,13 +114,31 @@ impl AgentView {
 
     pub fn scroll_up(&mut self, amount: u16) {
         self.scroll_offset = self.scroll_offset.saturating_sub(amount);
+        self.following = false;
     }
 
     pub fn scroll_down(&mut self, amount: u16) {
         self.scroll_offset = self.scroll_offset.saturating_add(amount);
+        // following will be re-enabled in render if we hit the bottom
+    }
+
+    pub fn page_up(&mut self) {
+        let page = self.visible_height.max(1);
+        self.scroll_up(page);
+    }
+
+    pub fn page_down(&mut self) {
+        let page = self.visible_height.max(1);
+        self.scroll_down(page);
+    }
+
+    pub fn scroll_to_top(&mut self) {
+        self.scroll_offset = 0;
+        self.following = false;
     }
 
     pub fn scroll_to_bottom(&mut self) {
         self.scroll_offset = u16::MAX;
+        self.following = true;
     }
 }

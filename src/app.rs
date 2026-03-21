@@ -169,6 +169,21 @@ impl App {
                     self.start_all_pane_watchers();
                 }
             }
+            Event::TerminalResize { width, height } => {
+                // Resize all tmux sessions to match the new terminal size
+                for swarm in &self.swarms {
+                    let session = swarm.tmux_session.clone();
+                    let w = width;
+                    let h = height;
+                    tokio::spawn(async move {
+                        if let Err(e) =
+                            crate::tmux::session::resize_session(&session, w, h).await
+                        {
+                            tracing::warn!("Failed to resize session {session}: {e}");
+                        }
+                    });
+                }
+            }
             Event::Error(msg) => {
                 tracing::error!("Background error: {msg}");
             }
@@ -525,11 +540,23 @@ impl App {
             KeyCode::Backspace => {
                 self.agent_view.input.pop();
             }
+            KeyCode::Up => {
+                self.agent_view.scroll_up(1);
+            }
+            KeyCode::Down => {
+                self.agent_view.scroll_down(1);
+            }
             KeyCode::PageUp => {
-                self.agent_view.scroll_up(10);
+                self.agent_view.page_up();
             }
             KeyCode::PageDown => {
-                self.agent_view.scroll_down(10);
+                self.agent_view.page_down();
+            }
+            KeyCode::Home => {
+                self.agent_view.scroll_to_top();
+            }
+            KeyCode::End => {
+                self.agent_view.scroll_to_bottom();
             }
             _ => {}
         }
