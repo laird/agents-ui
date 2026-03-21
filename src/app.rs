@@ -362,6 +362,11 @@ impl App {
                     match self.adapter.launch(&config).await {
                         Ok(swarm) => {
                             let project = swarm.project_name.clone();
+
+                            // Send post-launch commands after a delay
+                            // so Claude sessions have time to initialize
+                            self.send_post_launch_commands(&swarm);
+
                             self.swarms.push(swarm);
                             self.start_all_pane_watchers();
                             let idx = self.swarms.len() - 1;
@@ -519,6 +524,35 @@ impl App {
     }
 
     /// Start pane watchers for all agents in all swarms.
+    /// Send post-launch commands to manager and worker sessions.
+    /// Spawns a background task that waits for sessions to initialize,
+    /// then sends `/manage-loop` to the manager and `/fix-loop` to each worker.
+    fn send_post_launch_commands(&self, swarm: &Swarm) {
+        let manager_target = swarm.manager.tmux_target.clone();
+        let worker_targets: Vec<String> = swarm.workers.iter().map(|w| w.tmux_target.clone()).collect();
+
+        tokio::spawn(async move {
+            // Wait for Claude sessions to initialize before sending commands
+            tokio::time::sleep(Duration::from_secs(5)).await;
+
+            // Send /manage-loop to manager
+            if let Err(e) = proxy::send_keys(&manager_target, "/manage-loop").await {
+                tracing::warn!("Failed to send /manage-loop to manager: {e}");
+            } else {
+                tracing::info!("Sent /manage-loop to manager at {manager_target}");
+            }
+
+            // Send /fix-loop to each worker
+            for target in &worker_targets {
+                if let Err(e) = proxy::send_keys(target, "/fix-loop").await {
+                    tracing::warn!("Failed to send /fix-loop to worker at {target}: {e}");
+                } else {
+                    tracing::info!("Sent /fix-loop to worker at {target}");
+                }
+            }
+        });
+    }
+
     fn start_all_pane_watchers(&mut self) {
         // Cancel existing watchers
         for handle in self.pane_watchers.drain(..) {
