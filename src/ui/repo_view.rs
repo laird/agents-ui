@@ -1,7 +1,7 @@
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState, Wrap},
     Frame,
 };
 
@@ -30,10 +30,20 @@ impl RepoView {
         let worker_rows = swarm.workers.len().max(1);
         let workers_height = (worker_rows as u16 + 3).min(12); // header + rows + borders
 
+        // Calculate input height based on content (2 for borders, content lines capped at 5)
+        let input_display = format!("> {}█", self.input);
+        let avail_width = area.width.saturating_sub(2) as usize; // minus borders
+        let input_lines = if avail_width > 0 {
+            ((input_display.len() + avail_width - 1) / avail_width).max(1)
+        } else {
+            1
+        };
+        let input_height = (input_lines as u16).min(5) + 2; // content + borders
+
         let chunks = Layout::vertical([
             Constraint::Length(1),        // Title bar
             Constraint::Min(8),           // Manager session (primary, fills screen)
-            Constraint::Length(3),         // Input line
+            Constraint::Length(input_height), // Input line (expands with content)
             Constraint::Length(workers_height), // Workers table (compact)
             Constraint::Length(1),         // Help bar
         ])
@@ -86,18 +96,18 @@ impl RepoView {
         let manager_para = Paragraph::new(content_lines).block(manager_block);
         f.render_widget(manager_para, chunks[1]);
 
-        // Input line (always visible)
+        // Input line (always visible, wraps to show all content)
         let input_style = if self.focus_manager {
             theme::title_style()
         } else {
             theme::help_style()
         };
-        let input_display = format!("> {}█", self.input);
         let input_block = Block::default()
             .borders(Borders::ALL)
             .border_style(input_style);
-        let input_para = Paragraph::new(Line::from(Span::styled(&input_display, input_style)))
-            .block(input_block);
+        let input_para = Paragraph::new(Span::styled(&input_display, input_style))
+            .block(input_block)
+            .wrap(Wrap { trim: false });
         f.render_widget(input_para, chunks[2]);
 
         // Workers table (compact summary)

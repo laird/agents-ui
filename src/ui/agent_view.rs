@@ -22,10 +22,20 @@ impl AgentView {
     }
 
     pub fn render(&mut self, f: &mut Frame, area: Rect, agent: &AgentInfo) {
+        // Calculate input height based on content (2 for borders, content lines capped at 5)
+        let input_display = format!("> {}█", self.input);
+        let avail_width = area.width.saturating_sub(2) as usize; // minus borders
+        let input_lines = if avail_width > 0 {
+            ((input_display.len() + avail_width - 1) / avail_width).max(1)
+        } else {
+            1
+        };
+        let input_height = (input_lines as u16).min(5) + 2; // content + borders
+
         let chunks = Layout::vertical([
             Constraint::Length(3),
             Constraint::Min(5),
-            Constraint::Length(3),
+            Constraint::Length(input_height),
             Constraint::Length(3),
         ])
         .split(area);
@@ -68,13 +78,10 @@ impl AgentView {
             .scroll((self.scroll_offset, 0));
         f.render_widget(pane_output, chunks[1]);
 
-        // Input line
-        let input_display = format!("> {}█", self.input);
-        let input = Paragraph::new(Line::from(Span::styled(
-            input_display,
-            theme::input_style(),
-        )))
-        .block(Block::default().borders(Borders::ALL).title(" Input "));
+        // Input line (wraps to show all content)
+        let input = Paragraph::new(Span::styled(&input_display, theme::input_style()))
+            .block(Block::default().borders(Borders::ALL).title(" Input "))
+            .wrap(Wrap { trim: false });
         f.render_widget(input, chunks[2]);
 
         // Help
