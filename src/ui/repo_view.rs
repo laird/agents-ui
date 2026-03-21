@@ -171,6 +171,8 @@ impl RepoView {
                 Span::styled(" drill into agent  ", theme::help_style()),
                 Span::styled("m", theme::title_style()),
                 Span::styled(" manager session  ", theme::help_style()),
+                Span::styled("d", theme::title_style()),
+                Span::styled(" stop worker  ", theme::help_style()),
                 Span::styled("a", theme::title_style()),
                 Span::styled(" add worker  ", theme::help_style()),
                 Span::styled("Esc", theme::title_style()),
