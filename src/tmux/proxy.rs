@@ -3,22 +3,8 @@ use tokio::process::Command;
 use tokio::sync::mpsc;
 use std::time::Duration;
 
-/// Resize a tmux pane to the given width.
-pub async fn resize_pane(target: &str, width: u16) -> Result<()> {
-    let _ = Command::new("tmux")
-        .args(["resize-pane", "-t", target, "-x", &width.to_string()])
-        .output()
-        .await;
-    Ok(())
-}
-
-/// Capture the current content of a tmux pane, optionally resizing it first.
+/// Capture the current content of a tmux pane.
 pub async fn capture_pane(target: &str, scrollback_lines: u32) -> Result<String> {
-    // Resize pane to match the TUI's terminal width so content wraps correctly
-    if let Ok((cols, _)) = crossterm::terminal::size() {
-        resize_pane(target, cols).await?;
-    }
-
     let output = Command::new("tmux")
         .args([
             "capture-pane",
