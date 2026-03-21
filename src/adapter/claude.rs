@@ -298,14 +298,14 @@ impl AgentRuntime for ClaudeAdapter {
         proxy::send_keys(&tmux_target, &format!("cd '{}'", worktree_path.display())).await?;
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-        // Launch claude
-        proxy::send_keys(&tmux_target, "claude code --dangerously-skip-permissions .").await?;
+        // Launch the agent with autonomous permissions
+        proxy::send_keys(&tmux_target, swarm.agent_type.launch_cmd()).await?;
 
-        // Wait for Claude to initialize
+        // Wait for agent to initialize
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
-        // Send /fix-loop
-        self.start_worker_loop(&tmux_target).await?;
+        // Send the worker loop command
+        proxy::send_keys(&tmux_target, swarm.agent_type.worker_loop_cmd()).await?;
 
         Ok(AgentInfo {
             id: format!("worker-{next_idx}"),
@@ -318,7 +318,7 @@ impl AgentRuntime for ClaudeAdapter {
     }
 
     async fn start_worker_loop(&self, tmux_target: &str) -> Result<()> {
-        proxy::send_keys(tmux_target, "/autocoder:fix-loop").await
+        proxy::send_keys(tmux_target, AgentType::Claude.worker_loop_cmd()).await
     }
 
     async fn stop(&self, swarm: &Swarm) -> Result<()> {

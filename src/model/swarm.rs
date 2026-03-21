@@ -49,6 +49,24 @@ impl AgentType {
             AgentType::Droid => ".factory/loops",
         }
     }
+
+    /// The shell command to launch this agent with autonomous permissions.
+    pub fn launch_cmd(&self) -> &str {
+        match self {
+            AgentType::Claude => "claude code --dangerously-skip-permissions .",
+            AgentType::Codex => "codex --dangerously-skip-permissions",
+            AgentType::Droid => "droid",
+            AgentType::Gemini => "gemini --sandbox=false",
+        }
+    }
+
+    /// The slash command to start the worker fix-loop.
+    pub fn worker_loop_cmd(&self) -> &str {
+        match self {
+            AgentType::Claude => "/autocoder:fix-loop",
+            _ => "/fix-loop",
+        }
+    }
 }
 
 /// The workflow type for a swarm.
