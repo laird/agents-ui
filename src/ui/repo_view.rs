@@ -1,5 +1,6 @@
 use ratatui::{
     layout::{Constraint, Layout, Rect},
+    style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState, Wrap},
     Frame,
@@ -7,6 +8,53 @@ use ratatui::{
 
 use crate::model::swarm::Swarm;
 use super::theme;
+
+/// Highlight known patterns in a line of pane output.
+fn highlight_line(text: &str) -> Line<'static> {
+    let text = text.to_string();
+
+    // Check full-line patterns first
+    let lower = text.to_lowercase();
+    if lower.contains("error") || lower.contains("fail") || lower.contains("panic") {
+        return Line::from(Span::styled(text, Style::default().fg(Color::Red)));
+    }
+    if lower.contains("idle_no_work_available") || lower.contains("idle") && lower.contains("sleep") {
+        return Line::from(Span::styled(text, Style::default().fg(Color::Yellow)));
+    }
+    if lower.contains("fixed") || lower.contains("closed") || lower.contains("✅") || lower.contains("resolved") {
+        return Line::from(Span::styled(text, Style::default().fg(Color::Green)));
+    }
+
+    // For lines with issue references (#N), highlight those
+    if text.contains('#') {
+        let mut spans = Vec::new();
+        let mut remaining = text.as_str();
+        while let Some(hash_pos) = remaining.find('#') {
+            if hash_pos > 0 {
+                spans.push(Span::raw(remaining[..hash_pos].to_string()));
+            }
+            let after_hash = &remaining[hash_pos + 1..];
+            let num_len = after_hash.chars().take_while(|c| c.is_ascii_digit()).count();
+            if num_len > 0 {
+                let issue_ref = &remaining[hash_pos..hash_pos + 1 + num_len];
+                spans.push(Span::styled(
+                    issue_ref.to_string(),
+                    Style::default().fg(Color::Blue),
+                ));
+                remaining = &remaining[hash_pos + 1 + num_len..];
+            } else {
+                spans.push(Span::raw("#".to_string()));
+                remaining = after_hash;
+            }
+        }
+        if !remaining.is_empty() {
+            spans.push(Span::raw(remaining.to_string()));
+        }
+        return Line::from(spans);
+    }
+
+    Line::from(text)
+}
 
 pub struct RepoView {
     pub worker_table_state: TableState,
@@ -128,7 +176,7 @@ impl RepoView {
             f.render_widget(manager_block, chunks[1]);
 
             let content = &swarm.manager.pane_content;
-            let lines: Vec<Line> = content.lines().map(|l| Line::from(l.to_string())).collect();
+            let lines: Vec<Line> = content.lines().map(|l| highlight_line(l)).collect();
             let total_lines = lines.len() as u16;
 
             let visible_height = mgr_chunks[0].height;
@@ -264,15 +312,19 @@ impl RepoView {
         } else {
             Paragraph::new(Line::from(vec![
                 Span::styled(" Enter", theme::title_style()),
-                Span::styled(" drill into agent  ", theme::help_style()),
+                Span::styled(" view  ", theme::help_style()),
                 Span::styled("m", theme::title_style()),
-                Span::styled(" manager session  ", theme::help_style()),
-                Span::styled("d", theme::title_style()),
-                Span::styled(" shutdown  ", theme::help_style()),
+                Span::styled(" manager  ", theme::help_style()),
                 Span::styled("f", theme::title_style()),
                 Span::styled(" fix-loop  ", theme::help_style()),
+                Span::styled("R", theme::title_style()),
+                Span::styled(" restart idle  ", theme::help_style()),
                 Span::styled("a", theme::title_style()),
-                Span::styled(" add worker  ", theme::help_style()),
+                Span::styled(" add  ", theme::help_style()),
+                Span::styled("d", theme::title_style()),
+                Span::styled(" stop  ", theme::help_style()),
+                Span::styled("D", theme::title_style()),
+                Span::styled(" stop all  ", theme::help_style()),
                 Span::styled("Esc", theme::title_style()),
                 Span::styled(" back  ", theme::help_style()),
                 Span::styled("q", theme::title_style()),
