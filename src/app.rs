@@ -100,6 +100,11 @@ impl App {
         // Start pane watchers for discovered swarms
         app.start_all_pane_watchers();
 
+        // Trigger immediate issue refresh for all discovered swarms
+        for idx in 0..app.swarms.len() {
+            app.start_issue_refresh(idx);
+        }
+
         Ok(app)
     }
 
