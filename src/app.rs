@@ -183,6 +183,14 @@ impl App {
             return Ok(());
         }
 
+        // Global: Alt+a jumps to next agent needing attention
+        if key.modifiers.contains(KeyModifiers::ALT) && key.code == KeyCode::Char('a') {
+            if let Some((swarm_idx, agent_id)) = self.find_next_attention_agent() {
+                self.enter_agent_view(swarm_idx, agent_id).await;
+            }
+            return Ok(());
+        }
+
         match &self.screen.clone() {
             Screen::ReposList => self.handle_repos_list_key(key).await?,
             Screen::NewSwarm { field } => {
@@ -555,6 +563,24 @@ impl App {
             swarm_idx,
             agent_id,
         };
+    }
+
+    /// Find the next agent needing attention across all swarms.
+    /// Returns (swarm_idx, agent_id) if found.
+    fn find_next_attention_agent(&self) -> Option<(usize, String)> {
+        for (swarm_idx, swarm) in self.swarms.iter().enumerate() {
+            // Check manager first
+            if swarm.manager.needs_attention() {
+                return Some((swarm_idx, swarm.manager.id.clone()));
+            }
+            // Then workers
+            for worker in &swarm.workers {
+                if worker.needs_attention() {
+                    return Some((swarm_idx, worker.id.clone()));
+                }
+            }
+        }
+        None
     }
 
     /// Start pane watchers for all agents in all swarms.

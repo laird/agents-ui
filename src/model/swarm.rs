@@ -84,6 +84,32 @@ pub struct AgentInfo {
     pub pane_content: String,
 }
 
+impl AgentInfo {
+    /// Check if this agent appears to need human attention based on pane content.
+    pub fn needs_attention(&self) -> bool {
+        let content = &self.pane_content;
+        // Check last 20 lines for attention patterns
+        for line in content.lines().rev().take(20) {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let lower = trimmed.to_lowercase();
+            if lower.contains("interrupted")
+                || lower.contains("what should claude do")
+                || lower.contains("do you want to")
+                || lower.contains("waiting for your")
+                || lower.contains("permission denied")
+                || lower.contains("? (y/n)")
+            {
+                return true;
+            }
+        }
+        // Also flag idle agents as needing attention
+        matches!(self.status.state, super::status::AgentState::Idle)
+    }
+}
+
 /// A swarm of agents working on one repo.
 #[derive(Debug, Clone)]
 pub struct Swarm {
