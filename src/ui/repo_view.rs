@@ -11,7 +11,7 @@ use super::theme;
 
 pub struct RepoView {
     pub worker_table_state: TableState,
-    pub focus_manager: bool,
+    pub focus_workers: bool,
     pub input: String,
     pub manager_scroll_offset: u16,
 }
@@ -22,27 +22,30 @@ impl RepoView {
         worker_table_state.select(Some(0));
         Self {
             worker_table_state,
-            focus_manager: false,
+            focus_workers: false,
             input: String::new(),
             manager_scroll_offset: u16::MAX, // Start scrolled to bottom
         }
     }
 
     pub fn render(&mut self, f: &mut Frame, area: Rect, swarm: &Swarm) {
-        // Worker table height: header + border + rows (compact)
-        let worker_rows = swarm.workers.len() as u16;
-        let worker_table_height = (worker_rows + 3).min(10); // header + border top/bottom + rows, max 10
-
-        let chunks = Layout::vertical([
-            Constraint::Length(1),             // Title bar
-            Constraint::Min(5),               // Manager session (fills remaining space)
-            Constraint::Length(3),             // Input line
-            Constraint::Length(worker_table_height), // Workers table (compact)
-            Constraint::Length(3),             // Help bar
+        // Top-level 70/30 split: manager area vs worker list
+        let main_chunks = Layout::vertical([
+            Constraint::Percentage(70), // Manager area (title + session + input + help)
+            Constraint::Percentage(30), // Workers table
         ])
         .split(area);
 
-        // Title bar (compact, single line)
+        // Manager area: title, session output, input, help
+        let mgr_chunks = Layout::vertical([
+            Constraint::Length(3),  // Title bar
+            Constraint::Min(5),    // Manager session (fills remaining)
+            Constraint::Length(3),  // Input line
+            Constraint::Length(3),  // Help bar
+        ])
+        .split(main_chunks[0]);
+
+        // Title bar
         let project_label = format!("  {} ", swarm.project_name);
         let manager_status = &swarm.manager.status.state;
         let status_text = format!(" [{}] ", manager_status);
@@ -51,15 +54,16 @@ impl RepoView {
             Span::styled(project_label, theme::title_style()),
             Span::styled(status_text, theme::status_style(manager_status)),
             Span::styled(runtime_label, theme::help_style()),
-        ]));
-        f.render_widget(title, chunks[0]);
+        ]))
+        .block(Block::default().borders(Borders::BOTTOM));
+        f.render_widget(title, mgr_chunks[0]);
 
         // Manager session output (primary content, scrollable)
         let content = &swarm.manager.pane_content;
         let lines: Vec<Line> = content.lines().map(|l| Line::from(l.to_string())).collect();
         let total_lines = lines.len() as u16;
 
-        let visible_height = chunks[1].height.saturating_sub(2); // borders
+        let visible_height = mgr_chunks[1].height.saturating_sub(2); // borders
         let max_scroll = total_lines.saturating_sub(visible_height);
         if self.manager_scroll_offset > max_scroll {
             self.manager_scroll_offset = max_scroll;
@@ -75,7 +79,7 @@ impl RepoView {
             )
             .wrap(Wrap { trim: false })
             .scroll((self.manager_scroll_offset, 0));
-        f.render_widget(manager_output, chunks[1]);
+        f.render_widget(manager_output, mgr_chunks[1]);
 
         // Input line
         let input_display = format!("> {}█", self.input);
@@ -84,9 +88,24 @@ impl RepoView {
             theme::input_style(),
         )))
         .block(Block::default().borders(Borders::ALL).title(" Input "));
-        f.render_widget(input_widget, chunks[2]);
+        f.render_widget(input_widget, mgr_chunks[2]);
 
-        // Workers table (compact)
+        // Help bar
+        let help = Paragraph::new(Line::from(vec![
+            Span::styled(" Enter", theme::title_style()),
+            Span::styled(" send  ", theme::help_style()),
+            Span::styled("PgUp/PgDn", theme::title_style()),
+            Span::styled(" scroll  ", theme::help_style()),
+            Span::styled("Tab", theme::title_style()),
+            Span::styled(" workers  ", theme::help_style()),
+            Span::styled("⌥0", theme::title_style()),
+            Span::styled(" back  ", theme::help_style()),
+            Span::styled("q", theme::title_style()),
+            Span::styled(" quit", theme::help_style()),
+        ]));
+        f.render_widget(help.block(Block::default().borders(Borders::TOP)), mgr_chunks[3]);
+
+        // Workers table (bottom 30%)
         let header = Row::new(vec![
             Cell::from("Worker"),
             Cell::from("Status"),
@@ -131,22 +150,7 @@ impl RepoView {
         )
         .row_highlight_style(theme::selected_style());
 
-        f.render_stateful_widget(table, chunks[3], &mut self.worker_table_state);
-
-        // Help bar
-        let help = Paragraph::new(Line::from(vec![
-            Span::styled(" Enter", theme::title_style()),
-            Span::styled(" send  ", theme::help_style()),
-            Span::styled("PgUp/PgDn", theme::title_style()),
-            Span::styled(" scroll  ", theme::help_style()),
-            Span::styled("Tab", theme::title_style()),
-            Span::styled(" workers  ", theme::help_style()),
-            Span::styled("Esc", theme::title_style()),
-            Span::styled(" back  ", theme::help_style()),
-            Span::styled("q", theme::title_style()),
-            Span::styled(" quit", theme::help_style()),
-        ]));
-        f.render_widget(help.block(Block::default().borders(Borders::TOP)), chunks[4]);
+        f.render_stateful_widget(table, main_chunks[1], &mut self.worker_table_state);
     }
 
     pub fn scroll_manager_up(&mut self, amount: u16) {
@@ -168,7 +172,6 @@ impl RepoView {
         }
         let i = self.worker_table_state.selected().unwrap_or(0);
         if i + 1 >= len {
-            // Past the end — signal to focus manager
             return true;
         }
         self.worker_table_state.select(Some(i + 1));
@@ -182,7 +185,6 @@ impl RepoView {
         }
         let i = self.worker_table_state.selected().unwrap_or(0);
         if i == 0 {
-            // Past the top — signal to focus manager
             return true;
         }
         self.worker_table_state.select(Some(i - 1));
@@ -200,7 +202,6 @@ fn current_task_display(agent: &AgentInfo) -> String {
 
     match &agent.status.state {
         AgentState::Working { issue: Some(n) } => {
-            // Try to extract issue title from pane content
             if let Some(title) = extract_issue_title_from_pane(&agent.pane_content, *n) {
                 format!("#{n}: {title}")
             } else {
@@ -208,19 +209,17 @@ fn current_task_display(agent: &AgentInfo) -> String {
             }
         }
         AgentState::Working { issue: None } => {
-            // Try to find what's being worked on from pane content
             extract_task_hint_from_pane(&agent.pane_content)
                 .unwrap_or_else(|| "Working...".to_string())
         }
         AgentState::Idle => "idle".to_string(),
         AgentState::Starting => "starting...".to_string(),
         AgentState::Completed { detail } => {
-            let short = if detail.len() > 40 {
+            if detail.len() > 40 {
                 format!("{}...", &detail[..37])
             } else {
                 detail.clone()
-            };
-            short
+            }
         }
         AgentState::Stopped => "—".to_string(),
         AgentState::Unknown(_) => "—".to_string(),
@@ -232,7 +231,6 @@ fn extract_issue_title_from_pane(pane_content: &str, issue_num: u32) -> Option<S
     let pattern = format!("#{issue_num}");
     for line in pane_content.lines().rev() {
         if let Some(pos) = line.find(&pattern) {
-            // Look for text after the issue number like "#14: Some title" or "#14 - Some title"
             let after = &line[pos + pattern.len()..];
             let title = after
                 .trim_start_matches(|c: char| c == ':' || c == '-' || c == ' ')
@@ -252,13 +250,11 @@ fn extract_issue_title_from_pane(pane_content: &str, issue_num: u32) -> Option<S
 
 /// Try to extract a task hint from pane content (e.g., "Fixing...", "Reading file...").
 fn extract_task_hint_from_pane(pane_content: &str) -> Option<String> {
-    // Look at the last few non-empty lines for activity hints
     for line in pane_content.lines().rev().take(10) {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
-        // Look for lines that indicate current activity
         if trimmed.starts_with("Fix")
             || trimmed.starts_with("Working on")
             || trimmed.starts_with("Issue")
