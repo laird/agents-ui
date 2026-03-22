@@ -394,25 +394,23 @@ impl App {
     }
 
     async fn handle_repo_view_key(&mut self, key: KeyEvent, swarm_idx: usize) -> Result<()> {
-        if self.repo_view.focus_manager {
+        if self.repo_view.focus_workers {
             // Worker table focused (toggled via Tab)
             match key.code {
                 KeyCode::Tab | KeyCode::Esc => {
-                    self.repo_view.focus_manager = false;
+                    self.repo_view.focus_workers = false;
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
                     if let Some(swarm) = self.swarms.get(swarm_idx) {
                         if self.repo_view.next_worker(swarm.workers.len()) {
-                            // Wrapped past end — focus manager input
-                            self.repo_view.focus_manager = false;
+                            self.repo_view.focus_workers = false;
                         }
                     }
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
                     if let Some(swarm) = self.swarms.get(swarm_idx) {
                         if self.repo_view.previous_worker(swarm.workers.len()) {
-                            // Wrapped past top — focus manager input
-                            self.repo_view.focus_manager = false;
+                            self.repo_view.focus_workers = false;
                         }
                     }
                 }
@@ -460,10 +458,12 @@ impl App {
             }
         } else {
             // Manager session focused (default) — typing goes to input
+            // Alt+0 → back to repos list
+            if key.code == KeyCode::Char('0') && key.modifiers.contains(KeyModifiers::ALT) {
+                self.screen = Screen::ReposList;
+                return Ok(());
+            }
             match key.code {
-                KeyCode::Esc => {
-                    self.screen = Screen::ReposList;
-                }
                 KeyCode::Enter => {
                     if !self.repo_view.input.is_empty() {
                         let input = self.repo_view.input.drain(..).collect::<String>();
@@ -475,8 +475,7 @@ impl App {
                     }
                 }
                 KeyCode::Tab => {
-                    // Toggle focus to worker table
-                    self.repo_view.focus_manager = true;
+                    self.repo_view.focus_workers = true;
                 }
                 KeyCode::PageUp => {
                     self.repo_view.scroll_manager_up(10);
@@ -502,10 +501,12 @@ impl App {
         swarm_idx: usize,
         agent_id: String,
     ) -> Result<()> {
+        // Alt+0 → back to repo view
+        if key.code == KeyCode::Char('0') && key.modifiers.contains(KeyModifiers::ALT) {
+            self.screen = Screen::RepoView { swarm_idx };
+            return Ok(());
+        }
         match key.code {
-            KeyCode::Esc => {
-                self.screen = Screen::RepoView { swarm_idx };
-            }
             KeyCode::Enter => {
                 if !self.agent_view.input.is_empty() {
                     let input = self.agent_view.input.drain(..).collect::<String>();

@@ -83,7 +83,7 @@ impl AgentView {
             Span::styled(" send  ", theme::help_style()),
             Span::styled("PgUp/PgDn", theme::title_style()),
             Span::styled(" scroll  ", theme::help_style()),
-            Span::styled("Esc", theme::title_style()),
+            Span::styled("⌥0", theme::title_style()),
             Span::styled(" back  ", theme::help_style()),
             Span::styled("Ctrl+C", theme::title_style()),
             Span::styled(" quit", theme::help_style()),
