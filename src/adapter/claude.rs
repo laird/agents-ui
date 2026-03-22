@@ -247,34 +247,43 @@ impl ClaudeAdapter {
 
         let mut workers = Vec::new();
 
+        // First pass: identify the manager pane
         for window in &session_info.windows {
             if window.name == "review" || window.index == 1 {
                 if let Some(pane) = window.panes.first() {
                     manager.tmux_target = pane.target.clone();
                 }
-            } else if window.name == "agents" || window.index == 0 {
-                for pane in &window.panes {
-                    let worker_idx = pane.index as usize;
-                    let worktree_path = repo_path
-                        .parent()
-                        .unwrap_or(&repo_path)
-                        .join(format!("{}-wt-{}", project_name, worker_idx + 1));
+            }
+        }
 
-                    let status_file = worktree_path
-                        .join(AgentType::Claude.status_dir())
-                        .join("fix-loop.status");
+        // Second pass: all panes NOT in the manager window are workers.
+        // This handles dynamically added workers in any window.
+        let mut worker_count = 0usize;
+        for window in &session_info.windows {
+            if window.name == "review" || window.index == 1 {
+                continue; // Skip the manager window
+            }
+            for pane in &window.panes {
+                let worktree_path = repo_path
+                    .parent()
+                    .unwrap_or(&repo_path)
+                    .join(format!("{}-wt-{}", project_name, worker_count + 1));
 
-                    let agent_status = status::read_status_file(&status_file);
+                let status_file = worktree_path
+                    .join(AgentType::Claude.status_dir())
+                    .join("fix-loop.status");
 
-                    workers.push(AgentInfo {
-                        id: format!("worker-{worker_idx}"),
-                        worktree_path,
-                        tmux_target: pane.target.clone(),
-                        status: agent_status,
-                        is_manager: false,
-                        pane_content: String::new(),
-                    });
-                }
+                let agent_status = status::read_status_file(&status_file);
+
+                workers.push(AgentInfo {
+                    id: format!("worker-{worker_count}"),
+                    worktree_path,
+                    tmux_target: pane.target.clone(),
+                    status: agent_status,
+                    is_manager: false,
+                    pane_content: String::new(),
+                });
+                worker_count += 1;
             }
         }
 
