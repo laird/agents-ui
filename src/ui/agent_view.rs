@@ -70,10 +70,12 @@ impl AgentView {
             Span::styled(" Typing goes to session  ", theme::help_style()),
             Span::styled("PgUp/PgDn", theme::title_style()),
             Span::styled(" scroll  ", theme::help_style()),
+            Span::styled("Alt+0", theme::title_style()),
+            Span::styled("/", theme::help_style()),
             Span::styled("Ctrl+]", theme::title_style()),
             Span::styled(" back  ", theme::help_style()),
-            Span::styled("Ctrl+C", theme::title_style()),
-            Span::styled(" quit", theme::help_style()),
+            Span::styled("Alt+a", theme::waiting_style()),
+            Span::styled(" next waiting  ", theme::help_style()),
         ]))
         .block(Block::default().borders(Borders::TOP));
         f.render_widget(help, chunks[2]);
