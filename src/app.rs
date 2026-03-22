@@ -461,6 +461,14 @@ impl App {
                             self.adapter.send_input(&target, &input).await?;
                         }
                         self.repo_view.scroll_manager_to_bottom();
+                    } else {
+                        // Empty input + Enter = go fullscreen
+                        self.agent_view = AgentView::new();
+                        self.agent_view.scroll_to_bottom();
+                        self.screen = Screen::AgentView {
+                            swarm_idx,
+                            agent_id: "manager".to_string(),
+                        };
                     }
                 } else if kb.matches(Action::Fullscreen, &key) {
                     self.agent_view = AgentView::new();
