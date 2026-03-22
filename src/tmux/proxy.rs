@@ -76,12 +76,15 @@ pub fn spawn_pane_watcher(
     tokio::spawn(async move {
         let mut last_content = String::new();
         let mut interval = tokio::time::interval(poll_interval);
+        let mut consecutive_failures: u32 = 0;
+        const MAX_CONSECUTIVE_FAILURES: u32 = 3;
 
         loop {
             interval.tick().await;
 
             match capture_pane(&target, 500).await {
                 Ok(content) => {
+                    consecutive_failures = 0;
                     if content != last_content {
                         last_content = content.clone();
                         if tx
@@ -96,16 +99,14 @@ pub fn spawn_pane_watcher(
                     }
                 }
                 Err(e) => {
-                    tracing::warn!("Pane capture failed for {target}: {e}");
-                    // Pane might have been destroyed — check and break
-                    if !crate::tmux::session::has_session(
-                        target.split(':').next().unwrap_or(&target),
-                    )
-                    .await
-                    {
-                        tracing::info!("Session gone for {target}, stopping watcher");
+                    consecutive_failures += 1;
+                    if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
+                        tracing::info!(
+                            "Pane {target} failed {consecutive_failures} times consecutively, stopping watcher"
+                        );
                         break;
                     }
+                    tracing::warn!("Pane capture failed for {target}: {e}");
                 }
             }
         }
