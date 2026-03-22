@@ -3,6 +3,7 @@ use tokio::process::Command;
 
 /// A discovered tmux session.
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // name field used for display in future multi-session views
 pub struct TmuxSessionInfo {
     pub name: String,
     pub windows: Vec<TmuxWindowInfo>,
@@ -25,6 +26,7 @@ pub struct TmuxPaneInfo {
 }
 
 /// Check if tmux is available.
+#[allow(dead_code)] // Useful utility, planned for startup checks
 pub async fn tmux_available() -> bool {
     Command::new("tmux")
         .arg("-V")

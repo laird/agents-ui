@@ -11,6 +11,7 @@ pub fn config_dir() -> PathBuf {
 
 /// Persisted swarm configuration.
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(dead_code)] // Planned for integration - save/restore swarm state across restarts
 pub struct SwarmState {
     pub repo_path: String,
     pub agent_type: String,
@@ -20,6 +21,7 @@ pub struct SwarmState {
 }
 
 /// Save swarm state to disk.
+#[allow(dead_code)]
 pub fn save_swarm_state(project_name: &str, state: &SwarmState) -> Result<()> {
     let dir = config_dir().join("swarms").join(project_name);
     std::fs::create_dir_all(&dir)?;
@@ -29,6 +31,7 @@ pub fn save_swarm_state(project_name: &str, state: &SwarmState) -> Result<()> {
 }
 
 /// Load swarm state from disk.
+#[allow(dead_code)]
 pub fn load_swarm_state(project_name: &str) -> Result<Option<SwarmState>> {
     let path = config_dir()
         .join("swarms")
@@ -43,6 +46,7 @@ pub fn load_swarm_state(project_name: &str) -> Result<Option<SwarmState>> {
 }
 
 /// List all saved swarm states.
+#[allow(dead_code)]
 pub fn list_saved_swarms() -> Result<Vec<String>> {
     let dir = config_dir().join("swarms");
     if !dir.exists() {

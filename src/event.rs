@@ -7,6 +7,7 @@ use crate::model::status::AgentStatus;
 
 /// All events the app processes.
 #[derive(Debug)]
+#[allow(dead_code)] // StatusChange, SwarmDiscovered, Error are planned for future use
 pub enum Event {
     /// Keyboard input
     Key(KeyEvent),

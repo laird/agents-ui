@@ -224,6 +224,7 @@ impl KeyBindings {
     }
 
     /// Save current keybindings to config file.
+    #[allow(dead_code)] // Public API for users to save customized keybindings
     pub fn save(&self) -> Result<()> {
         let path = config_path();
         if let Some(parent) = path.parent() {
