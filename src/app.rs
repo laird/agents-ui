@@ -729,3 +729,48 @@ fn longest_common_prefix(strings: &[String]) -> String {
     }
     first[..len].to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn longest_common_prefix_single() {
+        let input = vec!["hello".to_string()];
+        assert_eq!(longest_common_prefix(&input), "hello");
+    }
+
+    #[test]
+    fn longest_common_prefix_common() {
+        let input = vec![
+            "foobar".to_string(),
+            "foobaz".to_string(),
+            "foobot".to_string(),
+        ];
+        assert_eq!(longest_common_prefix(&input), "foob");
+    }
+
+    #[test]
+    fn longest_common_prefix_no_common() {
+        let input = vec!["abc".to_string(), "xyz".to_string()];
+        assert_eq!(longest_common_prefix(&input), "");
+    }
+
+    #[test]
+    fn longest_common_prefix_empty_list() {
+        let input: Vec<String> = vec![];
+        assert_eq!(longest_common_prefix(&input), "");
+    }
+
+    #[test]
+    fn longest_common_prefix_identical() {
+        let input = vec!["same".to_string(), "same".to_string()];
+        assert_eq!(longest_common_prefix(&input), "same");
+    }
+
+    #[test]
+    fn longest_common_prefix_one_empty() {
+        let input = vec!["abc".to_string(), "".to_string()];
+        assert_eq!(longest_common_prefix(&input), "");
+    }
+}

@@ -295,3 +295,118 @@ fn format_last_activity(agent: &AgentInfo) -> String {
         "—".to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- extract_issue_title_from_pane tests ---
+
+    #[test]
+    fn extract_issue_title_found() {
+        let content = "Some output\nWorking on #42: Fix the login bug\nMore output";
+        assert_eq!(
+            extract_issue_title_from_pane(content, 42),
+            Some("Fix the login bug".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_issue_title_not_found() {
+        let content = "No issue references here";
+        assert_eq!(extract_issue_title_from_pane(content, 42), None);
+    }
+
+    #[test]
+    fn extract_issue_title_truncates_long() {
+        let content = format!(
+            "#99 - {}",
+            "A".repeat(60)
+        );
+        let result = extract_issue_title_from_pane(&content, 99).unwrap();
+        assert!(result.len() <= 53); // 50 + "..."
+        assert!(result.ends_with("..."));
+    }
+
+    #[test]
+    fn extract_issue_title_short_ignored() {
+        // Title <= 3 chars should be ignored
+        let content = "#42: ab";
+        assert_eq!(extract_issue_title_from_pane(content, 42), None);
+    }
+
+    #[test]
+    fn extract_issue_title_prefers_last_line() {
+        let content = "#5: first mention\n#5: second better title";
+        // Iterates in reverse, so finds "second better title" first
+        assert_eq!(
+            extract_issue_title_from_pane(content, 5),
+            Some("second better title".to_string())
+        );
+    }
+
+    // --- extract_task_hint_from_pane tests ---
+
+    #[test]
+    fn extract_task_hint_fix() {
+        let content = "random output\nFix the broken test\n";
+        assert_eq!(
+            extract_task_hint_from_pane(content),
+            Some("Fix the broken test".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_task_hint_working_on() {
+        let content = "Working on issue #42";
+        assert_eq!(
+            extract_task_hint_from_pane(content),
+            Some("Working on issue #42".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_task_hint_none() {
+        let content = "just some random output\nnothing relevant";
+        assert_eq!(extract_task_hint_from_pane(content), None);
+    }
+
+    #[test]
+    fn extract_task_hint_truncates_long() {
+        let hint = format!("Fix {}", "x".repeat(60));
+        let result = extract_task_hint_from_pane(&hint).unwrap();
+        assert!(result.len() <= 53);
+        assert!(result.ends_with("..."));
+    }
+
+    #[test]
+    fn extract_task_hint_issue_prefix() {
+        let content = "debug info\nIssue #10 needs attention";
+        assert_eq!(
+            extract_task_hint_from_pane(content),
+            Some("Issue #10 needs attention".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_task_hint_starting_work() {
+        let content = "Starting work on feature X";
+        assert_eq!(
+            extract_task_hint_from_pane(content),
+            Some("Starting work on feature X".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_task_hint_only_recent_lines() {
+        // Only checks last 10 lines
+        let mut lines: Vec<String> = (0..20)
+            .map(|i| format!("line {i}"))
+            .collect();
+        // Put a match at line 0 (beyond the 10-line window)
+        lines[0] = "Fix the early bug".to_string();
+        let content = lines.join("\n");
+        // Should NOT find it since it's more than 10 lines from the end
+        assert_eq!(extract_task_hint_from_pane(&content), None);
+    }
+}
