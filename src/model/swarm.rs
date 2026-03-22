@@ -3,6 +3,7 @@ use super::status::AgentStatus;
 
 /// The type of agent runtime.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)] // Codex, Droid, Gemini are planned runtime adapters
 pub enum AgentType {
     Claude,
     Codex,
@@ -33,6 +34,7 @@ impl AgentType {
     }
 
     /// Tmux session prefix (e.g., "claude-myrepo")
+    #[allow(dead_code)] // Used by multi-runtime discovery
     pub fn session_prefix(&self) -> &str {
         match self {
             AgentType::Claude => "claude",
@@ -53,6 +55,7 @@ impl AgentType {
 
 /// The workflow type for a swarm.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)] // Workflow variants are planned for use in swarm configuration
 pub enum Workflow {
     Autocoder,
     Modernize,
@@ -86,6 +89,7 @@ pub struct AgentInfo {
 
 /// A swarm of agents working on one repo.
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // repo_path, tmux_session used by persistence and multi-runtime features
 pub struct Swarm {
     /// Path to the base repository
     pub repo_path: PathBuf,
@@ -105,6 +109,7 @@ pub struct Swarm {
 
 impl Swarm {
     /// Total agent count (manager + workers)
+    #[allow(dead_code)]
     pub fn agent_count(&self) -> usize {
         1 + self.workers.len()
     }
@@ -149,6 +154,7 @@ impl Swarm {
     }
 
     /// Get all agents (manager + workers) as a flat list
+    #[allow(dead_code)]
     pub fn all_agents(&self) -> Vec<&AgentInfo> {
         let mut agents = vec![&self.manager];
         agents.extend(self.workers.iter());
