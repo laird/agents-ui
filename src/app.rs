@@ -259,10 +259,6 @@ impl App {
     /// Returns true if we're in a passthrough mode where keystrokes go directly to tmux.
     fn is_passthrough_mode(&self) -> bool {
         matches!(&self.screen, Screen::AgentView { .. })
-            || matches!(
-                (&self.screen, &self.repo_view.focus),
-                (Screen::RepoView { .. }, crate::ui::repo_view::RepoViewFocus::ManagerInput)
-            )
     }
 
     async fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
@@ -558,19 +554,34 @@ impl App {
 
         match self.repo_view.focus.clone() {
             RepoViewFocus::ManagerInput => {
-                // Ctrl+] escapes back to Workers focus (like ssh escape)
-                if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && key.code == KeyCode::Char(']')
-                {
-                    self.repo_view.focus = RepoViewFocus::Workers;
-                    return Ok(());
-                }
-
-                // Everything else passes through directly to the manager tmux pane
-                if let Some((tmux_key, literal)) = Self::key_to_tmux(&key) {
-                    if let Some(swarm) = self.swarms.get(swarm_idx) {
-                        let target = swarm.manager.tmux_target.clone();
-                        self.adapter.send_raw_key(&target, &tmux_key, literal).await?;
+                match key.code {
+                    KeyCode::Enter => {
+                        // Enter opens fullscreen manager view
+                        self.agent_view = AgentView::new();
+                        self.agent_view.scroll_to_bottom();
+                        self.screen = Screen::AgentView {
+                            swarm_idx,
+                            agent_id: "manager".to_string(),
+                        };
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        // Navigate down to workers list
+                        self.repo_view.focus = RepoViewFocus::Workers;
+                    }
+                    KeyCode::Tab => {
+                        self.repo_view.focus = RepoViewFocus::Workers;
+                    }
+                    KeyCode::Esc => {
+                        self.screen = Screen::ReposList;
+                    }
+                    _ => {
+                        // Other keys pass through to manager tmux pane
+                        if let Some((tmux_key, literal)) = Self::key_to_tmux(&key) {
+                            if let Some(swarm) = self.swarms.get(swarm_idx) {
+                                let target = swarm.manager.tmux_target.clone();
+                                self.adapter.send_raw_key(&target, &tmux_key, literal).await?;
+                            }
+                        }
                     }
                 }
             }

@@ -447,9 +447,12 @@ impl RepoView {
                 Span::styled(" back", theme::help_style()),
             ])),
             RepoViewFocus::ManagerInput => Paragraph::new(Line::from(vec![
-                Span::styled(" Typing goes to manager  ", theme::help_style()),
-                Span::styled("Ctrl+]", theme::title_style()),
-                Span::styled(" workers", theme::help_style()),
+                Span::styled(" Enter", theme::title_style()),
+                Span::styled(" fullscreen  ", theme::help_style()),
+                Span::styled("Tab/↓", theme::title_style()),
+                Span::styled(" workers  ", theme::help_style()),
+                Span::styled("other keys", theme::help_style()),
+                Span::styled(" → manager", theme::help_style()),
             ])),
             RepoViewFocus::CreateIssue(state) => match state {
                 CreateIssueState::SelectType => Paragraph::new(Line::from(vec![
