@@ -4,6 +4,7 @@ use tokio::process::Command;
 /// A discovered tmux session.
 #[derive(Debug, Clone)]
 pub struct TmuxSessionInfo {
+    #[allow(dead_code)] // Used for session identification in future features
     pub name: String,
     pub windows: Vec<TmuxWindowInfo>,
 }
@@ -25,6 +26,7 @@ pub struct TmuxPaneInfo {
 }
 
 /// Check if tmux is available.
+#[allow(dead_code)] // Available for startup validation
 pub async fn tmux_available() -> bool {
     Command::new("tmux")
         .arg("-V")
@@ -59,6 +61,62 @@ pub async fn discover_agent_sessions() -> Result<Vec<String>> {
         .into_iter()
         .filter(|s| prefixes.iter().any(|p| s.starts_with(p)))
         .collect())
+}
+
+/// Resize all windows in a session to the given dimensions.
+pub async fn resize_session(name: &str, width: u16, height: u16) -> Result<()> {
+    // First, set the session's default size so new windows inherit it
+    let _ = Command::new("tmux")
+        .args([
+            "set-option",
+            "-t",
+            name,
+            "default-size",
+            &format!("{width}x{height}"),
+        ])
+        .output()
+        .await;
+
+    // Resize all existing windows
+    let output = Command::new("tmux")
+        .args([
+            "list-windows",
+            "-t",
+            name,
+            "-F",
+            "#{window_index}",
+        ])
+        .output()
+        .await
+        .context("Failed to list windows for resize")?;
+
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for win_idx in stdout.lines() {
+            let target = format!("{name}:{win_idx}");
+            let _ = Command::new("tmux")
+                .args([
+                    "resize-window",
+                    "-t",
+                    &target,
+                    "-x",
+                    &width.to_string(),
+                    "-y",
+                    &height.to_string(),
+                ])
+                .output()
+                .await;
+        }
+    }
+
+    Ok(())
+}
+
+/// Resize a session to match the current terminal size.
+pub async fn resize_session_to_terminal(name: &str) -> Result<()> {
+    let (width, height) = crossterm::terminal::size()
+        .context("Failed to get terminal size")?;
+    resize_session(name, width, height).await
 }
 
 /// Check if a specific session exists.

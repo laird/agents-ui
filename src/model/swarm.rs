@@ -51,6 +51,7 @@ impl AgentType {
     }
 
     /// Parse agent type from tmux session prefix (e.g., "claude" → Claude).
+    #[allow(dead_code)] // Available for future use in dynamic session parsing
     pub fn from_prefix(prefix: &str) -> Option<AgentType> {
         match prefix {
             "claude" => Some(AgentType::Claude),
@@ -92,6 +93,7 @@ impl AgentType {
 
 /// The workflow type for a swarm.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)] // Planned for workflow display in repos list
 pub enum Workflow {
     Autocoder,
     Modernize,
@@ -142,6 +144,7 @@ pub struct Swarm {
     pub workers: Vec<AgentInfo>,
 }
 
+#[allow(dead_code)] // Utility methods for future UI enhancements
 impl Swarm {
     /// Total agent count (manager + workers)
     pub fn agent_count(&self) -> usize {
