@@ -12,6 +12,7 @@ use crate::scripts::launcher;
 use crate::tmux::proxy;
 use crate::tui::Tui;
 use crate::ui::agent_view::AgentView;
+use crate::ui::feedback_dialog::{FeedbackField, FeedbackState, FeedbackType};
 use crate::ui::repo_view::RepoView;
 use crate::ui::repos_list::ReposListView;
 
@@ -44,6 +45,7 @@ pub struct App {
     pub agents_dir: std::path::PathBuf,
     pub keybindings: KeyBindings,
     pub show_help: bool,
+    pub feedback: Option<FeedbackState>,
     /// Active pane watcher handles (so we can cancel them).
     pane_watchers: Vec<tokio::task::JoinHandle<()>>,
     /// Input buffer for new swarm dialog.
@@ -85,6 +87,7 @@ impl App {
             agents_dir,
             keybindings,
             show_help: false,
+            feedback: None,
             pane_watchers: Vec::new(),
             dialog_input: String::new(),
             new_swarm_repo: String::new(),
@@ -102,6 +105,7 @@ impl App {
             // Render
             let show_help = self.show_help;
             let keybindings = self.keybindings.clone();
+            let feedback = self.feedback.clone();
             terminal.draw(|f| {
                 let area = f.area();
                 match &self.screen {
@@ -134,6 +138,10 @@ impl App {
                             }
                         }
                     }
+                }
+                // Render feedback dialog on top if active
+                if let Some(ref fb) = feedback {
+                    crate::ui::feedback_dialog::render_feedback_dialog(f, area, fb);
                 }
                 // Render help overlay on top if active
                 if show_help {
@@ -209,6 +217,12 @@ impl App {
             return Ok(());
         }
 
+        // Feedback dialog handling (takes priority over everything else)
+        if self.feedback.is_some() {
+            self.handle_feedback_key(key).await?;
+            return Ok(());
+        }
+
         // Help overlay toggle
         if self.show_help {
             if self.keybindings.matches(Action::ShowHelp, &key)
@@ -216,6 +230,12 @@ impl App {
             {
                 self.show_help = false;
             }
+            return Ok(());
+        }
+
+        // Global: Alt+F opens feedback dialog from anywhere
+        if self.keybindings.matches(Action::FileFeedback, &key) {
+            self.feedback = Some(FeedbackState::new());
             return Ok(());
         }
 
@@ -543,6 +563,96 @@ impl App {
         Ok(())
     }
 
+    async fn handle_feedback_key(&mut self, key: KeyEvent) -> Result<()> {
+        let fb = match &mut self.feedback {
+            Some(fb) => fb,
+            None => return Ok(()),
+        };
+
+        match &fb.field {
+            FeedbackField::FeedbackType => match key.code {
+                KeyCode::Esc => {
+                    self.feedback = None;
+                }
+                KeyCode::Left => {
+                    if fb.type_index > 0 {
+                        fb.type_index -= 1;
+                        fb.feedback_type = FeedbackType::all()[fb.type_index];
+                    }
+                }
+                KeyCode::Right => {
+                    let types = FeedbackType::all();
+                    if fb.type_index < types.len() - 1 {
+                        fb.type_index += 1;
+                        fb.feedback_type = types[fb.type_index];
+                    }
+                }
+                KeyCode::Enter => {
+                    fb.field = FeedbackField::Title;
+                }
+                _ => {}
+            },
+            FeedbackField::Title => match key.code {
+                KeyCode::Esc => {
+                    fb.field = FeedbackField::FeedbackType;
+                }
+                KeyCode::Enter => {
+                    if !fb.title.is_empty() {
+                        fb.field = FeedbackField::Body;
+                    }
+                }
+                KeyCode::Char(c) => {
+                    fb.title.push(c);
+                }
+                KeyCode::Backspace => {
+                    fb.title.pop();
+                }
+                _ => {}
+            },
+            FeedbackField::Body => {
+                if key.code == KeyCode::Esc {
+                    fb.field = FeedbackField::Title;
+                } else if key.code == KeyCode::Enter
+                    && key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
+                {
+                    // Submit
+                    let title = fb.title.clone();
+                    let body = fb.body.clone();
+                    let label = fb.feedback_type.github_label().to_string();
+                    fb.field = FeedbackField::Submitting;
+
+                    // Spawn gh issue create
+                    let result = submit_feedback(&title, &body, &label).await;
+                    let fb = self.feedback.as_mut().unwrap();
+                    match result {
+                        Ok(url) => {
+                            fb.field = FeedbackField::Done(format!("Created: {url}"));
+                        }
+                        Err(e) => {
+                            fb.field = FeedbackField::Done(format!("Error: {e}"));
+                        }
+                    }
+                } else if let KeyCode::Char(c) = key.code {
+                    fb.body.push(c);
+                } else if key.code == KeyCode::Backspace {
+                    fb.body.pop();
+                } else if key.code == KeyCode::Enter {
+                    fb.body.push('\n');
+                }
+            }
+            FeedbackField::Done(_) => {
+                if key.code == KeyCode::Enter || key.code == KeyCode::Esc {
+                    self.feedback = None;
+                }
+            }
+            FeedbackField::Submitting => {
+                // Ignore input while submitting
+            }
+        }
+
+        Ok(())
+    }
+
     /// Start pane watchers for all agents in all swarms.
     fn start_all_pane_watchers(&mut self) {
         // Cancel existing watchers
@@ -663,6 +773,33 @@ fn tab_complete_path(input: &str) -> Option<String> {
         } else {
             None
         }
+    }
+}
+
+/// Submit feedback as a GitHub issue using `gh`.
+async fn submit_feedback(title: &str, body: &str, label: &str) -> Result<String> {
+    let output = tokio::process::Command::new("gh")
+        .args([
+            "issue",
+            "create",
+            "--repo",
+            "laird/agents-ui",
+            "--label",
+            label,
+            "--title",
+            title,
+            "--body",
+            body,
+        ])
+        .output()
+        .await?;
+
+    if output.status.success() {
+        let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        Ok(url)
+    } else {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        anyhow::bail!("{err}")
     }
 }
 

@@ -31,6 +31,9 @@ pub enum Action {
     // Scrolling
     ScrollUp,
     ScrollDown,
+
+    // Feedback
+    FileFeedback,
 }
 
 impl fmt::Display for Action {
@@ -49,6 +52,7 @@ impl fmt::Display for Action {
             Action::FocusManager => write!(f, "Focus Manager"),
             Action::ScrollUp => write!(f, "Scroll Up"),
             Action::ScrollDown => write!(f, "Scroll Down"),
+            Action::FileFeedback => write!(f, "File Feedback"),
         }
     }
 }
@@ -164,6 +168,12 @@ impl Default for KeyBindings {
         bindings.insert(Action::ScrollUp, vec![KeyBind::new("pageup")]);
         bindings.insert(Action::ScrollDown, vec![KeyBind::new("pagedown")]);
 
+        // Feedback
+        bindings.insert(Action::FileFeedback, vec![KeyBind {
+            key: "f".to_string(),
+            modifiers: vec!["alt".to_string()],
+        }]);
+
         Self { bindings }
     }
 }
@@ -241,6 +251,7 @@ impl KeyBindings {
             Action::FocusManager,
             Action::ScrollUp,
             Action::ScrollDown,
+            Action::FileFeedback,
         ];
 
         actions
