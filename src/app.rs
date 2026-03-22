@@ -51,6 +51,10 @@ pub struct App {
     pub status_message: Option<String>,
     /// Counter for periodic issue refresh (every ~60 ticks = 15 seconds at 250ms tick).
     issue_refresh_counter: u32,
+    /// Configurable keyboard shortcuts.
+    pub shortcuts: crate::config::shortcuts::ShortcutsConfig,
+    /// Whether the shortcuts viewer overlay is visible.
+    pub show_shortcuts_viewer: bool,
 }
 
 impl App {
@@ -86,6 +90,11 @@ impl App {
             new_swarm_repo: String::new(),
             status_message: None,
             issue_refresh_counter: 0,
+            shortcuts: {
+                crate::config::shortcuts::ShortcutsConfig::ensure_defaults_written();
+                crate::config::shortcuts::ShortcutsConfig::load()
+            },
+            show_shortcuts_viewer: false,
         };
 
         // Start pane watchers for discovered swarms
@@ -129,6 +138,22 @@ impl App {
                             }
                         }
                     }
+                }
+
+                // Shortcuts viewer overlay
+                if self.show_shortcuts_viewer {
+                    let panel = match &self.screen {
+                        Screen::RepoView { .. } => match &self.repo_view.focus {
+                            crate::ui::repo_view::RepoViewFocus::Workers => "workers",
+                            crate::ui::repo_view::RepoViewFocus::Issues => "issues",
+                            crate::ui::repo_view::RepoViewFocus::ManagerInput => "manager",
+                            _ => "global",
+                        },
+                        _ => "global",
+                    };
+                    crate::ui::shortcuts_viewer::render_shortcuts_viewer(
+                        f, area, &self.shortcuts, panel,
+                    );
                 }
             })?;
 
@@ -242,6 +267,27 @@ impl App {
             && !self.is_passthrough_mode()
         {
             self.running = false;
+            return Ok(());
+        }
+
+        // Shortcuts viewer: ? toggles, any other key dismisses
+        if self.show_shortcuts_viewer {
+            if key.code == KeyCode::Char('?') {
+                self.show_shortcuts_viewer = false;
+            } else if key.code == KeyCode::Char('e') {
+                // Open config file in editor
+                let path = crate::config::shortcuts::ShortcutsConfig::config_path();
+                self.show_shortcuts_viewer = false;
+                self.status_message = Some(format!("Edit: {}", path.display()));
+            } else {
+                self.show_shortcuts_viewer = false;
+            }
+            return Ok(());
+        }
+
+        // ? key opens shortcuts viewer (not in passthrough mode)
+        if key.code == KeyCode::Char('?') && !self.is_passthrough_mode() {
+            self.show_shortcuts_viewer = true;
             return Ok(());
         }
 
@@ -578,6 +624,10 @@ impl App {
                         use crate::ui::repo_view::CreateIssueState;
                         self.repo_view.focus = RepoViewFocus::CreateIssue(CreateIssueState::SelectType);
                     }
+                    KeyCode::Char(c) => {
+                        // Try configured shortcuts for workers panel
+                        self.try_shortcut("workers", &c.to_string(), swarm_idx, None).await?;
+                    }
                     _ => {}
                 }
             }
@@ -666,6 +716,15 @@ impl App {
                     KeyCode::Char('i') => {
                         use crate::ui::repo_view::CreateIssueState;
                         self.repo_view.focus = RepoViewFocus::CreateIssue(CreateIssueState::SelectType);
+                    }
+                    KeyCode::Char(c) => {
+                        // Try configured shortcuts for issues panel
+                        let selected_issue = self.repo_view.selected_issue_idx()
+                            .and_then(|idx| {
+                                self.swarms.get(swarm_idx)
+                                    .and_then(|s| s.issue_cache.filtered(self.repo_view.priority_filter.as_ref()).get(idx).map(|i| i.number))
+                            });
+                        self.try_shortcut("issues", &c.to_string(), swarm_idx, selected_issue).await?;
                     }
                     _ => {}
                 }
@@ -815,6 +874,42 @@ impl App {
                 self.status_message = Some("No sessions waiting for input".to_string());
             }
         }
+    }
+
+    /// Try to execute a configured shortcut for the given panel and key.
+    async fn try_shortcut(&mut self, panel: &str, key: &str, swarm_idx: usize, issue: Option<u32>) -> Result<()> {
+        use crate::config::shortcuts::ShortcutsConfig;
+
+        let shortcuts = self.shortcuts.for_panel(panel);
+        if let Some(shortcut) = shortcuts.get(key) {
+            let project = self.swarms.get(swarm_idx).map(|s| s.project_name.as_str());
+            let worker_target = self.repo_view.selected_worker()
+                .and_then(|idx| self.swarms.get(swarm_idx).and_then(|s| s.workers.get(idx)))
+                .map(|w| w.tmux_target.as_str());
+
+            let cmd = ShortcutsConfig::expand_command(
+                &shortcut.command,
+                issue,
+                worker_target,
+                project,
+            );
+
+            if let Some(swarm) = self.swarms.get(swarm_idx) {
+                let target = if shortcut.target == "worker" {
+                    worker_target.unwrap_or(&swarm.manager.tmux_target).to_string()
+                } else {
+                    swarm.manager.tmux_target.clone()
+                };
+
+                if shortcut.raw {
+                    self.adapter.send_raw_key(&target, &cmd, false).await?;
+                } else {
+                    self.adapter.send_input(&target, &cmd).await?;
+                }
+                self.status_message = Some(format!("[{}] {}", shortcut.label, cmd));
+            }
+        }
+        Ok(())
     }
 
     fn start_issue_refresh(&self, swarm_idx: usize) {
