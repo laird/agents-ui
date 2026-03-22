@@ -1,10 +1,11 @@
 use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent};
 use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::adapter::claude::ClaudeAdapter;
 use crate::adapter::traits::{AgentRuntime, SwarmConfig};
+use crate::config::keybindings::{Action, KeyBindings};
 use crate::event::{Event, EventHandler};
 use crate::model::swarm::{AgentType, Swarm};
 use crate::scripts::launcher;
@@ -41,6 +42,8 @@ pub struct App {
     pub events: EventHandler,
     pub adapter: ClaudeAdapter,
     pub agents_dir: std::path::PathBuf,
+    pub keybindings: KeyBindings,
+    pub show_help: bool,
     /// Active pane watcher handles (so we can cancel them).
     pane_watchers: Vec<tokio::task::JoinHandle<()>>,
     /// Input buffer for new swarm dialog.
@@ -56,6 +59,7 @@ impl App {
         let agents_dir = launcher::resolve_agents_dir();
         let adapter = ClaudeAdapter::new();
         let events = EventHandler::new();
+        let keybindings = KeyBindings::load();
 
         // Discover existing swarms on startup
         let swarms = match adapter.discover(&agents_dir).await {
@@ -79,6 +83,8 @@ impl App {
             events,
             adapter,
             agents_dir,
+            keybindings,
+            show_help: false,
             pane_watchers: Vec::new(),
             dialog_input: String::new(),
             new_swarm_repo: String::new(),
@@ -94,6 +100,8 @@ impl App {
     pub async fn run(&mut self, terminal: &mut Tui) -> Result<()> {
         while self.running {
             // Render
+            let show_help = self.show_help;
+            let keybindings = self.keybindings.clone();
             terminal.draw(|f| {
                 let area = f.area();
                 match &self.screen {
@@ -126,6 +134,10 @@ impl App {
                             }
                         }
                     }
+                }
+                // Render help overlay on top if active
+                if show_help {
+                    crate::ui::help_overlay::render_help_overlay(f, area, &keybindings);
                 }
             })?;
 
@@ -191,10 +203,39 @@ impl App {
     }
 
     async fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
-        // Global: Ctrl+C always quits
-        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+        // Global: Force quit (Ctrl+C) always quits
+        if self.keybindings.matches(Action::ForceQuit, &key) {
             self.running = false;
             return Ok(());
+        }
+
+        // Help overlay toggle
+        if self.show_help {
+            if self.keybindings.matches(Action::ShowHelp, &key)
+                || self.keybindings.matches(Action::Back, &key)
+            {
+                self.show_help = false;
+            }
+            return Ok(());
+        }
+
+        // Show help from any non-input screen
+        if self.keybindings.matches(Action::ShowHelp, &key) {
+            match &self.screen {
+                Screen::NewSwarm { .. } => {} // Don't intercept in input mode
+                Screen::AgentView { .. } => {} // Don't intercept in input mode
+                Screen::RepoView { .. } => {
+                    // Only show help when not in manager input mode
+                    if self.repo_view.input.is_empty() {
+                        self.show_help = true;
+                        return Ok(());
+                    }
+                }
+                _ => {
+                    self.show_help = true;
+                    return Ok(());
+                }
+            }
         }
 
         match &self.screen.clone() {
@@ -218,43 +259,38 @@ impl App {
     }
 
     async fn handle_repos_list_key(&mut self, key: KeyEvent) -> Result<()> {
-        match key.code {
-            KeyCode::Char('q') => self.running = false,
-            KeyCode::Down | KeyCode::Char('j') => {
-                self.repos_list.next(self.swarms.len());
-            }
-            KeyCode::Up | KeyCode::Char('k') => {
-                self.repos_list.previous(self.swarms.len());
-            }
-            KeyCode::Enter => {
-                if let Some(idx) = self.repos_list.selected() {
-                    if idx < self.swarms.len() {
-                        self.repo_view = RepoView::new();
-                        self.screen = Screen::RepoView { swarm_idx: idx };
-                    }
+        let kb = &self.keybindings;
+        if kb.matches(Action::Quit, &key) {
+            self.running = false;
+        } else if kb.matches(Action::MoveDown, &key) {
+            self.repos_list.next(self.swarms.len());
+        } else if kb.matches(Action::MoveUp, &key) {
+            self.repos_list.previous(self.swarms.len());
+        } else if kb.matches(Action::Select, &key) {
+            if let Some(idx) = self.repos_list.selected() {
+                if idx < self.swarms.len() {
+                    self.repo_view = RepoView::new();
+                    self.screen = Screen::RepoView { swarm_idx: idx };
                 }
             }
-            KeyCode::Char('n') => {
-                // New swarm dialog — pre-fill with current directory
-                self.dialog_input = std::env::current_dir()
-                    .map(|p| p.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                self.new_swarm_repo = String::new();
-                self.status_message = None;
-                self.screen = Screen::NewSwarm {
-                    field: NewSwarmField::RepoPath,
-                };
+        } else if kb.matches(Action::NewSwarm, &key) {
+            // New swarm dialog — pre-fill with current directory
+            self.dialog_input = std::env::current_dir()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
+            self.new_swarm_repo = String::new();
+            self.status_message = None;
+            self.screen = Screen::NewSwarm {
+                field: NewSwarmField::RepoPath,
+            };
+        } else if kb.matches(Action::Refresh, &key) {
+            // Refresh: re-discover swarms
+            self.status_message = Some("Refreshing...".to_string());
+            if let Ok(swarms) = self.adapter.discover(&self.agents_dir).await {
+                self.swarms = swarms;
+                self.start_all_pane_watchers();
+                self.status_message = Some(format!("Found {} swarm(s)", self.swarms.len()));
             }
-            KeyCode::Char('r') => {
-                // Refresh: re-discover swarms
-                self.status_message = Some("Refreshing...".to_string());
-                if let Ok(swarms) = self.adapter.discover(&self.agents_dir).await {
-                    self.swarms = swarms;
-                    self.start_all_pane_watchers();
-                    self.status_message = Some(format!("Found {} swarm(s)", self.swarms.len()));
-                }
-            }
-            _ => {}
         }
         Ok(())
     }
@@ -384,99 +420,84 @@ impl App {
 
     async fn handle_repo_view_key(&mut self, key: KeyEvent, swarm_idx: usize) -> Result<()> {
         use crate::ui::repo_view::RepoViewFocus;
+        let kb = &self.keybindings;
 
         match &self.repo_view.focus {
             RepoViewFocus::Manager => {
                 // Manager session focused — typing goes to input, scrolling works
-                match key.code {
-                    KeyCode::Esc => {
-                        // If input is non-empty, clear it first; otherwise go back to repos list
-                        if !self.repo_view.input.is_empty() {
-                            self.repo_view.input.clear();
-                        } else {
-                            self.screen = Screen::ReposList;
+                if kb.matches(Action::Back, &key) {
+                    if !self.repo_view.input.is_empty() {
+                        self.repo_view.input.clear();
+                    } else {
+                        self.screen = Screen::ReposList;
+                    }
+                } else if kb.matches(Action::MoveDown, &key) || key.code == KeyCode::Tab {
+                    self.repo_view.focus_workers();
+                } else if kb.matches(Action::Select, &key) {
+                    if !self.repo_view.input.is_empty() {
+                        let input = self.repo_view.input.drain(..).collect::<String>();
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            let target = swarm.manager.tmux_target.clone();
+                            self.adapter.send_input(&target, &input).await?;
                         }
+                        self.repo_view.scroll_manager_to_bottom();
                     }
-                    KeyCode::Down | KeyCode::Tab => {
-                        // Move focus down to workers table
-                        self.repo_view.focus_workers();
-                    }
-                    KeyCode::Enter => {
-                        if !self.repo_view.input.is_empty() {
-                            let input = self.repo_view.input.drain(..).collect::<String>();
-                            if let Some(swarm) = self.swarms.get(swarm_idx) {
-                                let target = swarm.manager.tmux_target.clone();
-                                self.adapter.send_input(&target, &input).await?;
-                            }
-                            self.repo_view.scroll_manager_to_bottom();
+                } else if kb.matches(Action::Fullscreen, &key) {
+                    self.agent_view = AgentView::new();
+                    self.agent_view.scroll_to_bottom();
+                    self.screen = Screen::AgentView {
+                        swarm_idx,
+                        agent_id: "manager".to_string(),
+                    };
+                } else if kb.matches(Action::ScrollUp, &key) {
+                    self.repo_view.scroll_manager_up(10);
+                } else if kb.matches(Action::ScrollDown, &key) {
+                    self.repo_view.scroll_manager_down(10);
+                } else if kb.matches(Action::Quit, &key) {
+                    self.running = false;
+                } else {
+                    match key.code {
+                        KeyCode::Char(c) => {
+                            self.repo_view.input.push(c);
                         }
+                        KeyCode::Backspace => {
+                            self.repo_view.input.pop();
+                        }
+                        _ => {}
                     }
-                    KeyCode::Char('f') | KeyCode::Char('F') => {
-                        // Fullscreen: drill into manager AgentView
-                        self.agent_view = AgentView::new();
-                        self.agent_view.scroll_to_bottom();
-                        self.screen = Screen::AgentView {
-                            swarm_idx,
-                            agent_id: "manager".to_string(),
-                        };
-                    }
-                    KeyCode::PageUp => {
-                        self.repo_view.scroll_manager_up(10);
-                    }
-                    KeyCode::PageDown => {
-                        self.repo_view.scroll_manager_down(10);
-                    }
-                    KeyCode::Char('q') => self.running = false,
-                    KeyCode::Char(c) => {
-                        self.repo_view.input.push(c);
-                    }
-                    KeyCode::Backspace => {
-                        self.repo_view.input.pop();
-                    }
-                    _ => {}
                 }
             }
             RepoViewFocus::Workers => {
-                // Workers table focused
-                match key.code {
-                    KeyCode::Char('q') => self.running = false,
-                    KeyCode::Esc => {
-                        self.screen = Screen::ReposList;
+                if kb.matches(Action::Quit, &key) {
+                    self.running = false;
+                } else if kb.matches(Action::Back, &key) {
+                    self.screen = Screen::ReposList;
+                } else if kb.matches(Action::MoveDown, &key) {
+                    if let Some(swarm) = self.swarms.get(swarm_idx) {
+                        self.repo_view.next_worker(swarm.workers.len());
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        if let Some(swarm) = self.swarms.get(swarm_idx) {
-                            self.repo_view.next_worker(swarm.workers.len());
+                } else if kb.matches(Action::MoveUp, &key) {
+                    if let Some(swarm) = self.swarms.get(swarm_idx) {
+                        let at_top = self.repo_view.previous_worker(swarm.workers.len());
+                        if at_top {
+                            self.repo_view.focus_manager();
                         }
                     }
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        if let Some(swarm) = self.swarms.get(swarm_idx) {
-                            let at_top = self.repo_view.previous_worker(swarm.workers.len());
-                            if at_top {
-                                // Arrow-up from top of workers list → focus manager session
-                                self.repo_view.focus_manager();
+                } else if kb.matches(Action::Select, &key) {
+                    if let Some(swarm) = self.swarms.get(swarm_idx) {
+                        if let Some(worker_idx) = self.repo_view.selected_worker() {
+                            if let Some(worker) = swarm.workers.get(worker_idx) {
+                                self.agent_view = AgentView::new();
+                                self.agent_view.scroll_to_bottom();
+                                self.screen = Screen::AgentView {
+                                    swarm_idx,
+                                    agent_id: worker.id.clone(),
+                                };
                             }
                         }
                     }
-                    KeyCode::Enter => {
-                        // Drill into selected worker's full-screen AgentView
-                        if let Some(swarm) = self.swarms.get(swarm_idx) {
-                            if let Some(worker_idx) = self.repo_view.selected_worker() {
-                                if let Some(worker) = swarm.workers.get(worker_idx) {
-                                    self.agent_view = AgentView::new();
-                                    self.agent_view.scroll_to_bottom();
-                                    self.screen = Screen::AgentView {
-                                        swarm_idx,
-                                        agent_id: worker.id.clone(),
-                                    };
-                                }
-                            }
-                        }
-                    }
-                    KeyCode::Char('m') => {
-                        // Focus the embedded manager session (not full-screen)
-                        self.repo_view.focus_manager();
-                    }
-                    _ => {}
+                } else if kb.matches(Action::FocusManager, &key) {
+                    self.repo_view.focus_manager();
                 }
             }
         }
