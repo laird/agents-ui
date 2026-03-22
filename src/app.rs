@@ -146,10 +146,14 @@ impl App {
                 self.refresh_statuses();
             }
             Event::PaneOutput { agent_id, content } => {
-                // Update the agent's pane content
+                // Update the agent's pane content and infer status from it
                 for swarm in &mut self.swarms {
                     if let Some(agent) = swarm.agent_mut(&agent_id) {
-                        agent.pane_content = content;
+                        agent.pane_content = content.clone();
+                        // Infer status from pane content for faster updates
+                        if let Some(inferred) = infer_status_from_pane(&content) {
+                            agent.status.state = inferred;
+                        }
                         break;
                     }
                 }
@@ -624,6 +628,18 @@ impl App {
     /// Refresh agent statuses from status files.
     fn refresh_statuses(&mut self) {
         for swarm in &mut self.swarms {
+            // Refresh manager status
+            let manager_status_file = swarm
+                .manager
+                .worktree_path
+                .join(swarm.agent_type.status_dir())
+                .join("fix-loop.status");
+            if manager_status_file.exists() {
+                swarm.manager.status =
+                    crate::model::status::read_status_file(&manager_status_file);
+            }
+
+            // Refresh worker statuses
             for worker in &mut swarm.workers {
                 let status_file = worker
                     .worktree_path
@@ -730,6 +746,30 @@ fn longest_common_prefix(strings: &[String]) -> String {
     first[..len].to_string()
 }
 
+/// Infer agent status from pane content by scanning recent lines.
+/// Returns Some(state) if a clear status indicator is found, None otherwise.
+fn infer_status_from_pane(content: &str) -> Option<crate::model::status::AgentState> {
+    use crate::model::status::AgentState;
+
+    // Scan last 15 lines of pane content for status indicators
+    for line in content.lines().rev().take(15) {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let lower = trimmed.to_lowercase();
+
+        if lower.contains("idle_no_work_available") {
+            return Some(AgentState::Idle);
+        }
+        // Detect the Claude Code prompt (agent is idle, waiting for input)
+        if trimmed.ends_with("> ") || trimmed == ">" {
+            return Some(AgentState::Idle);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -772,5 +812,29 @@ mod tests {
     fn longest_common_prefix_one_empty() {
         let input = vec!["abc".to_string(), "".to_string()];
         assert_eq!(longest_common_prefix(&input), "");
+    }
+
+    #[test]
+    fn infer_status_idle_no_work() {
+        let content = "some output\nIDLE_NO_WORK_AVAILABLE\n";
+        assert_eq!(
+            infer_status_from_pane(content),
+            Some(crate::model::status::AgentState::Idle)
+        );
+    }
+
+    #[test]
+    fn infer_status_prompt() {
+        let content = "Done with task\n> ";
+        assert_eq!(
+            infer_status_from_pane(content),
+            Some(crate::model::status::AgentState::Idle)
+        );
+    }
+
+    #[test]
+    fn infer_status_no_indicator() {
+        let content = "Working on something\nReading files...";
+        assert_eq!(infer_status_from_pane(content), None);
     }
 }
