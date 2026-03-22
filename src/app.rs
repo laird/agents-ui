@@ -473,7 +473,13 @@ impl App {
             }
             match key.code {
                 KeyCode::Enter => {
-                    if !self.repo_view.input.is_empty() {
+                    if self.repo_view.input.is_empty() {
+                        // Empty input → fullscreen manager view
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            let id = swarm.manager.id.clone();
+                            self.enter_agent_view(swarm_idx, id).await;
+                        }
+                    } else {
                         let input = self.repo_view.input.drain(..).collect::<String>();
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
                             let target = swarm.manager.tmux_target.clone();
