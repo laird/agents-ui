@@ -47,37 +47,29 @@ pub async fn send_keys(target: &str, input: &str) -> Result<()> {
 }
 
 /// Send a literal string to a tmux pane (no key name lookups, no Enter appended).
+/// Uses fire-and-forget spawn for lower latency on interactive keystrokes.
 pub async fn send_literal(target: &str, text: &str) -> Result<()> {
-    let output = Command::new("tmux")
+    Command::new("tmux")
         .args(["send-keys", "-t", target, "-l", text])
-        .output()
-        .await
-        .context("Failed to send literal keys to tmux pane")?;
-
-    if !output.status.success() {
-        anyhow::bail!(
-            "tmux send-keys literal failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .context("Failed to spawn tmux send-keys literal")?;
 
     Ok(())
 }
 
 /// Send a named key (e.g., "Enter", "BSpace", "C-c") to a tmux pane.
+/// Uses fire-and-forget spawn for lower latency on interactive keystrokes.
 pub async fn send_named_key(target: &str, key: &str) -> Result<()> {
-    let output = Command::new("tmux")
+    Command::new("tmux")
         .args(["send-keys", "-t", target, key])
-        .output()
-        .await
-        .context("Failed to send named key to tmux pane")?;
-
-    if !output.status.success() {
-        anyhow::bail!(
-            "tmux send-keys named failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .context("Failed to spawn tmux send-keys named")?;
 
     Ok(())
 }
