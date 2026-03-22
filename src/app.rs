@@ -323,9 +323,8 @@ impl App {
                         }
                     }
                 }
-                // Alt+f: file feedback as GitHub issue (global shortcut)
-                if c == 'f' {
-                    // Need a swarm context to send the gh command to manager
+                // Alt+a: jump to next agent needing attention (global shortcut)
+                if c == 'a' {
                     let swarm_idx = match &self.screen {
                         Screen::RepoView { swarm_idx } => Some(*swarm_idx),
                         Screen::AgentView { swarm_idx, .. } => Some(*swarm_idx),
@@ -333,7 +332,20 @@ impl App {
                         _ => None,
                     };
                     if let Some(idx) = swarm_idx {
-                        // Switch to RepoView and open issue creation flow
+                        self.jump_to_next_waiting(idx);
+                        return Ok(());
+                    }
+                }
+
+                // Alt+f: file feedback as GitHub issue (global shortcut)
+                if c == 'f' {
+                    let swarm_idx = match &self.screen {
+                        Screen::RepoView { swarm_idx } => Some(*swarm_idx),
+                        Screen::AgentView { swarm_idx, .. } => Some(*swarm_idx),
+                        Screen::ReposList if self.swarms.len() == 1 => Some(0),
+                        _ => None,
+                    };
+                    if let Some(idx) = swarm_idx {
                         self.screen = Screen::RepoView { swarm_idx: idx };
                         self.repo_view.focus = crate::ui::repo_view::RepoViewFocus::CreateIssue(
                             crate::ui::repo_view::CreateIssueState::SelectType,
