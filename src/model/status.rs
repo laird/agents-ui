@@ -29,6 +29,7 @@ impl std::fmt::Display for AgentState {
 /// Parsed status of an agent from its status file.
 #[derive(Debug, Clone)]
 pub struct AgentStatus {
+    #[allow(dead_code)] // Parsed for future use in status age display
     pub timestamp: Option<NaiveDateTime>,
     pub state: AgentState,
 }

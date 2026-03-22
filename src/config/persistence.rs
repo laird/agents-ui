@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+#[allow(dead_code)] // Persistence layer planned for swarm state save/restore
 /// Root configuration directory.
 pub fn config_dir() -> PathBuf {
     dirs::data_local_dir()
@@ -10,6 +11,7 @@ pub fn config_dir() -> PathBuf {
 }
 
 /// Persisted swarm configuration.
+#[allow(dead_code)]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SwarmState {
     pub repo_path: String,
@@ -19,6 +21,7 @@ pub struct SwarmState {
     pub num_workers: u32,
 }
 
+#[allow(dead_code)]
 /// Save swarm state to disk.
 pub fn save_swarm_state(project_name: &str, state: &SwarmState) -> Result<()> {
     let dir = config_dir().join("swarms").join(project_name);
@@ -28,6 +31,7 @@ pub fn save_swarm_state(project_name: &str, state: &SwarmState) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 /// Load swarm state from disk.
 pub fn load_swarm_state(project_name: &str) -> Result<Option<SwarmState>> {
     let path = config_dir()
@@ -42,6 +46,7 @@ pub fn load_swarm_state(project_name: &str) -> Result<Option<SwarmState>> {
     Ok(Some(state))
 }
 
+#[allow(dead_code)]
 /// List all saved swarm states.
 pub fn list_saved_swarms() -> Result<Vec<String>> {
     let dir = config_dir().join("swarms");
