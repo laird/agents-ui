@@ -556,6 +556,10 @@ impl App {
                         // Jump to next session waiting for input
                         self.jump_to_next_waiting(swarm_idx);
                     }
+                    KeyCode::Char('i') => {
+                        use crate::ui::repo_view::CreateIssueState;
+                        self.repo_view.focus = RepoViewFocus::CreateIssue(CreateIssueState::SelectType);
+                    }
                     _ => {}
                 }
             }
@@ -641,7 +645,87 @@ impl App {
                         // Jump to next session waiting for input
                         self.jump_to_next_waiting(swarm_idx);
                     }
+                    KeyCode::Char('i') => {
+                        use crate::ui::repo_view::CreateIssueState;
+                        self.repo_view.focus = RepoViewFocus::CreateIssue(CreateIssueState::SelectType);
+                    }
                     _ => {}
+                }
+            }
+            RepoViewFocus::CreateIssue(state) => {
+                use crate::ui::repo_view::{CreateIssueState, NewIssueType};
+                match state {
+                    CreateIssueState::SelectType => match key.code {
+                        KeyCode::Esc => {
+                            self.repo_view.focus = RepoViewFocus::Workers;
+                        }
+                        KeyCode::Char('b') => {
+                            self.repo_view.focus = RepoViewFocus::CreateIssue(
+                                CreateIssueState::EnterTitle { issue_type: NewIssueType::Bug, title: String::new() },
+                            );
+                        }
+                        KeyCode::Char('e') => {
+                            self.repo_view.focus = RepoViewFocus::CreateIssue(
+                                CreateIssueState::EnterTitle { issue_type: NewIssueType::Enhancement, title: String::new() },
+                            );
+                        }
+                        KeyCode::Char('i') => {
+                            self.repo_view.focus = RepoViewFocus::CreateIssue(
+                                CreateIssueState::EnterTitle { issue_type: NewIssueType::Plain, title: String::new() },
+                            );
+                        }
+                        _ => {}
+                    },
+                    CreateIssueState::EnterTitle { issue_type, title } => match key.code {
+                        KeyCode::Esc => {
+                            self.repo_view.focus = RepoViewFocus::CreateIssue(CreateIssueState::SelectType);
+                        }
+                        KeyCode::Enter => {
+                            let trimmed = title.trim();
+                            if !trimmed.is_empty() {
+                                let escaped = trimmed.replace('"', r#"\""#);
+                                let label_flag = match issue_type {
+                                    NewIssueType::Bug => " --label \"bug\"",
+                                    NewIssueType::Enhancement => " --label \"enhancement\"",
+                                    NewIssueType::Plain => "",
+                                };
+                                let cmd = format!(
+                                    "gh issue create{} --title \"{}\" --body \"Created from agents-ui\"",
+                                    label_flag, escaped
+                                );
+                                if let Some(swarm) = self.swarms.get(swarm_idx) {
+                                    let target = swarm.manager.tmux_target.clone();
+                                    if let Err(e) = self.adapter.send_input(&target, &cmd).await {
+                                        tracing::warn!("Failed to send issue creation: {e}");
+                                    }
+                                    let type_label = match issue_type {
+                                        NewIssueType::Bug => "bug",
+                                        NewIssueType::Enhancement => "enhancement",
+                                        NewIssueType::Plain => "issue",
+                                    };
+                                    self.status_message = Some(format!("Creating {}: {}", type_label, trimmed));
+                                    // Trigger issue refresh after a delay
+                                    self.issue_refresh_counter = 232;
+                                }
+                                self.repo_view.focus = RepoViewFocus::Issues;
+                            }
+                        }
+                        KeyCode::Char(c) => {
+                            let mut t = title.clone();
+                            t.push(c);
+                            self.repo_view.focus = RepoViewFocus::CreateIssue(
+                                CreateIssueState::EnterTitle { issue_type: issue_type.clone(), title: t },
+                            );
+                        }
+                        KeyCode::Backspace => {
+                            let mut t = title.clone();
+                            t.pop();
+                            self.repo_view.focus = RepoViewFocus::CreateIssue(
+                                CreateIssueState::EnterTitle { issue_type: issue_type.clone(), title: t },
+                            );
+                        }
+                        _ => {}
+                    },
                 }
             }
         }

@@ -15,6 +15,20 @@ pub enum RepoViewFocus {
     Workers,
     Issues,
     ManagerInput,
+    CreateIssue(CreateIssueState),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CreateIssueState {
+    SelectType,
+    EnterTitle { issue_type: NewIssueType, title: String },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum NewIssueType {
+    Bug,
+    Enhancement,
+    Plain,
 }
 
 /// A notification banner shown temporarily.
@@ -401,7 +415,7 @@ impl RepoView {
     }
 
     fn render_help(&self, f: &mut Frame, area: Rect) {
-        let help = match self.focus {
+        let help = match &self.focus {
             RepoViewFocus::Workers => Paragraph::new(Line::from(vec![
                 Span::styled(" Enter", theme::title_style()),
                 Span::styled(" drill in  ", theme::help_style()),
@@ -409,6 +423,8 @@ impl RepoView {
                 Span::styled(" peek  ", theme::help_style()),
                 Span::styled("Tab", theme::title_style()),
                 Span::styled(" issues  ", theme::help_style()),
+                Span::styled("i", theme::title_style()),
+                Span::styled(" new issue  ", theme::help_style()),
                 Span::styled("n", theme::waiting_style()),
                 Span::styled(" next waiting  ", theme::help_style()),
                 Span::styled("m", theme::title_style()),
@@ -419,12 +435,12 @@ impl RepoView {
             RepoViewFocus::Issues => Paragraph::new(Line::from(vec![
                 Span::styled(" Enter", theme::title_style()),
                 Span::styled(" assign  ", theme::help_style()),
+                Span::styled("i", theme::title_style()),
+                Span::styled(" new issue  ", theme::help_style()),
                 Span::styled("Tab", theme::title_style()),
                 Span::styled(" workers  ", theme::help_style()),
                 Span::styled("0-4", theme::title_style()),
                 Span::styled(" filter  ", theme::help_style()),
-                Span::styled("↑/↓", theme::title_style()),
-                Span::styled(" select  ", theme::help_style()),
                 Span::styled("r", theme::title_style()),
                 Span::styled(" refresh  ", theme::help_style()),
                 Span::styled("Esc", theme::title_style()),
@@ -435,6 +451,35 @@ impl RepoView {
                 Span::styled("Ctrl+]", theme::title_style()),
                 Span::styled(" workers", theme::help_style()),
             ])),
+            RepoViewFocus::CreateIssue(state) => match state {
+                CreateIssueState::SelectType => Paragraph::new(Line::from(vec![
+                    Span::styled(" New Issue — ", theme::title_style()),
+                    Span::styled("b", theme::attention_style()),
+                    Span::styled("ug  ", theme::help_style()),
+                    Span::styled("e", theme::attention_style()),
+                    Span::styled("nhancement  ", theme::help_style()),
+                    Span::styled("i", theme::attention_style()),
+                    Span::styled("ssue (plain)  ", theme::help_style()),
+                    Span::styled("Esc", theme::title_style()),
+                    Span::styled(" cancel", theme::help_style()),
+                ])),
+                CreateIssueState::EnterTitle { issue_type, title } => {
+                    let type_label = match issue_type {
+                        NewIssueType::Bug => "Bug",
+                        NewIssueType::Enhancement => "Enhancement",
+                        NewIssueType::Plain => "Issue",
+                    };
+                    Paragraph::new(Line::from(vec![
+                        Span::styled(format!(" {type_label} title: "), theme::title_style()),
+                        Span::styled(title.as_str(), ratatui::style::Style::default().fg(ratatui::style::Color::White)),
+                        Span::styled("█", ratatui::style::Style::default().fg(ratatui::style::Color::White)),
+                        Span::styled("  Enter", theme::title_style()),
+                        Span::styled(" create  ", theme::help_style()),
+                        Span::styled("Esc", theme::title_style()),
+                        Span::styled(" back", theme::help_style()),
+                    ]))
+                }
+            },
         };
         f.render_widget(help, area);
     }
