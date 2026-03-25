@@ -56,6 +56,8 @@ pub struct App {
     last_esc: Option<std::time::Instant>,
     /// Available repos (git directories found nearby) that don't have active swarms.
     pub available_repos: Vec<PathBuf>,
+    /// Last time we auto-dispatched /monitor-workers (for debounce).
+    auto_dispatch_last: Option<std::time::Instant>,
 }
 
 impl App {
@@ -93,6 +95,7 @@ impl App {
             status_message: None,
             last_esc: None,
             available_repos: Vec::new(),
+            auto_dispatch_last: None,
         };
 
         // Scan for available repos (git directories in cwd or children)
@@ -180,6 +183,8 @@ impl App {
             Event::Tick => {
                 // Periodic refresh — status files could be re-read here
                 self.refresh_statuses();
+                // Auto-dispatch: send /monitor-workers to manager when workers are idle
+                self.check_auto_dispatch().await;
             }
             Event::PaneOutput { agent_id, content } => {
                 // Update the agent's pane content
@@ -806,6 +811,58 @@ impl App {
     }
 
     /// Refresh agent statuses from status files and pane content.
+    /// Check if any worker is idle and auto-dispatch /monitor-workers to the manager.
+    /// Debounced to at most once every 3 minutes.
+    async fn check_auto_dispatch(&mut self) {
+        use crate::model::status::AgentState;
+
+        const DEBOUNCE_SECS: u64 = 180; // 3 minutes
+
+        // Check debounce
+        if let Some(last) = self.auto_dispatch_last {
+            if last.elapsed() < std::time::Duration::from_secs(DEBOUNCE_SECS) {
+                return;
+            }
+        }
+
+        for swarm in &self.swarms {
+            // Check if any worker is idle
+            let has_idle_worker = swarm
+                .workers
+                .iter()
+                .any(|w| matches!(w.status.state, AgentState::Idle));
+
+            if !has_idle_worker {
+                continue;
+            }
+
+            // Check that the manager is not already busy with /monitor-workers
+            let manager_busy = swarm
+                .manager
+                .pane_content
+                .to_lowercase()
+                .contains("monitor-workers");
+
+            if manager_busy {
+                continue;
+            }
+
+            // Send /monitor-workers to the manager pane
+            let target = &swarm.manager.tmux_target;
+            tracing::info!(
+                "Auto-dispatching /monitor-workers to manager (idle worker detected in {})",
+                swarm.project_name
+            );
+            if let Err(e) = crate::tmux::proxy::send_keys(target, "/monitor-workers").await {
+                tracing::warn!("Failed to auto-dispatch /monitor-workers: {e}");
+            }
+            self.auto_dispatch_last = Some(std::time::Instant::now());
+            self.status_message =
+                Some("Auto-dispatched /monitor-workers (idle worker detected)".to_string());
+            return; // Only dispatch once per tick
+        }
+    }
+
     fn refresh_statuses(&mut self) {
         for swarm in &mut self.swarms {
             // Refresh all agents (manager + workers)
