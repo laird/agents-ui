@@ -11,6 +11,7 @@ use crate::scripts::launcher;
 use crate::tmux::proxy;
 use crate::tui::Tui;
 use crate::ui::agent_view::AgentView;
+use crate::ui::issue_detail::IssueDetailView;
 use crate::ui::repo_view::RepoView;
 use crate::ui::repos_list::ReposListView;
 
@@ -22,6 +23,8 @@ pub enum Screen {
     NewSwarm { field: NewSwarmField },
     RepoView { swarm_idx: usize },
     AgentView { swarm_idx: usize, agent_id: String },
+    /// View full issue details (body, labels, state).
+    IssueDetail { swarm_idx: usize },
 }
 
 #[derive(Debug, Clone)]
@@ -58,6 +61,8 @@ pub struct App {
     pub available_repos: Vec<PathBuf>,
     /// Last time we auto-dispatched /monitor-workers (for debounce).
     auto_dispatch_last: Option<std::time::Instant>,
+    /// Issue detail view state.
+    pub issue_detail_view: Option<IssueDetailView>,
 }
 
 impl App {
@@ -96,6 +101,7 @@ impl App {
             last_esc: None,
             available_repos: Vec::new(),
             auto_dispatch_last: None,
+            issue_detail_view: None,
         };
 
         // Scan for available repos (git directories in cwd or children)
@@ -163,6 +169,11 @@ impl App {
                                 let agent = agent.clone();
                                 self.agent_view.render(f, area, &agent);
                             }
+                        }
+                    }
+                    Screen::IssueDetail { .. } => {
+                        if let Some(ref view) = self.issue_detail_view {
+                            view.render(f, area);
                         }
                     }
                 }
@@ -276,6 +287,9 @@ impl App {
             } => {
                 self.handle_agent_view_key(key, *swarm_idx, agent_id.clone())
                     .await?
+            }
+            Screen::IssueDetail { swarm_idx } => {
+                self.handle_issue_detail_key(key, *swarm_idx).await?
             }
         }
 
@@ -612,6 +626,24 @@ impl App {
                         }
                     }
                 }
+                KeyCode::Char('i') => {
+                    // View the issue that the selected worker is working on
+                    if let Some(swarm) = self.swarms.get(swarm_idx) {
+                        if let Some(worker_idx) = self.repo_view.selected_worker() {
+                            if let Some(worker) = swarm.workers.get(worker_idx) {
+                                if let crate::model::status::AgentState::Working {
+                                    issue: Some(n),
+                                } = &worker.status.state
+                                {
+                                    self.open_issue_detail(*n, swarm_idx).await;
+                                } else {
+                                    self.status_message =
+                                        Some("Selected worker has no active issue".to_string());
+                                }
+                            }
+                        }
+                    }
+                }
                 KeyCode::Char('d') => {
                     // Shut down the selected worker's session
                     if let Some(swarm) = self.swarms.get(swarm_idx) {
@@ -778,6 +810,94 @@ impl App {
     }
 
     /// Start pane watchers for all agents in all swarms.
+    async fn handle_issue_detail_key(&mut self, key: KeyEvent, swarm_idx: usize) -> Result<()> {
+        match key.code {
+            KeyCode::Esc | KeyCode::Backspace => {
+                self.issue_detail_view = None;
+                self.screen = Screen::RepoView { swarm_idx };
+            }
+            KeyCode::Char('q') => {
+                self.running = false;
+            }
+            KeyCode::Char('g') => {
+                // Open issue in browser
+                if let Some(ref view) = self.issue_detail_view {
+                    let _ = tokio::process::Command::new("gh")
+                        .args(["issue", "view", "--web", &view.issue_number.to_string()])
+                        .spawn();
+                }
+            }
+            KeyCode::PageUp => {
+                if let Some(ref mut view) = self.issue_detail_view {
+                    view.scroll_up(10);
+                }
+            }
+            KeyCode::PageDown => {
+                if let Some(ref mut view) = self.issue_detail_view {
+                    view.scroll_down(10);
+                }
+            }
+            KeyCode::Up => {
+                if let Some(ref mut view) = self.issue_detail_view {
+                    view.scroll_up(1);
+                }
+            }
+            KeyCode::Down => {
+                if let Some(ref mut view) = self.issue_detail_view {
+                    view.scroll_down(1);
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Open an issue detail view by fetching issue data from GitHub.
+    async fn open_issue_detail(&mut self, issue_number: u32, swarm_idx: usize) {
+        // Fetch issue details from GitHub
+        let output = tokio::process::Command::new("gh")
+            .args([
+                "issue",
+                "view",
+                &issue_number.to_string(),
+                "--json",
+                "number,title,body,labels,state",
+            ])
+            .output()
+            .await;
+
+        match output {
+            Ok(out) if out.status.success() => {
+                if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&out.stdout) {
+                    let title = json["title"].as_str().unwrap_or("").to_string();
+                    let body = json["body"].as_str().unwrap_or("").to_string();
+                    let state = json["state"].as_str().unwrap_or("OPEN").to_string();
+                    let labels: Vec<String> = json["labels"]
+                        .as_array()
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|l| l["name"].as_str().map(|s| s.to_string()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
+                    self.issue_detail_view = Some(IssueDetailView::new(
+                        issue_number,
+                        title,
+                        body,
+                        labels,
+                        state,
+                    ));
+                    self.screen = Screen::IssueDetail { swarm_idx };
+                }
+            }
+            _ => {
+                self.status_message =
+                    Some(format!("Failed to fetch issue #{issue_number}"));
+            }
+        }
+    }
+
     fn start_all_pane_watchers(&mut self) {
         // Cancel existing watchers
         for handle in self.pane_watchers.drain(..) {
