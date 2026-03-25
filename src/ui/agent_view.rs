@@ -35,15 +35,37 @@ impl AgentView {
         };
         let id_label = format!("  {} ", agent.id);
         let role_label = format!("[{role}] ");
-        let status_label = agent.status.state.to_string();
         let path_label = format!("  {}", agent.worktree_path.display());
 
-        let title = Paragraph::new(Line::from(vec![
+        // Build status spans with the issue number highlighted separately
+        let mut title_spans = vec![
             Span::styled(id_label, theme::title_style()),
             Span::styled(role_label, theme::help_style()),
-            Span::styled(status_label, theme::status_style(&agent.status.state)),
-            Span::styled(path_label, theme::help_style()),
-        ]))
+        ];
+        match &agent.status.state {
+            crate::model::status::AgentState::Working { issue: Some(n) } => {
+                title_spans.push(Span::styled(
+                    "Working ",
+                    theme::status_style(&agent.status.state),
+                ));
+                title_spans.push(Span::styled(
+                    format!("#{n}"),
+                    theme::title_style(),
+                ));
+            }
+            state => {
+                title_spans.push(Span::styled(
+                    state.to_string(),
+                    theme::status_style(&agent.status.state),
+                ));
+            }
+        }
+        if agent.waiting_for_input {
+            title_spans.push(Span::styled(" NEEDS INPUT", theme::waiting_style()));
+        }
+        title_spans.push(Span::styled(path_label, theme::help_style()));
+
+        let title = Paragraph::new(Line::from(title_spans))
         .block(Block::default().borders(Borders::BOTTOM));
         f.render_widget(title, chunks[0]);
 
