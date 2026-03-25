@@ -427,6 +427,13 @@ impl ClaudeAdapter {
             }
         }
 
+        // Sort workers by index
+        workers.sort_by_key(|w| {
+            w.id.strip_prefix("worker-")
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(0)
+        });
+
         Ok(Swarm {
             repo_path,
             project_name,
@@ -661,7 +668,7 @@ impl AgentRuntime for ClaudeAdapter {
                     Err(e) => tracing::warn!("Failed to build swarm from {session_name}: {e}"),
                 }
             } else {
-                tracing::warn!("Could not determine repo path for session {session_name}");
+                tracing::warn!("Could not determine repo path for project {project_name}");
             }
         }
 

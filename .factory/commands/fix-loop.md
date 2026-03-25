@@ -1,0 +1,1 @@
+/Users/Laird.Popkin/src/agents/plugins/autocoder/commands/fix-loop.md
