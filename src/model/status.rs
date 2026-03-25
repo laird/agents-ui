@@ -115,3 +115,162 @@ pub fn read_status_file(path: &Path) -> AgentStatus {
         Err(_) => AgentStatus::default(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- parse_state tests ---
+
+    #[test]
+    fn parse_state_starting() {
+        assert_eq!(parse_state("Starting"), AgentState::Starting);
+        assert_eq!(parse_state("starting up"), AgentState::Starting);
+    }
+
+    #[test]
+    fn parse_state_working_no_issue() {
+        assert_eq!(
+            parse_state("Working"),
+            AgentState::Working { issue: None }
+        );
+    }
+
+    #[test]
+    fn parse_state_working_with_issue() {
+        assert_eq!(
+            parse_state("Working on #42"),
+            AgentState::Working { issue: Some(42) }
+        );
+    }
+
+    #[test]
+    fn parse_state_fixing() {
+        assert_eq!(
+            parse_state("Fixing issue #7"),
+            AgentState::Working { issue: Some(7) }
+        );
+    }
+
+    #[test]
+    fn parse_state_idle() {
+        assert_eq!(parse_state("idle"), AgentState::Idle);
+        assert_eq!(parse_state("IDLE_NO_WORK_AVAILABLE"), AgentState::Idle);
+    }
+
+    #[test]
+    fn parse_state_completed() {
+        assert_eq!(
+            parse_state("Completed all tasks"),
+            AgentState::Completed {
+                detail: "Completed all tasks".to_string()
+            }
+        );
+        assert_eq!(
+            parse_state("Done: merged PR"),
+            AgentState::Completed {
+                detail: "Done: merged PR".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn parse_state_stopped() {
+        assert_eq!(parse_state("Stopped"), AgentState::Stopped);
+    }
+
+    #[test]
+    fn parse_state_unknown() {
+        assert_eq!(
+            parse_state("something else"),
+            AgentState::Unknown("something else".to_string())
+        );
+    }
+
+    // --- extract_issue_number tests ---
+
+    #[test]
+    fn extract_issue_hash_format() {
+        assert_eq!(extract_issue_number("Working on #42"), Some(42));
+        assert_eq!(extract_issue_number("#1"), Some(1));
+    }
+
+    #[test]
+    fn extract_issue_word_format() {
+        assert_eq!(extract_issue_number("fixing issue 99"), Some(99));
+        assert_eq!(extract_issue_number("issue #5 in progress"), Some(5));
+    }
+
+    #[test]
+    fn extract_issue_none() {
+        assert_eq!(extract_issue_number("no issue here"), None);
+        assert_eq!(extract_issue_number("working"), None);
+        assert_eq!(extract_issue_number(""), None);
+    }
+
+    // --- parse_status_line tests ---
+
+    #[test]
+    fn parse_status_line_with_timestamp() {
+        let status = parse_status_line("2024-01-15 10:30:00\tworking issue #42");
+        assert!(status.timestamp.is_some());
+        assert_eq!(
+            status.state,
+            AgentState::Working { issue: Some(42) }
+        );
+    }
+
+    #[test]
+    fn parse_status_line_without_timestamp() {
+        let status = parse_status_line("idle");
+        assert!(status.timestamp.is_none());
+        assert_eq!(status.state, AgentState::Idle);
+    }
+
+    #[test]
+    fn parse_status_line_bad_timestamp() {
+        let status = parse_status_line("not-a-date\tStarting");
+        assert!(status.timestamp.is_none());
+        assert_eq!(status.state, AgentState::Starting);
+    }
+
+    #[test]
+    fn parse_status_line_empty() {
+        let status = parse_status_line("");
+        // Empty string becomes Unknown("")
+        matches!(status.state, AgentState::Unknown(_));
+    }
+
+    // --- AgentStatus default ---
+
+    #[test]
+    fn agent_status_default() {
+        let d = AgentStatus::default();
+        assert!(d.timestamp.is_none());
+        assert!(matches!(d.state, AgentState::Unknown(_)));
+    }
+
+    // --- Display ---
+
+    #[test]
+    fn agent_state_display() {
+        assert_eq!(AgentState::Starting.to_string(), "Starting");
+        assert_eq!(
+            AgentState::Working { issue: Some(5) }.to_string(),
+            "Working #5"
+        );
+        assert_eq!(
+            AgentState::Working { issue: None }.to_string(),
+            "Working"
+        );
+        assert_eq!(AgentState::Idle.to_string(), "Idle");
+        assert_eq!(
+            AgentState::Completed {
+                detail: "done".into()
+            }
+            .to_string(),
+            "Done: done"
+        );
+        assert_eq!(AgentState::Stopped.to_string(), "Stopped");
+    }
+}
