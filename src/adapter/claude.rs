@@ -127,6 +127,9 @@ impl AgentRuntime for ClaudeAdapter {
             script_path.display()
         );
 
+        // Ensure gh is authenticated as the correct user for this repo
+        ensure_gh_auth_for_repo(&config.repo_path).await;
+
         // Launch the script in a detached manner.
         // start-parallel-agents.sh ends with `tmux attach`, so we spawn it
         // in the background and wait for the session to appear.
@@ -194,6 +197,9 @@ impl AgentRuntime for ClaudeAdapter {
             let repo_path = find_repo_path(&project_name).await;
 
             if let Some(repo_path) = repo_path {
+                // Ensure gh is authenticated as the correct user for this repo
+                ensure_gh_auth_for_repo(&repo_path).await;
+
                 // Resize discovered session to match current terminal
                 if let Err(e) = session::resize_session_to_terminal(&session_name).await {
                     tracing::warn!("Failed to resize session {session_name}: {e}");
@@ -586,6 +592,73 @@ impl AgentRuntime for ClaudeAdapter {
         }
 
         Ok(())
+    }
+}
+
+/// Detect the GitHub owner of a repo from its git remote URL and switch
+/// `gh auth` to a matching account if one is available.
+///
+/// This handles the case where a repo is owned by a different GitHub account
+/// than the currently active `gh` CLI profile.
+async fn ensure_gh_auth_for_repo(repo_path: &Path) {
+    // Get the remote URL
+    let remote = match Command::new("git")
+        .args(["remote", "get-url", "origin"])
+        .current_dir(repo_path)
+        .output()
+        .await
+    {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        _ => return,
+    };
+
+    // Extract owner from URL patterns:
+    // https://github.com/OWNER/REPO.git
+    // git@github.com:OWNER/REPO.git
+    let owner = if let Some(rest) = remote.strip_prefix("https://github.com/") {
+        rest.split('/').next()
+    } else if let Some(rest) = remote.strip_prefix("git@github.com:") {
+        rest.split('/').next()
+    } else {
+        None
+    };
+
+    let owner = match owner {
+        Some(o) if !o.is_empty() => o.to_string(),
+        _ => return,
+    };
+
+    // Check current gh user
+    let current_user = match Command::new("gh")
+        .args(["api", "user", "--jq", ".login"])
+        .output()
+        .await
+    {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        _ => return,
+    };
+
+    if current_user == owner {
+        return; // Already correct
+    }
+
+    // Try to switch to the repo owner's account
+    tracing::info!("Switching gh auth from {current_user} to {owner} for repo at {}", repo_path.display());
+    match Command::new("gh")
+        .args(["auth", "switch", "--user", &owner])
+        .output()
+        .await
+    {
+        Ok(o) if o.status.success() => {
+            tracing::info!("Successfully switched gh auth to {owner}");
+        }
+        Ok(o) => {
+            let err = String::from_utf8_lossy(&o.stderr);
+            tracing::warn!("Failed to switch gh auth to {owner}: {err}");
+        }
+        Err(e) => {
+            tracing::warn!("Failed to run gh auth switch: {e}");
+        }
     }
 }
 
