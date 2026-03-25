@@ -63,6 +63,14 @@ pub fn waiting_style() -> Style {
         .add_modifier(Modifier::BOLD)
 }
 
+/// Inverted style for sessions waiting for input — high-visibility row highlight.
+pub fn waiting_inverted_style() -> Style {
+    Style::default()
+        .bg(Color::Magenta)
+        .fg(Color::White)
+        .add_modifier(Modifier::BOLD)
+}
+
 pub fn active_filter_style() -> Style {
     Style::default()
         .fg(Color::Cyan)
