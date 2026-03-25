@@ -187,8 +187,8 @@ impl App {
             return Ok(());
         }
 
-        // Global: Alt+a jumps to next agent needing attention
-        if key.modifiers.contains(KeyModifiers::ALT) && key.code == KeyCode::Char('a') {
+        // Global: F1 jumps to next agent needing attention
+        if key.code == KeyCode::F(1) {
             if let Some((swarm_idx, agent_id)) = self.find_next_attention_agent() {
                 self.enter_agent_view(swarm_idx, agent_id).await;
             }
@@ -470,8 +470,8 @@ impl App {
             }
         } else {
             // Manager session focused (default) — typing goes to input
-            // Alt+0 → back to repos list
-            if key.code == KeyCode::Char('0') && key.modifiers.contains(KeyModifiers::ALT) {
+            // Esc → back to repos list
+            if key.code == KeyCode::Esc {
                 self.screen = Screen::ReposList;
                 return Ok(());
             }
@@ -519,8 +519,8 @@ impl App {
         swarm_idx: usize,
         agent_id: String,
     ) -> Result<()> {
-        // Alt+0 → back to repo view
-        if key.code == KeyCode::Char('0') && key.modifiers.contains(KeyModifiers::ALT) {
+        // Esc → back to repo view
+        if key.code == KeyCode::Esc {
             self.screen = Screen::RepoView { swarm_idx };
             return Ok(());
         }
