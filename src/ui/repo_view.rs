@@ -335,6 +335,9 @@ impl RepoView {
     }
 
     fn render_issues_column(&mut self, f: &mut Frame, area: Rect, swarm: &Swarm) {
+        // Calculate dynamic max title width: panel width minus borders, priority, #num, type, working labels
+        // Approx overhead: 2 (borders) + 3 (priority) + 6 (#NNN ) + 13 ( enhancement) + 10 ( [working]) = ~34
+        let max_title_width = (area.width as usize).saturating_sub(36).max(10);
         let (p0, p1, p2, p3) = swarm.issue_cache.priority_counts();
         let total = swarm.issue_cache.issues.len();
 
@@ -383,7 +386,7 @@ impl RepoView {
                     theme::priority_style(&issue.priority),
                 ),
                 Span::styled(format!("#{} ", issue.number), theme::title_style()),
-                Span::raw(truncate_str(&issue.title, 30)),
+                Span::raw(truncate_str(&issue.title, max_title_width)),
                 Span::styled(
                     format!(" {type_label}"),
                     theme::help_style(),
