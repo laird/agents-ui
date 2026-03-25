@@ -346,23 +346,70 @@ impl ClaudeAdapter {
         let content = proxy::capture_pane(&self.transport, &agent.tmux_target, 80)
             .await
             .unwrap_or_default();
-        if pane_needs_runtime_launch(&content) {
-            tracing::info!("Launching {} in existing pane {}", runtime, agent.tmux_target);
-            self.launch_agent_in_pane(&agent.tmux_target, session_name, runtime)
-                .await?;
-            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-            if let Some(cmd) = self.bootstrap_command(runtime, agent).await {
-                tracing::info!("Sending bootstrap command to {}: {}", agent.id, cmd);
-                proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
+
+        match classify_pane_state(&content) {
+            PaneState::NeedsLaunch => {
+                tracing::info!("Launching {} in existing pane {}", runtime, agent.tmux_target);
+                self.launch_agent_in_pane(&agent.tmux_target, session_name, runtime)
+                    .await?;
+                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                if let Some(cmd) = self.bootstrap_command(runtime, agent).await {
+                    tracing::info!("Sending bootstrap command to {}: {}", agent.id, cmd);
+                    proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
+                }
             }
-        } else if pane_agent_is_idle(&content) {
-            // Agent is running but idle — send bootstrap command
-            if let Some(cmd) = self.bootstrap_command(runtime, agent).await {
-                tracing::info!("Agent {} is idle, sending bootstrap: {}", agent.id, cmd);
-                proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
+            PaneState::AgentIdle => {
+                if let Some(cmd) = self.bootstrap_command(runtime, agent).await {
+                    tracing::info!("Agent {} is idle, sending bootstrap: {}", agent.id, cmd);
+                    proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
+                }
             }
-        } else {
-            tracing::info!("Agent {} already active in {}", agent.id, agent.tmux_target);
+            PaneState::AgentBusy => {
+                tracing::info!("Agent {} already active in {}", agent.id, agent.tmux_target);
+            }
+            PaneState::Unknown => {
+                // Can't tell from pane content — probe by sending Enter and re-reading
+                tracing::info!("Probing pane {} for {}", agent.tmux_target, agent.id);
+                proxy::send_keys_no_enter(&self.transport, &agent.tmux_target, "").await.ok();
+                // Send a bare Enter to elicit a prompt
+                self.transport.output(
+                    "tmux",
+                    &[
+                        "send-keys".to_string(),
+                        "-t".to_string(),
+                        agent.tmux_target.clone(),
+                        "Enter".to_string(),
+                    ],
+                    None,
+                ).await.ok();
+                tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+
+                let probed = proxy::capture_pane(&self.transport, &agent.tmux_target, 80)
+                    .await
+                    .unwrap_or_default();
+
+                match classify_pane_state(&probed) {
+                    PaneState::NeedsLaunch => {
+                        tracing::info!("Probe: shell detected in {}, launching {}", agent.tmux_target, runtime);
+                        self.launch_agent_in_pane(&agent.tmux_target, session_name, runtime)
+                            .await?;
+                        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                        if let Some(cmd) = self.bootstrap_command(runtime, agent).await {
+                            tracing::info!("Sending bootstrap command to {}: {}", agent.id, cmd);
+                            proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
+                        }
+                    }
+                    PaneState::AgentIdle => {
+                        if let Some(cmd) = self.bootstrap_command(runtime, agent).await {
+                            tracing::info!("Probe: agent {} is idle, sending bootstrap: {}", agent.id, cmd);
+                            proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
+                        }
+                    }
+                    _ => {
+                        tracing::info!("Probe: agent {} state unclear, leaving alone", agent.id);
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -859,82 +906,111 @@ impl AgentRuntime for ClaudeAdapter {
     }
 }
 
-fn pane_needs_runtime_launch(content: &str) -> bool {
+/// Classified state of a tmux pane.
+#[derive(Debug, Clone, PartialEq)]
+enum PaneState {
+    /// Shell prompt visible — no agent running, needs launch
+    NeedsLaunch,
+    /// Agent is running and actively working
+    AgentBusy,
+    /// Agent is running but idle at prompt
+    AgentIdle,
+    /// Can't determine state from content alone — need to probe
+    Unknown,
+}
+
+/// Classify pane state by analyzing recent output lines.
+///
+/// An AI agent session looks very different from a bare shell:
+/// - Shell: ends with `%`, `$`, `#` prompt chars
+/// - Claude: shows `❯` prompt, `bypass permissions` status bar, thinking/working indicators
+/// - Codex: shows `›` prompt, `gpt-` model indicator
+/// - Active agents show "thinking", "working", "reading", "writing", etc.
+/// - Idle agents show "how can i help", `>` or `❯` prompt with no activity
+fn classify_pane_state(content: &str) -> PaneState {
     let stripped = strip_ansi(content);
     let non_empty_lines: Vec<&str> = stripped
         .lines()
         .rev()
         .filter(|line| !line.trim().is_empty())
         .collect();
-    let Some(last_line) = non_empty_lines.first() else {
-        return true;
-    };
 
-    let trimmed = last_line.trim();
-    if trimmed.is_empty() {
-        return true;
+    // Empty pane — either shell hasn't loaded or pane was just created
+    if non_empty_lines.is_empty() {
+        return PaneState::Unknown;
     }
 
-    // Check all recent non-empty lines (not just the last) for agent indicators,
-    // since the status bar may appear after the prompt line.
-    for line in non_empty_lines.iter().take(5) {
+    let mut saw_agent_indicator = false;
+    let mut saw_idle_prompt = false;
+    let mut saw_busy_indicator = false;
+
+    for line in non_empty_lines.iter().take(8) {
         let lower = line.trim().to_lowercase();
+
+        // Busy agent indicators — actively working
         if lower.contains("thinking")
             || lower.contains("working")
             || lower.contains("reading")
             || lower.contains("writing")
             || lower.contains("analyzing")
-            || lower.contains("how can i help")
-            || lower.contains("what would you like")
+            || lower.contains("esc to interrupt")
+        {
+            saw_busy_indicator = true;
+        }
+
+        // Agent UI elements (proves an agent is running, but not whether busy/idle)
+        if lower.contains("bypass permissions")
+            || lower.contains("permissions on")
+            || lower.contains("permissions off")
+            || lower.contains("gpt-")
             || lower.contains("codex")
             || lower.contains("claude")
             || lower.contains("gemini")
             || lower.contains("droid")
-            || lower.contains("bypass permissions")
-            || lower.contains("permissions on")
-            || lower.contains("permissions off")
-            || lower.contains("gpt-")
-            || lower.starts_with('>')
-            || lower.starts_with('\u{276f}') // ❯ unicode prompt
-            || lower.starts_with('\u{23f5}') // ⏵ unicode play symbol
+            || lower.starts_with('\u{23f5}') // ⏵ (Claude/Codex status bar)
         {
-            return false;
+            saw_agent_indicator = true;
         }
-    }
 
-    trimmed.ends_with('%') || trimmed.ends_with('$') || trimmed.ends_with('#')
-}
-
-/// Check if an agent is running but idle (at the prompt, not actively working).
-fn pane_agent_is_idle(content: &str) -> bool {
-    let stripped = strip_ansi(content);
-    let non_empty_lines: Vec<&str> = stripped
-        .lines()
-        .rev()
-        .filter(|line| !line.trim().is_empty())
-        .collect();
-
-    for line in non_empty_lines.iter().take(5) {
-        let lower = line.trim().to_lowercase();
-        // Active work indicators — agent is busy, don't interrupt
-        if lower.contains("thinking")
-            || lower.contains("working")
-            || lower.contains("reading")
-            || lower.contains("writing")
-            || lower.contains("analyzing")
-        {
-            return false;
-        }
-        // Idle prompt indicators — agent is waiting for input
+        // Idle agent prompt (waiting for user input)
         if lower.contains("how can i help")
             || lower.contains("what would you like")
             || lower.starts_with('>')
-            || lower.starts_with('\u{276f}') // ❯
+            || lower.starts_with('\u{276f}') // ❯ (Claude prompt)
+            || lower.starts_with('\u{203a}') // › (Codex prompt)
         {
-            return true;
+            saw_idle_prompt = true;
         }
     }
-    false
+
+    // Decide based on what we found
+    if saw_busy_indicator {
+        return PaneState::AgentBusy;
+    }
+    if saw_idle_prompt || (saw_agent_indicator && !saw_busy_indicator) {
+        return PaneState::AgentIdle;
+    }
+
+    // Check for shell prompt (bare command line, no agent)
+    if let Some(last_line) = non_empty_lines.first() {
+        let trimmed = last_line.trim();
+        if trimmed.ends_with('%') || trimmed.ends_with('$') || trimmed.ends_with('#') {
+            return PaneState::NeedsLaunch;
+        }
+    }
+
+    PaneState::Unknown
+}
+
+// Legacy wrappers used by tests
+#[cfg(test)]
+fn pane_needs_runtime_launch(content: &str) -> bool {
+    classify_pane_state(content) == PaneState::NeedsLaunch
+}
+
+#[cfg(test)]
+fn pane_agent_is_idle(content: &str) -> bool {
+    classify_pane_state(content) == PaneState::AgentIdle
 }
 
 fn manager_bootstrap_cmd(runtime: &AgentType) -> Option<String> {
@@ -1077,43 +1153,64 @@ fn strip_ansi(content: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        extract_issue_number_from_branch, generic_worker_bootstrap_cmd, manager_bootstrap_cmd,
-        pane_agent_is_idle, pane_needs_runtime_launch, worker_dispatch_cmd,
+        classify_pane_state, extract_issue_number_from_branch, generic_worker_bootstrap_cmd,
+        manager_bootstrap_cmd, pane_agent_is_idle, pane_needs_runtime_launch,
+        worker_dispatch_cmd, PaneState,
     };
     use crate::model::swarm::AgentType;
 
     #[test]
-    fn empty_pane_needs_launch() {
-        assert!(pane_needs_runtime_launch(""));
+    fn empty_pane_is_unknown() {
+        // Empty pane could be shell loading or agent starting — probe needed
+        assert_eq!(classify_pane_state(""), PaneState::Unknown);
+        assert_eq!(classify_pane_state("\n\n\n"), PaneState::Unknown);
     }
 
     #[test]
     fn shell_prompt_needs_launch() {
+        assert_eq!(classify_pane_state("user@host repo %"), PaneState::NeedsLaunch);
+        assert_eq!(classify_pane_state("root@host:/tmp#"), PaneState::NeedsLaunch);
+        assert_eq!(classify_pane_state("laird@mac src $"), PaneState::NeedsLaunch);
+        // Legacy wrapper still works
         assert!(pane_needs_runtime_launch("user@host repo %"));
-        assert!(pane_needs_runtime_launch("root@host:/tmp#"));
     }
 
     #[test]
-    fn active_agent_output_does_not_need_launch() {
-        assert!(!pane_needs_runtime_launch("> how can i help"));
-        assert!(!pane_needs_runtime_launch("thinking about the next edit"));
+    fn agent_busy_detected() {
+        assert_eq!(classify_pane_state("thinking about the next edit"), PaneState::AgentBusy);
+        assert_eq!(classify_pane_state("  reading src/main.rs\n"), PaneState::AgentBusy);
+        assert_eq!(
+            classify_pane_state("  bypass permissions on\n  esc to interrupt\n"),
+            PaneState::AgentBusy,
+        );
     }
 
     #[test]
-    fn claude_status_bar_does_not_need_launch() {
-        // Claude's status bar appears at the bottom of the pane
-        assert!(!pane_needs_runtime_launch(
-            "  nextgen-CDD [integration]\n  \u{23f5}\u{23f5} bypass permissions on (shift+tab to cycle)\n\n"
-        ));
-        assert!(!pane_needs_runtime_launch("  gpt-5.4 default · 100% left\n"));
-    }
-
-    #[test]
-    fn idle_agent_detected_correctly() {
+    fn agent_idle_detected() {
+        assert_eq!(classify_pane_state("> \n"), PaneState::AgentIdle);
+        assert_eq!(classify_pane_state("how can i help you today?\n"), PaneState::AgentIdle);
+        // Claude status bar without busy indicator = idle
+        assert_eq!(
+            classify_pane_state(
+                "  nextgen-CDD [integration]\n  \u{23f5}\u{23f5} bypass permissions on (shift+tab to cycle)\n\n"
+            ),
+            PaneState::AgentIdle,
+        );
+        // Codex at prompt
+        assert_eq!(
+            classify_pane_state("  gpt-5.4 default \u{00b7} 100% left\n"),
+            PaneState::AgentIdle,
+        );
+        // Legacy wrapper
         assert!(pane_agent_is_idle("> \n"));
-        assert!(pane_agent_is_idle("how can i help you today?\n"));
         assert!(!pane_agent_is_idle("thinking about the next step\n"));
-        assert!(!pane_agent_is_idle("")); // empty = not idle, needs launch
+    }
+
+    #[test]
+    fn unknown_content_returns_unknown() {
+        // Random text that's not a shell prompt or agent indicator
+        assert_eq!(classify_pane_state("some random output\n"), PaneState::Unknown);
+        assert_eq!(classify_pane_state("building project...\n"), PaneState::Unknown);
     }
 
     #[test]
