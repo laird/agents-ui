@@ -236,7 +236,9 @@ impl RepoView {
         let items: Vec<ListItem> = swarm
             .workers
             .iter()
-            .map(|w| {
+            .enumerate()
+            .map(|(idx, w)| {
+                let key_label = format!("{} ", idx + 1);
                 let (dot, dot_style) = if w.waiting_for_input {
                     ("⚠ ", theme::waiting_style())
                 } else {
@@ -299,6 +301,7 @@ impl RepoView {
                 };
 
                 let line1 = Line::from(vec![
+                    Span::styled(key_label, theme::help_style()),
                     Span::styled(dot, if w.waiting_for_input { row_style } else { dot_style }),
                     Span::styled(role_label, if w.waiting_for_input { row_style } else { theme::title_style() }),
                 ]);
@@ -376,11 +379,17 @@ impl RepoView {
         // Filter header as first item
         items.push(ListItem::new(Line::from(filter_spans)));
 
-        for issue in &filtered {
+        for (idx, issue) in filtered.iter().enumerate() {
             let working_label = if issue.is_working { " [working]" } else { "" };
             let type_label = format!("{}", issue.issue_type);
+            let letter = if idx < 26 {
+                format!("{} ", (b'a' + idx as u8) as char)
+            } else {
+                "  ".to_string()
+            };
 
             let line = Line::from(vec![
+                Span::styled(letter, theme::help_style()),
                 Span::styled(
                     format!("{} ", issue.priority),
                     theme::priority_style(&issue.priority),
