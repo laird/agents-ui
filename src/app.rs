@@ -299,10 +299,17 @@ impl App {
                 }
             }
             Event::PaneOutput { agent_id, content } => {
-                // Update the agent's pane content
-                let is_manager = agent_id == "manager";
+                // agent_id is "session/agent" (e.g., "claude-myrepo/manager")
+                let (session_prefix, bare_id) = agent_id
+                    .split_once('/')
+                    .unwrap_or(("", &agent_id));
+                let is_manager = bare_id == "manager";
                 for swarm in &mut self.swarms {
-                    if let Some(agent) = swarm.agent_mut(&agent_id) {
+                    // Match by session name if qualified, otherwise fall back to first match
+                    if !session_prefix.is_empty() && swarm.tmux_session != session_prefix {
+                        continue;
+                    }
+                    if let Some(agent) = swarm.agent_mut(bare_id) {
                         agent.pane_content = content;
                         break;
                     }
@@ -1678,11 +1685,12 @@ impl App {
         let tx = self.events.tx();
 
         for swarm in &self.swarms {
-            // Watch manager pane
+            let session = &swarm.tmux_session;
+            // Watch manager pane — use session-qualified ID to disambiguate across swarms
             let handle = proxy::spawn_pane_watcher(
                 self.transport.clone(),
                 swarm.manager.tmux_target.clone(),
-                swarm.manager.id.clone(),
+                format!("{}/{}", session, swarm.manager.id),
                 tx.clone(),
                 Duration::from_millis(500),
             );
@@ -1693,7 +1701,7 @@ impl App {
                 let handle = proxy::spawn_pane_watcher(
                     self.transport.clone(),
                     worker.tmux_target.clone(),
-                    worker.id.clone(),
+                    format!("{}/{}", session, worker.id),
                     tx.clone(),
                     Duration::from_millis(500),
                 );
