@@ -27,6 +27,7 @@ pub enum Screen {
 #[derive(Debug, Clone)]
 pub enum NewSwarmField {
     RepoPath,
+    RuntimeSelection,
     NumWorkers,
     Launching,
 }
@@ -47,6 +48,8 @@ pub struct App {
     pub dialog_input: String,
     /// Stored repo path during new swarm flow.
     pub new_swarm_repo: String,
+    /// Selected agent type during new swarm flow.
+    pub new_swarm_agent_type: AgentType,
     /// Status message shown at bottom of repos list.
     pub status_message: Option<String>,
     /// Timestamp of last Esc press (for double-Esc detection).
@@ -86,6 +89,7 @@ impl App {
             pane_watchers: Vec::new(),
             dialog_input: String::new(),
             new_swarm_repo: String::new(),
+            new_swarm_agent_type: AgentType::Claude,
             status_message: None,
             last_esc: None,
             available_repos: Vec::new(),
@@ -136,8 +140,9 @@ impl App {
                         let field = field.clone();
                         let input = self.dialog_input.clone();
                         let repo = self.new_swarm_repo.clone();
+                        let agent_type = self.new_swarm_agent_type.clone();
                         crate::ui::new_swarm::render_new_swarm_dialog(
-                            f, area, &field, &input, &repo,
+                            f, area, &field, &input, &repo, &agent_type,
                         );
                     }
                     Screen::RepoView { swarm_idx } => {
@@ -384,9 +389,9 @@ impl App {
                     }
 
                     self.new_swarm_repo = path;
-                    self.dialog_input = "2".to_string(); // Default 2 workers
+                    self.new_swarm_agent_type = AgentType::Claude;
                     self.screen = Screen::NewSwarm {
-                        field: NewSwarmField::NumWorkers,
+                        field: NewSwarmField::RuntimeSelection,
                     };
                 }
                 KeyCode::Char(c) => {
@@ -403,12 +408,46 @@ impl App {
                 }
                 _ => {}
             },
-            NewSwarmField::NumWorkers => match key.code {
+            NewSwarmField::RuntimeSelection => match key.code {
                 KeyCode::Esc => {
                     self.screen = Screen::NewSwarm {
                         field: NewSwarmField::RepoPath,
                     };
                     self.dialog_input = self.new_swarm_repo.clone();
+                }
+                KeyCode::Enter => {
+                    self.dialog_input = "2".to_string(); // Default 2 workers
+                    self.screen = Screen::NewSwarm {
+                        field: NewSwarmField::NumWorkers,
+                    };
+                }
+                KeyCode::Left | KeyCode::Char('h') => {
+                    self.new_swarm_agent_type = match self.new_swarm_agent_type {
+                        AgentType::Claude => AgentType::Gemini,
+                        AgentType::Codex => AgentType::Claude,
+                        AgentType::Droid => AgentType::Codex,
+                        AgentType::Gemini => AgentType::Droid,
+                    };
+                }
+                KeyCode::Right | KeyCode::Char('l') => {
+                    self.new_swarm_agent_type = match self.new_swarm_agent_type {
+                        AgentType::Claude => AgentType::Codex,
+                        AgentType::Codex => AgentType::Droid,
+                        AgentType::Droid => AgentType::Gemini,
+                        AgentType::Gemini => AgentType::Claude,
+                    };
+                }
+                KeyCode::Char('c') => self.new_swarm_agent_type = AgentType::Claude,
+                KeyCode::Char('x') => self.new_swarm_agent_type = AgentType::Codex,
+                KeyCode::Char('d') => self.new_swarm_agent_type = AgentType::Droid,
+                KeyCode::Char('g') => self.new_swarm_agent_type = AgentType::Gemini,
+                _ => {}
+            },
+            NewSwarmField::NumWorkers => match key.code {
+                KeyCode::Esc => {
+                    self.screen = Screen::NewSwarm {
+                        field: NewSwarmField::RuntimeSelection,
+                    };
                 }
                 KeyCode::Enter => {
                     let num_workers: u32 = self.dialog_input.parse().unwrap_or(2);
@@ -422,7 +461,7 @@ impl App {
                     // Launch the swarm
                     let config = SwarmConfig {
                         repo_path: repo_path.clone(),
-                        agent_type: AgentType::Claude,
+                        agent_type: self.new_swarm_agent_type.clone(),
                         num_workers,
                         agents_dir: self.agents_dir.clone(),
                     };
