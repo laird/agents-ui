@@ -355,6 +355,14 @@ impl ClaudeAdapter {
                 tracing::info!("Sending bootstrap command to {}: {}", agent.id, cmd);
                 proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
             }
+        } else if pane_agent_is_idle(&content) {
+            // Agent is running but idle — send bootstrap command
+            if let Some(cmd) = self.bootstrap_command(runtime, agent).await {
+                tracing::info!("Agent {} is idle, sending bootstrap: {}", agent.id, cmd);
+                proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
+            }
+        } else {
+            tracing::info!("Agent {} already active in {}", agent.id, agent.tmux_target);
         }
         Ok(())
     }
@@ -853,11 +861,12 @@ impl AgentRuntime for ClaudeAdapter {
 
 fn pane_needs_runtime_launch(content: &str) -> bool {
     let stripped = strip_ansi(content);
-    let mut non_empty_lines = stripped
+    let non_empty_lines: Vec<&str> = stripped
         .lines()
         .rev()
-        .filter(|line| !line.trim().is_empty());
-    let Some(last_line) = non_empty_lines.next() else {
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    let Some(last_line) = non_empty_lines.first() else {
         return true;
     };
 
@@ -866,24 +875,66 @@ fn pane_needs_runtime_launch(content: &str) -> bool {
         return true;
     }
 
-    let lower = trimmed.to_lowercase();
-    if lower.contains("thinking")
-        || lower.contains("working")
-        || lower.contains("reading")
-        || lower.contains("writing")
-        || lower.contains("analyzing")
-        || lower.contains("how can i help")
-        || lower.contains("what would you like")
-        || lower.contains("codex")
-        || lower.contains("claude")
-        || lower.contains("gemini")
-        || lower.contains("droid")
-        || lower.starts_with('>')
-    {
-        return false;
+    // Check all recent non-empty lines (not just the last) for agent indicators,
+    // since the status bar may appear after the prompt line.
+    for line in non_empty_lines.iter().take(5) {
+        let lower = line.trim().to_lowercase();
+        if lower.contains("thinking")
+            || lower.contains("working")
+            || lower.contains("reading")
+            || lower.contains("writing")
+            || lower.contains("analyzing")
+            || lower.contains("how can i help")
+            || lower.contains("what would you like")
+            || lower.contains("codex")
+            || lower.contains("claude")
+            || lower.contains("gemini")
+            || lower.contains("droid")
+            || lower.contains("bypass permissions")
+            || lower.contains("permissions on")
+            || lower.contains("permissions off")
+            || lower.contains("gpt-")
+            || lower.starts_with('>')
+            || lower.starts_with('\u{276f}') // ❯ unicode prompt
+            || lower.starts_with('\u{23f5}') // ⏵ unicode play symbol
+        {
+            return false;
+        }
     }
 
     trimmed.ends_with('%') || trimmed.ends_with('$') || trimmed.ends_with('#')
+}
+
+/// Check if an agent is running but idle (at the prompt, not actively working).
+fn pane_agent_is_idle(content: &str) -> bool {
+    let stripped = strip_ansi(content);
+    let non_empty_lines: Vec<&str> = stripped
+        .lines()
+        .rev()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+
+    for line in non_empty_lines.iter().take(5) {
+        let lower = line.trim().to_lowercase();
+        // Active work indicators — agent is busy, don't interrupt
+        if lower.contains("thinking")
+            || lower.contains("working")
+            || lower.contains("reading")
+            || lower.contains("writing")
+            || lower.contains("analyzing")
+        {
+            return false;
+        }
+        // Idle prompt indicators — agent is waiting for input
+        if lower.contains("how can i help")
+            || lower.contains("what would you like")
+            || lower.starts_with('>')
+            || lower.starts_with('\u{276f}') // ❯
+        {
+            return true;
+        }
+    }
+    false
 }
 
 fn manager_bootstrap_cmd(runtime: &AgentType) -> Option<String> {
@@ -1027,7 +1078,7 @@ fn strip_ansi(content: &str) -> String {
 mod tests {
     use super::{
         extract_issue_number_from_branch, generic_worker_bootstrap_cmd, manager_bootstrap_cmd,
-        pane_needs_runtime_launch, worker_dispatch_cmd,
+        pane_agent_is_idle, pane_needs_runtime_launch, worker_dispatch_cmd,
     };
     use crate::model::swarm::AgentType;
 
@@ -1046,6 +1097,23 @@ mod tests {
     fn active_agent_output_does_not_need_launch() {
         assert!(!pane_needs_runtime_launch("> how can i help"));
         assert!(!pane_needs_runtime_launch("thinking about the next edit"));
+    }
+
+    #[test]
+    fn claude_status_bar_does_not_need_launch() {
+        // Claude's status bar appears at the bottom of the pane
+        assert!(!pane_needs_runtime_launch(
+            "  nextgen-CDD [integration]\n  \u{23f5}\u{23f5} bypass permissions on (shift+tab to cycle)\n\n"
+        ));
+        assert!(!pane_needs_runtime_launch("  gpt-5.4 default · 100% left\n"));
+    }
+
+    #[test]
+    fn idle_agent_detected_correctly() {
+        assert!(pane_agent_is_idle("> \n"));
+        assert!(pane_agent_is_idle("how can i help you today?\n"));
+        assert!(!pane_agent_is_idle("thinking about the next step\n"));
+        assert!(!pane_agent_is_idle("")); // empty = not idle, needs launch
     }
 
     #[test]
