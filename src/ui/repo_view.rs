@@ -98,7 +98,7 @@ impl RepoView {
             Span::styled(" scroll  ", theme::help_style()),
             Span::styled("Tab", theme::title_style()),
             Span::styled(" workers  ", theme::help_style()),
-            Span::styled("⌥0", theme::title_style()),
+            Span::styled("Esc", theme::title_style()),
             Span::styled(" back  ", theme::help_style()),
             Span::styled("q", theme::title_style()),
             Span::styled(" quit", theme::help_style()),
