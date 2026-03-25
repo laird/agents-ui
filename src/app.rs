@@ -503,6 +503,13 @@ impl App {
                 KeyCode::PageDown => {
                     self.repo_view.scroll_manager_down(10);
                 }
+                KeyCode::F(5) => {
+                    // Refresh: re-discover swarms and restart pane watchers
+                    if let Ok(swarms) = self.adapter.discover(&self.agents_dir).await {
+                        self.swarms = swarms;
+                        self.start_all_pane_watchers();
+                    }
+                }
                 KeyCode::Char(c) => {
                     self.repo_view.input.push(c);
                 }
@@ -550,6 +557,13 @@ impl App {
             }
             KeyCode::PageDown => {
                 self.agent_view.scroll_down(10);
+            }
+            KeyCode::F(5) => {
+                // Refresh: re-discover swarms and restart pane watchers
+                if let Ok(swarms) = self.adapter.discover(&self.agents_dir).await {
+                    self.swarms = swarms;
+                    self.start_all_pane_watchers();
+                }
             }
             _ => {}
         }
