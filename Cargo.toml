@@ -9,7 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 # TUI
-ratatui = "0.29"
+ratatui = "0.30"
 crossterm = { version = "0.28", features = ["event-stream"] }
 
 # Async runtime
@@ -40,4 +40,4 @@ chrono = { version = "0.4", features = ["serde"] }
 dirs = "6"
 
 # ANSI to ratatui conversion
-ansi-to-tui = "7"
+ansi-to-tui = "8"
