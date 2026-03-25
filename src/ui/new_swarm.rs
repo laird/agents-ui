@@ -84,7 +84,7 @@ pub fn render_new_swarm_dialog(
             f.render_widget(repo_line, chunks[0]);
 
             let prompt = Paragraph::new(Line::from(Span::styled(
-                " Number of workers:",
+                " Number of workers (default: 2):",
                 theme::help_style(),
             )));
             f.render_widget(prompt, chunks[1]);
@@ -99,6 +99,8 @@ pub fn render_new_swarm_dialog(
             let help = Paragraph::new(Line::from(vec![
                 Span::styled(" Enter", theme::title_style()),
                 Span::styled(" launch  ", theme::help_style()),
+                Span::styled("↑↓", theme::title_style()),
+                Span::styled(" adjust  ", theme::help_style()),
                 Span::styled("Esc", theme::title_style()),
                 Span::styled(" back", theme::help_style()),
             ]));
