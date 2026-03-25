@@ -284,29 +284,43 @@ impl RepoView {
                     })
                     .unwrap_or_default();
 
+                // Derive the role label from the agent id (e.g. "worker-1", "manager")
+                let role_label = if w.is_manager {
+                    "manager".to_string()
+                } else {
+                    w.id.clone()
+                };
+
+                // Use inverted style for the entire item when waiting for input
+                let row_style = if w.waiting_for_input {
+                    theme::waiting_inverted_style()
+                } else {
+                    ratatui::style::Style::default()
+                };
+
                 let line1 = Line::from(vec![
-                    Span::styled(dot, dot_style),
-                    Span::styled(&w.id, theme::title_style()),
+                    Span::styled(dot, if w.waiting_for_input { row_style } else { dot_style }),
+                    Span::styled(role_label, if w.waiting_for_input { row_style } else { theme::title_style() }),
                 ]);
                 let line2 = Line::from(vec![
-                    Span::raw("  "),
-                    Span::styled(status_text, status_style),
+                    Span::styled("  ", row_style),
+                    Span::styled(status_text, if w.waiting_for_input { row_style } else { status_style }),
                 ]);
                 let mut lines = vec![line1, line2];
                 if !elapsed.is_empty() {
                     lines.push(Line::from(vec![
-                        Span::raw("  "),
-                        Span::styled(elapsed, theme::help_style()),
+                        Span::styled("  ", row_style),
+                        Span::styled(elapsed, if w.waiting_for_input { row_style } else { theme::help_style() }),
                     ]));
                 }
-                ListItem::new(lines)
+                ListItem::new(lines).style(row_style)
             })
             .collect();
 
-        let workers_title = format!(" Workers ({}) ", swarm.workers.len());
+        let sessions_title = format!(" Sessions ({}) ", swarm.workers.len());
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(workers_title)
+            .title(sessions_title)
             .border_style(if self.focus == RepoViewFocus::Workers {
                 theme::title_style()
             } else {
@@ -438,7 +452,7 @@ impl RepoView {
                 Span::styled("i", theme::title_style()),
                 Span::styled(" new issue  ", theme::help_style()),
                 Span::styled("Tab", theme::title_style()),
-                Span::styled(" workers  ", theme::help_style()),
+                Span::styled(" sessions  ", theme::help_style()),
                 Span::styled("0-4", theme::title_style()),
                 Span::styled(" filter  ", theme::help_style()),
                 Span::styled("r", theme::title_style()),
@@ -450,7 +464,7 @@ impl RepoView {
                 Span::styled(" Enter", theme::title_style()),
                 Span::styled(" fullscreen  ", theme::help_style()),
                 Span::styled("Tab/↓", theme::title_style()),
-                Span::styled(" workers  ", theme::help_style()),
+                Span::styled(" sessions  ", theme::help_style()),
                 Span::styled("other keys", theme::help_style()),
                 Span::styled(" → manager", theme::help_style()),
             ])),
