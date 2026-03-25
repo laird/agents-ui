@@ -841,3 +841,65 @@ fn longest_common_prefix(strings: &[String]) -> String {
     }
     first[..len].to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lcp_empty_input() {
+        assert_eq!(longest_common_prefix(&[]), "");
+    }
+
+    #[test]
+    fn lcp_single_string() {
+        assert_eq!(
+            longest_common_prefix(&["hello".to_string()]),
+            "hello"
+        );
+    }
+
+    #[test]
+    fn lcp_common_prefix() {
+        assert_eq!(
+            longest_common_prefix(&[
+                "foobar".to_string(),
+                "foobaz".to_string(),
+                "fooqux".to_string(),
+            ]),
+            "foo"
+        );
+    }
+
+    #[test]
+    fn lcp_identical_strings() {
+        assert_eq!(
+            longest_common_prefix(&["abc".to_string(), "abc".to_string()]),
+            "abc"
+        );
+    }
+
+    #[test]
+    fn lcp_no_common_prefix() {
+        assert_eq!(
+            longest_common_prefix(&["abc".to_string(), "xyz".to_string()]),
+            ""
+        );
+    }
+
+    #[test]
+    fn lcp_one_empty_string() {
+        assert_eq!(
+            longest_common_prefix(&["".to_string(), "abc".to_string()]),
+            ""
+        );
+    }
+
+    #[test]
+    fn lcp_different_lengths() {
+        assert_eq!(
+            longest_common_prefix(&["ab".to_string(), "abcdef".to_string()]),
+            "ab"
+        );
+    }
+}
