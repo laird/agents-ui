@@ -697,7 +697,8 @@ impl App {
             }
         };
 
-        // Double-Esc to go back (single Esc is forwarded to the pane)
+        // Double-Esc to go back (Esc is NEVER forwarded to worker panes — it
+        // interrupts active Claude work and can break sessions)
         if key.code == KeyCode::Esc {
             let now = std::time::Instant::now();
             if let Some(last) = self.last_esc {
@@ -708,8 +709,6 @@ impl App {
                 }
             }
             self.last_esc = Some(now);
-            // Forward the single Esc to the pane
-            send_raw_key(&target, "Escape").await?;
             return Ok(());
         }
         self.last_esc = None;
@@ -1098,7 +1097,9 @@ fn key_event_to_tmux(key: KeyEvent) -> Option<String> {
         KeyCode::Enter => Some("Enter".to_string()),
         KeyCode::Tab => Some("Tab".to_string()),
         KeyCode::Backspace => Some("BSpace".to_string()),
-        KeyCode::Esc => Some("Escape".to_string()),
+        // Never forward Escape to tmux panes — it interrupts Claude sessions.
+        // Esc is handled separately as double-Esc for back navigation.
+        KeyCode::Esc => None,
         KeyCode::Up => Some("Up".to_string()),
         KeyCode::Down => Some("Down".to_string()),
         KeyCode::Left => Some("Left".to_string()),
