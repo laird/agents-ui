@@ -707,8 +707,10 @@ impl App {
                                     };
                                     let target = swarm.manager.tmux_target.clone();
                                     self.adapter.send_input(&target, &cmd).await?;
-                                    self.status_message =
-                                        Some(format!("Sent to manager: {}", cmd));
+                                    self.repo_view.add_banner(
+                                        format!("Dispatched #{} to manager", issue.number),
+                                        crate::ui::theme::title_style(),
+                                    );
                                 }
                             }
                         }
