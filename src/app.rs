@@ -1394,9 +1394,17 @@ impl App {
             return Ok(());
         }
 
-        // Esc goes back to repos list (except when Manager is focused — that's passthrough)
-        if key.code == KeyCode::Esc && self.swarm_focus != SwarmPanel::Manager {
-            self.screen = Screen::ReposList;
+        // Esc goes back one level:
+        // Sessions/Issues → Manager focus, Manager → Repos List
+        if key.code == KeyCode::Esc {
+            match self.swarm_focus {
+                SwarmPanel::Workers | SwarmPanel::Issues => {
+                    self.swarm_focus = SwarmPanel::Manager;
+                }
+                SwarmPanel::Manager => {
+                    self.screen = Screen::ReposList;
+                }
+            }
             return Ok(());
         }
 
