@@ -8,7 +8,8 @@ pub async fn capture_pane(target: &str, scrollback_lines: u32) -> Result<String>
     let output = Command::new("tmux")
         .args([
             "capture-pane",
-            "-p",
+            "-p",   // print to stdout
+            "-J",   // join wrapped lines (prevents truncation at pane width)
             "-t",
             target,
             "-S",
