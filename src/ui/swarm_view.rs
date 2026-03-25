@@ -263,6 +263,8 @@ impl SwarmView {
                 Span::styled(" scroll  ", theme::help_style()),
                 Span::styled("Enter", theme::title_style()),
                 Span::styled(" fullscreen  ", theme::help_style()),
+                Span::styled("⌥d", theme::title_style()),
+                Span::styled(" deploy  ", theme::help_style()),
                 Span::styled("⌥a", theme::title_style()),
                 Span::styled(" next alert  ", theme::help_style()),
                 Span::styled("⌥f", theme::title_style()),
