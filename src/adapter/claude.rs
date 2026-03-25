@@ -357,15 +357,22 @@ impl AgentRuntime for ClaudeAdapter {
         let launch_cmd = swarm.agent_type.launch_cmd().to_string();
 
         // Check which tmux panes actually exist in the agents window
-        let existing_panes = session::list_panes(session_name).await.ok();
-        let agents_window_panes: Vec<String> = existing_panes
+        let session_exists = session::has_session(session_name).await;
+        let existing_panes = if session_exists {
+            session::list_panes(session_name).await.ok()
+        } else {
+            None
+        };
+        let agents_window = existing_panes
             .as_ref()
             .and_then(|info| {
                 info.windows
                     .iter()
                     .find(|w| w.name == "agents" || w.index == 0)
-                    .map(|w| w.panes.iter().map(|p| p.target.clone()).collect())
-            })
+            });
+        let agents_window_exists = agents_window.is_some();
+        let agents_window_panes: Vec<String> = agents_window
+            .map(|w| w.panes.iter().map(|p| p.target.clone()).collect())
             .unwrap_or_default();
 
         for worker in &mut swarm.workers {
@@ -428,65 +435,85 @@ impl AgentRuntime for ClaudeAdapter {
                 }
             }
 
-            // 2. Check tmux pane exists
+            // 2. Check tmux pane exists; recreate session/window/pane as needed
             let pane_exists = agents_window_panes.contains(&worker.tmux_target);
             if !pane_exists {
-                tracing::info!("Healing {}: creating tmux pane", worker.id);
+                tracing::info!("Healing {}: pane missing, recreating (session_exists={}, window_exists={})",
+                    worker.id, session_exists, agents_window_exists);
 
-                let output = Command::new("tmux")
-                    .args(["split-window", "-h", "-t", &format!("{session_name}:0")])
-                    .output()
-                    .await;
-
-                if let Ok(o) = output {
-                    if o.status.success() {
-                        // Rebalance
-                        let _ = Command::new("tmux")
-                            .args(["select-layout", "-t", &format!("{session_name}:0"), "even-horizontal"])
-                            .output()
-                            .await;
-
-                        // Get the new pane's target
-                        let pane_output = Command::new("tmux")
-                            .args([
-                                "list-panes",
-                                "-t",
-                                &format!("{session_name}:0"),
-                                "-F",
-                                "#{pane_index}",
-                            ])
-                            .output()
-                            .await;
-
-                        if let Ok(po) = pane_output {
-                            let max_idx: u32 = String::from_utf8_lossy(&po.stdout)
-                                .lines()
-                                .filter_map(|l| l.parse().ok())
-                                .max()
-                                .unwrap_or(0);
-                            worker.tmux_target = format!("{session_name}:0.{max_idx}");
+                let pane_created = if !session_exists {
+                    // Session completely gone — recreate it with a new window
+                    let output = Command::new("tmux")
+                        .args(["new-session", "-d", "-s", session_name, "-n", "agents"])
+                        .output()
+                        .await;
+                    output.map(|o| o.status.success()).unwrap_or(false)
+                } else if !agents_window_exists {
+                    // Session exists but agents window is gone — create a new window
+                    let output = Command::new("tmux")
+                        .args(["new-window", "-t", session_name, "-n", "agents"])
+                        .output()
+                        .await;
+                    output.map(|o| o.status.success()).unwrap_or(false)
+                } else {
+                    // Window exists but this pane is missing — split to add a pane
+                    let output = Command::new("tmux")
+                        .args(["split-window", "-h", "-t", &format!("{session_name}:0")])
+                        .output()
+                        .await;
+                    if let Ok(ref o) = output {
+                        if o.status.success() {
+                            // Rebalance panes
+                            let _ = Command::new("tmux")
+                                .args(["select-layout", "-t", &format!("{session_name}:0"), "even-horizontal"])
+                                .output()
+                                .await;
                         }
+                    }
+                    output.map(|o| o.status.success()).unwrap_or(false)
+                };
 
-                        // cd to worktree
-                        if wt_path.exists() {
-                            let _ = proxy::send_keys(
-                                &worker.tmux_target,
-                                &format!("cd '{}'", wt_path.display()),
-                            )
-                            .await;
-                            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-                        }
-
-                        // Launch agent
-                        let _ = proxy::send_keys(
-                            &worker.tmux_target,
-                            &launch_cmd,
-                        )
+                if pane_created {
+                    // Get the new pane's target
+                    let pane_output = Command::new("tmux")
+                        .args([
+                            "list-panes",
+                            "-t",
+                            &format!("{session_name}:0"),
+                            "-F",
+                            "#{pane_index}",
+                        ])
+                        .output()
                         .await;
 
-                        repairs.push(format!("Created tmux pane and launched agent for {}", worker.id));
-                        continue; // Skip step 3 since we just launched
+                    if let Ok(po) = pane_output {
+                        let max_idx: u32 = String::from_utf8_lossy(&po.stdout)
+                            .lines()
+                            .filter_map(|l| l.parse().ok())
+                            .max()
+                            .unwrap_or(0);
+                        worker.tmux_target = format!("{session_name}:0.{max_idx}");
                     }
+
+                    // cd to worktree
+                    if wt_path.exists() {
+                        let _ = proxy::send_keys(
+                            &worker.tmux_target,
+                            &format!("cd '{}'", wt_path.display()),
+                        )
+                        .await;
+                        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                    }
+
+                    // Launch agent
+                    let _ = proxy::send_keys(
+                        &worker.tmux_target,
+                        &launch_cmd,
+                    )
+                    .await;
+
+                    repairs.push(format!("Recreated tmux pane and launched agent for {}", worker.id));
+                    continue; // Skip step 3 since we just launched
                 }
             }
 
