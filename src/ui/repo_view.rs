@@ -22,6 +22,9 @@ fn highlight_line(text: &str) -> Line<'static> {
     if lower.contains("idle_no_work_available") || lower.contains("idle") && lower.contains("sleep") {
         return Line::from(Span::styled(text, Style::default().fg(Color::Yellow)));
     }
+    if lower.contains("how is claude doing this session") || (lower.contains("1: bad") && lower.contains("0: dismiss")) {
+        return Line::from(Span::styled(text, Style::default().fg(Color::Magenta)));
+    }
     if lower.contains("fixed") || lower.contains("closed") || lower.contains("✅") || lower.contains("resolved") {
         return Line::from(Span::styled(text, Style::default().fg(Color::Green)));
     }

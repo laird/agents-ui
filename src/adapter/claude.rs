@@ -490,12 +490,24 @@ impl AgentRuntime for ClaudeAdapter {
                 }
             }
 
-            // 3. Check if agent is running (look for shell prompt instead of active Claude)
+            // 3. Check pane state: feedback prompt, shell prompt, etc.
             if pane_exists && wt_path.exists() {
-                match proxy::capture_pane(&worker.tmux_target, 5).await {
+                match proxy::capture_pane(&worker.tmux_target, 10).await {
                     Ok(content) => {
                         let trimmed = content.trim();
-                        // Detect shell prompt: ends with $ or %, or last non-empty line matches common prompts
+
+                        // 3a. Detect Claude feedback prompt and auto-dismiss
+                        if is_feedback_prompt(trimmed) {
+                            tracing::info!(
+                                "Healing {}: feedback prompt detected, auto-dismissing",
+                                worker.id
+                            );
+                            let _ = proxy::send_keys(&worker.tmux_target, "0").await;
+                            repairs.push(format!("Auto-dismissed feedback prompt for {}", worker.id));
+                            continue;
+                        }
+
+                        // 3b. Detect shell prompt (agent not running)
                         let last_line = trimmed.lines().last().unwrap_or("").trim();
                         let looks_like_shell = last_line.ends_with('$')
                             || last_line.ends_with('%')
@@ -547,6 +559,39 @@ impl AgentRuntime for ClaudeAdapter {
         }
 
         Ok(())
+    }
+}
+
+/// Check if pane content contains a Claude feedback prompt.
+/// Matches patterns like "How is Claude doing this session?" and
+/// "1: Bad    2: Fine   3: Good   0: Dismiss".
+pub(crate) fn is_feedback_prompt(content: &str) -> bool {
+    let lower = content.to_lowercase();
+    lower.contains("how is claude doing this session")
+        || (lower.contains("1: bad") && lower.contains("0: dismiss"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_feedback_prompt_full() {
+        let content = "some output\n● How is Claude doing this session? (optional)\n  1: Bad    2: Fine   3: Good   0: Dismiss\n";
+        assert!(is_feedback_prompt(content));
+    }
+
+    #[test]
+    fn detects_feedback_prompt_partial() {
+        assert!(is_feedback_prompt("How is Claude doing this session?"));
+        assert!(is_feedback_prompt("1: Bad 2: Fine 3: Good 0: Dismiss"));
+    }
+
+    #[test]
+    fn no_false_positive() {
+        assert!(!is_feedback_prompt("Working on issue #42"));
+        assert!(!is_feedback_prompt("idle"));
+        assert!(!is_feedback_prompt(""));
     }
 }
 
