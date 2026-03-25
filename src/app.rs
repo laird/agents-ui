@@ -876,12 +876,19 @@ impl App {
                     .join("fix-loop.status");
                 if status_file.exists() {
                     agent.status = crate::model::status::read_status_file(&status_file);
-                    continue;
+                } else if !agent.pane_content.is_empty() {
+                    // Infer status from pane content
+                    agent.status = infer_status_from_pane(&agent.pane_content);
                 }
 
-                // Infer status from pane content
-                if !agent.pane_content.is_empty() {
-                    agent.status = infer_status_from_pane(&agent.pane_content);
+                // If we detected "Working" but have no issue number, try the git branch
+                if let crate::model::status::AgentState::Working { issue: None } =
+                    &agent.status.state
+                {
+                    if let Some(n) = issue_from_git_branch(&agent.worktree_path) {
+                        agent.status.state =
+                            crate::model::status::AgentState::Working { issue: Some(n) };
+                    }
                 }
             }
         }
@@ -1064,6 +1071,28 @@ fn infer_status_from_pane(content: &str) -> crate::model::status::AgentStatus {
         timestamp: None,
         state,
     }
+}
+
+/// Try to extract an issue number from the current git branch name.
+/// Matches patterns like "fix/issue-42-auto" or "enhancement/issue-42-auto".
+fn issue_from_git_branch(worktree_path: &std::path::Path) -> Option<u32> {
+    // Read .git/HEAD or the worktree's gitdir HEAD to get branch name
+    let head_path = worktree_path.join(".git");
+    let head_content = if head_path.is_file() {
+        // Worktree: .git is a file pointing to the gitdir
+        let gitdir_ref = std::fs::read_to_string(&head_path).ok()?;
+        let gitdir = gitdir_ref.trim().strip_prefix("gitdir: ")?;
+        std::fs::read_to_string(std::path::Path::new(gitdir).join("HEAD")).ok()?
+    } else {
+        std::fs::read_to_string(head_path.join("HEAD")).ok()?
+    };
+
+    let branch = head_content.trim().strip_prefix("ref: refs/heads/")?;
+    // Match "fix/issue-N-auto" or "enhancement/issue-N-auto"
+    let after_issue = branch.strip_prefix("fix/issue-")
+        .or_else(|| branch.strip_prefix("enhancement/issue-"))?;
+    let num_str = after_issue.split('-').next()?;
+    num_str.parse::<u32>().ok()
 }
 
 /// Try to extract an issue number from text (e.g., "#42", "issue 42").
