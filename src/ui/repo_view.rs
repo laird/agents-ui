@@ -177,6 +177,8 @@ impl RepoView {
                 Span::styled(" shutdown  ", theme::help_style()),
                 Span::styled("f", theme::title_style()),
                 Span::styled(" fix-loop  ", theme::help_style()),
+                Span::styled("i", theme::title_style()),
+                Span::styled(" view issue  ", theme::help_style()),
                 Span::styled("a", theme::title_style()),
                 Span::styled(" add worker  ", theme::help_style()),
                 Span::styled("Esc", theme::title_style()),
