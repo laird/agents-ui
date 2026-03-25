@@ -785,7 +785,7 @@ impl App {
             }
         }
 
-        // PageUp/PageDown scroll the view without sending to pane
+        // PageUp/PageDown/Home/End scroll the view without sending to pane
         match key.code {
             KeyCode::PageUp => {
                 self.agent_view.scroll_up(10);
@@ -793,6 +793,14 @@ impl App {
             }
             KeyCode::PageDown => {
                 self.agent_view.scroll_down(10);
+                return Ok(());
+            }
+            KeyCode::Home => {
+                self.agent_view.scroll_offset = 0;
+                return Ok(());
+            }
+            KeyCode::End => {
+                self.agent_view.scroll_to_bottom();
                 return Ok(());
             }
             _ => {}

@@ -65,9 +65,19 @@ impl AgentView {
             self.scroll_offset = max_scroll;
         }
 
-        let session_title = format!(" Session — {} ", agent.tmux_target);
+        let at_bottom = self.scroll_offset >= max_scroll;
+        let scroll_indicator = if !at_bottom && total_lines > 0 {
+            format!(
+                " Session — {} [line {}/{}] ",
+                agent.tmux_target,
+                self.scroll_offset + 1,
+                total_lines,
+            )
+        } else {
+            format!(" Session — {} ", agent.tmux_target)
+        };
         let pane_output = Paragraph::new(text)
-            .block(Block::default().borders(Borders::ALL).title(session_title))
+            .block(Block::default().borders(Borders::ALL).title(scroll_indicator))
             .wrap(Wrap { trim: false })
             .scroll((self.scroll_offset, 0));
         f.render_widget(pane_output, chunks[1]);
@@ -92,6 +102,8 @@ impl AgentView {
             Span::styled(" worker  ", theme::help_style()),
             Span::styled("PgUp/Dn", theme::title_style()),
             Span::styled(" scroll  ", theme::help_style()),
+            Span::styled("Home/End", theme::title_style()),
+            Span::styled(" top/bottom  ", theme::help_style()),
         ]))
         .block(Block::default().borders(Borders::TOP));
         f.render_widget(help, chunks[3]);
