@@ -109,8 +109,10 @@ impl std::fmt::Display for Workflow {
 /// Info about a single agent (manager or worker).
 #[derive(Debug, Clone)]
 pub struct AgentInfo {
-    /// Unique ID: "manager" or "worker-0", "worker-1", etc.
+    /// Globally unique ID: "nextgen-CDD/manager" or "agents-ui/worker-1"
     pub id: String,
+    /// Role within the swarm: "manager", "worker-1", "tester", etc.
+    pub role: String,
     /// Path to the worktree (base repo for manager)
     pub worktree_path: PathBuf,
     /// tmux pane target (e.g., "claude-myrepo:0.0")
@@ -166,8 +168,28 @@ impl Swarm {
             .count()
     }
 
-    /// Get a specific agent by ID
-    pub fn agent(&self, id: &str) -> Option<&AgentInfo> {
+    /// Get a specific agent by role (e.g., "manager", "worker-1")
+    pub fn agent(&self, role: &str) -> Option<&AgentInfo> {
+        if self.manager.role == role {
+            Some(&self.manager)
+        } else {
+            self.workers.iter().find(|w| w.role == role)
+        }
+    }
+
+    /// Get a mutable reference to a specific agent by role
+    #[allow(dead_code)]
+    pub fn agent_mut(&mut self, role: &str) -> Option<&mut AgentInfo> {
+        if self.manager.role == role {
+            Some(&mut self.manager)
+        } else {
+            self.workers.iter_mut().find(|w| w.role == role)
+        }
+    }
+
+    /// Get a specific agent by globally unique ID (e.g., "nextgen-CDD/manager")
+    #[allow(dead_code)]
+    pub fn agent_by_id(&self, id: &str) -> Option<&AgentInfo> {
         if self.manager.id == id {
             Some(&self.manager)
         } else {
@@ -175,8 +197,8 @@ impl Swarm {
         }
     }
 
-    /// Get a mutable reference to a specific agent by ID
-    pub fn agent_mut(&mut self, id: &str) -> Option<&mut AgentInfo> {
+    /// Get a mutable reference to a specific agent by globally unique ID
+    pub fn agent_by_id_mut(&mut self, id: &str) -> Option<&mut AgentInfo> {
         if self.manager.id == id {
             Some(&mut self.manager)
         } else {

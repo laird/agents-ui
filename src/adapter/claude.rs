@@ -428,7 +428,8 @@ impl ClaudeAdapter {
         // Window 0 ("review"): manager in base repo
         // Windows 1..N ("worker-N"): one worker per window, each full-width
         let mut manager = AgentInfo {
-            id: "manager".to_string(),
+            id: format!("{project_name}/manager"),
+            role: "manager".to_string(),
             worktree_path: repo_path.clone(),
             tmux_target: format!("{session_name}:0.0"),
             status: AgentStatus::default(),
@@ -469,8 +470,10 @@ impl ClaudeAdapter {
 
                 let agent_status = status::read_status_file(&status_file);
 
+                let role = format!("worker-{worker_num}");
                 workers.push(AgentInfo {
-                    id: format!("worker-{worker_num}"),
+                    id: format!("{project_name}/{role}"),
+                    role,
                     worktree_path,
                     tmux_target: pane.target.clone(),
                     status: agent_status,
@@ -484,7 +487,7 @@ impl ClaudeAdapter {
 
         // Sort workers by index
         workers.sort_by_key(|w| {
-            w.id.strip_prefix("worker-")
+            w.role.strip_prefix("worker-")
                 .and_then(|s| s.parse::<usize>().ok())
                 .unwrap_or(0)
         });
@@ -832,8 +835,10 @@ impl AgentRuntime for ClaudeAdapter {
 
         proxy::send_keys(&self.transport, &tmux_target, swarm.agent_type.launch_cmd()).await?;
 
+        let role = format!("worker-{next_num}");
         Ok(AgentInfo {
-            id: format!("worker-{next_num}"),
+            id: format!("{}/{role}", swarm.project_name),
+            role,
             worktree_path,
             tmux_target,
             status: AgentStatus::default(),

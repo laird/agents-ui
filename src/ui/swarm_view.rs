@@ -426,7 +426,8 @@ mod tests {
 
     fn make_agent(id: &str, is_manager: bool, pane_content: &str, state: AgentState) -> AgentInfo {
         AgentInfo {
-            id: id.to_string(),
+            id: format!("test/{id}"),
+            role: id.to_string(),
             worktree_path: PathBuf::new(),
             tmux_target: String::new(),
             status: AgentStatus {

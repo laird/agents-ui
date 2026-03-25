@@ -29,7 +29,7 @@ impl AgentView {
         .split(area);
 
         // Title
-        let role = if agent.id == "tester" {
+        let role = if agent.role == "tester" {
             "Tester"
         } else if agent.is_manager {
             "Manager"

@@ -299,17 +299,10 @@ impl App {
                 }
             }
             Event::PaneOutput { agent_id, content } => {
-                // agent_id is "session/agent" (e.g., "claude-myrepo/manager")
-                let (session_prefix, bare_id) = agent_id
-                    .split_once('/')
-                    .unwrap_or(("", &agent_id));
-                let is_manager = bare_id == "manager";
+                // agent_id is globally unique (e.g., "nextgen-CDD/manager")
+                let is_manager = agent_id.ends_with("/manager");
                 for swarm in &mut self.swarms {
-                    // Match by session name if qualified, otherwise fall back to first match
-                    if !session_prefix.is_empty() && swarm.tmux_session != session_prefix {
-                        continue;
-                    }
-                    if let Some(agent) = swarm.agent_mut(bare_id) {
+                    if let Some(agent) = swarm.agent_by_id_mut(&agent_id) {
                         agent.pane_content = content;
                         break;
                     }
@@ -336,7 +329,7 @@ impl App {
                     for worker in &swarm.workers {
                         if let crate::model::status::AgentState::Working { issue: Some(n) } = &worker.status.state {
                             if let Some(issue) = issues.iter_mut().find(|i| i.number == *n) {
-                                issue.assigned_worker = Some(worker.id.clone());
+                                issue.assigned_worker = Some(worker.role.clone());
                             }
                         }
                     }
@@ -468,7 +461,7 @@ impl App {
                                 self.agent_view.scroll_to_bottom();
                                 self.screen = Screen::AgentView {
                                     swarm_idx,
-                                    agent_id: worker.id.clone(),
+                                    agent_id: worker.role.clone(),
                                 };
                                 return Ok(());
                             }
@@ -908,7 +901,8 @@ impl App {
             workflow: None,
             tmux_session: format!("{}-{project_name}", agent_type.session_prefix()),
             manager: crate::model::swarm::AgentInfo {
-                id: "manager".to_string(),
+                id: format!("{project_name}/manager"),
+                role: "manager".to_string(),
                 worktree_path: repo_path.clone(),
                 tmux_target: String::new(),
                 status: crate::model::status::AgentStatus::default(),
@@ -1301,7 +1295,7 @@ impl App {
                                     self.agent_view.scroll_to_bottom();
                                     self.screen = Screen::AgentView {
                                         swarm_idx,
-                                        agent_id: worker.id.clone(),
+                                        agent_id: worker.role.clone(),
                                     };
                                 }
                             }
@@ -1314,7 +1308,7 @@ impl App {
                             self.status_message = Some("Adding worker...".to_string());
                             match self.adapter.add_worker(&swarm_clone).await {
                                 Ok(worker) => {
-                                    let id = worker.id.clone();
+                                    let id = worker.role.clone();
                                     if let Some(swarm) = self.swarms.get_mut(swarm_idx) {
                                         swarm.workers.push(worker);
                                     }
@@ -1333,7 +1327,7 @@ impl App {
                             if let Some(worker_idx) = self.swarm_view.selected_worker() {
                                 if let Some(worker) = swarm.workers.get(worker_idx) {
                                     let target = worker.tmux_target.clone();
-                                    let id = worker.id.clone();
+                                    let id = worker.role.clone();
                                     if let Err(e) = self.adapter.start_worker_loop(&target).await {
                                         self.status_message = Some(format!("Failed: {e}"));
                                     } else {
@@ -1349,7 +1343,7 @@ impl App {
                             if let Some(worker_idx) = self.swarm_view.selected_worker() {
                                 if let Some(worker) = swarm.workers.get(worker_idx) {
                                     let target = worker.tmux_target.clone();
-                                    let id = worker.id.clone();
+                                    let id = worker.role.clone();
                                     let _ = proxy::kill_pane(&self.transport, &target).await;
                                     self.status_message = Some(format!("Shutting down {id}..."));
                                 }
@@ -1364,7 +1358,7 @@ impl App {
                                 self.agent_view.scroll_to_bottom();
                                 self.screen = Screen::AgentView {
                                     swarm_idx,
-                                    agent_id: worker.id.clone(),
+                                    agent_id: worker.role.clone(),
                                 };
                             }
                         }
@@ -1561,7 +1555,7 @@ impl App {
                         self.status_message = Some("Adding worker...".to_string());
                         match self.adapter.add_worker(&swarm_clone).await {
                             Ok(worker) => {
-                                let id = worker.id.clone();
+                                let id = worker.role.clone();
                                 if let Some(swarm) = self.swarms.get_mut(swarm_idx) {
                                     swarm.workers.push(worker);
                                 }
@@ -1582,7 +1576,7 @@ impl App {
                         if let Some(worker_idx) = self.repo_view.selected_worker() {
                             if let Some(worker) = swarm.workers.get(worker_idx) {
                                 let target = worker.tmux_target.clone();
-                                let id = worker.id.clone();
+                                let id = worker.role.clone();
                                 tracing::info!("Sending /fix-loop to {id} at {target}");
                                 if let Err(e) = self.adapter.start_worker_loop(&target).await {
                                     tracing::error!("Failed to send /fix-loop to {id}: {e}");
@@ -1602,7 +1596,7 @@ impl App {
                         if let Some(worker_idx) = self.repo_view.selected_worker() {
                             if let Some(worker) = swarm.workers.get(worker_idx) {
                                 let target = worker.tmux_target.clone();
-                                let id = worker.id.clone();
+                                let id = worker.role.clone();
                                 tracing::info!("Shutting down worker {id} at {target}");
                                 if let Err(e) = proxy::kill_pane(&self.transport, &target).await {
                                     tracing::error!("Failed to kill pane for {id}: {e}");
@@ -1621,7 +1615,7 @@ impl App {
                             self.agent_view.scroll_to_bottom();
                             self.screen = Screen::AgentView {
                                 swarm_idx,
-                                agent_id: worker.id.clone(),
+                                agent_id: worker.role.clone(),
                             };
                             return Ok(());
                         }
@@ -1685,23 +1679,21 @@ impl App {
         let tx = self.events.tx();
 
         for swarm in &self.swarms {
-            let session = &swarm.tmux_session;
-            // Watch manager pane — use session-qualified ID to disambiguate across swarms
+            // Agent IDs are globally unique (e.g., "nextgen-CDD/manager")
             let handle = proxy::spawn_pane_watcher(
                 self.transport.clone(),
                 swarm.manager.tmux_target.clone(),
-                format!("{}/{}", session, swarm.manager.id),
+                swarm.manager.id.clone(),
                 tx.clone(),
                 Duration::from_millis(500),
             );
             self.pane_watchers.push(handle);
 
-            // Watch worker panes
             for worker in &swarm.workers {
                 let handle = proxy::spawn_pane_watcher(
                     self.transport.clone(),
                     worker.tmux_target.clone(),
-                    format!("{}/{}", session, worker.id),
+                    worker.id.clone(),
                     tx.clone(),
                     Duration::from_millis(500),
                 );
@@ -1782,7 +1774,7 @@ impl App {
                     };
                     tracing::info!(
                         "Dispatching #{issue_num} to {} via {target}",
-                        self.swarms[si].workers[worker_idx].id
+                        self.swarms[si].workers[worker_idx].role
                     );
 
                     // Send command, then Enter separately
@@ -1798,7 +1790,7 @@ impl App {
                             };
                         self.status_message = Some(format!(
                             "Dispatched #{issue_num} → {}",
-                            self.swarms[si].workers[worker_idx].id
+                            self.swarms[si].workers[worker_idx].role
                         ));
                     }
                 }

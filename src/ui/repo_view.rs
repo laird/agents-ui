@@ -80,7 +80,7 @@ impl RepoView {
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default();
             Row::new(vec![
-                Cell::from(agent.id.clone()),
+                Cell::from(agent.role.clone()),
                 Cell::from(agent.status.state.to_string())
                     .style(theme::status_style(&agent.status.state)),
                 Cell::from(task),
