@@ -1462,6 +1462,16 @@ impl App {
                     _ => {}
                 }
 
+                // Alt+d: send deploy command to manager
+                if key.modifiers.contains(KeyModifiers::ALT) && key.code == KeyCode::Char('d') {
+                    let cmd = "deploy";
+                    tracing::info!("Sending '{cmd}' to manager at {target}");
+                    proxy::send_keys(&self.transport, &target, cmd).await?;
+                    self.swarm_view.scroll_manager_to_bottom();
+                    self.status_message = Some("Sent deploy to manager".to_string());
+                    return Ok(());
+                }
+
                 // Forward everything else to the manager tmux pane
                 let tmux_key = key_event_to_tmux(key);
                 if let Some(tmux_key) = tmux_key {
