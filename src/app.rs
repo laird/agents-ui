@@ -652,6 +652,21 @@ impl App {
                         use crate::ui::repo_view::CreateIssueState;
                         self.repo_view.focus = RepoViewFocus::CreateIssue(CreateIssueState::SelectType);
                     }
+                    KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
+                        // Number keys 1-9: jump to session and drill in
+                        let idx = (c as u8 - b'1') as usize;
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            if idx < swarm.workers.len() {
+                                self.repo_view.worker_list_state.select(Some(idx));
+                                self.agent_view = AgentView::new();
+                                self.agent_view.scroll_to_bottom();
+                                self.screen = Screen::AgentView {
+                                    swarm_idx,
+                                    agent_id: swarm.workers[idx].id.clone(),
+                                };
+                            }
+                        }
+                    }
                     KeyCode::Char(c) => {
                         // Try configured shortcuts for workers panel
                         self.try_shortcut("workers", &c.to_string(), swarm_idx, None).await?;
@@ -746,6 +761,17 @@ impl App {
                     KeyCode::Char('i') => {
                         use crate::ui::repo_view::CreateIssueState;
                         self.repo_view.focus = RepoViewFocus::CreateIssue(CreateIssueState::SelectType);
+                    }
+                    KeyCode::Char(c) if c >= 'a' && c <= 'z' && !matches!(c, 'i' | 'n' | 'q' | 'r') => {
+                        // Letter keys a-z: jump to issue by index (a=0, b=1, ...)
+                        let issue_idx = (c as u8 - b'a') as usize;
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            let filtered = swarm.issue_cache.filtered(self.repo_view.priority_filter.as_ref());
+                            if issue_idx < filtered.len() {
+                                // +1 because index 0 is the filter header row
+                                self.repo_view.issue_list_state.select(Some(issue_idx + 1));
+                            }
+                        }
                     }
                     KeyCode::Char(c) => {
                         // Try configured shortcuts for issues panel
