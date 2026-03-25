@@ -227,6 +227,7 @@ impl App {
             KeyCode::Enter => {
                 if let Some(idx) = self.repos_list.selected() {
                     if idx < self.swarms.len() {
+                        self.switch_gh_auth_for_swarm(idx);
                         self.repo_view = RepoView::new();
                         self.screen = Screen::RepoView { swarm_idx: idx };
                     }
@@ -367,6 +368,7 @@ impl App {
                             self.swarms.push(swarm);
                             self.start_all_pane_watchers();
                             let idx = self.swarms.len() - 1;
+                            self.switch_gh_auth_for_swarm(idx);
                             self.repo_view = RepoView::new();
                             self.screen = Screen::RepoView { swarm_idx: idx };
                             self.status_message =
@@ -552,6 +554,54 @@ impl App {
             _ => {}
         }
         Ok(())
+    }
+
+    /// Switch gh CLI auth to match the repo owner for the given swarm.
+    /// Runs in background to avoid blocking the UI.
+    fn switch_gh_auth_for_swarm(&self, swarm_idx: usize) {
+        if let Some(swarm) = self.swarms.get(swarm_idx) {
+            let repo_path = swarm.repo_path.clone();
+            tokio::spawn(async move {
+                // Get repo owner
+                let owner_output = tokio::process::Command::new("gh")
+                    .args(["repo", "view", "--json", "owner", "--jq", ".owner.login"])
+                    .current_dir(&repo_path)
+                    .output()
+                    .await;
+
+                let owner = match owner_output {
+                    Ok(out) if out.status.success() => {
+                        String::from_utf8_lossy(&out.stdout).trim().to_string()
+                    }
+                    _ => return,
+                };
+
+                if owner.is_empty() {
+                    return;
+                }
+
+                // Check current active user
+                let status_output = tokio::process::Command::new("gh")
+                    .args(["api", "user", "--jq", ".login"])
+                    .output()
+                    .await;
+
+                let current_user = match status_output {
+                    Ok(out) if out.status.success() => {
+                        String::from_utf8_lossy(&out.stdout).trim().to_string()
+                    }
+                    _ => return,
+                };
+
+                if current_user != owner {
+                    tracing::info!("Switching gh auth from {current_user} to {owner}");
+                    let _ = tokio::process::Command::new("gh")
+                        .args(["auth", "switch", "--user", &owner])
+                        .output()
+                        .await;
+                }
+            });
+        }
     }
 
     /// Enter agent view for a given agent, resizing its tmux pane to fill the terminal.
