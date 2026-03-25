@@ -330,6 +330,7 @@ impl App {
                             &self.swarms,
                             &self.available_repos,
                             self.status_message.as_deref(),
+                            &self.issue_caches,
                         );
                     }
                     Screen::NewSwarm { field } => {

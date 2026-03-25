@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
@@ -7,7 +8,9 @@ use ratatui::{
     Frame,
 };
 
+use crate::model::issue::IssueCache;
 use crate::model::swarm::Swarm;
+use crate::ui::swarm_view::count_attention;
 use super::theme;
 
 pub struct ReposListView {
@@ -28,6 +31,7 @@ impl ReposListView {
         swarms: &[Swarm],
         available: &[PathBuf],
         status_msg: Option<&str>,
+        issue_caches: &HashMap<String, IssueCache>,
     ) {
         let total_items = swarms.len() + available.len();
 
@@ -73,8 +77,9 @@ impl ReposListView {
                 Cell::from("Status"),
                 Cell::from("Workflow"),
                 Cell::from("Runtime"),
-                Cell::from("Agents"),
-                Cell::from("Attention"),
+                Cell::from("Sessions"),
+                Cell::from("Waiting"),
+                Cell::from("Issues"),
             ])
             .style(theme::header_style());
 
@@ -85,7 +90,38 @@ impl ReposListView {
             for s in swarms {
                 let busy = s.busy_count();
                 let total = s.workers.len();
-                let attention = s.attention_count();
+                let waiting = count_attention(s);
+
+                // Build issue priority summary from cache
+                let issue_summary = if let Some(cache) = issue_caches.get(&s.project_name) {
+                    let open_issues: Vec<_> = cache.issues.iter()
+                        .filter(|i| i.state == crate::model::issue::IssueState::Open)
+                        .collect();
+                    if open_issues.is_empty() {
+                        "—".to_string()
+                    } else {
+                        let mut counts = [0u32; 4]; // P0, P1, P2, P3
+                        for issue in &open_issues {
+                            if let Some(p) = issue.priority() {
+                                if (p as usize) < 4 {
+                                    counts[p as usize] += 1;
+                                }
+                            }
+                        }
+                        let parts: Vec<String> = counts.iter().enumerate()
+                            .filter(|&(_, c)| *c > 0)
+                            .map(|(i, c)| format!("P{i}:{c}"))
+                            .collect();
+                        if parts.is_empty() {
+                            format!("{} open", open_issues.len())
+                        } else {
+                            parts.join(" ")
+                        }
+                    }
+                } else {
+                    "—".to_string()
+                };
+
                 rows.push(Row::new(vec![
                     Cell::from(format!("{row_num}")).style(theme::title_style()),
                     Cell::from(s.project_name.clone()),
@@ -97,17 +133,18 @@ impl ReposListView {
                             .unwrap_or_else(|| "—".to_string()),
                     ),
                     Cell::from(s.agent_type.to_string()),
-                    Cell::from(format!("{busy}/{total} busy")),
-                    Cell::from(if attention > 0 {
-                        format!("{attention} items")
+                    Cell::from(format!("{busy}/{total} working")),
+                    Cell::from(if waiting > 0 {
+                        format!("{waiting} input")
                     } else {
                         "—".to_string()
                     })
-                    .style(if attention > 0 {
+                    .style(if waiting > 0 {
                         theme::attention_style()
                     } else {
                         theme::help_style()
                     }),
+                    Cell::from(issue_summary),
                 ]));
                 row_num += 1;
             }
@@ -126,6 +163,7 @@ impl ReposListView {
                     Cell::from("—").style(theme::help_style()),
                     Cell::from("—").style(theme::help_style()),
                     Cell::from("—").style(theme::help_style()),
+                    Cell::from("—").style(theme::help_style()),
                 ]));
                 row_num += 1;
             }
@@ -134,12 +172,13 @@ impl ReposListView {
                 rows,
                 [
                     Constraint::Length(3),
-                    Constraint::Percentage(22),
+                    Constraint::Percentage(18),
+                    Constraint::Percentage(10),
                     Constraint::Percentage(12),
+                    Constraint::Percentage(10),
                     Constraint::Percentage(14),
-                    Constraint::Percentage(12),
-                    Constraint::Percentage(14),
-                    Constraint::Percentage(14),
+                    Constraint::Percentage(10),
+                    Constraint::Percentage(16),
                 ],
             )
             .header(header)
@@ -237,14 +276,16 @@ mod tests {
 
     #[test]
     fn render_smoke_shows_active_and_available_repos() {
+        use std::collections::HashMap;
         let backend = TestBackend::new(120, 30);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut view = ReposListView::new();
         let swarms = vec![make_swarm()];
         let available = vec![PathBuf::from("/tmp/other-repo")];
+        let caches = HashMap::new();
 
         terminal
-            .draw(|f| view.render(f, f.area(), &swarms, &available, Some("Ready")))
+            .draw(|f| view.render(f, f.area(), &swarms, &available, Some("Ready"), &caches))
             .unwrap();
 
         let rendered = terminal

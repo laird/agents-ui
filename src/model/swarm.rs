@@ -160,14 +160,6 @@ impl Swarm {
             .count()
     }
 
-    /// Count of items needing attention (idle workers, blocked states)
-    pub fn attention_count(&self) -> usize {
-        self.workers
-            .iter()
-            .filter(|w| matches!(w.status.state, super::status::AgentState::Idle))
-            .count()
-    }
-
     /// Get a specific agent by role (e.g., "manager", "worker-1")
     pub fn agent(&self, role: &str) -> Option<&AgentInfo> {
         if self.manager.role == role {
