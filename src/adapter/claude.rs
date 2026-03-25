@@ -540,15 +540,11 @@ impl AgentRuntime for ClaudeAdapter {
                             continue;
                         }
 
-                        // 3b. Detect shell prompt (agent not running)
-                        let last_line = trimmed.lines().last().unwrap_or("").trim();
-                        let looks_like_shell = last_line.ends_with('$')
-                            || last_line.ends_with('%')
-                            || last_line.ends_with('#')
-                            || last_line.ends_with("❯")
-                            || (last_line.contains("~") && (last_line.ends_with('$') || last_line.ends_with('%')));
+                        // 3b. Detect bare shell prompt (agent not running)
+                        // Must distinguish from an active Claude session which also shows ❯
+                        let is_bare_shell = is_bare_shell_prompt(trimmed);
 
-                        if looks_like_shell && !last_line.is_empty() {
+                        if is_bare_shell {
                             tracing::info!(
                                 "Healing {}: agent not running (shell prompt detected), restarting",
                                 worker.id
@@ -662,6 +658,53 @@ async fn ensure_gh_auth_for_repo(repo_path: &Path) {
     }
 }
 
+/// Check if pane content shows a bare shell prompt (no active Claude session).
+///
+/// Returns true if the last line looks like a shell prompt AND there are no
+/// indicators of an active Claude session in the content. This avoids false
+/// positives where Claude's own prompt (❯) is mistaken for a shell.
+pub(crate) fn is_bare_shell_prompt(content: &str) -> bool {
+    let last_line = content.lines().last().unwrap_or("").trim();
+    if last_line.is_empty() {
+        return false;
+    }
+
+    // Check if last line looks like a shell prompt
+    let has_shell_prompt = last_line.ends_with('$')
+        || last_line.ends_with('%')
+        || last_line.ends_with('#')
+        || last_line.ends_with("❯");
+
+    if !has_shell_prompt {
+        return false;
+    }
+
+    // Check for Claude session indicators — if any are present, this is NOT a bare shell
+    let lower = content.to_lowercase();
+    let claude_indicators = [
+        "bypass permissions",
+        "claude code",
+        "brewed for",
+        "co-authored-by",
+        "tool use",
+        "read(",
+        "edit(",
+        "bash(",
+        "write(",
+        "╭─",  // Claude's box drawing
+        "╰─",
+        "idle_no_work_available",
+    ];
+
+    for indicator in &claude_indicators {
+        if lower.contains(indicator) {
+            return false;
+        }
+    }
+
+    true
+}
+
 /// Check if pane content contains a Claude feedback prompt.
 /// Matches patterns like "How is Claude doing this session?" and
 /// "1: Bad    2: Fine   3: Good   0: Dismiss".
@@ -692,6 +735,40 @@ mod tests {
         assert!(!is_feedback_prompt("Working on issue #42"));
         assert!(!is_feedback_prompt("idle"));
         assert!(!is_feedback_prompt(""));
+    }
+
+    // --- is_bare_shell_prompt tests ---
+
+    #[test]
+    fn detects_bash_prompt() {
+        assert!(is_bare_shell_prompt("user@host:~/project$"));
+        assert!(is_bare_shell_prompt("~ $"));
+    }
+
+    #[test]
+    fn detects_zsh_prompt() {
+        assert!(is_bare_shell_prompt("user@host %"));
+        assert!(is_bare_shell_prompt("❯"));
+    }
+
+    #[test]
+    fn not_bare_shell_with_claude_indicators() {
+        // Claude session with ❯ prompt should NOT be detected as bare shell
+        assert!(!is_bare_shell_prompt("╭─ some output\n╰─ ❯"));
+        assert!(!is_bare_shell_prompt("bypass permissions enabled\n❯"));
+        assert!(!is_bare_shell_prompt("Claude Code session\nBrewed for you\n❯"));
+    }
+
+    #[test]
+    fn empty_not_bare_shell() {
+        assert!(!is_bare_shell_prompt(""));
+        assert!(!is_bare_shell_prompt("\n\n"));
+    }
+
+    #[test]
+    fn normal_output_not_bare_shell() {
+        assert!(!is_bare_shell_prompt("Working on issue #42"));
+        assert!(!is_bare_shell_prompt("IDLE_NO_WORK_AVAILABLE"));
     }
 }
 
