@@ -3,10 +3,8 @@ use futures::StreamExt;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-use crate::model::status::AgentStatus;
-
+use crate::model::issue::GitHubIssue;
 /// All events the app processes.
-#[derive(Debug)]
 pub enum Event {
     /// Keyboard input
     Key(KeyEvent),
@@ -17,18 +15,23 @@ pub enum Event {
         agent_id: String,
         content: String,
     },
-    /// Agent status file changed
-    StatusChange {
-        agent_id: String,
-        status: AgentStatus,
+    /// GitHub issues updated for a project
+    IssuesUpdated {
+        project_name: String,
+        issues: Vec<GitHubIssue>,
+    },
+    /// GitHub CLI warning (auth failure, repo not found, not installed)
+    GhWarning {
+        project_name: String,
+        message: String,
     },
     /// A swarm was discovered (on startup reconnect)
-    SwarmDiscovered {
-        session_name: String,
-        repo_path: String,
+    SwarmDiscovered,
+    /// Launch progress update (shown in manager panel during setup)
+    LaunchProgress {
+        project_name: String,
+        message: String,
     },
-    /// Error from a background task
-    Error(String),
 }
 
 pub struct EventHandler {

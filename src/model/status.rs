@@ -29,6 +29,7 @@ impl std::fmt::Display for AgentState {
 /// Parsed status of an agent from its status file.
 #[derive(Debug, Clone)]
 pub struct AgentStatus {
+    #[allow(dead_code)]
     pub timestamp: Option<NaiveDateTime>,
     pub state: AgentState,
 }
@@ -112,5 +113,54 @@ pub fn read_status_file(path: &Path) -> AgentStatus {
             }
         }
         Err(_) => AgentStatus::default(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_status_line, read_status_file, AgentState};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_status_path(name: &str) -> std::path::PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        std::env::temp_dir().join(format!("agents-ui-status-{name}-{}-{nanos}", std::process::id()))
+    }
+
+    #[test]
+    fn parses_working_issue_and_timestamp() {
+        let status = parse_status_line("2024-01-15 10:30:00\tworking issue #42");
+        assert!(status.timestamp.is_some());
+        assert!(matches!(status.state, AgentState::Working { issue: Some(42) }));
+    }
+
+    #[test]
+    fn parses_idle_completed_and_unknown_states() {
+        assert!(matches!(parse_status_line("idle").state, AgentState::Idle));
+        assert!(matches!(
+            parse_status_line("completed successfully").state,
+            AgentState::Completed { .. }
+        ));
+        assert!(matches!(
+            parse_status_line("mystery mode").state,
+            AgentState::Unknown(_)
+        ));
+    }
+
+    #[test]
+    fn reads_last_line_from_status_file() {
+        let path = temp_status_path("read-last-line");
+        std::fs::write(
+            &path,
+            "2024-01-15 10:00:00\tidle\n2024-01-15 10:30:00\tfixing issue 77\n",
+        )
+        .unwrap();
+
+        let status = read_status_file(&path);
+        assert!(matches!(status.state, AgentState::Working { issue: Some(77) }));
+
+        std::fs::remove_file(path).ok();
     }
 }

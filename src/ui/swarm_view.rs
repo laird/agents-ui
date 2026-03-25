@@ -1,6 +1,6 @@
 use ansi_to_tui::IntoText;
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Layout, Rect},
     style::Style,
     text::{Line, Span, Text},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState, Wrap},
@@ -63,20 +63,18 @@ impl SwarmView {
             .filter(|i| i.matches_filter(self.issue_filter))
             .collect();
 
-        // Calculate bottom panel height: sized to content, max 50%
-        let worker_rows = swarm.workers.len();
-        let issue_rows = filtered_issues.len();
-        let bottom_content = worker_rows.max(issue_rows) as u16 + 3; // +3 for header/borders
-        let max_bottom = area.height / 2;
-        let bottom_height = bottom_content.min(max_bottom).max(4); // at least 4 rows
-
         let chunks = Layout::vertical([
             Constraint::Length(1),             // Header line
-            Constraint::Min(4),               // Manager panel (fills remaining)
-            Constraint::Length(bottom_height), // Workers + Issues
+            Constraint::Min(4),               // Body (manager + workers/issues)
             Constraint::Length(2),            // Help bar
         ])
         .split(area);
+
+        let body_chunks = Layout::vertical([
+            Constraint::Percentage(50),
+            Constraint::Percentage(50),
+        ])
+        .split(chunks[1]);
 
         // --- Header line ---
         let attention = count_attention(swarm);
@@ -112,7 +110,7 @@ impl SwarmView {
             .into_text()
             .unwrap_or_else(|_| Text::raw(manager_content.clone()));
         let total_lines = text.lines.len() as u16;
-        let visible = chunks[1].height.saturating_sub(2);
+        let visible = body_chunks[0].height.saturating_sub(2);
         let max_scroll = total_lines.saturating_sub(visible);
         if self.manager_scroll > max_scroll {
             self.manager_scroll = max_scroll;
@@ -131,14 +129,14 @@ impl SwarmView {
             .block(manager_block)
             .wrap(Wrap { trim: false })
             .scroll((self.manager_scroll, 0));
-        f.render_widget(manager, chunks[1]);
+        f.render_widget(manager, body_chunks[0]);
 
         // --- Bottom split: Workers (left) | Issues (right) ---
         let bottom_cols = Layout::horizontal([
             Constraint::Percentage(40),
             Constraint::Percentage(60),
         ])
-        .split(chunks[2]);
+        .split(body_chunks[1]);
 
         // Workers table
         let worker_header = Row::new(vec![
@@ -261,8 +259,6 @@ impl SwarmView {
             SwarmPanel::Manager => vec![
                 Span::styled(" Tab", theme::title_style()),
                 Span::styled(" cycle  ", theme::help_style()),
-                Span::styled("EscEsc", theme::title_style()),
-                Span::styled(" repos  ", theme::help_style()),
                 Span::styled("PgUp/Dn", theme::title_style()),
                 Span::styled(" scroll  ", theme::help_style()),
                 Span::styled("Enter", theme::title_style()),
@@ -284,14 +280,14 @@ impl SwarmView {
                 Span::styled("a", theme::title_style()),
                 Span::styled(" add  ", theme::help_style()),
                 Span::styled("⌥a", theme::title_style()),
-                Span::styled(" next alert  ", theme::help_style()),
-                Span::styled("EscEsc", theme::title_style()),
-                Span::styled(" repos", theme::help_style()),
+                Span::styled(" next alert", theme::help_style()),
             ],
             SwarmPanel::Issues => vec![
                 Span::styled(" Tab", theme::title_style()),
                 Span::styled(" cycle  ", theme::help_style()),
                 Span::styled("a", theme::title_style()),
+                Span::styled(" add  ", theme::help_style()),
+                Span::styled("p", theme::title_style()),
                 Span::styled(" approve  ", theme::help_style()),
                 Span::styled("b", theme::title_style()),
                 Span::styled(" brainstorm  ", theme::help_style()),
@@ -299,14 +295,14 @@ impl SwarmView {
                 Span::styled(" review-blocked  ", theme::help_style()),
                 Span::styled("f", theme::title_style()),
                 Span::styled(" filter  ", theme::help_style()),
+                Span::styled("g", theme::title_style()),
+                Span::styled(" gh issue  ", theme::help_style()),
                 Span::styled("⌥a", theme::title_style()),
-                Span::styled(" next alert  ", theme::help_style()),
-                Span::styled("EscEsc", theme::title_style()),
-                Span::styled(" repos", theme::help_style()),
+                Span::styled(" next alert", theme::help_style()),
             ],
         };
         let help = Paragraph::new(Line::from(help_spans));
-        f.render_widget(help, chunks[3]);
+        f.render_widget(help, chunks[2]);
     }
 
     pub fn scroll_manager_up(&mut self, amount: u16) {
@@ -416,5 +412,87 @@ fn truncate(s: &str, max: usize) -> String {
         s.to_string()
     } else {
         format!("{}…", &s[..max - 1])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{agent_needs_input, SwarmPanel, SwarmView};
+    use crate::model::issue::{GitHubIssue, IssueState};
+    use crate::model::status::{AgentState, AgentStatus};
+    use crate::model::swarm::{AgentInfo, AgentType, Swarm};
+    use ratatui::{backend::TestBackend, Terminal};
+    use std::path::PathBuf;
+
+    fn make_agent(id: &str, is_manager: bool, pane_content: &str, state: AgentState) -> AgentInfo {
+        AgentInfo {
+            id: id.to_string(),
+            worktree_path: PathBuf::new(),
+            tmux_target: String::new(),
+            status: AgentStatus {
+                timestamp: None,
+                state,
+            },
+            is_manager,
+            pane_content: pane_content.to_string(),
+            dispatched_issue: None,
+        }
+    }
+
+    fn make_swarm() -> Swarm {
+        Swarm {
+            repo_path: PathBuf::from("/tmp/repo"),
+            project_name: "demo".to_string(),
+            agent_type: AgentType::Codex,
+            workflow: None,
+            tmux_session: "codex-demo".to_string(),
+            manager: make_agent("manager", true, "Manager output", AgentState::Idle),
+            workers: vec![make_agent(
+                "worker-1",
+                false,
+                "working issue #12",
+                AgentState::Working { issue: Some(12) },
+            )],
+        }
+    }
+
+    #[test]
+    fn detects_confirmation_prompts() {
+        assert!(agent_needs_input("Would you like to proceed?\nPress enter to confirm"));
+        assert!(!agent_needs_input("All good, continuing work"));
+    }
+
+    #[test]
+    fn render_smoke_writes_swarm_sections() {
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut view = SwarmView::new();
+        let swarm = make_swarm();
+        let issues = vec![GitHubIssue {
+            number: 12,
+            title: "Fix worker bootstrap after reconnect".to_string(),
+            state: IssueState::Open,
+            labels: vec!["P1".to_string()],
+            assigned_worker: Some("worker-1".to_string()),
+        }];
+
+        terminal
+            .draw(|f| {
+                view.render(f, f.area(), &swarm, &issues, SwarmPanel::Manager, false);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let rendered = buffer
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("Manager"));
+        assert!(rendered.contains("Workers (1)"));
+        assert!(rendered.contains("Issues (open: 1)"));
+        assert!(rendered.contains("demo"));
+        assert!(rendered.contains("#12"));
     }
 }

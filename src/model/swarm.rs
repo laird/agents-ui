@@ -54,23 +54,44 @@ impl AgentType {
     pub fn launch_cmd(&self) -> &str {
         match self {
             AgentType::Claude => "claude code --dangerously-skip-permissions .",
-            AgentType::Codex => "codex --dangerously-skip-permissions",
+            AgentType::Codex => "codex",
             AgentType::Droid => "droid",
             AgentType::Gemini => "gemini --sandbox=false",
         }
     }
 
     /// The slash command to start the worker fix-loop.
+    #[allow(dead_code)]
     pub fn worker_loop_cmd(&self) -> &str {
         match self {
             AgentType::Claude => "/autocoder:fix-loop",
-            _ => "/fix-loop",
+            AgentType::Codex | AgentType::Droid => "",
+            AgentType::Gemini => "/fix-loop",
         }
+    }
+
+    pub fn from_name(value: &str) -> Option<Self> {
+        match value.trim().to_lowercase().as_str() {
+            "claude" => Some(AgentType::Claude),
+            "codex" => Some(AgentType::Codex),
+            "droid" => Some(AgentType::Droid),
+            "gemini" => Some(AgentType::Gemini),
+            _ => None,
+        }
+    }
+}
+
+impl std::str::FromStr for AgentType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        AgentType::from_name(s).ok_or(())
     }
 }
 
 /// The workflow type for a swarm.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)]
 pub enum Workflow {
     Autocoder,
     Modernize,
@@ -100,6 +121,8 @@ pub struct AgentInfo {
     pub is_manager: bool,
     /// Captured pane output (latest snapshot)
     pub pane_content: String,
+    /// Issue number currently assigned by the TUI dispatcher (None = unassigned)
+    pub dispatched_issue: Option<u32>,
 }
 
 /// A swarm of agents working on one repo.
@@ -122,11 +145,6 @@ pub struct Swarm {
 }
 
 impl Swarm {
-    /// Total agent count (manager + workers)
-    pub fn agent_count(&self) -> usize {
-        1 + self.workers.len()
-    }
-
     /// Count of busy workers
     pub fn busy_count(&self) -> usize {
         self.workers
@@ -166,10 +184,36 @@ impl Swarm {
         }
     }
 
-    /// Get all agents (manager + workers) as a flat list
-    pub fn all_agents(&self) -> Vec<&AgentInfo> {
-        let mut agents = vec![&self.manager];
-        agents.extend(self.workers.iter());
-        agents
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AgentType;
+
+    #[test]
+    fn codex_and_droid_launch_interactive_sessions() {
+        assert_eq!(AgentType::Codex.launch_cmd(), "codex");
+        assert_eq!(AgentType::Droid.launch_cmd(), "droid");
+    }
+
+    #[test]
+    fn claude_and_gemini_keep_inline_launch_commands() {
+        assert!(AgentType::Claude.launch_cmd().contains("claude code"));
+        assert!(AgentType::Gemini.launch_cmd().contains("gemini"));
+    }
+
+    #[test]
+    fn worker_loop_commands_match_runtime_model() {
+        assert_eq!(AgentType::Claude.worker_loop_cmd(), "/autocoder:fix-loop");
+        assert_eq!(AgentType::Gemini.worker_loop_cmd(), "/fix-loop");
+        assert_eq!(AgentType::Codex.worker_loop_cmd(), "");
+        assert_eq!(AgentType::Droid.worker_loop_cmd(), "");
+    }
+
+    #[test]
+    fn status_directories_match_runtime_storage() {
+        assert_eq!(AgentType::Codex.status_dir(), ".codex/loops");
+        assert_eq!(AgentType::Claude.status_dir(), ".codex/loops");
+        assert_eq!(AgentType::Droid.status_dir(), ".factory/loops");
     }
 }

@@ -10,14 +10,12 @@ use crate::model::swarm::AgentInfo;
 use super::theme;
 
 pub struct AgentView {
-    pub input: String,
     pub scroll_offset: u16,
 }
 
 impl AgentView {
     pub fn new() -> Self {
         Self {
-            input: String::new(),
             scroll_offset: 0,
         }
     }
@@ -27,12 +25,13 @@ impl AgentView {
             Constraint::Length(3),
             Constraint::Min(5),
             Constraint::Length(3),
-            Constraint::Length(3),
         ])
         .split(area);
 
         // Title
-        let role = if agent.is_manager {
+        let role = if agent.id == "tester" {
+            "Tester"
+        } else if agent.is_manager {
             "Manager"
         } else {
             "Worker"
@@ -72,29 +71,19 @@ impl AgentView {
             .scroll((self.scroll_offset, 0));
         f.render_widget(pane_output, chunks[1]);
 
-        // Passthrough mode indicator
-        let mode_info = Paragraph::new(Line::from(Span::styled(
-            " Keys forwarded to agent — Tab, /, etc. work natively",
-            theme::help_style(),
-        )))
-        .block(Block::default().borders(Borders::ALL).title(" Passthrough Mode "));
-        f.render_widget(mode_info, chunks[2]);
-
         // Help
         let help = Paragraph::new(Line::from(vec![
-            Span::styled(" Esc Esc", theme::title_style()),
+            Span::styled(" ⌥←", theme::title_style()),
             Span::styled(" back  ", theme::help_style()),
             Span::styled("⌥0", theme::title_style()),
             Span::styled(" overview  ", theme::help_style()),
-            Span::styled("⌥m", theme::title_style()),
-            Span::styled(" mgr  ", theme::help_style()),
             Span::styled("⌥1-9", theme::title_style()),
             Span::styled(" worker  ", theme::help_style()),
             Span::styled("PgUp/Dn", theme::title_style()),
             Span::styled(" scroll  ", theme::help_style()),
         ]))
         .block(Block::default().borders(Borders::TOP));
-        f.render_widget(help, chunks[3]);
+        f.render_widget(help, chunks[2]);
     }
 
     pub fn scroll_up(&mut self, amount: u16) {

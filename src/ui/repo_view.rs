@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     text::{Line, Span},
@@ -11,7 +13,6 @@ use super::theme;
 pub struct RepoView {
     pub worker_table_state: TableState,
     pub focus_manager: bool,
-    pub input: String,
 }
 
 impl RepoView {
@@ -21,7 +22,6 @@ impl RepoView {
         Self {
             worker_table_state,
             focus_manager: false,
-            input: String::new(),
         }
     }
 
@@ -90,11 +90,6 @@ impl RepoView {
             lines.push(Line::from(l.clone()));
         }
 
-        if self.focus_manager {
-            let input_display = format!("> {}█", self.input);
-            lines.push(Line::from(Span::styled(input_display, theme::title_style())));
-        }
-
         let manager_para = Paragraph::new(lines).block(manager_block);
         f.render_widget(manager_para, chunks[1]);
 
@@ -160,25 +155,30 @@ impl RepoView {
         // Help bar
         let help = if self.focus_manager {
             Paragraph::new(Line::from(vec![
-                Span::styled(" Enter", theme::title_style()),
-                Span::styled(" send  ", theme::help_style()),
+                Span::styled(" Keys forwarded to manager", theme::help_style()),
+                Span::styled("  Tab", theme::title_style()),
+                Span::styled("/", theme::help_style()),
                 Span::styled("Esc", theme::title_style()),
-                Span::styled(" back to workers  ", theme::help_style()),
+                Span::styled(" workers  ", theme::help_style()),
+                Span::styled("⌥1-9", theme::title_style()),
+                Span::styled(" worker", theme::help_style()),
             ]))
         } else {
             Paragraph::new(Line::from(vec![
-                Span::styled("1-9", theme::title_style()),
-                Span::styled(" jump to worker  ", theme::help_style()),
-                Span::styled("Enter", theme::title_style()),
-                Span::styled(" drill in  ", theme::help_style()),
+                Span::styled(" Tab", theme::title_style()),
+                Span::styled("/", theme::help_style()),
                 Span::styled("m", theme::title_style()),
                 Span::styled(" manager  ", theme::help_style()),
-                Span::styled("d", theme::title_style()),
-                Span::styled(" shutdown  ", theme::help_style()),
+                Span::styled("1-9", theme::title_style()),
+                Span::styled("/", theme::help_style()),
+                Span::styled("Enter", theme::title_style()),
+                Span::styled(" view  ", theme::help_style()),
+                Span::styled("a", theme::title_style()),
+                Span::styled(" add  ", theme::help_style()),
                 Span::styled("f", theme::title_style()),
                 Span::styled(" fix-loop  ", theme::help_style()),
-                Span::styled("a", theme::title_style()),
-                Span::styled(" add worker  ", theme::help_style()),
+                Span::styled("d", theme::title_style()),
+                Span::styled(" shutdown  ", theme::help_style()),
                 Span::styled("Esc", theme::title_style()),
                 Span::styled(" back  ", theme::help_style()),
                 Span::styled("q", theme::title_style()),

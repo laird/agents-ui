@@ -7,11 +7,12 @@ pub struct SwarmConfig {
     pub repo_path: PathBuf,
     pub agent_type: AgentType,
     pub num_workers: u32,
+    #[allow(dead_code)]
     pub agents_dir: PathBuf,
 }
 
 /// Trait abstracting over different agent runtimes.
-#[allow(async_fn_in_trait)]
+#[allow(async_fn_in_trait, dead_code)]
 pub trait AgentRuntime {
     /// Launch a new swarm (manager + workers).
     async fn launch(&self, config: &SwarmConfig) -> Result<Swarm>;

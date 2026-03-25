@@ -45,3 +45,15 @@ pub fn attention_style() -> Style {
         .fg(Color::Red)
         .add_modifier(Modifier::BOLD)
 }
+
+pub fn attention_blink_style(blink: bool) -> Style {
+    if blink {
+        Style::default()
+            .fg(Color::Red)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
+    }
+}

@@ -10,12 +10,6 @@ use ratatui::{
 use crate::model::swarm::Swarm;
 use super::theme;
 
-/// Combined list item: either an active swarm or an available repo.
-pub enum RepoEntry<'a> {
-    Active(&'a Swarm),
-    Available(&'a PathBuf),
-}
-
 pub struct ReposListView {
     pub table_state: TableState,
 }
@@ -202,5 +196,68 @@ impl ReposListView {
 
     pub fn selected(&self) -> Option<usize> {
         self.table_state.selected()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ReposListView;
+    use crate::model::status::{AgentState, AgentStatus};
+    use crate::model::swarm::{AgentInfo, AgentType, Swarm};
+    use ratatui::{backend::TestBackend, Terminal};
+    use std::path::PathBuf;
+
+    fn make_agent(id: &str, is_manager: bool) -> AgentInfo {
+        AgentInfo {
+            id: id.to_string(),
+            worktree_path: PathBuf::new(),
+            tmux_target: String::new(),
+            status: AgentStatus {
+                timestamp: None,
+                state: AgentState::Idle,
+            },
+            is_manager,
+            pane_content: String::new(),
+            dispatched_issue: None,
+        }
+    }
+
+    fn make_swarm() -> Swarm {
+        Swarm {
+            repo_path: PathBuf::from("/tmp/demo"),
+            project_name: "demo".to_string(),
+            agent_type: AgentType::Codex,
+            workflow: None,
+            tmux_session: "codex-demo".to_string(),
+            manager: make_agent("manager", true),
+            workers: vec![make_agent("worker-1", false)],
+        }
+    }
+
+    #[test]
+    fn render_smoke_shows_active_and_available_repos() {
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut view = ReposListView::new();
+        let swarms = vec![make_swarm()];
+        let available = vec![PathBuf::from("/tmp/other-repo")];
+
+        terminal
+            .draw(|f| view.render(f, f.area(), &swarms, &available, Some("Ready")))
+            .unwrap();
+
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("Agents UI"));
+        assert!(rendered.contains("demo"));
+        assert!(rendered.contains("other-repo"));
+        assert!(rendered.contains("Active"));
+        assert!(rendered.contains("Ready"));
     }
 }
