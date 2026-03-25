@@ -621,6 +621,19 @@ impl App {
                             Some(format!("Restarted {count} idle worker(s)"));
                     }
                 }
+                KeyCode::Char('B') => {
+                    // Send deploy command to manager session
+                    if let Some(swarm) = self.swarms.get(swarm_idx) {
+                        let target = swarm.manager.tmux_target.clone();
+                        tracing::info!("Sending deploy command to manager at {target}");
+                        if let Err(e) = self.adapter.send_input(&target, "deploy").await {
+                            tracing::error!("Failed to send deploy: {e}");
+                            self.status_message = Some(format!("Deploy failed: {e}"));
+                        } else {
+                            self.status_message = Some("Sent deploy to manager".to_string());
+                        }
+                    }
+                }
                 KeyCode::Char('D') => {
                     // Stop all workers (send stop to each)
                     if let Some(swarm) = self.swarms.get(swarm_idx) {

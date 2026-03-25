@@ -324,6 +324,8 @@ impl RepoView {
                 Span::styled(" add  ", theme::help_style()),
                 Span::styled("d", theme::title_style()),
                 Span::styled(" stop  ", theme::help_style()),
+                Span::styled("B", theme::title_style()),
+                Span::styled(" deploy  ", theme::help_style()),
                 Span::styled("D", theme::title_style()),
                 Span::styled(" stop all  ", theme::help_style()),
                 Span::styled("Esc", theme::title_style()),
