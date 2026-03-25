@@ -206,17 +206,17 @@ impl RepoView {
             let input_widget = Paragraph::new(input_line);
             f.render_widget(input_widget, mgr_chunks[1]);
         } else {
-            // Compact view: status + last few lines
+            // Compact view: status line + last few lines of output with highlighting
             let status_text = manager_status.to_string();
-            let worktree_text = format!("Worktree: {}", swarm.manager.worktree_path.display());
 
-            let last_lines: Vec<String> = swarm
+            // Filter out empty trailing lines and take meaningful content
+            let last_lines: Vec<&str> = swarm
                 .manager
                 .pane_content
                 .lines()
                 .rev()
-                .take(4)
-                .map(|s| s.to_string())
+                .filter(|l| !l.trim().is_empty())
+                .take(5)
                 .collect::<Vec<_>>()
                 .into_iter()
                 .rev()
@@ -226,11 +226,11 @@ impl RepoView {
                 Span::styled("Status: ", theme::help_style()),
                 Span::styled(status_text, theme::status_style(manager_status)),
                 Span::raw("  "),
-                Span::styled(worktree_text, theme::help_style()),
+                Span::styled("(press m for full view)", Style::default().fg(Color::DarkGray)),
             ])];
 
             for l in &last_lines {
-                lines.push(Line::from(l.clone()));
+                lines.push(highlight_line(l));
             }
 
             let manager_para = Paragraph::new(lines).block(manager_block);
