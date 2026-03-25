@@ -29,10 +29,14 @@ impl RepoView {
     }
 
     pub fn render(&mut self, f: &mut Frame, area: Rect, swarm: &Swarm) {
-        // Top-level 70/30 split: manager area vs worker list
+        // Dynamic sizing: workers table fits content, manager gets the rest
+        let worker_rows = swarm.workers.len() as u16;
+        let workers_height = (worker_rows + 3) // rows + header + top/bottom borders
+            .max(4)                             // minimum 4 lines
+            .min(area.height * 40 / 100);       // cap at 40% of screen
         let main_chunks = Layout::vertical([
-            Constraint::Percentage(70), // Manager area (title + session + input + help)
-            Constraint::Percentage(30), // Workers table
+            Constraint::Min(12),                      // Manager area (fills remaining)
+            Constraint::Length(workers_height),        // Workers table (sized to content)
         ])
         .split(area);
 
