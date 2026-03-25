@@ -205,6 +205,8 @@ pub struct App {
     pub blink_counter: u32,
     /// Create-issue dialog form state (None = closed).
     pub create_issue_form: Option<CreateIssueForm>,
+    /// Pending swarm teardown confirmation (swarm index).
+    pub confirm_teardown: Option<usize>,
     /// Default runtime for launched/discovered swarms.
     pub default_agent_type: AgentType,
     /// True when runtime was explicitly pinned via CLI flag.
@@ -273,6 +275,7 @@ impl App {
             blink: false,
             blink_counter: 0,
             create_issue_form: None,
+            confirm_teardown: None,
             default_agent_type,
             runtime_locked_from_cli,
             runtime_pref_repo_root,
@@ -1114,6 +1117,34 @@ impl App {
     }
 
     async fn handle_repos_list_key(&mut self, key: KeyEvent) -> Result<()> {
+        // Handle teardown confirmation
+        if let Some(idx) = self.confirm_teardown {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    if idx < self.swarms.len() {
+                        let swarm = self.swarms[idx].clone();
+                        let project = swarm.project_name.clone();
+                        self.status_message = Some(format!("Tearing down {project}..."));
+                        if let Err(e) = self.adapter.teardown(&swarm).await {
+                            self.status_message = Some(format!("Teardown error: {e}"));
+                        } else {
+                            self.swarms.remove(idx);
+                            self.start_all_pane_watchers();
+                            self.scan_available_repos();
+                            self.status_message = Some(format!("Torn down {project}"));
+                        }
+                    }
+                    self.confirm_teardown = None;
+                }
+                _ => {
+                    // Any other key cancels
+                    self.confirm_teardown = None;
+                    self.status_message = Some("Teardown cancelled".to_string());
+                }
+            }
+            return Ok(());
+        }
+
         let total = self.repos_list_len();
         match key.code {
             KeyCode::Char('q') => self.running = false,
@@ -1149,20 +1180,12 @@ impl App {
                 }
             }
             KeyCode::Char('d') => {
-                // Shut down the selected swarm
+                // Tear down the selected swarm (with confirmation)
                 if let Some(idx) = self.repos_list.selected() {
                     if idx < self.swarms.len() {
-                        let swarm = self.swarms[idx].clone();
-                        let project = swarm.project_name.clone();
-                        self.status_message = Some(format!("Shutting down {project}..."));
-                        if let Err(e) = self.adapter.teardown(&swarm).await {
-                            self.status_message = Some(format!("Teardown error: {e}"));
-                        } else {
-                            self.swarms.remove(idx);
-                            self.start_all_pane_watchers();
-                            self.scan_available_repos();
-                            self.status_message = Some(format!("Shut down {project}"));
-                        }
+                        let project = self.swarms[idx].project_name.clone();
+                        self.confirm_teardown = Some(idx);
+                        self.status_message = Some(format!("Tear down {project}? (y to confirm, any other key to cancel)"));
                     }
                 }
             }

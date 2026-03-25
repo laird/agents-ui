@@ -206,7 +206,7 @@ impl ReposListView {
             Span::styled("n", theme::title_style()),
             Span::styled(" new swarm  ", theme::help_style()),
             Span::styled("d", theme::title_style()),
-            Span::styled(" stop swarm  ", theme::help_style()),
+            Span::styled(" teardown  ", theme::help_style()),
             Span::styled("r", theme::title_style()),
             Span::styled(" refresh  ", theme::help_style()),
             Span::styled("q", theme::title_style()),
