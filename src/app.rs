@@ -43,6 +43,128 @@ pub enum InstallScope {
     Repo,
 }
 
+/// Which field is focused in the create-issue dialog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CreateIssueField {
+    Title,
+    Priority,
+    IssueType,
+    Labels,
+}
+
+/// Priority level for a new issue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IssuePriority {
+    P0,
+    P1,
+    P2,
+    P3,
+}
+
+impl IssuePriority {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::P0 => "P0",
+            Self::P1 => "P1",
+            Self::P2 => "P2",
+            Self::P3 => "P3",
+        }
+    }
+    pub fn desc(self) -> &'static str {
+        match self {
+            Self::P0 => "Critical",
+            Self::P1 => "High",
+            Self::P2 => "Medium",
+            Self::P3 => "Low",
+        }
+    }
+    pub fn next(self) -> Self {
+        match self {
+            Self::P0 => Self::P1,
+            Self::P1 => Self::P2,
+            Self::P2 => Self::P3,
+            Self::P3 => Self::P0,
+        }
+    }
+    pub fn prev(self) -> Self {
+        match self {
+            Self::P0 => Self::P3,
+            Self::P1 => Self::P0,
+            Self::P2 => Self::P1,
+            Self::P3 => Self::P2,
+        }
+    }
+}
+
+/// Issue type: bug or enhancement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IssueType {
+    Bug,
+    Enhancement,
+}
+
+impl IssueType {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Bug => "bug",
+            Self::Enhancement => "enhancement",
+        }
+    }
+    pub fn toggle(self) -> Self {
+        match self {
+            Self::Bug => Self::Enhancement,
+            Self::Enhancement => Self::Bug,
+        }
+    }
+}
+
+/// Blocking labels that can be toggled on/off.
+pub const BLOCKING_LABELS: &[&str] = &[
+    "needs-design",
+    "needs-clarification",
+    "needs-approval",
+    "too-complex",
+    "future",
+    "proposal",
+];
+
+/// Form state for the create-issue dialog.
+#[derive(Debug, Clone)]
+pub struct CreateIssueForm {
+    pub title: String,
+    pub field: CreateIssueField,
+    pub priority: IssuePriority,
+    pub issue_type: IssueType,
+    /// Which blocking labels are selected (indexed into BLOCKING_LABELS).
+    pub label_toggles: [bool; 6],
+    /// Which blocking label is highlighted (for arrow navigation).
+    pub label_cursor: usize,
+}
+
+impl CreateIssueForm {
+    pub fn new() -> Self {
+        Self {
+            title: String::new(),
+            field: CreateIssueField::Title,
+            priority: IssuePriority::P2,
+            issue_type: IssueType::Bug,
+            label_toggles: [false; 6],
+            label_cursor: 0,
+        }
+    }
+
+    /// Build the comma-separated labels string for gh issue create.
+    pub fn labels_string(&self) -> String {
+        let mut labels = vec![self.priority.label().to_string(), self.issue_type.label().to_string()];
+        for (i, &on) in self.label_toggles.iter().enumerate() {
+            if on {
+                labels.push(BLOCKING_LABELS[i].to_string());
+            }
+        }
+        labels.join(",")
+    }
+}
+
 #[derive(Debug, Clone)]
 struct PendingLaunch {
     repo_path: PathBuf,
@@ -81,8 +203,8 @@ pub struct App {
     /// Blink state for attention indicators.
     pub blink: bool,
     pub blink_counter: u32,
-    /// Whether the "create issue" dialog is open.
-    pub creating_issue: bool,
+    /// Create-issue dialog form state (None = closed).
+    pub create_issue_form: Option<CreateIssueForm>,
     /// Default runtime for launched/discovered swarms.
     pub default_agent_type: AgentType,
     /// True when runtime was explicitly pinned via CLI flag.
@@ -150,7 +272,7 @@ impl App {
             issue_caches: HashMap::new(),
             blink: false,
             blink_counter: 0,
-            creating_issue: false,
+            create_issue_form: None,
             default_agent_type,
             runtime_locked_from_cli,
             runtime_pref_repo_root,
@@ -234,9 +356,9 @@ impl App {
                             tracing::warn!("RepoView swarm_idx {} out of bounds (have {} swarms), falling back to ReposList", swarm_idx, self.swarms.len());
                         }
                         if let Some(_swarm) = self.swarms.get(*swarm_idx) {
-                            if self.creating_issue {
+                            if let Some(ref form) = self.create_issue_form {
                                 crate::ui::new_swarm::render_create_issue_dialog(
-                                    f, area, &self.dialog_input,
+                                    f, area, form,
                                 );
                             }
                         }
@@ -1194,38 +1316,77 @@ impl App {
 
     async fn handle_repo_view_key(&mut self, key: KeyEvent, swarm_idx: usize) -> Result<()> {
         // Handle create-issue dialog input
-        if self.creating_issue {
+        if let Some(ref mut form) = self.create_issue_form {
             match key.code {
                 KeyCode::Esc => {
-                    self.creating_issue = false;
-                    self.dialog_input.clear();
+                    self.create_issue_form = None;
+                }
+                KeyCode::Tab | KeyCode::Down if form.field != CreateIssueField::Labels => {
+                    form.field = match form.field {
+                        CreateIssueField::Title => CreateIssueField::Priority,
+                        CreateIssueField::Priority => CreateIssueField::IssueType,
+                        CreateIssueField::IssueType => CreateIssueField::Labels,
+                        CreateIssueField::Labels => CreateIssueField::Labels,
+                    };
+                }
+                KeyCode::BackTab | KeyCode::Up if form.field != CreateIssueField::Title => {
+                    form.field = match form.field {
+                        CreateIssueField::Title => CreateIssueField::Title,
+                        CreateIssueField::Priority => CreateIssueField::Title,
+                        CreateIssueField::IssueType => CreateIssueField::Priority,
+                        CreateIssueField::Labels => CreateIssueField::IssueType,
+                    };
                 }
                 KeyCode::Enter => {
-                    if !self.dialog_input.is_empty() {
-                        let text = self.dialog_input.clone();
+                    if !form.title.is_empty() {
+                        let title = form.title.clone();
+                        let labels = form.labels_string();
                         let target = self.swarms.get(swarm_idx)
                             .map(|s| s.manager.tmux_target.clone());
                         if let Some(target) = target {
-                            let cmd = format!("create gh issue {text}");
+                            let cmd = format!("create gh issue --label \"{labels}\" \"{title}\"");
                             tracing::info!("Sending '{cmd}' to manager at {target}");
                             proxy::send_keys(&self.transport, &target, &cmd).await?;
-                            self.status_message = Some(format!("Sent: {cmd}"));
+                            self.status_message = Some(format!("Created issue: {title}"));
                         }
                     }
-                    self.creating_issue = false;
-                    self.dialog_input.clear();
+                    self.create_issue_form = None;
                 }
-                KeyCode::PageUp => {
-                    self.repo_view.scroll_manager_up(10);
+                KeyCode::Left => match form.field {
+                    CreateIssueField::Priority => form.priority = form.priority.prev(),
+                    CreateIssueField::IssueType => form.issue_type = form.issue_type.toggle(),
+                    CreateIssueField::Labels => {
+                        if form.label_cursor > 0 {
+                            form.label_cursor -= 1;
+                        }
+                    }
+                    _ => {}
+                },
+                KeyCode::Right => match form.field {
+                    CreateIssueField::Priority => form.priority = form.priority.next(),
+                    CreateIssueField::IssueType => form.issue_type = form.issue_type.toggle(),
+                    CreateIssueField::Labels => {
+                        if form.label_cursor < BLOCKING_LABELS.len() - 1 {
+                            form.label_cursor += 1;
+                        }
+                    }
+                    _ => {}
+                },
+                KeyCode::Char(' ') if form.field == CreateIssueField::Labels => {
+                    let idx = form.label_cursor;
+                    form.label_toggles[idx] = !form.label_toggles[idx];
                 }
-                KeyCode::PageDown => {
-                    self.repo_view.scroll_manager_down(10);
+                KeyCode::Char(' ') if form.field == CreateIssueField::Priority => {
+                    form.priority = form.priority.next();
                 }
-                KeyCode::Char(c) => {
-                    self.dialog_input.push(c);
+                KeyCode::Char(' ') if form.field == CreateIssueField::IssueType => {
+                    form.issue_type = form.issue_type.toggle();
                 }
-                KeyCode::Backspace => {
-                    self.dialog_input.pop();
+                KeyCode::Char(c) if form.field == CreateIssueField::Title => {
+                    form.title.push(c);
+                }
+                KeyCode::Backspace if form.field == CreateIssueField::Title => {
+                    form.title.pop();
                 }
                 _ => {}
             }
@@ -1385,8 +1546,7 @@ impl App {
                     }
                     KeyCode::Char('a') => {
                         // Add new issue: open create-issue dialog
-                        self.creating_issue = true;
-                        self.dialog_input.clear();
+                        self.create_issue_form = Some(CreateIssueForm::new());
                     }
                     KeyCode::Char('p') => {
                         // Approve: send "approve <issue_number>" to manager pane
