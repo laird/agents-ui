@@ -891,6 +891,40 @@ impl App {
                     }
                 }
             }
+
+            // Parse manager pane for /monitor-workers output to supplement worker statuses
+            let manager_content = swarm.manager.pane_content.clone();
+            if !manager_content.is_empty() {
+                let updates = parse_monitor_workers_output(&manager_content);
+                for (wt_suffix, issue_num, status_text) in &updates {
+                    // Match worker by worktree path suffix (e.g., "wt-2")
+                    for worker in &mut swarm.workers {
+                        let wt_name = worker
+                            .worktree_path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        if wt_name.ends_with(&format!("-{wt_suffix}")) || wt_name == *wt_suffix {
+                            // Only update if the worker doesn't already have issue info
+                            if let crate::model::status::AgentState::Working { issue: None }
+                            | crate::model::status::AgentState::Idle
+                            | crate::model::status::AgentState::Unknown(_) =
+                                &worker.status.state
+                            {
+                                let lower = status_text.to_lowercase();
+                                if lower.contains("dispatched") || lower.contains("working") || lower.contains("active") {
+                                    worker.status.state =
+                                        crate::model::status::AgentState::Working {
+                                            issue: *issue_num,
+                                        };
+                                } else if lower.contains("idle") {
+                                    worker.status.state = crate::model::status::AgentState::Idle;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1071,6 +1105,50 @@ fn infer_status_from_pane(content: &str) -> crate::model::status::AgentStatus {
         timestamp: None,
         state,
     }
+}
+
+/// Parse /monitor-workers output from manager pane content.
+/// Returns Vec of (worktree_suffix, optional_issue_num, status_text).
+fn parse_monitor_workers_output(content: &str) -> Vec<(String, Option<u32>, String)> {
+    let mut results = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        // Match table rows like: | wt-2 | 2.0 | **dispatched** | #100 (P2 issue detail) |
+        if !trimmed.starts_with('|') || trimmed.starts_with("| Worker") || trimmed.starts_with("|--") {
+            continue;
+        }
+
+        let cells: Vec<&str> = trimmed
+            .split('|')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        if cells.len() >= 3 {
+            let worker_cell = cells[0].trim();
+            let status_cell = cells.get(2).unwrap_or(&"").trim();
+            let issue_cell = cells.get(3).unwrap_or(&"").trim();
+
+            // Extract worktree suffix (e.g., "wt-2" from the worker column)
+            let wt_suffix = worker_cell.to_string();
+
+            // Extract issue number from issue cell (e.g., "#100" from "#100 (P2 issue detail)")
+            let issue_num = issue_cell
+                .split_whitespace()
+                .find(|w| w.starts_with('#'))
+                .and_then(|w| w.trim_start_matches('#').trim_end_matches(|c: char| !c.is_ascii_digit()).parse::<u32>().ok());
+
+            // Clean status text (remove ** markdown bold markers)
+            let status = status_cell.replace("**", "");
+
+            if !wt_suffix.is_empty() {
+                results.push((wt_suffix, issue_num, status));
+            }
+        }
+    }
+
+    results
 }
 
 /// Try to extract an issue number from the current git branch name.
