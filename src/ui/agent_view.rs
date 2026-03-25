@@ -6,10 +6,11 @@ use ratatui::{
 };
 
 use crate::model::swarm::AgentInfo;
+use super::text_input::TextInput;
 use super::theme;
 
 pub struct AgentView {
-    pub input: String,
+    pub input: TextInput,
     pub scroll_offset: u16,
     /// Height of the visible pane area (updated each render).
     pub visible_height: u16,
@@ -20,7 +21,7 @@ pub struct AgentView {
 impl AgentView {
     pub fn new() -> Self {
         Self {
-            input: String::new(),
+            input: TextInput::new(),
             scroll_offset: 0,
             visible_height: 20,
             following: true,
@@ -85,13 +86,10 @@ impl AgentView {
         f.render_widget(pane_output, chunks[1]);
 
         // Input line
-        let input_display = format!("> {}█", self.input);
-        let input = Paragraph::new(Line::from(Span::styled(
-            input_display,
-            theme::input_style(),
-        )))
-        .block(Block::default().borders(Borders::ALL).title(" Input "));
-        f.render_widget(input, chunks[2]);
+        let input_line = self.input.render_line("> ");
+        let input_widget = Paragraph::new(input_line)
+            .block(Block::default().borders(Borders::ALL).title(" Input "));
+        f.render_widget(input_widget, chunks[2]);
 
         // Help
         let help = Paragraph::new(Line::from(vec![

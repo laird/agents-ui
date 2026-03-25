@@ -7,13 +7,14 @@ use ratatui::{
 
 use crate::app::NewSwarmField;
 use crate::model::swarm::{AgentType, ALL_AGENT_TYPES};
+use super::text_input::TextInput;
 use super::theme;
 
 pub fn render_new_swarm_dialog(
     f: &mut Frame,
     area: Rect,
     field: &NewSwarmField,
-    input: &str,
+    input: &TextInput,
     repo_path: &str,
     agent_type: &AgentType,
 ) {
@@ -48,11 +49,8 @@ pub fn render_new_swarm_dialog(
             )));
             f.render_widget(instructions, chunks[0]);
 
-            let input_display = format!(" > {}█", input);
-            let input_widget = Paragraph::new(Line::from(Span::styled(
-                input_display,
-                theme::input_style(),
-            )));
+            let input_line = input.render_line(" > ");
+            let input_widget = Paragraph::new(input_line);
             f.render_widget(input_widget, chunks[1]);
 
             let help = Paragraph::new(Line::from(vec![
@@ -131,11 +129,8 @@ pub fn render_new_swarm_dialog(
             )));
             f.render_widget(prompt, chunks[2]);
 
-            let input_display = format!(" > {}█", input);
-            let input_widget = Paragraph::new(Line::from(Span::styled(
-                input_display,
-                theme::input_style(),
-            )));
+            let input_line = input.render_line(" > ");
+            let input_widget = Paragraph::new(input_line);
             f.render_widget(input_widget, chunks[3]);
 
             let help = Paragraph::new(Line::from(vec![

@@ -13,6 +13,7 @@ use crate::tui::Tui;
 use crate::ui::agent_view::AgentView;
 use crate::ui::repo_view::RepoView;
 use crate::ui::repos_list::ReposListView;
+use crate::ui::text_input::TextInput;
 
 /// Which screen we're on.
 #[derive(Debug, Clone)]
@@ -45,7 +46,7 @@ pub struct App {
     /// Active pane watcher handles (so we can cancel them).
     pane_watchers: Vec<tokio::task::JoinHandle<()>>,
     /// Input buffer for new swarm dialog.
-    pub dialog_input: String,
+    pub dialog_input: TextInput,
     /// Stored repo path during new swarm flow.
     pub new_swarm_repo: String,
     /// Selected agent type during new swarm flow.
@@ -85,7 +86,7 @@ impl App {
             adapter,
             agents_dir,
             pane_watchers: Vec::new(),
-            dialog_input: String::new(),
+            dialog_input: TextInput::new(),
             new_swarm_repo: String::new(),
             new_swarm_agent_type: AgentType::Claude,
             status_message: None,
@@ -110,11 +111,10 @@ impl App {
                     }
                     Screen::NewSwarm { field } => {
                         let field = field.clone();
-                        let input = self.dialog_input.clone();
                         let repo = self.new_swarm_repo.clone();
                         let agent_type = self.new_swarm_agent_type.clone();
                         crate::ui::new_swarm::render_new_swarm_dialog(
-                            f, area, &field, &input, &repo, &agent_type,
+                            f, area, &field, &self.dialog_input, &repo, &agent_type,
                         );
                     }
                     Screen::RepoView { swarm_idx } => {
@@ -251,9 +251,9 @@ impl App {
             }
             KeyCode::Char('n') => {
                 // New swarm dialog — pre-fill with current directory
-                self.dialog_input = std::env::current_dir()
+                self.dialog_input.set_text(std::env::current_dir()
                     .map(|p| p.to_string_lossy().to_string())
-                    .unwrap_or_default();
+                    .unwrap_or_default());
                 self.new_swarm_repo = String::new();
                 self.status_message = None;
                 self.screen = Screen::NewSwarm {
@@ -288,7 +288,7 @@ impl App {
                             .to_string_lossy()
                             .to_string()
                     } else {
-                        self.dialog_input.clone()
+                        self.dialog_input.text().to_string()
                     };
 
                     // Expand ~ to home dir
@@ -315,16 +315,31 @@ impl App {
                         field: NewSwarmField::AgentRuntime,
                     };
                 }
+                KeyCode::Left => {
+                    self.dialog_input.move_left();
+                }
+                KeyCode::Right => {
+                    self.dialog_input.move_right();
+                }
+                KeyCode::Home => {
+                    self.dialog_input.move_home();
+                }
+                KeyCode::End => {
+                    self.dialog_input.move_end();
+                }
+                KeyCode::Delete => {
+                    self.dialog_input.delete();
+                }
                 KeyCode::Char(c) => {
-                    self.dialog_input.push(c);
+                    self.dialog_input.insert_char(c);
                 }
                 KeyCode::Backspace => {
-                    self.dialog_input.pop();
+                    self.dialog_input.backspace();
                 }
                 KeyCode::Tab => {
                     // Simple tab completion: try to complete the path
-                    if let Some(completed) = tab_complete_path(&self.dialog_input) {
-                        self.dialog_input = completed;
+                    if let Some(completed) = tab_complete_path(self.dialog_input.text()) {
+                        self.dialog_input.set_text(completed);
                     }
                 }
                 _ => {}
@@ -334,10 +349,10 @@ impl App {
                     self.screen = Screen::NewSwarm {
                         field: NewSwarmField::RepoPath,
                     };
-                    self.dialog_input = self.new_swarm_repo.clone();
+                    self.dialog_input.set_text(self.new_swarm_repo.clone());
                 }
                 KeyCode::Enter => {
-                    self.dialog_input = "2".to_string(); // Default 2 workers
+                    self.dialog_input.set_text("2".to_string()); // Default 2 workers
                     self.screen = Screen::NewSwarm {
                         field: NewSwarmField::NumWorkers,
                     };
@@ -371,13 +386,13 @@ impl App {
                     };
                 }
                 KeyCode::Enter => {
-                    let num_workers: u32 = self.dialog_input.parse().unwrap_or(2);
+                    let num_workers: u32 = self.dialog_input.text().parse().unwrap_or(2);
                     let repo_path = PathBuf::from(&self.new_swarm_repo);
 
                     self.screen = Screen::NewSwarm {
                         field: NewSwarmField::Launching,
                     };
-                    self.dialog_input = String::new();
+                    self.dialog_input = TextInput::new();
 
                     // Launch the swarm
                     let config = SwarmConfig {
@@ -406,18 +421,18 @@ impl App {
                     }
                 }
                 KeyCode::Up => {
-                    let n: u32 = self.dialog_input.parse().unwrap_or(1);
-                    self.dialog_input = (n + 1).to_string();
+                    let n: u32 = self.dialog_input.text().parse().unwrap_or(1);
+                    self.dialog_input.set_text((n + 1).to_string());
                 }
                 KeyCode::Down => {
-                    let n: u32 = self.dialog_input.parse().unwrap_or(2);
-                    self.dialog_input = n.max(2).saturating_sub(1).to_string();
+                    let n: u32 = self.dialog_input.text().parse().unwrap_or(2);
+                    self.dialog_input.set_text(n.max(2).saturating_sub(1).to_string());
                 }
                 KeyCode::Char(c) if c.is_ascii_digit() => {
-                    self.dialog_input.push(c);
+                    self.dialog_input.insert_char(c);
                 }
                 KeyCode::Backspace => {
-                    self.dialog_input.pop();
+                    self.dialog_input.backspace();
                 }
                 _ => {}
             },
@@ -440,7 +455,7 @@ impl App {
                 }
                 KeyCode::Enter => {
                     if !self.repo_view.input.is_empty() {
-                        let input = self.repo_view.input.drain(..).collect::<String>();
+                        let input = self.repo_view.input.drain();
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
                             let target = swarm.manager.tmux_target.clone();
                             self.adapter.send_input(&target, &input).await?;
@@ -466,11 +481,20 @@ impl App {
                 KeyCode::End => {
                     self.repo_view.manager_scroll_to_bottom();
                 }
+                KeyCode::Left => {
+                    self.repo_view.input.move_left();
+                }
+                KeyCode::Right => {
+                    self.repo_view.input.move_right();
+                }
+                KeyCode::Delete => {
+                    self.repo_view.input.delete();
+                }
                 KeyCode::Char(c) => {
-                    self.repo_view.input.push(c);
+                    self.repo_view.input.insert_char(c);
                 }
                 KeyCode::Backspace => {
-                    self.repo_view.input.pop();
+                    self.repo_view.input.backspace();
                 }
                 _ => {}
             }
@@ -635,7 +659,7 @@ impl App {
             }
             KeyCode::Enter => {
                 if !self.agent_view.input.is_empty() {
-                    let input = self.agent_view.input.drain(..).collect::<String>();
+                    let input = self.agent_view.input.drain();
                     if let Some(swarm) = self.swarms.get(swarm_idx) {
                         if let Some(agent) = swarm.agent(&agent_id) {
                             let target = agent.tmux_target.clone();
@@ -645,11 +669,20 @@ impl App {
                     self.agent_view.scroll_to_bottom();
                 }
             }
+            KeyCode::Left => {
+                self.agent_view.input.move_left();
+            }
+            KeyCode::Right => {
+                self.agent_view.input.move_right();
+            }
+            KeyCode::Delete => {
+                self.agent_view.input.delete();
+            }
             KeyCode::Char(c) => {
-                self.agent_view.input.push(c);
+                self.agent_view.input.insert_char(c);
             }
             KeyCode::Backspace => {
-                self.agent_view.input.pop();
+                self.agent_view.input.backspace();
             }
             KeyCode::Up => {
                 self.agent_view.scroll_up(1);

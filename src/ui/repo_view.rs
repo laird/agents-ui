@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 use crate::model::swarm::Swarm;
+use super::text_input::TextInput;
 use super::theme;
 
 /// Highlight known patterns in a line of pane output.
@@ -59,7 +60,7 @@ fn highlight_line(text: &str) -> Line<'static> {
 pub struct RepoView {
     pub worker_table_state: TableState,
     pub focus_manager: bool,
-    pub input: String,
+    pub input: TextInput,
     /// Scroll offset for manager pane output.
     pub manager_scroll: u16,
     /// Height of the visible manager pane area.
@@ -75,7 +76,7 @@ impl RepoView {
         Self {
             worker_table_state,
             focus_manager: false,
-            input: String::new(),
+            input: TextInput::new(),
             manager_scroll: 0,
             manager_visible_height: 20,
             manager_following: true,
@@ -198,11 +199,8 @@ impl RepoView {
             f.render_widget(pane_output, mgr_chunks[0]);
 
             // Input line
-            let input_display = format!("> {}█", self.input);
-            let input_widget = Paragraph::new(Line::from(Span::styled(
-                input_display,
-                theme::input_style(),
-            )));
+            let input_line = self.input.render_line("> ");
+            let input_widget = Paragraph::new(input_line);
             f.render_widget(input_widget, mgr_chunks[1]);
         } else {
             // Compact view: status + last few lines
