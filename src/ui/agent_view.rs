@@ -48,6 +48,9 @@ impl AgentView {
         let id_label = format!("  {} ", agent.id);
         let role_label = format!("[{role}] ");
         let path_label = format!("  {}", agent.worktree_path.display());
+        let id_len = id_label.len();
+        let role_len = role_label.len();
+        let path_len = path_label.len();
 
         // Build status spans with the issue number highlighted separately
         let mut title_spans = vec![
@@ -76,6 +79,10 @@ impl AgentView {
             title_spans.push(Span::styled(" NEEDS INPUT", theme::waiting_style()));
         }
         title_spans.push(Span::styled(path_label, theme::help_style()));
+        let left_len = id_len + role_len + path_len
+            + if agent.waiting_for_input { " NEEDS INPUT".len() } else { 0 }
+            + 10; // approximate state label
+        title_spans.push(theme::hostname_right_span(left_len, chunks[0].width as usize));
 
         let title = Paragraph::new(Line::from(title_spans))
         .block(Block::default().borders(Borders::BOTTOM));

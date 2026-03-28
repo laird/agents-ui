@@ -104,6 +104,8 @@ impl SwarmView {
             let style = theme::attention_blink_style(blink);
             header_spans.push(Span::styled(format!("⚠ {attention} need attention"), style));
         }
+        let left_len: usize = header_spans.iter().map(|s| s.content.len()).sum();
+        header_spans.push(theme::hostname_right_span(left_len, chunks[0].width as usize));
         let header = Paragraph::new(Line::from(header_spans));
         f.render_widget(header, chunks[0]);
 

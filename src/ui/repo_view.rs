@@ -218,6 +218,8 @@ impl RepoView {
         };
         let issues_label = format!(" P0:{p0} P1:{p1} P2:{p2} P3:{p3}");
 
+        let left_len = project_label.len() + workflow_label.len() + workers_label.len()
+            + waiting_label.len() + idle_label.len() + stopped_label.len() + issues_label.len();
         let title = Paragraph::new(Line::from(vec![
             Span::styled(project_label, theme::title_style()),
             Span::styled(workflow_label, theme::help_style()),
@@ -233,6 +235,7 @@ impl RepoView {
             )),
             Span::styled(attention_label, theme::attention_style()),
             Span::styled(issues_label, theme::help_style()),
+            theme::hostname_right_span(left_len, area.width as usize),
         ]));
         f.render_widget(title, area);
     }
