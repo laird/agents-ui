@@ -91,7 +91,7 @@ pub struct GitHubIssue {
     pub assigned_worker: Option<String>,
 }
 
-const BLOCKING_LABELS: &[&str] = &[
+pub const BLOCKING_LABELS: &[&str] = &[
     "needs-design",
     "needs-clarification",
     "needs-approval",
