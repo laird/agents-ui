@@ -438,10 +438,15 @@ impl SwarmView {
         self.workers_table.select(Some((i + 1) % len));
     }
 
-    pub fn prev_worker(&mut self, len: usize) {
-        if len == 0 { return; }
+    /// Returns `true` if already at the top (caller should focus the manager panel).
+    pub fn prev_worker(&mut self, len: usize) -> bool {
+        if len == 0 { return true; }
         let i = self.workers_table.selected().unwrap_or(0);
-        self.workers_table.select(Some(if i == 0 { len - 1 } else { i - 1 }));
+        if i == 0 {
+            return true;
+        }
+        self.workers_table.select(Some(i - 1));
+        false
     }
 
     pub fn selected_worker(&self) -> Option<usize> {
