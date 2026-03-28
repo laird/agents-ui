@@ -1,4 +1,5 @@
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use std::path::Path;
 use std::time::Instant;
@@ -89,6 +90,8 @@ pub struct GitHubIssue {
     pub is_working: bool,
     /// Worker ID currently working on this issue, if any.
     pub assigned_worker: Option<String>,
+    /// When the issue was last updated on GitHub.
+    pub updated_at: Option<DateTime<Utc>>,
 }
 
 pub const BLOCKING_LABELS: &[&str] = &[
@@ -148,6 +151,30 @@ impl GitHubIssue {
         } else {
             "closed".to_string()
         }
+    }
+
+    /// Compact age string based on `updated_at` (e.g., "2d", "3h"). Empty if unknown.
+    pub fn age_label(&self) -> String {
+        let Some(updated) = self.updated_at else {
+            return String::new();
+        };
+        let secs = (Utc::now() - updated).num_seconds().max(0) as u64;
+        if secs < 3600 {
+            format!("{}m", secs / 60)
+        } else if secs < 86400 {
+            format!("{}h", secs / 3600)
+        } else if secs < 7 * 86400 {
+            format!("{}d", secs / 86400)
+        } else {
+            format!("{}w", secs / (7 * 86400))
+        }
+    }
+
+    /// Whether this issue is stale (not updated in more than 7 days).
+    pub fn is_stale(&self) -> bool {
+        self.updated_at
+            .map(|u| (Utc::now() - u).num_days() >= 7)
+            .unwrap_or(false)
     }
 
     /// Whether this issue matches the given filter.
@@ -266,6 +293,7 @@ impl From<GhIssueJson> for GitHubIssue {
             labels,
             is_working,
             assigned_worker: None,
+            updated_at: None,
         }
     }
 }
@@ -279,7 +307,7 @@ pub async fn fetch_issues(repo_path: &Path) -> Result<Vec<GitHubIssue>> {
             "--state",
             "open",
             "--json",
-            "number,title,labels",
+            "number,title,labels,updatedAt",
             "--limit",
             "100",
         ])
@@ -314,6 +342,10 @@ pub async fn fetch_issues(repo_path: &Path) -> Result<Vec<GitHubIssue>> {
             let priority = labels_to_priority(&labels);
             let issue_type = labels_to_type(&labels);
             let is_working = labels.iter().any(|l| l == "working");
+            let updated_at = item["updatedAt"]
+                .as_str()
+                .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                .map(|dt| dt.with_timezone(&Utc));
 
             issues.push(GitHubIssue {
                 number,
@@ -324,6 +356,7 @@ pub async fn fetch_issues(repo_path: &Path) -> Result<Vec<GitHubIssue>> {
                 labels,
                 is_working,
                 assigned_worker: None,
+                updated_at,
             });
         }
     }
@@ -352,6 +385,7 @@ mod tests {
             labels: label_vec,
             is_working,
             assigned_worker: None,
+            updated_at: None,
         }
     }
 
@@ -403,6 +437,33 @@ mod tests {
         assert_eq!(IssueFilter::All.next(), IssueFilter::Open);
         assert_eq!(IssueFilter::Open.next(), IssueFilter::Blocked);
         assert_eq!(IssueFilter::Blocked.next(), IssueFilter::All);
+    }
+
+    #[test]
+    fn age_label_formats() {
+        let mut issue = make_issue(1, &["bug"]);
+        // No timestamp → empty string
+        assert_eq!(issue.age_label(), "");
+        assert!(!issue.is_stale());
+
+        // 30 minutes ago
+        issue.updated_at = Some(Utc::now() - chrono::Duration::minutes(30));
+        assert_eq!(issue.age_label(), "30m");
+        assert!(!issue.is_stale());
+
+        // 5 hours ago
+        issue.updated_at = Some(Utc::now() - chrono::Duration::hours(5));
+        assert_eq!(issue.age_label(), "5h");
+
+        // 3 days ago
+        issue.updated_at = Some(Utc::now() - chrono::Duration::days(3));
+        assert_eq!(issue.age_label(), "3d");
+        assert!(!issue.is_stale());
+
+        // 14 days ago → stale
+        issue.updated_at = Some(Utc::now() - chrono::Duration::days(14));
+        assert_eq!(issue.age_label(), "2w");
+        assert!(issue.is_stale());
     }
 
     #[test]

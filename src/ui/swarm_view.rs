@@ -258,6 +258,7 @@ impl SwarmView {
         let issue_header = Row::new(vec![
             Cell::from("#"),
             Cell::from("Pri"),
+            Cell::from("Age"),
             Cell::from("Title"),
             Cell::from("Status"),
         ])
@@ -274,10 +275,17 @@ impl SwarmView {
                 } else {
                     Style::default().fg(ratatui::style::Color::Gray)
                 };
+                let age = issue.age_label();
+                let age_style = if issue.is_stale() {
+                    theme::attention_style()
+                } else {
+                    theme::help_style()
+                };
                 Row::new(vec![
                     Cell::from(format!("{}", issue.number)),
                     Cell::from(issue.priority_label()),
-                    Cell::from(truncate(&issue.title, 30)),
+                    Cell::from(age).style(age_style),
+                    Cell::from(truncate(&issue.title, 28)),
                     Cell::from(status).style(status_style),
                 ])
             })
@@ -297,7 +305,8 @@ impl SwarmView {
             [
                 Constraint::Length(5),
                 Constraint::Length(4),
-                Constraint::Min(15),
+                Constraint::Length(4),
+                Constraint::Min(13),
                 Constraint::Length(18),
             ],
         )
@@ -548,6 +557,7 @@ mod tests {
             labels: vec!["P1".to_string()],
             is_working: false,
             assigned_worker: Some("worker-1".to_string()),
+            updated_at: None,
         }];
 
         terminal
