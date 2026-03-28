@@ -228,8 +228,7 @@ impl App {
                 if let Some(idx) = self.repos_list.selected() {
                     if idx < self.swarms.len() {
                         self.switch_gh_auth_for_swarm(idx);
-                        self.repo_view = RepoView::new();
-                        self.screen = Screen::RepoView { swarm_idx: idx };
+                        self.enter_repo_view(idx).await;
                     }
                 }
             }
@@ -369,8 +368,7 @@ impl App {
                             self.start_all_pane_watchers();
                             let idx = self.swarms.len() - 1;
                             self.switch_gh_auth_for_swarm(idx);
-                            self.repo_view = RepoView::new();
-                            self.screen = Screen::RepoView { swarm_idx: idx };
+                            self.enter_repo_view(idx).await;
                             self.status_message =
                                 Some(format!("Launched swarm for {project}"));
                         }
@@ -616,6 +614,21 @@ impl App {
                 }
             });
         }
+    }
+
+    /// Enter repo view for a swarm, resizing the manager's tmux pane to fill the terminal.
+    async fn enter_repo_view(&mut self, swarm_idx: usize) {
+        if let Some(swarm) = self.swarms.get(swarm_idx) {
+            let target = swarm.manager.tmux_target.clone();
+            // Resize pane to current terminal size so captured content fills the view
+            if let Ok((width, height)) = crossterm::terminal::size() {
+                if let Err(e) = proxy::resize_pane(&target, width, height).await {
+                    tracing::warn!("Failed to resize manager pane {target}: {e}");
+                }
+            }
+        }
+        self.repo_view = RepoView::new();
+        self.screen = Screen::RepoView { swarm_idx };
     }
 
     /// Enter agent view for a given agent, resizing its tmux pane to fill the terminal.
