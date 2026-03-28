@@ -219,6 +219,9 @@ pub struct Swarm {
     pub workers: Vec<AgentInfo>,
     /// Cached GitHub issues
     pub issue_cache: IssueCache,
+    /// Set to true when the swarm was intentionally stopped via the TUI.
+    /// Prevents automatic respawning by heal_workers and revive_agents.
+    pub stopped: bool,
 }
 
 #[allow(dead_code)] // Utility methods for future UI enhancements
@@ -348,6 +351,7 @@ mod tests {
             manager,
             workers: Vec::new(),
             issue_cache: cache,
+            stopped: false,
         }
     }
 

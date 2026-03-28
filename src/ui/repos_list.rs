@@ -301,6 +301,7 @@ mod tests {
             manager: make_agent("manager", true),
             workers: vec![make_agent("worker-1", false)],
             issue_cache: crate::model::issue::IssueCache::default(),
+            stopped: false,
         }
     }
 

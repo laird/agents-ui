@@ -217,6 +217,8 @@ pub struct App {
     pub create_issue_form: Option<CreateIssueForm>,
     /// Pending swarm teardown confirmation (swarm index).
     pub confirm_teardown: Option<usize>,
+    /// Pending swarm stop-all confirmation (swarm index).
+    pub confirm_stop: Option<usize>,
     /// Default runtime for launched/discovered swarms.
     pub default_agent_type: AgentType,
     /// True when runtime was explicitly pinned via CLI flag.
@@ -307,6 +309,7 @@ impl App {
             blink_counter: 0,
             create_issue_form: None,
             confirm_teardown: None,
+            confirm_stop: None,
             default_agent_type,
             runtime_locked_from_cli,
             runtime_pref_repo_root,
@@ -521,6 +524,10 @@ impl App {
                 // Revive agents that dropped to shell (e.g. after self-update) every ~60 seconds
                 if self.blink_counter % 240 == 0 {
                     self.revive_dropped_agents().await;
+                }
+                // Prune swarms whose tmux sessions were externally killed (every ~45 seconds)
+                if self.blink_counter % 180 == 0 {
+                    self.prune_dead_swarms().await;
                 }
                 // Periodically heal worker infrastructure (every 30 seconds)
                 if self.last_heal.elapsed() >= Duration::from_secs(30) {
@@ -1292,6 +1299,7 @@ impl App {
             },
             workers: Vec::new(),
             issue_cache: crate::model::issue::IssueCache::default(),
+            stopped: false,
         };
 
         self.swarms.push(placeholder);
@@ -1710,6 +1718,34 @@ impl App {
             return Ok(());
         }
 
+        // Handle stop-all confirmation from Repo View
+        if let Some(idx) = self.confirm_stop {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    if idx < self.swarms.len() {
+                        let swarm = self.swarms[idx].clone();
+                        let project = swarm.project_name.clone();
+                        // Write tombstones before stopping so heal/revive won't respawn.
+                        for worker in &swarm.workers {
+                            crate::adapter::claude::mark_agent_stopped(&worker.worktree_path);
+                        }
+                        if let Err(e) = self.adapter.stop(&swarm).await {
+                            self.status_message = Some(format!("Stop error: {e}"));
+                        } else {
+                            self.swarms[idx].stopped = true;
+                            self.status_message = Some(format!("Stopped all workers in {project}"));
+                        }
+                    }
+                    self.confirm_stop = None;
+                }
+                _ => {
+                    self.confirm_stop = None;
+                    self.status_message = Some("Stop cancelled".to_string());
+                }
+            }
+            return Ok(());
+        }
+
         // Handle create-issue dialog input
         if let Some(ref mut form) = self.create_issue_form {
             match key.code {
@@ -1926,10 +1962,20 @@ impl App {
                                 if let Some(worker) = swarm.workers.get(worker_idx) {
                                     let target = worker.tmux_target.clone();
                                     let id = worker.role.clone();
+                                    // Write tombstone before killing so heal/revive won't respawn.
+                                    crate::adapter::claude::mark_agent_stopped(&worker.worktree_path);
                                     let _ = proxy::kill_pane(&self.transport, &target).await;
                                     self.status_message = Some(format!("Shutting down {id}..."));
                                 }
                             }
+                        }
+                    }
+                    KeyCode::Char('S') => {
+                        // Stop all workers (with confirmation)
+                        if swarm_idx < self.swarms.len() {
+                            let project = self.swarms[swarm_idx].project_name.clone();
+                            self.confirm_stop = Some(swarm_idx);
+                            self.status_message = Some(format!("Stop all workers in {project}? (y to confirm, any other key to cancel)"));
                         }
                     }
                     KeyCode::Char('T') => {
@@ -2921,6 +2967,9 @@ impl App {
     /// Check for idle workers and dispatch the next available issue to them.
     async fn dispatch_idle_workers(&mut self) {
         for si in 0..self.swarms.len() {
+            if self.swarms[si].stopped {
+                continue;
+            }
             let project_name = self.swarms[si].project_name.clone();
             let agent_type = self.swarms[si].agent_type.clone();
 
@@ -3020,6 +3069,9 @@ impl App {
         let mut all_repairs = Vec::new();
 
         for i in 0..self.swarms.len() {
+            if self.swarms[i].stopped {
+                continue;
+            }
             match self.adapter.heal_workers(&mut self.swarms[i]).await {
                 Ok(repairs) => {
                     if !repairs.is_empty() {
@@ -3041,9 +3093,42 @@ impl App {
         }
     }
 
+    /// Remove swarms whose tmux sessions have been externally killed.
+    /// This prevents heal_workers from respawning intentionally-killed sessions.
+    async fn prune_dead_swarms(&mut self) {
+        let mut to_remove = Vec::new();
+        for (i, swarm) in self.swarms.iter().enumerate() {
+            if swarm.tmux_session.is_empty() {
+                continue; // Placeholder swarm still launching
+            }
+            let alive = tokio::process::Command::new("tmux")
+                .args(["has-session", "-t", &swarm.tmux_session])
+                .output()
+                .await
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            if !alive {
+                tracing::info!("Pruning dead swarm: {} (session gone)", swarm.project_name);
+                to_remove.push(i);
+            }
+        }
+        let pruned = !to_remove.is_empty();
+        for i in to_remove.into_iter().rev() {
+            self.swarms.remove(i);
+        }
+        if pruned {
+            self.scan_available_repos();
+            if let Screen::RepoView { swarm_idx } = self.screen {
+                if swarm_idx >= self.swarms.len() {
+                    self.screen = Screen::ReposList;
+                }
+            }
+        }
+    }
+
     /// Re-launch any agents that have dropped back to a shell prompt (e.g. after a self-update).
     async fn revive_dropped_agents(&mut self) {
-        let swarms: Vec<_> = self.swarms.iter().filter(|s| !s.manager.tmux_target.is_empty()).cloned().collect();
+        let swarms: Vec<_> = self.swarms.iter().filter(|s| !s.stopped && !s.manager.tmux_target.is_empty()).cloned().collect();
         for swarm in swarms {
             if let Err(e) = self.adapter.revive_agents(&swarm).await {
                 tracing::warn!("revive_agents failed for {}: {e}", swarm.project_name);
@@ -3057,6 +3142,9 @@ impl App {
 
         for si in 0..self.swarms.len() {
             let swarm = &self.swarms[si];
+            if swarm.stopped {
+                continue;
+            }
             let manager_target = swarm.manager.tmux_target.clone();
             if manager_target.is_empty() {
                 continue; // Placeholder swarm, not ready yet
