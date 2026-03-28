@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use crate::adapter::claude::ClaudeAdapter;
 use crate::adapter::traits::{AgentRuntime, SwarmConfig};
 use crate::event::{Event, EventHandler};
-use crate::model::issue::{GitHubIssue, IssueCache};
+use crate::model::issue::{GitHubIssue, IssueCache, IssueFilter};
 use crate::model::swarm::{AgentType, ALL_AGENT_TYPES, Swarm};
 use crate::scripts::launcher;
 use crate::transport::ServerTransport;
@@ -1926,6 +1926,9 @@ impl App {
                             }
                         }
                     }
+                    KeyCode::Char('b') => {
+                        self.jump_to_next_blocked(swarm_idx);
+                    }
                     KeyCode::Char('d') => {
                         // Shut down selected worker
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
@@ -1981,8 +1984,8 @@ impl App {
                         self.send_issue_command_to_manager(swarm_idx, "approve").await?;
                     }
                     KeyCode::Char('b') => {
-                        // Brainstorm: send "brainstorm <issue_number>" to manager pane
-                        self.send_issue_command_to_manager(swarm_idx, "brainstorm").await?;
+                        // Jump to next blocked issue (cycle through blocked issues)
+                        self.jump_to_next_blocked(swarm_idx);
                     }
                     KeyCode::Char('r') => {
                         // Review-blocked in selected runtime (only if manager is idle)
@@ -2536,6 +2539,32 @@ impl App {
 
     /// Start pane watchers for all agents in all swarms.
     /// Jump to the next agent session that is waiting for user input.
+    fn jump_to_next_blocked(&mut self, swarm_idx: usize) {
+        let blocked_count = self.swarms.get(swarm_idx)
+            .and_then(|s| self.issue_caches.get(&s.project_name))
+            .map(|c| c.issues.iter().filter(|i| i.is_blocked()).count())
+            .unwrap_or(0);
+
+        if blocked_count == 0 {
+            self.status_message = Some("No blocked issues".to_string());
+            return;
+        }
+
+        // If already viewing blocked issues, cycle to next; otherwise go to first
+        let next_idx = if self.swarm_focus == SwarmPanel::Issues
+            && self.swarm_view.issue_filter == IssueFilter::Blocked
+        {
+            let current = self.swarm_view.issues_table.selected().unwrap_or(0);
+            (current + 1) % blocked_count
+        } else {
+            0
+        };
+
+        self.swarm_view.issue_filter = IssueFilter::Blocked;
+        self.swarm_view.issues_table.select(Some(next_idx));
+        self.swarm_focus = SwarmPanel::Issues;
+    }
+
     fn jump_to_next_waiting(&mut self, swarm_idx: usize) {
         // Get the current agent ID if we're in an agent view
         let current_id = match &self.screen {
