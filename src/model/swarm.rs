@@ -219,6 +219,9 @@ pub struct Swarm {
     pub workers: Vec<AgentInfo>,
     /// Cached GitHub issues
     pub issue_cache: IssueCache,
+    /// True when the user (or an external kill of the tmux session) has intentionally stopped
+    /// this swarm. heal_workers and revive_agents will not respawn agents for stopped swarms.
+    pub stopped: bool,
 }
 
 #[allow(dead_code)] // Utility methods for future UI enhancements
@@ -348,6 +351,7 @@ mod tests {
             manager,
             workers: Vec::new(),
             issue_cache: cache,
+            stopped: false,
         }
     }
 
