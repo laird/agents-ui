@@ -281,6 +281,8 @@ impl RepoView {
                 let key_label = format!("{} ", idx + 1);
                 let (dot, dot_style) = if w.waiting_for_input {
                     ("⚠ ", theme::waiting_style())
+                } else if w.status.is_stale(300) {
+                    ("⚠ ", ratatui::style::Style::default().fg(ratatui::style::Color::Yellow))
                 } else {
                     match &w.status.state {
                         crate::model::status::AgentState::Working { .. } => {

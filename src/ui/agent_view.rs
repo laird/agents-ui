@@ -78,6 +78,12 @@ impl AgentView {
         if agent.waiting_for_input {
             title_spans.push(Span::styled(" NEEDS INPUT", theme::waiting_style()));
         }
+        if agent.status.is_stale(300) {
+            title_spans.push(Span::styled(
+                " (stale)",
+                ratatui::style::Style::default().fg(ratatui::style::Color::Yellow),
+            ));
+        }
         title_spans.push(Span::styled(path_label, theme::help_style()));
         let left_len = id_len + role_len + path_len
             + if agent.waiting_for_input { " NEEDS INPUT".len() } else { 0 }
