@@ -1415,6 +1415,57 @@ fn generic_worker_bootstrap_cmd(runtime: &AgentType) -> Option<String> {
 }
 
 impl ClaudeAdapter {
+    /// Switch the agent runtime for a running swarm.
+    /// Exits all panes from the current agent, relaunches with the new runtime,
+    /// and restarts fix-loops for workers and the manager bootstrap command.
+    pub async fn switch_agent(&self, swarm: &mut Swarm, new_runtime: AgentType) -> Result<()> {
+        let old_runtime = swarm.agent_type.clone();
+        let (exit_key, is_named) = old_runtime.exit_cmd();
+        let session_name = swarm.tmux_session.clone();
+
+        // Collect all pane targets: workers first, then manager
+        let all_targets: Vec<(String, bool)> = swarm
+            .workers
+            .iter()
+            .map(|w| (w.tmux_target.clone(), false))
+            .chain(std::iter::once((swarm.manager.tmux_target.clone(), true)))
+            .collect();
+
+        // Send exit command to each pane
+        for (target, _is_manager) in &all_targets {
+            if is_named {
+                proxy::send_named_key(target, exit_key).await.ok();
+            } else {
+                proxy::send_keys(&self.transport, target, exit_key).await.ok();
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+
+        // Update swarm agent type
+        swarm.agent_type = new_runtime.clone();
+
+        // Relaunch all panes with the new runtime
+        for (target, _is_manager) in &all_targets {
+            self.launch_agent_in_pane(target, &session_name, &new_runtime).await.ok();
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+
+        // Restart worker fix-loops
+        let loop_cmd = new_runtime.worker_loop_cmd().to_string();
+        if !loop_cmd.is_empty() {
+            for worker in &swarm.workers {
+                proxy::send_keys(&self.transport, &worker.tmux_target, &loop_cmd).await.ok();
+            }
+        }
+
+        // Restart manager bootstrap
+        if let Some(cmd) = manager_bootstrap_cmd(&new_runtime) {
+            proxy::send_keys(&self.transport, &swarm.manager.tmux_target, &cmd).await.ok();
+        }
+
+        Ok(())
+    }
+
     async fn bootstrap_command(&self, runtime: &AgentType, agent: &AgentInfo) -> Option<String> {
         if agent.is_manager {
             return manager_bootstrap_cmd(runtime);

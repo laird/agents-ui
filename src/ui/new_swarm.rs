@@ -89,6 +89,69 @@ pub fn render_runtime_dialog(
     f.render_widget(help, chunks[4]);
 }
 
+/// Render the "switch agent runtime" overlay for a running swarm.
+/// `selected_idx` is an index into `ALL_AGENT_TYPES`.
+pub fn render_switch_agent_dialog(
+    f: &mut Frame,
+    area: Rect,
+    project_name: &str,
+    current: &AgentType,
+    selected_idx: usize,
+) {
+    let title = format!(" Switch agent runtime for {project_name}: ");
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title.as_str())
+        .border_style(theme::title_style());
+
+    let inner = block.inner(area);
+    f.render_widget(Clear, area);
+    f.render_widget(block, area);
+
+    // One row per agent type + instruction row + help row
+    let n = ALL_AGENT_TYPES.len();
+    let mut constraints: Vec<Constraint> = vec![Constraint::Length(2)]; // instructions
+    for _ in 0..n {
+        constraints.push(Constraint::Length(2));
+    }
+    constraints.push(Constraint::Min(0));
+    constraints.push(Constraint::Length(2)); // help
+
+    let chunks = Layout::vertical(constraints).split(inner);
+
+    let instructions = Paragraph::new(Line::from(Span::styled(
+        " Choose new agent runtime:",
+        theme::help_style(),
+    )));
+    f.render_widget(instructions, chunks[0]);
+
+    for (i, agent_type) in ALL_AGENT_TYPES.iter().enumerate() {
+        let is_selected = i == selected_idx;
+        let is_current = agent_type == current;
+        let style = if is_selected {
+            theme::input_style()
+        } else {
+            theme::help_style()
+        };
+        let suffix = if is_current { " (current)" } else { "" };
+        let label = format!(" {} {}{suffix}", if is_selected { "▶" } else { " " }, agent_type);
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(label, style))),
+            chunks[1 + i],
+        );
+    }
+
+    let help = Paragraph::new(Line::from(vec![
+        Span::styled(" ↑/↓", theme::title_style()),
+        Span::styled(" choose  ", theme::help_style()),
+        Span::styled("Enter", theme::title_style()),
+        Span::styled(" switch  ", theme::help_style()),
+        Span::styled("Esc", theme::title_style()),
+        Span::styled(" cancel", theme::help_style()),
+    ]));
+    f.render_widget(help, chunks[1 + n + 1]);
+}
+
 pub fn render_install_scope_dialog(
     f: &mut Frame,
     area: Rect,
@@ -505,7 +568,7 @@ pub fn render_create_issue_dialog(
 mod tests {
     use super::{
         render_create_issue_dialog, render_install_scope_dialog, render_new_swarm_dialog,
-        render_runtime_dialog,
+        render_runtime_dialog, render_switch_agent_dialog,
     };
     use crate::app::{CreateIssueForm, InstallScope, NewSwarmField};
     use crate::model::swarm::AgentType;
@@ -607,5 +670,24 @@ mod tests {
         assert!(rendered.contains("needs-design"));
         assert!(rendered.contains("proposal"));
         assert!(rendered.contains("create"));
+    }
+
+    #[test]
+    fn switch_agent_dialog_shows_all_runtimes_and_current() {
+        let rendered = rendered_text(|terminal| {
+            terminal
+                .draw(|f| {
+                    render_switch_agent_dialog(f, f.area(), "my-repo", &AgentType::Claude, 0)
+                })
+                .unwrap();
+        });
+
+        assert!(rendered.contains("Switch agent runtime for my-repo"));
+        assert!(rendered.contains("Claude"));
+        assert!(rendered.contains("Codex"));
+        assert!(rendered.contains("Droid"));
+        assert!(rendered.contains("Gemini"));
+        assert!(rendered.contains("(current)"));
+        assert!(rendered.contains("▶"));
     }
 }

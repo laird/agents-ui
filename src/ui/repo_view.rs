@@ -559,6 +559,8 @@ impl RepoView {
                 Span::styled(" view issue  ", theme::help_style()),
                 Span::styled("a", theme::title_style()),
                 Span::styled(" add worker  ", theme::help_style()),
+                Span::styled("S", theme::title_style()),
+                Span::styled(" switch agent  ", theme::help_style()),
                 Span::styled("Esc", theme::title_style()),
                 Span::styled(" back", theme::help_style()),
             ])),

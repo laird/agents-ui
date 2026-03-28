@@ -37,6 +37,8 @@ pub enum Screen {
     IssueDetail { swarm_idx: usize },
     /// Full issue list for a swarm (press 'L' from RepoView).
     IssueList { swarm_idx: usize },
+    /// Overlay to pick a new agent runtime to switch the running swarm to.
+    SwitchAgent { swarm_idx: usize, selected: usize },
 }
 
 #[derive(Debug, Clone)]
@@ -471,6 +473,17 @@ impl App {
                             );
                         }
                     }
+                    Screen::SwitchAgent { swarm_idx, selected } => {
+                        if let Some(swarm) = self.swarms.get(*swarm_idx) {
+                            crate::ui::new_swarm::render_switch_agent_dialog(
+                                f,
+                                area,
+                                &swarm.project_name.clone(),
+                                &swarm.agent_type.clone(),
+                                *selected,
+                            );
+                        }
+                    }
                 }
 
                 // Shortcuts viewer overlay
@@ -513,6 +526,9 @@ impl App {
                     self.screen = Screen::ReposList;
                 }
                 Screen::IssueList { swarm_idx } if *swarm_idx >= self.swarms.len() => {
+                    self.screen = Screen::ReposList;
+                }
+                Screen::SwitchAgent { swarm_idx, .. } if *swarm_idx >= self.swarms.len() => {
                     self.screen = Screen::ReposList;
                 }
                 Screen::RuntimeSelect | Screen::InstallScopeSelect => {}
@@ -776,7 +792,7 @@ impl App {
                     let idx = *swarm_idx;
                     self.enter_repo_view(idx).await;
                 }
-                Screen::IssueList { swarm_idx } => {
+                Screen::IssueList { swarm_idx } | Screen::SwitchAgent { swarm_idx, .. } => {
                     let idx = *swarm_idx;
                     self.enter_repo_view(idx).await;
                 }
@@ -830,6 +846,10 @@ impl App {
                             };
                         }
                         Screen::RuntimeSelect => {}
+                        Screen::SwitchAgent { swarm_idx, .. } => {
+                            let idx = *swarm_idx;
+                            self.enter_repo_view(idx).await;
+                        }
                         Screen::ReposList => {} // Already at top
                     }
                     return Ok(());
@@ -931,6 +951,9 @@ impl App {
             }
             Screen::IssueList { swarm_idx } => {
                 self.handle_issue_list_key(key, *swarm_idx).await?
+            }
+            Screen::SwitchAgent { swarm_idx, selected } => {
+                self.handle_switch_agent_key(key, *swarm_idx, *selected).await?
             }
         }
 
@@ -1872,6 +1895,19 @@ impl App {
             return Ok(());
         }
 
+        // 'S' opens the switch-agent overlay (works from any panel except Manager passthrough)
+        if key.code == KeyCode::Char('S') && self.swarm_focus != SwarmPanel::Manager {
+            let selected = self.swarms.get(swarm_idx)
+                .and_then(|s| {
+                    crate::model::swarm::ALL_AGENT_TYPES
+                        .iter()
+                        .position(|t| t == &s.agent_type)
+                })
+                .unwrap_or(0);
+            self.screen = Screen::SwitchAgent { swarm_idx, selected };
+            return Ok(());
+        }
+
         match self.swarm_focus {
             SwarmPanel::Manager => {
                 // Manager pane: passthrough all keys to tmux
@@ -2747,6 +2783,42 @@ impl App {
                 // Refresh issues
                 self.start_issue_refresh(swarm_idx);
                 self.status_message = Some("Refreshing issues…".to_string());
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    async fn handle_switch_agent_key(&mut self, key: KeyEvent, swarm_idx: usize, selected: usize) -> Result<()> {
+        let n = crate::model::swarm::ALL_AGENT_TYPES.len();
+        match key.code {
+            KeyCode::Esc | KeyCode::Backspace => {
+                self.enter_repo_view(swarm_idx).await;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                let new_selected = if selected == 0 { n - 1 } else { selected - 1 };
+                self.screen = Screen::SwitchAgent { swarm_idx, selected: new_selected };
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.screen = Screen::SwitchAgent { swarm_idx, selected: (selected + 1) % n };
+            }
+            KeyCode::Enter => {
+                let new_runtime = crate::model::swarm::ALL_AGENT_TYPES
+                    .get(selected)
+                    .cloned()
+                    .unwrap_or(crate::model::swarm::AgentType::Claude);
+                self.status_message = Some(format!("Switching to {}…", new_runtime));
+                self.enter_repo_view(swarm_idx).await;
+                if swarm_idx < self.swarms.len() {
+                    match self.adapter.switch_agent(&mut self.swarms[swarm_idx], new_runtime.clone()).await {
+                        Err(e) => { self.status_message = Some(format!("Switch failed: {e}")); }
+                        Ok(()) => {
+                            let repo_path = self.swarms[swarm_idx].repo_path.clone();
+                            crate::config::persistence::save_repo_agent_type(&repo_path, &new_runtime).ok();
+                            self.status_message = Some(format!("Switched to {}", new_runtime));
+                        }
+                    }
+                }
             }
             _ => {}
         }

@@ -73,6 +73,16 @@ impl AgentType {
         }
     }
 
+    /// Returns the exit command for this agent type.
+    /// `(key, is_named)` — if `is_named` is true, send as a tmux named key (e.g. "C-c");
+    /// otherwise send as literal text followed by Enter.
+    pub fn exit_cmd(&self) -> (&str, bool) {
+        match self {
+            AgentType::Claude | AgentType::Gemini => ("q", false),
+            AgentType::Codex | AgentType::Droid => ("C-c", true),
+        }
+    }
+
     /// The slash command to start the worker fix-loop.
     pub fn worker_loop_cmd(&self) -> &str {
         match self {
@@ -424,5 +434,15 @@ mod tests {
         assert_eq!(AgentType::Codex.status_dir(), ".codex/loops");
         assert_eq!(AgentType::Claude.status_dir(), ".codex/loops");
         assert_eq!(AgentType::Droid.status_dir(), ".factory/loops");
+    }
+
+    #[test]
+    fn exit_cmd_matches_agent_exit_behavior() {
+        // Claude and Gemini exit with 'q' + Enter (literal text)
+        assert_eq!(AgentType::Claude.exit_cmd(), ("q", false));
+        assert_eq!(AgentType::Gemini.exit_cmd(), ("q", false));
+        // Codex and Droid exit with Ctrl+C (named tmux key)
+        assert_eq!(AgentType::Codex.exit_cmd(), ("C-c", true));
+        assert_eq!(AgentType::Droid.exit_cmd(), ("C-c", true));
     }
 }
