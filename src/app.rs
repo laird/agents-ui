@@ -1843,6 +1843,36 @@ impl App {
                     _ => {}
                 }
 
+                // g: open first blocked issue in browser (when attention section is visible)
+                if key.code == KeyCode::Char('g') && key.modifiers.is_empty() {
+                    if let Some(swarm) = self.swarms.get(swarm_idx) {
+                        let first_blocked = self.issue_caches
+                            .get(&swarm.project_name)
+                            .and_then(|c| c.issues.iter().find(|i| i.is_blocked()).cloned());
+                        if let Some(issue) = first_blocked {
+                            let num = issue.number;
+                            let repo_path = swarm.repo_path.clone();
+                            let transport = self.transport.clone();
+                            tokio::spawn(async move {
+                                let _ = transport
+                                    .output(
+                                        "gh",
+                                        &[
+                                            "issue".to_string(),
+                                            "view".to_string(),
+                                            num.to_string(),
+                                            "--web".to_string(),
+                                        ],
+                                        Some(&repo_path),
+                                    )
+                                    .await;
+                            });
+                            self.status_message = Some(format!("Opening issue #{num} in browser"));
+                            return Ok(());
+                        }
+                    }
+                }
+
                 // Alt+d: send deploy command to manager
                 if key.modifiers.contains(KeyModifiers::ALT) && key.code == KeyCode::Char('d') {
                     let cmd = "deploy";
