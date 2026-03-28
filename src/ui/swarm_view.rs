@@ -81,7 +81,7 @@ impl SwarmView {
         .split(chunks[1]);
 
         // --- Header line ---
-        let attention = count_attention(swarm);
+        let attention = swarm.attention_count() + count_attention(swarm);
         let working = swarm.busy_count();
         let total_workers = swarm.workers.len();
         let idle = total_workers - working;
@@ -102,7 +102,7 @@ impl SwarmView {
         ];
         if attention > 0 {
             let style = theme::attention_blink_style(blink);
-            header_spans.push(Span::styled(format!("⚠ {attention} waiting"), style));
+            header_spans.push(Span::styled(format!("⚠ {attention} need attention"), style));
         }
         let header = Paragraph::new(Line::from(header_spans));
         f.render_widget(header, chunks[0]);

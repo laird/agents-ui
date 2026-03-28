@@ -92,7 +92,7 @@ impl ReposListView {
                 Cell::from("Workflow"),
                 Cell::from("Runtime"),
                 Cell::from("Sessions"),
-                Cell::from("Waiting"),
+                Cell::from("Attention"),
                 Cell::from("Issues"),
             ])
             .style(theme::header_style());
@@ -104,7 +104,7 @@ impl ReposListView {
             for s in swarms {
                 let busy = s.busy_count();
                 let total = s.workers.len();
-                let waiting = count_attention(s);
+                let waiting = s.attention_count() + count_attention(s);
 
                 // Build issue priority summary from cache
                 let issue_summary = if let Some(cache) = issue_caches.get(&s.project_name) {
@@ -149,7 +149,7 @@ impl ReposListView {
                     Cell::from(s.agent_type.to_string()),
                     Cell::from(format!("{busy}/{total} working")),
                     Cell::from(if waiting > 0 {
-                        format!("{waiting} input")
+                        format!("⚠ {waiting}")
                     } else {
                         "—".to_string()
                     })
