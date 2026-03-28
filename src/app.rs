@@ -1955,6 +1955,67 @@ impl App {
                 }
             }
             SwarmPanel::Issues => {
+                // Search mode: route keys to the TextInput
+                if self.swarm_view.issue_search.is_some() {
+                    let search_filtered_count = if let Some(swarm) = self.swarms.get(swarm_idx) {
+                        if let Some(cache) = self.issue_caches.get(&swarm.project_name) {
+                            let q = self.swarm_view.issue_search.as_ref().unwrap().text().to_lowercase();
+                            cache.issues.iter()
+                                .filter(|i| i.matches_filter(self.swarm_view.issue_filter))
+                                .filter(|i| {
+                                    if q.is_empty() { return true; }
+                                    if let Some(num_str) = q.strip_prefix('#') {
+                                        if let Ok(num) = num_str.parse::<u32>() {
+                                            return i.number == num;
+                                        }
+                                    }
+                                    i.title.to_lowercase().contains(&q)
+                                })
+                                .count()
+                        } else { 0 }
+                    } else { 0 };
+
+                    match key.code {
+                        KeyCode::Esc => {
+                            self.swarm_view.issue_search = None;
+                            self.swarm_view.issues_table.select(Some(0));
+                        }
+                        KeyCode::Enter => {
+                            self.swarm_view.issue_search = None;
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            self.swarm_view.next_issue(search_filtered_count);
+                        }
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            self.swarm_view.prev_issue(search_filtered_count);
+                        }
+                        KeyCode::Char(c) => {
+                            if let Some(ref mut s) = self.swarm_view.issue_search {
+                                s.insert_char(c);
+                            }
+                            self.swarm_view.issues_table.select(Some(0));
+                        }
+                        KeyCode::Backspace => {
+                            if let Some(ref mut s) = self.swarm_view.issue_search {
+                                s.backspace();
+                            }
+                            self.swarm_view.issues_table.select(Some(0));
+                        }
+                        KeyCode::Left => {
+                            if let Some(ref mut s) = self.swarm_view.issue_search {
+                                s.move_left();
+                            }
+                        }
+                        KeyCode::Right => {
+                            if let Some(ref mut s) = self.swarm_view.issue_search {
+                                s.move_right();
+                            }
+                        }
+                        _ => {}
+                    }
+                    return Ok(());
+                }
+
                 let issue_count = self.swarms.get(swarm_idx)
                     .and_then(|s| self.issue_caches.get(&s.project_name))
                     .map(|c| c.issues.iter().filter(|i| i.matches_filter(self.swarm_view.issue_filter)).count())
@@ -1965,6 +2026,11 @@ impl App {
                     }
                     KeyCode::Up | KeyCode::Char('k') => {
                         self.swarm_view.prev_issue(issue_count);
+                    }
+                    KeyCode::Char('/') => {
+                        // Start issue search
+                        self.swarm_view.issue_search = Some(TextInput::new());
+                        self.swarm_view.issues_table.select(Some(0));
                     }
                     KeyCode::Char('f') => {
                         // Cycle issue filter
