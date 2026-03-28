@@ -457,6 +457,7 @@ impl App {
                             SwarmPanel::Issues => "issues",
                             SwarmPanel::Manager => "manager",
                         },
+                        Screen::IssueView { .. } | Screen::IssueDetail { .. } => "issues",
                         _ => "global",
                     };
                     crate::ui::shortcuts_viewer::render_shortcuts_viewer(
