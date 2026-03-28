@@ -1,4 +1,5 @@
 use ansi_to_tui::IntoText;
+use chrono::Local;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::Style,
@@ -203,25 +204,45 @@ impl SwarmView {
                 } else {
                     theme::status_style(&w.status.state)
                 };
+                let elapsed = w.status.timestamp.map(|ts| {
+                    let now = Local::now().naive_local();
+                    let dur = now.signed_duration_since(ts);
+                    let mins = dur.num_minutes();
+                    if mins < 1 {
+                        String::new()
+                    } else if mins < 60 {
+                        format!(" [{mins}m]")
+                    } else {
+                        let h = mins / 60;
+                        let m = mins % 60;
+                        if m == 0 { format!(" [{h}h]") } else { format!(" [{h}h{m}m]") }
+                    }
+                }).unwrap_or_default();
+                let elapsed_long = elapsed.len() > 5; // > 2h threshold for attention
                 let task = if let Some(issue_num) = w.current_issue {
                     let title = w.current_issue_title.as_deref().unwrap_or("");
                     if title.is_empty() {
-                        format!("#{issue_num}")
+                        format!("#{issue_num}{elapsed}")
                     } else {
-                        format!("#{issue_num} {}", truncate(title, 25))
+                        format!("#{issue_num} {}{elapsed}", truncate(title, 22))
                     }
                 } else {
                     match &w.status.state {
                         crate::model::status::AgentState::Working { issue: Some(n) } => {
-                            format!("#{n}")
+                            format!("#{n}{elapsed}")
                         }
                         _ => "\u{2014}".to_string(),
                     }
                 };
+                let task_style = if elapsed_long && !elapsed.is_empty() {
+                    theme::attention_style()
+                } else {
+                    Style::default()
+                };
                 Row::new(vec![
                     Cell::from(format!("{}", i + 1)),
                     Cell::from(status_str).style(status_style),
-                    Cell::from(task),
+                    Cell::from(task).style(task_style),
                 ])
             })
             .collect();
