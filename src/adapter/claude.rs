@@ -1347,13 +1347,15 @@ fn worker_dispatch_cmd(runtime: &AgentType, issue_number: u32) -> Option<String>
 }
 
 fn generic_worker_bootstrap_cmd(runtime: &AgentType) -> Option<String> {
+    let loop_cmd = runtime.worker_loop_cmd();
+    if !loop_cmd.is_empty() {
+        return Some(loop_cmd.to_string());
+    }
     match runtime {
-        AgentType::Claude => Some("/autocoder:fix".to_string()),
-        AgentType::Gemini => Some("/fix".to_string()),
         AgentType::Codex => Some(
             "Use the repository's Codex autocoder workflow to pick the next available issue and work it. Start by reading AGENTS.md, skills/autocoder/SKILL.md, skills/autocoder/references/workflow-map.md, and skills/autocoder/references/command-mapping.md. Choose the highest-priority available issue, do one focused pass, run relevant tests, and summarize the outcome.".to_string(),
         ),
-        AgentType::Droid => Some("/fix".to_string()),
+        _ => None,
     }
 }
 
@@ -1543,14 +1545,18 @@ mod tests {
     }
 
     #[test]
-    fn generic_worker_bootstrap_uses_fix() {
+    fn generic_worker_bootstrap_uses_fix_loop() {
         assert_eq!(
             generic_worker_bootstrap_cmd(&AgentType::Claude),
-            Some("/autocoder:fix".to_string())
+            Some("/autocoder:fix-loop".to_string())
+        );
+        assert_eq!(
+            generic_worker_bootstrap_cmd(&AgentType::Gemini),
+            Some("/fix-loop".to_string())
         );
         assert_eq!(
             generic_worker_bootstrap_cmd(&AgentType::Droid),
-            Some("/fix".to_string())
+            None
         );
     }
 
