@@ -219,6 +219,10 @@ pub struct App {
     pub create_issue_form: Option<CreateIssueForm>,
     /// Pending swarm teardown confirmation (swarm index).
     pub confirm_teardown: Option<usize>,
+    /// Pending stop-all-workers confirmation in Repo View (swarm index).
+    pub confirm_stop_swarm: Option<usize>,
+    /// Pending teardown confirmation in Repo View (swarm index).
+    pub confirm_teardown_repo_view: Option<usize>,
     /// Default runtime for launched/discovered swarms.
     pub default_agent_type: AgentType,
     /// True when runtime was explicitly pinned via CLI flag.
@@ -311,6 +315,8 @@ impl App {
             blink_counter: 0,
             create_issue_form: None,
             confirm_teardown: None,
+            confirm_stop_swarm: None,
+            confirm_teardown_repo_view: None,
             default_agent_type,
             runtime_locked_from_cli,
             runtime_pref_repo_root,
@@ -1723,6 +1729,49 @@ impl App {
     }
 
     async fn handle_repo_view_key(&mut self, key: KeyEvent, swarm_idx: usize) -> Result<()> {
+        // Handle stop-all confirmation
+        if let Some(idx) = self.confirm_stop_swarm {
+            self.confirm_stop_swarm = None;
+            if key.code == KeyCode::Char('y') || key.code == KeyCode::Char('Y') {
+                if let Some(swarm) = self.swarms.get(swarm_idx) {
+                    let targets: Vec<String> = swarm.workers.iter().map(|w| w.tmux_target.clone()).collect();
+                    let count = targets.len();
+                    for target in targets {
+                        let _ = proxy::kill_pane(&self.transport, &target).await;
+                    }
+                    self.status_message = Some(format!("Stopped {count} worker(s)"));
+                }
+            } else {
+                self.status_message = Some("Stop cancelled".to_string());
+            }
+            let _ = idx;
+            return Ok(());
+        }
+
+        // Handle teardown confirmation (from Repo View)
+        if let Some(idx) = self.confirm_teardown_repo_view {
+            self.confirm_teardown_repo_view = None;
+            if key.code == KeyCode::Char('y') || key.code == KeyCode::Char('Y') {
+                if idx < self.swarms.len() {
+                    let swarm = self.swarms[idx].clone();
+                    let project = swarm.project_name.clone();
+                    self.status_message = Some(format!("Tearing down {project}..."));
+                    if let Err(e) = self.adapter.teardown(&swarm).await {
+                        self.status_message = Some(format!("Teardown error: {e}"));
+                    } else {
+                        self.swarms.remove(idx);
+                        self.start_all_pane_watchers();
+                        self.scan_available_repos();
+                        self.screen = Screen::ReposList;
+                        self.status_message = Some(format!("Torn down {project}"));
+                    }
+                }
+            } else {
+                self.status_message = Some("Teardown cancelled".to_string());
+            }
+            return Ok(());
+        }
+
         // Handle create-issue dialog input
         if let Some(ref mut form) = self.create_issue_form {
             match key.code {
@@ -1945,6 +1994,30 @@ impl App {
                                     self.status_message = Some(format!("Shutting down {id}..."));
                                 }
                             }
+                        }
+                    }
+                    KeyCode::Char('S') => {
+                        // Stop all workers (with confirmation)
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            let count = swarm.workers.len();
+                            if count == 0 {
+                                self.status_message = Some("No workers to stop".to_string());
+                            } else {
+                                self.confirm_stop_swarm = Some(swarm_idx);
+                                self.status_message = Some(format!(
+                                    "Stop all {count} worker(s)? (y to confirm, any other key to cancel)"
+                                ));
+                            }
+                        }
+                    }
+                    KeyCode::Char('T') => {
+                        // Teardown entire swarm (with confirmation)
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            let project = swarm.project_name.clone();
+                            self.confirm_teardown_repo_view = Some(swarm_idx);
+                            self.status_message = Some(format!(
+                                "Teardown {project} and remove worktrees? (y to confirm, any other key to cancel)"
+                            ));
                         }
                     }
                     KeyCode::Char(c @ '1'..='9') => {
