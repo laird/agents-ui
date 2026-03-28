@@ -30,9 +30,19 @@ impl std::fmt::Display for AgentState {
 /// Parsed status of an agent from its status file.
 #[derive(Debug, Clone)]
 pub struct AgentStatus {
-    #[allow(dead_code)] // Parsed for future use in status age display
     pub timestamp: Option<NaiveDateTime>,
     pub state: AgentState,
+}
+
+impl AgentStatus {
+    /// Returns `true` when the status file timestamp is older than `threshold_secs` seconds.
+    /// Returns `false` if there is no timestamp (can't determine staleness).
+    pub fn is_stale(&self, threshold_secs: u64) -> bool {
+        let Some(ts) = self.timestamp else { return false };
+        let now = chrono::Local::now().naive_local();
+        let age = now.signed_duration_since(ts);
+        age.num_seconds() > threshold_secs as i64
+    }
 }
 
 impl Default for AgentStatus {
@@ -438,5 +448,33 @@ mod tests {
             "Done: done"
         );
         assert_eq!(AgentState::Stopped.to_string(), "Stopped");
+    }
+
+    // --- is_stale ---
+
+    #[test]
+    fn is_stale_returns_false_when_timestamp_is_recent() {
+        let now = chrono::Local::now().naive_local();
+        let status = AgentStatus {
+            timestamp: Some(now - chrono::Duration::seconds(60)),
+            state: AgentState::Idle,
+        };
+        assert!(!status.is_stale(300));
+    }
+
+    #[test]
+    fn is_stale_returns_true_when_timestamp_is_old() {
+        let old = chrono::Local::now().naive_local() - chrono::Duration::seconds(600);
+        let status = AgentStatus {
+            timestamp: Some(old),
+            state: AgentState::Idle,
+        };
+        assert!(status.is_stale(300));
+    }
+
+    #[test]
+    fn is_stale_returns_false_when_no_timestamp() {
+        let status = AgentStatus { timestamp: None, state: AgentState::Idle };
+        assert!(!status.is_stale(300));
     }
 }
