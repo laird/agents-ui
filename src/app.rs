@@ -452,11 +452,10 @@ impl App {
                 // Shortcuts viewer overlay
                 if self.show_shortcuts_viewer {
                     let panel = match &self.screen {
-                        Screen::RepoView { .. } => match &self.repo_view.focus {
-                            crate::ui::repo_view::RepoViewFocus::Workers => "workers",
-                            crate::ui::repo_view::RepoViewFocus::Issues => "issues",
-                            crate::ui::repo_view::RepoViewFocus::ManagerInput => "manager",
-                            _ => "global",
+                        Screen::RepoView { .. } => match self.swarm_focus {
+                            SwarmPanel::Workers => "workers",
+                            SwarmPanel::Issues => "issues",
+                            SwarmPanel::Manager => "manager",
                         },
                         _ => "global",
                     };
@@ -2072,6 +2071,10 @@ impl App {
                             }
                         }
                     }
+                    KeyCode::Char('d') | KeyCode::Char(' ') => {
+                        // Dispatch selected issue to an idle worker
+                        self.dispatch_selected_issue(swarm_idx).await;
+                    }
                     _ => {}
                 }
             }
@@ -2706,44 +2709,6 @@ impl App {
         }
     }
 
-    /// Send post-launch commands to manager and worker sessions.
-    /// Spawns a background task that waits for sessions to initialize,
-    /// then sends `/autocoder:monitor-loop` to the manager and
-    /// `/autocoder:fix-loop` to each worker.
-    fn send_post_launch_commands(&self, swarm: &Swarm) {
-        let manager_target = swarm.manager.tmux_target.clone();
-        let worker_targets: Vec<String> = swarm.workers.iter().map(|w| w.tmux_target.clone()).collect();
-        let plugin_installed = self.agents_dir.exists()
-            && self.agents_dir.join("scripts/start-parallel-agents.sh").exists();
-        let transport = self.transport.clone();
-
-        tokio::spawn(async move {
-            if !plugin_installed {
-                tracing::warn!("Autocoder plugin not found; skipping post-launch commands");
-                return;
-            }
-
-            // Wait for Claude sessions to initialize before sending commands
-            tokio::time::sleep(Duration::from_secs(5)).await;
-
-            // Send /autocoder:monitor-loop to manager
-            if let Err(e) = proxy::send_keys(&transport, &manager_target, "/autocoder:monitor-loop").await {
-                tracing::warn!("Failed to send /autocoder:monitor-loop to manager: {e}");
-            } else {
-                tracing::info!("Sent /autocoder:monitor-loop to manager at {manager_target}");
-            }
-
-            // Send /autocoder:fix-loop to each worker
-            for target in &worker_targets {
-                if let Err(e) = proxy::send_keys(&transport, target, "/autocoder:fix-loop").await {
-                    tracing::warn!("Failed to send /autocoder:fix-loop to worker at {target}: {e}");
-                } else {
-                    tracing::info!("Sent /autocoder:fix-loop to worker at {target}");
-                }
-            }
-        });
-    }
-
     /// Open an issue detail view by fetching issue data from GitHub.
     async fn open_issue_detail(&mut self, issue_number: u32, swarm_idx: usize) {
         // Fetch issue details from GitHub
@@ -2819,6 +2784,63 @@ impl App {
                 );
                 self.pane_watchers.push(handle);
             }
+        }
+    }
+
+    /// Dispatch the currently selected issue (in the Issues panel) to an idle worker.
+    async fn dispatch_selected_issue(&mut self, swarm_idx: usize) {
+        let Some(swarm) = self.swarms.get(swarm_idx) else { return };
+        let project_name = swarm.project_name.clone();
+        let agent_type = swarm.agent_type.clone();
+
+        // Get the selected issue number
+        let issues: Vec<u32> = self.issue_caches
+            .get(&project_name)
+            .map(|c| {
+                c.issues
+                    .iter()
+                    .filter(|i| i.matches_filter(self.swarm_view.issue_filter))
+                    .map(|i| i.number)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let Some(issue_num) = self.swarm_view.selected_issue().and_then(|idx| issues.get(idx).copied()) else {
+            self.status_message = Some("No issue selected".to_string());
+            return;
+        };
+
+        // Find an idle worker
+        let idle_worker = self.swarms[swarm_idx]
+            .workers
+            .iter()
+            .enumerate()
+            .find(|(_, w)| {
+                !w.is_manager
+                    && w.dispatched_issue.is_none()
+                    && matches!(w.status.state, crate::model::status::AgentState::Idle)
+            })
+            .map(|(idx, w)| (idx, w.tmux_target.clone(), w.role.clone()));
+
+        let Some((worker_idx, target, role)) = idle_worker else {
+            self.status_message = Some("No idle workers available".to_string());
+            return;
+        };
+
+        let Some(cmd) = self.worker_dispatch_cmd(&agent_type, issue_num) else {
+            self.status_message = Some(format!("No dispatch command configured for {agent_type}"));
+            return;
+        };
+
+        tracing::info!("Manual dispatch: #{issue_num} → {role} via {target}");
+        if let Ok(()) = crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, &cmd).await {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, "Enter").await.ok();
+            self.swarms[swarm_idx].workers[worker_idx].dispatched_issue = Some(issue_num);
+            self.swarms[swarm_idx].workers[worker_idx].status.state =
+                crate::model::status::AgentState::Working { issue: Some(issue_num) };
+            self.status_message = Some(format!("Dispatched #{issue_num} → {role}"));
+        } else {
+            self.status_message = Some(format!("Failed to dispatch #{issue_num}"));
         }
     }
 
