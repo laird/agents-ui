@@ -17,6 +17,7 @@ pub async fn capture_pane(
                 "capture-pane".to_string(),
                 "-p".to_string(),
                 "-e".to_string(),
+                "-J".to_string(), // join wrapped lines (prevents truncation at pane width)
                 "-t".to_string(),
                 target.to_string(),
                 "-S".to_string(),

@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use std::collections::HashMap;
 
@@ -9,7 +9,7 @@ use crate::adapter::claude::ClaudeAdapter;
 use crate::adapter::traits::{AgentRuntime, SwarmConfig};
 use crate::event::{Event, EventHandler};
 use crate::model::issue::{GitHubIssue, IssueCache};
-use crate::model::swarm::{AgentType, Swarm};
+use crate::model::swarm::{AgentType, ALL_AGENT_TYPES, Swarm};
 use crate::scripts::launcher;
 use crate::transport::ServerTransport;
 use crate::tmux::proxy;
@@ -18,6 +18,7 @@ use crate::ui::agent_view::AgentView;
 use crate::ui::repo_view::RepoView;
 use crate::ui::swarm_view::{SwarmView, SwarmPanel};
 use crate::ui::repos_list::ReposListView;
+use crate::ui::text_input::TextInput;
 
 /// Which screen we're on.
 #[derive(Debug, Clone)]
@@ -35,7 +36,9 @@ pub enum Screen {
 #[derive(Debug, Clone)]
 pub enum NewSwarmField {
     RepoPath,
+    AgentRuntime,
     NumWorkers,
+    Launching,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -189,9 +192,11 @@ pub struct App {
     pane_watchers: Vec<tokio::task::JoinHandle<()>>,
     issue_watchers: Vec<tokio::task::JoinHandle<()>>,
     /// Input buffer for new swarm dialog.
-    pub dialog_input: String,
+    pub dialog_input: TextInput,
     /// Stored repo path during new swarm flow.
     pub new_swarm_repo: String,
+    /// Selected agent type during new swarm flow.
+    pub new_swarm_agent_type: AgentType,
     /// Status message shown at bottom of repos list.
     pub status_message: Option<String>,
     /// Available repos (git directories found nearby) that don't have active swarms.
@@ -219,6 +224,8 @@ pub struct App {
     pub install_scope: InstallScope,
     /// Deferred launch context when waiting on install scope selection.
     pending_launch: Option<PendingLaunch>,
+    /// Last time worker healing was run.
+    last_heal: Instant,
 }
 
 impl App {
@@ -268,8 +275,9 @@ impl App {
             agents_dir,
             pane_watchers: Vec::new(),
             issue_watchers: Vec::new(),
-            dialog_input: String::new(),
+            dialog_input: TextInput::new(),
             new_swarm_repo: String::new(),
+            new_swarm_agent_type: AgentType::Claude,
             status_message: startup_warning,
             available_repos: Vec::new(),
             swarm_view: SwarmView::new(),
@@ -284,6 +292,7 @@ impl App {
             runtime_pref_repo_root,
             install_scope: InstallScope::User,
             pending_launch: None,
+            last_heal: Instant::now(),
         };
 
         // Scan for available repos (git directories in cwd or children)
@@ -341,10 +350,10 @@ impl App {
                     }
                     Screen::NewSwarm { field } => {
                         let field = field.clone();
-                        let input = self.dialog_input.clone();
                         let repo = self.new_swarm_repo.clone();
+                        let agent_type = self.new_swarm_agent_type.clone();
                         crate::ui::new_swarm::render_new_swarm_dialog(
-                            f, area, &field, &input, &repo,
+                            f, area, &field, &self.dialog_input, &repo, &agent_type,
                         );
                     }
                     Screen::RepoView { swarm_idx } => {
@@ -447,6 +456,11 @@ impl App {
                 if self.blink_counter % 240 == 0 {
                     self.revive_dropped_agents().await;
                 }
+                // Periodically heal worker infrastructure (every 30 seconds)
+                if self.last_heal.elapsed() >= Duration::from_secs(30) {
+                    self.last_heal = Instant::now();
+                    self.heal_all_workers().await;
+                }
             }
             Event::PaneOutput { agent_id, content } => {
                 // agent_id is globally unique (e.g., "nextgen-CDD/manager")
@@ -531,6 +545,21 @@ impl App {
                             }
                         }
                     }
+                }
+            }
+            Event::TerminalResize { width, height } => {
+                // Resize all tmux sessions to match the new terminal size
+                for swarm in &self.swarms {
+                    let session = swarm.tmux_session.clone();
+                    let w = width;
+                    let h = height;
+                    tokio::spawn(async move {
+                        if let Err(e) =
+                            crate::tmux::session::resize_session(&session, w, h).await
+                        {
+                            tracing::warn!("Failed to resize session {session}: {e}");
+                        }
+                    });
                 }
             }
         }
@@ -736,7 +765,7 @@ impl App {
                             field: NewSwarmField::NumWorkers,
                         };
                         self.new_swarm_repo = pending.repo_path.to_string_lossy().to_string();
-                        self.dialog_input = pending.num_workers.to_string();
+                        self.dialog_input = TextInput::with_text(pending.num_workers.to_string());
                         self.status_message = Some(format!("Install failed: {e}"));
                     }
                 }
@@ -1157,7 +1186,7 @@ impl App {
             let avail_idx = idx - self.swarms.len();
             if let Some(repo_path) = self.available_repos.get(avail_idx) {
                 self.new_swarm_repo = repo_path.to_string_lossy().to_string();
-                self.dialog_input = "2".to_string();
+                self.dialog_input = TextInput::with_text("2".to_string());
                 self.status_message = None;
                 self.screen = Screen::NewSwarm {
                     field: NewSwarmField::NumWorkers,
@@ -1212,9 +1241,9 @@ impl App {
             }
             KeyCode::Char('n') => {
                 // New swarm dialog — pre-fill with current directory
-                self.dialog_input = std::env::current_dir()
+                self.dialog_input.set_text(std::env::current_dir()
                     .map(|p| p.to_string_lossy().to_string())
-                    .unwrap_or_default();
+                    .unwrap_or_default());
                 self.new_swarm_repo = String::new();
                 self.status_message = None;
                 self.screen = Screen::NewSwarm {
@@ -1267,7 +1296,7 @@ impl App {
                             .to_string_lossy()
                             .to_string()
                     } else {
-                        self.dialog_input.clone()
+                        self.dialog_input.text().to_string()
                     };
 
                     // Expand ~ to home dir
@@ -1289,38 +1318,85 @@ impl App {
                     }
 
                     self.new_swarm_repo = path;
-                    self.dialog_input = "2".to_string(); // Default 2 workers
+                    self.new_swarm_agent_type = AgentType::Claude;
+                    self.screen = Screen::NewSwarm {
+                        field: NewSwarmField::AgentRuntime,
+                    };
+                }
+                KeyCode::Left => {
+                    self.dialog_input.move_left();
+                }
+                KeyCode::Right => {
+                    self.dialog_input.move_right();
+                }
+                KeyCode::Home => {
+                    self.dialog_input.move_home();
+                }
+                KeyCode::End => {
+                    self.dialog_input.move_end();
+                }
+                KeyCode::Delete => {
+                    self.dialog_input.delete();
+                }
+                KeyCode::Char(c) => {
+                    self.dialog_input.insert_char(c);
+                }
+                KeyCode::Backspace => {
+                    self.dialog_input.backspace();
+                }
+                KeyCode::Tab => {
+                    // Simple tab completion: try to complete the path
+                    if let Some(completed) = tab_complete_path(self.dialog_input.text()) {
+                        self.dialog_input.set_text(completed);
+                    }
+                }
+                _ => {}
+            },
+            NewSwarmField::AgentRuntime => match key.code {
+                KeyCode::Esc => {
+                    self.screen = Screen::NewSwarm {
+                        field: NewSwarmField::RepoPath,
+                    };
+                    self.dialog_input.set_text(self.new_swarm_repo.clone());
+                }
+                KeyCode::Enter => {
+                    self.dialog_input.set_text("2".to_string()); // Default 2 workers
                     self.screen = Screen::NewSwarm {
                         field: NewSwarmField::NumWorkers,
                     };
                 }
-                KeyCode::Char(c) => {
-                    self.dialog_input.push(c);
+                KeyCode::Up | KeyCode::Char('k') => {
+                    let idx = ALL_AGENT_TYPES
+                        .iter()
+                        .position(|t| *t == self.new_swarm_agent_type)
+                        .unwrap_or(0);
+                    let new_idx = if idx == 0 {
+                        ALL_AGENT_TYPES.len() - 1
+                    } else {
+                        idx - 1
+                    };
+                    self.new_swarm_agent_type = ALL_AGENT_TYPES[new_idx].clone();
                 }
-                KeyCode::Backspace => {
-                    self.dialog_input.pop();
-                }
-                KeyCode::Tab => {
-                    // Simple tab completion: try to complete the path
-                    if !self.transport.is_remote() {
-                        if let Some(completed) = tab_complete_path(&self.dialog_input) {
-                            self.dialog_input = completed;
-                        }
-                    }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    let idx = ALL_AGENT_TYPES
+                        .iter()
+                        .position(|t| *t == self.new_swarm_agent_type)
+                        .unwrap_or(0);
+                    let new_idx = (idx + 1) % ALL_AGENT_TYPES.len();
+                    self.new_swarm_agent_type = ALL_AGENT_TYPES[new_idx].clone();
                 }
                 _ => {}
             },
             NewSwarmField::NumWorkers => match key.code {
                 KeyCode::Esc => {
                     self.screen = Screen::NewSwarm {
-                        field: NewSwarmField::RepoPath,
+                        field: NewSwarmField::AgentRuntime,
                     };
-                    self.dialog_input = self.new_swarm_repo.clone();
                 }
                 KeyCode::Enter => {
-                    let num_workers: u32 = self.dialog_input.parse().unwrap_or(2);
+                    let num_workers: u32 = self.dialog_input.text().parse().unwrap_or(2);
                     let repo_path = PathBuf::from(&self.new_swarm_repo);
-                    self.dialog_input = String::new();
+                    self.dialog_input = TextInput::new();
                     let agent_type = self.resolve_agent_type_for_repo(&repo_path);
                     self.persist_agent_type_for_repo(&repo_path, &agent_type);
 
@@ -1357,7 +1433,7 @@ impl App {
                                 }
                                 Err(e) => {
                                     self.new_swarm_repo = repo_path.to_string_lossy().to_string();
-                                    self.dialog_input = num_workers.to_string();
+                                    self.dialog_input.set_text(num_workers.to_string());
                                     self.status_message = Some(format!("Codex install failed: {e}"));
                                     self.screen = Screen::NewSwarm {
                                         field: NewSwarmField::NumWorkers,
@@ -1370,21 +1446,27 @@ impl App {
                     }
                 }
                 KeyCode::Up => {
-                    let n: u32 = self.dialog_input.parse().unwrap_or(1);
-                    self.dialog_input = (n + 1).to_string();
+                    let n: u32 = self.dialog_input.text().parse().unwrap_or(1);
+                    self.dialog_input.set_text((n + 1).to_string());
                 }
                 KeyCode::Down => {
-                    let n: u32 = self.dialog_input.parse().unwrap_or(2);
-                    self.dialog_input = n.max(2).saturating_sub(1).to_string();
+                    let n: u32 = self.dialog_input.text().parse().unwrap_or(2);
+                    self.dialog_input.set_text(n.max(2).saturating_sub(1).to_string());
                 }
                 KeyCode::Char(c) if c.is_ascii_digit() => {
-                    self.dialog_input.push(c);
+                    self.dialog_input.insert_char(c);
                 }
                 KeyCode::Backspace => {
-                    self.dialog_input.pop();
+                    self.dialog_input.backspace();
                 }
                 _ => {}
             },
+            NewSwarmField::Launching => {
+                // No key handling while launching — just ignore
+                if key.code == KeyCode::Esc {
+                    self.screen = Screen::ReposList;
+                }
+            }
         }
         Ok(())
     }
@@ -1976,53 +2058,141 @@ impl App {
                         if let Some(worker) = swarm.workers.get(worker_idx) {
                             self.agent_view = AgentView::new();
                             self.agent_view.scroll_to_bottom();
+                            let aid = worker.id.clone();
                             self.screen = Screen::AgentView {
                                 swarm_idx,
-                                agent_id: worker.role.clone(),
+                                agent_id: aid,
                             };
                             return Ok(());
                         }
                     }
                 }
-                _ => {
-                    // Alt+z: tear down the entire swarm (only from repo view)
-                    if key.modifiers.contains(KeyModifiers::ALT)
-                        && key.code == KeyCode::Char('z')
-                    {
-                        if let Some(swarm) = self.swarms.get(swarm_idx) {
-                            let project = swarm.project_name.clone();
-                            tracing::info!("Tearing down swarm for {project}");
-                            if let Err(e) = self.adapter.teardown(swarm).await {
-                                tracing::error!("Teardown failed: {e}");
-                                self.status_message =
-                                    Some(format!("Teardown failed: {e}"));
-                            } else {
-                                self.swarms.remove(swarm_idx);
-                                self.status_message =
-                                    Some(format!("Swarm {project} shut down"));
-                                self.screen = Screen::ReposList;
+                KeyCode::Char('R') => {
+                    // Restart all idle workers (send fix-loop to each)
+                    if let Some(swarm) = self.swarms.get(swarm_idx) {
+                        let transport = self.transport.clone();
+                        let idle_workers: Vec<(String, String)> = swarm
+                            .workers
+                            .iter()
+                            .filter(|w| {
+                                matches!(
+                                    w.status.state,
+                                    crate::model::status::AgentState::Idle
+                                        | crate::model::status::AgentState::Unknown(_)
+                                )
+                            })
+                            .map(|w| (w.id.clone(), w.tmux_target.clone()))
+                            .collect();
+
+                        let count = idle_workers.len();
+                        let loop_cmd = swarm.agent_type.worker_loop_cmd().to_string();
+                        for (id, target) in idle_workers {
+                            tracing::info!("Restarting idle worker {id}");
+                            if let Err(e) = proxy::send_keys(&transport, &target, &loop_cmd).await {
+                                tracing::error!("Failed to restart {id}: {e}");
                             }
+                        }
+                        self.status_message =
+                            Some(format!("Restarted {count} idle worker(s)"));
+                    }
+                }
+                KeyCode::Char('B') => {
+                    // Send deploy command to manager session
+                    if let Some(swarm) = self.swarms.get(swarm_idx) {
+                        let target = swarm.manager.tmux_target.clone();
+                        tracing::info!("Sending deploy command to manager at {target}");
+                        if let Err(e) = self.adapter.send_input(&target, "deploy").await {
+                            tracing::error!("Failed to send deploy: {e}");
+                            self.status_message = Some(format!("Deploy failed: {e}"));
+                        } else {
+                            self.status_message = Some("Sent deploy to manager".to_string());
                         }
                     }
                 }
+                KeyCode::Char('D') => {
+                    // Stop all workers (send stop to each)
+                    if let Some(swarm) = self.swarms.get(swarm_idx) {
+                        let transport = self.transport.clone();
+                        let workers: Vec<(String, String)> = swarm
+                            .workers
+                            .iter()
+                            .map(|w| (w.id.clone(), w.tmux_target.clone()))
+                            .collect();
+
+                        let count = workers.len();
+                        for (id, target) in workers {
+                            tracing::info!("Stopping worker {id}");
+                            if let Err(e) = proxy::kill_pane(&transport, &target).await {
+                                tracing::error!("Failed to stop {id}: {e}");
+                            }
+                        }
+                        self.status_message =
+                            Some(format!("Stopping all {count} worker(s)..."));
+                    }
+                }
+                _ => {}
             }
         }
 
-        // PageUp/PageDown scroll the view without sending to pane
+        // PageUp/PageDown and input handling
         match key.code {
             KeyCode::PageUp => {
-                self.agent_view.scroll_up(10);
+                self.agent_view.page_up();
                 return Ok(());
             }
             KeyCode::PageDown => {
-                self.agent_view.scroll_down(10);
+                self.agent_view.page_down();
+                return Ok(());
+            }
+            KeyCode::Home => {
+                self.agent_view.scroll_to_top();
+                return Ok(());
+            }
+            KeyCode::End => {
+                self.agent_view.scroll_to_bottom();
+                return Ok(());
+            }
+            KeyCode::Up => {
+                self.agent_view.scroll_up(1);
+                return Ok(());
+            }
+            KeyCode::Down => {
+                self.agent_view.scroll_down(1);
+                return Ok(());
+            }
+            KeyCode::Enter => {
+                if !self.agent_view.input.is_empty() {
+                    let input = self.agent_view.input.drain();
+                    proxy::send_keys(&self.transport, &target, &input).await?;
+                    self.agent_view.scroll_to_bottom();
+                }
+                return Ok(());
+            }
+            KeyCode::Left => {
+                self.agent_view.input.move_left();
+                return Ok(());
+            }
+            KeyCode::Right => {
+                self.agent_view.input.move_right();
+                return Ok(());
+            }
+            KeyCode::Delete => {
+                self.agent_view.input.delete();
+                return Ok(());
+            }
+            KeyCode::Backspace => {
+                self.agent_view.input.backspace();
+                return Ok(());
+            }
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT) => {
+                self.agent_view.input.insert_char(c);
                 return Ok(());
             }
             _ => {}
         }
 
         // Everything else is forwarded directly to the tmux pane.
-        // This gives us Claude's native tab completion, slash commands, etc.
         let tmux_key = key_event_to_tmux(key);
         if let Some(tmux_key) = tmux_key {
             send_raw_key(&self.transport, &target, &tmux_key).await?;
@@ -2031,6 +2201,7 @@ impl App {
 
         Ok(())
     }
+
 
     /// Start pane watchers for all agents in all swarms.
     fn start_all_pane_watchers(&mut self) {
@@ -2158,6 +2329,33 @@ impl App {
                     }
                 }
             }
+        }
+    }
+
+    /// Validate and heal all worker infrastructure across all swarms.
+    async fn heal_all_workers(&mut self) {
+        let mut any_repairs = false;
+        let mut all_repairs = Vec::new();
+
+        for i in 0..self.swarms.len() {
+            match self.adapter.heal_workers(&mut self.swarms[i]).await {
+                Ok(repairs) => {
+                    if !repairs.is_empty() {
+                        any_repairs = true;
+                        all_repairs.extend(repairs);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Worker healing failed: {e}");
+                }
+            }
+        }
+
+        if any_repairs {
+            let msg = all_repairs.join("; ");
+            tracing::info!("Healed workers: {msg}");
+            self.status_message = Some(format!("Healed: {msg}"));
+            self.start_all_pane_watchers();
         }
     }
 
@@ -2729,11 +2927,7 @@ fn longest_common_prefix(strings: &[String]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        codex_repo_assets_present, codex_user_assets_present, extract_issue_from_text,
-        infer_status_from_pane, installer_script_candidates, key_event_to_tmux, next_runtime,
-        prev_runtime,
-    };
+    use super::*;
     use crate::model::status::AgentState;
     use crate::model::swarm::AgentType;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -2854,5 +3048,62 @@ mod tests {
 
         let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
         assert_eq!(key_event_to_tmux(enter).as_deref(), Some("Enter"));
+    }
+
+    #[test]
+    fn lcp_empty_input() {
+        assert_eq!(longest_common_prefix(&[]), "");
+    }
+
+    #[test]
+    fn lcp_single_string() {
+        assert_eq!(
+            longest_common_prefix(&["hello".to_string()]),
+            "hello"
+        );
+    }
+
+    #[test]
+    fn lcp_common_prefix() {
+        assert_eq!(
+            longest_common_prefix(&[
+                "foobar".to_string(),
+                "foobaz".to_string(),
+                "fooqux".to_string(),
+            ]),
+            "foo"
+        );
+    }
+
+    #[test]
+    fn lcp_identical_strings() {
+        assert_eq!(
+            longest_common_prefix(&["abc".to_string(), "abc".to_string()]),
+            "abc"
+        );
+    }
+
+    #[test]
+    fn lcp_no_common_prefix() {
+        assert_eq!(
+            longest_common_prefix(&["abc".to_string(), "xyz".to_string()]),
+            ""
+        );
+    }
+
+    #[test]
+    fn lcp_one_empty_string() {
+        assert_eq!(
+            longest_common_prefix(&["".to_string(), "abc".to_string()]),
+            ""
+        );
+    }
+
+    #[test]
+    fn lcp_different_lengths() {
+        assert_eq!(
+            longest_common_prefix(&["ab".to_string(), "abcdef".to_string()]),
+            "ab"
+        );
     }
 }

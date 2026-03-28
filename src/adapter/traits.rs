@@ -12,7 +12,7 @@ pub struct SwarmConfig {
 }
 
 /// Trait abstracting over different agent runtimes.
-#[allow(async_fn_in_trait, dead_code)]
+#[allow(async_fn_in_trait, dead_code)] // Full lifecycle methods for swarm management
 pub trait AgentRuntime {
     /// Launch a new swarm (manager + workers).
     async fn launch(&self, config: &SwarmConfig) -> Result<Swarm>;
@@ -40,4 +40,8 @@ pub trait AgentRuntime {
 
     /// Re-launch any agents that have dropped back to a shell (e.g. after a self-update).
     async fn revive_agents(&self, swarm: &Swarm) -> Result<()>;
+
+    /// Validate and heal worker infrastructure. Returns descriptions of repairs made.
+    /// Ensures each worker has a worktree, tmux pane, and active agent.
+    async fn heal_workers(&self, swarm: &mut Swarm) -> Result<Vec<String>>;
 }

@@ -5,9 +5,13 @@ use tokio::sync::mpsc;
 
 use crate::model::issue::GitHubIssue;
 /// All events the app processes.
+#[derive(Debug)]
+#[allow(dead_code)] // Variants used by background tasks and planned notification system
 pub enum Event {
     /// Keyboard input
     Key(KeyEvent),
+    /// Terminal was resized
+    TerminalResize { width: u16, height: u16 },
     /// Periodic tick for UI refresh
     Tick,
     /// Updated pane content from tmux
@@ -61,6 +65,11 @@ impl EventHandler {
                             if event_tx.send(Event::Key(key)).is_err() {
                                 break;
                             }
+                        }
+                    }
+                    Some(Ok(CrosstermEvent::Resize(width, height))) => {
+                        if event_tx.send(Event::TerminalResize { width, height }).is_err() {
+                            break;
                         }
                     }
                     Some(Err(_)) | None => break,

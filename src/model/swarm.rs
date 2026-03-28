@@ -10,6 +10,14 @@ pub enum AgentType {
     Gemini,
 }
 
+/// All supported agent types, in display order.
+pub const ALL_AGENT_TYPES: &[AgentType] = &[
+    AgentType::Claude,
+    AgentType::Codex,
+    AgentType::Droid,
+    AgentType::Gemini,
+];
+
 impl std::fmt::Display for AgentType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -42,11 +50,15 @@ impl AgentType {
         }
     }
 
-    /// Status file directory within a worktree
-    pub fn status_dir(&self) -> &str {
-        match self {
-            AgentType::Claude | AgentType::Codex | AgentType::Gemini => ".codex/loops",
-            AgentType::Droid => ".factory/loops",
+    /// Parse agent type from tmux session prefix (e.g., "claude" → Claude).
+    #[allow(dead_code)] // Available for future use in dynamic session parsing
+    pub fn from_prefix(prefix: &str) -> Option<AgentType> {
+        match prefix {
+            "claude" => Some(AgentType::Claude),
+            "codex" => Some(AgentType::Codex),
+            "droid" => Some(AgentType::Droid),
+            "gemini" => Some(AgentType::Gemini),
+            _ => None,
         }
     }
 
@@ -61,12 +73,19 @@ impl AgentType {
     }
 
     /// The slash command to start the worker fix-loop.
-    #[allow(dead_code)]
     pub fn worker_loop_cmd(&self) -> &str {
         match self {
             AgentType::Claude => "/autocoder:fix-loop",
             AgentType::Codex | AgentType::Droid => "",
             AgentType::Gemini => "/fix-loop",
+        }
+    }
+
+    /// Status file directory within a worktree
+    pub fn status_dir(&self) -> &str {
+        match self {
+            AgentType::Claude | AgentType::Codex | AgentType::Gemini => ".codex/loops",
+            AgentType::Droid => ".factory/loops",
         }
     }
 
@@ -91,7 +110,7 @@ impl std::str::FromStr for AgentType {
 
 /// The workflow type for a swarm.
 #[derive(Debug, Clone, PartialEq)]
-#[allow(dead_code)]
+#[allow(dead_code)] // Planned for workflow display in repos list
 pub enum Workflow {
     Autocoder,
     Modernize,
@@ -150,6 +169,7 @@ pub struct Swarm {
     pub workers: Vec<AgentInfo>,
 }
 
+#[allow(dead_code)] // Utility methods for future UI enhancements
 impl Swarm {
     /// Count of busy workers
     pub fn busy_count(&self) -> usize {

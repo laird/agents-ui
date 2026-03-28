@@ -40,6 +40,10 @@ pub fn input_style() -> Style {
     Style::default().fg(Color::White)
 }
 
+pub fn cursor_style() -> Style {
+    Style::default().bg(Color::White).fg(Color::Black)
+}
+
 pub fn attention_style() -> Style {
     Style::default()
         .fg(Color::Red)

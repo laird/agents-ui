@@ -7,16 +7,25 @@ use ratatui::{
 };
 
 use crate::model::swarm::AgentInfo;
+use super::text_input::TextInput;
 use super::theme;
 
 pub struct AgentView {
+    pub input: TextInput,
     pub scroll_offset: u16,
+    /// Height of the visible pane area (updated each render).
+    pub visible_height: u16,
+    /// Whether the view should auto-follow new content (true when at bottom).
+    pub following: bool,
 }
 
 impl AgentView {
     pub fn new() -> Self {
         Self {
+            input: TextInput::new(),
             scroll_offset: 0,
+            visible_height: 20,
+            following: true,
         }
     }
 
@@ -59,9 +68,19 @@ impl AgentView {
         let total_lines = text.lines.len() as u16;
 
         let visible_height = chunks[1].height.saturating_sub(2);
+        self.visible_height = visible_height;
         let max_scroll = total_lines.saturating_sub(visible_height);
-        if self.scroll_offset > max_scroll {
+
+        // Auto-follow: if following mode is on, snap to bottom
+        if self.following {
             self.scroll_offset = max_scroll;
+        } else if self.scroll_offset > max_scroll {
+            self.scroll_offset = max_scroll;
+        }
+
+        // If we're at the bottom, re-enable following
+        if self.scroll_offset >= max_scroll {
+            self.following = true;
         }
 
         let session_title = format!(" Session — {} ", agent.tmux_target);
@@ -71,16 +90,28 @@ impl AgentView {
             .scroll((self.scroll_offset, 0));
         f.render_widget(pane_output, chunks[1]);
 
+        // Input line
+        let input_line = self.input.render_line("> ");
+        let input_widget = Paragraph::new(input_line)
+            .block(Block::default().borders(Borders::ALL).title(" Input "));
+        f.render_widget(input_widget, chunks[2]);
+
         // Help
         let help = Paragraph::new(Line::from(vec![
-            Span::styled(" ⌥←", theme::title_style()),
+            Span::styled(" Enter", theme::title_style()),
+            Span::styled(" send  ", theme::help_style()),
+            Span::styled("↑/↓", theme::title_style()),
+            Span::styled(" line  ", theme::help_style()),
+            Span::styled("PgUp/PgDn", theme::title_style()),
+            Span::styled(" page  ", theme::help_style()),
+            Span::styled("Home/End", theme::title_style()),
+            Span::styled(" top/btm  ", theme::help_style()),
+            Span::styled("Esc", theme::title_style()),
             Span::styled(" back  ", theme::help_style()),
             Span::styled("⌥0", theme::title_style()),
             Span::styled(" overview  ", theme::help_style()),
             Span::styled("⌥1-9", theme::title_style()),
             Span::styled(" worker  ", theme::help_style()),
-            Span::styled("PgUp/Dn", theme::title_style()),
-            Span::styled(" scroll  ", theme::help_style()),
         ]))
         .block(Block::default().borders(Borders::TOP));
         f.render_widget(help, chunks[2]);
@@ -88,13 +119,31 @@ impl AgentView {
 
     pub fn scroll_up(&mut self, amount: u16) {
         self.scroll_offset = self.scroll_offset.saturating_sub(amount);
+        self.following = false;
     }
 
     pub fn scroll_down(&mut self, amount: u16) {
         self.scroll_offset = self.scroll_offset.saturating_add(amount);
+        // following will be re-enabled in render if we hit the bottom
+    }
+
+    pub fn page_up(&mut self) {
+        let page = self.visible_height.max(1);
+        self.scroll_up(page);
+    }
+
+    pub fn page_down(&mut self) {
+        let page = self.visible_height.max(1);
+        self.scroll_down(page);
+    }
+
+    pub fn scroll_to_top(&mut self) {
+        self.scroll_offset = 0;
+        self.following = false;
     }
 
     pub fn scroll_to_bottom(&mut self) {
         self.scroll_offset = u16::MAX;
+        self.following = true;
     }
 }
