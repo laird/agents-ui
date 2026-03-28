@@ -425,4 +425,58 @@ mod tests {
         assert_eq!(AgentType::Claude.status_dir(), ".codex/loops");
         assert_eq!(AgentType::Droid.status_dir(), ".factory/loops");
     }
+
+    // --- detect_waiting_for_input ---
+
+    #[test]
+    fn waiting_detected_for_bypass_permissions_prompt() {
+        assert!(detect_waiting_for_input("bypass permissions\nsome output"));
+    }
+
+    #[test]
+    fn waiting_detected_for_allow_prompt() {
+        assert!(detect_waiting_for_input("Running tool...\nAllow?"));
+    }
+
+    #[test]
+    fn waiting_detected_for_allow_this_action() {
+        assert!(detect_waiting_for_input("allow this action (y/n)"));
+    }
+
+    #[test]
+    fn waiting_detected_for_yn_brackets() {
+        assert!(detect_waiting_for_input("Continue? [Y/n]"));
+        assert!(detect_waiting_for_input("Continue? [y/N]"));
+    }
+
+    #[test]
+    fn waiting_detected_for_interrupted_state() {
+        assert!(detect_waiting_for_input(
+            "Some output\nWhat should Claude do instead?\nmore"
+        ));
+    }
+
+    #[test]
+    fn waiting_detected_for_interrupted_with_prompt_indicator() {
+        assert!(detect_waiting_for_input("Interrupted\nSome context\n❯"));
+    }
+
+    #[test]
+    fn waiting_detected_for_shift_tab_bypass_line() {
+        assert!(detect_waiting_for_input(
+            "bypass permissions on /some/file (shift+tab to allow)"
+        ));
+    }
+
+    #[test]
+    fn waiting_not_detected_for_normal_output() {
+        assert!(!detect_waiting_for_input(
+            "Running cargo build...\nCompiling foo v1.0\nFinished"
+        ));
+    }
+
+    #[test]
+    fn waiting_not_detected_for_empty_string() {
+        assert!(!detect_waiting_for_input(""));
+    }
 }
