@@ -1,9 +1,10 @@
 #![allow(dead_code)]
 
+use ansi_to_tui::IntoText;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Style},
-    text::{Line, Span},
+    text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
     Frame,
 };
@@ -148,15 +149,19 @@ impl RepoView {
 
         f.render_widget(Clear, popup_area);
 
-        let lines: Vec<Line> = worker
-            .pane_content
-            .lines()
+        let content = &worker.pane_content;
+        let text = content
+            .as_bytes()
+            .into_text()
+            .unwrap_or_else(|_| Text::raw(content.clone()));
+        let lines: Vec<Line> = text
+            .lines
+            .into_iter()
             .rev()
             .take(15)
             .collect::<Vec<_>>()
             .into_iter()
             .rev()
-            .map(|l| Line::from(l.to_string()))
             .collect();
 
         let title = format!(" {} — {} ", worker.id, worker.status.state);
