@@ -105,6 +105,7 @@ impl ReposListView {
                 let busy = s.busy_count();
                 let total = s.workers.len();
                 let waiting = count_attention(s);
+                let blocked_issues = s.attention_count();
 
                 // Build issue priority summary from cache
                 let issue_summary = if let Some(cache) = issue_caches.get(&s.project_name) {
@@ -148,12 +149,13 @@ impl ReposListView {
                     ),
                     Cell::from(s.agent_type.to_string()),
                     Cell::from(format!("{busy}/{total} working")),
-                    Cell::from(if waiting > 0 {
-                        format!("{waiting} input")
-                    } else {
-                        "—".to_string()
+                    Cell::from({
+                        let mut parts = Vec::new();
+                        if waiting > 0 { parts.push(format!("{waiting} input")); }
+                        if blocked_issues > 0 { parts.push(format!("{blocked_issues} blocked")); }
+                        if parts.is_empty() { "—".to_string() } else { parts.join(", ") }
                     })
-                    .style(if waiting > 0 {
+                    .style(if waiting > 0 || blocked_issues > 0 {
                         theme::attention_style()
                     } else {
                         theme::help_style()
