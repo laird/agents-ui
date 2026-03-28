@@ -1951,6 +1951,24 @@ impl App {
                             }
                         }
                     }
+                    KeyCode::Char('b') => {
+                        // Jump to next blocked issue in Issues panel
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            let issues: Vec<&GitHubIssue> = self.issue_caches
+                                .get(&swarm.project_name)
+                                .map(|c| c.issues.iter()
+                                    .filter(|i| i.matches_filter(self.swarm_view.issue_filter))
+                                    .collect())
+                                .unwrap_or_default();
+                            let found = issues.iter().position(|i| i.is_blocked());
+                            if let Some(idx) = found {
+                                self.swarm_focus = SwarmPanel::Issues;
+                                self.swarm_view.issues_table.select(Some(idx));
+                            } else {
+                                self.status_message = Some("No blocked issues".to_string());
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -1980,6 +1998,29 @@ impl App {
                         self.send_issue_command_to_manager(swarm_idx, "approve").await?;
                     }
                     KeyCode::Char('b') => {
+                        // Jump to next blocked issue (cycling from current selection)
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            let issues: Vec<&GitHubIssue> = self.issue_caches
+                                .get(&swarm.project_name)
+                                .map(|c| c.issues.iter()
+                                    .filter(|i| i.matches_filter(self.swarm_view.issue_filter))
+                                    .collect())
+                                .unwrap_or_default();
+                            let len = issues.len();
+                            if len > 0 {
+                                let current = self.swarm_view.selected_issue().unwrap_or(0);
+                                let found = (1..=len)
+                                    .map(|i| (current + i) % len)
+                                    .find(|&idx| issues[idx].is_blocked());
+                                if let Some(idx) = found {
+                                    self.swarm_view.issues_table.select(Some(idx));
+                                } else {
+                                    self.status_message = Some("No blocked issues".to_string());
+                                }
+                            }
+                        }
+                    }
+                    KeyCode::Char('B') => {
                         // Brainstorm: send "brainstorm <issue_number>" to manager pane
                         self.send_issue_command_to_manager(swarm_idx, "brainstorm").await?;
                     }
