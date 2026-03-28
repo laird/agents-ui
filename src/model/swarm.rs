@@ -1,6 +1,15 @@
 use std::path::PathBuf;
 use super::status::AgentStatus;
 
+/// A GitHub issue that is blocked waiting for human attention.
+#[derive(Debug, Clone)]
+pub struct BlockedIssue {
+    pub number: u32,
+    pub title: String,
+    /// The blocking label (e.g., "needs-approval", "needs-design", "needs-clarification", "too-complex")
+    pub label: String,
+}
+
 /// The type of agent runtime.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentType {
@@ -142,6 +151,8 @@ pub struct Swarm {
     pub manager: AgentInfo,
     /// Worker agents (each in their own worktree)
     pub workers: Vec<AgentInfo>,
+    /// GitHub issues blocked waiting for human attention
+    pub blocked_issues: Vec<BlockedIssue>,
 }
 
 #[allow(dead_code)] // Utility methods for future UI enhancements
@@ -164,12 +175,9 @@ impl Swarm {
             .count()
     }
 
-    /// Count of items needing attention (idle workers, blocked states)
+    /// Count of items needing attention (blocked GitHub issues)
     pub fn attention_count(&self) -> usize {
-        self.workers
-            .iter()
-            .filter(|w| matches!(w.status.state, super::status::AgentState::Idle))
-            .count()
+        self.blocked_issues.len()
     }
 
     /// Get a specific agent by ID

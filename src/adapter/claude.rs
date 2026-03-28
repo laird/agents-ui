@@ -92,6 +92,7 @@ impl ClaudeAdapter {
             tmux_session: session_name.to_string(),
             manager,
             workers,
+            blocked_issues: vec![],
         })
     }
 }

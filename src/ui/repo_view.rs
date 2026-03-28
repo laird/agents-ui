@@ -123,9 +123,18 @@ impl RepoView {
             Constraint::Length(8)
         };
 
+        let blocked = &swarm.blocked_issues;
+        let attention_height = if !blocked.is_empty() && !self.focus_manager {
+            // Show up to 3 issues + 1 header line = min 2, max 4 lines + borders = max 6
+            Constraint::Length((blocked.len().min(3) as u16 + 2).min(6))
+        } else {
+            Constraint::Length(0)
+        };
+
         let chunks = Layout::vertical([
             Constraint::Length(3),
             manager_height,
+            attention_height,
             Constraint::Min(5),
             Constraint::Length(3),
         ])
@@ -237,6 +246,39 @@ impl RepoView {
             f.render_widget(manager_para, chunks[1]);
         }
 
+        // Attention panel (blocked issues)
+        if !blocked.is_empty() && !self.focus_manager {
+            let attention_block = Block::default()
+                .borders(Borders::ALL)
+                .title(" Attention ")
+                .border_style(theme::attention_style());
+
+            let mut lines: Vec<Line> = Vec::new();
+            let show_count = blocked.len().min(3);
+            for issue in &blocked[..show_count] {
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("[{}] ", issue.label),
+                        Style::default().fg(Color::Yellow),
+                    ),
+                    Span::styled(
+                        format!("#{} ", issue.number),
+                        Style::default().fg(Color::Blue),
+                    ),
+                    Span::raw(issue.title.clone()),
+                ]));
+            }
+            if blocked.len() > 3 {
+                lines.push(Line::from(Span::styled(
+                    format!("  …and {} more", blocked.len() - 3),
+                    theme::help_style(),
+                )));
+            }
+
+            let attention_para = Paragraph::new(lines).block(attention_block);
+            f.render_widget(attention_para, chunks[2]);
+        }
+
         // Workers table
         let header = Row::new(vec![
             Cell::from("Worker"),
@@ -294,7 +336,7 @@ impl RepoView {
         )
         .row_highlight_style(theme::selected_style());
 
-        f.render_stateful_widget(table, chunks[2], &mut self.worker_table_state);
+        f.render_stateful_widget(table, chunks[3], &mut self.worker_table_state);
 
         // Help bar
         let help = if self.focus_manager {
@@ -334,7 +376,7 @@ impl RepoView {
                 Span::styled(" quit", theme::help_style()),
             ]))
         };
-        f.render_widget(help.block(Block::default().borders(Borders::TOP)), chunks[3]);
+        f.render_widget(help.block(Block::default().borders(Borders::TOP)), chunks[4]);
     }
 
     pub fn next_worker(&mut self, len: usize) {

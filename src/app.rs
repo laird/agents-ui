@@ -55,6 +55,8 @@ pub struct App {
     pub status_message: Option<String>,
     /// Last time worker healing was run.
     last_heal: Instant,
+    /// Last time blocked issues were refreshed.
+    last_blocked_refresh: Instant,
 }
 
 impl App {
@@ -91,6 +93,7 @@ impl App {
             new_swarm_agent_type: AgentType::Claude,
             status_message: None,
             last_heal: Instant::now(),
+            last_blocked_refresh: Instant::now() - Duration::from_secs(120),
         };
 
         // Start pane watchers for discovered swarms
@@ -157,6 +160,12 @@ impl App {
                 if self.last_heal.elapsed() >= Duration::from_secs(30) {
                     self.last_heal = Instant::now();
                     self.heal_all_workers().await;
+                }
+
+                // Periodically refresh blocked GitHub issues (every 60 seconds)
+                if self.last_blocked_refresh.elapsed() >= Duration::from_secs(60) {
+                    self.last_blocked_refresh = Instant::now();
+                    self.refresh_all_blocked_issues().await;
                 }
             }
             Event::PaneOutput { agent_id, content } => {
@@ -779,6 +788,17 @@ impl App {
         }
     }
 
+    /// Fetch blocked GitHub issues for all swarms.
+    async fn refresh_all_blocked_issues(&mut self) {
+        for swarm in &mut self.swarms {
+            let repo_path = swarm.repo_path.clone();
+            match fetch_blocked_issues(&repo_path).await {
+                Ok(issues) => swarm.blocked_issues = issues,
+                Err(e) => tracing::warn!("Failed to fetch blocked issues for {}: {e}", repo_path.display()),
+            }
+        }
+    }
+
     /// Refresh agent statuses from status files.
     fn refresh_statuses(&mut self) {
         for swarm in &mut self.swarms {
@@ -868,6 +888,50 @@ fn tab_complete_path(input: &str) -> Option<String> {
             None
         }
     }
+}
+
+/// Fetch GitHub issues with blocking labels from the given repo path.
+async fn fetch_blocked_issues(repo_path: &std::path::Path) -> anyhow::Result<Vec<crate::model::swarm::BlockedIssue>> {
+    const BLOCKING_LABELS: &[&str] = &["needs-approval", "needs-design", "needs-clarification", "too-complex"];
+
+    let output = tokio::process::Command::new("gh")
+        .args([
+            "issue", "list",
+            "--label", "needs-approval,needs-design,needs-clarification,too-complex",
+            "--state", "open",
+            "--json", "number,title,labels",
+            "--limit", "20",
+        ])
+        .current_dir(repo_path)
+        .output()
+        .await?;
+
+    if !output.status.success() {
+        anyhow::bail!("gh issue list failed: {}", String::from_utf8_lossy(&output.stderr));
+    }
+
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    let mut issues = Vec::new();
+    if let Some(arr) = json.as_array() {
+        for item in arr {
+            let number = item["number"].as_u64().unwrap_or(0) as u32;
+            let title = item["title"].as_str().unwrap_or("").to_string();
+            // Pick the first blocking label found
+            let label = item["labels"]
+                .as_array()
+                .and_then(|labels| {
+                    labels.iter().find_map(|l| {
+                        let name = l["name"].as_str()?;
+                        BLOCKING_LABELS.contains(&name).then_some(name.to_string())
+                    })
+                })
+                .unwrap_or_default();
+            if number > 0 {
+                issues.push(crate::model::swarm::BlockedIssue { number, title, label });
+            }
+        }
+    }
+    Ok(issues)
 }
 
 fn longest_common_prefix(strings: &[String]) -> String {
