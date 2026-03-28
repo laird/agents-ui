@@ -701,6 +701,23 @@ impl App {
             return Ok(());
         }
 
+        // Help overlay: Esc or ? closes it; all other keys are consumed
+        if self.show_help {
+            if key.code == KeyCode::Esc || key.code == KeyCode::Char('?') {
+                self.show_help = false;
+            }
+            return Ok(());
+        }
+
+        // ? key: toggle help overlay only on non-session screens
+        if key.code == KeyCode::Char('?') && key.modifiers == KeyModifiers::NONE
+            && matches!(self.screen, Screen::ReposList | Screen::NewSwarm { .. }
+                | Screen::RuntimeSelect | Screen::InstallScopeSelect)
+        {
+            self.show_help = true;
+            return Ok(());
+        }
+
         // Shortcuts viewer: ? toggles, any other key dismisses
         if self.show_shortcuts_viewer {
             if key.code == KeyCode::Char('?') {
@@ -716,18 +733,12 @@ impl App {
             return Ok(());
         }
 
-        // ? key opens shortcuts viewer (not in passthrough mode)
-        if key.code == KeyCode::Char('?') && !self.is_passthrough_mode() {
-            self.show_shortcuts_viewer = true;
-            return Ok(());
-        }
-
-        // ? key: toggle help overlay only on non-session screens
-        if key.code == KeyCode::Char('?') && key.modifiers == KeyModifiers::NONE
-            && matches!(self.screen, Screen::ReposList | Screen::NewSwarm { .. }
+        // ? key opens shortcuts viewer (not in passthrough mode, not on non-session screens)
+        if key.code == KeyCode::Char('?') && !self.is_passthrough_mode()
+            && !matches!(self.screen, Screen::ReposList | Screen::NewSwarm { .. }
                 | Screen::RuntimeSelect | Screen::InstallScopeSelect)
         {
-            self.show_help = !self.show_help;
+            self.show_shortcuts_viewer = true;
             return Ok(());
         }
 
@@ -840,12 +851,8 @@ impl App {
             }
         }
 
-        // Esc closes overlays first
+        // Esc closes feedback overlay first
         if key.code == KeyCode::Esc {
-            if self.show_help {
-                self.show_help = false;
-                return Ok(());
-            }
             if self.feedback_state.is_some() {
                 self.feedback_state = None;
                 return Ok(());
