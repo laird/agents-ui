@@ -379,6 +379,7 @@ impl ClaudeAdapter {
     }
 
     /// Remove worktrees for a swarm.
+    #[allow(dead_code)]
     async fn remove_worktrees(repo_path: &Path, worktree_paths: &[PathBuf]) -> Result<()> {
         for wt in worktree_paths {
             let output = Command::new("git")

@@ -47,6 +47,7 @@ pub fn resolve_agents_dir() -> PathBuf {
 }
 
 /// Find a specific script, searching installed plugin paths.
+#[allow(dead_code)]
 pub fn find_script(name: &str) -> Option<PathBuf> {
     let search_paths = script_search_paths();
     for dir in search_paths {
@@ -59,6 +60,7 @@ pub fn find_script(name: &str) -> Option<PathBuf> {
 }
 
 /// All directories where scripts might live, in priority order.
+#[allow(dead_code)]
 fn script_search_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
 
