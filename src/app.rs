@@ -242,6 +242,12 @@ pub struct App {
     pub issue_detail_view: Option<IssueDetailView>,
     /// Tracks last Esc press for double-Esc to go back (never forwarded to pane).
     last_esc: Option<std::time::Instant>,
+    /// App-level keybinding configuration.
+    pub keybindings: crate::config::keybindings::KeyBindings,
+    /// Whether the ? help overlay is visible.
+    pub show_help: bool,
+    /// Rich feedback dialog state (None = closed).
+    pub feedback_state: Option<crate::ui::feedback_dialog::FeedbackState>,
 }
 
 impl App {
@@ -318,6 +324,9 @@ impl App {
             last_esc: None,
             auto_dispatch_last: None,
             issue_detail_view: None,
+            keybindings: crate::config::keybindings::KeyBindings::load(),
+            show_help: false,
+            feedback_state: None,
         };
 
         // Scan for available repos (git directories in cwd or children)
@@ -454,6 +463,15 @@ impl App {
                     crate::ui::shortcuts_viewer::render_shortcuts_viewer(
                         f, area, &self.shortcuts, panel,
                     );
+                }
+
+                // Help overlay (rendered on top of everything)
+                if self.show_help {
+                    crate::ui::help_overlay::render_help_overlay(f, f.area(), &self.keybindings);
+                }
+                // Feedback dialog (rendered on top of everything)
+                if let Some(ref state) = self.feedback_state {
+                    crate::ui::feedback_dialog::render_feedback_dialog(f, f.area(), state);
                 }
             })?;
 
@@ -704,6 +722,12 @@ impl App {
             return Ok(());
         }
 
+        // ? key: toggle help overlay
+        if key.code == KeyCode::Char('?') && key.modifiers == KeyModifiers::NONE {
+            self.show_help = !self.show_help;
+            return Ok(());
+        }
+
         // Global: Alt+Left goes back one level
         if key.modifiers.contains(KeyModifiers::ALT) && key.code == KeyCode::Left {
             match &self.screen {
@@ -797,23 +821,39 @@ impl App {
                     }
                 }
 
-                // Alt+f: file feedback as GitHub issue (global shortcut)
+                // Alt+f: file feedback as GitHub issue
                 if c == 'f' {
-                    let swarm_idx = match &self.screen {
-                        Screen::RepoView { swarm_idx } => Some(*swarm_idx),
-                        Screen::AgentView { swarm_idx, .. } => Some(*swarm_idx),
-                        Screen::ReposList if self.swarms.len() == 1 => Some(0),
-                        _ => None,
+                    let (repo_path, repo_name) = match &self.screen {
+                        Screen::RepoView { swarm_idx } | Screen::AgentView { swarm_idx, .. } => {
+                            let idx = *swarm_idx;
+                            self.swarms.get(idx).map(|s| (s.repo_path.clone(), s.project_name.clone()))
+                                .unwrap_or_else(|| (std::path::PathBuf::from("."), "agents-ui".to_string()))
+                        }
+                        _ => (std::path::PathBuf::from("."), "agents-ui".to_string()),
                     };
-                    if let Some(idx) = swarm_idx {
-                        self.screen = Screen::RepoView { swarm_idx: idx };
-                        self.repo_view.focus = crate::ui::repo_view::RepoViewFocus::CreateIssue(
-                            crate::ui::repo_view::CreateIssueState::SelectType,
-                        );
-                        return Ok(());
-                    }
+                    self.feedback_state = Some(crate::ui::feedback_dialog::FeedbackState::new(repo_name, repo_path));
+                    return Ok(());
                 }
             }
+        }
+
+        // Esc closes overlays first
+        if key.code == KeyCode::Esc {
+            if self.show_help {
+                self.show_help = false;
+                return Ok(());
+            }
+            if self.feedback_state.is_some() {
+                self.feedback_state = None;
+                return Ok(());
+            }
+            // existing Esc handling continues below
+        }
+
+        // Feedback dialog captures all keys when open
+        if self.feedback_state.is_some() {
+            self.handle_feedback_key(key).await?;
+            return Ok(());
         }
 
         match &self.screen.clone() {
@@ -2535,6 +2575,107 @@ impl App {
             }
             _ => {}
         }
+        Ok(())
+    }
+
+    async fn handle_feedback_key(&mut self, key: crossterm::event::KeyEvent) -> anyhow::Result<()> {
+        use crossterm::event::KeyCode;
+        use crate::ui::feedback_dialog::{FeedbackField, FeedbackType};
+
+        let state = match self.feedback_state.as_mut() {
+            Some(s) => s,
+            None => return Ok(()),
+        };
+
+        match &state.field {
+            FeedbackField::FeedbackType => match key.code {
+                KeyCode::Left | KeyCode::Char('h') => {
+                    if state.type_index > 0 { state.type_index -= 1; }
+                    let types = FeedbackType::all();
+                    state.feedback_type = types[state.type_index];
+                }
+                KeyCode::Right | KeyCode::Char('l') => {
+                    let types = FeedbackType::all();
+                    if state.type_index + 1 < types.len() {
+                        state.type_index += 1;
+                        state.feedback_type = types[state.type_index];
+                    }
+                }
+                KeyCode::Enter => { state.field = FeedbackField::Title; }
+                KeyCode::Esc => { self.feedback_state = None; }
+                _ => {}
+            },
+            FeedbackField::Title => match key.code {
+                KeyCode::Char(c) => { state.title.push(c); }
+                KeyCode::Backspace => { state.title.pop(); }
+                KeyCode::Enter => {
+                    if !state.title.is_empty() {
+                        state.field = FeedbackField::Body;
+                    }
+                }
+                KeyCode::Esc => { state.field = FeedbackField::FeedbackType; }
+                _ => {}
+            },
+            FeedbackField::Body => match key.code {
+                KeyCode::Char(c) if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) && c == 'j' => {
+                    // Ctrl+Enter (represented as Ctrl+j in some terminals) = submit
+                    state.field = FeedbackField::Submitting;
+                }
+                KeyCode::Enter if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                    state.field = FeedbackField::Submitting;
+                }
+                KeyCode::Char(c) => { state.body.push(c); }
+                KeyCode::Backspace => { state.body.pop(); }
+                KeyCode::Esc => { state.field = FeedbackField::Title; }
+                _ => {}
+            },
+            FeedbackField::Submitting => {
+                // Transition to submitting — fire the gh issue create command
+            }
+            FeedbackField::Done(_) => match key.code {
+                KeyCode::Enter | KeyCode::Esc => { self.feedback_state = None; }
+                _ => {}
+            },
+        }
+
+        // If we just transitioned to Submitting, fire the request
+        if matches!(self.feedback_state.as_ref().map(|s| &s.field), Some(FeedbackField::Submitting)) {
+            let state = self.feedback_state.as_ref().unwrap();
+            let title = state.title.clone();
+            let body = state.body.clone();
+            let label = state.feedback_type.github_label().to_string();
+            let repo_path = state.repo_path.clone();
+
+            let result = self.transport.output(
+                "gh",
+                &[
+                    "issue".to_string(),
+                    "create".to_string(),
+                    "--title".to_string(),
+                    title.clone(),
+                    "--body".to_string(),
+                    body.clone(),
+                    "--label".to_string(),
+                    label,
+                ],
+                Some(&repo_path),
+            ).await;
+
+            if let Some(state) = self.feedback_state.as_mut() {
+                state.field = match result {
+                    Ok(out) if out.status.success() => {
+                        let url = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                        FeedbackField::Done(format!("Filed! {url}"))
+                    }
+                    Ok(out) => {
+                        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                        FeedbackField::Done(format!("Error: {err}"))
+                    }
+                    Err(e) => FeedbackField::Done(format!("Error: {e}")),
+                };
+            }
+        }
+
         Ok(())
     }
 

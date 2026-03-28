@@ -8,3 +8,5 @@ pub mod shortcuts_viewer;
 pub mod text_input;
 pub mod issue_detail;
 pub mod theme;
+pub mod help_overlay;
+pub mod feedback_dialog;
