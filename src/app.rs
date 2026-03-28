@@ -1800,7 +1800,14 @@ impl App {
 
         // Esc goes back one level:
         // Sessions/Issues → Manager focus, Manager → Repos List
+        // Exception: when search is active in Issues panel, Esc clears search instead.
         if key.code == KeyCode::Esc {
+            if self.swarm_focus == SwarmPanel::Issues && self.swarm_view.issue_search_active {
+                self.swarm_view.issue_search.drain();
+                self.swarm_view.issue_search_active = false;
+                self.swarm_view.issues_table.select(Some(0));
+                return Ok(());
+            }
             match self.swarm_focus {
                 SwarmPanel::Workers | SwarmPanel::Issues => {
                     self.swarm_focus = SwarmPanel::Manager;
@@ -1955,9 +1962,33 @@ impl App {
                 }
             }
             SwarmPanel::Issues => {
+                // Search mode: consume all keystrokes for the search input
+                if self.swarm_view.issue_search_active {
+                    match key.code {
+                        KeyCode::Esc => {
+                            self.swarm_view.issue_search.drain();
+                            self.swarm_view.issue_search_active = false;
+                            self.swarm_view.issues_table.select(Some(0));
+                        }
+                        KeyCode::Enter => {
+                            self.swarm_view.issue_search_active = false;
+                        }
+                        KeyCode::Backspace => {
+                            self.swarm_view.issue_search.backspace();
+                            self.swarm_view.issues_table.select(Some(0));
+                        }
+                        KeyCode::Char(c) => {
+                            self.swarm_view.issue_search.insert_char(c);
+                            self.swarm_view.issues_table.select(Some(0));
+                        }
+                        _ => {}
+                    }
+                    return Ok(());
+                }
+
                 let issue_count = self.swarms.get(swarm_idx)
                     .and_then(|s| self.issue_caches.get(&s.project_name))
-                    .map(|c| c.issues.iter().filter(|i| i.matches_filter(self.swarm_view.issue_filter)).count())
+                    .map(|c| self.swarm_view.issues_matching_search(&c.issues).len())
                     .unwrap_or(0);
                 match key.code {
                     KeyCode::Down | KeyCode::Char('j') => {
@@ -1965,6 +1996,11 @@ impl App {
                     }
                     KeyCode::Up | KeyCode::Char('k') => {
                         self.swarm_view.prev_issue(issue_count);
+                    }
+                    KeyCode::Char('/') => {
+                        self.swarm_view.issue_search.drain();
+                        self.swarm_view.issue_search_active = true;
+                        self.swarm_view.issues_table.select(Some(0));
                     }
                     KeyCode::Char('f') => {
                         // Cycle issue filter
@@ -2008,7 +2044,7 @@ impl App {
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
                             let issues: Vec<&GitHubIssue> = self.issue_caches
                                 .get(&swarm.project_name)
-                                .map(|c| c.issues.iter().filter(|i| i.matches_filter(self.swarm_view.issue_filter)).collect())
+                                .map(|c| self.swarm_view.issues_matching_search(&c.issues))
                                 .unwrap_or_default();
                             if let Some(issue) = self.swarm_view.selected_issue()
                                 .and_then(|idx| issues.get(idx))
@@ -2049,7 +2085,7 @@ impl App {
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
                             let issues: Vec<&GitHubIssue> = self.issue_caches
                                 .get(&swarm.project_name)
-                                .map(|c| c.issues.iter().filter(|i| i.matches_filter(self.swarm_view.issue_filter)).collect())
+                                .map(|c| self.swarm_view.issues_matching_search(&c.issues))
                                 .unwrap_or_default();
                             if let Some(issue) = self.swarm_view.selected_issue()
                                 .and_then(|idx| issues.get(idx))
@@ -2097,7 +2133,7 @@ impl App {
             );
             let issues: Vec<&GitHubIssue> = self.issue_caches
                 .get(&swarm.project_name)
-                .map(|c| c.issues.iter().filter(|i| i.matches_filter(self.swarm_view.issue_filter)).collect())
+                .map(|c| self.swarm_view.issues_matching_search(&c.issues))
                 .unwrap_or_default();
             let issue_num = self.swarm_view.selected_issue()
                 .and_then(|idx| issues.get(idx))
@@ -2789,9 +2825,9 @@ impl App {
         let issues: Vec<u32> = self.issue_caches
             .get(&project_name)
             .map(|c| {
-                c.issues
-                    .iter()
-                    .filter(|i| i.matches_filter(self.swarm_view.issue_filter))
+                self.swarm_view
+                    .issues_matching_search(&c.issues)
+                    .into_iter()
                     .map(|i| i.number)
                     .collect()
             })
