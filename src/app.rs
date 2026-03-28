@@ -45,7 +45,6 @@ pub enum NewSwarmField {
     AgentRuntime,
     RuntimeSelection,
     NumWorkers,
-    Launching,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -246,8 +245,7 @@ pub struct App {
     /// Full-screen issue list view state.
     pub issue_list_view: crate::ui::issue_list::IssueListView,
     /// Tracks last Esc press for double-Esc to go back (never forwarded to pane).
-    #[allow(dead_code)]
-    last_esc: Option<std::time::Instant>,
+
     /// App-level keybinding configuration.
     pub keybindings: crate::config::keybindings::KeyBindings,
     /// Whether the ? help overlay is visible.
@@ -327,7 +325,6 @@ impl App {
                 crate::config::shortcuts::ShortcutsConfig::load()
             },
             show_shortcuts_viewer: false,
-            last_esc: None,
             auto_dispatch_last: None,
             issue_detail_view: None,
             issue_list_view: crate::ui::issue_list::IssueListView::new(),
@@ -677,36 +674,6 @@ impl App {
         Ok(())
     }
 
-    /// Convert a crossterm KeyEvent to a tmux send-keys argument.
-    /// Returns (key_string, literal) where literal means use -l flag.
-    #[allow(dead_code)]
-    fn key_to_tmux(key: &KeyEvent) -> Option<(String, bool)> {
-        if key.modifiers.contains(KeyModifiers::CONTROL) {
-            if let KeyCode::Char(c) = key.code {
-                return Some((format!("C-{c}"), false));
-            }
-        }
-        if key.modifiers.contains(KeyModifiers::ALT) {
-            if let KeyCode::Char(c) = key.code {
-                return Some((format!("M-{c}"), false));
-            }
-        }
-        match key.code {
-            KeyCode::Char(c) => Some((c.to_string(), true)),
-            KeyCode::Enter => Some(("Enter".to_string(), false)),
-            KeyCode::Backspace => Some(("BSpace".to_string(), false)),
-            KeyCode::Tab => Some(("Tab".to_string(), false)),
-            KeyCode::Esc => Some(("Escape".to_string(), false)),
-            KeyCode::Up => Some(("Up".to_string(), false)),
-            KeyCode::Down => Some(("Down".to_string(), false)),
-            KeyCode::Left => Some(("Left".to_string(), false)),
-            KeyCode::Right => Some(("Right".to_string(), false)),
-            KeyCode::Home => Some(("Home".to_string(), false)),
-            KeyCode::End => Some(("End".to_string(), false)),
-            KeyCode::Delete => Some(("DC".to_string(), false)),
-            _ => None,
-        }
-    }
 
     /// Returns true if we're in a passthrough mode where keystrokes go directly to tmux.
     fn is_passthrough_mode(&self) -> bool {
@@ -1735,12 +1702,6 @@ impl App {
                 }
                 _ => {}
             },
-            NewSwarmField::Launching => {
-                // No key handling while launching — just ignore
-                if key.code == KeyCode::Esc {
-                    self.screen = Screen::ReposList;
-                }
-            }
         }
         Ok(())
     }
@@ -1988,7 +1949,11 @@ impl App {
                             }
                         }
                     }
-                    _ => {}
+                    _ => {
+                        if let KeyCode::Char(c) = key.code {
+                            self.try_shortcut("workers", &c.to_string(), swarm_idx, None).await?;
+                        }
+                    }
                 }
             }
             SwarmPanel::Issues => {
@@ -2145,7 +2110,23 @@ impl App {
                         self.swarm_view.search_query = Some(String::new());
                         self.swarm_view.issues_table.select(Some(0));
                     }
-                    _ => {}
+                    _ => {
+                        if let KeyCode::Char(c) = key.code {
+                            let issue_num = {
+                                let filter = self.swarm_view.issue_filter;
+                                let selected = self.swarm_view.selected_issue();
+                                self.swarms.get(swarm_idx)
+                                    .and_then(|s| self.issue_caches.get(&s.project_name))
+                                    .and_then(|cache| {
+                                        let issues: Vec<_> = cache.issues.iter()
+                                            .filter(|i| i.matches_filter(filter))
+                                            .collect();
+                                        selected.and_then(|idx| issues.get(idx)).map(|i| i.number)
+                                    })
+                            };
+                            self.try_shortcut("issues", &c.to_string(), swarm_idx, issue_num).await?;
+                        }
+                    }
                 }
             }
         }
