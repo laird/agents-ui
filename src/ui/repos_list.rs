@@ -107,6 +107,7 @@ impl ReposListView {
                 let waiting = count_attention(s);
 
                 // Build issue priority summary from cache
+                let blocked_attention = s.attention_count();
                 let issue_summary = if let Some(cache) = issue_caches.get(&s.project_name) {
                     let open_issues: Vec<_> = cache.issues.iter()
                         .filter(|i| i.state == crate::model::issue::IssueState::Open)
@@ -122,10 +123,13 @@ impl ReposListView {
                                 }
                             }
                         }
-                        let parts: Vec<String> = counts.iter().enumerate()
+                        let mut parts: Vec<String> = counts.iter().enumerate()
                             .filter(|&(_, c)| *c > 0)
                             .map(|(i, c)| format!("P{i}:{c}"))
                             .collect();
+                        if blocked_attention > 0 {
+                            parts.push(format!("{blocked_attention}⚠"));
+                        }
                         if parts.is_empty() {
                             format!("{} open", open_issues.len())
                         } else {

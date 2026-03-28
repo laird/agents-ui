@@ -236,16 +236,20 @@ impl Swarm {
             .count()
     }
 
-    /// Count of agents needing attention (not busy, not stopped)
+    /// Count of items needing human attention (blocked GitHub issues)
     pub fn attention_count(&self) -> usize {
+        self.issue_cache
+            .issues
+            .iter()
+            .filter(|i| i.is_blocked())
+            .count()
+    }
+
+    /// Count of idle (non-busy, non-stopped) workers
+    pub fn idle_count(&self) -> usize {
         self.workers
             .iter()
-            .filter(|w| {
-                matches!(
-                    w.status.state,
-                    super::status::AgentState::Idle
-                )
-            })
+            .filter(|w| matches!(w.status.state, super::status::AgentState::Idle))
             .count()
     }
 

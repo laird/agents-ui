@@ -178,9 +178,9 @@ impl RepoView {
 
     fn render_title_bar(&self, f: &mut Frame, area: Rect, swarm: &Swarm) {
         let busy = swarm.busy_count();
-        let idle = swarm.attention_count();
+        let idle = swarm.idle_count();
         let total = swarm.workers.len();
-        let stopped = total - busy - idle;
+        let stopped = total.saturating_sub(busy + idle);
         let waiting = swarm.waiting_count();
 
         let (p0, p1, p2, p3) = swarm.issue_cache.priority_counts();
@@ -384,8 +384,52 @@ impl RepoView {
 
         let filtered = swarm.issue_cache.filtered(self.priority_filter.as_ref());
 
+        // Collect blocked issues for attention section
+        let blocked: Vec<_> = swarm.issue_cache.issues.iter().filter(|i| i.is_blocked()).collect();
+        let blocked_count = blocked.len();
+
         let mut items: Vec<ListItem> = Vec::new();
-        // Filter header as first item
+
+        // Attention section: show blocked issues first if any
+        if blocked_count > 0 {
+            items.push(ListItem::new(Line::from(vec![
+                Span::styled(
+                    format!(" ⚠ {} blocked issue{} need attention",
+                        blocked_count,
+                        if blocked_count == 1 { "" } else { "s" }),
+                    theme::attention_style(),
+                ),
+            ])));
+            for issue in blocked.iter().take(3) {
+                let blocking_label = issue.labels.iter()
+                    .find(|l| matches!(l.as_str(),
+                        "needs-approval" | "needs-design" | "needs-clarification" |
+                        "too-complex" | "future" | "proposal"))
+                    .map(|l| l.as_str())
+                    .unwrap_or("blocked");
+                items.push(ListItem::new(Line::from(vec![
+                    Span::styled(
+                        format!("  [{blocking_label}] "),
+                        Style::default().fg(Color::Yellow),
+                    ),
+                    Span::styled(format!("#{} ", issue.number), theme::title_style()),
+                    Span::raw(truncate_str(&issue.title, max_title_width.saturating_sub(20))),
+                ])));
+            }
+            if blocked_count > 3 {
+                items.push(ListItem::new(Line::from(Span::styled(
+                    format!("  …and {} more blocked", blocked_count - 3),
+                    theme::help_style(),
+                ))));
+            }
+            // Separator
+            items.push(ListItem::new(Line::from(Span::styled(
+                "─".repeat(area.width.saturating_sub(2) as usize),
+                theme::help_style(),
+            ))));
+        }
+
+        // Filter header as next item
         items.push(ListItem::new(Line::from(filter_spans)));
 
         for (idx, issue) in filtered.iter().enumerate() {
@@ -429,11 +473,18 @@ impl RepoView {
             ))));
         }
 
+        let issues_title = if blocked_count > 0 {
+            format!(" Issues ({blocked_count} need attention) ")
+        } else {
+            " Issues ".to_string()
+        };
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(" Issues ")
+            .title(issues_title)
             .border_style(if self.focus == RepoViewFocus::Issues {
                 theme::title_style()
+            } else if blocked_count > 0 {
+                theme::attention_style()
             } else {
                 ratatui::style::Style::default()
             });
