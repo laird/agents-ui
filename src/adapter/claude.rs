@@ -100,7 +100,24 @@ impl ClaudeAdapter {
             .build_swarm_from_session(&session_name, config.repo_path.clone(), runtime.clone())
             .await?;
 
-        progress("✅ TUI will auto-dispatch work to idle workers\n");
+        // Start worker fix-loops after agents have had time to initialize
+        let loop_cmd = runtime.worker_loop_cmd().to_string();
+        if !loop_cmd.is_empty() {
+            let transport = self.transport.clone();
+            let targets: Vec<String> = swarm.workers.iter().map(|w| w.tmux_target.clone()).collect();
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                for target in &targets {
+                    if let Err(e) = proxy::send_keys(&transport, target, &loop_cmd).await {
+                        tracing::warn!("Failed to send {loop_cmd} to {target}: {e}");
+                    } else {
+                        tracing::info!("Sent {loop_cmd} to worker at {target}");
+                    }
+                }
+            });
+        }
+
+        progress("✅ Workers will start fix-loop after initialization\n");
 
         Ok(swarm)
     }
@@ -735,7 +752,22 @@ impl AgentRuntime for ClaudeAdapter {
             .build_swarm_from_session(&session_name, config.repo_path.clone(), runtime.clone())
             .await?;
 
-        // TUI manages dispatch — no need to auto-start monitor-loop
+        // Start worker fix-loops after agents have had time to initialize
+        let loop_cmd = runtime.worker_loop_cmd().to_string();
+        if !loop_cmd.is_empty() {
+            let transport = self.transport.clone();
+            let targets: Vec<String> = swarm.workers.iter().map(|w| w.tmux_target.clone()).collect();
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                for target in &targets {
+                    if let Err(e) = proxy::send_keys(&transport, target, &loop_cmd).await {
+                        tracing::warn!("Failed to send {loop_cmd} to {target}: {e}");
+                    } else {
+                        tracing::info!("Sent {loop_cmd} to worker at {target}");
+                    }
+                }
+            });
+        }
 
         Ok(swarm)
     }
