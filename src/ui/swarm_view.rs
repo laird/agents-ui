@@ -77,7 +77,7 @@ impl SwarmView {
         .split(chunks[1]);
 
         // --- Header line ---
-        let attention = count_attention(swarm);
+        let attention = count_attention(swarm, issues);
         let working = swarm.busy_count();
         let total_workers = swarm.workers.len();
         let idle = total_workers - working;
@@ -98,7 +98,7 @@ impl SwarmView {
         ];
         if attention > 0 {
             let style = theme::attention_blink_style(blink);
-            header_spans.push(Span::styled(format!("⚠ {attention} waiting"), style));
+            header_spans.push(Span::styled(format!("⚠ {attention} need attention"), style));
         }
         let header = Paragraph::new(Line::from(header_spans));
         f.render_widget(header, chunks[0]);
@@ -352,18 +352,19 @@ impl SwarmView {
     }
 }
 
-/// Count agents waiting for human input in a swarm.
-pub fn count_attention(swarm: &Swarm) -> usize {
-    let mut count = 0;
+/// Count items needing human attention: blocked GitHub issues + agents waiting for input.
+pub fn count_attention(swarm: &Swarm, issues: &[crate::model::issue::GitHubIssue]) -> usize {
+    let blocked = issues.iter().filter(|i| i.is_blocked()).count();
+    let mut agents_waiting = 0;
     if agent_needs_input(&swarm.manager.pane_content) {
-        count += 1;
+        agents_waiting += 1;
     }
     for w in &swarm.workers {
         if agent_needs_input(&w.pane_content) {
-            count += 1;
+            agents_waiting += 1;
         }
     }
-    count
+    blocked + agents_waiting
 }
 
 /// Check if an agent's pane content indicates it's waiting for human input.
