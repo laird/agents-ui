@@ -1798,9 +1798,13 @@ impl App {
             return Ok(());
         }
 
-        // Esc goes back one level:
-        // Sessions/Issues → Manager focus, Manager → Repos List
+        // Esc closes search first, then goes back one level
         if key.code == KeyCode::Esc {
+            if self.swarm_view.issue_search.is_some() {
+                self.swarm_view.issue_search = None;
+                self.swarm_view.issues_table.select(Some(0));
+                return Ok(());
+            }
             match self.swarm_focus {
                 SwarmPanel::Workers | SwarmPanel::Issues => {
                     self.swarm_focus = SwarmPanel::Manager;
@@ -1955,10 +1959,80 @@ impl App {
                 }
             }
             SwarmPanel::Issues => {
+                let search_query = self.swarm_view.issue_search.as_ref().map(|s| s.text().to_lowercase());
                 let issue_count = self.swarms.get(swarm_idx)
                     .and_then(|s| self.issue_caches.get(&s.project_name))
-                    .map(|c| c.issues.iter().filter(|i| i.matches_filter(self.swarm_view.issue_filter)).count())
+                    .map(|c| c.issues.iter().filter(|i| {
+                        if !i.matches_filter(self.swarm_view.issue_filter) {
+                            return false;
+                        }
+                        if let Some(ref q) = search_query {
+                            if q.is_empty() { return true; }
+                            if let Some(num_str) = q.strip_prefix('#') {
+                                if let Ok(n) = num_str.parse::<u32>() {
+                                    return i.number == n;
+                                }
+                            }
+                            return i.title.to_lowercase().contains(q.as_str());
+                        }
+                        true
+                    }).count())
                     .unwrap_or(0);
+
+                // When search is active, route input to the text input widget
+                if self.swarm_view.issue_search.is_some() {
+                    match key.code {
+                        KeyCode::Esc => {
+                            self.swarm_view.issue_search = None;
+                            self.swarm_view.issues_table.select(Some(0));
+                        }
+                        KeyCode::Enter => {
+                            // Confirm: close search, keep filter applied
+                            self.swarm_view.issue_search = None;
+                        }
+                        KeyCode::Backspace => {
+                            if let Some(ref mut s) = self.swarm_view.issue_search {
+                                s.backspace();
+                                self.swarm_view.issues_table.select(Some(0));
+                            }
+                        }
+                        KeyCode::Delete => {
+                            if let Some(ref mut s) = self.swarm_view.issue_search {
+                                s.delete();
+                                self.swarm_view.issues_table.select(Some(0));
+                            }
+                        }
+                        KeyCode::Left => {
+                            if let Some(ref mut s) = self.swarm_view.issue_search {
+                                s.move_left();
+                            }
+                        }
+                        KeyCode::Right => {
+                            if let Some(ref mut s) = self.swarm_view.issue_search {
+                                s.move_right();
+                            }
+                        }
+                        KeyCode::Home => {
+                            if let Some(ref mut s) = self.swarm_view.issue_search {
+                                s.move_home();
+                            }
+                        }
+                        KeyCode::End => {
+                            if let Some(ref mut s) = self.swarm_view.issue_search {
+                                s.move_end();
+                            }
+                        }
+                        KeyCode::Char(c) => {
+                            if let Some(ref mut s) = self.swarm_view.issue_search {
+                                s.insert_char(c);
+                                self.swarm_view.issues_table.select(Some(0));
+                            }
+                        }
+                        _ => {}
+                    }
+                    return Ok(());
+                }
+
                 match key.code {
                     KeyCode::Down | KeyCode::Char('j') => {
                         self.swarm_view.next_issue(issue_count);
@@ -1966,8 +2040,14 @@ impl App {
                     KeyCode::Up | KeyCode::Char('k') => {
                         self.swarm_view.prev_issue(issue_count);
                     }
+                    KeyCode::Char('/') => {
+                        // Open search bar
+                        self.swarm_view.issue_search = Some(crate::ui::text_input::TextInput::new());
+                        self.swarm_view.issues_table.select(Some(0));
+                    }
                     KeyCode::Char('f') => {
-                        // Cycle issue filter
+                        // Cycle issue filter and clear any active search
+                        self.swarm_view.issue_search = None;
                         self.swarm_view.issue_filter = self.swarm_view.issue_filter.next();
                         self.swarm_view.issues_table.select(Some(0));
                     }

@@ -9,6 +9,7 @@ use ratatui::{
 
 use crate::model::issue::{GitHubIssue, IssueFilter};
 use crate::model::swarm::Swarm;
+use super::text_input::TextInput;
 use super::theme;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -33,6 +34,8 @@ pub struct SwarmView {
     pub workers_table: TableState,
     pub issues_table: TableState,
     pub issue_filter: IssueFilter,
+    /// Active search query in the Issues panel (None = not searching)
+    pub issue_search: Option<TextInput>,
 }
 
 impl SwarmView {
@@ -46,6 +49,7 @@ impl SwarmView {
             workers_table,
             issues_table,
             issue_filter: IssueFilter::All,
+            issue_search: None,
         }
     }
 
@@ -58,9 +62,27 @@ impl SwarmView {
         focus: SwarmPanel,
         blink: bool,
     ) {
+        let search_query = self.issue_search.as_ref().map(|s| s.text().to_lowercase());
         let filtered_issues: Vec<&GitHubIssue> = issues
             .iter()
-            .filter(|i| i.matches_filter(self.issue_filter))
+            .filter(|i| {
+                if !i.matches_filter(self.issue_filter) {
+                    return false;
+                }
+                if let Some(ref q) = search_query {
+                    if q.is_empty() {
+                        return true;
+                    }
+                    // Match `#NNN` by issue number or title substring
+                    if let Some(num_str) = q.strip_prefix('#') {
+                        if let Ok(n) = num_str.parse::<u32>() {
+                            return i.number == n;
+                        }
+                    }
+                    return i.title.to_lowercase().contains(q.as_str());
+                }
+                true
+            })
             .collect();
 
         // Pre-compute attention data before layout (needed for dynamic sizing)
@@ -253,7 +275,19 @@ impl SwarmView {
 
         f.render_stateful_widget(workers_table, bottom_cols[0], &mut self.workers_table);
 
-        // Issues table
+        // Issues panel: split vertically to add search bar when active
+        let issues_area = bottom_cols[1];
+        let (search_area, table_area) = if self.issue_search.is_some() {
+            let parts = Layout::vertical([
+                Constraint::Length(1),
+                Constraint::Min(0),
+            ])
+            .split(issues_area);
+            (Some(parts[0]), parts[1])
+        } else {
+            (None, issues_area)
+        };
+
         let filter_label = self.issue_filter.label();
         let issue_header = Row::new(vec![
             Cell::from("#"),
@@ -309,7 +343,13 @@ impl SwarmView {
             Style::default()
         });
 
-        f.render_stateful_widget(issues_table, bottom_cols[1], &mut self.issues_table);
+        f.render_stateful_widget(issues_table, table_area, &mut self.issues_table);
+
+        // Render search bar above the table when active
+        if let (Some(area), Some(search)) = (search_area, &self.issue_search) {
+            let search_line = search.render_line("/ ");
+            f.render_widget(Paragraph::new(search_line), area);
+        }
 
         // --- Help bar ---
         let help_spans = match focus {
@@ -348,8 +388,6 @@ impl SwarmView {
                 Span::styled(" dispatch  ", theme::help_style()),
                 Span::styled("a", theme::title_style()),
                 Span::styled(" add  ", theme::help_style()),
-                Span::styled("d", theme::title_style()),
-                Span::styled(" dispatch  ", theme::help_style()),
                 Span::styled("p", theme::title_style()),
                 Span::styled(" approve  ", theme::help_style()),
                 Span::styled("b", theme::title_style()),
@@ -358,6 +396,8 @@ impl SwarmView {
                 Span::styled(" review-blocked  ", theme::help_style()),
                 Span::styled("f", theme::title_style()),
                 Span::styled(" filter  ", theme::help_style()),
+                Span::styled("/", theme::title_style()),
+                Span::styled(" search  ", theme::help_style()),
                 Span::styled("Enter", theme::title_style()),
                 Span::styled(" view  ", theme::help_style()),
                 Span::styled("g", theme::title_style()),
