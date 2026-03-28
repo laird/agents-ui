@@ -290,7 +290,7 @@ impl App {
             // Start pane watchers and issue fetchers for discovered swarms
             app.start_all_pane_watchers();
             app.start_all_issue_watchers();
-            app.auto_select_current_repo_swarm();
+            app.auto_select_current_repo_swarm().await;
         }
 
         Ok(app)
@@ -518,7 +518,7 @@ impl App {
             match &self.screen {
                 Screen::AgentView { swarm_idx, .. } => {
                     let idx = *swarm_idx;
-                    self.screen = Screen::RepoView { swarm_idx: idx };
+                    self.enter_repo_view(idx).await;
                 }
                 Screen::RepoView { .. } | Screen::NewSwarm { .. } => {
                     self.screen = Screen::ReposList;
@@ -553,7 +553,7 @@ impl App {
                     match &self.screen {
                         Screen::AgentView { swarm_idx, .. } => {
                             let idx = *swarm_idx;
-                            self.screen = Screen::RepoView { swarm_idx: idx };
+                            self.enter_repo_view(idx).await;
                         }
                         Screen::RepoView { .. } | Screen::NewSwarm { .. } => {
                             self.screen = Screen::ReposList;
@@ -573,10 +573,9 @@ impl App {
                 if swarm_idx < self.swarms.len() {
                     if c == '0' {
                         // Alt+0: go to Repo View with manager focused
-                        self.repo_view = RepoView::new();
+                        self.enter_repo_view(swarm_idx).await;
                         self.repo_view.focus_manager = true;
                         self.repo_view.manager_scroll = u16::MAX;
-                        self.screen = Screen::RepoView { swarm_idx };
                         return Ok(());
                     } else {
                         // Alt+1-9: jump to worker agent view
@@ -737,13 +736,13 @@ impl App {
         self.start_all_issue_watchers();
         self.scan_available_repos();
         self.screen = Screen::ReposList;
-        self.auto_select_current_repo_swarm();
+        self.auto_select_current_repo_swarm().await;
         self.status_message = Some(format!("Using {} runtime", self.default_agent_type));
 
         Ok(())
     }
 
-    fn auto_select_current_repo_swarm(&mut self) {
+    async fn auto_select_current_repo_swarm(&mut self) {
         if let Ok(cwd) = std::env::current_dir() {
             let cwd_name = cwd
                 .file_name()
@@ -755,8 +754,7 @@ impl App {
                 .position(|s| s.project_name == cwd_name)
             {
                 self.repos_list.table_state.select(Some(idx));
-                self.repo_view = RepoView::new();
-                self.screen = Screen::RepoView { swarm_idx: idx };
+                self.enter_repo_view(idx).await;
             }
         }
     }
@@ -1093,14 +1091,27 @@ impl App {
         self.swarms.len() + self.available_repos.len()
     }
 
+    /// Enter repo view for a swarm, resizing the manager's tmux pane to fill the terminal.
+    async fn enter_repo_view(&mut self, swarm_idx: usize) {
+        if let Some(swarm) = self.swarms.get(swarm_idx) {
+            let target = swarm.manager.tmux_target.clone();
+            if let Ok((width, height)) = crossterm::terminal::size() {
+                if let Err(e) = proxy::resize_pane(&self.transport, &target, width, height).await {
+                    tracing::warn!("Failed to resize manager pane {target}: {e}");
+                }
+            }
+        }
+        self.repo_view = RepoView::new();
+        self.screen = Screen::RepoView { swarm_idx };
+    }
+
     /// Handle selecting a row in the repos list.
     /// If it's an active swarm, jump to repo view.
     /// If it's an available repo, open the new swarm dialog pre-filled.
     async fn select_repo_row(&mut self, idx: usize) -> Result<()> {
         if idx < self.swarms.len() {
             // Active swarm — jump to repo view
-            self.repo_view = RepoView::new();
-            self.screen = Screen::RepoView { swarm_idx: idx };
+            self.enter_repo_view(idx).await;
         } else {
             // Available repo — open new swarm dialog pre-filled
             let avail_idx = idx - self.swarms.len();
@@ -1723,7 +1734,7 @@ impl App {
         let target = match target {
             Some(t) => t,
             None => {
-                self.screen = Screen::RepoView { swarm_idx };
+                self.enter_repo_view(swarm_idx).await;
                 return Ok(());
             }
         };
@@ -1738,7 +1749,7 @@ impl App {
         if key.modifiers.contains(KeyModifiers::ALT) {
             match key.code {
                 KeyCode::Char('0') => {
-                    self.screen = Screen::RepoView { swarm_idx };
+                    self.enter_repo_view(swarm_idx).await;
                     return Ok(());
                 }
                 KeyCode::Char('m') => {

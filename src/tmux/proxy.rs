@@ -94,6 +94,35 @@ pub async fn send_keys(transport: &ServerTransport, target: &str, input: &str) -
     Ok(())
 }
 
+/// Resize a tmux pane to given dimensions.
+pub async fn resize_pane(transport: &ServerTransport, target: &str, width: u16, height: u16) -> Result<()> {
+    let output = transport
+        .output(
+            "tmux",
+            &[
+                "resize-pane".to_string(),
+                "-t".to_string(),
+                target.to_string(),
+                "-x".to_string(),
+                width.to_string(),
+                "-y".to_string(),
+                height.to_string(),
+            ],
+            None,
+        )
+        .await
+        .context("Failed to resize tmux pane")?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "tmux resize-pane failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    Ok(())
+}
+
 /// Send Ctrl+C followed by kill to a tmux pane to shut down the session.
 pub async fn kill_pane(transport: &ServerTransport, target: &str) -> Result<()> {
     // Send Ctrl+C to interrupt any running process
