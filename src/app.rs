@@ -722,9 +722,10 @@ impl App {
             return Ok(());
         }
 
-        // ? key: toggle help overlay (not in AgentView — passthrough sends it to the pane)
+        // ? key: toggle help overlay only on non-session screens
         if key.code == KeyCode::Char('?') && key.modifiers == KeyModifiers::NONE
-            && !matches!(self.screen, Screen::AgentView { .. })
+            && matches!(self.screen, Screen::ReposList | Screen::NewSwarm { .. }
+                | Screen::RuntimeSelect | Screen::InstallScopeSelect)
         {
             self.show_help = !self.show_help;
             return Ok(());
