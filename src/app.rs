@@ -37,13 +37,11 @@ pub enum Screen {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub enum NewSwarmField {
     RepoPath,
     AgentRuntime,
     RuntimeSelection,
     NumWorkers,
-    Launching,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -242,8 +240,6 @@ pub struct App {
     /// Issue detail view state.
     pub issue_detail_view: Option<IssueDetailView>,
     /// Tracks last Esc press for double-Esc to go back (never forwarded to pane).
-    #[allow(dead_code)]
-    last_esc: Option<std::time::Instant>,
     /// App-level keybinding configuration.
     pub keybindings: crate::config::keybindings::KeyBindings,
     /// Whether the ? help overlay is visible.
@@ -323,7 +319,6 @@ impl App {
                 crate::config::shortcuts::ShortcutsConfig::load()
             },
             show_shortcuts_viewer: false,
-            last_esc: None,
             auto_dispatch_last: None,
             issue_detail_view: None,
             keybindings: crate::config::keybindings::KeyBindings::load(),
@@ -656,37 +651,6 @@ impl App {
             }
         }
         Ok(())
-    }
-
-    /// Convert a crossterm KeyEvent to a tmux send-keys argument.
-    /// Returns (key_string, literal) where literal means use -l flag.
-    #[allow(dead_code)]
-    fn key_to_tmux(key: &KeyEvent) -> Option<(String, bool)> {
-        if key.modifiers.contains(KeyModifiers::CONTROL) {
-            if let KeyCode::Char(c) = key.code {
-                return Some((format!("C-{c}"), false));
-            }
-        }
-        if key.modifiers.contains(KeyModifiers::ALT) {
-            if let KeyCode::Char(c) = key.code {
-                return Some((format!("M-{c}"), false));
-            }
-        }
-        match key.code {
-            KeyCode::Char(c) => Some((c.to_string(), true)),
-            KeyCode::Enter => Some(("Enter".to_string(), false)),
-            KeyCode::Backspace => Some(("BSpace".to_string(), false)),
-            KeyCode::Tab => Some(("Tab".to_string(), false)),
-            KeyCode::Esc => Some(("Escape".to_string(), false)),
-            KeyCode::Up => Some(("Up".to_string(), false)),
-            KeyCode::Down => Some(("Down".to_string(), false)),
-            KeyCode::Left => Some(("Left".to_string(), false)),
-            KeyCode::Right => Some(("Right".to_string(), false)),
-            KeyCode::Home => Some(("Home".to_string(), false)),
-            KeyCode::End => Some(("End".to_string(), false)),
-            KeyCode::Delete => Some(("DC".to_string(), false)),
-            _ => None,
-        }
     }
 
     /// Returns true if we're in a passthrough mode where keystrokes go directly to tmux.
@@ -1713,17 +1677,39 @@ impl App {
                 }
                 _ => {}
             },
-            NewSwarmField::Launching => {
-                // No key handling while launching — just ignore
-                if key.code == KeyCode::Esc {
-                    self.screen = Screen::ReposList;
-                }
-            }
         }
         Ok(())
     }
 
     async fn handle_repo_view_key(&mut self, key: KeyEvent, swarm_idx: usize) -> Result<()> {
+        // Handle teardown confirmation from Repo View
+        if let Some(idx) = self.confirm_teardown {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    if idx < self.swarms.len() {
+                        let swarm = self.swarms[idx].clone();
+                        let project = swarm.project_name.clone();
+                        self.status_message = Some(format!("Tearing down {project}..."));
+                        if let Err(e) = self.adapter.teardown(&swarm).await {
+                            self.status_message = Some(format!("Teardown error: {e}"));
+                        } else {
+                            self.swarms.remove(idx);
+                            self.start_all_pane_watchers();
+                            self.scan_available_repos();
+                            self.status_message = Some(format!("Torn down {project}"));
+                            self.screen = Screen::ReposList;
+                        }
+                    }
+                    self.confirm_teardown = None;
+                }
+                _ => {
+                    self.confirm_teardown = None;
+                    self.status_message = Some("Teardown cancelled".to_string());
+                }
+            }
+            return Ok(());
+        }
+
         // Handle create-issue dialog input
         if let Some(ref mut form) = self.create_issue_form {
             match key.code {
@@ -1946,6 +1932,14 @@ impl App {
                             }
                         }
                     }
+                    KeyCode::Char('T') => {
+                        // Teardown entire swarm (with confirmation)
+                        if swarm_idx < self.swarms.len() {
+                            let project = self.swarms[swarm_idx].project_name.clone();
+                            self.confirm_teardown = Some(swarm_idx);
+                            self.status_message = Some(format!("Teardown swarm {project}? (y to confirm, any other key to cancel)"));
+                        }
+                    }
                     KeyCode::Char(c @ '1'..='9') => {
                         let worker_idx = (c as usize) - ('1' as usize);
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
@@ -1959,7 +1953,11 @@ impl App {
                             }
                         }
                     }
-                    _ => {}
+                    _ => {
+                        if let KeyCode::Char(c) = key.code {
+                            self.try_shortcut("workers", &c.to_string(), swarm_idx, None).await?;
+                        }
+                    }
                 }
             }
             SwarmPanel::Issues => {
@@ -2116,7 +2114,23 @@ impl App {
                         self.swarm_view.search_query = Some(String::new());
                         self.swarm_view.issues_table.select(Some(0));
                     }
-                    _ => {}
+                    _ => {
+                        if let KeyCode::Char(c) = key.code {
+                            let issue_num = {
+                                let filter = self.swarm_view.issue_filter;
+                                let selected = self.swarm_view.selected_issue();
+                                self.swarms.get(swarm_idx)
+                                    .and_then(|s| self.issue_caches.get(&s.project_name))
+                                    .and_then(|cache| {
+                                        let issues: Vec<_> = cache.issues.iter()
+                                            .filter(|i| i.matches_filter(filter))
+                                            .collect();
+                                        selected.and_then(|idx| issues.get(idx)).map(|i| i.number)
+                                    })
+                            };
+                            self.try_shortcut("issues", &c.to_string(), swarm_idx, issue_num).await?;
+                        }
+                    }
                 }
             }
         }
@@ -2573,7 +2587,6 @@ impl App {
     }
 
     /// Try to execute a configured shortcut for the given panel and key.
-    #[allow(dead_code)]
     async fn try_shortcut(&mut self, panel: &str, key: &str, swarm_idx: usize, issue: Option<u32>) -> Result<()> {
         use crate::config::shortcuts::ShortcutsConfig;
 
