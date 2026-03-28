@@ -202,7 +202,34 @@ impl Swarm {
 
 #[cfg(test)]
 mod tests {
-    use super::AgentType;
+    use super::{AgentInfo, AgentType, Swarm, Workflow};
+    use crate::model::status::{AgentState, AgentStatus};
+    use std::path::PathBuf;
+
+    fn make_agent(role: &str, state: AgentState) -> AgentInfo {
+        AgentInfo {
+            id: format!("test-repo/{role}"),
+            role: role.to_string(),
+            worktree_path: PathBuf::from("/tmp/test"),
+            tmux_target: format!("claude-test:0.0"),
+            status: AgentStatus { state, timestamp: None },
+            is_manager: role == "manager",
+            pane_content: String::new(),
+            dispatched_issue: None,
+        }
+    }
+
+    fn make_swarm(workers: Vec<AgentInfo>) -> Swarm {
+        Swarm {
+            repo_path: PathBuf::from("/tmp/test-repo"),
+            project_name: "test-repo".to_string(),
+            agent_type: AgentType::Claude,
+            workflow: None,
+            tmux_session: "claude-test-repo".to_string(),
+            manager: make_agent("manager", AgentState::Idle),
+            workers,
+        }
+    }
 
     #[test]
     fn codex_and_droid_launch_interactive_sessions() {
@@ -229,5 +256,69 @@ mod tests {
         assert_eq!(AgentType::Codex.status_dir(), ".codex/loops");
         assert_eq!(AgentType::Claude.status_dir(), ".codex/loops");
         assert_eq!(AgentType::Droid.status_dir(), ".factory/loops");
+    }
+
+    #[test]
+    fn agent_type_display_matches_expected_strings() {
+        assert_eq!(AgentType::Claude.to_string(), "Claude");
+        assert_eq!(AgentType::Codex.to_string(), "Codex");
+        assert_eq!(AgentType::Droid.to_string(), "Droid");
+        assert_eq!(AgentType::Gemini.to_string(), "Gemini");
+    }
+
+    #[test]
+    fn agent_type_from_name_round_trips() {
+        for name in &["claude", "codex", "droid", "gemini"] {
+            let parsed = AgentType::from_name(name);
+            assert!(parsed.is_some(), "from_name({name}) should succeed");
+            assert_eq!(parsed.unwrap().script_flag(), *name);
+        }
+        assert!(AgentType::from_name("unknown").is_none());
+        assert!(AgentType::from_name("").is_none());
+    }
+
+    #[test]
+    fn workflow_display_matches_expected_strings() {
+        assert_eq!(Workflow::Autocoder.to_string(), "Autocoder");
+        assert_eq!(Workflow::Modernize.to_string(), "Modernize");
+    }
+
+    #[test]
+    fn busy_count_counts_only_working_and_starting_workers() {
+        let swarm = make_swarm(vec![
+            make_agent("worker-1", AgentState::Working { issue: Some(1) }),
+            make_agent("worker-2", AgentState::Idle),
+            make_agent("worker-3", AgentState::Starting),
+            make_agent("worker-4", AgentState::Working { issue: None }),
+        ]);
+        assert_eq!(swarm.busy_count(), 3);
+    }
+
+    #[test]
+    fn busy_count_is_zero_with_no_workers() {
+        let swarm = make_swarm(vec![]);
+        assert_eq!(swarm.busy_count(), 0);
+    }
+
+    #[test]
+    fn agent_lookup_finds_manager_and_workers_by_role() {
+        let swarm = make_swarm(vec![
+            make_agent("worker-1", AgentState::Idle),
+            make_agent("worker-2", AgentState::Idle),
+        ]);
+        assert!(swarm.agent("manager").is_some());
+        assert!(swarm.agent("worker-1").is_some());
+        assert!(swarm.agent("worker-2").is_some());
+        assert!(swarm.agent("worker-3").is_none());
+    }
+
+    #[test]
+    fn agent_by_id_finds_manager_and_workers() {
+        let swarm = make_swarm(vec![
+            make_agent("worker-1", AgentState::Idle),
+        ]);
+        assert!(swarm.agent_by_id("test-repo/manager").is_some());
+        assert!(swarm.agent_by_id("test-repo/worker-1").is_some());
+        assert!(swarm.agent_by_id("test-repo/worker-9").is_none());
     }
 }
