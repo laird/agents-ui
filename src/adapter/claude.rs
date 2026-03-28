@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
+use tokio::process::Command;
 
 use crate::model::status::{self, AgentStatus};
 use crate::model::swarm::{AgentInfo, AgentType, Swarm};
@@ -91,6 +92,18 @@ impl ClaudeAdapter {
             progress(&format!("⚠️  Manager failed: {e}\n"));
         } else {
             progress("✅ Manager started\n");
+            if let Some(cmd) = manager_bootstrap_cmd(runtime) {
+                progress("⏳ Waiting for manager to be ready...\n");
+                if Self::wait_for_claude_ready(&self.transport, &manager_target).await {
+                    progress(&format!("⏳ Sending {cmd} to manager...\n"));
+                    proxy::send_keys(&self.transport, &manager_target, &cmd)
+                        .await
+                        .ok();
+                    progress("✅ Manager running manage-loop\n");
+                } else {
+                    progress("⚠️  Manager not ready in time, manage-loop not started\n");
+                }
+            }
         }
 
         progress("\n🎉 Swarm launched!\n");
@@ -99,7 +112,24 @@ impl ClaudeAdapter {
             .build_swarm_from_session(&session_name, config.repo_path.clone(), runtime.clone())
             .await?;
 
-        progress("✅ TUI will auto-dispatch work to idle workers\n");
+        // Start worker fix-loops after agents have had time to initialize
+        let loop_cmd = runtime.worker_loop_cmd().to_string();
+        if !loop_cmd.is_empty() {
+            let transport = self.transport.clone();
+            let targets: Vec<String> = swarm.workers.iter().map(|w| w.tmux_target.clone()).collect();
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                for target in &targets {
+                    if let Err(e) = proxy::send_keys(&transport, target, &loop_cmd).await {
+                        tracing::warn!("Failed to send {loop_cmd} to {target}: {e}");
+                    } else {
+                        tracing::info!("Sent {loop_cmd} to worker at {target}");
+                    }
+                }
+            });
+        }
+
+        progress("✅ Workers will start fix-loop after initialization\n");
 
         Ok(swarm)
     }
@@ -113,8 +143,8 @@ impl ClaudeAdapter {
     }
 
     /// Expected tmux session name for a given project.
-    fn session_name(runtime: &AgentType, project: &str) -> String {
-        format!("{}-{project}", runtime.session_prefix())
+    fn session_name(agent_type: &AgentType, project: &str) -> String {
+        format!("{}-{project}", agent_type.session_prefix())
     }
 
     /// Create git worktrees for workers.
@@ -414,12 +444,41 @@ impl ClaudeAdapter {
         Ok(())
     }
 
+    /// Poll a tmux pane until Claude's prompt indicator appears, or timeout.
+    /// Returns true if the prompt was detected, false on timeout.
+    async fn wait_for_claude_ready(transport: &crate::transport::ServerTransport, target: &str) -> bool {
+        let timeout = std::time::Duration::from_secs(60);
+        let poll_interval = std::time::Duration::from_secs(2);
+        let start = std::time::Instant::now();
+
+        // Wait a minimum of 5 seconds before polling
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+
+        while start.elapsed() < timeout {
+            if let Ok(content) = proxy::capture_pane(transport, target, 50).await {
+                // Claude Code shows a "❯" or ">" prompt when ready
+                // Also check for the tips/help text that appears on startup
+                if content.contains('❯')
+                    || content.contains("What can I help")
+                    || content.contains("/help")
+                {
+                    tracing::info!("Claude ready in pane {target}");
+                    return true;
+                }
+            }
+            tokio::time::sleep(poll_interval).await;
+        }
+
+        tracing::warn!("Timed out waiting for Claude ready in pane {target}");
+        false
+    }
+
     /// Build a Swarm model from an existing tmux session.
     async fn build_swarm_from_session(
         &self,
         session_name: &str,
         repo_path: PathBuf,
-        runtime: AgentType,
+        agent_type: AgentType,
     ) -> Result<Swarm> {
         let project_name = Self::project_name(&repo_path);
         let session_info = session::list_panes(&self.transport, session_name).await?;
@@ -436,6 +495,9 @@ impl ClaudeAdapter {
             is_manager: true,
             pane_content: String::new(),
             dispatched_issue: None,
+            current_issue: None,
+            current_issue_title: None,
+            waiting_for_input: false,
         };
 
         let mut workers = Vec::new();
@@ -465,7 +527,7 @@ impl ClaudeAdapter {
                     .join(format!("{}-wt-{}", project_name, worker_num));
 
                 let status_file = worktree_path
-                    .join(runtime.status_dir())
+                    .join(agent_type.status_dir())
                     .join("fix-loop.status");
 
                 let agent_status = status::read_status_file(&status_file);
@@ -480,6 +542,9 @@ impl ClaudeAdapter {
                     is_manager: false,
                     pane_content: String::new(),
                     dispatched_issue: None,
+                    current_issue: None,
+                    current_issue_title: None,
+                    waiting_for_input: false,
                 });
                 worker_num += 1;
             }
@@ -495,11 +560,12 @@ impl ClaudeAdapter {
         Ok(Swarm {
             repo_path,
             project_name,
-            agent_type: runtime,
-            workflow: None,
+            agent_type,
+            workflow: None, // Can't determine from session alone
             tmux_session: session_name.to_string(),
             manager,
             workers,
+            issue_cache: Default::default(),
         })
     }
 
@@ -640,6 +706,9 @@ impl AgentRuntime for ClaudeAdapter {
             project_name,
         );
 
+        // Ensure gh is authenticated as the correct user for this repo
+        ensure_gh_auth_for_repo(&config.repo_path).await;
+
         // 1. Create git worktrees
         tracing::info!("Creating {} git worktrees", config.num_workers);
         let worktree_paths = self
@@ -681,16 +750,47 @@ impl AgentRuntime for ClaudeAdapter {
             tracing::warn!("Failed to launch claude in manager pane: {e}");
         } else {
             tracing::info!("✅ Manager started\n");
+            // Wait for Claude to be ready, then send the manage-loop bootstrap command
+            if let Some(cmd) = manager_bootstrap_cmd(runtime) {
+                if Self::wait_for_claude_ready(&self.transport, &manager_target).await {
+                    tracing::info!("Sending manage-loop to manager: {cmd}");
+                    proxy::send_keys(&self.transport, &manager_target, &cmd)
+                        .await
+                        .ok();
+                } else {
+                    tracing::warn!("Manager not ready in time, skipping manage-loop bootstrap");
+                }
+            }
         }
 
         tracing::info!("\n🎉 Swarm launched! Waiting for sessions to initialize...\n");
+
+        // Resize the tmux session to match the current terminal size
+        if let Err(e) = session::resize_session_to_terminal(&session_name).await {
+            tracing::warn!("Failed to resize session {session_name}: {e}");
+        }
 
         // 5. Build swarm model
         let swarm = self
             .build_swarm_from_session(&session_name, config.repo_path.clone(), runtime.clone())
             .await?;
 
-        // TUI manages dispatch — no need to auto-start monitor-loop
+        // Start worker fix-loops after agents have had time to initialize
+        let loop_cmd = runtime.worker_loop_cmd().to_string();
+        if !loop_cmd.is_empty() {
+            let transport = self.transport.clone();
+            let targets: Vec<String> = swarm.workers.iter().map(|w| w.tmux_target.clone()).collect();
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                for target in &targets {
+                    if let Err(e) = proxy::send_keys(&transport, target, &loop_cmd).await {
+                        tracing::warn!("Failed to send {loop_cmd} to {target}: {e}");
+                    } else {
+                        tracing::info!("Sent {loop_cmd} to worker at {target}");
+                    }
+                }
+            });
+        }
 
         Ok(swarm)
     }
@@ -698,23 +798,34 @@ impl AgentRuntime for ClaudeAdapter {
     async fn discover(&self, _agents_dir: &Path) -> Result<Vec<Swarm>> {
         let sessions = session::discover_agent_sessions(&self.transport).await?;
         let mut swarms = Vec::new();
-        let session_prefix = format!("{}-", self.runtime.session_prefix());
 
         for session_name in sessions {
-            if !session_name.starts_with(&session_prefix) {
+            // Infer agent type and project name from session name prefix
+            let (agent_type, project_name) = if let Some(rest) = session_name.strip_prefix("claude-") {
+                (AgentType::Claude, rest.to_string())
+            } else if let Some(rest) = session_name.strip_prefix("codex-") {
+                (AgentType::Codex, rest.to_string())
+            } else if let Some(rest) = session_name.strip_prefix("droid-") {
+                (AgentType::Droid, rest.to_string())
+            } else if let Some(rest) = session_name.strip_prefix("gemini-") {
+                (AgentType::Gemini, rest.to_string())
+            } else {
                 continue;
-            }
-
-            let project_name = session_name
-                .strip_prefix(&session_prefix)
-                .unwrap_or(&session_name)
-                .to_string();
+            };
 
             let repo_path = find_repo_path(&self.transport, &session_name, &project_name).await;
 
             if let Some(repo_path) = repo_path {
+                // Ensure gh is authenticated as the correct user for this repo
+                ensure_gh_auth_for_repo(&repo_path).await;
+
+                // Resize discovered session to match current terminal
+                if let Err(e) = session::resize_session_to_terminal(&session_name).await {
+                    tracing::warn!("Failed to resize session {session_name}: {e}");
+                }
+
                 match self
-                    .build_swarm_from_session(&session_name, repo_path, self.runtime.clone())
+                    .build_swarm_from_session(&session_name, repo_path, agent_type)
                     .await
                 {
                     Ok(swarm) => {
@@ -735,6 +846,14 @@ impl AgentRuntime for ClaudeAdapter {
 
     async fn send_input(&self, tmux_target: &str, input: &str) -> Result<()> {
         proxy::send_keys(&self.transport, tmux_target, input).await
+    }
+
+    async fn send_raw_key(&self, tmux_target: &str, key: &str, literal: bool) -> Result<()> {
+        if literal {
+            proxy::send_literal(tmux_target, key).await
+        } else {
+            proxy::send_named_key(tmux_target, key).await
+        }
     }
 
     async fn capture_output(&self, tmux_target: &str) -> Result<String> {
@@ -845,6 +964,9 @@ impl AgentRuntime for ClaudeAdapter {
             is_manager: false,
             pane_content: String::new(),
             dispatched_issue: None,
+            current_issue: None,
+            current_issue_title: None,
+            waiting_for_input: false,
         })
     }
 
@@ -874,6 +996,231 @@ impl AgentRuntime for ClaudeAdapter {
             .ok();
         }
         Ok(())
+    }
+
+    async fn heal_workers(&self, swarm: &mut Swarm) -> Result<Vec<String>> {
+        let mut repairs = Vec::new();
+        let session_name = &swarm.tmux_session;
+        let repo_path = &swarm.repo_path;
+        let launch_cmd = swarm.agent_type.launch_cmd().to_string();
+        let loop_cmd = swarm.agent_type.worker_loop_cmd().to_string();
+
+        // Check which tmux panes actually exist in the agents window
+        let session_exists = session::has_session(&self.transport, session_name).await;
+        let existing_panes = if session_exists {
+            session::list_panes(&self.transport, session_name).await.ok()
+        } else {
+            None
+        };
+        let agents_window = existing_panes
+            .as_ref()
+            .and_then(|info| {
+                info.windows
+                    .iter()
+                    .find(|w| w.name == "agents" || w.index == 0)
+            });
+        let agents_window_exists = agents_window.is_some();
+        let agents_window_panes: Vec<String> = agents_window
+            .map(|w| w.panes.iter().map(|p| p.target.clone()).collect())
+            .unwrap_or_default();
+
+        for worker in &mut swarm.workers {
+            let wt_path = &worker.worktree_path;
+
+            // 1. Check worktree exists
+            if !wt_path.exists() {
+                tracing::info!("Healing {}: recreating worktree at {}", worker.id, wt_path.display());
+
+                // Determine branch name from path
+                let wt_name = wt_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+
+                let current_branch = Command::new("git")
+                    .args(["rev-parse", "--abbrev-ref", "HEAD"])
+                    .current_dir(repo_path)
+                    .output()
+                    .await
+                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                    .unwrap_or_else(|_| "main".to_string());
+
+                // Extract wt index from name like "project-wt-3"
+                let branch_suffix = wt_name
+                    .rsplit_once("-wt-")
+                    .map(|(_, idx)| format!("-wt-{idx}"))
+                    .unwrap_or_else(|| format!("-{}", worker.id));
+                let worktree_branch = format!("{current_branch}{branch_suffix}");
+
+                // Create branch if needed
+                let _ = Command::new("git")
+                    .args(["branch", &worktree_branch, &current_branch])
+                    .current_dir(repo_path)
+                    .output()
+                    .await;
+
+                let output = Command::new("git")
+                    .args([
+                        "worktree",
+                        "add",
+                        &wt_path.to_string_lossy(),
+                        &worktree_branch,
+                    ])
+                    .current_dir(repo_path)
+                    .output()
+                    .await;
+
+                match output {
+                    Ok(o) if o.status.success() => {
+                        repairs.push(format!("Recreated worktree for {}", worker.id));
+                    }
+                    Ok(o) => {
+                        let err = String::from_utf8_lossy(&o.stderr);
+                        tracing::warn!("Failed to recreate worktree for {}: {err}", worker.id);
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to recreate worktree for {}: {e}", worker.id);
+                    }
+                }
+            }
+
+            // 2. Check tmux pane exists; recreate session/window/pane as needed
+            let pane_exists = agents_window_panes.contains(&worker.tmux_target);
+            if !pane_exists {
+                tracing::info!("Healing {}: pane missing, recreating (session_exists={}, window_exists={})",
+                    worker.id, session_exists, agents_window_exists);
+
+                let pane_created = if !session_exists {
+                    // Session completely gone — recreate it with a new window
+                    let output = Command::new("tmux")
+                        .args(["new-session", "-d", "-s", session_name, "-n", "agents"])
+                        .output()
+                        .await;
+                    output.map(|o| o.status.success()).unwrap_or(false)
+                } else if !agents_window_exists {
+                    // Session exists but agents window is gone — create a new window
+                    let output = Command::new("tmux")
+                        .args(["new-window", "-t", session_name, "-n", "agents"])
+                        .output()
+                        .await;
+                    output.map(|o| o.status.success()).unwrap_or(false)
+                } else {
+                    // Window exists but this pane is missing — split to add a pane
+                    let output = Command::new("tmux")
+                        .args(["split-window", "-h", "-t", &format!("{session_name}:0")])
+                        .output()
+                        .await;
+                    if let Ok(ref o) = output {
+                        if o.status.success() {
+                            // Rebalance panes
+                            let _ = Command::new("tmux")
+                                .args(["select-layout", "-t", &format!("{session_name}:0"), "even-horizontal"])
+                                .output()
+                                .await;
+                        }
+                    }
+                    output.map(|o| o.status.success()).unwrap_or(false)
+                };
+
+                if pane_created {
+                    // Get the new pane's target
+                    let pane_output = Command::new("tmux")
+                        .args([
+                            "list-panes",
+                            "-t",
+                            &format!("{session_name}:0"),
+                            "-F",
+                            "#{pane_index}",
+                        ])
+                        .output()
+                        .await;
+
+                    if let Ok(po) = pane_output {
+                        let max_idx: u32 = String::from_utf8_lossy(&po.stdout)
+                            .lines()
+                            .filter_map(|l| l.parse().ok())
+                            .max()
+                            .unwrap_or(0);
+                        worker.tmux_target = format!("{session_name}:0.{max_idx}");
+                    }
+
+                    // cd to worktree
+                    if wt_path.exists() {
+                        let _ = proxy::send_keys(
+                            &self.transport,
+                            &worker.tmux_target,
+                            &format!("cd '{}'", wt_path.display()),
+                        )
+                        .await;
+                        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                    }
+
+                    // Launch agent
+                    let _ = proxy::send_keys(
+                        &self.transport,
+                        &worker.tmux_target,
+                        &launch_cmd,
+                    )
+                    .await;
+
+                    // Wait for agent to initialize, then start fix-loop
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    let _ = proxy::send_keys(&self.transport, &worker.tmux_target, &loop_cmd).await;
+
+                    repairs.push(format!("Recreated tmux pane and launched agent for {}", worker.id));
+                    continue; // Skip step 3 since we just launched
+                }
+            }
+
+            // 3. Check pane state: feedback prompt, shell prompt, etc.
+            if pane_exists && wt_path.exists() {
+                match proxy::capture_pane(&self.transport, &worker.tmux_target, 10).await {
+                    Ok(content) => {
+                        let trimmed = content.trim();
+
+                        // 3a. Detect Claude feedback prompt and auto-dismiss
+                        if is_feedback_prompt(trimmed) {
+                            tracing::info!(
+                                "Healing {}: feedback prompt detected, auto-dismissing",
+                                worker.id
+                            );
+                            let _ = proxy::send_keys(&self.transport, &worker.tmux_target, "0").await;
+                            repairs.push(format!("Auto-dismissed feedback prompt for {}", worker.id));
+                            continue;
+                        }
+
+                        // 3b. Detect bare shell prompt (agent not running)
+                        // Must distinguish from an active Claude session which also shows ❯
+                        let is_bare_shell = is_bare_shell_prompt(trimmed);
+
+                        if is_bare_shell {
+                            tracing::info!(
+                                "Healing {}: agent not running (shell prompt detected), restarting",
+                                worker.id
+                            );
+                            // cd to worktree and restart agent
+                            let _ = proxy::send_keys(
+                                &self.transport,
+                                &worker.tmux_target,
+                                &format!("cd '{}' && {}", wt_path.display(), launch_cmd),
+                            )
+                            .await;
+
+                            // Wait for agent to initialize, then start fix-loop
+                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                            let _ = proxy::send_keys(&self.transport, &worker.tmux_target, &loop_cmd).await;
+
+                            repairs.push(format!("Restarted agent for {} (was at shell prompt)", worker.id));
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("Could not capture pane for {}: {e}", worker.id);
+                    }
+                }
+            }
+        }
+
+        Ok(repairs)
     }
 
     async fn teardown(&self, swarm: &Swarm) -> Result<()> {
@@ -908,6 +1255,10 @@ impl AgentRuntime for ClaudeAdapter {
             .await?;
 
         Ok(())
+    }
+
+    async fn revive_agents(&self, swarm: &Swarm) -> Result<()> {
+        self.ensure_swarm_agents_running(swarm).await
     }
 }
 
@@ -996,6 +1347,18 @@ fn classify_pane_state(content: &str) -> PaneState {
         return PaneState::AgentIdle;
     }
 
+    // Agent exited with an "update yourself and restart" message
+    for line in non_empty_lines.iter().take(5) {
+        let lower = line.trim().to_lowercase();
+        if lower.contains("please restart codex")
+            || lower.contains("update ran successfully")
+            || lower.contains("please restart claude")
+            || lower.contains("restart to apply")
+        {
+            return PaneState::NeedsLaunch;
+        }
+    }
+
     // Check for shell prompt (bare command line, no agent)
     if let Some(last_line) = non_empty_lines.first() {
         let trimmed = last_line.trim();
@@ -1020,10 +1383,10 @@ fn pane_agent_is_idle(content: &str) -> bool {
 
 fn manager_bootstrap_cmd(runtime: &AgentType) -> Option<String> {
     match runtime {
-        AgentType::Claude => Some("/autocoder:monitor-workers".to_string()),
-        AgentType::Gemini => Some("/monitor-workers".to_string()),
-        AgentType::Codex => Some("/monitor-workers".to_string()),
-        AgentType::Droid => Some("/monitor-workers".to_string()),
+        AgentType::Claude => Some("/autocoder:monitor-loop".to_string()),
+        AgentType::Gemini => Some("/manage-loop".to_string()),
+        AgentType::Codex => Some("/manage-loop".to_string()),
+        AgentType::Droid => Some("/manage-loop".to_string()),
     }
 }
 
@@ -1039,13 +1402,15 @@ fn worker_dispatch_cmd(runtime: &AgentType, issue_number: u32) -> Option<String>
 }
 
 fn generic_worker_bootstrap_cmd(runtime: &AgentType) -> Option<String> {
+    let loop_cmd = runtime.worker_loop_cmd();
+    if !loop_cmd.is_empty() {
+        return Some(loop_cmd.to_string());
+    }
     match runtime {
-        AgentType::Claude => Some("/autocoder:fix".to_string()),
-        AgentType::Gemini => Some("/fix".to_string()),
         AgentType::Codex => Some(
             "Use the repository's Codex autocoder workflow to pick the next available issue and work it. Start by reading AGENTS.md, skills/autocoder/SKILL.md, skills/autocoder/references/workflow-map.md, and skills/autocoder/references/command-mapping.md. Choose the highest-priority available issue, do one focused pass, run relevant tests, and summarize the outcome.".to_string(),
         ),
-        AgentType::Droid => Some("/fix".to_string()),
+        _ => None,
     }
 }
 
@@ -1159,8 +1524,8 @@ fn strip_ansi(content: &str) -> String {
 mod tests {
     use super::{
         classify_pane_state, extract_issue_number_from_branch, generic_worker_bootstrap_cmd,
-        manager_bootstrap_cmd, pane_agent_is_idle, pane_needs_runtime_launch,
-        worker_dispatch_cmd, PaneState,
+        is_bare_shell_prompt, is_feedback_prompt, manager_bootstrap_cmd, pane_agent_is_idle,
+        pane_needs_runtime_launch, worker_dispatch_cmd, PaneState,
     };
     use crate::model::swarm::AgentType;
 
@@ -1227,22 +1592,26 @@ mod tests {
     }
 
     #[test]
-    fn manager_bootstrap_uses_monitor_workers() {
+    fn manager_bootstrap_uses_monitor_loop() {
         assert_eq!(
             manager_bootstrap_cmd(&AgentType::Claude),
-            Some("/autocoder:monitor-workers".to_string())
+            Some("/autocoder:monitor-loop".to_string())
         );
     }
 
     #[test]
-    fn generic_worker_bootstrap_uses_fix() {
+    fn generic_worker_bootstrap_uses_fix_loop() {
         assert_eq!(
             generic_worker_bootstrap_cmd(&AgentType::Claude),
-            Some("/autocoder:fix".to_string())
+            Some("/autocoder:fix-loop".to_string())
+        );
+        assert_eq!(
+            generic_worker_bootstrap_cmd(&AgentType::Gemini),
+            Some("/fix-loop".to_string())
         );
         assert_eq!(
             generic_worker_bootstrap_cmd(&AgentType::Droid),
-            Some("/fix".to_string())
+            None
         );
     }
 
@@ -1262,6 +1631,61 @@ mod tests {
     fn branch_without_issue_number_is_ignored() {
         assert_eq!(extract_issue_number_from_branch("main"), None);
         assert_eq!(extract_issue_number_from_branch("feature/fix-bug"), None);
+    }
+
+    // --- is_feedback_prompt tests ---
+
+    #[test]
+    fn detects_feedback_prompt_full() {
+        let content = "some output\n● How is Claude doing this session? (optional)\n  1: Bad    2: Fine   3: Good   0: Dismiss\n";
+        assert!(is_feedback_prompt(content));
+    }
+
+    #[test]
+    fn detects_feedback_prompt_partial() {
+        assert!(is_feedback_prompt("How is Claude doing this session?"));
+        assert!(is_feedback_prompt("1: Bad 2: Fine 3: Good 0: Dismiss"));
+    }
+
+    #[test]
+    fn no_false_positive_feedback() {
+        assert!(!is_feedback_prompt("Working on issue #42"));
+        assert!(!is_feedback_prompt("idle"));
+        assert!(!is_feedback_prompt(""));
+    }
+
+    // --- is_bare_shell_prompt tests ---
+
+    #[test]
+    fn detects_bash_prompt() {
+        assert!(is_bare_shell_prompt("user@host:~/project$"));
+        assert!(is_bare_shell_prompt("~ $"));
+    }
+
+    #[test]
+    fn detects_zsh_prompt() {
+        assert!(is_bare_shell_prompt("user@host %"));
+        assert!(is_bare_shell_prompt("❯"));
+    }
+
+    #[test]
+    fn not_bare_shell_with_claude_indicators() {
+        // Claude session with ❯ prompt should NOT be detected as bare shell
+        assert!(!is_bare_shell_prompt("╭─ some output\n╰─ ❯"));
+        assert!(!is_bare_shell_prompt("bypass permissions enabled\n❯"));
+        assert!(!is_bare_shell_prompt("Claude Code session\nBrewed for you\n❯"));
+    }
+
+    #[test]
+    fn empty_not_bare_shell() {
+        assert!(!is_bare_shell_prompt(""));
+        assert!(!is_bare_shell_prompt("\n\n"));
+    }
+
+    #[test]
+    fn normal_output_not_bare_shell() {
+        assert!(!is_bare_shell_prompt("Working on issue #42"));
+        assert!(!is_bare_shell_prompt("IDLE_NO_WORK_AVAILABLE"));
     }
 }
 
@@ -1328,3 +1752,128 @@ async fn find_repo_path(
 
     None
 }
+
+/// Detect the GitHub owner of a repo from its git remote URL and switch
+/// `gh auth` to a matching account if one is available.
+///
+/// This handles the case where a repo is owned by a different GitHub account
+/// than the currently active `gh` CLI profile.
+async fn ensure_gh_auth_for_repo(repo_path: &Path) {
+    // Get the remote URL
+    let remote = match Command::new("git")
+        .args(["remote", "get-url", "origin"])
+        .current_dir(repo_path)
+        .output()
+        .await
+    {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        _ => return,
+    };
+
+    // Extract owner from URL patterns:
+    // https://github.com/OWNER/REPO.git
+    // git@github.com:OWNER/REPO.git
+    let owner = if let Some(rest) = remote.strip_prefix("https://github.com/") {
+        rest.split('/').next()
+    } else if let Some(rest) = remote.strip_prefix("git@github.com:") {
+        rest.split('/').next()
+    } else {
+        None
+    };
+
+    let owner = match owner {
+        Some(o) if !o.is_empty() => o.to_string(),
+        _ => return,
+    };
+
+    // Check current gh user
+    let current_user = match Command::new("gh")
+        .args(["api", "user", "--jq", ".login"])
+        .output()
+        .await
+    {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        _ => return,
+    };
+
+    if current_user == owner {
+        return; // Already correct
+    }
+
+    // Try to switch to the repo owner's account
+    tracing::info!("Switching gh auth from {current_user} to {owner} for repo at {}", repo_path.display());
+    match Command::new("gh")
+        .args(["auth", "switch", "--user", &owner])
+        .output()
+        .await
+    {
+        Ok(o) if o.status.success() => {
+            tracing::info!("Successfully switched gh auth to {owner}");
+        }
+        Ok(o) => {
+            let err = String::from_utf8_lossy(&o.stderr);
+            tracing::warn!("Failed to switch gh auth to {owner}: {err}");
+        }
+        Err(e) => {
+            tracing::warn!("Failed to run gh auth switch: {e}");
+        }
+    }
+}
+
+/// Check if pane content shows a bare shell prompt (no active Claude session).
+///
+/// Returns true if the last line looks like a shell prompt AND there are no
+/// indicators of an active Claude session in the content. This avoids false
+/// positives where Claude's own prompt (❯) is mistaken for a shell.
+pub(crate) fn is_bare_shell_prompt(content: &str) -> bool {
+    let last_line = content.lines().last().unwrap_or("").trim();
+    if last_line.is_empty() {
+        return false;
+    }
+
+    // Check if last line looks like a shell prompt
+    let has_shell_prompt = last_line.ends_with('$')
+        || last_line.ends_with('%')
+        || last_line.ends_with('#')
+        || last_line.ends_with("❯");
+
+    if !has_shell_prompt {
+        return false;
+    }
+
+    // Check for Claude session indicators — if any are present, this is NOT a bare shell
+    let lower = content.to_lowercase();
+    let claude_indicators = [
+        "bypass permissions",
+        "claude code",
+        "brewed for",
+        "co-authored-by",
+        "tool use",
+        "read(",
+        "edit(",
+        "bash(",
+        "write(",
+        "╭─",  // Claude's box drawing
+        "╰─",
+        "idle_no_work_available",
+    ];
+
+    for indicator in &claude_indicators {
+        if lower.contains(indicator) {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Check if pane content contains a Claude feedback prompt.
+/// Matches patterns like "How is Claude doing this session?" and
+/// "1: Bad    2: Fine   3: Good   0: Dismiss".
+pub(crate) fn is_feedback_prompt(content: &str) -> bool {
+    let lower = content.to_lowercase();
+    lower.contains("how is claude doing this session")
+        || (lower.contains("1: bad") && lower.contains("0: dismiss"))
+}
+
+

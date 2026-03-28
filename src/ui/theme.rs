@@ -1,5 +1,6 @@
 use ratatui::style::{Color, Modifier, Style};
 
+use crate::model::issue::IssuePriority;
 use crate::model::status::AgentState;
 
 pub fn title_style() -> Style {
@@ -40,6 +41,10 @@ pub fn input_style() -> Style {
     Style::default().fg(Color::White)
 }
 
+pub fn cursor_style() -> Style {
+    Style::default().bg(Color::White).fg(Color::Black)
+}
+
 pub fn attention_style() -> Style {
     Style::default()
         .fg(Color::Red)
@@ -56,4 +61,34 @@ pub fn attention_blink_style(blink: bool) -> Style {
             .fg(Color::Yellow)
             .add_modifier(Modifier::BOLD)
     }
+}
+
+pub fn priority_style(priority: &IssuePriority) -> Style {
+    match priority {
+        IssuePriority::P0 => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        IssuePriority::P1 => Style::default().fg(Color::Yellow),
+        IssuePriority::P2 => Style::default().fg(Color::Blue),
+        IssuePriority::P3 => Style::default().fg(Color::DarkGray),
+        IssuePriority::None => Style::default().fg(Color::DarkGray),
+    }
+}
+
+pub fn waiting_style() -> Style {
+    Style::default()
+        .fg(Color::Magenta)
+        .add_modifier(Modifier::BOLD)
+}
+
+/// Inverted style for sessions waiting for input — high-visibility row highlight.
+pub fn waiting_inverted_style() -> Style {
+    Style::default()
+        .bg(Color::Magenta)
+        .fg(Color::White)
+        .add_modifier(Modifier::BOLD)
+}
+
+pub fn active_filter_style() -> Style {
+    Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
 }

@@ -1,12 +1,13 @@
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph, Wrap},
     Frame,
 };
 
 use crate::app::{CreateIssueField, CreateIssueForm, InstallScope, NewSwarmField, BLOCKING_LABELS};
-use crate::model::swarm::AgentType;
+use crate::model::swarm::{AgentType, ALL_AGENT_TYPES};
+use super::text_input::TextInput;
 use super::theme;
 
 pub fn render_runtime_dialog(
@@ -181,10 +182,10 @@ pub fn render_new_swarm_dialog(
     f: &mut Frame,
     area: Rect,
     field: &NewSwarmField,
-    input: &str,
+    input: &TextInput,
     repo_path: &str,
+    agent_type: &AgentType,
 ) {
-    // Use the full screen area with a bordered block
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" Launch New Swarm ")
@@ -195,11 +196,11 @@ pub fn render_new_swarm_dialog(
     f.render_widget(block, area);
 
     let chunks = Layout::vertical([
-        Constraint::Length(2),
-        Constraint::Length(2),
-        Constraint::Length(2),
-        Constraint::Min(0),
-        Constraint::Length(2),
+        Constraint::Length(2), // Instructions / context
+        Constraint::Length(2), // Field 1
+        Constraint::Length(2), // Field 2
+        Constraint::Length(2), // Field 3
+        Constraint::Length(2), // Help
     ])
     .split(inner);
 
@@ -211,11 +212,8 @@ pub fn render_new_swarm_dialog(
             )));
             f.render_widget(instructions, chunks[0]);
 
-            let input_display = format!(" > {}█", input);
-            let input_widget = Paragraph::new(Line::from(Span::styled(
-                input_display,
-                theme::input_style(),
-            )));
+            let input_line = input.render_line(" > ");
+            let input_widget = Paragraph::new(input_line);
             f.render_widget(input_widget, chunks[1]);
 
             let help = Paragraph::new(Line::from(vec![
@@ -228,7 +226,7 @@ pub fn render_new_swarm_dialog(
             ]));
             f.render_widget(help, chunks[4]);
         }
-        NewSwarmField::NumWorkers => {
+        NewSwarmField::RuntimeSelection => {
             let repo_display = format!(" Repo: {repo_path}");
             let repo_line = Paragraph::new(Line::from(Span::styled(
                 repo_display,
@@ -237,23 +235,144 @@ pub fn render_new_swarm_dialog(
             f.render_widget(repo_line, chunks[0]);
 
             let prompt = Paragraph::new(Line::from(Span::styled(
-                " Number of workers (↑/↓ to adjust):",
+                " Select runtime:",
                 theme::help_style(),
             )));
             f.render_widget(prompt, chunks[1]);
 
-            let input_display = format!(" > {}█", input);
-            let input_widget = Paragraph::new(Line::from(Span::styled(
-                input_display,
-                theme::input_style(),
+            // Render runtime options with selection indicator
+            let runtimes = [
+                (AgentType::Claude, "Claude", 'c'),
+                (AgentType::Codex, "Codex", 'x'),
+                (AgentType::Droid, "Droid", 'd'),
+                (AgentType::Gemini, "Gemini", 'g'),
+            ];
+
+            let mut spans = vec![Span::raw(" ")];
+            for (rt, name, key) in &runtimes {
+                let selected = rt == agent_type;
+                let indicator = if selected { "●" } else { "○" };
+                let style = if selected {
+                    theme::title_style()
+                } else {
+                    theme::help_style()
+                };
+                spans.push(Span::styled(format!(" {indicator} "), style));
+                spans.push(Span::styled(format!("{name}({key})"), style));
+                spans.push(Span::raw("  "));
+            }
+
+            let options = Paragraph::new(Line::from(spans));
+            f.render_widget(options, chunks[2]);
+
+            let help = Paragraph::new(Line::from(vec![
+                Span::styled(" ←/→", theme::title_style()),
+                Span::styled(" select  ", theme::help_style()),
+                Span::styled("Enter", theme::title_style()),
+                Span::styled(" confirm  ", theme::help_style()),
+                Span::styled("Esc", theme::title_style()),
+                Span::styled(" back", theme::help_style()),
+            ]));
+            f.render_widget(help, chunks[4]);
+        }
+        NewSwarmField::AgentRuntime => {
+            let repo_display = format!(" Repo: {repo_path}");
+            let repo_line = Paragraph::new(Line::from(Span::styled(
+                repo_display,
+                theme::help_style(),
             )));
-            f.render_widget(input_widget, chunks[2]);
+            f.render_widget(repo_line, chunks[0]);
+
+            let runtime_display = format!(" Runtime: {agent_type}");
+            let runtime_line = Paragraph::new(Line::from(Span::styled(
+                runtime_display,
+                theme::help_style(),
+            )));
+            f.render_widget(runtime_line, chunks[1]);
+
+            let prompt = Paragraph::new(Line::from(Span::styled(
+                " Select agent runtime:",
+                theme::help_style(),
+            )));
+            f.render_widget(prompt, chunks[2]);
+
+            // Show all agent types with the selected one highlighted
+            let type_spans: Vec<Span> = ALL_AGENT_TYPES
+                .iter()
+                .flat_map(|t| {
+                    let label = format!(" {} ", t);
+                    if *t == *agent_type {
+                        vec![Span::styled(
+                            format!("[{label}]"),
+                            theme::selected_style(),
+                        )]
+                    } else {
+                        vec![Span::styled(
+                            format!(" {label} "),
+                            theme::help_style(),
+                        )]
+                    }
+                })
+                .collect();
+            let type_widget = Paragraph::new(Line::from(type_spans));
+            f.render_widget(type_widget, chunks[2]);
+
+            let help = Paragraph::new(Line::from(vec![
+                Span::styled(" ↑/↓", theme::title_style()),
+                Span::styled(" select  ", theme::help_style()),
+                Span::styled("Enter", theme::title_style()),
+                Span::styled(" confirm  ", theme::help_style()),
+                Span::styled("Esc", theme::title_style()),
+                Span::styled(" back", theme::help_style()),
+            ]));
+            f.render_widget(help, chunks[4]);
+        }
+        NewSwarmField::NumWorkers => {
+            let repo_display = format!(" Repo: {repo_path}");
+            let repo_line = Paragraph::new(Span::styled(
+                repo_display,
+                theme::help_style(),
+            ))
+            .wrap(Wrap { trim: false });
+            f.render_widget(repo_line, chunks[0]);
+
+            let runtime_display = format!(" Runtime: {agent_type}");
+            let runtime_line = Paragraph::new(Line::from(Span::styled(
+                runtime_display,
+                theme::help_style(),
+            )));
+            f.render_widget(runtime_line, chunks[1]);
+
+            let prompt = Paragraph::new(Line::from(Span::styled(
+                " Number of workers (↑/↓ to adjust):",
+                theme::help_style(),
+            )));
+            f.render_widget(prompt, chunks[2]);
+
+            let input_line = input.render_line(" > ");
+            let input_widget = Paragraph::new(input_line);
+            f.render_widget(input_widget, chunks[3]);
 
             let help = Paragraph::new(Line::from(vec![
                 Span::styled(" Enter", theme::title_style()),
                 Span::styled(" launch  ", theme::help_style()),
+                Span::styled("↑↓", theme::title_style()),
+                Span::styled(" adjust  ", theme::help_style()),
                 Span::styled("Esc", theme::title_style()),
                 Span::styled(" back", theme::help_style()),
+            ]));
+            f.render_widget(help, chunks[4]);
+        }
+        NewSwarmField::Launching => {
+            let msg = Paragraph::new(Line::from(Span::styled(
+                " Launching swarm... please wait",
+                theme::title_style(),
+            )));
+            f.render_widget(msg, chunks[1]);
+
+            let help = Paragraph::new(Line::from(vec![
+                Span::styled(" Esc", theme::title_style()),
+                Span::styled(" cancel", theme::help_style()),
             ]));
             f.render_widget(help, chunks[4]);
         }
@@ -390,6 +509,7 @@ mod tests {
     };
     use crate::app::{CreateIssueForm, InstallScope, NewSwarmField};
     use crate::model::swarm::AgentType;
+    use crate::ui::text_input::TextInput;
     use ratatui::{backend::TestBackend, Terminal};
 
     fn rendered_text<F>(draw_fn: F) -> String
@@ -446,6 +566,7 @@ mod tests {
 
     #[test]
     fn new_swarm_dialog_shows_input_state() {
+        let input = TextInput::with_text("3".into());
         let rendered = rendered_text(|terminal| {
             terminal
                 .draw(|f| {
@@ -453,8 +574,9 @@ mod tests {
                         f,
                         f.area(),
                         &NewSwarmField::NumWorkers,
-                        "3",
+                        &input,
                         "/tmp/demo",
+                        &AgentType::Claude,
                     )
                 })
                 .unwrap();

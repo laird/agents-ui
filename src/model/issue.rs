@@ -1,5 +1,8 @@
+use anyhow::Result;
 use serde::Deserialize;
+use std::path::Path;
 use std::time::Instant;
+use tokio::process::Command;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum IssueState {
@@ -7,7 +10,7 @@ pub enum IssueState {
     Closed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IssueFilter {
     All,
     Open,
@@ -32,18 +35,63 @@ impl IssueFilter {
     }
 }
 
+/// Priority level parsed from GitHub issue labels.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum IssuePriority {
+    P0,
+    P1,
+    P2,
+    P3,
+    None,
+}
+
+impl std::fmt::Display for IssuePriority {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IssuePriority::P0 => write!(f, "P0"),
+            IssuePriority::P1 => write!(f, "P1"),
+            IssuePriority::P2 => write!(f, "P2"),
+            IssuePriority::P3 => write!(f, "P3"),
+            IssuePriority::None => write!(f, "—"),
+        }
+    }
+}
+
+/// Type of issue derived from labels.
+#[derive(Debug, Clone, PartialEq)]
+pub enum IssueType {
+    Bug,
+    Enhancement,
+    Proposal,
+    Other,
+}
+
+impl std::fmt::Display for IssueType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IssueType::Bug => write!(f, "bug"),
+            IssueType::Enhancement => write!(f, "enhancement"),
+            IssueType::Proposal => write!(f, "proposal"),
+            IssueType::Other => write!(f, ""),
+        }
+    }
+}
+
 /// A GitHub issue.
 #[derive(Debug, Clone)]
 pub struct GitHubIssue {
     pub number: u32,
     pub title: String,
     pub state: IssueState,
+    pub priority: IssuePriority,
+    pub issue_type: IssueType,
     pub labels: Vec<String>,
+    pub is_working: bool,
     /// Worker ID currently working on this issue, if any.
     pub assigned_worker: Option<String>,
 }
 
-const BLOCKING_LABELS: &[&str] = &[
+pub const BLOCKING_LABELS: &[&str] = &[
     "needs-design",
     "needs-clarification",
     "needs-approval",
@@ -63,7 +111,7 @@ impl GitHubIssue {
         self.labels.iter().any(|l| l == "working")
     }
 
-    pub fn priority(&self) -> Option<u8> {
+    pub fn priority_num(&self) -> Option<u8> {
         for label in &self.labels {
             if let Some(p) = label.strip_prefix('P') {
                 if let Ok(n) = p.parse::<u8>() {
@@ -75,7 +123,7 @@ impl GitHubIssue {
     }
 
     pub fn priority_label(&self) -> String {
-        self.priority()
+        self.priority_num()
             .map(|p| format!("P{p}"))
             .unwrap_or_else(|| "—".to_string())
     }
@@ -113,9 +161,11 @@ impl GitHubIssue {
 }
 
 /// Cached issues for a project.
+#[derive(Debug, Clone)]
 pub struct IssueCache {
     pub issues: Vec<GitHubIssue>,
     pub last_fetched: Option<Instant>,
+    pub is_loading: bool,
 }
 
 impl Default for IssueCache {
@@ -123,6 +173,35 @@ impl Default for IssueCache {
         Self {
             issues: Vec::new(),
             last_fetched: None,
+            is_loading: false,
+        }
+    }
+}
+
+impl IssueCache {
+    /// Count issues by priority.
+    pub fn priority_counts(&self) -> (usize, usize, usize, usize) {
+        let mut p0 = 0;
+        let mut p1 = 0;
+        let mut p2 = 0;
+        let mut p3 = 0;
+        for issue in &self.issues {
+            match issue.priority {
+                IssuePriority::P0 => p0 += 1,
+                IssuePriority::P1 => p1 += 1,
+                IssuePriority::P2 => p2 += 1,
+                IssuePriority::P3 => p3 += 1,
+                IssuePriority::None => {}
+            }
+        }
+        (p0, p1, p2, p3)
+    }
+
+    /// Filter issues by priority. `None` means show all.
+    pub fn filtered(&self, filter: Option<&IssuePriority>) -> Vec<&GitHubIssue> {
+        match filter {
+            Some(p) => self.issues.iter().filter(|i| &i.priority == p).collect(),
+            None => self.issues.iter().collect(),
         }
     }
 }
@@ -141,6 +220,32 @@ pub struct GhLabelJson {
     pub name: String,
 }
 
+fn labels_to_priority(labels: &[String]) -> IssuePriority {
+    if labels.iter().any(|l| l == "P0") {
+        IssuePriority::P0
+    } else if labels.iter().any(|l| l == "P1") {
+        IssuePriority::P1
+    } else if labels.iter().any(|l| l == "P2") {
+        IssuePriority::P2
+    } else if labels.iter().any(|l| l == "P3") {
+        IssuePriority::P3
+    } else {
+        IssuePriority::None
+    }
+}
+
+fn labels_to_type(labels: &[String]) -> IssueType {
+    if labels.iter().any(|l| l == "proposal") {
+        IssueType::Proposal
+    } else if labels.iter().any(|l| l == "enhancement") {
+        IssueType::Enhancement
+    } else if labels.iter().any(|l| l == "bug") {
+        IssueType::Bug
+    } else {
+        IssueType::Other
+    }
+}
+
 impl From<GhIssueJson> for GitHubIssue {
     fn from(raw: GhIssueJson) -> Self {
         let state = if raw.state == "OPEN" {
@@ -149,14 +254,84 @@ impl From<GhIssueJson> for GitHubIssue {
             IssueState::Closed
         };
         let labels: Vec<String> = raw.labels.into_iter().map(|l| l.name).collect();
+        let priority = labels_to_priority(&labels);
+        let issue_type = labels_to_type(&labels);
+        let is_working = labels.iter().any(|l| l == "working");
         GitHubIssue {
             number: raw.number,
             title: raw.title,
             state,
+            priority,
+            issue_type,
             labels,
+            is_working,
             assigned_worker: None,
         }
     }
+}
+
+/// Fetch open issues from GitHub using `gh` CLI.
+pub async fn fetch_issues(repo_path: &Path) -> Result<Vec<GitHubIssue>> {
+    let output = Command::new("gh")
+        .args([
+            "issue",
+            "list",
+            "--state",
+            "open",
+            "--json",
+            "number,title,labels",
+            "--limit",
+            "100",
+        ])
+        .current_dir(repo_path)
+        .output()
+        .await?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "gh issue list failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    let mut issues = Vec::new();
+
+    if let Some(arr) = json.as_array() {
+        for item in arr {
+            let number = item["number"].as_u64().unwrap_or(0) as u32;
+            let title = item["title"].as_str().unwrap_or("").to_string();
+
+            let labels: Vec<String> = item["labels"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|l| l["name"].as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let priority = labels_to_priority(&labels);
+            let issue_type = labels_to_type(&labels);
+            let is_working = labels.iter().any(|l| l == "working");
+
+            issues.push(GitHubIssue {
+                number,
+                title,
+                state: IssueState::Open,
+                priority,
+                issue_type,
+                labels,
+                is_working,
+                assigned_worker: None,
+            });
+        }
+    }
+
+    // Sort by priority then number
+    issues.sort_by(|a, b| a.priority.cmp(&b.priority).then(a.number.cmp(&b.number)));
+
+    Ok(issues)
 }
 
 #[cfg(test)]
@@ -164,11 +339,18 @@ mod tests {
     use super::*;
 
     fn make_issue(number: u32, labels: &[&str]) -> GitHubIssue {
+        let label_vec: Vec<String> = labels.iter().map(|s| s.to_string()).collect();
+        let priority = labels_to_priority(&label_vec);
+        let issue_type = labels_to_type(&label_vec);
+        let is_working = label_vec.iter().any(|l| l == "working");
         GitHubIssue {
             number,
             title: format!("Issue #{number}"),
             state: IssueState::Open,
-            labels: labels.iter().map(|s| s.to_string()).collect(),
+            priority,
+            issue_type,
+            labels: label_vec,
+            is_working,
             assigned_worker: None,
         }
     }
@@ -194,9 +376,9 @@ mod tests {
 
     #[test]
     fn priority_extraction() {
-        assert_eq!(make_issue(1, &["P0", "bug"]).priority(), Some(0));
-        assert_eq!(make_issue(2, &["P2"]).priority(), Some(2));
-        assert_eq!(make_issue(3, &["bug"]).priority(), None);
+        assert_eq!(make_issue(1, &["P0", "bug"]).priority, IssuePriority::P0);
+        assert_eq!(make_issue(2, &["P2"]).priority, IssuePriority::P2);
+        assert_eq!(make_issue(3, &["bug"]).priority, IssuePriority::None);
     }
 
     #[test]
@@ -228,5 +410,19 @@ mod tests {
         assert_eq!(make_issue(1, &["bug"]).status_label(), "available");
         assert!(make_issue(2, &["working"]).status_label().contains("working"));
         assert!(make_issue(3, &["needs-design"]).status_label().contains("needs-design"));
+    }
+
+    #[test]
+    fn priority_counts_work() {
+        let mut cache = IssueCache::default();
+        cache.issues.push(make_issue(1, &["P0"]));
+        cache.issues.push(make_issue(2, &["P1"]));
+        cache.issues.push(make_issue(3, &["P1"]));
+        cache.issues.push(make_issue(4, &["P2"]));
+        let (p0, p1, p2, p3) = cache.priority_counts();
+        assert_eq!(p0, 1);
+        assert_eq!(p1, 2);
+        assert_eq!(p2, 1);
+        assert_eq!(p3, 0);
     }
 }

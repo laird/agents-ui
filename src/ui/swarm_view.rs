@@ -63,18 +63,30 @@ impl SwarmView {
             .filter(|i| i.matches_filter(self.issue_filter))
             .collect();
 
+        let blocked_issue_list: Vec<&GitHubIssue> = issues
+            .iter()
+            .filter(|i| i.is_blocked())
+            .collect();
+        let blocked_issues = blocked_issue_list.len();
+        let attention_height = if blocked_issues > 0 { 1u16 } else { 0u16 };
+
         let chunks = Layout::vertical([
-            Constraint::Length(1),             // Header line
-            Constraint::Min(4),               // Body (manager + workers/issues)
-            Constraint::Length(2),            // Help bar
+            Constraint::Length(1),                      // Header line
+            Constraint::Length(attention_height),       // Attention row (collapsed when no blocked issues)
+            Constraint::Min(4),                         // Body (manager + workers/issues)
+            Constraint::Length(2),                      // Help bar
         ])
         .split(area);
 
+        // Size bottom panel to fit the longer of workers or issues (+3 for borders+header row)
+        // but never more than 50% of the body area so the manager always has room
+        let max_bottom = chunks[2].height / 2;
+        let bottom_rows = ((swarm.workers.len().max(filtered_issues.len()) + 3) as u16).min(max_bottom);
         let body_chunks = Layout::vertical([
-            Constraint::Percentage(50),
-            Constraint::Percentage(50),
+            Constraint::Min(4),               // Manager gets all remaining space
+            Constraint::Length(bottom_rows),   // Workers/Issues: sized to fit content
         ])
-        .split(chunks[1]);
+        .split(chunks[2]);
 
         // --- Header line ---
         let attention = count_attention(swarm, issues);
@@ -82,7 +94,6 @@ impl SwarmView {
         let total_workers = swarm.workers.len();
         let idle = total_workers - working;
         let avail_issues = issues.iter().filter(|i| !i.is_blocked() && !i.is_being_worked() && i.state == crate::model::issue::IssueState::Open).count();
-        let blocked_issues = issues.iter().filter(|i| i.is_blocked()).count();
 
         let mut header_spans = vec![
             Span::styled(format!(" {} ", swarm.project_name), theme::title_style()),
@@ -102,6 +113,42 @@ impl SwarmView {
         }
         let header = Paragraph::new(Line::from(header_spans));
         f.render_widget(header, chunks[0]);
+
+        // --- Attention row: inline blocked issue summary ---
+        if blocked_issues > 0 {
+            let shown: Vec<&GitHubIssue> = blocked_issue_list.iter().copied().take(3).collect();
+            let mut attention_spans = vec![
+                Span::styled(" ⚠ Needs attention: ", theme::attention_style()),
+            ];
+            for (i, issue) in shown.iter().enumerate() {
+                if i > 0 {
+                    attention_spans.push(Span::styled("  ", theme::help_style()));
+                }
+                let blocking = issue.labels.iter()
+                    .find(|l| crate::model::issue::BLOCKING_LABELS.contains(&l.as_str()))
+                    .map(|s| s.as_str())
+                    .unwrap_or("blocked");
+                let title = if issue.title.len() > 28 {
+                    format!("{}…", &issue.title[..27])
+                } else {
+                    issue.title.clone()
+                };
+                attention_spans.push(Span::styled(
+                    format!("#{} [{}] {}", issue.number, blocking, title),
+                    theme::attention_style(),
+                ));
+            }
+            if blocked_issues > 3 {
+                attention_spans.push(Span::styled(
+                    format!("  … and {} more (Tab→Issues)", blocked_issues - 3),
+                    theme::help_style(),
+                ));
+            } else {
+                attention_spans.push(Span::styled("  g: open in browser", theme::help_style()));
+            }
+            let attention_row = Paragraph::new(Line::from(attention_spans));
+            f.render_widget(attention_row, chunks[1]);
+        }
 
         // --- Manager panel ---
         let manager_content = &swarm.manager.pane_content;
@@ -304,7 +351,7 @@ impl SwarmView {
             ],
         };
         let help = Paragraph::new(Line::from(help_spans));
-        f.render_widget(help, chunks[2]);
+        f.render_widget(help, chunks[3]);
     }
 
     pub fn scroll_manager_up(&mut self, amount: u16) {
@@ -440,6 +487,9 @@ mod tests {
             is_manager,
             pane_content: pane_content.to_string(),
             dispatched_issue: None,
+            current_issue: None,
+            current_issue_title: None,
+            waiting_for_input: false,
         }
     }
 
@@ -457,6 +507,7 @@ mod tests {
                 "working issue #12",
                 AgentState::Working { issue: Some(12) },
             )],
+            issue_cache: crate::model::issue::IssueCache::default(),
         }
     }
 
@@ -478,6 +529,9 @@ mod tests {
             state: IssueState::Open,
             labels: vec!["P1".to_string()],
             assigned_worker: Some("worker-1".to_string()),
+            priority: crate::model::issue::IssuePriority::P1,
+            issue_type: crate::model::issue::IssueType::Bug,
+            is_working: true,
         }];
 
         terminal

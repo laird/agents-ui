@@ -76,3 +76,27 @@ src/
 - Keystroke passthrough in agent view — all keys forwarded to tmux pane except: double-Esc (back), Alt+0-9/m (navigation), PgUp/PgDn (scroll).
 - The autocoder plugin is auto-installed via `claude plugin marketplace add laird/agents` + `claude plugin install autocoder` if not present.
 - Claude is launched with `--append-system-prompt` to force tmux (not cmux) usage.
+
+## Automated Testing & Issue Management
+
+This section configures the `/fix` command for autonomous issue resolution.
+
+### Regression Test Suite
+```bash
+cargo test
+```
+
+### Build Verification
+```bash
+cargo build
+```
+
+### Test Framework Details
+
+**Unit Tests**:
+- Framework: Rust built-in test framework
+- Location: inline `#[cfg(test)]` modules in each source file
+
+**Test Reports**:
+- Location: `docs/test/regression-reports/`
+

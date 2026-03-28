@@ -55,9 +55,23 @@ impl ReposListView {
         } else {
             String::new()
         };
+        let version = env!("CARGO_PKG_VERSION");
+        let left_text = format!("  Agents UI{title_info}");
+        let right_text = format!("v{version} ");
+        // Pad between left and right to fill the width
+        let width = chunks[0].width as usize;
+        let left_len = left_text.len();
+        let right_len = right_text.len();
+        let padding = if width > left_len + right_len {
+            " ".repeat(width - left_len - right_len)
+        } else {
+            " ".to_string()
+        };
         let title = Paragraph::new(Line::from(vec![
             Span::styled("  Agents UI", theme::title_style()),
             Span::styled(title_info, theme::help_style()),
+            Span::raw(padding),
+            Span::styled(right_text, theme::help_style()),
         ]))
         .block(Block::default().borders(Borders::BOTTOM));
         f.render_widget(title, chunks[0]);
@@ -90,11 +104,7 @@ impl ReposListView {
             for s in swarms {
                 let busy = s.busy_count();
                 let total = s.workers.len();
-                let swarm_issues = issue_caches
-                    .get(&s.project_name)
-                    .map(|c| c.issues.as_slice())
-                    .unwrap_or(&[]);
-                let waiting = count_attention(s, swarm_issues);
+                let waiting = count_attention(s, &s.issue_cache.issues);
 
                 // Build issue priority summary from cache
                 let issue_summary = if let Some(cache) = issue_caches.get(&s.project_name) {
@@ -106,7 +116,7 @@ impl ReposListView {
                     } else {
                         let mut counts = [0u32; 4]; // P0, P1, P2, P3
                         for issue in &open_issues {
-                            if let Some(p) = issue.priority() {
+                            if let Some(p) = issue.priority_num() {
                                 if (p as usize) < 4 {
                                     counts[p as usize] += 1;
                                 }
@@ -263,6 +273,9 @@ mod tests {
             is_manager,
             pane_content: String::new(),
             dispatched_issue: None,
+            current_issue: None,
+            current_issue_title: None,
+            waiting_for_input: false,
         }
     }
 
@@ -275,6 +288,7 @@ mod tests {
             tmux_session: "codex-demo".to_string(),
             manager: make_agent("manager", true),
             workers: vec![make_agent("worker-1", false)],
+            issue_cache: crate::model::issue::IssueCache::default(),
         }
     }
 
