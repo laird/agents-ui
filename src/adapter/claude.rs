@@ -92,6 +92,18 @@ impl ClaudeAdapter {
             progress(&format!("⚠️  Manager failed: {e}\n"));
         } else {
             progress("✅ Manager started\n");
+            if let Some(cmd) = manager_bootstrap_cmd(runtime) {
+                progress("⏳ Waiting for manager to be ready...\n");
+                if Self::wait_for_claude_ready(&self.transport, &manager_target).await {
+                    progress(&format!("⏳ Sending {cmd} to manager...\n"));
+                    proxy::send_keys(&self.transport, &manager_target, &cmd)
+                        .await
+                        .ok();
+                    progress("✅ Manager running manage-loop\n");
+                } else {
+                    progress("⚠️  Manager not ready in time, manage-loop not started\n");
+                }
+            }
         }
 
         progress("\n🎉 Swarm launched!\n");
