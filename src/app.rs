@@ -1821,6 +1821,12 @@ impl App {
             return Ok(());
         }
 
+        // L key: jump directly to Issues panel
+        if key.code == KeyCode::Char('L') {
+            self.swarm_focus = SwarmPanel::Issues;
+            return Ok(());
+        }
+
         match self.swarm_focus {
             SwarmPanel::Manager => {
                 // Manager pane: passthrough all keys to tmux
