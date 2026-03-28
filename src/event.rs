@@ -32,6 +32,11 @@ pub enum Event {
         project_name: String,
         message: String,
     },
+    /// Fetched issue body text for display in IssueView
+    IssueFetched {
+        issue_number: u32,
+        body: String,
+    },
 }
 
 pub struct EventHandler {

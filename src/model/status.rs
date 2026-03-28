@@ -1,4 +1,5 @@
 use chrono::NaiveDateTime;
+use std::collections::HashMap;
 use std::path::Path;
 
 /// The state of an individual agent.
@@ -116,9 +117,71 @@ pub fn read_status_file(path: &Path) -> AgentStatus {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct JsonAgentStatus {
+    pub status: String,
+    pub issue: Option<u32>,
+    pub title: Option<String>,
+}
+
+/// Read all agent status files from /tmp/agents-ui/.
+/// Returns a map from pane identifier (e.g., "claude-agents-ui:2.0") to status.
+pub fn read_json_status_files() -> HashMap<String, JsonAgentStatus> {
+    let mut result = HashMap::new();
+    let dir = Path::new("/tmp/agents-ui");
+    if !dir.exists() {
+        return result;
+    }
+
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+
+            let key = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string();
+
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                    // Check if this is a monitor summary with a "workers" array
+                    if let Some(workers) = val.get("workers").and_then(|v| v.as_array()) {
+                        for w in workers {
+                            let pane = w.get("pane").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            if pane.is_empty() { continue; }
+                            let status = w.get("status").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+                            let issue = w.get("issue").and_then(|v| v.as_u64()).map(|n| n as u32);
+                            let title = w.get("title").and_then(|v| v.as_str()).map(|s| s.to_string());
+                            result.insert(pane, JsonAgentStatus { status, issue, title });
+                        }
+                    } else {
+                        // Per-worker status file (written by /fix)
+                        let status = val
+                            .get("status")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        let issue = val.get("issue").and_then(|v| v.as_u64()).map(|n| n as u32);
+                        let title = val
+                            .get("title")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                        result.insert(key, JsonAgentStatus { status, issue, title });
+                    }
+                }
+            }
+        }
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{parse_status_line, read_status_file, AgentState};
+    use super::{parse_status_line, read_json_status_files, read_status_file, AgentState};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_status_path(name: &str) -> std::path::PathBuf {
@@ -162,5 +225,64 @@ mod tests {
         assert!(matches!(status.state, AgentState::Working { issue: Some(77) }));
 
         std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn reads_json_status_files_from_tmp() {
+        let dir = std::env::temp_dir().join(format!(
+            "agents-ui-json-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Write a working status file
+        std::fs::write(
+            dir.join("claude-test:1.0.json"),
+            r#"{"status": "working", "issue": 42, "title": "Fix the bug"}"#,
+        )
+        .unwrap();
+
+        // Write an idle status file
+        std::fs::write(
+            dir.join("claude-test:2.0.json"),
+            r#"{"status": "idle"}"#,
+        )
+        .unwrap();
+
+        // Write a non-json file (should be ignored)
+        std::fs::write(dir.join("readme.txt"), "not json").unwrap();
+
+        // Temporarily override the path by calling the internal logic directly
+        let mut result = std::collections::HashMap::new();
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let key = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                    let status = val.get("status").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+                    let issue = val.get("issue").and_then(|v| v.as_u64()).map(|n| n as u32);
+                    let title = val.get("title").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    result.insert(key, super::JsonAgentStatus { status, issue, title });
+                }
+            }
+        }
+
+        assert_eq!(result.len(), 2);
+        let working = result.get("claude-test:1.0").unwrap();
+        assert_eq!(working.status, "working");
+        assert_eq!(working.issue, Some(42));
+        assert_eq!(working.title.as_deref(), Some("Fix the bug"));
+
+        let idle = result.get("claude-test:2.0").unwrap();
+        assert_eq!(idle.status, "idle");
+        assert_eq!(idle.issue, None);
+
+        // Also verify read_json_status_files doesn't crash on missing dir
+        let _ = read_json_status_files();
+
+        std::fs::remove_dir_all(dir).ok();
     }
 }

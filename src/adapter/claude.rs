@@ -436,6 +436,8 @@ impl ClaudeAdapter {
             is_manager: true,
             pane_content: String::new(),
             dispatched_issue: None,
+            current_issue: None,
+            current_issue_title: None,
         };
 
         let mut workers = Vec::new();
@@ -480,6 +482,8 @@ impl ClaudeAdapter {
                     is_manager: false,
                     pane_content: String::new(),
                     dispatched_issue: None,
+                    current_issue: None,
+                    current_issue_title: None,
                 });
                 worker_num += 1;
             }
@@ -845,6 +849,8 @@ impl AgentRuntime for ClaudeAdapter {
             is_manager: false,
             pane_content: String::new(),
             dispatched_issue: None,
+            current_issue: None,
+            current_issue_title: None,
         })
     }
 
@@ -908,6 +914,10 @@ impl AgentRuntime for ClaudeAdapter {
             .await?;
 
         Ok(())
+    }
+
+    async fn revive_agents(&self, swarm: &Swarm) -> Result<()> {
+        self.ensure_swarm_agents_running(swarm).await
     }
 }
 
@@ -994,6 +1004,18 @@ fn classify_pane_state(content: &str) -> PaneState {
     }
     if saw_idle_prompt || (saw_agent_indicator && !saw_busy_indicator) {
         return PaneState::AgentIdle;
+    }
+
+    // Agent exited with an "update yourself and restart" message
+    for line in non_empty_lines.iter().take(5) {
+        let lower = line.trim().to_lowercase();
+        if lower.contains("please restart codex")
+            || lower.contains("update ran successfully")
+            || lower.contains("please restart claude")
+            || lower.contains("restart to apply")
+        {
+            return PaneState::NeedsLaunch;
+        }
     }
 
     // Check for shell prompt (bare command line, no agent)

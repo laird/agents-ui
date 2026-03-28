@@ -125,6 +125,10 @@ pub struct AgentInfo {
     pub pane_content: String,
     /// Issue number currently assigned by the TUI dispatcher (None = unassigned)
     pub dispatched_issue: Option<u32>,
+    /// Current issue number from JSON status file
+    pub current_issue: Option<u32>,
+    /// Current issue title from JSON status file
+    pub current_issue_title: Option<String>,
 }
 
 /// A swarm of agents working on one repo.

@@ -37,4 +37,7 @@ pub trait AgentRuntime {
 
     /// Terminate and clean up a swarm.
     async fn teardown(&self, swarm: &Swarm) -> Result<()>;
+
+    /// Re-launch any agents that have dropped back to a shell (e.g. after a self-update).
+    async fn revive_agents(&self, swarm: &Swarm) -> Result<()>;
 }

@@ -55,9 +55,23 @@ impl ReposListView {
         } else {
             String::new()
         };
+        let version = env!("CARGO_PKG_VERSION");
+        let left_text = format!("  Agents UI{title_info}");
+        let right_text = format!("v{version} ");
+        // Pad between left and right to fill the width
+        let width = chunks[0].width as usize;
+        let left_len = left_text.len();
+        let right_len = right_text.len();
+        let padding = if width > left_len + right_len {
+            " ".repeat(width - left_len - right_len)
+        } else {
+            " ".to_string()
+        };
         let title = Paragraph::new(Line::from(vec![
             Span::styled("  Agents UI", theme::title_style()),
             Span::styled(title_info, theme::help_style()),
+            Span::raw(padding),
+            Span::styled(right_text, theme::help_style()),
         ]))
         .block(Block::default().borders(Borders::BOTTOM));
         f.render_widget(title, chunks[0]);
@@ -259,6 +273,8 @@ mod tests {
             is_manager,
             pane_content: String::new(),
             dispatched_issue: None,
+            current_issue: None,
+            current_issue_title: None,
         }
     }
 

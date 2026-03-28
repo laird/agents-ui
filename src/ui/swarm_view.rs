@@ -45,7 +45,7 @@ impl SwarmView {
             manager_scroll: 0,
             workers_table,
             issues_table,
-            issue_filter: IssueFilter::Open,
+            issue_filter: IssueFilter::All,
         }
     }
 
@@ -70,9 +70,13 @@ impl SwarmView {
         ])
         .split(area);
 
+        // Size bottom panel to fit the longer of workers or issues (+3 for borders+header row)
+        // but never more than 50% of the body area so the manager always has room
+        let max_bottom = chunks[1].height / 2;
+        let bottom_rows = ((swarm.workers.len().max(filtered_issues.len()) + 3) as u16).min(max_bottom);
         let body_chunks = Layout::vertical([
-            Constraint::Percentage(50),
-            Constraint::Percentage(50),
+            Constraint::Min(4),               // Manager gets all remaining space
+            Constraint::Length(bottom_rows),   // Workers/Issues: sized to fit content
         ])
         .split(chunks[1]);
 
@@ -162,11 +166,20 @@ impl SwarmView {
                 } else {
                     theme::status_style(&w.status.state)
                 };
-                let task = match &w.status.state {
-                    crate::model::status::AgentState::Working { issue: Some(n) } => {
-                        format!("#{n}")
+                let task = if let Some(issue_num) = w.current_issue {
+                    let title = w.current_issue_title.as_deref().unwrap_or("");
+                    if title.is_empty() {
+                        format!("#{issue_num}")
+                    } else {
+                        format!("#{issue_num} {}", truncate(title, 25))
                     }
-                    _ => "—".to_string(),
+                } else {
+                    match &w.status.state {
+                        crate::model::status::AgentState::Working { issue: Some(n) } => {
+                            format!("#{n}")
+                        }
+                        _ => "\u{2014}".to_string(),
+                    }
                 };
                 Row::new(vec![
                     Cell::from(format!("{}", i + 1)),
@@ -217,11 +230,18 @@ impl SwarmView {
             .iter()
             .map(|issue| {
                 let status = issue.status_label();
+                let status_style = if issue.is_being_worked() {
+                    Style::default().fg(ratatui::style::Color::Green)
+                } else if issue.is_blocked() {
+                    Style::default().fg(ratatui::style::Color::Yellow)
+                } else {
+                    Style::default().fg(ratatui::style::Color::Gray)
+                };
                 Row::new(vec![
                     Cell::from(format!("{}", issue.number)),
                     Cell::from(issue.priority_label()),
                     Cell::from(truncate(&issue.title, 30)),
-                    Cell::from(status),
+                    Cell::from(status).style(status_style),
                 ])
             })
             .collect();
@@ -297,8 +317,10 @@ impl SwarmView {
                 Span::styled(" review-blocked  ", theme::help_style()),
                 Span::styled("f", theme::title_style()),
                 Span::styled(" filter  ", theme::help_style()),
+                Span::styled("Enter", theme::title_style()),
+                Span::styled(" view  ", theme::help_style()),
                 Span::styled("g", theme::title_style()),
-                Span::styled(" gh issue  ", theme::help_style()),
+                Span::styled(" browser  ", theme::help_style()),
                 Span::styled("⌥a", theme::title_style()),
                 Span::styled(" next alert", theme::help_style()),
             ],
@@ -439,6 +461,8 @@ mod tests {
             is_manager,
             pane_content: pane_content.to_string(),
             dispatched_issue: None,
+            current_issue: None,
+            current_issue_title: None,
         }
     }
 
@@ -494,7 +518,7 @@ mod tests {
 
         assert!(rendered.contains("Manager"));
         assert!(rendered.contains("Workers (1)"));
-        assert!(rendered.contains("Issues (open: 1)"));
+        assert!(rendered.contains("Issues (all: 1)"));
         assert!(rendered.contains("demo"));
         assert!(rendered.contains("#12"));
     }
