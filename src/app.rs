@@ -1682,6 +1682,34 @@ impl App {
     }
 
     async fn handle_repo_view_key(&mut self, key: KeyEvent, swarm_idx: usize) -> Result<()> {
+        // Handle teardown confirmation from Repo View
+        if let Some(idx) = self.confirm_teardown {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    if idx < self.swarms.len() {
+                        let swarm = self.swarms[idx].clone();
+                        let project = swarm.project_name.clone();
+                        self.status_message = Some(format!("Tearing down {project}..."));
+                        if let Err(e) = self.adapter.teardown(&swarm).await {
+                            self.status_message = Some(format!("Teardown error: {e}"));
+                        } else {
+                            self.swarms.remove(idx);
+                            self.start_all_pane_watchers();
+                            self.scan_available_repos();
+                            self.status_message = Some(format!("Torn down {project}"));
+                            self.screen = Screen::ReposList;
+                        }
+                    }
+                    self.confirm_teardown = None;
+                }
+                _ => {
+                    self.confirm_teardown = None;
+                    self.status_message = Some("Teardown cancelled".to_string());
+                }
+            }
+            return Ok(());
+        }
+
         // Handle create-issue dialog input
         if let Some(ref mut form) = self.create_issue_form {
             match key.code {
@@ -1902,6 +1930,14 @@ impl App {
                                     self.status_message = Some(format!("Shutting down {id}..."));
                                 }
                             }
+                        }
+                    }
+                    KeyCode::Char('T') => {
+                        // Teardown entire swarm (with confirmation)
+                        if swarm_idx < self.swarms.len() {
+                            let project = self.swarms[swarm_idx].project_name.clone();
+                            self.confirm_teardown = Some(swarm_idx);
+                            self.status_message = Some(format!("Teardown swarm {project}? (y to confirm, any other key to cancel)"));
                         }
                     }
                     KeyCode::Char(c @ '1'..='9') => {
