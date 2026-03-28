@@ -1815,6 +1815,7 @@ impl App {
 
         // Tab cycles focus: Manager → Workers → Issues → Manager
         if key.code == KeyCode::Tab {
+            self.swarm_view.search_query = None;
             self.swarm_focus = self.swarm_focus.next();
             return Ok(());
         }
@@ -1959,6 +1960,33 @@ impl App {
                 }
             }
             SwarmPanel::Issues => {
+                // Search mode intercepts all input
+                if self.swarm_view.search_query.is_some() {
+                    match key.code {
+                        KeyCode::Esc => {
+                            self.swarm_view.search_query = None;
+                            self.swarm_view.issues_table.select(Some(0));
+                        }
+                        KeyCode::Enter => {
+                            self.swarm_view.search_query = None;
+                        }
+                        KeyCode::Backspace => {
+                            if let Some(q) = self.swarm_view.search_query.as_mut() {
+                                q.pop();
+                            }
+                            self.swarm_view.issues_table.select(Some(0));
+                        }
+                        KeyCode::Char(c) => {
+                            if let Some(q) = self.swarm_view.search_query.as_mut() {
+                                q.push(c);
+                            }
+                            self.swarm_view.issues_table.select(Some(0));
+                        }
+                        _ => {}
+                    }
+                    return Ok(());
+                }
+
                 let issue_count = self.swarms.get(swarm_idx)
                     .and_then(|s| self.issue_caches.get(&s.project_name))
                     .map(|c| c.issues.iter().filter(|i| i.matches_filter(self.swarm_view.issue_filter)).count())
@@ -2122,6 +2150,10 @@ impl App {
                     KeyCode::Char('d') | KeyCode::Char(' ') => {
                         // Dispatch selected issue to an idle worker
                         self.dispatch_selected_issue(swarm_idx).await;
+                    }
+                    KeyCode::Char('/') => {
+                        self.swarm_view.search_query = Some(String::new());
+                        self.swarm_view.issues_table.select(Some(0));
                     }
                     _ => {}
                 }

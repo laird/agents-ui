@@ -33,6 +33,8 @@ pub struct SwarmView {
     pub workers_table: TableState,
     pub issues_table: TableState,
     pub issue_filter: IssueFilter,
+    /// Active search query (None = not searching, Some("") = searching with empty query).
+    pub search_query: Option<String>,
 }
 
 impl SwarmView {
@@ -46,6 +48,7 @@ impl SwarmView {
             workers_table,
             issues_table,
             issue_filter: IssueFilter::All,
+            search_query: None,
         }
     }
 
@@ -61,6 +64,23 @@ impl SwarmView {
         let filtered_issues: Vec<&GitHubIssue> = issues
             .iter()
             .filter(|i| i.matches_filter(self.issue_filter))
+            .filter(|i| {
+                if let Some(q) = &self.search_query {
+                    if q.is_empty() {
+                        return true;
+                    }
+                    let q_lower = q.to_lowercase();
+                    if q.starts_with('#') {
+                        if let Ok(n) = q[1..].parse::<u32>() {
+                            return i.number == n;
+                        }
+                    }
+                    i.title.to_lowercase().contains(&q_lower)
+                        || i.number.to_string().contains(q.as_str())
+                } else {
+                    true
+                }
+            })
             .collect();
 
         // Pre-compute attention data before layout (needed for dynamic sizing)
@@ -255,6 +275,32 @@ impl SwarmView {
 
         // Issues table
         let filter_label = self.issue_filter.label();
+
+        // Split issues area: optional 1-line search bar + table
+        let is_searching = self.search_query.is_some();
+        let issues_col = bottom_cols[1];
+        let (search_area, table_area) = if is_searching {
+            let parts = Layout::vertical([
+                Constraint::Length(1),
+                Constraint::Min(1),
+            ])
+            .split(issues_col);
+            (Some(parts[0]), parts[1])
+        } else {
+            (None, issues_col)
+        };
+
+        // Render search bar
+        if let (Some(area), Some(query)) = (search_area, &self.search_query) {
+            let bar = Paragraph::new(Line::from(vec![
+                Span::styled(" / ", theme::title_style()),
+                Span::styled(query.as_str(), Style::default().fg(ratatui::style::Color::White)),
+                Span::styled("█", Style::default().fg(ratatui::style::Color::White)),
+                Span::styled("  Esc clear  Enter confirm", theme::help_style()),
+            ]));
+            f.render_widget(bar, area);
+        }
+
         let issue_header = Row::new(vec![
             Cell::from("#"),
             Cell::from("Pri"),
@@ -309,7 +355,7 @@ impl SwarmView {
             Style::default()
         });
 
-        f.render_stateful_widget(issues_table, bottom_cols[1], &mut self.issues_table);
+        f.render_stateful_widget(issues_table, table_area, &mut self.issues_table);
 
         // --- Help bar ---
         let help_spans = match focus {
@@ -348,8 +394,6 @@ impl SwarmView {
                 Span::styled(" dispatch  ", theme::help_style()),
                 Span::styled("a", theme::title_style()),
                 Span::styled(" add  ", theme::help_style()),
-                Span::styled("d", theme::title_style()),
-                Span::styled(" dispatch  ", theme::help_style()),
                 Span::styled("p", theme::title_style()),
                 Span::styled(" approve  ", theme::help_style()),
                 Span::styled("b", theme::title_style()),
@@ -358,6 +402,8 @@ impl SwarmView {
                 Span::styled(" review-blocked  ", theme::help_style()),
                 Span::styled("f", theme::title_style()),
                 Span::styled(" filter  ", theme::help_style()),
+                Span::styled("/", theme::title_style()),
+                Span::styled(" search  ", theme::help_style()),
                 Span::styled("Enter", theme::title_style()),
                 Span::styled(" view  ", theme::help_style()),
                 Span::styled("g", theme::title_style()),
