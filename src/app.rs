@@ -34,6 +34,8 @@ pub enum Screen {
     IssueView { swarm_idx: usize, issue_number: u32 },
     /// View full issue details (body, labels, state).
     IssueDetail { swarm_idx: usize },
+    /// Full-screen issue list for a swarm (opened with 'L' from RepoView).
+    IssueList { swarm_idx: usize },
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +44,7 @@ pub enum NewSwarmField {
     AgentRuntime,
     RuntimeSelection,
     NumWorkers,
+    #[allow(dead_code)]
     Launching,
 }
 
@@ -241,6 +244,7 @@ pub struct App {
     /// Issue detail view state.
     pub issue_detail_view: Option<IssueDetailView>,
     /// Tracks last Esc press for double-Esc to go back (never forwarded to pane).
+    #[allow(dead_code)]
     last_esc: Option<std::time::Instant>,
     /// App-level keybinding configuration.
     pub keybindings: crate::config::keybindings::KeyBindings,
@@ -447,6 +451,15 @@ impl App {
                             view.render(f, area);
                         }
                     }
+                    Screen::IssueList { swarm_idx } => {
+                        if let Some(swarm) = self.swarms.get(*swarm_idx) {
+                            let issues = self.issue_caches
+                                .get(&swarm.project_name)
+                                .map(|c| c.issues.clone())
+                                .unwrap_or_default();
+                            self.swarm_view.render_issue_list(f, area, &swarm.project_name, &issues);
+                        }
+                    }
                 }
 
                 // Shortcuts viewer overlay
@@ -486,6 +499,10 @@ impl App {
                 }
                 Screen::IssueView { swarm_idx, .. } if *swarm_idx >= self.swarms.len() => {
                     tracing::warn!("IssueView points to invalid swarm_idx {}, falling back", swarm_idx);
+                    self.screen = Screen::ReposList;
+                }
+                Screen::IssueList { swarm_idx } if *swarm_idx >= self.swarms.len() => {
+                    tracing::warn!("IssueList points to invalid swarm_idx {}, falling back", swarm_idx);
                     self.screen = Screen::ReposList;
                 }
                 Screen::RuntimeSelect | Screen::InstallScopeSelect => {}
@@ -598,7 +615,7 @@ impl App {
                     Screen::RepoView { swarm_idx } => {
                         self.swarms.get(*swarm_idx).map(|s| s.project_name.clone())
                     }
-                    Screen::AgentView { swarm_idx, .. } | Screen::IssueView { swarm_idx, .. } => {
+                    Screen::AgentView { swarm_idx, .. } | Screen::IssueView { swarm_idx, .. } | Screen::IssueList { swarm_idx } => {
                         self.swarms.get(*swarm_idx).map(|s| s.project_name.clone())
                     }
                     _ => None,
@@ -657,6 +674,7 @@ impl App {
 
     /// Convert a crossterm KeyEvent to a tmux send-keys argument.
     /// Returns (key_string, literal) where literal means use -l flag.
+    #[allow(dead_code)]
     fn key_to_tmux(key: &KeyEvent) -> Option<(String, bool)> {
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             if let KeyCode::Char(c) = key.code {
@@ -744,7 +762,7 @@ impl App {
         // Global: Alt+Left goes back one level
         if key.modifiers.contains(KeyModifiers::ALT) && key.code == KeyCode::Left {
             match &self.screen {
-                Screen::AgentView { swarm_idx, .. } | Screen::IssueView { swarm_idx, .. } | Screen::IssueDetail { swarm_idx, .. } => {
+                Screen::AgentView { swarm_idx, .. } | Screen::IssueView { swarm_idx, .. } | Screen::IssueDetail { swarm_idx, .. } | Screen::IssueList { swarm_idx } => {
                     let idx = *swarm_idx;
                     self.enter_repo_view(idx).await;
                 }
@@ -769,7 +787,7 @@ impl App {
                 // Find the current swarm index (use 0 if on repos list)
                 let swarm_idx = match &self.screen {
                     Screen::RepoView { swarm_idx } => *swarm_idx,
-                    Screen::AgentView { swarm_idx, .. } | Screen::IssueView { swarm_idx, .. } => *swarm_idx,
+                    Screen::AgentView { swarm_idx, .. } | Screen::IssueView { swarm_idx, .. } | Screen::IssueList { swarm_idx } => *swarm_idx,
                     _ => {
                         // From repos list, use the selected swarm or first one
                         self.repos_list.selected().unwrap_or(0)
@@ -779,7 +797,7 @@ impl App {
                 if c == '0' {
                     // Alt+0: go back one level
                     match &self.screen {
-                        Screen::AgentView { swarm_idx, .. } | Screen::IssueView { swarm_idx, .. } | Screen::IssueDetail { swarm_idx, .. } => {
+                        Screen::AgentView { swarm_idx, .. } | Screen::IssueView { swarm_idx, .. } | Screen::IssueDetail { swarm_idx, .. } | Screen::IssueList { swarm_idx } => {
                             let idx = *swarm_idx;
                             self.enter_repo_view(idx).await;
                         }
@@ -891,6 +909,9 @@ impl App {
             }
             Screen::IssueDetail { swarm_idx } => {
                 self.handle_issue_detail_key(key, *swarm_idx).await?
+            }
+            Screen::IssueList { swarm_idx } => {
+                self.handle_issue_list_key(key, *swarm_idx).await?
             }
         }
 
@@ -1818,6 +1839,12 @@ impl App {
             return Ok(());
         }
 
+        // L: open full-screen issue list
+        if key.code == KeyCode::Char('L') {
+            self.screen = Screen::IssueList { swarm_idx };
+            return Ok(());
+        }
+
         match self.swarm_focus {
             SwarmPanel::Manager => {
                 // Manager pane: passthrough all keys to tmux
@@ -1955,6 +1982,67 @@ impl App {
                 }
             }
             SwarmPanel::Issues => {
+                // Search mode: route keys to the TextInput
+                if self.swarm_view.issue_search.is_some() {
+                    let search_filtered_count = if let Some(swarm) = self.swarms.get(swarm_idx) {
+                        if let Some(cache) = self.issue_caches.get(&swarm.project_name) {
+                            let q = self.swarm_view.issue_search.as_ref().unwrap().text().to_lowercase();
+                            cache.issues.iter()
+                                .filter(|i| i.matches_filter(self.swarm_view.issue_filter))
+                                .filter(|i| {
+                                    if q.is_empty() { return true; }
+                                    if let Some(num_str) = q.strip_prefix('#') {
+                                        if let Ok(num) = num_str.parse::<u32>() {
+                                            return i.number == num;
+                                        }
+                                    }
+                                    i.title.to_lowercase().contains(&q)
+                                })
+                                .count()
+                        } else { 0 }
+                    } else { 0 };
+
+                    match key.code {
+                        KeyCode::Esc => {
+                            self.swarm_view.issue_search = None;
+                            self.swarm_view.issues_table.select(Some(0));
+                        }
+                        KeyCode::Enter => {
+                            self.swarm_view.issue_search = None;
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            self.swarm_view.next_issue(search_filtered_count);
+                        }
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            self.swarm_view.prev_issue(search_filtered_count);
+                        }
+                        KeyCode::Char(c) => {
+                            if let Some(ref mut s) = self.swarm_view.issue_search {
+                                s.insert_char(c);
+                            }
+                            self.swarm_view.issues_table.select(Some(0));
+                        }
+                        KeyCode::Backspace => {
+                            if let Some(ref mut s) = self.swarm_view.issue_search {
+                                s.backspace();
+                            }
+                            self.swarm_view.issues_table.select(Some(0));
+                        }
+                        KeyCode::Left => {
+                            if let Some(ref mut s) = self.swarm_view.issue_search {
+                                s.move_left();
+                            }
+                        }
+                        KeyCode::Right => {
+                            if let Some(ref mut s) = self.swarm_view.issue_search {
+                                s.move_right();
+                            }
+                        }
+                        _ => {}
+                    }
+                    return Ok(());
+                }
+
                 let issue_count = self.swarms.get(swarm_idx)
                     .and_then(|s| self.issue_caches.get(&s.project_name))
                     .map(|c| c.issues.iter().filter(|i| i.matches_filter(self.swarm_view.issue_filter)).count())
@@ -1965,6 +2053,11 @@ impl App {
                     }
                     KeyCode::Up | KeyCode::Char('k') => {
                         self.swarm_view.prev_issue(issue_count);
+                    }
+                    KeyCode::Char('/') => {
+                        // Start issue search
+                        self.swarm_view.issue_search = Some(TextInput::new());
+                        self.swarm_view.issues_table.select(Some(0));
                     }
                     KeyCode::Char('f') => {
                         // Cycle issue filter
@@ -2115,7 +2208,7 @@ impl App {
                             }
                         }
                     }
-                    KeyCode::Char('d') | KeyCode::Char(' ') => {
+                    KeyCode::Char(' ') => {
                         // Dispatch selected issue to an idle worker
                         self.dispatch_selected_issue(swarm_idx).await;
                     }
@@ -2236,6 +2329,140 @@ impl App {
                     });
                     self.status_message = Some(format!("Opening issue #{issue_number} in browser"));
                 }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    async fn handle_issue_list_key(&mut self, key: KeyEvent, swarm_idx: usize) -> Result<()> {
+        // Search mode: route keys to the TextInput
+        if self.swarm_view.issue_search.is_some() {
+            let search_filtered_count = if let Some(swarm) = self.swarms.get(swarm_idx) {
+                if let Some(cache) = self.issue_caches.get(&swarm.project_name) {
+                    let q = self.swarm_view.issue_search.as_ref().unwrap().text().to_lowercase();
+                    cache.issues.iter()
+                        .filter(|i| i.matches_filter(self.swarm_view.issue_filter))
+                        .filter(|i| {
+                            if q.is_empty() { return true; }
+                            if let Some(num_str) = q.strip_prefix('#') {
+                                if let Ok(num) = num_str.parse::<u32>() {
+                                    return i.number == num;
+                                }
+                            }
+                            i.title.to_lowercase().contains(&q)
+                        })
+                        .count()
+                } else { 0 }
+            } else { 0 };
+
+            match key.code {
+                KeyCode::Esc => {
+                    self.swarm_view.issue_search = None;
+                    self.swarm_view.issues_table.select(Some(0));
+                }
+                KeyCode::Enter => {
+                    self.swarm_view.issue_search = None;
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.swarm_view.next_issue(search_filtered_count);
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.swarm_view.prev_issue(search_filtered_count);
+                }
+                KeyCode::Char(c) => {
+                    if let Some(ref mut s) = self.swarm_view.issue_search {
+                        s.insert_char(c);
+                    }
+                    self.swarm_view.issues_table.select(Some(0));
+                }
+                KeyCode::Backspace => {
+                    if let Some(ref mut s) = self.swarm_view.issue_search {
+                        s.backspace();
+                    }
+                    self.swarm_view.issues_table.select(Some(0));
+                }
+                KeyCode::Left => {
+                    if let Some(ref mut s) = self.swarm_view.issue_search {
+                        s.move_left();
+                    }
+                }
+                KeyCode::Right => {
+                    if let Some(ref mut s) = self.swarm_view.issue_search {
+                        s.move_right();
+                    }
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+
+        let issue_count = self.swarms.get(swarm_idx)
+            .and_then(|s| self.issue_caches.get(&s.project_name))
+            .map(|c| c.issues.iter().filter(|i| i.matches_filter(self.swarm_view.issue_filter)).count())
+            .unwrap_or(0);
+
+        match key.code {
+            KeyCode::Esc => {
+                self.screen = Screen::RepoView { swarm_idx };
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.swarm_view.next_issue(issue_count);
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.swarm_view.prev_issue(issue_count);
+            }
+            KeyCode::Char('/') => {
+                self.swarm_view.issue_search = Some(TextInput::new());
+                self.swarm_view.issues_table.select(Some(0));
+            }
+            KeyCode::Char('f') => {
+                self.swarm_view.issue_filter = self.swarm_view.issue_filter.next();
+                self.swarm_view.issues_table.select(Some(0));
+            }
+            KeyCode::Char('r') | KeyCode::F(5) => {
+                // Refresh: trigger issue reload
+                self.start_issue_refresh(swarm_idx);
+                self.status_message = Some("Refreshing issues…".to_string());
+            }
+            KeyCode::Enter => {
+                // Drill into issue detail view
+                if let Some(swarm) = self.swarms.get(swarm_idx) {
+                    let issues: Vec<&GitHubIssue> = self.issue_caches
+                        .get(&swarm.project_name)
+                        .map(|c| c.issues.iter().filter(|i| i.matches_filter(self.swarm_view.issue_filter)).collect())
+                        .unwrap_or_default();
+                    if let Some(issue) = self.swarm_view.selected_issue()
+                        .and_then(|idx| issues.get(idx))
+                    {
+                        let num = issue.number;
+                        let repo_path = swarm.repo_path.clone();
+                        let transport = self.transport.clone();
+                        let tx = self.events.tx();
+                        self.issue_view = Some(crate::ui::issue_view::IssueView::new(num));
+                        self.screen = Screen::IssueView { swarm_idx, issue_number: num };
+                        tokio::spawn(async move {
+                            let result = transport
+                                .output(
+                                    "gh",
+                                    &[
+                                        "issue".to_string(),
+                                        "view".to_string(),
+                                        num.to_string(),
+                                    ],
+                                    Some(&repo_path),
+                                )
+                                .await;
+                            if let Ok(output) = result {
+                                let body = String::from_utf8_lossy(&output.stdout).to_string();
+                                let _ = tx.send(crate::event::Event::IssueFetched { issue_number: num, body });
+                            }
+                        });
+                    }
+                }
+            }
+            KeyCode::Char('d') | KeyCode::Char(' ') => {
+                self.dispatch_selected_issue(swarm_idx).await;
             }
             _ => {}
         }
@@ -2511,14 +2738,6 @@ impl App {
                 self.agent_view.input.insert_char(c);
                 return Ok(());
             }
-            KeyCode::Home => {
-                self.agent_view.scroll_offset = 0;
-                return Ok(());
-            }
-            KeyCode::End => {
-                self.agent_view.scroll_to_bottom();
-                return Ok(());
-            }
             _ => {}
         }
 
@@ -2558,6 +2777,7 @@ impl App {
     }
 
     /// Try to execute a configured shortcut for the given panel and key.
+    #[allow(dead_code)]
     async fn try_shortcut(&mut self, panel: &str, key: &str, swarm_idx: usize, issue: Option<u32>) -> Result<()> {
         use crate::config::shortcuts::ShortcutsConfig;
 

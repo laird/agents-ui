@@ -3,7 +3,6 @@
 use ansi_to_tui::IntoText;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
-    style::{Color, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
     Frame,
@@ -11,7 +10,6 @@ use ratatui::{
 
 use crate::model::issue::IssuePriority;
 use crate::model::swarm::Swarm;
-use super::text_input::TextInput;
 use super::theme;
 
 /// Which panel has focus in the repo view.

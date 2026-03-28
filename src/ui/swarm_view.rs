@@ -9,6 +9,7 @@ use ratatui::{
 
 use crate::model::issue::{GitHubIssue, IssueFilter};
 use crate::model::swarm::Swarm;
+use super::text_input::TextInput;
 use super::theme;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -33,6 +34,8 @@ pub struct SwarmView {
     pub workers_table: TableState,
     pub issues_table: TableState,
     pub issue_filter: IssueFilter,
+    /// Active issue search query (`/` activates search mode)
+    pub issue_search: Option<TextInput>,
 }
 
 impl SwarmView {
@@ -46,6 +49,7 @@ impl SwarmView {
             workers_table,
             issues_table,
             issue_filter: IssueFilter::All,
+            issue_search: None,
         }
     }
 
@@ -58,9 +62,25 @@ impl SwarmView {
         focus: SwarmPanel,
         blink: bool,
     ) {
+        let search_query = self.issue_search.as_ref().map(|s| s.text().to_lowercase());
         let filtered_issues: Vec<&GitHubIssue> = issues
             .iter()
             .filter(|i| i.matches_filter(self.issue_filter))
+            .filter(|i| {
+                if let Some(ref q) = search_query {
+                    if q.is_empty() {
+                        return true;
+                    }
+                    if let Some(num_str) = q.strip_prefix('#') {
+                        if let Ok(num) = num_str.parse::<u32>() {
+                            return i.number == num;
+                        }
+                    }
+                    i.title.to_lowercase().contains(q.as_str())
+                } else {
+                    true
+                }
+            })
             .collect();
 
         // Pre-compute attention data before layout (needed for dynamic sizing)
@@ -309,7 +329,28 @@ impl SwarmView {
             Style::default()
         });
 
-        f.render_stateful_widget(issues_table, bottom_cols[1], &mut self.issues_table);
+        // Split issues area: search bar (when active) + issues table
+        let (search_area, issues_table_area) = if self.issue_search.is_some() {
+            let split = Layout::vertical([
+                Constraint::Length(3),
+                Constraint::Min(3),
+            ])
+            .split(bottom_cols[1]);
+            (Some(split[0]), split[1])
+        } else {
+            (None, bottom_cols[1])
+        };
+
+        if let (Some(area), Some(search)) = (search_area, &self.issue_search) {
+            let search_block = Block::default()
+                .borders(Borders::ALL)
+                .title(" Search ")
+                .border_style(theme::title_style());
+            let search_widget = Paragraph::new(search.render_line(" / ")).block(search_block);
+            f.render_widget(search_widget, area);
+        }
+
+        f.render_stateful_widget(issues_table, issues_table_area, &mut self.issues_table);
 
         // --- Help bar ---
         let help_spans = match focus {
@@ -358,6 +399,8 @@ impl SwarmView {
                 Span::styled(" review-blocked  ", theme::help_style()),
                 Span::styled("f", theme::title_style()),
                 Span::styled(" filter  ", theme::help_style()),
+                Span::styled("/", theme::title_style()),
+                Span::styled(" search  ", theme::help_style()),
                 Span::styled("Enter", theme::title_style()),
                 Span::styled(" view  ", theme::help_style()),
                 Span::styled("g", theme::title_style()),
@@ -412,6 +455,144 @@ impl SwarmView {
 
     pub fn selected_issue(&self) -> Option<usize> {
         self.issues_table.selected()
+    }
+
+    /// Render a full-screen issue list for the given project.
+    pub fn render_issue_list(
+        &mut self,
+        f: &mut Frame,
+        area: Rect,
+        project_name: &str,
+        issues: &[GitHubIssue],
+    ) {
+        let search_query = self.issue_search.as_ref().map(|s| s.text().to_lowercase());
+        let filtered: Vec<&GitHubIssue> = issues
+            .iter()
+            .filter(|i| i.matches_filter(self.issue_filter))
+            .filter(|i| {
+                if let Some(ref q) = search_query {
+                    if q.is_empty() { return true; }
+                    if let Some(num_str) = q.strip_prefix('#') {
+                        if let Ok(num) = num_str.parse::<u32>() {
+                            return i.number == num;
+                        }
+                    }
+                    i.title.to_lowercase().contains(q.as_str())
+                } else {
+                    true
+                }
+            })
+            .collect();
+
+        let avail = issues.iter().filter(|i| !i.is_blocked() && !i.is_being_worked()).count();
+        let blocked = issues.iter().filter(|i| i.is_blocked()).count();
+        let filter_label = self.issue_filter.label();
+
+        let chunks = Layout::vertical([
+            Constraint::Length(1),  // Header
+            Constraint::Min(3),     // Table (with optional search bar)
+            Constraint::Length(2),  // Help bar
+        ])
+        .split(area);
+
+        // Header
+        let mut header_spans = vec![
+            Span::styled(format!(" {} ", project_name), theme::title_style()),
+            Span::styled(
+                format!("Issues: {} avail  {} blocked  filter: {}  showing {}", avail, blocked, filter_label, filtered.len()),
+                theme::help_style(),
+            ),
+        ];
+        let left_len: usize = header_spans.iter().map(|s| s.content.len()).sum();
+        header_spans.push(theme::hostname_right_span(left_len, chunks[0].width as usize));
+        f.render_widget(Paragraph::new(Line::from(header_spans)), chunks[0]);
+
+        // Split table area for optional search bar
+        let (search_area, table_area) = if self.issue_search.is_some() {
+            let split = Layout::vertical([
+                Constraint::Length(3),
+                Constraint::Min(3),
+            ])
+            .split(chunks[1]);
+            (Some(split[0]), split[1])
+        } else {
+            (None, chunks[1])
+        };
+
+        if let (Some(area), Some(search)) = (search_area, &self.issue_search) {
+            let search_block = Block::default()
+                .borders(Borders::ALL)
+                .title(" Search ")
+                .border_style(theme::title_style());
+            let search_widget = Paragraph::new(search.render_line(" / ")).block(search_block);
+            f.render_widget(search_widget, area);
+        }
+
+        // Issues table (full-width, title grows with available space)
+        let issue_header = Row::new(vec![
+            Cell::from("#"),
+            Cell::from("Pri"),
+            Cell::from("Title"),
+            Cell::from("Status"),
+        ])
+        .style(theme::header_style());
+
+        let issue_rows: Vec<Row> = filtered
+            .iter()
+            .map(|issue| {
+                let status = issue.status_label();
+                let status_style = if issue.is_being_worked() {
+                    Style::default().fg(ratatui::style::Color::Green)
+                } else if issue.is_blocked() {
+                    Style::default().fg(ratatui::style::Color::Yellow)
+                } else {
+                    Style::default().fg(ratatui::style::Color::Gray)
+                };
+                Row::new(vec![
+                    Cell::from(format!("{}", issue.number)),
+                    Cell::from(issue.priority_label()),
+                    Cell::from(issue.title.clone()),
+                    Cell::from(status).style(status_style),
+                ])
+            })
+            .collect();
+
+        let issues_block = Block::default()
+            .borders(Borders::ALL)
+            .title(format!(" Issues ({filter_label}: {}) ", filtered.len()))
+            .border_style(theme::title_style());
+
+        let table = Table::new(
+            issue_rows,
+            [
+                Constraint::Length(5),
+                Constraint::Length(4),
+                Constraint::Min(20),
+                Constraint::Length(20),
+            ],
+        )
+        .header(issue_header)
+        .block(issues_block)
+        .row_highlight_style(theme::selected_style());
+
+        f.render_stateful_widget(table, table_area, &mut self.issues_table);
+
+        // Help bar
+        let help = Paragraph::new(Line::from(vec![
+            Span::styled(" Esc", theme::title_style()),
+            Span::styled(" back  ", theme::help_style()),
+            Span::styled("Enter", theme::title_style()),
+            Span::styled(" view  ", theme::help_style()),
+            Span::styled("d/Space", theme::title_style()),
+            Span::styled(" dispatch  ", theme::help_style()),
+            Span::styled("f", theme::title_style()),
+            Span::styled(" filter  ", theme::help_style()),
+            Span::styled("/", theme::title_style()),
+            Span::styled(" search  ", theme::help_style()),
+            Span::styled("r/F5", theme::title_style()),
+            Span::styled(" refresh", theme::help_style()),
+        ]));
+        f.render_widget(help, chunks[2]);
     }
 }
 
