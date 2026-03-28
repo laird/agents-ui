@@ -42,6 +42,7 @@ pub enum NewSwarmField {
     AgentRuntime,
     RuntimeSelection,
     NumWorkers,
+    #[allow(dead_code)]
     Launching,
 }
 
@@ -241,6 +242,7 @@ pub struct App {
     /// Issue detail view state.
     pub issue_detail_view: Option<IssueDetailView>,
     /// Tracks last Esc press for double-Esc to go back (never forwarded to pane).
+    #[allow(dead_code)]
     last_esc: Option<std::time::Instant>,
     /// App-level keybinding configuration.
     pub keybindings: crate::config::keybindings::KeyBindings,
@@ -657,6 +659,7 @@ impl App {
 
     /// Convert a crossterm KeyEvent to a tmux send-keys argument.
     /// Returns (key_string, literal) where literal means use -l flag.
+    #[allow(dead_code)]
     fn key_to_tmux(key: &KeyEvent) -> Option<(String, bool)> {
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             if let KeyCode::Char(c) = key.code {
@@ -2181,7 +2184,7 @@ impl App {
                             }
                         }
                     }
-                    KeyCode::Char('d') | KeyCode::Char(' ') => {
+                    KeyCode::Char(' ') => {
                         // Dispatch selected issue to an idle worker
                         self.dispatch_selected_issue(swarm_idx).await;
                     }
@@ -2577,14 +2580,6 @@ impl App {
                 self.agent_view.input.insert_char(c);
                 return Ok(());
             }
-            KeyCode::Home => {
-                self.agent_view.scroll_offset = 0;
-                return Ok(());
-            }
-            KeyCode::End => {
-                self.agent_view.scroll_to_bottom();
-                return Ok(());
-            }
             _ => {}
         }
 
@@ -2624,6 +2619,7 @@ impl App {
     }
 
     /// Try to execute a configured shortcut for the given panel and key.
+    #[allow(dead_code)]
     async fn try_shortcut(&mut self, panel: &str, key: &str, swarm_idx: usize, issue: Option<u32>) -> Result<()> {
         use crate::config::shortcuts::ShortcutsConfig;
 

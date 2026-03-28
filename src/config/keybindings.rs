@@ -90,6 +90,7 @@ impl KeyBind {
     }
 
     /// Check if a KeyEvent matches this binding.
+    #[allow(dead_code)]
     pub fn matches(&self, event: &KeyEvent) -> bool {
         let key_matches = match event.code {
             KeyCode::Char(c) => self.key == c.to_string(),
@@ -180,6 +181,7 @@ impl Default for KeyBindings {
 
 impl KeyBindings {
     /// Check if a key event matches any binding for the given action.
+    #[allow(dead_code)]
     pub fn matches(&self, action: Action, event: &KeyEvent) -> bool {
         self.bindings
             .get(&action)
