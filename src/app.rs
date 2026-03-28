@@ -2072,6 +2072,10 @@ impl App {
                             }
                         }
                     }
+                    KeyCode::Char('d') | KeyCode::Char(' ') => {
+                        // Dispatch selected issue to an idle worker
+                        self.dispatch_selected_issue(swarm_idx).await;
+                    }
                     _ => {}
                 }
             }
@@ -2781,6 +2785,63 @@ impl App {
                 );
                 self.pane_watchers.push(handle);
             }
+        }
+    }
+
+    /// Dispatch the currently selected issue (in the Issues panel) to an idle worker.
+    async fn dispatch_selected_issue(&mut self, swarm_idx: usize) {
+        let Some(swarm) = self.swarms.get(swarm_idx) else { return };
+        let project_name = swarm.project_name.clone();
+        let agent_type = swarm.agent_type.clone();
+
+        // Get the selected issue number
+        let issues: Vec<u32> = self.issue_caches
+            .get(&project_name)
+            .map(|c| {
+                c.issues
+                    .iter()
+                    .filter(|i| i.matches_filter(self.swarm_view.issue_filter))
+                    .map(|i| i.number)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let Some(issue_num) = self.swarm_view.selected_issue().and_then(|idx| issues.get(idx).copied()) else {
+            self.status_message = Some("No issue selected".to_string());
+            return;
+        };
+
+        // Find an idle worker
+        let idle_worker = self.swarms[swarm_idx]
+            .workers
+            .iter()
+            .enumerate()
+            .find(|(_, w)| {
+                !w.is_manager
+                    && w.dispatched_issue.is_none()
+                    && matches!(w.status.state, crate::model::status::AgentState::Idle)
+            })
+            .map(|(idx, w)| (idx, w.tmux_target.clone(), w.role.clone()));
+
+        let Some((worker_idx, target, role)) = idle_worker else {
+            self.status_message = Some("No idle workers available".to_string());
+            return;
+        };
+
+        let Some(cmd) = self.worker_dispatch_cmd(&agent_type, issue_num) else {
+            self.status_message = Some(format!("No dispatch command configured for {agent_type}"));
+            return;
+        };
+
+        tracing::info!("Manual dispatch: #{issue_num} → {role} via {target}");
+        if let Ok(()) = crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, &cmd).await {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, "Enter").await.ok();
+            self.swarms[swarm_idx].workers[worker_idx].dispatched_issue = Some(issue_num);
+            self.swarms[swarm_idx].workers[worker_idx].status.state =
+                crate::model::status::AgentState::Working { issue: Some(issue_num) };
+            self.status_message = Some(format!("Dispatched #{issue_num} → {role}"));
+        } else {
+            self.status_message = Some(format!("Failed to dispatch #{issue_num}"));
         }
     }
 
