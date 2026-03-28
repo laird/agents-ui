@@ -2005,6 +2005,10 @@ impl App {
                             }
                         }
                     }
+                    KeyCode::Char(c) => {
+                        // Try user-configured shortcut for workers panel
+                        self.try_shortcut("workers", &c.to_string(), swarm_idx, None).await?;
+                    }
                     _ => {}
                 }
             }
@@ -2157,6 +2161,19 @@ impl App {
                                 self.status_message = Some(format!("Opening issue #{} in browser", issue.number));
                             }
                         }
+                    }
+                    KeyCode::Char(c) => {
+                        // Try user-configured shortcut for issues panel
+                        let issue_num = {
+                            let issues: Vec<&GitHubIssue> = self.swarms.get(swarm_idx)
+                                .and_then(|s| self.issue_caches.get(&s.project_name))
+                                .map(|c| self.swarm_view.issues_matching_search(&c.issues))
+                                .unwrap_or_default();
+                            self.swarm_view.selected_issue()
+                                .and_then(|idx| issues.get(idx))
+                                .map(|i| i.number)
+                        };
+                        self.try_shortcut("issues", &c.to_string(), swarm_idx, issue_num).await?;
                     }
                     _ => {}
                 }
@@ -2589,7 +2606,6 @@ impl App {
     }
 
     /// Try to execute a configured shortcut for the given panel and key.
-    #[allow(dead_code)] // Available for future configurable shortcut execution
     async fn try_shortcut(&mut self, panel: &str, key: &str, swarm_idx: usize, issue: Option<u32>) -> Result<()> {
         use crate::config::shortcuts::ShortcutsConfig;
 
