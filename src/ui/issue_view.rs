@@ -35,7 +35,8 @@ impl IssueView {
         .split(area);
 
         // Title bar
-        let title_text = if let Some(issue) = issue {
+        let width = chunks[0].width as usize;
+        let mut title_text = if let Some(issue) = issue {
             let status = issue.status_label();
             let pri = issue.priority_label();
             vec![
@@ -49,6 +50,8 @@ impl IssueView {
                 Span::styled(format!("  #{} ", self.issue_number), theme::title_style()),
             ]
         };
+        let left_len: usize = title_text.iter().map(|s| s.content.len()).sum();
+        title_text.push(theme::hostname_right_span(left_len, width));
 
         let title = Paragraph::new(Line::from(title_text))
             .block(Block::default().borders(Borders::BOTTOM));

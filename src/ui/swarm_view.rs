@@ -63,10 +63,22 @@ impl SwarmView {
             .filter(|i| i.matches_filter(self.issue_filter))
             .collect();
 
+        // Pre-compute attention data before layout (needed for dynamic sizing)
+        let attention = count_attention(swarm, issues);
+        let working = swarm.busy_count();
+        let total_workers = swarm.workers.len();
+        let idle = total_workers - working;
+        let avail_issues = issues.iter().filter(|i| !i.is_blocked() && !i.is_being_worked() && i.state == crate::model::issue::IssueState::Open).count();
+        let blocked_issues: Vec<&GitHubIssue> = issues.iter().filter(|i| i.is_blocked()).collect();
+        let blocked_count = blocked_issues.len();
+
+        // Header is 1 line normally; 2 lines when there are blocked issues to surface inline
+        let header_height: u16 = if blocked_count > 0 { 2 } else { 1 };
+
         let chunks = Layout::vertical([
-            Constraint::Length(1),             // Header line
-            Constraint::Min(4),               // Body (manager + workers/issues)
-            Constraint::Length(2),            // Help bar
+            Constraint::Length(header_height),  // Header line(s)
+            Constraint::Min(4),                 // Body (manager + workers/issues)
+            Constraint::Length(2),              // Help bar
         ])
         .split(area);
 
@@ -80,14 +92,6 @@ impl SwarmView {
         ])
         .split(chunks[1]);
 
-        // --- Header line ---
-        let attention = count_attention(swarm);
-        let working = swarm.busy_count();
-        let total_workers = swarm.workers.len();
-        let idle = total_workers - working;
-        let avail_issues = issues.iter().filter(|i| !i.is_blocked() && !i.is_being_worked() && i.state == crate::model::issue::IssueState::Open).count();
-        let blocked_issues = issues.iter().filter(|i| i.is_blocked()).count();
-
         let mut header_spans = vec![
             Span::styled(format!(" {} ", swarm.project_name), theme::title_style()),
             Span::styled("Active ", Style::default().fg(ratatui::style::Color::Green)),
@@ -96,15 +100,48 @@ impl SwarmView {
                 theme::help_style(),
             ),
             Span::styled(
-                format!("Issues: {} avail, {} blocked  ", avail_issues, blocked_issues),
+                format!("Issues: {} avail, {} blocked  ", avail_issues, blocked_count),
                 theme::help_style(),
             ),
         ];
         if attention > 0 {
             let style = theme::attention_blink_style(blink);
-            header_spans.push(Span::styled(format!("⚠ {attention} waiting"), style));
+            header_spans.push(Span::styled(format!("⚠ {attention} need attention"), style));
         }
-        let header = Paragraph::new(Line::from(header_spans));
+        let left_len: usize = header_spans.iter().map(|s| s.content.len()).sum();
+        header_spans.push(theme::hostname_right_span(left_len, chunks[0].width as usize));
+
+        // Build header lines: status line + optional inline attention row
+        let mut header_lines = vec![Line::from(header_spans)];
+        if blocked_count > 0 {
+            let mut attn_spans = vec![
+                Span::styled(" ⚠ ", theme::attention_style()),
+            ];
+            let show_n = blocked_count.min(3);
+            for (idx, issue) in blocked_issues.iter().take(show_n).enumerate() {
+                if idx > 0 {
+                    attn_spans.push(Span::styled("  ", theme::help_style()));
+                }
+                let blocking_label = issue.labels
+                    .iter()
+                    .find(|l| crate::model::issue::BLOCKING_LABELS.contains(&l.as_str()))
+                    .map(|s| s.as_str())
+                    .unwrap_or("blocked");
+                attn_spans.push(Span::styled(
+                    format!("#{} [{}] {}", issue.number, blocking_label, truncate(&issue.title, 30)),
+                    theme::attention_style(),
+                ));
+            }
+            if blocked_count > 3 {
+                attn_spans.push(Span::styled(
+                    format!("  … and {} more (Tab→Issues)", blocked_count - 3),
+                    theme::help_style(),
+                ));
+            }
+            header_lines.push(Line::from(attn_spans));
+        }
+
+        let header = Paragraph::new(header_lines);
         f.render_widget(header, chunks[0]);
 
         // --- Manager panel ---
@@ -311,6 +348,8 @@ impl SwarmView {
                 Span::styled(" dispatch  ", theme::help_style()),
                 Span::styled("a", theme::title_style()),
                 Span::styled(" add  ", theme::help_style()),
+                Span::styled("d", theme::title_style()),
+                Span::styled(" dispatch  ", theme::help_style()),
                 Span::styled("p", theme::title_style()),
                 Span::styled(" approve  ", theme::help_style()),
                 Span::styled("b", theme::title_style()),
@@ -376,18 +415,19 @@ impl SwarmView {
     }
 }
 
-/// Count agents waiting for human input in a swarm.
-pub fn count_attention(swarm: &Swarm) -> usize {
-    let mut count = 0;
+/// Count items needing human attention: blocked GitHub issues + agents waiting for input.
+pub fn count_attention(swarm: &Swarm, issues: &[crate::model::issue::GitHubIssue]) -> usize {
+    let blocked = issues.iter().filter(|i| i.is_blocked()).count();
+    let mut agents_waiting = 0;
     if agent_needs_input(&swarm.manager.pane_content) {
-        count += 1;
+        agents_waiting += 1;
     }
     for w in &swarm.workers {
         if agent_needs_input(&w.pane_content) {
-            count += 1;
+            agents_waiting += 1;
         }
     }
-    count
+    blocked + agents_waiting
 }
 
 /// Check if an agent's pane content indicates it's waiting for human input.

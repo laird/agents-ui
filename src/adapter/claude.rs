@@ -92,6 +92,18 @@ impl ClaudeAdapter {
             progress(&format!("⚠️  Manager failed: {e}\n"));
         } else {
             progress("✅ Manager started\n");
+            if let Some(cmd) = manager_bootstrap_cmd(runtime) {
+                progress("⏳ Waiting for manager to be ready...\n");
+                if Self::wait_for_claude_ready(&self.transport, &manager_target).await {
+                    progress(&format!("⏳ Sending {cmd} to manager...\n"));
+                    proxy::send_keys(&self.transport, &manager_target, &cmd)
+                        .await
+                        .ok();
+                    progress("✅ Manager running manage-loop\n");
+                } else {
+                    progress("⚠️  Manager not ready in time, manage-loop not started\n");
+                }
+            }
         }
 
         progress("\n🎉 Swarm launched!\n");
@@ -738,6 +750,17 @@ impl AgentRuntime for ClaudeAdapter {
             tracing::warn!("Failed to launch claude in manager pane: {e}");
         } else {
             tracing::info!("✅ Manager started\n");
+            // Wait for Claude to be ready, then send the manage-loop bootstrap command
+            if let Some(cmd) = manager_bootstrap_cmd(runtime) {
+                if Self::wait_for_claude_ready(&self.transport, &manager_target).await {
+                    tracing::info!("Sending manage-loop to manager: {cmd}");
+                    proxy::send_keys(&self.transport, &manager_target, &cmd)
+                        .await
+                        .ok();
+                } else {
+                    tracing::warn!("Manager not ready in time, skipping manage-loop bootstrap");
+                }
+            }
         }
 
         tracing::info!("\n🎉 Swarm launched! Waiting for sessions to initialize...\n");
@@ -1360,10 +1383,10 @@ fn pane_agent_is_idle(content: &str) -> bool {
 
 fn manager_bootstrap_cmd(runtime: &AgentType) -> Option<String> {
     match runtime {
-        AgentType::Claude => Some("/autocoder:monitor-workers".to_string()),
-        AgentType::Gemini => Some("/monitor-workers".to_string()),
-        AgentType::Codex => Some("/monitor-workers".to_string()),
-        AgentType::Droid => Some("/monitor-workers".to_string()),
+        AgentType::Claude => Some("/autocoder:monitor-loop".to_string()),
+        AgentType::Gemini => Some("/manage-loop".to_string()),
+        AgentType::Codex => Some("/manage-loop".to_string()),
+        AgentType::Droid => Some("/manage-loop".to_string()),
     }
 }
 
@@ -1569,10 +1592,10 @@ mod tests {
     }
 
     #[test]
-    fn manager_bootstrap_uses_monitor_workers() {
+    fn manager_bootstrap_uses_monitor_loop() {
         assert_eq!(
             manager_bootstrap_cmd(&AgentType::Claude),
-            Some("/autocoder:monitor-workers".to_string())
+            Some("/autocoder:monitor-loop".to_string())
         );
     }
 

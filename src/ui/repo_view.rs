@@ -178,10 +178,11 @@ impl RepoView {
 
     fn render_title_bar(&self, f: &mut Frame, area: Rect, swarm: &Swarm) {
         let busy = swarm.busy_count();
-        let idle = swarm.attention_count();
+        let idle = swarm.idle_count();
         let total = swarm.workers.len();
-        let stopped = total - busy - idle;
+        let stopped = total.saturating_sub(busy + idle);
         let waiting = swarm.waiting_count();
+        let attention = swarm.attention_count();
 
         let (p0, p1, p2, p3) = swarm.issue_cache.priority_counts();
 
@@ -210,8 +211,15 @@ impl RepoView {
         } else {
             String::new()
         };
+        let attention_label = if attention > 0 {
+            format!("{attention} attention ")
+        } else {
+            String::new()
+        };
         let issues_label = format!(" P0:{p0} P1:{p1} P2:{p2} P3:{p3}");
 
+        let left_len = project_label.len() + workflow_label.len() + workers_label.len()
+            + waiting_label.len() + idle_label.len() + stopped_label.len() + issues_label.len();
         let title = Paragraph::new(Line::from(vec![
             Span::styled(project_label, theme::title_style()),
             Span::styled(workflow_label, theme::help_style()),
@@ -225,7 +233,9 @@ impl RepoView {
             Span::styled(stopped_label, theme::status_style(
                 &crate::model::status::AgentState::Stopped,
             )),
+            Span::styled(attention_label, theme::attention_style()),
             Span::styled(issues_label, theme::help_style()),
+            theme::hostname_right_span(left_len, area.width as usize),
         ]));
         f.render_widget(title, area);
     }
@@ -242,6 +252,29 @@ impl RepoView {
     }
 
     fn render_workers_column(&mut self, f: &mut Frame, area: Rect, swarm: &Swarm) {
+        let blocked: Vec<&crate::model::issue::GitHubIssue> = swarm
+            .issue_cache
+            .issues
+            .iter()
+            .filter(|i| i.is_blocked())
+            .collect();
+
+        // Reserve space at the bottom for the attention panel when there are blocked issues
+        let attention_height = if blocked.is_empty() {
+            0
+        } else {
+            (blocked.len().min(3) + 2) as u16 // up to 3 items + border top/bottom
+        };
+
+        let rows = Layout::vertical([
+            Constraint::Min(4),
+            Constraint::Length(attention_height),
+        ])
+        .split(area);
+
+        let sessions_area = rows[0];
+        let attention_area = rows[1];
+
         let items: Vec<ListItem> = swarm
             .workers
             .iter()
@@ -343,7 +376,63 @@ impl RepoView {
             .block(block)
             .highlight_style(theme::selected_style());
 
-        f.render_stateful_widget(list, area, &mut self.worker_list_state);
+        f.render_stateful_widget(list, sessions_area, &mut self.worker_list_state);
+
+        // Render blocked issues attention panel if there are any
+        if !blocked.is_empty() {
+            self.render_attention_panel(f, attention_area, &blocked);
+        }
+    }
+
+    fn render_attention_panel(&self, f: &mut Frame, area: Rect, blocked: &[&crate::model::issue::GitHubIssue]) {
+        let max_title_width = (area.width as usize).saturating_sub(20).max(10);
+        let shown = blocked.len().min(3);
+        let extra = blocked.len().saturating_sub(3);
+
+        let mut lines: Vec<Line> = blocked[..shown]
+            .iter()
+            .map(|issue| {
+                let blocking_label = issue
+                    .labels
+                    .iter()
+                    .find(|l| {
+                        matches!(
+                            l.as_str(),
+                            "needs-approval" | "needs-design" | "needs-clarification" | "too-complex" | "proposal" | "future"
+                        )
+                    })
+                    .map(|s| s.as_str())
+                    .unwrap_or("blocked");
+
+                let title = if issue.title.len() > max_title_width {
+                    format!("{}…", &issue.title[..max_title_width.saturating_sub(1)])
+                } else {
+                    issue.title.clone()
+                };
+
+                Line::from(vec![
+                    Span::styled(format!("[{}] ", blocking_label), theme::attention_style()),
+                    Span::styled(format!("#{} ", issue.number), theme::help_style()),
+                    Span::styled(title, theme::title_style()),
+                ])
+            })
+            .collect();
+
+        if extra > 0 {
+            lines.push(Line::from(Span::styled(
+                format!("  …and {extra} more"),
+                theme::help_style(),
+            )));
+        }
+
+        let title = format!(" Attention ({}) ", blocked.len());
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(Span::styled(title, theme::attention_style()))
+            .border_style(theme::attention_style());
+
+        let para = Paragraph::new(lines).block(block);
+        f.render_widget(para, area);
     }
 
     fn render_issues_column(&mut self, f: &mut Frame, area: Rect, swarm: &Swarm) {

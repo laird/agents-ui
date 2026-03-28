@@ -57,11 +57,18 @@ impl ReposListView {
         };
         let version = env!("CARGO_PKG_VERSION");
         let left_text = format!("  Agents UI{title_info}");
-        let right_text = format!("v{version} ");
-        // Pad between left and right to fill the width
+        let version_span = format!("v{version} ");
+        let version_len = version_span.len();
         let width = chunks[0].width as usize;
-        let left_len = left_text.len();
+        // hostname + version right-aligned: build hostname span with padding, then version
+        let hn = theme::hostname();
+        let right_text = if hn.is_empty() {
+            version_span.clone()
+        } else {
+            format!("{hn}  {version_span}")
+        };
         let right_len = right_text.len();
+        let left_len = left_text.len();
         let padding = if width > left_len + right_len {
             " ".repeat(width - left_len - right_len)
         } else {
@@ -92,7 +99,7 @@ impl ReposListView {
                 Cell::from("Workflow"),
                 Cell::from("Runtime"),
                 Cell::from("Sessions"),
-                Cell::from("Waiting"),
+                Cell::from("Attention"),
                 Cell::from("Issues"),
             ])
             .style(theme::header_style());
@@ -104,7 +111,12 @@ impl ReposListView {
             for s in swarms {
                 let busy = s.busy_count();
                 let total = s.workers.len();
-                let waiting = count_attention(s);
+                let swarm_issues = issue_caches
+                    .get(&s.project_name)
+                    .map(|c| c.issues.as_slice())
+                    .unwrap_or(&[]);
+                let blocked_issues = swarm_issues.iter().filter(|i| i.is_blocked()).count();
+                let waiting = count_attention(s, swarm_issues) - blocked_issues;
 
                 // Build issue priority summary from cache
                 let issue_summary = if let Some(cache) = issue_caches.get(&s.project_name) {
@@ -148,12 +160,13 @@ impl ReposListView {
                     ),
                     Cell::from(s.agent_type.to_string()),
                     Cell::from(format!("{busy}/{total} working")),
-                    Cell::from(if waiting > 0 {
-                        format!("{waiting} input")
-                    } else {
-                        "—".to_string()
+                    Cell::from({
+                        let mut parts = Vec::new();
+                        if waiting > 0 { parts.push(format!("{waiting} input")); }
+                        if blocked_issues > 0 { parts.push(format!("{blocked_issues} blocked")); }
+                        if parts.is_empty() { "—".to_string() } else { parts.join(", ") }
                     })
-                    .style(if waiting > 0 {
+                    .style(if waiting > 0 || blocked_issues > 0 {
                         theme::attention_style()
                     } else {
                         theme::help_style()

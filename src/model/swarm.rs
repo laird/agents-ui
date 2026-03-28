@@ -236,16 +236,20 @@ impl Swarm {
             .count()
     }
 
-    /// Count of agents needing attention (not busy, not stopped)
+    /// Count of items needing human attention (blocked issues in the issue cache).
     pub fn attention_count(&self) -> usize {
+        self.issue_cache
+            .issues
+            .iter()
+            .filter(|i| i.is_blocked())
+            .count()
+    }
+
+    /// Count of idle workers.
+    pub fn idle_count(&self) -> usize {
         self.workers
             .iter()
-            .filter(|w| {
-                matches!(
-                    w.status.state,
-                    super::status::AgentState::Idle
-                )
-            })
+            .filter(|w| matches!(w.status.state, super::status::AgentState::Idle))
             .count()
     }
 
@@ -315,7 +319,85 @@ impl Swarm {
 
 #[cfg(test)]
 mod tests {
-    use super::AgentType;
+    use super::*;
+    use crate::model::issue::{GitHubIssue, IssueCache, IssueState, IssuePriority, IssueType};
+    use crate::model::status::AgentStatus;
+
+    fn make_swarm_with_issues(issues: Vec<GitHubIssue>) -> Swarm {
+        let manager = AgentInfo {
+            id: "test/manager".to_string(),
+            role: "manager".to_string(),
+            worktree_path: PathBuf::from("/tmp/test"),
+            tmux_target: "test:0.0".to_string(),
+            status: AgentStatus::default(),
+            is_manager: true,
+            pane_content: String::new(),
+            dispatched_issue: None,
+            current_issue: None,
+            current_issue_title: None,
+            waiting_for_input: false,
+        };
+        let mut cache = IssueCache::default();
+        cache.issues = issues;
+        Swarm {
+            repo_path: PathBuf::from("/tmp/test"),
+            project_name: "test".to_string(),
+            agent_type: AgentType::Claude,
+            workflow: None,
+            tmux_session: "claude-test".to_string(),
+            manager,
+            workers: Vec::new(),
+            issue_cache: cache,
+        }
+    }
+
+    fn blocked_issue(number: u32) -> GitHubIssue {
+        GitHubIssue {
+            number,
+            title: format!("Blocked issue #{number}"),
+            state: IssueState::Open,
+            priority: IssuePriority::P2,
+            issue_type: IssueType::Other,
+            labels: vec!["needs-design".to_string()],
+            is_working: false,
+            assigned_worker: None,
+        }
+    }
+
+    fn open_issue(number: u32) -> GitHubIssue {
+        GitHubIssue {
+            number,
+            title: format!("Open issue #{number}"),
+            state: IssueState::Open,
+            priority: IssuePriority::P2,
+            issue_type: IssueType::Bug,
+            labels: vec!["bug".to_string()],
+            is_working: false,
+            assigned_worker: None,
+        }
+    }
+
+    #[test]
+    fn attention_count_returns_blocked_issue_count() {
+        let swarm = make_swarm_with_issues(vec![
+            blocked_issue(1),
+            open_issue(2),
+            blocked_issue(3),
+        ]);
+        assert_eq!(swarm.attention_count(), 2);
+    }
+
+    #[test]
+    fn attention_count_zero_when_no_blocked_issues() {
+        let swarm = make_swarm_with_issues(vec![open_issue(1), open_issue(2)]);
+        assert_eq!(swarm.attention_count(), 0);
+    }
+
+    #[test]
+    fn attention_count_zero_when_issue_cache_empty() {
+        let swarm = make_swarm_with_issues(vec![]);
+        assert_eq!(swarm.attention_count(), 0);
+    }
 
     #[test]
     fn codex_and_droid_launch_interactive_sessions() {
