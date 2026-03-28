@@ -379,6 +379,8 @@ impl SwarmView {
                 Span::styled(" shutdown  ", theme::help_style()),
                 Span::styled("a", theme::title_style()),
                 Span::styled(" add  ", theme::help_style()),
+                Span::styled("S", theme::title_style()),
+                Span::styled(" switch agent  ", theme::help_style()),
                 Span::styled("⌥a", theme::title_style()),
                 Span::styled(" next alert", theme::help_style()),
             ],

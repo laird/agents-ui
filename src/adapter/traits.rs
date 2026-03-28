@@ -46,6 +46,10 @@ pub trait AgentRuntime {
     /// Re-launch any agents that have dropped back to a shell (e.g. after a self-update).
     async fn revive_agents(&self, swarm: &Swarm) -> Result<()>;
 
+    /// Switch all agents in a swarm to a new runtime. Kills existing agents, updates
+    /// swarm.agent_type, relaunches, and restarts worker loops.
+    async fn switch_agent(&self, swarm: &mut Swarm, new_runtime: AgentType) -> Result<()>;
+
     /// Validate and heal worker infrastructure. Returns descriptions of repairs made.
     /// Ensures each worker has a worktree, tmux pane, and active agent.
     async fn heal_workers(&self, swarm: &mut Swarm) -> Result<Vec<String>>;

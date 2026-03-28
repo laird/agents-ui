@@ -36,6 +36,8 @@ pub enum Screen {
     IssueDetail { swarm_idx: usize },
     /// Full-screen issue list for a swarm (opened with 'L' from RepoView).
     IssueList { swarm_idx: usize },
+    /// Overlay: pick a new agent runtime to switch the running swarm to.
+    SwitchAgent { swarm_idx: usize, selected: usize },
 }
 
 #[derive(Debug, Clone)]
@@ -460,6 +462,33 @@ impl App {
                             self.swarm_view.render_issue_list(f, area, &swarm.project_name, &issues);
                         }
                     }
+                    Screen::SwitchAgent { swarm_idx, selected } => {
+                        // Render RepoView underneath, then overlay the dialog
+                        if let Some(swarm) = self.swarms.get(*swarm_idx) {
+                            let swarm = swarm.clone();
+                            let issues = self.issue_caches
+                                .get(&swarm.project_name)
+                                .map(|c| c.issues.clone())
+                                .unwrap_or_default();
+                            let focus = self.swarm_focus;
+                            let blink = self.blink;
+                            self.swarm_view.render(f, area, &swarm, &issues, focus, blink);
+                            // Center a compact overlay dialog
+                            let dialog_w = 50u16.min(area.width);
+                            let n_types = crate::model::swarm::ALL_AGENT_TYPES.len() as u16;
+                            let dialog_h = (n_types + 4).min(area.height);
+                            let x = area.x + area.width.saturating_sub(dialog_w) / 2;
+                            let y = area.y + area.height.saturating_sub(dialog_h) / 2;
+                            let dialog_area = ratatui::layout::Rect::new(x, y, dialog_w, dialog_h);
+                            crate::ui::new_swarm::render_switch_agent_dialog(
+                                f,
+                                dialog_area,
+                                &swarm.project_name,
+                                &swarm.agent_type,
+                                *selected,
+                            );
+                        }
+                    }
                 }
 
                 // Shortcuts viewer overlay
@@ -503,6 +532,9 @@ impl App {
                 }
                 Screen::IssueList { swarm_idx } if *swarm_idx >= self.swarms.len() => {
                     tracing::warn!("IssueList points to invalid swarm_idx {}, falling back", swarm_idx);
+                    self.screen = Screen::ReposList;
+                }
+                Screen::SwitchAgent { swarm_idx, .. } if *swarm_idx >= self.swarms.len() => {
                     self.screen = Screen::ReposList;
                 }
                 Screen::RuntimeSelect | Screen::InstallScopeSelect => {}
@@ -762,7 +794,7 @@ impl App {
         // Global: Alt+Left goes back one level
         if key.modifiers.contains(KeyModifiers::ALT) && key.code == KeyCode::Left {
             match &self.screen {
-                Screen::AgentView { swarm_idx, .. } | Screen::IssueView { swarm_idx, .. } | Screen::IssueDetail { swarm_idx, .. } | Screen::IssueList { swarm_idx } => {
+                Screen::AgentView { swarm_idx, .. } | Screen::IssueView { swarm_idx, .. } | Screen::IssueDetail { swarm_idx, .. } | Screen::IssueList { swarm_idx } | Screen::SwitchAgent { swarm_idx, .. } => {
                     let idx = *swarm_idx;
                     self.enter_repo_view(idx).await;
                 }
@@ -797,7 +829,7 @@ impl App {
                 if c == '0' {
                     // Alt+0: go back one level
                     match &self.screen {
-                        Screen::AgentView { swarm_idx, .. } | Screen::IssueView { swarm_idx, .. } | Screen::IssueDetail { swarm_idx, .. } | Screen::IssueList { swarm_idx } => {
+                        Screen::AgentView { swarm_idx, .. } | Screen::IssueView { swarm_idx, .. } | Screen::IssueDetail { swarm_idx, .. } | Screen::IssueList { swarm_idx } | Screen::SwitchAgent { swarm_idx, .. } => {
                             let idx = *swarm_idx;
                             self.enter_repo_view(idx).await;
                         }
@@ -912,6 +944,9 @@ impl App {
             }
             Screen::IssueList { swarm_idx } => {
                 self.handle_issue_list_key(key, *swarm_idx).await?
+            }
+            Screen::SwitchAgent { swarm_idx, selected } => {
+                self.handle_switch_agent_key(key, *swarm_idx, *selected).await?
             }
         }
 
@@ -1845,6 +1880,16 @@ impl App {
             return Ok(());
         }
 
+        // S: open switch-agent dialog
+        if key.code == KeyCode::Char('S') {
+            let current = self.swarms.get(swarm_idx).map(|s| &s.agent_type);
+            let selected = current
+                .and_then(|a| crate::model::swarm::ALL_AGENT_TYPES.iter().position(|t| t == a))
+                .unwrap_or(0);
+            self.screen = Screen::SwitchAgent { swarm_idx, selected };
+            return Ok(());
+        }
+
         match self.swarm_focus {
             SwarmPanel::Manager => {
                 // Manager pane: passthrough all keys to tmux
@@ -2463,6 +2508,53 @@ impl App {
             }
             KeyCode::Char('d') | KeyCode::Char(' ') => {
                 self.dispatch_selected_issue(swarm_idx).await;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    async fn handle_switch_agent_key(
+        &mut self,
+        key: KeyEvent,
+        swarm_idx: usize,
+        selected: usize,
+    ) -> Result<()> {
+        let n = crate::model::swarm::ALL_AGENT_TYPES.len();
+        match key.code {
+            KeyCode::Esc => {
+                self.screen = Screen::RepoView { swarm_idx };
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                let new_sel = if selected == 0 { n - 1 } else { selected - 1 };
+                self.screen = Screen::SwitchAgent { swarm_idx, selected: new_sel };
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let new_sel = (selected + 1) % n;
+                self.screen = Screen::SwitchAgent { swarm_idx, selected: new_sel };
+            }
+            KeyCode::Enter => {
+                let new_runtime = crate::model::swarm::ALL_AGENT_TYPES
+                    .get(selected)
+                    .cloned()
+                    .unwrap_or(crate::model::swarm::AgentType::Claude);
+                let project_name = self.swarms.get(swarm_idx)
+                    .map(|s| s.project_name.clone())
+                    .unwrap_or_default();
+                self.screen = Screen::RepoView { swarm_idx };
+                self.status_message = Some(format!("Switching to {}…", new_runtime));
+                if let Some(swarm) = self.swarms.get_mut(swarm_idx) {
+                    match self.adapter.switch_agent(swarm, new_runtime.clone()).await {
+                        Ok(()) => {
+                            self.status_message = Some(format!(
+                                "{project_name}: switched to {new_runtime}"
+                            ));
+                        }
+                        Err(e) => {
+                            self.status_message = Some(format!("Switch failed: {e}"));
+                        }
+                    }
+                }
             }
             _ => {}
         }

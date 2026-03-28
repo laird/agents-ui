@@ -82,6 +82,15 @@ impl AgentType {
         }
     }
 
+    /// The tmux send-keys key sequence to gracefully exit this agent (returns to shell).
+    /// Returns ("key", literal) where literal=true means use -l flag (send as text).
+    pub fn exit_key(&self) -> (&str, bool) {
+        match self {
+            AgentType::Claude | AgentType::Gemini => ("q", true),
+            AgentType::Codex | AgentType::Droid => ("C-c", false),
+        }
+    }
+
     /// Status file directory within a worktree
     pub fn status_dir(&self) -> &str {
         match self {

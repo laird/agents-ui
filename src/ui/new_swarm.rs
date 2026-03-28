@@ -89,6 +89,57 @@ pub fn render_runtime_dialog(
     f.render_widget(help, chunks[4]);
 }
 
+/// Render the switch-agent overlay: lets user pick a new runtime for a running swarm.
+pub fn render_switch_agent_dialog(
+    f: &mut Frame,
+    area: Rect,
+    project_name: &str,
+    current: &AgentType,
+    selected_idx: usize,
+) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" Switch agent runtime for {} ", project_name))
+        .border_style(crate::ui::theme::title_style());
+
+    let inner = block.inner(area);
+    f.render_widget(Clear, area);
+    f.render_widget(block, area);
+
+    // One row per agent + help row
+    let mut constraints: Vec<Constraint> = ALL_AGENT_TYPES.iter().map(|_| Constraint::Length(2)).collect();
+    constraints.push(Constraint::Min(0));
+    constraints.push(Constraint::Length(2));
+    let chunks = Layout::vertical(constraints).split(inner);
+
+    for (i, agent_type) in ALL_AGENT_TYPES.iter().enumerate() {
+        let is_selected = i == selected_idx;
+        let is_current = agent_type == current;
+        let label = if is_current {
+            format!(" > {} (current)", agent_type)
+        } else {
+            format!(" > {}", agent_type)
+        };
+        let style = if is_selected {
+            crate::ui::theme::input_style()
+        } else {
+            crate::ui::theme::help_style()
+        };
+        f.render_widget(Paragraph::new(Line::from(Span::styled(label, style))), chunks[i]);
+    }
+
+    let help_idx = ALL_AGENT_TYPES.len() + 1;
+    let help = Paragraph::new(Line::from(vec![
+        Span::styled(" ↑/↓", crate::ui::theme::title_style()),
+        Span::styled(" choose  ", crate::ui::theme::help_style()),
+        Span::styled("Enter", crate::ui::theme::title_style()),
+        Span::styled(" switch  ", crate::ui::theme::help_style()),
+        Span::styled("Esc", crate::ui::theme::title_style()),
+        Span::styled(" cancel", crate::ui::theme::help_style()),
+    ]));
+    f.render_widget(help, chunks[help_idx]);
+}
+
 pub fn render_install_scope_dialog(
     f: &mut Frame,
     area: Rect,

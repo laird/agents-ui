@@ -978,6 +978,64 @@ impl AgentRuntime for ClaudeAdapter {
         proxy::send_keys(&self.transport, tmux_target, worker_loop_cmd).await
     }
 
+    async fn switch_agent(&self, swarm: &mut Swarm, new_runtime: AgentType) -> Result<()> {
+        let session_name = swarm.tmux_session.clone();
+        let (exit_key, exit_literal) = swarm.agent_type.exit_key();
+
+        // Collect all pane targets (manager + workers)
+        let mut targets: Vec<String> = vec![swarm.manager.tmux_target.clone()];
+        for w in &swarm.workers {
+            targets.push(w.tmux_target.clone());
+        }
+
+        // Step 1: Exit existing agent in each pane
+        for target in &targets {
+            if exit_literal {
+                proxy::send_keys(&self.transport, target, exit_key).await.ok();
+            } else {
+                self.output(
+                    "tmux",
+                    &[
+                        "send-keys".to_string(),
+                        "-t".to_string(),
+                        target.clone(),
+                        exit_key.to_string(),
+                        String::new(),
+                    ],
+                    None,
+                )
+                .await
+                .ok();
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+
+        // Step 2: Update agent type on the swarm
+        swarm.agent_type = new_runtime.clone();
+
+        // Step 3: Relaunch agent in each pane
+        for target in &targets {
+            self.launch_agent_in_pane(target, &session_name, &new_runtime).await.ok();
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+
+        // Step 4: Restart loops
+        let loop_cmd = new_runtime.worker_loop_cmd().to_string();
+        for worker in &swarm.workers {
+            if !loop_cmd.is_empty() {
+                proxy::send_keys(&self.transport, &worker.tmux_target, &loop_cmd).await.ok();
+            }
+        }
+        if let Some(cmd) = self.bootstrap_command(&new_runtime, &swarm.manager).await {
+            proxy::send_keys(&self.transport, &swarm.manager.tmux_target, &cmd).await.ok();
+        }
+
+        // Step 5: Save the new agent type to repo config
+        crate::config::persistence::save_repo_agent_type(&swarm.repo_path, &new_runtime).ok();
+
+        Ok(())
+    }
+
     async fn stop(&self, swarm: &Swarm) -> Result<()> {
         // Send Ctrl+C to each worker pane to interrupt claude
         for worker in &swarm.workers {
