@@ -452,11 +452,10 @@ impl App {
                 // Shortcuts viewer overlay
                 if self.show_shortcuts_viewer {
                     let panel = match &self.screen {
-                        Screen::RepoView { .. } => match &self.repo_view.focus {
-                            crate::ui::repo_view::RepoViewFocus::Workers => "workers",
-                            crate::ui::repo_view::RepoViewFocus::Issues => "issues",
-                            crate::ui::repo_view::RepoViewFocus::ManagerInput => "manager",
-                            _ => "global",
+                        Screen::RepoView { .. } => match self.swarm_focus {
+                            SwarmPanel::Workers => "workers",
+                            SwarmPanel::Issues => "issues",
+                            SwarmPanel::Manager => "manager",
                         },
                         _ => "global",
                     };
