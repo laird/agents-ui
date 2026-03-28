@@ -171,7 +171,15 @@ impl AgentRuntime for ClaudeAdapter {
             tracing::warn!("Failed to resize session {session_name}: {e}");
         }
 
-        Self::build_swarm_from_session(&session_name, config.repo_path.clone(), config.agent_type.clone()).await
+        let swarm = Self::build_swarm_from_session(&session_name, config.repo_path.clone(), config.agent_type.clone()).await?;
+
+        // Send fix-loop to all workers in the newly created session
+        let loop_cmd = config.agent_type.worker_loop_cmd();
+        for worker in &swarm.workers {
+            let _ = proxy::send_keys(&worker.tmux_target, loop_cmd).await;
+        }
+
+        Ok(swarm)
     }
 
     async fn discover(&self, _agents_dir: &Path) -> Result<Vec<Swarm>> {
@@ -361,6 +369,7 @@ impl AgentRuntime for ClaudeAdapter {
         let session_name = &swarm.tmux_session;
         let repo_path = &swarm.repo_path;
         let launch_cmd = swarm.agent_type.launch_cmd().to_string();
+        let loop_cmd = swarm.agent_type.worker_loop_cmd().to_string();
 
         // Check which tmux panes actually exist in the agents window
         let session_exists = session::has_session(session_name).await;
@@ -518,6 +527,10 @@ impl AgentRuntime for ClaudeAdapter {
                     )
                     .await;
 
+                    // Wait for agent to initialize, then start fix-loop
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    let _ = proxy::send_keys(&worker.tmux_target, &loop_cmd).await;
+
                     repairs.push(format!("Recreated tmux pane and launched agent for {}", worker.id));
                     continue; // Skip step 3 since we just launched
                 }
@@ -555,6 +568,10 @@ impl AgentRuntime for ClaudeAdapter {
                                 &format!("cd '{}' && {}", wt_path.display(), launch_cmd),
                             )
                             .await;
+
+                            // Wait for agent to initialize, then start fix-loop
+                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                            let _ = proxy::send_keys(&worker.tmux_target, &loop_cmd).await;
 
                             repairs.push(format!("Restarted agent for {} (was at shell prompt)", worker.id));
                         }
