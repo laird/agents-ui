@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use crate::adapter::claude::ClaudeAdapter;
 use crate::adapter::traits::{AgentRuntime, SwarmConfig};
 use crate::event::{Event, EventHandler};
-use crate::model::issue::{GitHubIssue, IssueCache};
+use crate::model::issue::{GitHubIssue, IssueCache, IssueFilter};
 use crate::model::swarm::{AgentType, ALL_AGENT_TYPES, Swarm};
 use crate::scripts::launcher;
 use crate::transport::ServerTransport;
@@ -37,6 +37,7 @@ pub enum Screen {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum NewSwarmField {
     RepoPath,
     AgentRuntime,
@@ -241,6 +242,7 @@ pub struct App {
     /// Issue detail view state.
     pub issue_detail_view: Option<IssueDetailView>,
     /// Tracks last Esc press for double-Esc to go back (never forwarded to pane).
+    #[allow(dead_code)]
     last_esc: Option<std::time::Instant>,
     /// App-level keybinding configuration.
     pub keybindings: crate::config::keybindings::KeyBindings,
@@ -457,6 +459,7 @@ impl App {
                             SwarmPanel::Issues => "issues",
                             SwarmPanel::Manager => "manager",
                         },
+                        Screen::IssueView { .. } | Screen::IssueDetail { .. } => "issues",
                         _ => "global",
                     };
                     crate::ui::shortcuts_viewer::render_shortcuts_viewer(
@@ -657,6 +660,7 @@ impl App {
 
     /// Convert a crossterm KeyEvent to a tmux send-keys argument.
     /// Returns (key_string, literal) where literal means use -l flag.
+    #[allow(dead_code)]
     fn key_to_tmux(key: &KeyEvent) -> Option<(String, bool)> {
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             if let KeyCode::Char(c) = key.code {
@@ -1814,6 +1818,7 @@ impl App {
 
         // Tab cycles focus: Manager → Workers → Issues → Manager
         if key.code == KeyCode::Tab {
+            self.swarm_view.search_query = None;
             self.swarm_focus = self.swarm_focus.next();
             return Ok(());
         }
@@ -1925,6 +1930,9 @@ impl App {
                             }
                         }
                     }
+                    KeyCode::Char('b') => {
+                        self.jump_to_next_blocked(swarm_idx);
+                    }
                     KeyCode::Char('d') => {
                         // Shut down selected worker
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
@@ -1955,6 +1963,33 @@ impl App {
                 }
             }
             SwarmPanel::Issues => {
+                // Search mode intercepts all input
+                if self.swarm_view.search_query.is_some() {
+                    match key.code {
+                        KeyCode::Esc => {
+                            self.swarm_view.search_query = None;
+                            self.swarm_view.issues_table.select(Some(0));
+                        }
+                        KeyCode::Enter => {
+                            self.swarm_view.search_query = None;
+                        }
+                        KeyCode::Backspace => {
+                            if let Some(q) = self.swarm_view.search_query.as_mut() {
+                                q.pop();
+                            }
+                            self.swarm_view.issues_table.select(Some(0));
+                        }
+                        KeyCode::Char(c) => {
+                            if let Some(q) = self.swarm_view.search_query.as_mut() {
+                                q.push(c);
+                            }
+                            self.swarm_view.issues_table.select(Some(0));
+                        }
+                        _ => {}
+                    }
+                    return Ok(());
+                }
+
                 let issue_count = self.swarms.get(swarm_idx)
                     .and_then(|s| self.issue_caches.get(&s.project_name))
                     .map(|c| c.issues.iter().filter(|i| i.matches_filter(self.swarm_view.issue_filter)).count())
@@ -1980,8 +2015,8 @@ impl App {
                         self.send_issue_command_to_manager(swarm_idx, "approve").await?;
                     }
                     KeyCode::Char('b') => {
-                        // Brainstorm: send "brainstorm <issue_number>" to manager pane
-                        self.send_issue_command_to_manager(swarm_idx, "brainstorm").await?;
+                        // Jump to next blocked issue (cycle through blocked issues)
+                        self.jump_to_next_blocked(swarm_idx);
                     }
                     KeyCode::Char('r') => {
                         // Review-blocked in selected runtime (only if manager is idle)
@@ -2041,48 +2076,7 @@ impl App {
                         }
                     }
                     KeyCode::Char('d') => {
-                        // Dispatch selected issue to an idle worker
-                        if let Some(swarm) = self.swarms.get(swarm_idx) {
-                            let issues: Vec<&GitHubIssue> = self.issue_caches
-                                .get(&swarm.project_name)
-                                .map(|c| c.issues.iter().filter(|i| i.matches_filter(self.swarm_view.issue_filter)).collect())
-                                .unwrap_or_default();
-                            if let Some(issue) = self.swarm_view.selected_issue()
-                                .and_then(|idx| issues.get(idx))
-                            {
-                                let issue_num = issue.number;
-                                let agent_type = swarm.agent_type.clone();
-                                let idle_worker = swarm.workers.iter()
-                                    .find(|w| {
-                                        !w.is_manager
-                                            && w.dispatched_issue.is_none()
-                                            && matches!(w.status.state, crate::model::status::AgentState::Idle)
-                                    })
-                                    .map(|w| w.tmux_target.clone());
-                                if let Some(target) = idle_worker {
-                                    if let Some(cmd) = self.worker_dispatch_cmd(&agent_type, issue_num) {
-                                        tracing::info!("Manual dispatch #{issue_num} to {target}");
-                                        if let Ok(()) = crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, &cmd).await {
-                                            tokio::time::sleep(Duration::from_millis(200)).await;
-                                            crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, "Enter").await.ok();
-                                            // Track dispatch in worker
-                                            if let Some(swarm_mut) = self.swarms.get_mut(swarm_idx) {
-                                                if let Some(worker) = swarm_mut.workers.iter_mut()
-                                                    .find(|w| w.tmux_target == target)
-                                                {
-                                                    worker.dispatched_issue = Some(issue_num);
-                                                }
-                                            }
-                                            self.status_message = Some(format!("Dispatched #{issue_num} to {target}"));
-                                        }
-                                    } else {
-                                        self.status_message = Some(format!("No dispatch command configured for {agent_type}"));
-                                    }
-                                } else {
-                                    self.status_message = Some("No idle workers available".to_string());
-                                }
-                            }
-                        }
+                        self.dispatch_selected_issue(swarm_idx).await;
                     }
                     KeyCode::Char('g') => {
                         // Open selected issue in browser via gh issue view --web
@@ -2115,9 +2109,12 @@ impl App {
                             }
                         }
                     }
-                    KeyCode::Char('d') | KeyCode::Char(' ') => {
-                        // Dispatch selected issue to an idle worker
+                    KeyCode::Char(' ') => {
                         self.dispatch_selected_issue(swarm_idx).await;
+                    }
+                    KeyCode::Char('/') => {
+                        self.swarm_view.search_query = Some(String::new());
+                        self.swarm_view.issues_table.select(Some(0));
                     }
                     _ => {}
                 }
@@ -2511,14 +2508,6 @@ impl App {
                 self.agent_view.input.insert_char(c);
                 return Ok(());
             }
-            KeyCode::Home => {
-                self.agent_view.scroll_offset = 0;
-                return Ok(());
-            }
-            KeyCode::End => {
-                self.agent_view.scroll_to_bottom();
-                return Ok(());
-            }
             _ => {}
         }
 
@@ -2535,6 +2524,32 @@ impl App {
 
     /// Start pane watchers for all agents in all swarms.
     /// Jump to the next agent session that is waiting for user input.
+    fn jump_to_next_blocked(&mut self, swarm_idx: usize) {
+        let blocked_count = self.swarms.get(swarm_idx)
+            .and_then(|s| self.issue_caches.get(&s.project_name))
+            .map(|c| c.issues.iter().filter(|i| i.is_blocked()).count())
+            .unwrap_or(0);
+
+        if blocked_count == 0 {
+            self.status_message = Some("No blocked issues".to_string());
+            return;
+        }
+
+        // If already viewing blocked issues, cycle to next; otherwise go to first
+        let next_idx = if self.swarm_focus == SwarmPanel::Issues
+            && self.swarm_view.issue_filter == IssueFilter::Blocked
+        {
+            let current = self.swarm_view.issues_table.selected().unwrap_or(0);
+            (current + 1) % blocked_count
+        } else {
+            0
+        };
+
+        self.swarm_view.issue_filter = IssueFilter::Blocked;
+        self.swarm_view.issues_table.select(Some(next_idx));
+        self.swarm_focus = SwarmPanel::Issues;
+    }
+
     fn jump_to_next_waiting(&mut self, swarm_idx: usize) {
         // Get the current agent ID if we're in an agent view
         let current_id = match &self.screen {
@@ -2558,6 +2573,7 @@ impl App {
     }
 
     /// Try to execute a configured shortcut for the given panel and key.
+    #[allow(dead_code)]
     async fn try_shortcut(&mut self, panel: &str, key: &str, swarm_idx: usize, issue: Option<u32>) -> Result<()> {
         use crate::config::shortcuts::ShortcutsConfig;
 

@@ -3,7 +3,6 @@
 use ansi_to_tui::IntoText;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
-    style::{Color, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
     Frame,
@@ -11,7 +10,6 @@ use ratatui::{
 
 use crate::model::issue::IssuePriority;
 use crate::model::swarm::Swarm;
-use super::text_input::TextInput;
 use super::theme;
 
 /// Which panel has focus in the repo view.
@@ -551,14 +549,14 @@ impl RepoView {
                 Span::styled(" new issue  ", theme::help_style()),
                 Span::styled("n", theme::waiting_style()),
                 Span::styled(" next waiting  ", theme::help_style()),
+                Span::styled("b", theme::attention_style()),
+                Span::styled(" next blocked  ", theme::help_style()),
                 Span::styled("m", theme::title_style()),
                 Span::styled(" manager  ", theme::help_style()),
                 Span::styled("d", theme::title_style()),
                 Span::styled(" shutdown  ", theme::help_style()),
                 Span::styled("f", theme::title_style()),
                 Span::styled(" fix-loop  ", theme::help_style()),
-                Span::styled("i", theme::title_style()),
-                Span::styled(" view issue  ", theme::help_style()),
                 Span::styled("a", theme::title_style()),
                 Span::styled(" add worker  ", theme::help_style()),
                 Span::styled("Esc", theme::title_style()),
@@ -567,6 +565,8 @@ impl RepoView {
             RepoViewFocus::Issues => Paragraph::new(Line::from(vec![
                 Span::styled(" Enter", theme::title_style()),
                 Span::styled(" assign  ", theme::help_style()),
+                Span::styled("b", theme::attention_style()),
+                Span::styled(" next blocked  ", theme::help_style()),
                 Span::styled("i", theme::title_style()),
                 Span::styled(" new issue  ", theme::help_style()),
                 Span::styled("Tab", theme::title_style()),
