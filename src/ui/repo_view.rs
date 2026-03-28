@@ -11,7 +11,6 @@ use ratatui::{
 
 use crate::model::issue::IssuePriority;
 use crate::model::swarm::Swarm;
-use super::text_input::TextInput;
 use super::theme;
 
 /// Which panel has focus in the repo view.
