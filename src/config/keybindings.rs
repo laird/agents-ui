@@ -1,5 +1,4 @@
 use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
@@ -89,42 +88,6 @@ impl KeyBind {
         }
     }
 
-    /// Check if a KeyEvent matches this binding.
-    #[allow(dead_code)]
-    pub fn matches(&self, event: &KeyEvent) -> bool {
-        let key_matches = match event.code {
-            KeyCode::Char(c) => self.key == c.to_string(),
-            KeyCode::Enter => self.key == "enter",
-            KeyCode::Esc => self.key == "esc",
-            KeyCode::Tab => self.key == "tab",
-            KeyCode::Backspace => self.key == "backspace",
-            KeyCode::Up => self.key == "up",
-            KeyCode::Down => self.key == "down",
-            KeyCode::Left => self.key == "left",
-            KeyCode::Right => self.key == "right",
-            KeyCode::PageUp => self.key == "pageup",
-            KeyCode::PageDown => self.key == "pagedown",
-            KeyCode::Home => self.key == "home",
-            KeyCode::End => self.key == "end",
-            KeyCode::Delete => self.key == "delete",
-            KeyCode::F(n) => self.key == format!("f{n}"),
-            _ => false,
-        };
-
-        if !key_matches {
-            return false;
-        }
-
-        let needs_ctrl = self.modifiers.iter().any(|m| m == "ctrl");
-        let needs_alt = self.modifiers.iter().any(|m| m == "alt");
-        let needs_shift = self.modifiers.iter().any(|m| m == "shift");
-
-        let has_ctrl = event.modifiers.contains(KeyModifiers::CONTROL);
-        let has_alt = event.modifiers.contains(KeyModifiers::ALT);
-        let has_shift = event.modifiers.contains(KeyModifiers::SHIFT);
-
-        needs_ctrl == has_ctrl && needs_alt == has_alt && needs_shift == has_shift
-    }
 }
 
 /// The full keybindings configuration.
@@ -180,15 +143,6 @@ impl Default for KeyBindings {
 }
 
 impl KeyBindings {
-    /// Check if a key event matches any binding for the given action.
-    #[allow(dead_code)]
-    pub fn matches(&self, action: Action, event: &KeyEvent) -> bool {
-        self.bindings
-            .get(&action)
-            .map(|binds| binds.iter().any(|b| b.matches(event)))
-            .unwrap_or(false)
-    }
-
     /// Get display string for an action's bindings (e.g., "q", "up/k").
     pub fn display(&self, action: Action) -> String {
         self.bindings

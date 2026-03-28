@@ -46,8 +46,6 @@ pub enum NewSwarmField {
     AgentRuntime,
     RuntimeSelection,
     NumWorkers,
-    #[allow(dead_code)]
-    Launching,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -245,9 +243,6 @@ pub struct App {
     auto_dispatch_last: Option<std::time::Instant>,
     /// Issue detail view state.
     pub issue_detail_view: Option<IssueDetailView>,
-    /// Tracks last Esc press for double-Esc to go back (never forwarded to pane).
-    #[allow(dead_code)]
-    last_esc: Option<std::time::Instant>,
     /// App-level keybinding configuration.
     pub keybindings: crate::config::keybindings::KeyBindings,
     /// Whether the ? help overlay is visible.
@@ -327,7 +322,6 @@ impl App {
                 crate::config::shortcuts::ShortcutsConfig::load()
             },
             show_shortcuts_viewer: false,
-            last_esc: None,
             auto_dispatch_last: None,
             issue_detail_view: None,
             keybindings: crate::config::keybindings::KeyBindings::load(),
@@ -702,37 +696,6 @@ impl App {
             }
         }
         Ok(())
-    }
-
-    /// Convert a crossterm KeyEvent to a tmux send-keys argument.
-    /// Returns (key_string, literal) where literal means use -l flag.
-    #[allow(dead_code)]
-    fn key_to_tmux(key: &KeyEvent) -> Option<(String, bool)> {
-        if key.modifiers.contains(KeyModifiers::CONTROL) {
-            if let KeyCode::Char(c) = key.code {
-                return Some((format!("C-{c}"), false));
-            }
-        }
-        if key.modifiers.contains(KeyModifiers::ALT) {
-            if let KeyCode::Char(c) = key.code {
-                return Some((format!("M-{c}"), false));
-            }
-        }
-        match key.code {
-            KeyCode::Char(c) => Some((c.to_string(), true)),
-            KeyCode::Enter => Some(("Enter".to_string(), false)),
-            KeyCode::Backspace => Some(("BSpace".to_string(), false)),
-            KeyCode::Tab => Some(("Tab".to_string(), false)),
-            KeyCode::Esc => Some(("Escape".to_string(), false)),
-            KeyCode::Up => Some(("Up".to_string(), false)),
-            KeyCode::Down => Some(("Down".to_string(), false)),
-            KeyCode::Left => Some(("Left".to_string(), false)),
-            KeyCode::Right => Some(("Right".to_string(), false)),
-            KeyCode::Home => Some(("Home".to_string(), false)),
-            KeyCode::End => Some(("End".to_string(), false)),
-            KeyCode::Delete => Some(("DC".to_string(), false)),
-            _ => None,
-        }
     }
 
     /// Returns true if we're in a passthrough mode where keystrokes go directly to tmux.
@@ -1765,12 +1728,6 @@ impl App {
                 }
                 _ => {}
             },
-            NewSwarmField::Launching => {
-                // No key handling while launching — just ignore
-                if key.code == KeyCode::Esc {
-                    self.screen = Screen::ReposList;
-                }
-            }
         }
         Ok(())
     }
@@ -2866,43 +2823,6 @@ impl App {
                 self.status_message = Some("No sessions waiting for input".to_string());
             }
         }
-    }
-
-    /// Try to execute a configured shortcut for the given panel and key.
-    #[allow(dead_code)]
-    async fn try_shortcut(&mut self, panel: &str, key: &str, swarm_idx: usize, issue: Option<u32>) -> Result<()> {
-        use crate::config::shortcuts::ShortcutsConfig;
-
-        let shortcuts = self.shortcuts.for_panel(panel);
-        if let Some(shortcut) = shortcuts.get(key) {
-            let project = self.swarms.get(swarm_idx).map(|s| s.project_name.as_str());
-            let worker_target = self.repo_view.selected_worker()
-                .and_then(|idx| self.swarms.get(swarm_idx).and_then(|s| s.workers.get(idx)))
-                .map(|w| w.tmux_target.as_str());
-
-            let cmd = ShortcutsConfig::expand_command(
-                &shortcut.command,
-                issue,
-                worker_target,
-                project,
-            );
-
-            if let Some(swarm) = self.swarms.get(swarm_idx) {
-                let target = if shortcut.target == "worker" {
-                    worker_target.unwrap_or(&swarm.manager.tmux_target).to_string()
-                } else {
-                    swarm.manager.tmux_target.clone()
-                };
-
-                if shortcut.raw {
-                    self.adapter.send_raw_key(&target, &cmd, false).await?;
-                } else {
-                    self.adapter.send_input(&target, &cmd).await?;
-                }
-                self.status_message = Some(format!("[{}] {}", shortcut.label, cmd));
-            }
-        }
-        Ok(())
     }
 
     async fn handle_issue_detail_key(&mut self, key: KeyEvent, swarm_idx: usize) -> Result<()> {

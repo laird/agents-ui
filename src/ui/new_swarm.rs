@@ -414,19 +414,6 @@ pub fn render_new_swarm_dialog(
             ]));
             f.render_widget(help, chunks[4]);
         }
-        NewSwarmField::Launching => {
-            let msg = Paragraph::new(Line::from(Span::styled(
-                " Launching swarm... please wait",
-                theme::title_style(),
-            )));
-            f.render_widget(msg, chunks[1]);
-
-            let help = Paragraph::new(Line::from(vec![
-                Span::styled(" Esc", theme::title_style()),
-                Span::styled(" cancel", theme::help_style()),
-            ]));
-            f.render_widget(help, chunks[4]);
-        }
     }
 }
 
