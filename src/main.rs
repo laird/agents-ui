@@ -175,6 +175,12 @@ async fn main() -> Result<()> {
     result
 }
 
+/// Mutex that test code acquires before mutating global environment variables (e.g., HOME).
+/// Any test that reads HOME-dependent state (e.g., config_dir()) must also hold this lock
+/// to prevent flaky failures from parallel test execution.
+#[cfg(test)]
+pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::{parse_cli_options, select_initial_agent_type, CliOptions};

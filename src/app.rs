@@ -1333,6 +1333,7 @@ impl App {
             },
             workers: Vec::new(),
             issue_cache: crate::model::issue::IssueCache::default(),
+            stopped: false,
         };
 
         self.swarms.push(placeholder);
@@ -1733,9 +1734,11 @@ impl App {
         if let Some(idx) = self.confirm_stop_swarm {
             self.confirm_stop_swarm = None;
             if key.code == KeyCode::Char('y') || key.code == KeyCode::Char('Y') {
-                if let Some(swarm) = self.swarms.get(swarm_idx) {
+                if let Some(swarm) = self.swarms.get_mut(swarm_idx) {
                     let targets: Vec<String> = swarm.workers.iter().map(|w| w.tmux_target.clone()).collect();
                     let count = targets.len();
+                    swarm.stopped = true;
+                    crate::config::persistence::mark_swarm_stopped(&swarm.project_name);
                     for target in targets {
                         let _ = proxy::kill_pane(&self.transport, &target).await;
                     }
@@ -3830,9 +3833,10 @@ mod tests {
         let bin = home.join(".local/bin");
         std::fs::create_dir_all(&skills).unwrap();
         std::fs::create_dir_all(&bin).unwrap();
+        let transport = ServerTransport::default();
+        let _env_guard = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let original_home = std::env::var_os("HOME");
         unsafe { std::env::set_var("HOME", &home) };
-        let transport = ServerTransport::default();
 
         assert!(!codex_user_assets_present(&transport).await);
 
@@ -3847,6 +3851,7 @@ mod tests {
         } else {
             unsafe { std::env::remove_var("HOME") };
         }
+        drop(_env_guard);
         std::fs::remove_dir_all(home).ok();
     }
 

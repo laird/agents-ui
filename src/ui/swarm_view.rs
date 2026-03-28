@@ -535,6 +535,7 @@ mod tests {
                 AgentState::Working { issue: Some(12) },
             )],
             issue_cache: crate::model::issue::IssueCache::default(),
+            stopped: false,
         }
     }
 

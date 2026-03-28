@@ -188,6 +188,9 @@ mod tests {
     fn stopped_tombstone_round_trip() {
         use super::{clear_swarm_stopped, config_dir, is_swarm_stopped, mark_swarm_stopped};
 
+        // Hold the env lock so HOME-mutating tests don't change config_dir() under us
+        let _env_guard = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
         // Use a unique project name to avoid collisions between parallel test runs
         let project = format!("test-project-{}", std::process::id());
 

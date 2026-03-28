@@ -1280,6 +1280,9 @@ impl AgentRuntime for ClaudeAdapter {
     }
 
     async fn revive_agents(&self, swarm: &Swarm) -> Result<()> {
+        if swarm.stopped || crate::config::persistence::is_swarm_stopped(&swarm.project_name) {
+            return Ok(());
+        }
         self.ensure_swarm_agents_running(swarm).await
     }
 }
