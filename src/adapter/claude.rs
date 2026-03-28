@@ -373,6 +373,12 @@ impl ClaudeAdapter {
         session_name: &str,
         runtime: &AgentType,
     ) -> Result<()> {
+        // Skip intentionally stopped workers.
+        if agent_is_stopped(agent) {
+            tracing::info!("Skipping revive for {} — tombstone present", agent.id);
+            return Ok(());
+        }
+
         let content = proxy::capture_pane(&self.transport, &agent.tmux_target, 80)
             .await
             .unwrap_or_default();
@@ -566,6 +572,7 @@ impl ClaudeAdapter {
             manager,
             workers,
             issue_cache: Default::default(),
+            stopped: false,
         })
     }
 
@@ -1027,6 +1034,12 @@ impl AgentRuntime for ClaudeAdapter {
         for worker in &mut swarm.workers {
             let wt_path = &worker.worktree_path;
 
+            // Skip intentionally stopped workers — do not heal or revive them.
+            if agent_is_stopped(worker) {
+                tracing::info!("Skipping heal for {} — tombstone present", worker.id);
+                continue;
+            }
+
             // 1. Check worktree exists
             if !wt_path.exists() {
                 tracing::info!("Healing {}: recreating worktree at {}", worker.id, wt_path.display());
@@ -1279,6 +1292,26 @@ enum PaneState {
 ///
 /// An AI agent session looks very different from a bare shell:
 /// - Shell: ends with `%`, `$`, `#` prompt chars
+/// Returns true if the agent has been intentionally stopped (tombstone file present).
+fn agent_is_stopped(agent: &AgentInfo) -> bool {
+    !agent.worktree_path.as_os_str().is_empty()
+        && agent.worktree_path.join(".codex").join("stopped").exists()
+}
+
+/// Write a tombstone file to mark a worker as intentionally stopped.
+/// Returns Ok(()) even if the write fails (best-effort).
+pub fn mark_agent_stopped(worktree_path: &std::path::Path) {
+    let dir = worktree_path.join(".codex");
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(dir.join("stopped"), "");
+}
+
+/// Remove the tombstone file so a worker can be revived.
+#[allow(dead_code)] // Counterpart to mark_agent_stopped; available for future restart UI
+pub fn clear_agent_stopped(worktree_path: &std::path::Path) {
+    let _ = std::fs::remove_file(worktree_path.join(".codex").join("stopped"));
+}
+
 /// - Claude: shows `❯` prompt, `bypass permissions` status bar, thinking/working indicators
 /// - Codex: shows `›` prompt, `gpt-` model indicator
 /// - Active agents show "thinking", "working", "reading", "writing", etc.
