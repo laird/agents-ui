@@ -1,4 +1,5 @@
 use ansi_to_tui::IntoText;
+use chrono::Local;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::Style,
@@ -231,12 +232,17 @@ impl SwarmView {
                 } else {
                     theme::status_style(&w.status.state)
                 };
-                let task = if let Some(issue_num) = w.current_issue {
+                let has_task = w.current_issue.is_some()
+                    || matches!(
+                        &w.status.state,
+                        crate::model::status::AgentState::Working { issue: Some(_) }
+                    );
+                let task_text = if let Some(issue_num) = w.current_issue {
                     let title = w.current_issue_title.as_deref().unwrap_or("");
                     if title.is_empty() {
                         format!("#{issue_num}")
                     } else {
-                        format!("#{issue_num} {}", truncate(title, 25))
+                        format!("#{issue_num} {}", truncate(title, 22))
                     }
                 } else {
                     match &w.status.state {
@@ -246,10 +252,24 @@ impl SwarmView {
                         _ => "\u{2014}".to_string(),
                     }
                 };
+                let task_cell = if has_task {
+                    let (elapsed_str, overdue) = format_elapsed(w.status.timestamp);
+                    let elapsed_style = if overdue {
+                        theme::attention_style()
+                    } else {
+                        theme::help_style()
+                    };
+                    Cell::from(Line::from(vec![
+                        Span::raw(task_text),
+                        Span::styled(format!(" [{elapsed_str}]"), elapsed_style),
+                    ]))
+                } else {
+                    Cell::from(task_text)
+                };
                 Row::new(vec![
                     Cell::from(format!("{}", i + 1)),
                     Cell::from(status_str).style(status_style),
-                    Cell::from(task),
+                    task_cell,
                 ])
             })
             .collect();
@@ -551,6 +571,31 @@ fn strip_ansi(s: &str) -> String {
         .0
 }
 
+/// Format elapsed time from a NaiveDateTime to now.
+/// Returns (display_string, is_overdue) where overdue means > 2 hours.
+fn format_elapsed(timestamp: Option<chrono::NaiveDateTime>) -> (String, bool) {
+    let Some(ts) = timestamp else {
+        return ("?".to_string(), false);
+    };
+    let now = Local::now().naive_local();
+    let secs = now.signed_duration_since(ts).num_seconds().max(0) as u64;
+    if secs < 60 {
+        return ("just now".to_string(), false);
+    }
+    let mins = secs / 60;
+    if mins < 60 {
+        return (format!("{mins}m"), false);
+    }
+    let hours = mins / 60;
+    let rem_mins = mins % 60;
+    let s = if rem_mins == 0 {
+        format!("{hours}h")
+    } else {
+        format!("{hours}h {rem_mins}m")
+    };
+    (s, hours >= 2)
+}
+
 fn truncate(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
@@ -561,7 +606,7 @@ fn truncate(s: &str, max: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{agent_needs_input, SwarmPanel, SwarmView};
+    use super::{agent_needs_input, format_elapsed, SwarmPanel, SwarmView};
     use crate::model::issue::{GitHubIssue, IssueFilter, IssueState};
     use crate::model::status::{AgentState, AgentStatus};
     use crate::model::swarm::{AgentInfo, AgentType, Swarm};
@@ -738,5 +783,44 @@ mod tests {
         let results = view.issues_matching_search(&issues);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].number, 2);
+    }
+
+    #[test]
+    fn format_elapsed_none_returns_question_mark() {
+        let (s, overdue) = format_elapsed(None);
+        assert_eq!(s, "?");
+        assert!(!overdue);
+    }
+
+    #[test]
+    fn format_elapsed_recent_shows_just_now() {
+        let ts = chrono::Local::now().naive_local();
+        let (s, overdue) = format_elapsed(Some(ts));
+        assert_eq!(s, "just now");
+        assert!(!overdue);
+    }
+
+    #[test]
+    fn format_elapsed_minutes_only() {
+        let ts = chrono::Local::now().naive_local() - chrono::Duration::minutes(42);
+        let (s, overdue) = format_elapsed(Some(ts));
+        assert_eq!(s, "42m");
+        assert!(!overdue);
+    }
+
+    #[test]
+    fn format_elapsed_hours_and_minutes() {
+        let ts = chrono::Local::now().naive_local() - chrono::Duration::minutes(75);
+        let (s, overdue) = format_elapsed(Some(ts));
+        assert_eq!(s, "1h 15m");
+        assert!(!overdue);
+    }
+
+    #[test]
+    fn format_elapsed_overdue_at_two_hours() {
+        let ts = chrono::Local::now().naive_local() - chrono::Duration::hours(3);
+        let (s, overdue) = format_elapsed(Some(ts));
+        assert_eq!(s, "3h");
+        assert!(overdue);
     }
 }
