@@ -1289,6 +1289,7 @@ impl App {
                 current_issue: None,
                 current_issue_title: None,
                 waiting_for_input: false,
+                completed_issue_count: 0,
             },
             workers: Vec::new(),
             issue_cache: crate::model::issue::IssueCache::default(),
@@ -3259,7 +3260,9 @@ impl App {
                                 crate::model::status::AgentState::Idle |
                                 crate::model::status::AgentState::Stopped
                             ) {
-                                agent.dispatched_issue = None;
+                                if agent.dispatched_issue.take().is_some() {
+                                    agent.completed_issue_count += 1;
+                                }
                             }
                             agent.status = new_status;
                         }
