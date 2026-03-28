@@ -10,8 +10,10 @@ use crate::model::swarm::{AgentType, Swarm};
 use crate::scripts::launcher;
 use crate::tmux::proxy;
 use crate::tui::Tui;
+use crate::model::issue::parse_issues;
 use crate::ui::agent_view::AgentView;
 use crate::ui::issue_detail::IssueDetailView;
+use crate::ui::issue_list::IssueListView;
 use crate::ui::repo_view::RepoView;
 use crate::ui::repos_list::ReposListView;
 
@@ -25,6 +27,8 @@ pub enum Screen {
     AgentView { swarm_idx: usize, agent_id: String },
     /// View full issue details (body, labels, state).
     IssueDetail { swarm_idx: usize },
+    /// Browse GitHub issues for a repo (press 'L' in RepoView).
+    IssueList { swarm_idx: usize },
 }
 
 #[derive(Debug, Clone)]
@@ -63,6 +67,8 @@ pub struct App {
     auto_dispatch_last: Option<std::time::Instant>,
     /// Issue detail view state.
     pub issue_detail_view: Option<IssueDetailView>,
+    /// Issue list view state (GitHub issues browser).
+    pub issue_list_view: Option<IssueListView>,
 }
 
 impl App {
@@ -102,6 +108,7 @@ impl App {
             available_repos: Vec::new(),
             auto_dispatch_last: None,
             issue_detail_view: None,
+            issue_list_view: None,
         };
 
         // Scan for available repos (git directories in cwd or children)
@@ -174,6 +181,16 @@ impl App {
                     Screen::IssueDetail { .. } => {
                         if let Some(ref view) = self.issue_detail_view {
                             view.render(f, area);
+                        }
+                    }
+                    Screen::IssueList { swarm_idx } => {
+                        let idle = self
+                            .swarms
+                            .get(*swarm_idx)
+                            .map(|s| s.workers.iter().filter(|w| matches!(w.status.state, crate::model::status::AgentState::Idle)).count())
+                            .unwrap_or(0);
+                        if let Some(ref mut view) = self.issue_list_view {
+                            view.render(f, area, idle);
                         }
                     }
                 }
@@ -290,6 +307,9 @@ impl App {
             }
             Screen::IssueDetail { swarm_idx } => {
                 self.handle_issue_detail_key(key, *swarm_idx).await?
+            }
+            Screen::IssueList { swarm_idx } => {
+                self.handle_issue_list_key(key, *swarm_idx).await?
             }
         }
 
@@ -644,6 +664,10 @@ impl App {
                         }
                     }
                 }
+                KeyCode::Char('L') => {
+                    // Open GitHub issue list for this repo
+                    self.open_issue_list(swarm_idx).await;
+                }
                 KeyCode::Char('d') => {
                     // Shut down the selected worker's session
                     if let Some(swarm) = self.swarms.get(swarm_idx) {
@@ -858,6 +882,109 @@ impl App {
             _ => {}
         }
         Ok(())
+    }
+
+    /// Key handler for Screen::IssueList.
+    async fn handle_issue_list_key(&mut self, key: KeyEvent, swarm_idx: usize) -> Result<()> {
+        match key.code {
+            KeyCode::Esc | KeyCode::Backspace => {
+                self.issue_list_view = None;
+                self.screen = Screen::RepoView { swarm_idx };
+            }
+            KeyCode::Char('q') => {
+                self.running = false;
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if let Some(ref mut view) = self.issue_list_view {
+                    view.next();
+                }
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if let Some(ref mut view) = self.issue_list_view {
+                    view.previous();
+                }
+            }
+            KeyCode::Enter => {
+                // Open issue detail for the selected issue
+                if let Some(ref view) = self.issue_list_view {
+                    if let Some(issue) = view.selected_issue() {
+                        let num = issue.number;
+                        self.open_issue_detail(num, swarm_idx).await;
+                    }
+                }
+            }
+            KeyCode::Char(' ') | KeyCode::Char('d') => {
+                // Dispatch selected issue to first idle worker
+                let issue_num = self
+                    .issue_list_view
+                    .as_ref()
+                    .and_then(|v| v.selected_issue())
+                    .map(|i| i.number);
+                if let Some(num) = issue_num {
+                    if let Some(swarm) = self.swarms.get(swarm_idx) {
+                        let idle_worker = swarm.workers.iter().find(|w| {
+                            matches!(w.status.state, crate::model::status::AgentState::Idle)
+                        });
+                        match idle_worker {
+                            Some(worker) => {
+                                let dispatch_path = worker
+                                    .worktree_path
+                                    .join(".codex/loops/fix-loop.dispatch");
+                                let worker_id = worker.id.clone();
+                                if let Some(parent) = dispatch_path.parent() {
+                                    let _ = std::fs::create_dir_all(parent);
+                                }
+                                match std::fs::write(&dispatch_path, num.to_string()) {
+                                    Ok(_) => {
+                                        if let Some(ref mut view) = self.issue_list_view {
+                                            view.status_msg = Some(format!(
+                                                " Dispatched #{num} to {worker_id}"
+                                            ));
+                                        }
+                                    }
+                                    Err(e) => {
+                                        if let Some(ref mut view) = self.issue_list_view {
+                                            view.status_msg =
+                                                Some(format!(" Dispatch failed: {e}"));
+                                        }
+                                    }
+                                }
+                            }
+                            None => {
+                                if let Some(ref mut view) = self.issue_list_view {
+                                    view.status_msg = Some(" No idle workers".to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            KeyCode::Char('r') => {
+                // Refresh issue list
+                self.open_issue_list(swarm_idx).await;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Fetch GitHub issues and open the issue list screen.
+    async fn open_issue_list(&mut self, swarm_idx: usize) {
+        let output = tokio::process::Command::new("gh")
+            .args(["issue", "list", "--state", "open", "--json", "number,title,labels", "--limit", "100"])
+            .output()
+            .await;
+
+        match output {
+            Ok(out) if out.status.success() => {
+                let issues = parse_issues(&out.stdout);
+                self.issue_list_view = Some(IssueListView::new(issues));
+                self.screen = Screen::IssueList { swarm_idx };
+            }
+            _ => {
+                self.status_message = Some("Failed to fetch GitHub issues".to_string());
+            }
+        }
     }
 
     /// Open an issue detail view by fetching issue data from GitHub.
