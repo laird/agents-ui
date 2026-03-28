@@ -1,8 +1,9 @@
 #![allow(dead_code)]
 
+use ansi_to_tui::IntoText;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
-    text::{Line, Span},
+    text::{Line, Span, Text},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState, Wrap},
     Frame,
 };
@@ -119,8 +120,11 @@ impl RepoView {
 
         // Manager session output (scrollable, like AgentView)
         let content = &swarm.manager.pane_content;
-        let lines: Vec<Line> = content.lines().map(|l| Line::from(l.to_string())).collect();
-        let total_lines = lines.len() as u16;
+        let text = content
+            .as_bytes()
+            .into_text()
+            .unwrap_or_else(|_| Text::raw(content.clone()));
+        let total_lines = text.lines.len() as u16;
 
         let visible_height = chunks[2].height.saturating_sub(2); // subtract borders
         let max_scroll = total_lines.saturating_sub(visible_height);
@@ -129,7 +133,7 @@ impl RepoView {
         }
 
         let session_title = format!(" Manager — {} ", swarm.manager.tmux_target);
-        let manager_output = Paragraph::new(lines)
+        let manager_output = Paragraph::new(text)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
