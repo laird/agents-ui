@@ -9,6 +9,7 @@ use ratatui::{
 
 use crate::model::issue::{GitHubIssue, IssueFilter};
 use crate::model::swarm::Swarm;
+use super::text_input::TextInput;
 use super::theme;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -33,6 +34,8 @@ pub struct SwarmView {
     pub workers_table: TableState,
     pub issues_table: TableState,
     pub issue_filter: IssueFilter,
+    pub issue_search: TextInput,
+    pub issue_search_active: bool,
 }
 
 impl SwarmView {
@@ -46,6 +49,8 @@ impl SwarmView {
             workers_table,
             issues_table,
             issue_filter: IssueFilter::All,
+            issue_search: TextInput::new(),
+            issue_search_active: false,
         }
     }
 
@@ -58,9 +63,20 @@ impl SwarmView {
         focus: SwarmPanel,
         blink: bool,
     ) {
+        let search_query = self.issue_search.text().to_lowercase();
         let filtered_issues: Vec<&GitHubIssue> = issues
             .iter()
-            .filter(|i| i.matches_filter(self.issue_filter))
+            .filter(|i| {
+                if !i.matches_filter(self.issue_filter) {
+                    return false;
+                }
+                if search_query.is_empty() {
+                    return true;
+                }
+                let num_q = search_query.trim_start_matches('#');
+                i.title.to_lowercase().contains(&search_query)
+                    || i.number.to_string().contains(num_q)
+            })
             .collect();
 
         // Pre-compute attention data before layout (needed for dynamic sizing)
@@ -68,7 +84,14 @@ impl SwarmView {
         let working = swarm.busy_count();
         let total_workers = swarm.workers.len();
         let idle = total_workers - working;
-        let avail_issues = issues.iter().filter(|i| !i.is_blocked() && !i.is_being_worked() && i.state == crate::model::issue::IssueState::Open).count();
+        let avail_issues = issues
+            .iter()
+            .filter(|i| {
+                !i.is_blocked()
+                    && !i.is_being_worked()
+                    && i.state == crate::model::issue::IssueState::Open
+            })
+            .count();
         let blocked_issues: Vec<&GitHubIssue> = issues.iter().filter(|i| i.is_blocked()).collect();
         let blocked_count = blocked_issues.len();
 
@@ -76,19 +99,20 @@ impl SwarmView {
         let header_height: u16 = if blocked_count > 0 { 2 } else { 1 };
 
         let chunks = Layout::vertical([
-            Constraint::Length(header_height),  // Header line(s)
-            Constraint::Min(4),                 // Body (manager + workers/issues)
-            Constraint::Length(2),              // Help bar
+            Constraint::Length(header_height), // Header line(s)
+            Constraint::Min(4),                // Body (manager + workers/issues)
+            Constraint::Length(2),             // Help bar
         ])
         .split(area);
 
         // Size bottom panel to fit the longer of workers or issues (+3 for borders+header row)
         // but never more than 50% of the body area so the manager always has room
         let max_bottom = chunks[1].height / 2;
-        let bottom_rows = ((swarm.workers.len().max(filtered_issues.len()) + 3) as u16).min(max_bottom);
+        let bottom_rows =
+            ((swarm.workers.len().max(filtered_issues.len()) + 3) as u16).min(max_bottom);
         let body_chunks = Layout::vertical([
-            Constraint::Min(4),               // Manager gets all remaining space
-            Constraint::Length(bottom_rows),   // Workers/Issues: sized to fit content
+            Constraint::Min(4),              // Manager gets all remaining space
+            Constraint::Length(bottom_rows), // Workers/Issues: sized to fit content
         ])
         .split(chunks[1]);
 
@@ -114,21 +138,25 @@ impl SwarmView {
         // Build header lines: status line + optional inline attention row
         let mut header_lines = vec![Line::from(header_spans)];
         if blocked_count > 0 {
-            let mut attn_spans = vec![
-                Span::styled(" ⚠ ", theme::attention_style()),
-            ];
+            let mut attn_spans = vec![Span::styled(" ⚠ ", theme::attention_style())];
             let show_n = blocked_count.min(3);
             for (idx, issue) in blocked_issues.iter().take(show_n).enumerate() {
                 if idx > 0 {
                     attn_spans.push(Span::styled("  ", theme::help_style()));
                 }
-                let blocking_label = issue.labels
+                let blocking_label = issue
+                    .labels
                     .iter()
                     .find(|l| crate::model::issue::BLOCKING_LABELS.contains(&l.as_str()))
                     .map(|s| s.as_str())
                     .unwrap_or("blocked");
                 attn_spans.push(Span::styled(
-                    format!("#{} [{}] {}", issue.number, blocking_label, truncate(&issue.title, 30)),
+                    format!(
+                        "#{} [{}] {}",
+                        issue.number,
+                        blocking_label,
+                        truncate(&issue.title, 30)
+                    ),
                     theme::attention_style(),
                 ));
             }
@@ -253,8 +281,20 @@ impl SwarmView {
 
         f.render_stateful_widget(workers_table, bottom_cols[0], &mut self.workers_table);
 
-        // Issues table
+        // Issues table — title reflects search state
         let filter_label = self.issue_filter.label();
+        let issues_title = if self.issue_search_active {
+            format!(" / {}_ ", self.issue_search.text())
+        } else if !self.issue_search.text().is_empty() {
+            format!(
+                " Issues [{}] ({}: {}) ",
+                self.issue_search.text(),
+                filter_label,
+                filtered_issues.len()
+            )
+        } else {
+            format!(" Issues ({filter_label}: {}) ", filtered_issues.len())
+        };
         let issue_header = Row::new(vec![
             Cell::from("#"),
             Cell::from("Pri"),
@@ -285,7 +325,7 @@ impl SwarmView {
 
         let issues_block = Block::default()
             .borders(Borders::ALL)
-            .title(format!(" Issues ({filter_label}: {}) ", filtered_issues.len()))
+            .title(issues_title)
             .border_style(if focus == SwarmPanel::Issues {
                 theme::title_style()
             } else {
@@ -341,15 +381,25 @@ impl SwarmView {
                 Span::styled("⌥a", theme::title_style()),
                 Span::styled(" next alert", theme::help_style()),
             ],
+            SwarmPanel::Issues if self.issue_search_active => vec![
+                Span::styled(" Type", theme::title_style()),
+                Span::styled(" to search  ", theme::help_style()),
+                Span::styled("Backspace", theme::title_style()),
+                Span::styled(" delete  ", theme::help_style()),
+                Span::styled("Enter", theme::title_style()),
+                Span::styled(" confirm  ", theme::help_style()),
+                Span::styled("Esc", theme::title_style()),
+                Span::styled(" clear", theme::help_style()),
+            ],
             SwarmPanel::Issues => vec![
                 Span::styled(" Tab", theme::title_style()),
                 Span::styled(" cycle  ", theme::help_style()),
+                Span::styled("/", theme::title_style()),
+                Span::styled(" search  ", theme::help_style()),
                 Span::styled("d", theme::title_style()),
                 Span::styled(" dispatch  ", theme::help_style()),
                 Span::styled("a", theme::title_style()),
                 Span::styled(" add  ", theme::help_style()),
-                Span::styled("d", theme::title_style()),
-                Span::styled(" dispatch  ", theme::help_style()),
                 Span::styled("p", theme::title_style()),
                 Span::styled(" approve  ", theme::help_style()),
                 Span::styled("b", theme::title_style()),
@@ -383,15 +433,20 @@ impl SwarmView {
     }
 
     pub fn next_worker(&mut self, len: usize) {
-        if len == 0 { return; }
+        if len == 0 {
+            return;
+        }
         let i = self.workers_table.selected().unwrap_or(0);
         self.workers_table.select(Some((i + 1) % len));
     }
 
     pub fn prev_worker(&mut self, len: usize) {
-        if len == 0 { return; }
+        if len == 0 {
+            return;
+        }
         let i = self.workers_table.selected().unwrap_or(0);
-        self.workers_table.select(Some(if i == 0 { len - 1 } else { i - 1 }));
+        self.workers_table
+            .select(Some(if i == 0 { len - 1 } else { i - 1 }));
     }
 
     pub fn selected_worker(&self) -> Option<usize> {
@@ -399,19 +454,42 @@ impl SwarmView {
     }
 
     pub fn next_issue(&mut self, len: usize) {
-        if len == 0 { return; }
+        if len == 0 {
+            return;
+        }
         let i = self.issues_table.selected().unwrap_or(0);
         self.issues_table.select(Some((i + 1) % len));
     }
 
     pub fn prev_issue(&mut self, len: usize) {
-        if len == 0 { return; }
+        if len == 0 {
+            return;
+        }
         let i = self.issues_table.selected().unwrap_or(0);
-        self.issues_table.select(Some(if i == 0 { len - 1 } else { i - 1 }));
+        self.issues_table
+            .select(Some(if i == 0 { len - 1 } else { i - 1 }));
     }
 
     pub fn selected_issue(&self) -> Option<usize> {
         self.issues_table.selected()
+    }
+
+    /// Return issues matching both the active filter and the current search query.
+    pub fn issues_matching_search<'a>(&self, issues: &'a [GitHubIssue]) -> Vec<&'a GitHubIssue> {
+        let q = self.issue_search.text().to_lowercase();
+        issues
+            .iter()
+            .filter(|i| {
+                if !i.matches_filter(self.issue_filter) {
+                    return false;
+                }
+                if q.is_empty() {
+                    return true;
+                }
+                let num_q = q.trim_start_matches('#');
+                i.title.to_lowercase().contains(&q) || i.number.to_string().contains(num_q)
+            })
+            .collect()
     }
 }
 
@@ -484,7 +562,7 @@ fn truncate(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{agent_needs_input, SwarmPanel, SwarmView};
-    use crate::model::issue::{GitHubIssue, IssueState};
+    use crate::model::issue::{GitHubIssue, IssueFilter, IssueState};
     use crate::model::status::{AgentState, AgentStatus};
     use crate::model::swarm::{AgentInfo, AgentType, Swarm};
     use ratatui::{backend::TestBackend, Terminal};
@@ -524,6 +602,20 @@ mod tests {
                 AgentState::Working { issue: Some(12) },
             )],
             issue_cache: crate::model::issue::IssueCache::default(),
+        }
+    }
+
+    fn make_issue(number: u32, title: &str, labels: &[&str]) -> GitHubIssue {
+        let label_vec: Vec<String> = labels.iter().map(|s| s.to_string()).collect();
+        GitHubIssue {
+            number,
+            title: title.to_string(),
+            state: IssueState::Open,
+            priority: crate::model::issue::IssuePriority::None,
+            issue_type: crate::model::issue::IssueType::Other,
+            labels: label_vec,
+            is_working: false,
+            assigned_worker: None,
         }
     }
 
@@ -568,5 +660,83 @@ mod tests {
         assert!(rendered.contains("Issues (all: 1)"));
         assert!(rendered.contains("demo"));
         assert!(rendered.contains("#12"));
+    }
+
+    #[test]
+    fn search_filters_by_title_substring() {
+        let mut view = SwarmView::new();
+        let issues = vec![
+            make_issue(1, "Fix login bug", &[]),
+            make_issue(2, "Add dark mode", &[]),
+            make_issue(3, "Fix logout flow", &[]),
+        ];
+
+        view.issue_search.insert_char('l');
+        view.issue_search.insert_char('o');
+        view.issue_search.insert_char('g');
+        view.issue_search.insert_char('i');
+        view.issue_search.insert_char('n');
+
+        let results = view.issues_matching_search(&issues);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].number, 1);
+    }
+
+    #[test]
+    fn search_filters_by_issue_number() {
+        let mut view = SwarmView::new();
+        let issues = vec![
+            make_issue(42, "Some issue", &[]),
+            make_issue(123, "Another issue", &[]),
+        ];
+
+        view.issue_search.insert_char('4');
+        view.issue_search.insert_char('2');
+
+        let results = view.issues_matching_search(&issues);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].number, 42);
+    }
+
+    #[test]
+    fn search_with_hash_prefix_filters_by_number() {
+        let mut view = SwarmView::new();
+        let issues = vec![
+            make_issue(42, "Some issue", &[]),
+            make_issue(123, "Another issue", &[]),
+        ];
+
+        view.issue_search.insert_char('#');
+        view.issue_search.insert_char('4');
+        view.issue_search.insert_char('2');
+
+        let results = view.issues_matching_search(&issues);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].number, 42);
+    }
+
+    #[test]
+    fn empty_search_returns_all_filtered_issues() {
+        let view = SwarmView::new();
+        let issues = vec![
+            make_issue(1, "Issue one", &[]),
+            make_issue(2, "Issue two", &[]),
+        ];
+        let results = view.issues_matching_search(&issues);
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn search_respects_issue_filter() {
+        let mut view = SwarmView::new();
+        view.issue_filter = IssueFilter::Blocked;
+        let issues = vec![
+            make_issue(1, "Open issue", &[]),
+            make_issue(2, "Blocked issue", &["needs-design"]),
+        ];
+
+        let results = view.issues_matching_search(&issues);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].number, 2);
     }
 }

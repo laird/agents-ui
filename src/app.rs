@@ -1800,7 +1800,14 @@ impl App {
 
         // Esc goes back one level:
         // Sessions/Issues → Manager focus, Manager → Repos List
+        // Exception: when search is active in Issues panel, Esc clears search instead.
         if key.code == KeyCode::Esc {
+            if self.swarm_focus == SwarmPanel::Issues && self.swarm_view.issue_search_active {
+                self.swarm_view.issue_search.drain();
+                self.swarm_view.issue_search_active = false;
+                self.swarm_view.issues_table.select(Some(0));
+                return Ok(());
+            }
             match self.swarm_focus {
                 SwarmPanel::Workers | SwarmPanel::Issues => {
                     self.swarm_focus = SwarmPanel::Manager;
@@ -1955,9 +1962,33 @@ impl App {
                 }
             }
             SwarmPanel::Issues => {
+                // Search mode: consume all keystrokes for the search input
+                if self.swarm_view.issue_search_active {
+                    match key.code {
+                        KeyCode::Esc => {
+                            self.swarm_view.issue_search.drain();
+                            self.swarm_view.issue_search_active = false;
+                            self.swarm_view.issues_table.select(Some(0));
+                        }
+                        KeyCode::Enter => {
+                            self.swarm_view.issue_search_active = false;
+                        }
+                        KeyCode::Backspace => {
+                            self.swarm_view.issue_search.backspace();
+                            self.swarm_view.issues_table.select(Some(0));
+                        }
+                        KeyCode::Char(c) => {
+                            self.swarm_view.issue_search.insert_char(c);
+                            self.swarm_view.issues_table.select(Some(0));
+                        }
+                        _ => {}
+                    }
+                    return Ok(());
+                }
+
                 let issue_count = self.swarms.get(swarm_idx)
                     .and_then(|s| self.issue_caches.get(&s.project_name))
-                    .map(|c| c.issues.iter().filter(|i| i.matches_filter(self.swarm_view.issue_filter)).count())
+                    .map(|c| self.swarm_view.issues_matching_search(&c.issues).len())
                     .unwrap_or(0);
                 match key.code {
                     KeyCode::Down | KeyCode::Char('j') => {
@@ -1965,6 +1996,11 @@ impl App {
                     }
                     KeyCode::Up | KeyCode::Char('k') => {
                         self.swarm_view.prev_issue(issue_count);
+                    }
+                    KeyCode::Char('/') => {
+                        self.swarm_view.issue_search.drain();
+                        self.swarm_view.issue_search_active = true;
+                        self.swarm_view.issues_table.select(Some(0));
                     }
                     KeyCode::Char('f') => {
                         // Cycle issue filter
@@ -2008,7 +2044,7 @@ impl App {
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
                             let issues: Vec<&GitHubIssue> = self.issue_caches
                                 .get(&swarm.project_name)
-                                .map(|c| c.issues.iter().filter(|i| i.matches_filter(self.swarm_view.issue_filter)).collect())
+                                .map(|c| self.swarm_view.issues_matching_search(&c.issues))
                                 .unwrap_or_default();
                             if let Some(issue) = self.swarm_view.selected_issue()
                                 .and_then(|idx| issues.get(idx))
@@ -2040,56 +2076,16 @@ impl App {
                             }
                         }
                     }
-                    KeyCode::Char('d') => {
+                    KeyCode::Char('d') | KeyCode::Char(' ') => {
                         // Dispatch selected issue to an idle worker
-                        if let Some(swarm) = self.swarms.get(swarm_idx) {
-                            let issues: Vec<&GitHubIssue> = self.issue_caches
-                                .get(&swarm.project_name)
-                                .map(|c| c.issues.iter().filter(|i| i.matches_filter(self.swarm_view.issue_filter)).collect())
-                                .unwrap_or_default();
-                            if let Some(issue) = self.swarm_view.selected_issue()
-                                .and_then(|idx| issues.get(idx))
-                            {
-                                let issue_num = issue.number;
-                                let agent_type = swarm.agent_type.clone();
-                                let idle_worker = swarm.workers.iter()
-                                    .find(|w| {
-                                        !w.is_manager
-                                            && w.dispatched_issue.is_none()
-                                            && matches!(w.status.state, crate::model::status::AgentState::Idle)
-                                    })
-                                    .map(|w| w.tmux_target.clone());
-                                if let Some(target) = idle_worker {
-                                    if let Some(cmd) = self.worker_dispatch_cmd(&agent_type, issue_num) {
-                                        tracing::info!("Manual dispatch #{issue_num} to {target}");
-                                        if let Ok(()) = crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, &cmd).await {
-                                            tokio::time::sleep(Duration::from_millis(200)).await;
-                                            crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, "Enter").await.ok();
-                                            // Track dispatch in worker
-                                            if let Some(swarm_mut) = self.swarms.get_mut(swarm_idx) {
-                                                if let Some(worker) = swarm_mut.workers.iter_mut()
-                                                    .find(|w| w.tmux_target == target)
-                                                {
-                                                    worker.dispatched_issue = Some(issue_num);
-                                                }
-                                            }
-                                            self.status_message = Some(format!("Dispatched #{issue_num} to {target}"));
-                                        }
-                                    } else {
-                                        self.status_message = Some(format!("No dispatch command configured for {agent_type}"));
-                                    }
-                                } else {
-                                    self.status_message = Some("No idle workers available".to_string());
-                                }
-                            }
-                        }
+                        self.dispatch_selected_issue(swarm_idx).await;
                     }
                     KeyCode::Char('g') => {
                         // Open selected issue in browser via gh issue view --web
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
                             let issues: Vec<&GitHubIssue> = self.issue_caches
                                 .get(&swarm.project_name)
-                                .map(|c| c.issues.iter().filter(|i| i.matches_filter(self.swarm_view.issue_filter)).collect())
+                                .map(|c| self.swarm_view.issues_matching_search(&c.issues))
                                 .unwrap_or_default();
                             if let Some(issue) = self.swarm_view.selected_issue()
                                 .and_then(|idx| issues.get(idx))
@@ -2115,10 +2111,6 @@ impl App {
                             }
                         }
                     }
-                    KeyCode::Char('d') | KeyCode::Char(' ') => {
-                        // Dispatch selected issue to an idle worker
-                        self.dispatch_selected_issue(swarm_idx).await;
-                    }
                     _ => {}
                 }
             }
@@ -2141,7 +2133,7 @@ impl App {
             );
             let issues: Vec<&GitHubIssue> = self.issue_caches
                 .get(&swarm.project_name)
-                .map(|c| c.issues.iter().filter(|i| i.matches_filter(self.swarm_view.issue_filter)).collect())
+                .map(|c| self.swarm_view.issues_matching_search(&c.issues))
                 .unwrap_or_default();
             let issue_num = self.swarm_view.selected_issue()
                 .and_then(|idx| issues.get(idx))
@@ -2511,14 +2503,6 @@ impl App {
                 self.agent_view.input.insert_char(c);
                 return Ok(());
             }
-            KeyCode::Home => {
-                self.agent_view.scroll_offset = 0;
-                return Ok(());
-            }
-            KeyCode::End => {
-                self.agent_view.scroll_to_bottom();
-                return Ok(());
-            }
             _ => {}
         }
 
@@ -2841,9 +2825,9 @@ impl App {
         let issues: Vec<u32> = self.issue_caches
             .get(&project_name)
             .map(|c| {
-                c.issues
-                    .iter()
-                    .filter(|i| i.matches_filter(self.swarm_view.issue_filter))
+                self.swarm_view
+                    .issues_matching_search(&c.issues)
+                    .into_iter()
                     .map(|i| i.number)
                     .collect()
             })
