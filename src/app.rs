@@ -1859,7 +1859,9 @@ impl App {
                         self.swarm_view.next_worker(worker_count);
                     }
                     KeyCode::Up | KeyCode::Char('k') => {
-                        self.swarm_view.prev_worker(worker_count);
+                        if self.swarm_view.prev_worker(worker_count) {
+                            self.swarm_focus = SwarmPanel::Manager;
+                        }
                     }
                     KeyCode::Enter => {
                         // Drill into selected worker's agent view
