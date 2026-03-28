@@ -1938,6 +1938,22 @@ impl App {
                             }
                         }
                     }
+                    KeyCode::Char('b') => {
+                        // Jump to next blocked issue in Issues panel
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            let blocked_count = self.issue_caches
+                                .get(&swarm.project_name)
+                                .map(|c| c.issues.iter().filter(|i| i.is_blocked()).count())
+                                .unwrap_or(0);
+                            if blocked_count == 0 {
+                                self.status_message = Some("No blocked issues".to_string());
+                            } else {
+                                self.swarm_view.issue_filter = crate::model::issue::IssueFilter::Blocked;
+                                self.swarm_view.issues_table.select(Some(0));
+                                self.swarm_focus = SwarmPanel::Issues;
+                            }
+                        }
+                    }
                     KeyCode::Char(c @ '1'..='9') => {
                         let worker_idx = (c as usize) - ('1' as usize);
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
@@ -1980,6 +1996,23 @@ impl App {
                         self.send_issue_command_to_manager(swarm_idx, "approve").await?;
                     }
                     KeyCode::Char('b') => {
+                        // Jump to next blocked issue (cycling, wrapping)
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            let blocked_count = self.issue_caches
+                                .get(&swarm.project_name)
+                                .map(|c| c.issues.iter().filter(|i| i.is_blocked()).count())
+                                .unwrap_or(0);
+                            if blocked_count == 0 {
+                                self.status_message = Some("No blocked issues".to_string());
+                            } else if self.swarm_view.issue_filter != crate::model::issue::IssueFilter::Blocked {
+                                self.swarm_view.issue_filter = crate::model::issue::IssueFilter::Blocked;
+                                self.swarm_view.issues_table.select(Some(0));
+                            } else {
+                                self.swarm_view.next_issue(blocked_count);
+                            }
+                        }
+                    }
+                    KeyCode::Char('B') => {
                         // Brainstorm: send "brainstorm <issue_number>" to manager pane
                         self.send_issue_command_to_manager(swarm_idx, "brainstorm").await?;
                     }
