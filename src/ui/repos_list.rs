@@ -58,7 +58,7 @@ impl ReposListView {
         let version = env!("CARGO_PKG_VERSION");
         let left_text = format!("  Agents UI{title_info}");
         let version_span = format!("v{version} ");
-        let version_len = version_span.len();
+        let _version_len = version_span.len();
         let width = chunks[0].width as usize;
         // hostname + version right-aligned: build hostname span with padding, then version
         let hn = theme::hostname();

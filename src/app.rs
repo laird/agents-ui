@@ -42,6 +42,7 @@ pub enum NewSwarmField {
     AgentRuntime,
     RuntimeSelection,
     NumWorkers,
+    #[allow(dead_code)] // Planned: used when swarm launch is in-progress
     Launching,
 }
 
@@ -218,6 +219,10 @@ pub struct App {
     pub create_issue_form: Option<CreateIssueForm>,
     /// Pending swarm teardown confirmation (swarm index).
     pub confirm_teardown: Option<usize>,
+    /// Pending stop-all-workers confirmation in Repo View (swarm index).
+    pub confirm_stop_swarm: Option<usize>,
+    /// Pending teardown confirmation in Repo View (swarm index).
+    pub confirm_teardown_repo_view: Option<usize>,
     /// Default runtime for launched/discovered swarms.
     pub default_agent_type: AgentType,
     /// True when runtime was explicitly pinned via CLI flag.
@@ -241,6 +246,7 @@ pub struct App {
     /// Issue detail view state.
     pub issue_detail_view: Option<IssueDetailView>,
     /// Tracks last Esc press for double-Esc to go back (never forwarded to pane).
+    #[allow(dead_code)]
     last_esc: Option<std::time::Instant>,
     /// App-level keybinding configuration.
     pub keybindings: crate::config::keybindings::KeyBindings,
@@ -309,6 +315,8 @@ impl App {
             blink_counter: 0,
             create_issue_form: None,
             confirm_teardown: None,
+            confirm_stop_swarm: None,
+            confirm_teardown_repo_view: None,
             default_agent_type,
             runtime_locked_from_cli,
             runtime_pref_repo_root,
@@ -657,6 +665,7 @@ impl App {
 
     /// Convert a crossterm KeyEvent to a tmux send-keys argument.
     /// Returns (key_string, literal) where literal means use -l flag.
+    #[allow(dead_code)] // Available for future shortcut key-passthrough
     fn key_to_tmux(key: &KeyEvent) -> Option<(String, bool)> {
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             if let KeyCode::Char(c) = key.code {
@@ -1720,6 +1729,49 @@ impl App {
     }
 
     async fn handle_repo_view_key(&mut self, key: KeyEvent, swarm_idx: usize) -> Result<()> {
+        // Handle stop-all confirmation
+        if let Some(idx) = self.confirm_stop_swarm {
+            self.confirm_stop_swarm = None;
+            if key.code == KeyCode::Char('y') || key.code == KeyCode::Char('Y') {
+                if let Some(swarm) = self.swarms.get(swarm_idx) {
+                    let targets: Vec<String> = swarm.workers.iter().map(|w| w.tmux_target.clone()).collect();
+                    let count = targets.len();
+                    for target in targets {
+                        let _ = proxy::kill_pane(&self.transport, &target).await;
+                    }
+                    self.status_message = Some(format!("Stopped {count} worker(s)"));
+                }
+            } else {
+                self.status_message = Some("Stop cancelled".to_string());
+            }
+            let _ = idx;
+            return Ok(());
+        }
+
+        // Handle teardown confirmation (from Repo View)
+        if let Some(idx) = self.confirm_teardown_repo_view {
+            self.confirm_teardown_repo_view = None;
+            if key.code == KeyCode::Char('y') || key.code == KeyCode::Char('Y') {
+                if idx < self.swarms.len() {
+                    let swarm = self.swarms[idx].clone();
+                    let project = swarm.project_name.clone();
+                    self.status_message = Some(format!("Tearing down {project}..."));
+                    if let Err(e) = self.adapter.teardown(&swarm).await {
+                        self.status_message = Some(format!("Teardown error: {e}"));
+                    } else {
+                        self.swarms.remove(idx);
+                        self.start_all_pane_watchers();
+                        self.scan_available_repos();
+                        self.screen = Screen::ReposList;
+                        self.status_message = Some(format!("Torn down {project}"));
+                    }
+                }
+            } else {
+                self.status_message = Some("Teardown cancelled".to_string());
+            }
+            return Ok(());
+        }
+
         // Handle create-issue dialog input
         if let Some(ref mut form) = self.create_issue_form {
             match key.code {
@@ -1815,6 +1867,12 @@ impl App {
         // Tab cycles focus: Manager → Workers → Issues → Manager
         if key.code == KeyCode::Tab {
             self.swarm_focus = self.swarm_focus.next();
+            return Ok(());
+        }
+
+        // L key: jump directly to Issues panel
+        if key.code == KeyCode::Char('L') {
+            self.swarm_focus = SwarmPanel::Issues;
             return Ok(());
         }
 
@@ -1938,6 +1996,30 @@ impl App {
                             }
                         }
                     }
+                    KeyCode::Char('S') => {
+                        // Stop all workers (with confirmation)
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            let count = swarm.workers.len();
+                            if count == 0 {
+                                self.status_message = Some("No workers to stop".to_string());
+                            } else {
+                                self.confirm_stop_swarm = Some(swarm_idx);
+                                self.status_message = Some(format!(
+                                    "Stop all {count} worker(s)? (y to confirm, any other key to cancel)"
+                                ));
+                            }
+                        }
+                    }
+                    KeyCode::Char('T') => {
+                        // Teardown entire swarm (with confirmation)
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            let project = swarm.project_name.clone();
+                            self.confirm_teardown_repo_view = Some(swarm_idx);
+                            self.status_message = Some(format!(
+                                "Teardown {project} and remove worktrees? (y to confirm, any other key to cancel)"
+                            ));
+                        }
+                    }
                     KeyCode::Char(c @ '1'..='9') => {
                         let worker_idx = (c as usize) - ('1' as usize);
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
@@ -2040,49 +2122,9 @@ impl App {
                             }
                         }
                     }
-                    KeyCode::Char('d') => {
+                    KeyCode::Char('d') | KeyCode::Char(' ') => {
                         // Dispatch selected issue to an idle worker
-                        if let Some(swarm) = self.swarms.get(swarm_idx) {
-                            let issues: Vec<&GitHubIssue> = self.issue_caches
-                                .get(&swarm.project_name)
-                                .map(|c| c.issues.iter().filter(|i| i.matches_filter(self.swarm_view.issue_filter)).collect())
-                                .unwrap_or_default();
-                            if let Some(issue) = self.swarm_view.selected_issue()
-                                .and_then(|idx| issues.get(idx))
-                            {
-                                let issue_num = issue.number;
-                                let agent_type = swarm.agent_type.clone();
-                                let idle_worker = swarm.workers.iter()
-                                    .find(|w| {
-                                        !w.is_manager
-                                            && w.dispatched_issue.is_none()
-                                            && matches!(w.status.state, crate::model::status::AgentState::Idle)
-                                    })
-                                    .map(|w| w.tmux_target.clone());
-                                if let Some(target) = idle_worker {
-                                    if let Some(cmd) = self.worker_dispatch_cmd(&agent_type, issue_num) {
-                                        tracing::info!("Manual dispatch #{issue_num} to {target}");
-                                        if let Ok(()) = crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, &cmd).await {
-                                            tokio::time::sleep(Duration::from_millis(200)).await;
-                                            crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, "Enter").await.ok();
-                                            // Track dispatch in worker
-                                            if let Some(swarm_mut) = self.swarms.get_mut(swarm_idx) {
-                                                if let Some(worker) = swarm_mut.workers.iter_mut()
-                                                    .find(|w| w.tmux_target == target)
-                                                {
-                                                    worker.dispatched_issue = Some(issue_num);
-                                                }
-                                            }
-                                            self.status_message = Some(format!("Dispatched #{issue_num} to {target}"));
-                                        }
-                                    } else {
-                                        self.status_message = Some(format!("No dispatch command configured for {agent_type}"));
-                                    }
-                                } else {
-                                    self.status_message = Some("No idle workers available".to_string());
-                                }
-                            }
-                        }
+                        self.dispatch_selected_issue(swarm_idx).await;
                     }
                     KeyCode::Char('g') => {
                         // Open selected issue in browser via gh issue view --web
@@ -2114,10 +2156,6 @@ impl App {
                                 self.status_message = Some(format!("Opening issue #{} in browser", issue.number));
                             }
                         }
-                    }
-                    KeyCode::Char('d') | KeyCode::Char(' ') => {
-                        // Dispatch selected issue to an idle worker
-                        self.dispatch_selected_issue(swarm_idx).await;
                     }
                     _ => {}
                 }
@@ -2511,14 +2549,6 @@ impl App {
                 self.agent_view.input.insert_char(c);
                 return Ok(());
             }
-            KeyCode::Home => {
-                self.agent_view.scroll_offset = 0;
-                return Ok(());
-            }
-            KeyCode::End => {
-                self.agent_view.scroll_to_bottom();
-                return Ok(());
-            }
             _ => {}
         }
 
@@ -2558,6 +2588,7 @@ impl App {
     }
 
     /// Try to execute a configured shortcut for the given panel and key.
+    #[allow(dead_code)] // Planned: used when shortcut key configuration is wired up
     async fn try_shortcut(&mut self, panel: &str, key: &str, swarm_idx: usize, issue: Option<u32>) -> Result<()> {
         use crate::config::shortcuts::ShortcutsConfig;
 

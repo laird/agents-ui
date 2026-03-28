@@ -4,7 +4,6 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::model::issue::GitHubIssue;
-use crate::model::status::AgentStatus;
 
 /// All events the app processes.
 #[derive(Debug)]
