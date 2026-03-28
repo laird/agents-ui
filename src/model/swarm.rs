@@ -21,6 +21,7 @@ impl std::fmt::Display for AgentType {
     }
 }
 
+#[allow(dead_code)]
 impl AgentType {
     /// CLI flag value for start-parallel-agents.sh --agent
     pub fn script_flag(&self) -> &str {
@@ -71,6 +72,7 @@ impl AgentType {
 
 /// The workflow type for a swarm.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)]
 pub enum Workflow {
     Autocoder,
     Modernize,
@@ -121,6 +123,7 @@ pub struct Swarm {
     pub workers: Vec<AgentInfo>,
 }
 
+#[allow(dead_code)]
 impl Swarm {
     /// Total agent count (manager + workers)
     pub fn agent_count(&self) -> usize {

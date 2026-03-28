@@ -10,6 +10,7 @@ use crate::model::swarm::AgentInfo;
 use super::theme;
 
 pub struct AgentView {
+    #[allow(dead_code)]
     pub input: String,
     pub scroll_offset: u16,
 }

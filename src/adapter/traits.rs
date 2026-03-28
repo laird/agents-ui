@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use crate::model::swarm::{AgentType, Swarm};
 
 /// Configuration for launching a new swarm.
+#[allow(dead_code)]
 pub struct SwarmConfig {
     pub repo_path: PathBuf,
     pub agent_type: AgentType,
@@ -11,7 +12,7 @@ pub struct SwarmConfig {
 }
 
 /// Trait abstracting over different agent runtimes.
-#[allow(async_fn_in_trait)]
+#[allow(async_fn_in_trait, dead_code)]
 pub trait AgentRuntime {
     /// Launch a new swarm (manager + workers).
     async fn launch(&self, config: &SwarmConfig) -> Result<Swarm>;

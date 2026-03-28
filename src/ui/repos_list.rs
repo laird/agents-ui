@@ -10,12 +10,6 @@ use ratatui::{
 use crate::model::swarm::Swarm;
 use super::theme;
 
-/// Combined list item: either an active swarm or an available repo.
-pub enum RepoEntry<'a> {
-    Active(&'a Swarm),
-    Available(&'a PathBuf),
-}
-
 pub struct ReposListView {
     pub table_state: TableState,
 }
