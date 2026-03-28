@@ -202,6 +202,7 @@ pub fn spawn_pane_watcher(
         let mut last_content = String::new();
         let mut interval = tokio::time::interval(poll_interval);
         let mut consecutive_failures: u32 = 0;
+        const MAX_CONSECUTIVE_FAILURES: u32 = 3;
 
         loop {
             interval.tick().await;
@@ -224,14 +225,13 @@ pub fn spawn_pane_watcher(
                 }
                 Err(e) => {
                     consecutive_failures += 1;
-                    if consecutive_failures <= 3 {
-                        tracing::warn!("Pane capture failed for {target}: {e}");
-                    }
-                    // Stop after 5 consecutive failures (pane likely gone)
-                    if consecutive_failures >= 5 {
-                        tracing::info!("Pane {target} unreachable after {consecutive_failures} failures, stopping watcher");
+                    if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
+                        tracing::info!(
+                            "Pane {target} failed {consecutive_failures} times consecutively, stopping watcher"
+                        );
                         break;
                     }
+                    tracing::warn!("Pane capture failed for {target}: {e}");
                 }
             }
         }

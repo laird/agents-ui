@@ -15,6 +15,7 @@ use crate::transport::ServerTransport;
 use crate::tmux::proxy;
 use crate::tui::Tui;
 use crate::ui::agent_view::AgentView;
+use crate::ui::issue_detail::IssueDetailView;
 use crate::ui::repo_view::RepoView;
 use crate::ui::swarm_view::{SwarmView, SwarmPanel};
 use crate::ui::repos_list::ReposListView;
@@ -31,12 +32,15 @@ pub enum Screen {
     RepoView { swarm_idx: usize },
     AgentView { swarm_idx: usize, agent_id: String },
     IssueView { swarm_idx: usize, issue_number: u32 },
+    /// View full issue details (body, labels, state).
+    IssueDetail { swarm_idx: usize },
 }
 
 #[derive(Debug, Clone)]
 pub enum NewSwarmField {
     RepoPath,
     AgentRuntime,
+    RuntimeSelection,
     NumWorkers,
     Launching,
 }
@@ -232,6 +236,12 @@ pub struct App {
     pub shortcuts: crate::config::shortcuts::ShortcutsConfig,
     /// Whether the shortcuts viewer overlay is visible.
     pub show_shortcuts_viewer: bool,
+    /// Last time we auto-dispatched /monitor-workers (for debounce).
+    auto_dispatch_last: Option<std::time::Instant>,
+    /// Issue detail view state.
+    pub issue_detail_view: Option<IssueDetailView>,
+    /// Tracks last Esc press for double-Esc to go back (never forwarded to pane).
+    last_esc: Option<std::time::Instant>,
 }
 
 impl App {
@@ -305,6 +315,9 @@ impl App {
                 crate::config::shortcuts::ShortcutsConfig::load()
             },
             show_shortcuts_viewer: false,
+            last_esc: None,
+            auto_dispatch_last: None,
+            issue_detail_view: None,
         };
 
         // Scan for available repos (git directories in cwd or children)
@@ -420,6 +433,11 @@ impl App {
                             view.render(f, area, issue.as_ref());
                         }
                     }
+                    Screen::IssueDetail { .. } => {
+                        if let Some(ref view) = self.issue_detail_view {
+                            view.render(f, area);
+                        }
+                    }
                 }
 
                 // Shortcuts viewer overlay
@@ -502,6 +520,8 @@ impl App {
                         self.start_issue_refresh(*swarm_idx);
                     }
                 }
+                // Auto-dispatch: send /monitor-workers to manager when workers are idle
+                self.check_auto_dispatch().await;
             }
             Event::PaneOutput { agent_id, content } => {
                 // agent_id is globally unique (e.g., "nextgen-CDD/manager")
@@ -687,7 +707,7 @@ impl App {
         // Global: Alt+Left goes back one level
         if key.modifiers.contains(KeyModifiers::ALT) && key.code == KeyCode::Left {
             match &self.screen {
-                Screen::AgentView { swarm_idx, .. } | Screen::IssueView { swarm_idx, .. } => {
+                Screen::AgentView { swarm_idx, .. } | Screen::IssueView { swarm_idx, .. } | Screen::IssueDetail { swarm_idx, .. } => {
                     let idx = *swarm_idx;
                     self.enter_repo_view(idx).await;
                 }
@@ -722,7 +742,7 @@ impl App {
                 if c == '0' {
                     // Alt+0: go back one level
                     match &self.screen {
-                        Screen::AgentView { swarm_idx, .. } | Screen::IssueView { swarm_idx, .. } => {
+                        Screen::AgentView { swarm_idx, .. } | Screen::IssueView { swarm_idx, .. } | Screen::IssueDetail { swarm_idx, .. } => {
                             let idx = *swarm_idx;
                             self.enter_repo_view(idx).await;
                         }
@@ -819,6 +839,9 @@ impl App {
             } => {
                 self.handle_issue_view_key(key, *swarm_idx, *issue_number)
                     .await?
+            }
+            Screen::IssueDetail { swarm_idx } => {
+                self.handle_issue_detail_key(key, *swarm_idx).await?
             }
         }
 
@@ -1504,7 +1527,7 @@ impl App {
                 KeyCode::Enter => {
                     self.dialog_input.set_text("2".to_string()); // Default 2 workers
                     self.screen = Screen::NewSwarm {
-                        field: NewSwarmField::NumWorkers,
+                        field: NewSwarmField::RuntimeSelection,
                     };
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
@@ -1529,10 +1552,44 @@ impl App {
                 }
                 _ => {}
             },
-            NewSwarmField::NumWorkers => match key.code {
+            NewSwarmField::RuntimeSelection => match key.code {
                 KeyCode::Esc => {
                     self.screen = Screen::NewSwarm {
                         field: NewSwarmField::AgentRuntime,
+                    };
+                }
+                KeyCode::Enter => {
+                    self.dialog_input.set_text("2".to_string()); // Default 2 workers
+                    self.screen = Screen::NewSwarm {
+                        field: NewSwarmField::NumWorkers,
+                    };
+                }
+                KeyCode::Left | KeyCode::Char('h') => {
+                    self.new_swarm_agent_type = match self.new_swarm_agent_type {
+                        AgentType::Claude => AgentType::Gemini,
+                        AgentType::Codex => AgentType::Claude,
+                        AgentType::Droid => AgentType::Codex,
+                        AgentType::Gemini => AgentType::Droid,
+                    };
+                }
+                KeyCode::Right | KeyCode::Char('l') => {
+                    self.new_swarm_agent_type = match self.new_swarm_agent_type {
+                        AgentType::Claude => AgentType::Codex,
+                        AgentType::Codex => AgentType::Droid,
+                        AgentType::Droid => AgentType::Gemini,
+                        AgentType::Gemini => AgentType::Claude,
+                    };
+                }
+                KeyCode::Char('c') => self.new_swarm_agent_type = AgentType::Claude,
+                KeyCode::Char('x') => self.new_swarm_agent_type = AgentType::Codex,
+                KeyCode::Char('d') => self.new_swarm_agent_type = AgentType::Droid,
+                KeyCode::Char('g') => self.new_swarm_agent_type = AgentType::Gemini,
+                _ => {}
+            },
+            NewSwarmField::NumWorkers => match key.code {
+                KeyCode::Esc => {
+                    self.screen = Screen::NewSwarm {
+                        field: NewSwarmField::RuntimeSelection,
                     };
                 }
                 KeyCode::Enter => {
@@ -2185,6 +2242,24 @@ impl App {
                         }
                     }
                 }
+                KeyCode::Char('i') => {
+                    // View the issue that the selected worker is working on
+                    if let Some(swarm) = self.swarms.get(swarm_idx) {
+                        if let Some(worker_idx) = self.repo_view.selected_worker() {
+                            if let Some(worker) = swarm.workers.get(worker_idx) {
+                                if let crate::model::status::AgentState::Working {
+                                    issue: Some(n),
+                                } = &worker.status.state
+                                {
+                                    self.open_issue_detail(*n, swarm_idx).await;
+                                } else {
+                                    self.status_message =
+                                        Some("Selected worker has no active issue".to_string());
+                                }
+                            }
+                        }
+                    }
+                }
                 KeyCode::Char('d') => {
                     // Shut down the selected worker's session
                     if let Some(swarm) = self.swarms.get(swarm_idx) {
@@ -2284,7 +2359,7 @@ impl App {
             }
         }
 
-        // PageUp/PageDown and input handling
+        // PageUp/PageDown/Home/End scroll the view without sending to pane
         match key.code {
             KeyCode::PageUp => {
                 self.agent_view.page_up();
@@ -2339,6 +2414,14 @@ impl App {
                 self.agent_view.input.insert_char(c);
                 return Ok(());
             }
+            KeyCode::Home => {
+                self.agent_view.scroll_offset = 0;
+                return Ok(());
+            }
+            KeyCode::End => {
+                self.agent_view.scroll_to_bottom();
+                return Ok(());
+            }
             _ => {}
         }
 
@@ -2354,9 +2437,6 @@ impl App {
 
 
     /// Start pane watchers for all agents in all swarms.
-    /// Send post-launch commands to manager and worker sessions.
-    /// Spawns a background task that waits for sessions to initialize,
-    /// Spawn a background task to fetch GitHub issues for a swarm.
     /// Jump to the next agent session that is waiting for user input.
     fn jump_to_next_waiting(&mut self, swarm_idx: usize) {
         // Get the current agent ID if we're in an agent view
@@ -2416,6 +2496,48 @@ impl App {
         Ok(())
     }
 
+    async fn handle_issue_detail_key(&mut self, key: KeyEvent, swarm_idx: usize) -> Result<()> {
+        match key.code {
+            KeyCode::Esc | KeyCode::Backspace => {
+                self.issue_detail_view = None;
+                self.screen = Screen::RepoView { swarm_idx };
+            }
+            KeyCode::Char('q') => {
+                self.running = false;
+            }
+            KeyCode::Char('g') => {
+                // Open issue in browser
+                if let Some(ref view) = self.issue_detail_view {
+                    let _ = tokio::process::Command::new("gh")
+                        .args(["issue", "view", "--web", &view.issue_number.to_string()])
+                        .spawn();
+                }
+            }
+            KeyCode::PageUp => {
+                if let Some(ref mut view) = self.issue_detail_view {
+                    view.scroll_up(10);
+                }
+            }
+            KeyCode::PageDown => {
+                if let Some(ref mut view) = self.issue_detail_view {
+                    view.scroll_down(10);
+                }
+            }
+            KeyCode::Up => {
+                if let Some(ref mut view) = self.issue_detail_view {
+                    view.scroll_up(1);
+                }
+            }
+            KeyCode::Down => {
+                if let Some(ref mut view) = self.issue_detail_view {
+                    view.scroll_down(1);
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     fn start_issue_refresh(&self, swarm_idx: usize) {
         if let Some(swarm) = self.swarms.get(swarm_idx) {
             let repo_path = swarm.repo_path.clone();
@@ -2433,6 +2555,8 @@ impl App {
         }
     }
 
+    /// Send post-launch commands to manager and worker sessions.
+    /// Spawns a background task that waits for sessions to initialize,
     /// then sends `/autocoder:monitor-loop` to the manager and
     /// `/autocoder:fix-loop` to each worker.
     fn send_post_launch_commands(&self, swarm: &Swarm) {
@@ -2467,6 +2591,52 @@ impl App {
                 }
             }
         });
+    }
+
+    /// Open an issue detail view by fetching issue data from GitHub.
+    async fn open_issue_detail(&mut self, issue_number: u32, swarm_idx: usize) {
+        // Fetch issue details from GitHub
+        let output = tokio::process::Command::new("gh")
+            .args([
+                "issue",
+                "view",
+                &issue_number.to_string(),
+                "--json",
+                "number,title,body,labels,state",
+            ])
+            .output()
+            .await;
+
+        match output {
+            Ok(out) if out.status.success() => {
+                if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&out.stdout) {
+                    let title = json["title"].as_str().unwrap_or("").to_string();
+                    let body = json["body"].as_str().unwrap_or("").to_string();
+                    let state = json["state"].as_str().unwrap_or("OPEN").to_string();
+                    let labels: Vec<String> = json["labels"]
+                        .as_array()
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|l| l["name"].as_str().map(|s| s.to_string()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
+                    self.issue_detail_view = Some(IssueDetailView::new(
+                        issue_number,
+                        title,
+                        body,
+                        labels,
+                        state,
+                    ));
+                    self.screen = Screen::IssueDetail { swarm_idx };
+                }
+            }
+            _ => {
+                self.status_message =
+                    Some(format!("Failed to fetch issue #{issue_number}"));
+            }
+        }
     }
 
     fn start_all_pane_watchers(&mut self) {
@@ -2727,6 +2897,58 @@ impl App {
     }
 
     /// Refresh agent statuses from status files and pane content.
+    /// Check if any worker is idle and auto-dispatch /monitor-workers to the manager.
+    /// Debounced to at most once every 3 minutes.
+    async fn check_auto_dispatch(&mut self) {
+        use crate::model::status::AgentState;
+
+        const DEBOUNCE_SECS: u64 = 180; // 3 minutes
+
+        // Check debounce
+        if let Some(last) = self.auto_dispatch_last {
+            if last.elapsed() < std::time::Duration::from_secs(DEBOUNCE_SECS) {
+                return;
+            }
+        }
+
+        for swarm in &self.swarms {
+            // Check if any worker is idle
+            let has_idle_worker = swarm
+                .workers
+                .iter()
+                .any(|w| matches!(w.status.state, AgentState::Idle));
+
+            if !has_idle_worker {
+                continue;
+            }
+
+            // Check that the manager is not already busy with /monitor-workers
+            let manager_busy = swarm
+                .manager
+                .pane_content
+                .to_lowercase()
+                .contains("monitor-workers");
+
+            if manager_busy {
+                continue;
+            }
+
+            // Send /monitor-workers to the manager pane
+            let target = &swarm.manager.tmux_target;
+            tracing::info!(
+                "Auto-dispatching /monitor-workers to manager (idle worker detected in {})",
+                swarm.project_name
+            );
+            if let Err(e) = crate::tmux::proxy::send_keys(&self.transport, target, "/monitor-workers").await {
+                tracing::warn!("Failed to auto-dispatch /monitor-workers: {e}");
+            }
+            self.auto_dispatch_last = Some(std::time::Instant::now());
+            self.status_message =
+                Some("Auto-dispatched /monitor-workers (idle worker detected)".to_string());
+            return; // Only dispatch once per tick
+        }
+    }
+
     fn refresh_statuses(&mut self) {
         // Read JSON status files from /tmp/agents-ui/
         let json_statuses = crate::model::status::read_json_status_files();
@@ -2766,10 +2988,13 @@ impl App {
                     .join("fix-loop.status");
                 if !self.transport.is_remote() && status_file.exists() {
                     agent.status = crate::model::status::read_status_file(&status_file);
-                    continue;
+                } else if !agent.pane_content.is_empty() {
+                    // Infer status from pane content
+                    agent.status = infer_status_from_pane(&agent.pane_content);
                 }
 
-                // Infer status from pane content
+                // Re-infer from pane content, persisting "Working #N" status
+                // until we see an explicit change
                 if !agent.pane_content.is_empty() {
                     let new_status = infer_status_from_pane(&agent.pane_content);
                     // Persist "Working #N" status until we see an explicit change
@@ -2791,6 +3016,50 @@ impl App {
                                 agent.dispatched_issue = None;
                             }
                             agent.status = new_status;
+                        }
+                    }
+                }
+
+                // If we detected "Working" but have no issue number, try the git branch
+                if let crate::model::status::AgentState::Working { issue: None } =
+                    &agent.status.state
+                {
+                    if let Some(n) = issue_from_git_branch(&agent.worktree_path) {
+                        agent.status.state =
+                            crate::model::status::AgentState::Working { issue: Some(n) };
+                    }
+                }
+            }
+
+            // Parse manager pane for /monitor-workers output to supplement worker statuses
+            let manager_content = swarm.manager.pane_content.clone();
+            if !manager_content.is_empty() {
+                let updates = parse_monitor_workers_output(&manager_content);
+                for (wt_suffix, issue_num, status_text) in &updates {
+                    // Match worker by worktree path suffix (e.g., "wt-2")
+                    for worker in &mut swarm.workers {
+                        let wt_name = worker
+                            .worktree_path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        if wt_name.ends_with(&format!("-{wt_suffix}")) || wt_name == *wt_suffix {
+                            // Only update if the worker doesn't already have issue info
+                            if let crate::model::status::AgentState::Working { issue: None }
+                            | crate::model::status::AgentState::Idle
+                            | crate::model::status::AgentState::Unknown(_) =
+                                &worker.status.state
+                            {
+                                let lower = status_text.to_lowercase();
+                                if lower.contains("dispatched") || lower.contains("working") || lower.contains("active") {
+                                    worker.status.state =
+                                        crate::model::status::AgentState::Working {
+                                            issue: *issue_num,
+                                        };
+                                } else if lower.contains("idle") {
+                                    worker.status.state = crate::model::status::AgentState::Idle;
+                                }
+                            }
                         }
                     }
                 }
@@ -3100,6 +3369,72 @@ fn infer_status_from_pane(content: &str) -> crate::model::status::AgentStatus {
     }
 }
 
+/// Parse /monitor-workers output from manager pane content.
+/// Returns Vec of (worktree_suffix, optional_issue_num, status_text).
+fn parse_monitor_workers_output(content: &str) -> Vec<(String, Option<u32>, String)> {
+    let mut results = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        // Match table rows like: | wt-2 | 2.0 | **dispatched** | #100 (P2 issue detail) |
+        if !trimmed.starts_with('|') || trimmed.starts_with("| Worker") || trimmed.starts_with("|--") {
+            continue;
+        }
+
+        let cells: Vec<&str> = trimmed
+            .split('|')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        if cells.len() >= 3 {
+            let worker_cell = cells[0].trim();
+            let status_cell = cells.get(2).unwrap_or(&"").trim();
+            let issue_cell = cells.get(3).unwrap_or(&"").trim();
+
+            // Extract worktree suffix (e.g., "wt-2" from the worker column)
+            let wt_suffix = worker_cell.to_string();
+
+            // Extract issue number from issue cell (e.g., "#100" from "#100 (P2 issue detail)")
+            let issue_num = issue_cell
+                .split_whitespace()
+                .find(|w| w.starts_with('#'))
+                .and_then(|w| w.trim_start_matches('#').trim_end_matches(|c: char| !c.is_ascii_digit()).parse::<u32>().ok());
+
+            // Clean status text (remove ** markdown bold markers)
+            let status = status_cell.replace("**", "");
+
+            if !wt_suffix.is_empty() {
+                results.push((wt_suffix, issue_num, status));
+            }
+        }
+    }
+
+    results
+}
+
+/// Try to extract an issue number from the current git branch name.
+/// Matches patterns like "fix/issue-42-auto" or "enhancement/issue-42-auto".
+fn issue_from_git_branch(worktree_path: &std::path::Path) -> Option<u32> {
+    // Read .git/HEAD or the worktree's gitdir HEAD to get branch name
+    let head_path = worktree_path.join(".git");
+    let head_content = if head_path.is_file() {
+        // Worktree: .git is a file pointing to the gitdir
+        let gitdir_ref = std::fs::read_to_string(&head_path).ok()?;
+        let gitdir = gitdir_ref.trim().strip_prefix("gitdir: ")?;
+        std::fs::read_to_string(std::path::Path::new(gitdir).join("HEAD")).ok()?
+    } else {
+        std::fs::read_to_string(head_path.join("HEAD")).ok()?
+    };
+
+    let branch = head_content.trim().strip_prefix("ref: refs/heads/")?;
+    // Match "fix/issue-N-auto" or "enhancement/issue-N-auto"
+    let after_issue = branch.strip_prefix("fix/issue-")
+        .or_else(|| branch.strip_prefix("enhancement/issue-"))?;
+    let num_str = after_issue.split('-').next()?;
+    num_str.parse::<u32>().ok()
+}
+
 /// Try to extract an issue number from text (e.g., "#42", "issue 42").
 fn extract_issue_from_text(text: &str) -> Option<u32> {
     for word in text.split_whitespace() {
@@ -3131,7 +3466,9 @@ fn key_event_to_tmux(key: KeyEvent) -> Option<String> {
         KeyCode::Enter => Some("Enter".to_string()),
         KeyCode::Tab => Some("Tab".to_string()),
         KeyCode::Backspace => Some("BSpace".to_string()),
-        KeyCode::Esc => Some("Escape".to_string()),
+        // Never forward Escape to tmux panes — it interrupts Claude sessions.
+        // Esc is handled separately as double-Esc for back navigation.
+        KeyCode::Esc => None,
         KeyCode::Up => Some("Up".to_string()),
         KeyCode::Down => Some("Down".to_string()),
         KeyCode::Left => Some("Left".to_string()),

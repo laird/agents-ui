@@ -6,4 +6,5 @@ pub mod issue_view;
 pub mod new_swarm;
 pub mod shortcuts_viewer;
 pub mod text_input;
+pub mod issue_detail;
 pub mod theme;

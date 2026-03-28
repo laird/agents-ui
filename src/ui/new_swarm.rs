@@ -226,7 +226,7 @@ pub fn render_new_swarm_dialog(
             ]));
             f.render_widget(help, chunks[4]);
         }
-        NewSwarmField::AgentRuntime => {
+        NewSwarmField::RuntimeSelection => {
             let repo_display = format!(" Repo: {repo_path}");
             let repo_line = Paragraph::new(Line::from(Span::styled(
                 repo_display,
@@ -235,10 +235,66 @@ pub fn render_new_swarm_dialog(
             f.render_widget(repo_line, chunks[0]);
 
             let prompt = Paragraph::new(Line::from(Span::styled(
-                " Select agent runtime:",
+                " Select runtime:",
                 theme::help_style(),
             )));
             f.render_widget(prompt, chunks[1]);
+
+            // Render runtime options with selection indicator
+            let runtimes = [
+                (AgentType::Claude, "Claude", 'c'),
+                (AgentType::Codex, "Codex", 'x'),
+                (AgentType::Droid, "Droid", 'd'),
+                (AgentType::Gemini, "Gemini", 'g'),
+            ];
+
+            let mut spans = vec![Span::raw(" ")];
+            for (rt, name, key) in &runtimes {
+                let selected = rt == agent_type;
+                let indicator = if selected { "●" } else { "○" };
+                let style = if selected {
+                    theme::title_style()
+                } else {
+                    theme::help_style()
+                };
+                spans.push(Span::styled(format!(" {indicator} "), style));
+                spans.push(Span::styled(format!("{name}({key})"), style));
+                spans.push(Span::raw("  "));
+            }
+
+            let options = Paragraph::new(Line::from(spans));
+            f.render_widget(options, chunks[2]);
+
+            let help = Paragraph::new(Line::from(vec![
+                Span::styled(" ←/→", theme::title_style()),
+                Span::styled(" select  ", theme::help_style()),
+                Span::styled("Enter", theme::title_style()),
+                Span::styled(" confirm  ", theme::help_style()),
+                Span::styled("Esc", theme::title_style()),
+                Span::styled(" back", theme::help_style()),
+            ]));
+            f.render_widget(help, chunks[4]);
+        }
+        NewSwarmField::AgentRuntime => {
+            let repo_display = format!(" Repo: {repo_path}");
+            let repo_line = Paragraph::new(Line::from(Span::styled(
+                repo_display,
+                theme::help_style(),
+            )));
+            f.render_widget(repo_line, chunks[0]);
+
+            let runtime_display = format!(" Runtime: {agent_type}");
+            let runtime_line = Paragraph::new(Line::from(Span::styled(
+                runtime_display,
+                theme::help_style(),
+            )));
+            f.render_widget(runtime_line, chunks[1]);
+
+            let prompt = Paragraph::new(Line::from(Span::styled(
+                " Select agent runtime:",
+                theme::help_style(),
+            )));
+            f.render_widget(prompt, chunks[2]);
 
             // Show all agent types with the selected one highlighted
             let type_spans: Vec<Span> = ALL_AGENT_TYPES

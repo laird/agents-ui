@@ -415,6 +415,35 @@ impl ClaudeAdapter {
         Ok(())
     }
 
+    /// Poll a tmux pane until Claude's prompt indicator appears, or timeout.
+    /// Returns true if the prompt was detected, false on timeout.
+    async fn wait_for_claude_ready(transport: &crate::transport::ServerTransport, target: &str) -> bool {
+        let timeout = std::time::Duration::from_secs(60);
+        let poll_interval = std::time::Duration::from_secs(2);
+        let start = std::time::Instant::now();
+
+        // Wait a minimum of 5 seconds before polling
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+
+        while start.elapsed() < timeout {
+            if let Ok(content) = proxy::capture_pane(transport, target, 50).await {
+                // Claude Code shows a "❯" or ">" prompt when ready
+                // Also check for the tips/help text that appears on startup
+                if content.contains('❯')
+                    || content.contains("What can I help")
+                    || content.contains("/help")
+                {
+                    tracing::info!("Claude ready in pane {target}");
+                    return true;
+                }
+            }
+            tokio::time::sleep(poll_interval).await;
+        }
+
+        tracing::warn!("Timed out waiting for Claude ready in pane {target}");
+        false
+    }
+
     /// Build a Swarm model from an existing tmux session.
     async fn build_swarm_from_session(
         &self,
