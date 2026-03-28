@@ -325,6 +325,8 @@ impl SwarmView {
             SwarmPanel::Manager => vec![
                 Span::styled(" Tab", theme::title_style()),
                 Span::styled(" cycle  ", theme::help_style()),
+                Span::styled("L", theme::title_style()),
+                Span::styled(" issues  ", theme::help_style()),
                 Span::styled("PgUp/Dn", theme::title_style()),
                 Span::styled(" scroll  ", theme::help_style()),
                 Span::styled("Enter", theme::title_style()),
@@ -339,6 +341,8 @@ impl SwarmView {
             SwarmPanel::Workers => vec![
                 Span::styled(" Tab", theme::title_style()),
                 Span::styled(" cycle  ", theme::help_style()),
+                Span::styled("L", theme::title_style()),
+                Span::styled(" issues  ", theme::help_style()),
                 Span::styled("Enter", theme::title_style()),
                 Span::styled(" drill in  ", theme::help_style()),
                 Span::styled("f", theme::title_style()),
@@ -357,8 +361,6 @@ impl SwarmView {
                 Span::styled(" dispatch  ", theme::help_style()),
                 Span::styled("a", theme::title_style()),
                 Span::styled(" add  ", theme::help_style()),
-                Span::styled("d", theme::title_style()),
-                Span::styled(" dispatch  ", theme::help_style()),
                 Span::styled("p", theme::title_style()),
                 Span::styled(" approve  ", theme::help_style()),
                 Span::styled("b", theme::title_style()),
