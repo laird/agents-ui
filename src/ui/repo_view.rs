@@ -340,10 +340,16 @@ impl RepoView {
                     ratatui::style::Style::default()
                 };
 
+                let done_label = if w.completed_issue_count > 0 {
+                    format!(" ({} done)", w.completed_issue_count)
+                } else {
+                    String::new()
+                };
                 let line1 = Line::from(vec![
                     Span::styled(key_label, theme::help_style()),
                     Span::styled(dot, if w.waiting_for_input { row_style } else { dot_style }),
                     Span::styled(role_label, if w.waiting_for_input { row_style } else { theme::title_style() }),
+                    Span::styled(done_label, theme::help_style()),
                 ]);
                 let line2 = Line::from(vec![
                     Span::styled("  ", row_style),

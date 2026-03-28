@@ -288,6 +288,7 @@ mod tests {
             current_issue: None,
             current_issue_title: None,
             waiting_for_input: false,
+            completed_issue_count: 0,
         }
     }
 

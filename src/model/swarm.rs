@@ -151,6 +151,8 @@ pub struct AgentInfo {
     pub current_issue_title: Option<String>,
     /// Whether the agent is waiting for user input (detected from pane content)
     pub waiting_for_input: bool,
+    /// Number of issues completed (dispatched → cleared) in this session.
+    pub completed_issue_count: u32,
 }
 
 /// Detect if pane content indicates the session is waiting for user input.
@@ -339,6 +341,7 @@ mod tests {
             current_issue: None,
             current_issue_title: None,
             waiting_for_input: false,
+            completed_issue_count: 0,
         };
         let mut cache = IssueCache::default();
         cache.issues = issues;
