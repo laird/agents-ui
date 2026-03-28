@@ -89,6 +89,8 @@ pub struct GitHubIssue {
     pub is_working: bool,
     /// Worker ID currently working on this issue, if any.
     pub assigned_worker: Option<String>,
+    /// When the issue was last updated (from GitHub's updatedAt field).
+    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 pub const BLOCKING_LABELS: &[&str] = &[
@@ -126,6 +128,34 @@ impl GitHubIssue {
         self.priority_num()
             .map(|p| format!("P{p}"))
             .unwrap_or_else(|| "—".to_string())
+    }
+
+    /// Compact age string for display (e.g., "2d", "3h", "15m").
+    /// Returns empty string if updated_at is not set.
+    pub fn age_label(&self) -> String {
+        let updated = match self.updated_at {
+            Some(t) => t,
+            None => return String::new(),
+        };
+        let now = chrono::Utc::now();
+        let dur = now.signed_duration_since(updated);
+        let mins = dur.num_minutes();
+        if mins < 60 {
+            format!("{mins}m")
+        } else if dur.num_hours() < 24 {
+            format!("{}h", dur.num_hours())
+        } else if dur.num_days() < 7 {
+            format!("{}d", dur.num_days())
+        } else {
+            format!("{}w", dur.num_weeks())
+        }
+    }
+
+    /// True if the issue hasn't been updated in over 7 days.
+    pub fn is_stale(&self) -> bool {
+        self.updated_at
+            .map(|t| chrono::Utc::now().signed_duration_since(t).num_days() >= 7)
+            .unwrap_or(false)
     }
 
     pub fn status_label(&self) -> String {
@@ -266,6 +296,7 @@ impl From<GhIssueJson> for GitHubIssue {
             labels,
             is_working,
             assigned_worker: None,
+            updated_at: None,
         }
     }
 }
@@ -279,7 +310,7 @@ pub async fn fetch_issues(repo_path: &Path) -> Result<Vec<GitHubIssue>> {
             "--state",
             "open",
             "--json",
-            "number,title,labels",
+            "number,title,labels,updatedAt",
             "--limit",
             "100",
         ])
@@ -314,6 +345,10 @@ pub async fn fetch_issues(repo_path: &Path) -> Result<Vec<GitHubIssue>> {
             let priority = labels_to_priority(&labels);
             let issue_type = labels_to_type(&labels);
             let is_working = labels.iter().any(|l| l == "working");
+            let updated_at = item["updatedAt"]
+                .as_str()
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                .map(|dt| dt.with_timezone(&chrono::Utc));
 
             issues.push(GitHubIssue {
                 number,
@@ -324,6 +359,7 @@ pub async fn fetch_issues(repo_path: &Path) -> Result<Vec<GitHubIssue>> {
                 labels,
                 is_working,
                 assigned_worker: None,
+                updated_at,
             });
         }
     }
@@ -352,6 +388,7 @@ mod tests {
             labels: label_vec,
             is_working,
             assigned_worker: None,
+            updated_at: None,
         }
     }
 
