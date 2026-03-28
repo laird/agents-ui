@@ -722,8 +722,10 @@ impl App {
             return Ok(());
         }
 
-        // ? key: toggle help overlay
-        if key.code == KeyCode::Char('?') && key.modifiers == KeyModifiers::NONE {
+        // ? key: toggle help overlay (not in AgentView — passthrough sends it to the pane)
+        if key.code == KeyCode::Char('?') && key.modifiers == KeyModifiers::NONE
+            && !matches!(self.screen, Screen::AgentView { .. })
+        {
             self.show_help = !self.show_help;
             return Ok(());
         }
