@@ -1,7 +1,7 @@
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph, Wrap},
     Frame,
 };
 
@@ -273,10 +273,11 @@ pub fn render_new_swarm_dialog(
         }
         NewSwarmField::NumWorkers => {
             let repo_display = format!(" Repo: {repo_path}");
-            let repo_line = Paragraph::new(Line::from(Span::styled(
+            let repo_line = Paragraph::new(Span::styled(
                 repo_display,
                 theme::help_style(),
-            )));
+            ))
+            .wrap(Wrap { trim: false });
             f.render_widget(repo_line, chunks[0]);
 
             let runtime_display = format!(" Runtime: {agent_type}");
@@ -299,6 +300,8 @@ pub fn render_new_swarm_dialog(
             let help = Paragraph::new(Line::from(vec![
                 Span::styled(" Enter", theme::title_style()),
                 Span::styled(" launch  ", theme::help_style()),
+                Span::styled("↑↓", theme::title_style()),
+                Span::styled(" adjust  ", theme::help_style()),
                 Span::styled("Esc", theme::title_style()),
                 Span::styled(" back", theme::help_style()),
             ]));

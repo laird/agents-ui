@@ -439,6 +439,7 @@ impl ClaudeAdapter {
             dispatched_issue: None,
             current_issue: None,
             current_issue_title: None,
+            waiting_for_input: false,
         };
 
         let mut workers = Vec::new();
@@ -485,6 +486,7 @@ impl ClaudeAdapter {
                     dispatched_issue: None,
                     current_issue: None,
                     current_issue_title: None,
+                    waiting_for_input: false,
                 });
                 worker_num += 1;
             }
@@ -505,6 +507,7 @@ impl ClaudeAdapter {
             tmux_session: session_name.to_string(),
             manager,
             workers,
+            issue_cache: Default::default(),
         })
     }
 
@@ -761,6 +764,14 @@ impl AgentRuntime for ClaudeAdapter {
         proxy::send_keys(&self.transport, tmux_target, input).await
     }
 
+    async fn send_raw_key(&self, tmux_target: &str, key: &str, literal: bool) -> Result<()> {
+        if literal {
+            proxy::send_literal(tmux_target, key).await
+        } else {
+            proxy::send_named_key(tmux_target, key).await
+        }
+    }
+
     async fn capture_output(&self, tmux_target: &str) -> Result<String> {
         proxy::capture_pane(&self.transport, tmux_target, 500).await
     }
@@ -871,6 +882,7 @@ impl AgentRuntime for ClaudeAdapter {
             dispatched_issue: None,
             current_issue: None,
             current_issue_title: None,
+            waiting_for_input: false,
         })
     }
 

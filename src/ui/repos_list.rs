@@ -116,7 +116,7 @@ impl ReposListView {
                     } else {
                         let mut counts = [0u32; 4]; // P0, P1, P2, P3
                         for issue in &open_issues {
-                            if let Some(p) = issue.priority() {
+                            if let Some(p) = issue.priority_num() {
                                 if (p as usize) < 4 {
                                     counts[p as usize] += 1;
                                 }
@@ -275,6 +275,7 @@ mod tests {
             dispatched_issue: None,
             current_issue: None,
             current_issue_title: None,
+            waiting_for_input: false,
         }
     }
 
@@ -287,6 +288,7 @@ mod tests {
             tmux_session: "codex-demo".to_string(),
             manager: make_agent("manager", true),
             workers: vec![make_agent("worker-1", false)],
+            issue_cache: crate::model::issue::IssueCache::default(),
         }
     }
 

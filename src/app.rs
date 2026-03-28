@@ -226,6 +226,12 @@ pub struct App {
     pending_launch: Option<PendingLaunch>,
     /// Last time worker healing was run.
     last_heal: Instant,
+    /// Counter for periodic issue refresh (every ~60 ticks = 15 seconds at 250ms tick).
+    issue_refresh_counter: u32,
+    /// Configurable keyboard shortcuts.
+    pub shortcuts: crate::config::shortcuts::ShortcutsConfig,
+    /// Whether the shortcuts viewer overlay is visible.
+    pub show_shortcuts_viewer: bool,
 }
 
 impl App {
@@ -293,6 +299,12 @@ impl App {
             install_scope: InstallScope::User,
             pending_launch: None,
             last_heal: Instant::now(),
+            issue_refresh_counter: 0,
+            shortcuts: {
+                crate::config::shortcuts::ShortcutsConfig::ensure_defaults_written();
+                crate::config::shortcuts::ShortcutsConfig::load()
+            },
+            show_shortcuts_viewer: false,
         };
 
         // Scan for available repos (git directories in cwd or children)
@@ -303,6 +315,11 @@ impl App {
             app.start_all_pane_watchers();
             app.start_all_issue_watchers();
             app.auto_select_current_repo_swarm().await;
+        }
+
+        // Trigger immediate issue refresh for all discovered swarms
+        for idx in 0..app.swarms.len() {
+            app.start_issue_refresh(idx);
         }
 
         Ok(app)
@@ -404,6 +421,22 @@ impl App {
                         }
                     }
                 }
+
+                // Shortcuts viewer overlay
+                if self.show_shortcuts_viewer {
+                    let panel = match &self.screen {
+                        Screen::RepoView { .. } => match &self.repo_view.focus {
+                            crate::ui::repo_view::RepoViewFocus::Workers => "workers",
+                            crate::ui::repo_view::RepoViewFocus::Issues => "issues",
+                            crate::ui::repo_view::RepoViewFocus::ManagerInput => "manager",
+                            _ => "global",
+                        },
+                        _ => "global",
+                    };
+                    crate::ui::shortcuts_viewer::render_shortcuts_viewer(
+                        f, area, &self.shortcuts, panel,
+                    );
+                }
             })?;
 
             // Fix invalid screen state (swarm removed while viewing)
@@ -437,8 +470,8 @@ impl App {
         match event {
             Event::Key(key) => self.handle_key(key).await?,
             Event::Tick => {
-                // Periodic refresh — status files could be re-read here
                 self.refresh_statuses();
+                self.repo_view.tick_banners();
                 // Blink toggle for attention indicators
                 self.blink_counter += 1;
                 if self.blink_counter % 5 == 0 {
@@ -461,12 +494,22 @@ impl App {
                     self.last_heal = Instant::now();
                     self.heal_all_workers().await;
                 }
+                // Periodic issue refresh (~every 60 seconds when viewing a repo)
+                self.issue_refresh_counter += 1;
+                if self.issue_refresh_counter >= 240 {
+                    self.issue_refresh_counter = 0;
+                    if let Screen::RepoView { swarm_idx } = &self.screen {
+                        self.start_issue_refresh(*swarm_idx);
+                    }
+                }
             }
             Event::PaneOutput { agent_id, content } => {
                 // agent_id is globally unique (e.g., "nextgen-CDD/manager")
                 let is_manager = agent_id.ends_with("/manager");
                 for swarm in &mut self.swarms {
                     if let Some(agent) = swarm.agent_by_id_mut(&agent_id) {
+                        agent.waiting_for_input =
+                            crate::model::swarm::detect_waiting_for_input(&content);
                         agent.pane_content = content;
                         break;
                     }
@@ -562,14 +605,82 @@ impl App {
                     });
                 }
             }
+            Event::IssuesRefreshed { swarm_idx, issues } => {
+                if let Some(swarm) = self.swarms.get_mut(swarm_idx) {
+                    swarm.issue_cache.issues = issues;
+                    swarm.issue_cache.is_loading = false;
+                }
+            }
+            Event::Error(msg) => {
+                tracing::error!("Background error: {msg}");
+            }
         }
         Ok(())
     }
 
+    /// Convert a crossterm KeyEvent to a tmux send-keys argument.
+    /// Returns (key_string, literal) where literal means use -l flag.
+    fn key_to_tmux(key: &KeyEvent) -> Option<(String, bool)> {
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            if let KeyCode::Char(c) = key.code {
+                return Some((format!("C-{c}"), false));
+            }
+        }
+        if key.modifiers.contains(KeyModifiers::ALT) {
+            if let KeyCode::Char(c) = key.code {
+                return Some((format!("M-{c}"), false));
+            }
+        }
+        match key.code {
+            KeyCode::Char(c) => Some((c.to_string(), true)),
+            KeyCode::Enter => Some(("Enter".to_string(), false)),
+            KeyCode::Backspace => Some(("BSpace".to_string(), false)),
+            KeyCode::Tab => Some(("Tab".to_string(), false)),
+            KeyCode::Esc => Some(("Escape".to_string(), false)),
+            KeyCode::Up => Some(("Up".to_string(), false)),
+            KeyCode::Down => Some(("Down".to_string(), false)),
+            KeyCode::Left => Some(("Left".to_string(), false)),
+            KeyCode::Right => Some(("Right".to_string(), false)),
+            KeyCode::Home => Some(("Home".to_string(), false)),
+            KeyCode::End => Some(("End".to_string(), false)),
+            KeyCode::Delete => Some(("DC".to_string(), false)),
+            _ => None,
+        }
+    }
+
+    /// Returns true if we're in a passthrough mode where keystrokes go directly to tmux.
+    fn is_passthrough_mode(&self) -> bool {
+        matches!(&self.screen, Screen::AgentView { .. })
+    }
+
     async fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
-        // Global: Ctrl+C always quits
-        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+        // Global: Ctrl+C quits (but not in passthrough mode — there it goes to tmux)
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && key.code == KeyCode::Char('c')
+            && !self.is_passthrough_mode()
+        {
             self.running = false;
+            return Ok(());
+        }
+
+        // Shortcuts viewer: ? toggles, any other key dismisses
+        if self.show_shortcuts_viewer {
+            if key.code == KeyCode::Char('?') {
+                self.show_shortcuts_viewer = false;
+            } else if key.code == KeyCode::Char('e') {
+                // Open config file in editor
+                let path = crate::config::shortcuts::ShortcutsConfig::config_path();
+                self.show_shortcuts_viewer = false;
+                self.status_message = Some(format!("Edit: {}", path.display()));
+            } else {
+                self.show_shortcuts_viewer = false;
+            }
+            return Ok(());
+        }
+
+        // ? key opens shortcuts viewer (not in passthrough mode)
+        if key.code == KeyCode::Char('?') && !self.is_passthrough_mode() {
+            self.show_shortcuts_viewer = true;
             return Ok(());
         }
 
@@ -634,8 +745,7 @@ impl App {
                     if c == '0' {
                         // Alt+0: go to Repo View with manager focused
                         self.enter_repo_view(swarm_idx).await;
-                        self.repo_view.focus_manager = true;
-                        self.repo_view.manager_scroll = u16::MAX;
+                        self.repo_view.focus = crate::ui::repo_view::RepoViewFocus::ManagerInput;
                         return Ok(());
                     } else {
                         // Alt+1-9: jump to worker agent view
@@ -646,11 +756,41 @@ impl App {
                                 self.agent_view.scroll_to_bottom();
                                 self.screen = Screen::AgentView {
                                     swarm_idx,
-                                    agent_id: worker.role.clone(),
+                                    agent_id: worker.id.clone(),
                                 };
                                 return Ok(());
                             }
                         }
+                    }
+                }
+                // Alt+a: jump to next agent needing attention (global shortcut)
+                if c == 'a' {
+                    let swarm_idx = match &self.screen {
+                        Screen::RepoView { swarm_idx } => Some(*swarm_idx),
+                        Screen::AgentView { swarm_idx, .. } => Some(*swarm_idx),
+                        Screen::ReposList if self.swarms.len() == 1 => Some(0),
+                        _ => None,
+                    };
+                    if let Some(idx) = swarm_idx {
+                        self.jump_to_next_waiting(idx);
+                        return Ok(());
+                    }
+                }
+
+                // Alt+f: file feedback as GitHub issue (global shortcut)
+                if c == 'f' {
+                    let swarm_idx = match &self.screen {
+                        Screen::RepoView { swarm_idx } => Some(*swarm_idx),
+                        Screen::AgentView { swarm_idx, .. } => Some(*swarm_idx),
+                        Screen::ReposList if self.swarms.len() == 1 => Some(0),
+                        _ => None,
+                    };
+                    if let Some(idx) = swarm_idx {
+                        self.screen = Screen::RepoView { swarm_idx: idx };
+                        self.repo_view.focus = crate::ui::repo_view::RepoViewFocus::CreateIssue(
+                            crate::ui::repo_view::CreateIssueState::SelectType,
+                        );
+                        return Ok(());
                     }
                 }
             }
@@ -1108,8 +1248,10 @@ impl App {
                 dispatched_issue: None,
                 current_issue: None,
                 current_issue_title: None,
+                waiting_for_input: false,
             },
             workers: Vec::new(),
+            issue_cache: crate::model::issue::IssueCache::default(),
         };
 
         self.swarms.push(placeholder);
@@ -1952,6 +2094,14 @@ impl App {
         swarm_idx: usize,
         agent_id: String,
     ) -> Result<()> {
+        // Ctrl+] escapes back to repo view (like ssh escape)
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && key.code == KeyCode::Char(']')
+        {
+            self.screen = Screen::RepoView { swarm_idx };
+            return Ok(());
+        }
+
         let target = self
             .swarms
             .get(swarm_idx)
@@ -2204,6 +2354,121 @@ impl App {
 
 
     /// Start pane watchers for all agents in all swarms.
+    /// Send post-launch commands to manager and worker sessions.
+    /// Spawns a background task that waits for sessions to initialize,
+    /// Spawn a background task to fetch GitHub issues for a swarm.
+    /// Jump to the next agent session that is waiting for user input.
+    fn jump_to_next_waiting(&mut self, swarm_idx: usize) {
+        // Get the current agent ID if we're in an agent view
+        let current_id = match &self.screen {
+            Screen::AgentView { agent_id, .. } => Some(agent_id.clone()),
+            _ => None,
+        };
+
+        if let Some(swarm) = self.swarms.get(swarm_idx) {
+            if let Some(agent) = swarm.next_waiting_agent(current_id.as_deref()) {
+                let agent_id = agent.id.clone();
+                self.agent_view = AgentView::new();
+                self.agent_view.scroll_to_bottom();
+                self.screen = Screen::AgentView {
+                    swarm_idx,
+                    agent_id,
+                };
+            } else {
+                self.status_message = Some("No sessions waiting for input".to_string());
+            }
+        }
+    }
+
+    /// Try to execute a configured shortcut for the given panel and key.
+    async fn try_shortcut(&mut self, panel: &str, key: &str, swarm_idx: usize, issue: Option<u32>) -> Result<()> {
+        use crate::config::shortcuts::ShortcutsConfig;
+
+        let shortcuts = self.shortcuts.for_panel(panel);
+        if let Some(shortcut) = shortcuts.get(key) {
+            let project = self.swarms.get(swarm_idx).map(|s| s.project_name.as_str());
+            let worker_target = self.repo_view.selected_worker()
+                .and_then(|idx| self.swarms.get(swarm_idx).and_then(|s| s.workers.get(idx)))
+                .map(|w| w.tmux_target.as_str());
+
+            let cmd = ShortcutsConfig::expand_command(
+                &shortcut.command,
+                issue,
+                worker_target,
+                project,
+            );
+
+            if let Some(swarm) = self.swarms.get(swarm_idx) {
+                let target = if shortcut.target == "worker" {
+                    worker_target.unwrap_or(&swarm.manager.tmux_target).to_string()
+                } else {
+                    swarm.manager.tmux_target.clone()
+                };
+
+                if shortcut.raw {
+                    self.adapter.send_raw_key(&target, &cmd, false).await?;
+                } else {
+                    self.adapter.send_input(&target, &cmd).await?;
+                }
+                self.status_message = Some(format!("[{}] {}", shortcut.label, cmd));
+            }
+        }
+        Ok(())
+    }
+
+    fn start_issue_refresh(&self, swarm_idx: usize) {
+        if let Some(swarm) = self.swarms.get(swarm_idx) {
+            let repo_path = swarm.repo_path.clone();
+            let tx = self.events.tx();
+            tokio::spawn(async move {
+                match crate::model::issue::fetch_issues(&repo_path).await {
+                    Ok(issues) => {
+                        let _ = tx.send(Event::IssuesRefreshed { swarm_idx, issues });
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to fetch issues: {e}");
+                    }
+                }
+            });
+        }
+    }
+
+    /// then sends `/autocoder:monitor-loop` to the manager and
+    /// `/autocoder:fix-loop` to each worker.
+    fn send_post_launch_commands(&self, swarm: &Swarm) {
+        let manager_target = swarm.manager.tmux_target.clone();
+        let worker_targets: Vec<String> = swarm.workers.iter().map(|w| w.tmux_target.clone()).collect();
+        let plugin_installed = self.agents_dir.exists()
+            && self.agents_dir.join("scripts/start-parallel-agents.sh").exists();
+        let transport = self.transport.clone();
+
+        tokio::spawn(async move {
+            if !plugin_installed {
+                tracing::warn!("Autocoder plugin not found; skipping post-launch commands");
+                return;
+            }
+
+            // Wait for Claude sessions to initialize before sending commands
+            tokio::time::sleep(Duration::from_secs(5)).await;
+
+            // Send /autocoder:monitor-loop to manager
+            if let Err(e) = proxy::send_keys(&transport, &manager_target, "/autocoder:monitor-loop").await {
+                tracing::warn!("Failed to send /autocoder:monitor-loop to manager: {e}");
+            } else {
+                tracing::info!("Sent /autocoder:monitor-loop to manager at {manager_target}");
+            }
+
+            // Send /autocoder:fix-loop to each worker
+            for target in &worker_targets {
+                if let Err(e) = proxy::send_keys(&transport, target, "/autocoder:fix-loop").await {
+                    tracing::warn!("Failed to send /autocoder:fix-loop to worker at {target}: {e}");
+                } else {
+                    tracing::info!("Sent /autocoder:fix-loop to worker at {target}");
+                }
+            }
+        });
+    }
+
     fn start_all_pane_watchers(&mut self) {
         // Cancel existing watchers
         for handle in self.pane_watchers.drain(..) {
@@ -2278,7 +2543,7 @@ impl App {
                                 && !being_worked.contains(&i.number)
                         })
                         // Sort by priority (P0 first)
-                        .min_by_key(|i| i.priority().unwrap_or(99))
+                        .min_by_key(|i| i.priority_num().unwrap_or(99))
                 })
                 .map(|i| i.number);
 
@@ -2332,6 +2597,7 @@ impl App {
         }
     }
 
+    /// Refresh agent statuses from status files and generate banners on state changes.
     /// Validate and heal all worker infrastructure across all swarms.
     async fn heal_all_workers(&mut self) {
         let mut any_repairs = false;

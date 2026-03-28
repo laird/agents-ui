@@ -47,15 +47,37 @@ impl AgentView {
         };
         let id_label = format!("  {} ", agent.id);
         let role_label = format!("[{role}] ");
-        let status_label = agent.status.state.to_string();
         let path_label = format!("  {}", agent.worktree_path.display());
 
-        let title = Paragraph::new(Line::from(vec![
+        // Build status spans with the issue number highlighted separately
+        let mut title_spans = vec![
             Span::styled(id_label, theme::title_style()),
             Span::styled(role_label, theme::help_style()),
-            Span::styled(status_label, theme::status_style(&agent.status.state)),
-            Span::styled(path_label, theme::help_style()),
-        ]))
+        ];
+        match &agent.status.state {
+            crate::model::status::AgentState::Working { issue: Some(n) } => {
+                title_spans.push(Span::styled(
+                    "Working ",
+                    theme::status_style(&agent.status.state),
+                ));
+                title_spans.push(Span::styled(
+                    format!("#{n}"),
+                    theme::title_style(),
+                ));
+            }
+            state => {
+                title_spans.push(Span::styled(
+                    state.to_string(),
+                    theme::status_style(&agent.status.state),
+                ));
+            }
+        }
+        if agent.waiting_for_input {
+            title_spans.push(Span::styled(" NEEDS INPUT", theme::waiting_style()));
+        }
+        title_spans.push(Span::styled(path_label, theme::help_style()));
+
+        let title = Paragraph::new(Line::from(title_spans))
         .block(Block::default().borders(Borders::BOTTOM));
         f.render_widget(title, chunks[0]);
 
@@ -90,28 +112,17 @@ impl AgentView {
             .scroll((self.scroll_offset, 0));
         f.render_widget(pane_output, chunks[1]);
 
-        // Input line
-        let input_line = self.input.render_line("> ");
-        let input_widget = Paragraph::new(input_line)
-            .block(Block::default().borders(Borders::ALL).title(" Input "));
-        f.render_widget(input_widget, chunks[2]);
-
-        // Help
+        // Help bar with key shortcuts
         let help = Paragraph::new(Line::from(vec![
-            Span::styled(" Enter", theme::title_style()),
-            Span::styled(" send  ", theme::help_style()),
-            Span::styled("↑/↓", theme::title_style()),
-            Span::styled(" line  ", theme::help_style()),
-            Span::styled("PgUp/PgDn", theme::title_style()),
-            Span::styled(" page  ", theme::help_style()),
-            Span::styled("Home/End", theme::title_style()),
-            Span::styled(" top/btm  ", theme::help_style()),
-            Span::styled("Esc", theme::title_style()),
+            Span::styled(" keys → session  ", theme::help_style()),
+            Span::styled("PgUp/Dn", theme::title_style()),
+            Span::styled(" scroll  ", theme::help_style()),
+            Span::styled("Alt+0", theme::title_style()),
             Span::styled(" back  ", theme::help_style()),
-            Span::styled("⌥0", theme::title_style()),
-            Span::styled(" overview  ", theme::help_style()),
-            Span::styled("⌥1-9", theme::title_style()),
-            Span::styled(" worker  ", theme::help_style()),
+            Span::styled("Alt+1-9", theme::title_style()),
+            Span::styled(" sessions  ", theme::help_style()),
+            Span::styled("Alt+a", theme::waiting_style()),
+            Span::styled(" next waiting", theme::help_style()),
         ]))
         .block(Block::default().borders(Borders::TOP));
         f.render_widget(help, chunks[2]);

@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use super::issue::IssueCache;
 use super::status::AgentStatus;
 
 /// The type of agent runtime.
@@ -148,6 +149,55 @@ pub struct AgentInfo {
     pub current_issue: Option<u32>,
     /// Current issue title from JSON status file
     pub current_issue_title: Option<String>,
+    /// Whether the agent is waiting for user input (detected from pane content)
+    pub waiting_for_input: bool,
+}
+
+/// Detect if pane content indicates the session is waiting for user input.
+pub fn detect_waiting_for_input(content: &str) -> bool {
+    // Look at the last ~15 lines for waiting indicators
+    let tail: Vec<&str> = content.lines().rev().take(15).collect();
+    let tail_text = tail.iter().rev().copied().collect::<Vec<_>>().join("\n");
+
+    // Permission prompts
+    if tail_text.contains("bypass permissions")
+        || tail_text.contains("Allow?")
+        || tail_text.contains("allow this action")
+        || tail_text.contains("(y/n)")
+        || tail_text.contains("[Y/n]")
+        || tail_text.contains("[y/N]")
+    {
+        return true;
+    }
+
+    // Interrupted state
+    if tail_text.contains("What should Claude do instead?") {
+        return true;
+    }
+
+    // AskUserQuestion or similar prompts
+    if tail_text.contains("Interrupted") && tail_text.contains("❯") {
+        return true;
+    }
+
+    // Bare prompt at end with no active work (idle at prompt after interruption)
+    // Check if the very last non-empty line is just a prompt
+    let last_lines: Vec<&str> = content
+        .lines()
+        .rev()
+        .filter(|l| !l.trim().is_empty())
+        .take(3)
+        .collect();
+
+    if let Some(last) = last_lines.first() {
+        let trimmed = last.trim();
+        // Permission bypass prompt line
+        if trimmed.contains("bypass permissions on") && trimmed.contains("shift+tab") {
+            return true;
+        }
+    }
+
+    false
 }
 
 /// A swarm of agents working on one repo.
@@ -167,6 +217,8 @@ pub struct Swarm {
     pub manager: AgentInfo,
     /// Worker agents (each in their own worktree)
     pub workers: Vec<AgentInfo>,
+    /// Cached GitHub issues
+    pub issue_cache: IssueCache,
 }
 
 #[allow(dead_code)] // Utility methods for future UI enhancements
@@ -184,32 +236,70 @@ impl Swarm {
             .count()
     }
 
-    /// Get a specific agent by role (e.g., "manager", "worker-1")
-    pub fn agent(&self, role: &str) -> Option<&AgentInfo> {
-        if self.manager.role == role {
+    /// Count of agents needing attention (not busy, not stopped)
+    pub fn attention_count(&self) -> usize {
+        self.workers
+            .iter()
+            .filter(|w| {
+                matches!(
+                    w.status.state,
+                    super::status::AgentState::Idle
+                )
+            })
+            .count()
+    }
+
+    /// Count of agents waiting for user input
+    pub fn waiting_count(&self) -> usize {
+        let mut count = 0;
+        if self.manager.waiting_for_input {
+            count += 1;
+        }
+        count += self.workers.iter().filter(|w| w.waiting_for_input).count();
+        count
+    }
+
+    /// Get all agents (manager first, then workers).
+    pub fn all_agents(&self) -> Vec<&AgentInfo> {
+        let mut all = vec![&self.manager];
+        all.extend(self.workers.iter());
+        all
+    }
+
+    /// Get the next agent waiting for input, starting after `after_id`.
+    /// Returns None if no agent is waiting.
+    pub fn next_waiting_agent(&self, after_id: Option<&str>) -> Option<&AgentInfo> {
+        let all = self.all_agents();
+        let start_idx = after_id
+            .and_then(|id| all.iter().position(|a| a.id == id))
+            .map(|i| i + 1)
+            .unwrap_or(0);
+
+        // Search from start_idx, wrapping around
+        for i in 0..all.len() {
+            let idx = (start_idx + i) % all.len();
+            if all[idx].waiting_for_input {
+                return Some(all[idx]);
+            }
+        }
+        None
+    }
+
+    /// Get a specific agent by ID
+    pub fn agent(&self, id: &str) -> Option<&AgentInfo> {
+        if self.manager.id == id || self.manager.role == id {
             Some(&self.manager)
         } else {
-            self.workers.iter().find(|w| w.role == role)
+            self.workers.iter().find(|w| w.id == id || w.role == id)
         }
     }
 
     /// Get a mutable reference to a specific agent by role
-    #[allow(dead_code)]
     pub fn agent_mut(&mut self, role: &str) -> Option<&mut AgentInfo> {
-        if self.manager.role == role {
+        if self.manager.role == role || self.manager.id == role {
             Some(&mut self.manager)
         } else {
-            self.workers.iter_mut().find(|w| w.role == role)
-        }
-    }
-
-    /// Get a specific agent by globally unique ID (e.g., "nextgen-CDD/manager")
-    #[allow(dead_code)]
-    pub fn agent_by_id(&self, id: &str) -> Option<&AgentInfo> {
-        if self.manager.id == id {
-            Some(&self.manager)
-        } else {
-            self.workers.iter().find(|w| w.id == id)
+            self.workers.iter_mut().find(|w| w.role == role || w.id == role)
         }
     }
 
@@ -221,7 +311,6 @@ impl Swarm {
             self.workers.iter_mut().find(|w| w.id == id)
         }
     }
-
 }
 
 #[cfg(test)]

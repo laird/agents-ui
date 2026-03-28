@@ -463,6 +463,7 @@ mod tests {
             dispatched_issue: None,
             current_issue: None,
             current_issue_title: None,
+            waiting_for_input: false,
         }
     }
 
@@ -480,6 +481,7 @@ mod tests {
                 "working issue #12",
                 AgentState::Working { issue: Some(12) },
             )],
+            issue_cache: crate::model::issue::IssueCache::default(),
         }
     }
 
@@ -499,7 +501,10 @@ mod tests {
             number: 12,
             title: "Fix worker bootstrap after reconnect".to_string(),
             state: IssueState::Open,
+            priority: crate::model::issue::IssuePriority::P1,
+            issue_type: crate::model::issue::IssueType::Bug,
             labels: vec!["P1".to_string()],
+            is_working: false,
             assigned_worker: Some("worker-1".to_string()),
         }];
 

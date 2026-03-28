@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use tokio::process::Command;
 use tokio::sync::mpsc;
 use std::time::Duration;
 
@@ -95,6 +96,34 @@ pub async fn send_keys(transport: &ServerTransport, target: &str, input: &str) -
     Ok(())
 }
 
+/// Send a literal string to a tmux pane (no key name lookups, no Enter appended).
+/// Uses fire-and-forget spawn for lower latency on interactive keystrokes.
+pub async fn send_literal(target: &str, text: &str) -> Result<()> {
+    Command::new("tmux")
+        .args(["send-keys", "-t", target, "-l", text])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .context("Failed to spawn tmux send-keys literal")?;
+
+    Ok(())
+}
+
+/// Send a named key (e.g., "Enter", "BSpace", "C-c") to a tmux pane.
+/// Uses fire-and-forget spawn for lower latency on interactive keystrokes.
+pub async fn send_named_key(target: &str, key: &str) -> Result<()> {
+    Command::new("tmux")
+        .args(["send-keys", "-t", target, key])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .context("Failed to spawn tmux send-keys named")?;
+
+    Ok(())
+}
+
 /// Resize a tmux pane to given dimensions.
 pub async fn resize_pane(transport: &ServerTransport, target: &str, width: u16, height: u16) -> Result<()> {
     let output = transport
@@ -172,12 +201,14 @@ pub fn spawn_pane_watcher(
     tokio::spawn(async move {
         let mut last_content = String::new();
         let mut interval = tokio::time::interval(poll_interval);
+        let mut consecutive_failures: u32 = 0;
 
         loop {
             interval.tick().await;
 
             match capture_pane(&transport, &target, 500).await {
                 Ok(content) => {
+                    consecutive_failures = 0;
                     if content != last_content {
                         last_content = content.clone();
                         if tx
@@ -192,15 +223,13 @@ pub fn spawn_pane_watcher(
                     }
                 }
                 Err(e) => {
-                    tracing::warn!("Pane capture failed for {target}: {e}");
-                    // Pane might have been destroyed — check and break
-                    if !crate::tmux::session::has_session(
-                        &transport,
-                        target.split(':').next().unwrap_or(&target),
-                    )
-                    .await
-                    {
-                        tracing::info!("Session gone for {target}, stopping watcher");
+                    consecutive_failures += 1;
+                    if consecutive_failures <= 3 {
+                        tracing::warn!("Pane capture failed for {target}: {e}");
+                    }
+                    // Stop after 5 consecutive failures (pane likely gone)
+                    if consecutive_failures >= 5 {
+                        tracing::info!("Pane {target} unreachable after {consecutive_failures} failures, stopping watcher");
                         break;
                     }
                 }

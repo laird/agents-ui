@@ -4,6 +4,8 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::model::issue::GitHubIssue;
+use crate::model::status::AgentStatus;
+
 /// All events the app processes.
 #[derive(Debug)]
 #[allow(dead_code)] // Variants used by background tasks and planned notification system
@@ -41,6 +43,13 @@ pub enum Event {
         issue_number: u32,
         body: String,
     },
+    /// GitHub issues refreshed for a swarm
+    IssuesRefreshed {
+        swarm_idx: usize,
+        issues: Vec<GitHubIssue>,
+    },
+    /// Error from a background task
+    Error(String),
 }
 
 pub struct EventHandler {
