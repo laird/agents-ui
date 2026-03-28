@@ -9,6 +9,7 @@ use ratatui::{
 
 use crate::model::issue::{GitHubIssue, IssueFilter};
 use crate::model::swarm::Swarm;
+use super::text_input::TextInput;
 use super::theme;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -33,6 +34,8 @@ pub struct SwarmView {
     pub workers_table: TableState,
     pub issues_table: TableState,
     pub issue_filter: IssueFilter,
+    /// Active issue search query (`/` activates search mode)
+    pub issue_search: Option<TextInput>,
 }
 
 impl SwarmView {
@@ -46,6 +49,7 @@ impl SwarmView {
             workers_table,
             issues_table,
             issue_filter: IssueFilter::All,
+            issue_search: None,
         }
     }
 
@@ -58,9 +62,25 @@ impl SwarmView {
         focus: SwarmPanel,
         blink: bool,
     ) {
+        let search_query = self.issue_search.as_ref().map(|s| s.text().to_lowercase());
         let filtered_issues: Vec<&GitHubIssue> = issues
             .iter()
             .filter(|i| i.matches_filter(self.issue_filter))
+            .filter(|i| {
+                if let Some(ref q) = search_query {
+                    if q.is_empty() {
+                        return true;
+                    }
+                    if let Some(num_str) = q.strip_prefix('#') {
+                        if let Ok(num) = num_str.parse::<u32>() {
+                            return i.number == num;
+                        }
+                    }
+                    i.title.to_lowercase().contains(q.as_str())
+                } else {
+                    true
+                }
+            })
             .collect();
 
         // Pre-compute attention data before layout (needed for dynamic sizing)
@@ -309,7 +329,28 @@ impl SwarmView {
             Style::default()
         });
 
-        f.render_stateful_widget(issues_table, bottom_cols[1], &mut self.issues_table);
+        // Split issues area: search bar (when active) + issues table
+        let (search_area, issues_table_area) = if self.issue_search.is_some() {
+            let split = Layout::vertical([
+                Constraint::Length(3),
+                Constraint::Min(3),
+            ])
+            .split(bottom_cols[1]);
+            (Some(split[0]), split[1])
+        } else {
+            (None, bottom_cols[1])
+        };
+
+        if let (Some(area), Some(search)) = (search_area, &self.issue_search) {
+            let search_block = Block::default()
+                .borders(Borders::ALL)
+                .title(" Search ")
+                .border_style(theme::title_style());
+            let search_widget = Paragraph::new(search.render_line(" / ")).block(search_block);
+            f.render_widget(search_widget, area);
+        }
+
+        f.render_stateful_widget(issues_table, issues_table_area, &mut self.issues_table);
 
         // --- Help bar ---
         let help_spans = match focus {
@@ -358,6 +399,8 @@ impl SwarmView {
                 Span::styled(" review-blocked  ", theme::help_style()),
                 Span::styled("f", theme::title_style()),
                 Span::styled(" filter  ", theme::help_style()),
+                Span::styled("/", theme::title_style()),
+                Span::styled(" search  ", theme::help_style()),
                 Span::styled("Enter", theme::title_style()),
                 Span::styled(" view  ", theme::help_style()),
                 Span::styled("g", theme::title_style()),
