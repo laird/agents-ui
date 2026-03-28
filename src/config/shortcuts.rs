@@ -11,9 +11,11 @@ pub struct Shortcut {
     pub command: String,
     /// Where to send the command: "manager" (default) or "worker".
     #[serde(default = "default_target")]
+    #[allow(dead_code)] // Planned for worker-targeted shortcut dispatch
     pub target: String,
     /// If true, send as raw tmux key (e.g., "C-c") instead of text+Enter.
     #[serde(default)]
+    #[allow(dead_code)] // Planned for raw key forwarding support
     pub raw: bool,
 }
 
@@ -94,6 +96,7 @@ impl ShortcutsConfig {
     }
 
     /// Expand template variables in a command string.
+    #[allow(dead_code)] // Planned for shortcut variable substitution
     pub fn expand_command(template: &str, issue: Option<u32>, worker: Option<&str>, project: Option<&str>) -> String {
         let mut cmd = template.to_string();
         if let Some(n) = issue {
