@@ -73,12 +73,32 @@ impl AgentType {
         }
     }
 
-    /// The slash command to start the worker fix-loop.
+    /// The slash command to start the worker fix-loop (sent once on first launch).
     pub fn worker_loop_cmd(&self) -> &str {
         match self {
             AgentType::Claude => "/autocoder:fix-loop",
             AgentType::Codex | AgentType::Droid => "",
             AgentType::Gemini => "/fix-loop",
+        }
+    }
+
+    /// The slash command to dispatch work to an already-running idle worker (ongoing cycles).
+    #[allow(dead_code)]
+    pub fn worker_cmd(&self) -> &str {
+        match self {
+            AgentType::Claude => "/autocoder:fix",
+            AgentType::Gemini => "/fix",
+            AgentType::Codex | AgentType::Droid => "",
+        }
+    }
+
+    /// The slash command to send to an already-running idle manager (ongoing cycles).
+    #[allow(dead_code)]
+    pub fn manager_cmd(&self) -> &str {
+        match self {
+            AgentType::Claude => "/autocoder:monitor",
+            AgentType::Gemini => "/manage",
+            AgentType::Codex | AgentType::Droid => "",
         }
     }
 
