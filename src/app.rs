@@ -2938,6 +2938,12 @@ impl App {
                     }
                 }
             }
+            KeyCode::Char('d') => {
+                // Dispatch the currently-viewed issue to an idle worker
+                if let Some(issue_num) = self.issue_detail_view.as_ref().map(|v| v.issue_number) {
+                    self.dispatch_issue_by_number(swarm_idx, issue_num).await;
+                }
+            }
             KeyCode::PageUp => {
                 if let Some(ref mut view) = self.issue_detail_view {
                     view.scroll_up(10);
@@ -3354,6 +3360,44 @@ impl App {
         };
 
         tracing::info!("Manual dispatch: #{issue_num} → {role} via {target}");
+        if let Ok(()) = crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, &cmd).await {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, "Enter").await.ok();
+            self.swarms[swarm_idx].workers[worker_idx].dispatched_issue = Some(issue_num);
+            self.swarms[swarm_idx].workers[worker_idx].status.state =
+                crate::model::status::AgentState::Working { issue: Some(issue_num) };
+            self.set_status(format!("Dispatched #{issue_num} → {role}"));
+        } else {
+            self.set_status(format!("Failed to dispatch #{issue_num}"));
+        }
+    }
+
+    /// Dispatch a specific issue number to an idle worker (used from Issue Detail view).
+    async fn dispatch_issue_by_number(&mut self, swarm_idx: usize, issue_num: u32) {
+        let Some(swarm) = self.swarms.get(swarm_idx) else { return };
+        let agent_type = swarm.agent_type.clone();
+
+        let idle_worker = self.swarms[swarm_idx]
+            .workers
+            .iter()
+            .enumerate()
+            .find(|(_, w)| {
+                !w.is_manager
+                    && w.dispatched_issue.is_none()
+                    && matches!(w.status.state, crate::model::status::AgentState::Idle)
+            })
+            .map(|(idx, w)| (idx, w.tmux_target.clone(), w.role.clone()));
+
+        let Some((worker_idx, target, role)) = idle_worker else {
+            self.set_status("No idle workers available".to_string());
+            return;
+        };
+
+        let Some(cmd) = self.worker_dispatch_cmd(&agent_type, issue_num) else {
+            self.set_status(format!("No dispatch command configured for {agent_type}"));
+            return;
+        };
+
         if let Ok(()) = crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, &cmd).await {
             tokio::time::sleep(Duration::from_millis(200)).await;
             crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, "Enter").await.ok();
