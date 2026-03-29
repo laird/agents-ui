@@ -395,9 +395,14 @@ impl ClaudeAdapter {
                 }
             }
             PaneState::AgentIdle => {
-                if let Some(cmd) = self.ongoing_command(runtime, agent).await {
-                    tracing::info!("Agent {} is idle, sending ongoing command: {}", agent.id, cmd);
-                    proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
+                // Don't re-bootstrap the manager when it's idle — manage_manager_sessions
+                // handles dispatching commands to the manager based on work availability.
+                // Re-bootstrapping here causes monitor-loop to fire continuously.
+                if !agent.is_manager {
+                    if let Some(cmd) = self.ongoing_command(runtime, agent).await {
+                        tracing::info!("Agent {} is idle, sending ongoing command: {}", agent.id, cmd);
+                        proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
+                    }
                 }
             }
             PaneState::AgentBusy => {
@@ -436,9 +441,11 @@ impl ClaudeAdapter {
                         }
                     }
                     PaneState::AgentIdle => {
-                        if let Some(cmd) = self.ongoing_command(runtime, agent).await {
-                            tracing::info!("Probe: agent {} is idle, sending ongoing command: {}", agent.id, cmd);
-                            proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
+                        if !agent.is_manager {
+                            if let Some(cmd) = self.ongoing_command(runtime, agent).await {
+                                tracing::info!("Probe: agent {} is idle, sending ongoing command: {}", agent.id, cmd);
+                                proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
+                            }
                         }
                     }
                     _ => {
@@ -1363,14 +1370,26 @@ fn classify_pane_state(content: &str) -> PaneState {
             saw_agent_indicator = true;
         }
 
-        // Idle agent prompt (waiting for user input)
-        if lower.contains("how can i help")
-            || lower.contains("what would you like")
-            || lower.starts_with('>')
+        // Idle agent prompt (waiting for user input, no command queued)
+        if lower.contains("how can i help") || lower.contains("what would you like") {
+            saw_idle_prompt = true;
+        } else if lower.starts_with('>')
             || lower.starts_with('\u{276f}') // ❯ (Claude prompt)
             || lower.starts_with('\u{203a}') // › (Codex prompt)
         {
-            saw_idle_prompt = true;
+            // If there is text after the prompt character, a command has been queued
+            // (sent via tmux send-keys but not yet processed). Treat as busy so the
+            // TUI does not dispatch a second command to the same session.
+            let after_prompt = lower
+                .trim_start_matches(|c: char| {
+                    c == '>' || c == '\u{276f}' || c == '\u{203a}'
+                })
+                .trim();
+            if after_prompt.is_empty() {
+                saw_idle_prompt = true;
+            } else {
+                saw_busy_indicator = true;
+            }
         }
     }
 
@@ -1661,6 +1680,18 @@ mod tests {
         // Random text that's not a shell prompt or agent indicator
         assert_eq!(classify_pane_state("some random output\n"), PaneState::Unknown);
         assert_eq!(classify_pane_state("building project...\n"), PaneState::Unknown);
+    }
+
+    #[test]
+    fn queued_command_at_prompt_is_busy() {
+        // Prompt with a command queued (sent via tmux send-keys, not yet processed)
+        // should not appear idle — prevents double-dispatch.
+        assert_eq!(classify_pane_state("\u{276f} /fix 123\n"), PaneState::AgentBusy);
+        assert_eq!(classify_pane_state("\u{276f} /autocoder:monitor\n"), PaneState::AgentBusy);
+        assert_eq!(classify_pane_state("> /fix 123\n"), PaneState::AgentBusy);
+        // Bare prompt (no command) is still idle
+        assert_eq!(classify_pane_state("\u{276f} \n"), PaneState::AgentIdle);
+        assert_eq!(classify_pane_state("\u{276f}\n"), PaneState::AgentIdle);
     }
 
     #[test]
