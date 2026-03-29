@@ -320,6 +320,30 @@ impl IssueDetailView {
         self.scroll_offset = self.scroll_offset.saturating_add(amount);
     }
 
+    pub fn scroll_to_start(&mut self) {
+        self.scroll_offset = 0;
+    }
+
+    pub fn scroll_to_end(&mut self, total_lines: u16) {
+        self.scroll_offset = total_lines;
+    }
+
+    /// Returns the total number of logical lines in the scrollable content area.
+    /// This is used by Home/End navigation to jump to the end without over-scrolling.
+    pub fn line_count(&self) -> u16 {
+        let body_text = if self.body.is_empty() {
+            " (No description provided)".to_string()
+        } else {
+            format!(" {}", self.body.replace('\r', ""))
+        };
+        let mut count = render_markdown_lines(&body_text).len();
+        for (_, comment_body) in &self.comments {
+            count += 2; // blank line + author separator
+            count += render_markdown_lines(&comment_body.replace('\r', "")).len();
+        }
+        count as u16
+    }
+
     pub fn render(&self, f: &mut Frame, area: Rect) {
         let chunks = Layout::vertical([
             Constraint::Length(5), // Header (extra line for metadata)
@@ -431,6 +455,8 @@ impl IssueDetailView {
         let help = Paragraph::new(Line::from(vec![
             Span::styled(" PgUp/PgDn", theme::title_style()),
             Span::styled(" scroll  ", theme::help_style()),
+            Span::styled("Home/End", theme::title_style()),
+            Span::styled(" top/bottom  ", theme::help_style()),
             Span::styled("g", theme::title_style()),
             Span::styled(" open in browser  ", theme::help_style()),
             Span::styled("Esc/⌥←", theme::title_style()),
