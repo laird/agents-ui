@@ -2848,6 +2848,12 @@ impl App {
                     view.scroll_down(1);
                 }
             }
+            KeyCode::Char('d') => {
+                let issue_num = self.issue_detail_view.as_ref().map(|v| v.issue_number);
+                if let Some(num) = issue_num {
+                    self.dispatch_issue_by_number(swarm_idx, num).await;
+                }
+            }
             KeyCode::Char('n') => {
                 let current = self.issue_detail_view.as_ref().map(|v| v.issue_number);
                 if let Some(current_num) = current {
@@ -3237,22 +3243,10 @@ impl App {
     }
 
     /// Dispatch the currently selected issue (in the Issues panel) to an idle worker.
-    async fn dispatch_selected_issue(&mut self, swarm_idx: usize) {
+    async fn dispatch_issue_by_number(&mut self, swarm_idx: usize, issue_num: u32) {
         let Some(swarm) = self.swarms.get(swarm_idx) else { return };
-        let project_name = swarm.project_name.clone();
         let agent_type = swarm.agent_type.clone();
 
-        // Get the selected issue number
-        let issues: Vec<u32> = self.issue_caches
-            .get(&project_name)
-            .map(|c| self.swarm_view.apply_filters(&c.issues).into_iter().map(|i| i.number).collect())
-            .unwrap_or_default();
-        let Some(issue_num) = self.swarm_view.selected_issue().and_then(|idx| issues.get(idx).copied()) else {
-            self.set_status("No issue selected".to_string());
-            return;
-        };
-
-        // Find an idle worker
         let idle_worker = self.swarms[swarm_idx]
             .workers
             .iter()
@@ -3285,6 +3279,22 @@ impl App {
         } else {
             self.set_status(format!("Failed to dispatch #{issue_num}"));
         }
+    }
+
+    async fn dispatch_selected_issue(&mut self, swarm_idx: usize) {
+        let Some(swarm) = self.swarms.get(swarm_idx) else { return };
+        let project_name = swarm.project_name.clone();
+
+        let issues: Vec<u32> = self.issue_caches
+            .get(&project_name)
+            .map(|c| self.swarm_view.apply_filters(&c.issues).into_iter().map(|i| i.number).collect())
+            .unwrap_or_default();
+        let Some(issue_num) = self.swarm_view.selected_issue().and_then(|idx| issues.get(idx).copied()) else {
+            self.set_status("No issue selected".to_string());
+            return;
+        };
+
+        self.dispatch_issue_by_number(swarm_idx, issue_num).await;
     }
 
     /// Start issue fetchers for all swarms.
