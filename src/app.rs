@@ -55,20 +55,6 @@ pub enum InstallScope {
     Repo,
 }
 
-/// Keybindings shown in the help overlay when the Issues panel is focused in Swarm View.
-const ISSUES_PANEL_HELP_ENTRIES: &[(&str, &str)] = &[
-    ("f",       "Cycle status filter"),
-    ("t",       "Cycle type filter"),
-    ("P",       "Cycle priority filter"),
-    ("/",       "Search issues"),
-    ("a",       "Add new issue"),
-    ("d / Space", "Dispatch to agent"),
-    ("p",       "Approve issue"),
-    ("b",       "Jump to next blocked"),
-    ("r",       "Send review-blocked"),
-    ("g",       "Open in browser"),
-    ("Enter",   "View issue detail"),
-];
 
 /// Which field is focused in the create-issue dialog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2325,49 +2311,6 @@ impl App {
                             }
                         }
                     }
-                    KeyCode::Char('u') => {
-                        // Release stuck issue: remove 'working' label via gh
-                        if let Some(swarm) = self.swarms.get(swarm_idx) {
-                            let project_name = swarm.project_name.clone();
-                            let repo_path = swarm.repo_path.clone();
-                            let issues: Vec<GitHubIssue> = self.issue_caches
-                                .get(&project_name)
-                                .map(|c| self.swarm_view.apply_filters(&c.issues).into_iter().cloned().collect())
-                                .unwrap_or_default();
-                            if let Some(issue) = self.swarm_view.selected_issue()
-                                .and_then(|idx| issues.get(idx))
-                            {
-                                if issue.is_working {
-                                    let num = issue.number;
-                                    let transport = self.transport.clone();
-                                    tokio::spawn(async move {
-                                        let _ = crate::github::gh_repo_output(
-                                            &transport,
-                                            &repo_path,
-                                            &[
-                                                "issue".to_string(),
-                                                "edit".to_string(),
-                                                num.to_string(),
-                                                "--remove-label".to_string(),
-                                                "working".to_string(),
-                                            ],
-                                        )
-                                        .await;
-                                    });
-                                    // Update local cache immediately
-                                    if let Some(cache) = self.issue_caches.get_mut(&project_name) {
-                                        if let Some(i) = cache.issues.iter_mut().find(|i| i.number == num) {
-                                            i.is_working = false;
-                                            i.assigned_worker = None;
-                                        }
-                                    }
-                                    self.set_status(format!("Released issue #{num} (removed working label)"));
-                                } else {
-                                    self.set_status(format!("Issue #{} is not marked as working", issue.number));
-                                }
-                            }
-                        }
-                    }
                     KeyCode::Char('d') | KeyCode::Char(' ') => {
                         self.dispatch_selected_issue(swarm_idx).await;
                     }
@@ -2444,9 +2387,6 @@ impl App {
                                 }
                             }
                         }
-                    }
-                    KeyCode::Char(' ') => {
-                        self.dispatch_selected_issue(swarm_idx).await;
                     }
                     KeyCode::Char('/') => {
                         self.swarm_view.search_query = Some(String::new());
