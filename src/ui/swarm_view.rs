@@ -281,7 +281,16 @@ impl SwarmView {
 
         let workers_block = Block::default()
             .borders(Borders::ALL)
-            .title(format!(" Workers ({}) ", swarm.workers.len()))
+            .title({
+                let title = if working == 0 {
+                    format!(" Workers ({total_workers} idle) ")
+                } else if idle == 0 {
+                    format!(" Workers ({working} busy) ")
+                } else {
+                    format!(" Workers ({working} busy, {idle} idle) ")
+                };
+                title
+            })
             .border_style(if focus == SwarmPanel::Workers {
                 theme::title_style()
             } else {
@@ -778,7 +787,7 @@ mod tests {
             .collect::<String>();
 
         assert!(rendered.contains("Manager"));
-        assert!(rendered.contains("Workers (1)"));
+        assert!(rendered.contains("Workers (1 busy)"));
         assert!(rendered.contains("Issues (all: 1)"));
         assert!(rendered.contains("demo"));
         assert!(rendered.contains("#12"));
