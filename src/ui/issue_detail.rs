@@ -296,6 +296,14 @@ impl IssueDetailView {
         self.scroll_offset = self.scroll_offset.saturating_add(amount);
     }
 
+    pub fn scroll_to_start(&mut self) {
+        self.scroll_offset = 0;
+    }
+
+    pub fn scroll_to_end(&mut self) {
+        self.scroll_offset = u16::MAX;
+    }
+
     pub fn render(&self, f: &mut Frame, area: Rect) {
         let chunks = Layout::vertical([
             Constraint::Length(4), // Header
@@ -403,6 +411,8 @@ impl IssueDetailView {
         let help = Paragraph::new(Line::from(vec![
             Span::styled(" PgUp/PgDn", theme::title_style()),
             Span::styled(" scroll  ", theme::help_style()),
+            Span::styled("Home/End", theme::title_style()),
+            Span::styled(" top/bottom  ", theme::help_style()),
             Span::styled("g", theme::title_style()),
             Span::styled(" open in browser  ", theme::help_style()),
             Span::styled("Esc/⌥←", theme::title_style()),

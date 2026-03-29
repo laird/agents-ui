@@ -2794,6 +2794,16 @@ impl App {
                     view.scroll_down(1);
                 }
             }
+            KeyCode::Home => {
+                if let Some(ref mut view) = self.issue_detail_view {
+                    view.scroll_to_start();
+                }
+            }
+            KeyCode::End => {
+                if let Some(ref mut view) = self.issue_detail_view {
+                    view.scroll_to_end();
+                }
+            }
             _ => {}
         }
         Ok(())
