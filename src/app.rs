@@ -784,12 +784,8 @@ impl App {
                         let worker_idx = (c as usize) - ('1' as usize);
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
                             if let Some(worker) = swarm.workers.get(worker_idx) {
-                                self.agent_view = AgentView::new();
-                                self.agent_view.scroll_to_bottom();
-                                self.screen = Screen::AgentView {
-                                    swarm_idx,
-                                    agent_id: worker.id.clone(),
-                                };
+                                let aid = worker.id.clone();
+                                self.enter_agent_view(swarm_idx, aid).await;
                                 return Ok(());
                             }
                         }
@@ -1372,6 +1368,23 @@ impl App {
         self.screen = Screen::RepoView { swarm_idx };
     }
 
+    /// Enter agent view for a specific agent, resizing its tmux pane to full terminal width.
+    async fn enter_agent_view(&mut self, swarm_idx: usize, agent_id: String) {
+        if let Some(swarm) = self.swarms.get(swarm_idx) {
+            if let Some(agent) = swarm.agent(&agent_id) {
+                let target = agent.tmux_target.clone();
+                if let Ok((width, height)) = crossterm::terminal::size() {
+                    if let Err(e) = proxy::resize_pane(&self.transport, &target, width, height).await {
+                        tracing::warn!("Failed to resize agent pane {target}: {e}");
+                    }
+                }
+            }
+        }
+        self.agent_view = AgentView::new();
+        self.agent_view.scroll_to_bottom();
+        self.screen = Screen::AgentView { swarm_idx, agent_id };
+    }
+
     /// Handle selecting a row in the repos list.
     /// If it's an active swarm, jump to repo view.
     /// If it's an available repo, open the new swarm dialog pre-filled.
@@ -1911,12 +1924,8 @@ impl App {
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
                             if let Some(worker_idx) = self.swarm_view.selected_worker() {
                                 if let Some(worker) = swarm.workers.get(worker_idx) {
-                                    self.agent_view = AgentView::new();
-                                    self.agent_view.scroll_to_bottom();
-                                    self.screen = Screen::AgentView {
-                                        swarm_idx,
-                                        agent_id: worker.role.clone(),
-                                    };
+                                    let aid = worker.role.clone();
+                                    self.enter_agent_view(swarm_idx, aid).await;
                                 }
                             }
                         }
@@ -1999,12 +2008,8 @@ impl App {
                         let worker_idx = (c as usize) - ('1' as usize);
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
                             if let Some(worker) = swarm.workers.get(worker_idx) {
-                                self.agent_view = AgentView::new();
-                                self.agent_view.scroll_to_bottom();
-                                self.screen = Screen::AgentView {
-                                    swarm_idx,
-                                    agent_id: worker.role.clone(),
-                                };
+                                let aid = worker.role.clone();
+                                self.enter_agent_view(swarm_idx, aid).await;
                             }
                         }
                     }
@@ -2348,12 +2353,7 @@ impl App {
                     return Ok(());
                 }
                 KeyCode::Char('m') => {
-                    self.agent_view = AgentView::new();
-                    self.agent_view.scroll_to_bottom();
-                    self.screen = Screen::AgentView {
-                        swarm_idx,
-                        agent_id: "manager".to_string(),
-                    };
+                    self.enter_agent_view(swarm_idx, "manager".to_string()).await;
                     return Ok(());
                 }
                 KeyCode::Char('a') => {
@@ -2442,13 +2442,8 @@ impl App {
                     let worker_idx = (c as usize) - ('1' as usize);
                     if let Some(swarm) = self.swarms.get(swarm_idx) {
                         if let Some(worker) = swarm.workers.get(worker_idx) {
-                            self.agent_view = AgentView::new();
-                            self.agent_view.scroll_to_bottom();
                             let aid = worker.id.clone();
-                            self.screen = Screen::AgentView {
-                                swarm_idx,
-                                agent_id: aid,
-                            };
+                            self.enter_agent_view(swarm_idx, aid).await;
                             return Ok(());
                         }
                     }

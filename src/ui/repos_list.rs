@@ -235,6 +235,8 @@ impl ReposListView {
             Span::styled(" teardown  ", theme::help_style()),
             Span::styled("r", theme::title_style()),
             Span::styled(" refresh  ", theme::help_style()),
+            Span::styled("F1", theme::title_style()),
+            Span::styled(" attention  ", theme::help_style()),
             Span::styled("q", theme::title_style()),
             Span::styled(" quit", theme::help_style()),
         ]))

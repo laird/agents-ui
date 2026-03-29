@@ -200,6 +200,32 @@ pub fn detect_waiting_for_input(content: &str) -> bool {
     false
 }
 
+impl AgentInfo {
+    /// Check if this agent appears to need human attention based on pane content.
+    pub fn needs_attention(&self) -> bool {
+        let content = &self.pane_content;
+        // Check last 20 lines for attention patterns
+        for line in content.lines().rev().take(20) {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let lower = trimmed.to_lowercase();
+            if lower.contains("interrupted")
+                || lower.contains("what should claude do")
+                || lower.contains("do you want to")
+                || lower.contains("waiting for your")
+                || lower.contains("permission denied")
+                || lower.contains("? (y/n)")
+            {
+                return true;
+            }
+        }
+        // Also flag idle agents as needing attention
+        matches!(self.status.state, super::status::AgentState::Idle)
+    }
+}
+
 /// A swarm of agents working on one repo.
 #[derive(Debug, Clone)]
 pub struct Swarm {
@@ -324,7 +350,37 @@ impl Swarm {
 mod tests {
     use super::*;
     use crate::model::issue::{GitHubIssue, IssueCache, IssueState, IssuePriority, IssueType};
-    use crate::model::status::AgentStatus;
+    use crate::model::status::{AgentState, AgentStatus};
+
+    fn make_agent(id: &str, state: AgentState, pane_content: &str) -> AgentInfo {
+        AgentInfo {
+            id: id.to_string(),
+            role: id.to_string(),
+            worktree_path: PathBuf::from("/tmp/test"),
+            tmux_target: "test:0.0".to_string(),
+            status: AgentStatus { timestamp: None, state },
+            is_manager: id == "manager",
+            pane_content: pane_content.to_string(),
+            dispatched_issue: None,
+            current_issue: None,
+            current_issue_title: None,
+            waiting_for_input: false,
+        }
+    }
+
+    fn make_swarm(workers: Vec<AgentInfo>) -> Swarm {
+        Swarm {
+            repo_path: PathBuf::from("/tmp/repo"),
+            project_name: "test".to_string(),
+            agent_type: AgentType::Claude,
+            workflow: Some(Workflow::Autocoder),
+            tmux_session: "claude-test".to_string(),
+            manager: make_agent("manager", AgentState::Working { issue: None }, ""),
+            workers,
+            issue_cache: IssueCache::default(),
+            stopped: false,
+        }
+    }
 
     fn make_swarm_with_issues(issues: Vec<GitHubIssue>) -> Swarm {
         let manager = AgentInfo {
@@ -428,5 +484,164 @@ mod tests {
         assert_eq!(AgentType::Codex.status_dir(), ".codex/loops");
         assert_eq!(AgentType::Claude.status_dir(), ".codex/loops");
         assert_eq!(AgentType::Droid.status_dir(), ".factory/loops");
+    }
+
+    #[test]
+    fn agent_type_display() {
+        assert_eq!(AgentType::Claude.to_string(), "Claude");
+        assert_eq!(AgentType::Codex.to_string(), "Codex");
+        assert_eq!(AgentType::Droid.to_string(), "Droid");
+        assert_eq!(AgentType::Gemini.to_string(), "Gemini");
+    }
+
+    #[test]
+    fn agent_type_script_flag() {
+        assert_eq!(AgentType::Claude.script_flag(), "claude");
+        assert_eq!(AgentType::Codex.script_flag(), "codex");
+        assert_eq!(AgentType::Droid.script_flag(), "droid");
+        assert_eq!(AgentType::Gemini.script_flag(), "gemini");
+    }
+
+    #[test]
+    fn agent_type_session_prefix() {
+        assert_eq!(AgentType::Claude.session_prefix(), "claude");
+        assert_eq!(AgentType::Droid.session_prefix(), "droid");
+    }
+
+    #[test]
+    fn workflow_display() {
+        assert_eq!(Workflow::Autocoder.to_string(), "Autocoder");
+        assert_eq!(Workflow::Modernize.to_string(), "Modernize");
+    }
+
+    #[test]
+    fn needs_attention_idle_agent() {
+        let agent = make_agent("w-0", AgentState::Idle, "some output");
+        assert!(agent.needs_attention());
+    }
+
+    #[test]
+    fn needs_attention_working_agent() {
+        let agent = make_agent("w-0", AgentState::Working { issue: Some(42) }, "doing stuff");
+        assert!(!agent.needs_attention());
+    }
+
+    #[test]
+    fn needs_attention_permission_prompt() {
+        let agent = make_agent(
+            "w-0",
+            AgentState::Working { issue: None },
+            "some output\nWhat should Claude do? (y/n)\n",
+        );
+        assert!(agent.needs_attention());
+    }
+
+    #[test]
+    fn needs_attention_interrupted() {
+        let agent = make_agent(
+            "w-0",
+            AgentState::Working { issue: None },
+            "output\nProcess was interrupted\n",
+        );
+        assert!(agent.needs_attention());
+    }
+
+    #[test]
+    fn needs_attention_permission_denied() {
+        let agent = make_agent(
+            "w-0",
+            AgentState::Working { issue: None },
+            "trying stuff\npermission denied for file\n",
+        );
+        assert!(agent.needs_attention());
+    }
+
+    #[test]
+    fn needs_attention_do_you_want() {
+        let agent = make_agent(
+            "w-0",
+            AgentState::Working { issue: None },
+            "stuff\nDo you want to continue?\n",
+        );
+        assert!(agent.needs_attention());
+    }
+
+    #[test]
+    fn needs_attention_empty_pane() {
+        let agent = make_agent("w-0", AgentState::Working { issue: None }, "");
+        assert!(!agent.needs_attention());
+    }
+
+    #[test]
+    fn swarm_all_agent_count() {
+        let swarm = make_swarm(vec![
+            make_agent("w-0", AgentState::Idle, ""),
+            make_agent("w-1", AgentState::Working { issue: None }, ""),
+        ]);
+        assert_eq!(swarm.all_agents().len(), 3); // manager + 2 workers
+    }
+
+    #[test]
+    fn swarm_busy_count() {
+        let swarm = make_swarm(vec![
+            make_agent("w-0", AgentState::Idle, ""),
+            make_agent("w-1", AgentState::Working { issue: Some(1) }, ""),
+            make_agent("w-2", AgentState::Starting, ""),
+            make_agent("w-3", AgentState::Stopped, ""),
+        ]);
+        assert_eq!(swarm.busy_count(), 2); // Working + Starting
+    }
+
+    #[test]
+    fn swarm_busy_count_none_busy() {
+        let swarm = make_swarm(vec![
+            make_agent("w-0", AgentState::Idle, ""),
+            make_agent("w-1", AgentState::Stopped, ""),
+        ]);
+        assert_eq!(swarm.busy_count(), 0);
+    }
+
+    #[test]
+    fn swarm_agent_lookup_manager() {
+        let swarm = make_swarm(vec![make_agent("w-0", AgentState::Idle, "")]);
+        let agent = swarm.agent("manager");
+        assert!(agent.is_some());
+        assert!(agent.unwrap().is_manager);
+    }
+
+    #[test]
+    fn swarm_agent_lookup_worker() {
+        let swarm = make_swarm(vec![make_agent("w-0", AgentState::Idle, "")]);
+        let agent = swarm.agent("w-0");
+        assert!(agent.is_some());
+        assert_eq!(agent.unwrap().id, "w-0");
+    }
+
+    #[test]
+    fn swarm_agent_lookup_missing() {
+        let swarm = make_swarm(vec![]);
+        assert!(swarm.agent("nonexistent").is_none());
+    }
+
+    #[test]
+    fn swarm_agent_mut_worker() {
+        let mut swarm = make_swarm(vec![make_agent("w-0", AgentState::Idle, "")]);
+        let agent = swarm.agent_mut("w-0");
+        assert!(agent.is_some());
+        agent.unwrap().pane_content = "updated".to_string();
+        assert_eq!(swarm.agent("w-0").unwrap().pane_content, "updated");
+    }
+
+    #[test]
+    fn swarm_all_agents() {
+        let swarm = make_swarm(vec![
+            make_agent("w-0", AgentState::Idle, ""),
+            make_agent("w-1", AgentState::Working { issue: None }, ""),
+        ]);
+        let all = swarm.all_agents();
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[0].id, "manager");
+        assert_eq!(all[1].id, "w-0");
+        assert_eq!(all[2].id, "w-1");
     }
 }
