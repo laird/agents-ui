@@ -2848,6 +2848,42 @@ impl App {
                     view.scroll_down(1);
                 }
             }
+            KeyCode::Char('n') => {
+                let current = self.issue_detail_view.as_ref().map(|v| v.issue_number);
+                if let Some(current_num) = current {
+                    if let Some(swarm) = self.swarms.get(swarm_idx) {
+                        let issues = self.issue_caches
+                            .get(&swarm.project_name)
+                            .map(|c| self.swarm_view.apply_filters(&c.issues))
+                            .unwrap_or_default();
+                        let pos = issues.iter().position(|i| i.number == current_num);
+                        if let Some(idx) = pos {
+                            let next_idx = (idx + 1) % issues.len();
+                            let next_num = issues[next_idx].number;
+                            self.swarm_view.issues_table.select(Some(next_idx));
+                            self.open_issue_detail(next_num, swarm_idx).await;
+                        }
+                    }
+                }
+            }
+            KeyCode::Char('p') => {
+                let current = self.issue_detail_view.as_ref().map(|v| v.issue_number);
+                if let Some(current_num) = current {
+                    if let Some(swarm) = self.swarms.get(swarm_idx) {
+                        let issues = self.issue_caches
+                            .get(&swarm.project_name)
+                            .map(|c| self.swarm_view.apply_filters(&c.issues))
+                            .unwrap_or_default();
+                        let pos = issues.iter().position(|i| i.number == current_num);
+                        if let Some(idx) = pos {
+                            let prev_idx = if idx == 0 { issues.len() - 1 } else { idx - 1 };
+                            let prev_num = issues[prev_idx].number;
+                            self.swarm_view.issues_table.select(Some(prev_idx));
+                            self.open_issue_detail(prev_num, swarm_idx).await;
+                        }
+                    }
+                }
+            }
             _ => {}
         }
         Ok(())

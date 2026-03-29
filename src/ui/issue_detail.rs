@@ -387,6 +387,10 @@ impl IssueDetailView {
         let help = Paragraph::new(Line::from(vec![
             Span::styled(" PgUp/PgDn", theme::title_style()),
             Span::styled(" scroll  ", theme::help_style()),
+            Span::styled("n", theme::title_style()),
+            Span::styled(" next  ", theme::help_style()),
+            Span::styled("p", theme::title_style()),
+            Span::styled(" prev  ", theme::help_style()),
             Span::styled("g", theme::title_style()),
             Span::styled(" open in browser  ", theme::help_style()),
             Span::styled("Esc/⌥←", theme::title_style()),
