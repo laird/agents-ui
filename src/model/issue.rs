@@ -100,6 +100,19 @@ pub const BLOCKING_LABELS: &[&str] = &[
     "proposal",
 ];
 
+/// Returns a short action hint for a blocking label.
+pub fn blocking_guidance(label: &str) -> &'static str {
+    match label {
+        "needs-design" => "Add design doc or spec to issue",
+        "needs-approval" => "Request stakeholder sign-off",
+        "needs-clarification" => "Reply with additional context",
+        "too-complex" => "Break into sub-tasks manually",
+        "future" => "Defer — remove label to unblock",
+        "proposal" => "Remove proposal label to approve",
+        _ => "Review and remove blocking label to unblock",
+    }
+}
+
 impl GitHubIssue {
     pub fn is_blocked(&self) -> bool {
         self.labels
