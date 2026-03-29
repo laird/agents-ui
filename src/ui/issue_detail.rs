@@ -204,6 +204,32 @@ pub fn count_tasks(body: &str) -> (usize, usize) {
     (checked, total)
 }
 
+/// Convert markdown text into styled lines, handling fenced code blocks (``` ... ```).
+/// Lines inside a fenced code block are rendered verbatim in Cyan.
+pub fn render_markdown_lines(text: &str) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let mut in_code_block = false;
+    for raw_line in text.lines() {
+        let trimmed = raw_line.trim_start();
+        if trimmed.starts_with("```") {
+            in_code_block = !in_code_block;
+            // Render the fence delimiter itself as a dim border
+            lines.push(Line::from(Span::styled(
+                raw_line.to_string(),
+                Style::default().fg(Color::DarkGray),
+            )));
+        } else if in_code_block {
+            lines.push(Line::from(Span::styled(
+                raw_line.to_string(),
+                Style::default().fg(Color::Cyan),
+            )));
+        } else {
+            lines.push(render_markdown_line(raw_line));
+        }
+    }
+    lines
+}
+
 /// State for the issue detail view.
 pub struct IssueDetailView {
     pub scroll_offset: u16,
@@ -298,10 +324,7 @@ impl IssueDetailView {
             format!(" {}", self.body.replace('\r', ""))
         };
 
-        let mut all_lines: Vec<Line> = body_text
-            .lines()
-            .map(render_markdown_line)
-            .collect();
+        let mut all_lines: Vec<Line> = render_markdown_lines(&body_text);
 
         for (author, comment_body) in &self.comments {
             all_lines.push(Line::from(""));
@@ -310,9 +333,7 @@ impl IssueDetailView {
                 Span::styled(author.clone(), theme::title_style()),
                 Span::styled(" ───", theme::help_style()),
             ]));
-            for line in comment_body.replace('\r', "").lines() {
-                all_lines.push(render_markdown_line(line));
-            }
+            all_lines.extend(render_markdown_lines(&comment_body.replace('\r', "")));
         }
 
         let comment_count = self.comments.len();
@@ -483,6 +504,25 @@ mod tests {
         let bold_span = line.spans.iter().find(|s| s.content == "bold").unwrap();
         assert!(bold_span.style.add_modifier.contains(Modifier::BOLD));
         assert!(!bold_span.style.add_modifier.contains(Modifier::ITALIC));
+    }
+
+    #[test]
+    fn render_markdown_lines_fenced_code_block() {
+        use ratatui::style::Color;
+        let text = "before\n```\nfn foo() {}\n```\nafter";
+        let lines = render_markdown_lines(text);
+        assert_eq!(lines.len(), 5);
+        // "before" — plain text
+        assert!(lines[0].spans.iter().any(|s| s.content.contains("before")));
+        // opening ``` — dark gray
+        assert_eq!(lines[1].spans[0].style.fg, Some(Color::DarkGray));
+        // code line — cyan
+        assert_eq!(lines[2].spans[0].style.fg, Some(Color::Cyan));
+        assert!(lines[2].spans[0].content.contains("fn foo()"));
+        // closing ``` — dark gray
+        assert_eq!(lines[3].spans[0].style.fg, Some(Color::DarkGray));
+        // "after" — plain text
+        assert!(lines[4].spans.iter().any(|s| s.content.contains("after")));
     }
 
 }
