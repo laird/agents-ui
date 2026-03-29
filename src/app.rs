@@ -50,6 +50,21 @@ pub enum InstallScope {
     Repo,
 }
 
+/// Keybindings shown in the help overlay when the Issues panel is focused in Swarm View.
+const ISSUES_PANEL_HELP_ENTRIES: &[(&str, &str)] = &[
+    ("f",       "Cycle status filter"),
+    ("t",       "Cycle type filter"),
+    ("P",       "Cycle priority filter"),
+    ("/",       "Search issues"),
+    ("a",       "Add new issue"),
+    ("d / Space", "Dispatch to agent"),
+    ("p",       "Approve issue"),
+    ("b",       "Jump to next blocked"),
+    ("r",       "Send review-blocked"),
+    ("g",       "Open in browser"),
+    ("Enter",   "View issue detail"),
+];
+
 /// Which field is focused in the create-issue dialog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CreateIssueField {
@@ -468,7 +483,14 @@ impl App {
 
                 // Help overlay (rendered on top of everything)
                 if self.show_help {
-                    crate::ui::help_overlay::render_help_overlay(f, f.area(), &self.keybindings);
+                    let context = if matches!(&self.screen, Screen::RepoView { .. })
+                        && self.swarm_focus == SwarmPanel::Issues
+                    {
+                        Some(("Issues Panel", ISSUES_PANEL_HELP_ENTRIES))
+                    } else {
+                        None
+                    };
+                    crate::ui::help_overlay::render_help_overlay(f, f.area(), &self.keybindings, context);
                 }
                 // Feedback dialog (rendered on top of everything)
                 if let Some(ref state) = self.feedback_state {
