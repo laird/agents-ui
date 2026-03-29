@@ -2929,7 +2929,7 @@ impl App {
                     "view".to_string(),
                     issue_number.to_string(),
                     "--json".to_string(),
-                    "number,title,body,labels,state,comments".to_string(),
+                    "number,title,body,labels,state,comments,createdAt,updatedAt".to_string(),
                 ],
             )
             .await
@@ -2966,6 +2966,12 @@ impl App {
                                 .collect()
                         })
                         .unwrap_or_default();
+                    let created_at = json["createdAt"]
+                        .as_str()
+                        .and_then(|s| s.parse::<chrono::DateTime<chrono::Utc>>().ok());
+                    let updated_at = json["updatedAt"]
+                        .as_str()
+                        .and_then(|s| s.parse::<chrono::DateTime<chrono::Utc>>().ok());
 
                     self.issue_detail_view = Some(IssueDetailView::new(
                         issue_number,
@@ -2974,6 +2980,8 @@ impl App {
                         labels,
                         state,
                         comments,
+                        created_at,
+                        updated_at,
                     ));
                     self.screen = Screen::IssueDetail { swarm_idx };
                 }
