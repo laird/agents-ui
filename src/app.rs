@@ -2123,6 +2123,10 @@ impl App {
                         // Cycle issue type filter (Bug → Enhancement → Proposal → All)
                         self.swarm_view.cycle_issue_type_filter();
                     }
+                    KeyCode::Char('P') => {
+                        // Cycle priority filter (None → P0 → P1 → P2 → P3 → None)
+                        self.swarm_view.cycle_priority_filter();
+                    }
                     KeyCode::Char('a') => {
                         // Add new issue: open create-issue dialog
                         self.create_issue_form = Some(CreateIssueForm::new());

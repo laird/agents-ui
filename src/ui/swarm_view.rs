@@ -7,7 +7,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::model::issue::{GitHubIssue, IssueFilter, IssueType};
+use crate::model::issue::{GitHubIssue, IssueFilter, IssuePriority, IssueType};
 use crate::model::swarm::Swarm;
 use super::theme;
 
@@ -35,6 +35,8 @@ pub struct SwarmView {
     pub issue_filter: IssueFilter,
     /// Active type filter: None = all types, Some(t) = only issues of that type.
     pub issue_type_filter: Option<IssueType>,
+    /// Active priority filter: None = all priorities, Some(p) = only issues of that priority.
+    pub priority_filter: Option<IssuePriority>,
     /// Active search query (None = not searching, Some("") = searching with empty query).
     pub search_query: Option<String>,
 }
@@ -51,6 +53,7 @@ impl SwarmView {
             issues_table,
             issue_filter: IssueFilter::All,
             issue_type_filter: None,
+            priority_filter: None,
             search_query: None,
         }
     }
@@ -313,6 +316,13 @@ impl SwarmView {
             Some(IssueType::Other) => " · other",
             None => "",
         };
+        let priority_label = match &self.priority_filter {
+            Some(IssuePriority::P0) => " · P0",
+            Some(IssuePriority::P1) => " · P1",
+            Some(IssuePriority::P2) => " · P2",
+            Some(IssuePriority::P3) => " · P3",
+            _ => "",
+        };
 
         // Split issues area: optional 1-line search bar + table
         let is_searching = self.search_query.is_some();
@@ -384,7 +394,7 @@ impl SwarmView {
         };
         let issues_block = Block::default()
             .borders(Borders::ALL)
-            .title(format!(" Issues ({filter_label}{type_label}: {}{}) ", count_str, if issues_loading { ", loading\u{2026}" } else { "" }))
+            .title(format!(" Issues ({filter_label}{type_label}{priority_label}: {}{}) ", count_str, if issues_loading { ", loading\u{2026}" } else { "" }))
             .border_style(if focus == SwarmPanel::Issues {
                 theme::title_style()
             } else {
@@ -460,6 +470,8 @@ impl SwarmView {
                 Span::styled(" filter  ", theme::help_style()),
                 Span::styled("t", theme::title_style()),
                 Span::styled(" type  ", theme::help_style()),
+                Span::styled("P", theme::title_style()),
+                Span::styled(" priority  ", theme::help_style()),
                 Span::styled("/", theme::title_style()),
                 Span::styled(" search  ", theme::help_style()),
                 Span::styled("Enter", theme::title_style()),
@@ -525,6 +537,7 @@ impl SwarmView {
             .iter()
             .filter(|i| i.matches_filter(self.issue_filter))
             .filter(|i| self.issue_type_filter.as_ref().map_or(true, |tf| &i.issue_type == tf))
+            .filter(|i| self.priority_filter.as_ref().map_or(true, |pf| &i.priority == pf))
             .collect();
         result.sort_by_key(|i| (&i.priority, i.number));
         result
@@ -539,6 +552,18 @@ impl SwarmView {
             Some(IssueType::Proposal) | Some(IssueType::Other) => None,
         };
         // Reset table selection when filter changes.
+        self.issues_table.select(Some(0));
+    }
+
+    /// Cycle the priority filter: None → P0 → P1 → P2 → P3 → None.
+    pub fn cycle_priority_filter(&mut self) {
+        self.priority_filter = match &self.priority_filter {
+            None => Some(IssuePriority::P0),
+            Some(IssuePriority::P0) => Some(IssuePriority::P1),
+            Some(IssuePriority::P1) => Some(IssuePriority::P2),
+            Some(IssuePriority::P2) => Some(IssuePriority::P3),
+            Some(IssuePriority::P3) | Some(IssuePriority::None) => None,
+        };
         self.issues_table.select(Some(0));
     }
 }
@@ -813,5 +838,45 @@ mod tests {
         // No filter: plain count "all: 2", no fraction
         assert!(rendered.contains("all: 2"), "Expected 'all: 2' in rendered output");
         assert!(!rendered.contains("2/2"), "Should not show fraction when unfiltered");
+    }
+
+    #[test]
+    fn priority_filter_cycles_correctly() {
+        use crate::model::issue::IssuePriority;
+        let mut view = SwarmView::new();
+        assert_eq!(view.priority_filter, None);
+        view.cycle_priority_filter();
+        assert_eq!(view.priority_filter, Some(IssuePriority::P0));
+        view.cycle_priority_filter();
+        assert_eq!(view.priority_filter, Some(IssuePriority::P1));
+        view.cycle_priority_filter();
+        assert_eq!(view.priority_filter, Some(IssuePriority::P2));
+        view.cycle_priority_filter();
+        assert_eq!(view.priority_filter, Some(IssuePriority::P3));
+        view.cycle_priority_filter();
+        assert_eq!(view.priority_filter, None);
+    }
+
+    #[test]
+    fn priority_filter_excludes_non_matching() {
+        use crate::model::issue::{IssueType, IssuePriority, IssueState};
+        let issues = vec![
+            GitHubIssue { number: 1, title: "p1 bug".into(), state: IssueState::Open, priority: IssuePriority::P1, issue_type: IssueType::Bug, labels: vec![], is_working: false, assigned_worker: None, updated_at: None },
+            GitHubIssue { number: 2, title: "p2 enh".into(), state: IssueState::Open, priority: IssuePriority::P2, issue_type: IssueType::Enhancement, labels: vec![], is_working: false, assigned_worker: None, updated_at: None },
+            GitHubIssue { number: 3, title: "p3 other".into(), state: IssueState::Open, priority: IssuePriority::P3, issue_type: IssueType::Other, labels: vec![], is_working: false, assigned_worker: None, updated_at: None },
+        ];
+        let mut view = SwarmView::new();
+        view.cycle_priority_filter(); // → P0 (nothing matches)
+        assert_eq!(view.apply_filters(&issues).len(), 0);
+
+        view.cycle_priority_filter(); // → P1
+        let filtered = view.apply_filters(&issues);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].number, 1);
+
+        view.cycle_priority_filter(); // → P2
+        let filtered = view.apply_filters(&issues);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].number, 2);
     }
 }
