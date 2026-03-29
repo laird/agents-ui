@@ -78,6 +78,7 @@ impl SwarmView {
                     true
                 }
             })
+            .filter(|i| self.priority_filter.as_ref().map_or(true, |pf| &i.priority == pf))
             .filter(|i| {
                 if let Some(q) = &self.search_query {
                     if q.is_empty() {
@@ -1023,5 +1024,36 @@ mod tests {
         let filtered = view.apply_filters(&issues);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].number, 2);
+    }
+
+    #[test]
+    fn render_applies_priority_filter() {
+        use crate::model::issue::{IssueType, IssuePriority, IssueState};
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut view = SwarmView::new();
+        view.cycle_priority_filter(); // → P0 (no issues match)
+        view.cycle_priority_filter(); // → P1
+        let swarm = make_swarm();
+        let issues = vec![
+            GitHubIssue {
+                number: 1, title: "p1 issue".into(), state: IssueState::Open,
+                priority: IssuePriority::P1, issue_type: IssueType::Bug,
+                labels: vec![], is_working: false, assigned_worker: None, updated_at: None,
+            },
+            GitHubIssue {
+                number: 2, title: "p2 issue".into(), state: IssueState::Open,
+                priority: IssuePriority::P2, issue_type: IssueType::Enhancement,
+                labels: vec![], is_working: false, assigned_worker: None, updated_at: None,
+            },
+        ];
+        terminal.draw(|f| {
+            view.render(f, f.area(), &swarm, &issues, SwarmPanel::Issues, false, false);
+        }).unwrap();
+        let rendered: String = terminal.backend().buffer().content().iter().map(|c| c.symbol()).collect();
+        // P1 filter active: 1 of 2 issues shown
+        assert!(rendered.contains("1/2"), "Priority filter should reduce rendered count: {rendered}");
+        assert!(rendered.contains("p1 issue"), "P1 issue should be visible");
+        assert!(!rendered.contains("p2 issue"), "P2 issue should be hidden by P1 filter");
     }
 }
