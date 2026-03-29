@@ -7,7 +7,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::model::issue::{GitHubIssue, IssueFilter};
+use crate::model::issue::{GitHubIssue, IssueFilter, IssuePriority, IssueType};
 use crate::model::swarm::Swarm;
 use super::theme;
 
@@ -33,6 +33,10 @@ pub struct SwarmView {
     pub workers_table: TableState,
     pub issues_table: TableState,
     pub issue_filter: IssueFilter,
+    /// Active type filter: None = all types, Some(t) = only issues of that type.
+    pub issue_type_filter: Option<IssueType>,
+    /// Active priority filter: None = all priorities, Some(p) = only issues of that priority.
+    pub priority_filter: Option<IssuePriority>,
     /// Active search query (None = not searching, Some("") = searching with empty query).
     pub search_query: Option<String>,
 }
@@ -48,6 +52,8 @@ impl SwarmView {
             workers_table,
             issues_table,
             issue_filter: IssueFilter::All,
+            issue_type_filter: None,
+            priority_filter: None,
             search_query: None,
         }
     }
@@ -62,9 +68,16 @@ impl SwarmView {
         blink: bool,
         issues_loading: bool,
     ) {
-        let filtered_issues: Vec<&GitHubIssue> = issues
+        let mut filtered_issues: Vec<&GitHubIssue> = issues
             .iter()
             .filter(|i| i.matches_filter(self.issue_filter))
+            .filter(|i| {
+                if let Some(ref tf) = self.issue_type_filter {
+                    &i.issue_type == tf
+                } else {
+                    true
+                }
+            })
             .filter(|i| {
                 if let Some(q) = &self.search_query {
                     if q.is_empty() {
@@ -83,6 +96,7 @@ impl SwarmView {
                 }
             })
             .collect();
+        filtered_issues.sort_by_key(|i| (&i.priority, i.number));
 
         // Pre-compute attention data before layout (needed for dynamic sizing)
         let attention = count_attention(swarm, issues);
@@ -295,6 +309,20 @@ impl SwarmView {
 
         // Issues table
         let filter_label = self.issue_filter.label();
+        let type_label = match &self.issue_type_filter {
+            Some(IssueType::Bug) => " · bug",
+            Some(IssueType::Enhancement) => " · enh",
+            Some(IssueType::Proposal) => " · prop",
+            Some(IssueType::Other) => " · other",
+            None => "",
+        };
+        let priority_label = match &self.priority_filter {
+            Some(IssuePriority::P0) => " · P0",
+            Some(IssuePriority::P1) => " · P1",
+            Some(IssuePriority::P2) => " · P2",
+            Some(IssuePriority::P3) => " · P3",
+            _ => "",
+        };
 
         // Split issues area: optional 1-line search bar + table
         let is_searching = self.search_query.is_some();
@@ -341,8 +369,14 @@ impl SwarmView {
                 } else {
                     Style::default().fg(ratatui::style::Color::Gray)
                 };
+                let type_cell = if issue.is_recently_updated() {
+                    Cell::from(format!("{}★", issue.type_char()))
+                        .style(theme::issue_type_style(&issue.issue_type))
+                } else {
+                    Cell::from(issue.type_char()).style(theme::issue_type_style(&issue.issue_type))
+                };
                 Row::new(vec![
-                    Cell::from(issue.type_char()).style(theme::issue_type_style(&issue.issue_type)),
+                    type_cell,
                     Cell::from(format!("{}", issue.number)),
                     Cell::from(issue.priority_label()).style(theme::priority_style(&issue.priority)),
                     Cell::from(truncate(&issue.title, 30)),
@@ -351,9 +385,16 @@ impl SwarmView {
             })
             .collect();
 
+        let total_issue_count = issues.len();
+        let is_filtered = filtered_issues.len() < total_issue_count;
+        let count_str = if is_filtered {
+            format!("{}/{}", filtered_issues.len(), total_issue_count)
+        } else {
+            filtered_issues.len().to_string()
+        };
         let issues_block = Block::default()
             .borders(Borders::ALL)
-            .title(format!(" Issues ({filter_label}: {}{}) ", filtered_issues.len(), if issues_loading { ", loading\u{2026}" } else { "" }))
+            .title(format!(" Issues ({filter_label}{type_label}{priority_label}: {}{}) ", count_str, if issues_loading { ", loading\u{2026}" } else { "" }))
             .border_style(if focus == SwarmPanel::Issues {
                 theme::title_style()
             } else {
@@ -427,6 +468,10 @@ impl SwarmView {
                 Span::styled(" review-blocked  ", theme::help_style()),
                 Span::styled("f", theme::title_style()),
                 Span::styled(" filter  ", theme::help_style()),
+                Span::styled("t", theme::title_style()),
+                Span::styled(" type  ", theme::help_style()),
+                Span::styled("P", theme::title_style()),
+                Span::styled(" priority  ", theme::help_style()),
                 Span::styled("/", theme::title_style()),
                 Span::styled(" search  ", theme::help_style()),
                 Span::styled("Enter", theme::title_style()),
@@ -514,6 +559,43 @@ impl SwarmView {
                 }
             })
             .collect()
+    }
+
+    /// Return the subset of `issues` that pass both the state filter and the type filter,
+    /// sorted by priority then issue number — matching the order rendered by `render()`.
+    pub fn apply_filters<'a>(&self, issues: &'a [GitHubIssue]) -> Vec<&'a GitHubIssue> {
+        let mut result: Vec<&'a GitHubIssue> = issues
+            .iter()
+            .filter(|i| i.matches_filter(self.issue_filter))
+            .filter(|i| self.issue_type_filter.as_ref().map_or(true, |tf| &i.issue_type == tf))
+            .filter(|i| self.priority_filter.as_ref().map_or(true, |pf| &i.priority == pf))
+            .collect();
+        result.sort_by_key(|i| (&i.priority, i.number));
+        result
+    }
+
+    /// Cycle the type filter: None → Bug → Enhancement → Proposal → None.
+    pub fn cycle_issue_type_filter(&mut self) {
+        self.issue_type_filter = match &self.issue_type_filter {
+            None => Some(IssueType::Bug),
+            Some(IssueType::Bug) => Some(IssueType::Enhancement),
+            Some(IssueType::Enhancement) => Some(IssueType::Proposal),
+            Some(IssueType::Proposal) | Some(IssueType::Other) => None,
+        };
+        // Reset table selection when filter changes.
+        self.issues_table.select(Some(0));
+    }
+
+    /// Cycle the priority filter: None → P0 → P1 → P2 → P3 → None.
+    pub fn cycle_priority_filter(&mut self) {
+        self.priority_filter = match &self.priority_filter {
+            None => Some(IssuePriority::P0),
+            Some(IssuePriority::P0) => Some(IssuePriority::P1),
+            Some(IssuePriority::P1) => Some(IssuePriority::P2),
+            Some(IssuePriority::P2) => Some(IssuePriority::P3),
+            Some(IssuePriority::P3) | Some(IssuePriority::None) => None,
+        };
+        self.issues_table.select(Some(0));
     }
 }
 
@@ -631,6 +713,65 @@ mod tests {
     }
 
     #[test]
+    fn issue_type_filter_cycles() {
+        let mut view = SwarmView::new();
+        assert_eq!(view.issue_type_filter, None);
+        view.cycle_issue_type_filter();
+        assert_eq!(view.issue_type_filter, Some(crate::model::issue::IssueType::Bug));
+        view.cycle_issue_type_filter();
+        assert_eq!(view.issue_type_filter, Some(crate::model::issue::IssueType::Enhancement));
+        view.cycle_issue_type_filter();
+        assert_eq!(view.issue_type_filter, Some(crate::model::issue::IssueType::Proposal));
+        view.cycle_issue_type_filter();
+        assert_eq!(view.issue_type_filter, None);
+    }
+
+    #[test]
+    fn issue_type_filter_excludes_non_matching() {
+        use crate::model::issue::{IssueType, IssuePriority, IssueState};
+        let mut view = SwarmView::new();
+        view.cycle_issue_type_filter(); // → Bug
+
+        let bug = GitHubIssue {
+            number: 1, title: "a bug".into(), state: IssueState::Open,
+            priority: IssuePriority::P2, issue_type: IssueType::Bug,
+            labels: vec!["bug".into()], is_working: false, assigned_worker: None,
+            updated_at: None,
+        };
+        let enh = GitHubIssue {
+            number: 2, title: "an enh".into(), state: IssueState::Open,
+            priority: IssuePriority::P3, issue_type: IssueType::Enhancement,
+            labels: vec!["enhancement".into()], is_working: false, assigned_worker: None,
+            updated_at: None,
+        };
+        let issues = vec![bug, enh];
+        // Only bug should pass the type filter
+        let filtered: Vec<_> = issues.iter()
+            .filter(|i| {
+                if let Some(ref tf) = view.issue_type_filter { &i.issue_type == tf } else { true }
+            })
+            .collect();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].number, 1);
+    }
+
+    #[test]
+    fn apply_filters_sorts_by_priority_then_number() {
+        use crate::model::issue::{IssueType, IssuePriority, IssueState};
+        let issues = vec![
+            GitHubIssue { number: 10, title: "a".into(), state: IssueState::Open, priority: IssuePriority::P3, issue_type: IssueType::Other, labels: vec![], is_working: false, assigned_worker: None, updated_at: None },
+            GitHubIssue { number: 5, title: "b".into(), state: IssueState::Open, priority: IssuePriority::P1, issue_type: IssueType::Bug, labels: vec![], is_working: false, assigned_worker: None, updated_at: None },
+            GitHubIssue { number: 3, title: "c".into(), state: IssueState::Open, priority: IssuePriority::P1, issue_type: IssueType::Bug, labels: vec![], is_working: false, assigned_worker: None, updated_at: None },
+            GitHubIssue { number: 8, title: "d".into(), state: IssueState::Open, priority: IssuePriority::P2, issue_type: IssueType::Enhancement, labels: vec![], is_working: false, assigned_worker: None, updated_at: None },
+        ];
+        // apply_filters returns issues sorted by priority then number
+        let view = SwarmView::new();
+        let filtered = view.apply_filters(&issues);
+        let nums: Vec<u32> = filtered.iter().map(|i| i.number).collect();
+        assert_eq!(nums, vec![3, 5, 8, 10]); // P1(3), P1(5), P2(8), P3(10)
+    }
+
+    #[test]
     fn detects_confirmation_prompts() {
         assert!(agent_needs_input("Would you like to proceed?\nPress enter to confirm"));
         assert!(!agent_needs_input("All good, continuing work"));
@@ -651,6 +792,7 @@ mod tests {
             labels: vec!["P1".to_string()],
             is_working: false,
             assigned_worker: Some("worker-1".to_string()),
+            updated_at: None,
         }];
 
         terminal
@@ -748,5 +890,101 @@ mod tests {
         let results = view.issues_matching_search(&issues);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].number, 2);
+    }
+
+    #[test]
+    fn issues_title_shows_fraction_when_filter_active() {
+        use crate::model::issue::{IssueType, IssuePriority, IssueState};
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut view = SwarmView::new();
+        view.cycle_issue_type_filter(); // → Bug filter
+        let swarm = make_swarm();
+        let issues = vec![
+            GitHubIssue {
+                number: 1, title: "A bug".into(), state: IssueState::Open,
+                priority: IssuePriority::P1, issue_type: IssueType::Bug,
+                labels: vec!["bug".into()], is_working: false, assigned_worker: None, updated_at: None,
+            },
+            GitHubIssue {
+                number: 2, title: "An enhancement".into(), state: IssueState::Open,
+                priority: IssuePriority::P2, issue_type: IssueType::Enhancement,
+                labels: vec!["enhancement".into()], is_working: false, assigned_worker: None, updated_at: None,
+            },
+        ];
+        terminal.draw(|f| {
+            view.render(f, f.area(), &swarm, &issues, SwarmPanel::Issues, false, false);
+        }).unwrap();
+        let rendered: String = terminal.backend().buffer().content().iter().map(|c| c.symbol()).collect();
+        // Bug filter active: 1 bug shown out of 2 total
+        assert!(rendered.contains("1/2"), "Expected '1/2' in rendered output, got: {rendered}");
+    }
+
+    #[test]
+    fn issues_title_shows_plain_count_when_no_filter() {
+        use crate::model::issue::{IssueType, IssuePriority, IssueState};
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut view = SwarmView::new();
+        let swarm = make_swarm();
+        let issues = vec![
+            GitHubIssue {
+                number: 1, title: "A bug".into(), state: IssueState::Open,
+                priority: IssuePriority::P1, issue_type: IssueType::Bug,
+                labels: vec!["bug".into()], is_working: false, assigned_worker: None, updated_at: None,
+            },
+            GitHubIssue {
+                number: 2, title: "An enhancement".into(), state: IssueState::Open,
+                priority: IssuePriority::P2, issue_type: IssueType::Enhancement,
+                labels: vec!["enhancement".into()], is_working: false, assigned_worker: None, updated_at: None,
+            },
+        ];
+        terminal.draw(|f| {
+            view.render(f, f.area(), &swarm, &issues, SwarmPanel::Issues, false, false);
+        }).unwrap();
+        let rendered: String = terminal.backend().buffer().content().iter().map(|c| c.symbol()).collect();
+        // No filter: plain count "all: 2", no fraction
+        assert!(rendered.contains("all: 2"), "Expected 'all: 2' in rendered output");
+        assert!(!rendered.contains("2/2"), "Should not show fraction when unfiltered");
+    }
+
+    #[test]
+    fn priority_filter_cycles_correctly() {
+        use crate::model::issue::IssuePriority;
+        let mut view = SwarmView::new();
+        assert_eq!(view.priority_filter, None);
+        view.cycle_priority_filter();
+        assert_eq!(view.priority_filter, Some(IssuePriority::P0));
+        view.cycle_priority_filter();
+        assert_eq!(view.priority_filter, Some(IssuePriority::P1));
+        view.cycle_priority_filter();
+        assert_eq!(view.priority_filter, Some(IssuePriority::P2));
+        view.cycle_priority_filter();
+        assert_eq!(view.priority_filter, Some(IssuePriority::P3));
+        view.cycle_priority_filter();
+        assert_eq!(view.priority_filter, None);
+    }
+
+    #[test]
+    fn priority_filter_excludes_non_matching() {
+        use crate::model::issue::{IssueType, IssuePriority, IssueState};
+        let issues = vec![
+            GitHubIssue { number: 1, title: "p1 bug".into(), state: IssueState::Open, priority: IssuePriority::P1, issue_type: IssueType::Bug, labels: vec![], is_working: false, assigned_worker: None, updated_at: None },
+            GitHubIssue { number: 2, title: "p2 enh".into(), state: IssueState::Open, priority: IssuePriority::P2, issue_type: IssueType::Enhancement, labels: vec![], is_working: false, assigned_worker: None, updated_at: None },
+            GitHubIssue { number: 3, title: "p3 other".into(), state: IssueState::Open, priority: IssuePriority::P3, issue_type: IssueType::Other, labels: vec![], is_working: false, assigned_worker: None, updated_at: None },
+        ];
+        let mut view = SwarmView::new();
+        view.cycle_priority_filter(); // → P0 (nothing matches)
+        assert_eq!(view.apply_filters(&issues).len(), 0);
+
+        view.cycle_priority_filter(); // → P1
+        let filtered = view.apply_filters(&issues);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].number, 1);
+
+        view.cycle_priority_filter(); // → P2
+        let filtered = view.apply_filters(&issues);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].number, 2);
     }
 }
