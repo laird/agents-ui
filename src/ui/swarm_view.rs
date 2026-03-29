@@ -491,6 +491,7 @@ impl SwarmView {
     }
 
     /// Return issues matching both the active filter and the current search query.
+    #[allow(dead_code)]
     pub fn issues_matching_search<'a>(&self, issues: &'a [GitHubIssue]) -> Vec<&'a GitHubIssue> {
         issues
             .iter()
