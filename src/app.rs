@@ -503,6 +503,11 @@ impl App {
         Ok(())
     }
 
+    fn set_status(&mut self, msg: String) {
+        self.set_status(msg);
+        self.status_message_age = 0;
+    }
+
     async fn handle_event(&mut self, event: Event) -> Result<()> {
         match event {
             Event::Key(key) => self.handle_key(key).await?,
@@ -608,7 +613,7 @@ impl App {
             }
             Event::GhWarning { project_name, message } => {
                 tracing::warn!("GitHub warning for {project_name}: {message}");
-                self.status_message = Some(message);
+                self.set_status(message);
             }
             Event::IssueFetched { issue_number, body } => {
                 if let Some(ref mut view) = self.issue_view {
@@ -720,7 +725,7 @@ impl App {
                 // Open config file in editor
                 let path = crate::config::shortcuts::ShortcutsConfig::config_path();
                 self.show_shortcuts_viewer = false;
-                self.status_message = Some(format!("Edit: {}", path.display()));
+                self.set_status(format!("Edit: {}", path.display()));
             } else {
                 self.show_shortcuts_viewer = false;
             }
@@ -945,7 +950,7 @@ impl App {
                     }
                 };
 
-                self.status_message = Some("Installing agents runtime...".to_string());
+                self.set_status("Installing agents runtime...".to_string());
                 match self
                     .install_agents_for_scope(
                         &pending.repo_path,
@@ -969,7 +974,7 @@ impl App {
                         };
                         self.new_swarm_repo = pending.repo_path.to_string_lossy().to_string();
                         self.dialog_input = TextInput::with_text(pending.num_workers.to_string());
-                        self.status_message = Some(format!("Install failed: {e}"));
+                        self.set_status(format!("Install failed: {e}"));
                     }
                 }
             }
@@ -1007,7 +1012,7 @@ impl App {
         self.scan_available_repos();
         self.screen = Screen::ReposList;
         self.auto_select_current_repo_swarm().await;
-        self.status_message = Some(format!("Using {} runtime", self.default_agent_type));
+        self.set_status(format!("Using {} runtime", self.default_agent_type));
 
         Ok(())
     }
@@ -1436,14 +1441,14 @@ impl App {
                     if idx < self.swarms.len() {
                         let swarm = self.swarms[idx].clone();
                         let project = swarm.project_name.clone();
-                        self.status_message = Some(format!("Tearing down {project}..."));
+                        self.set_status(format!("Tearing down {project}..."));
                         if let Err(e) = self.adapter.teardown(&swarm).await {
-                            self.status_message = Some(format!("Teardown error: {e}"));
+                            self.set_status(format!("Teardown error: {e}"));
                         } else {
                             self.swarms.remove(idx);
                             self.start_all_pane_watchers();
                             self.scan_available_repos();
-                            self.status_message = Some(format!("Torn down {project}"));
+                            self.set_status(format!("Torn down {project}"));
                         }
                     }
                     self.confirm_teardown = None;
@@ -1451,7 +1456,7 @@ impl App {
                 _ => {
                     // Any other key cancels
                     self.confirm_teardown = None;
-                    self.status_message = Some("Teardown cancelled".to_string());
+                    self.set_status("Teardown cancelled".to_string());
                 }
             }
             return Ok(());
@@ -1484,11 +1489,11 @@ impl App {
             }
             KeyCode::Char('r') => {
                 // Refresh: re-discover swarms
-                self.status_message = Some("Refreshing...".to_string());
+                self.set_status("Refreshing...".to_string());
                 if let Ok(swarms) = self.adapter.discover(&self.agents_dir).await {
                     self.swarms = swarms;
                     self.start_all_pane_watchers();
-                    self.status_message = Some(format!("Found {} swarm(s)", self.swarms.len()));
+                    self.set_status(format!("Found {} swarm(s)", self.swarms.len()));
                 }
             }
             KeyCode::Char('d') => {
@@ -1497,7 +1502,7 @@ impl App {
                     if idx < self.swarms.len() {
                         let project = self.swarms[idx].project_name.clone();
                         self.confirm_teardown = Some(idx);
-                        self.status_message = Some(format!("Tear down {project}? (y to confirm, any other key to cancel)"));
+                        self.set_status(format!("Tear down {project}? (y to confirm, any other key to cancel)"));
                     }
                 }
             }
@@ -1544,7 +1549,7 @@ impl App {
 
                     let repo_path = PathBuf::from(&path);
                     if !self.repo_path_exists(&repo_path).await {
-                        self.status_message = Some(format!("Path not found: {path}"));
+                        self.set_status(format!("Path not found: {path}"));
                         self.screen = Screen::ReposList;
                         return Ok(());
                     }
@@ -1681,7 +1686,7 @@ impl App {
                                 self.screen = Screen::InstallScopeSelect;
                             }
                             Err(e) => {
-                                self.status_message = Some(format!("Failed to check Droid install: {e}"));
+                                self.set_status(format!("Failed to check Droid install: {e}"));
                                 self.screen = Screen::ReposList;
                             }
                         }
@@ -1689,7 +1694,7 @@ impl App {
                         if self.codex_agents_installed(&repo_path).await {
                             self.launch_new_swarm(repo_path, num_workers, agent_type);
                         } else {
-                            self.status_message = Some("Installing Codex runtime...".to_string());
+                            self.set_status("Installing Codex runtime...".to_string());
                             match self
                                 .install_agents_for_scope(&repo_path, agent_type.clone(), InstallScope::Repo)
                                 .await
@@ -1700,7 +1705,7 @@ impl App {
                                 Err(e) => {
                                     self.new_swarm_repo = repo_path.to_string_lossy().to_string();
                                     self.dialog_input.set_text(num_workers.to_string());
-                                    self.status_message = Some(format!("Codex install failed: {e}"));
+                                    self.set_status(format!("Codex install failed: {e}"));
                                     self.screen = Screen::NewSwarm {
                                         field: NewSwarmField::NumWorkers,
                                     };
@@ -1739,14 +1744,14 @@ impl App {
                     if idx < self.swarms.len() {
                         let swarm = self.swarms[idx].clone();
                         let project = swarm.project_name.clone();
-                        self.status_message = Some(format!("Tearing down {project}..."));
+                        self.set_status(format!("Tearing down {project}..."));
                         if let Err(e) = self.adapter.teardown(&swarm).await {
-                            self.status_message = Some(format!("Teardown error: {e}"));
+                            self.set_status(format!("Teardown error: {e}"));
                         } else {
                             self.swarms.remove(idx);
                             self.start_all_pane_watchers();
                             self.scan_available_repos();
-                            self.status_message = Some(format!("Torn down {project}"));
+                            self.set_status(format!("Torn down {project}"));
                             self.screen = Screen::ReposList;
                         }
                     }
@@ -1754,7 +1759,7 @@ impl App {
                 }
                 _ => {
                     self.confirm_teardown = None;
-                    self.status_message = Some("Teardown cancelled".to_string());
+                    self.set_status("Teardown cancelled".to_string());
                 }
             }
             return Ok(());
@@ -1772,17 +1777,17 @@ impl App {
                             crate::adapter::claude::mark_agent_stopped(&worker.worktree_path);
                         }
                         if let Err(e) = self.adapter.stop(&swarm).await {
-                            self.status_message = Some(format!("Stop error: {e}"));
+                            self.set_status(format!("Stop error: {e}"));
                         } else {
                             self.swarms[idx].stopped = true;
-                            self.status_message = Some(format!("Stopped all workers in {project}"));
+                            self.set_status(format!("Stopped all workers in {project}"));
                         }
                     }
                     self.confirm_stop = None;
                 }
                 _ => {
                     self.confirm_stop = None;
-                    self.status_message = Some("Stop cancelled".to_string());
+                    self.set_status("Stop cancelled".to_string());
                 }
             }
             return Ok(());
@@ -1820,7 +1825,7 @@ impl App {
                             let cmd = format!("create gh issue --label \"{labels}\" \"{title}\"");
                             tracing::info!("Sending '{cmd}' to manager at {target}");
                             proxy::send_keys(&self.transport, &target, &cmd).await?;
-                            self.status_message = Some(format!("Created issue: {title}"));
+                            self.set_status(format!("Created issue: {title}"));
                         }
                     }
                     self.create_issue_form = None;
@@ -1918,7 +1923,7 @@ impl App {
                     tracing::info!("Sending '{cmd}' to manager at {target}");
                     proxy::send_keys(&self.transport, &target, cmd).await?;
                     self.swarm_view.scroll_manager_to_bottom();
-                    self.status_message = Some("Sent deploy to manager".to_string());
+                    self.set_status("Sent deploy to manager".to_string());
                     return Ok(());
                 }
 
@@ -1954,7 +1959,7 @@ impl App {
                         // Add a new worker
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
                             let swarm_clone = swarm.clone();
-                            self.status_message = Some("Adding worker...".to_string());
+                            self.set_status("Adding worker...".to_string());
                             match self.adapter.add_worker(&swarm_clone).await {
                                 Ok(worker) => {
                                     let id = worker.role.clone();
@@ -1962,10 +1967,10 @@ impl App {
                                         swarm.workers.push(worker);
                                     }
                                     self.start_all_pane_watchers();
-                                    self.status_message = Some(format!("Added {id}"));
+                                    self.set_status(format!("Added {id}"));
                                 }
                                 Err(e) => {
-                                    self.status_message = Some(format!("Failed: {e}"));
+                                    self.set_status(format!("Failed: {e}"));
                                 }
                             }
                         }
@@ -1976,14 +1981,14 @@ impl App {
                             if let Some(worker_idx) = self.swarm_view.selected_worker() {
                                 if let Some(worker) = swarm.workers.get(worker_idx) {
                                     if !matches!(worker.status.state, crate::model::status::AgentState::Idle) {
-                                        self.status_message = Some(format!("Worker {} is busy — wait until idle", worker.role));
+                                        self.set_status(format!("Worker {} is busy — wait until idle", worker.role));
                                     } else {
                                         let target = worker.tmux_target.clone();
                                         let id = worker.role.clone();
                                         if let Err(e) = self.adapter.start_worker_loop(&target).await {
-                                            self.status_message = Some(format!("Failed: {e}"));
+                                            self.set_status(format!("Failed: {e}"));
                                         } else {
-                                            self.status_message = Some(format!("Sent /fix-loop to {id}"));
+                                            self.set_status(format!("Sent /fix-loop to {id}"));
                                         }
                                     }
                                 }
@@ -2003,7 +2008,7 @@ impl App {
                                     // Write tombstone before killing so heal/revive won't respawn.
                                     crate::adapter::claude::mark_agent_stopped(&worker.worktree_path);
                                     let _ = proxy::kill_pane(&self.transport, &target).await;
-                                    self.status_message = Some(format!("Shutting down {id}..."));
+                                    self.set_status(format!("Shutting down {id}..."));
                                 }
                             }
                         }
@@ -2013,7 +2018,7 @@ impl App {
                         if swarm_idx < self.swarms.len() {
                             let project = self.swarms[swarm_idx].project_name.clone();
                             self.confirm_stop = Some(swarm_idx);
-                            self.status_message = Some(format!("Stop all workers in {project}? (y to confirm, any other key to cancel)"));
+                            self.set_status(format!("Stop all workers in {project}? (y to confirm, any other key to cancel)"));
                         }
                     }
                     KeyCode::Char('T') => {
@@ -2021,7 +2026,7 @@ impl App {
                         if swarm_idx < self.swarms.len() {
                             let project = self.swarms[swarm_idx].project_name.clone();
                             self.confirm_teardown = Some(swarm_idx);
-                            self.status_message = Some(format!("Teardown swarm {project}? (y to confirm, any other key to cancel)"));
+                            self.set_status(format!("Teardown swarm {project}? (y to confirm, any other key to cancel)"));
                         }
                     }
                     KeyCode::Char('g') => {
@@ -2046,9 +2051,9 @@ impl App {
                                             )
                                             .await;
                                         });
-                                        self.status_message = Some(format!("Opening issue #{num} in browser"));
+                                        self.set_status(format!("Opening issue #{num} in browser"));
                                     } else {
-                                        self.status_message = Some(format!("No issue assigned to {}", worker.role));
+                                        self.set_status(format!("No issue assigned to {}", worker.role));
                                     }
                                 }
                             }
@@ -2140,13 +2145,13 @@ impl App {
                             let agent_type = swarm.agent_type.clone();
                             let target = swarm.manager.tmux_target.clone();
                             if !manager_idle {
-                                self.status_message = Some("Manager is busy — wait until idle".to_string());
+                                self.set_status("Manager is busy — wait until idle".to_string());
                             } else if let Some(cmd) = self.review_blocked_cmd(&agent_type) {
                                 tracing::info!("Sending '{cmd}' to manager at {target}");
                                 proxy::send_keys(&self.transport, &target, &cmd).await?;
-                                self.status_message = Some(format!("Sent: {cmd}"));
+                                self.set_status(format!("Sent: {cmd}"));
                             } else {
-                                self.status_message = Some(format!("No review-blocked command configured for {}", agent_type));
+                                self.set_status(format!("No review-blocked command configured for {}", agent_type));
                             }
                         }
                     }
@@ -2215,7 +2220,7 @@ impl App {
                                     )
                                     .await;
                                 });
-                                self.status_message = Some(format!("Opening issue #{} in browser", issue.number));
+                                self.set_status(format!("Opening issue #{} in browser", issue.number));
                             }
                         }
                     }
@@ -2273,7 +2278,7 @@ impl App {
         };
 
         if !manager_idle {
-            self.status_message = Some("Manager is busy — wait until idle".to_string());
+            self.set_status("Manager is busy — wait until idle".to_string());
             return Ok(());
         }
 
@@ -2281,7 +2286,7 @@ impl App {
             let full_cmd = format!("{cmd} {num}");
             tracing::info!("Sending '{full_cmd}' to manager at {target}");
             proxy::send_keys(&self.transport, &target, &full_cmd).await?;
-            self.status_message = Some(format!("Sent: {full_cmd}"));
+            self.set_status(format!("Sent: {full_cmd}"));
         }
         Ok(())
     }
@@ -2357,7 +2362,7 @@ impl App {
                             )
                             .await;
                     });
-                    self.status_message = Some(format!("Opening issue #{issue_number} in browser"));
+                    self.set_status(format!("Opening issue #{issue_number} in browser"));
                 }
             }
             _ => {}
@@ -2414,7 +2419,7 @@ impl App {
                     // Add a new worker to this swarm
                     if let Some(swarm) = self.swarms.get(swarm_idx) {
                         let swarm_clone = swarm.clone();
-                        self.status_message = Some("Adding worker...".to_string());
+                        self.set_status("Adding worker...".to_string());
                         match self.adapter.add_worker(&swarm_clone).await {
                             Ok(worker) => {
                                 let id = worker.role.clone();
@@ -2538,9 +2543,9 @@ impl App {
                         tracing::info!("Sending deploy command to manager at {target}");
                         if let Err(e) = self.adapter.send_input(&target, "deploy").await {
                             tracing::error!("Failed to send deploy: {e}");
-                            self.status_message = Some(format!("Deploy failed: {e}"));
+                            self.set_status(format!("Deploy failed: {e}"));
                         } else {
-                            self.status_message = Some("Sent deploy to manager".to_string());
+                            self.set_status("Sent deploy to manager".to_string());
                         }
                     }
                 }
@@ -2647,7 +2652,7 @@ impl App {
             .unwrap_or(0);
 
         if blocked_count == 0 {
-            self.status_message = Some("No blocked issues".to_string());
+            self.set_status("No blocked issues".to_string());
             return;
         }
 
@@ -2678,7 +2683,7 @@ impl App {
                 let agent_id = agent.id.clone();
                 self.enter_agent_view(swarm_idx, agent_id).await;
             } else {
-                self.status_message = Some("No sessions waiting for input".to_string());
+                self.set_status("No sessions waiting for input".to_string());
             }
         }
     }
@@ -2713,7 +2718,7 @@ impl App {
                 } else {
                     self.adapter.send_input(&target, &cmd).await?;
                 }
-                self.status_message = Some(format!("[{}] {}", shortcut.label, cmd));
+                self.set_status(format!("[{}] {}", shortcut.label, cmd));
             }
         }
         Ok(())
@@ -3007,7 +3012,7 @@ impl App {
             })
             .unwrap_or_default();
         let Some(issue_num) = self.swarm_view.selected_issue().and_then(|idx| issues.get(idx).copied()) else {
-            self.status_message = Some("No issue selected".to_string());
+            self.set_status("No issue selected".to_string());
             return;
         };
 
@@ -3024,12 +3029,12 @@ impl App {
             .map(|(idx, w)| (idx, w.tmux_target.clone(), w.role.clone()));
 
         let Some((worker_idx, target, role)) = idle_worker else {
-            self.status_message = Some("No idle workers available".to_string());
+            self.set_status("No idle workers available".to_string());
             return;
         };
 
         let Some(cmd) = self.worker_dispatch_cmd(&agent_type, issue_num) else {
-            self.status_message = Some(format!("No dispatch command configured for {agent_type}"));
+            self.set_status(format!("No dispatch command configured for {agent_type}"));
             return;
         };
 
@@ -3040,9 +3045,9 @@ impl App {
             self.swarms[swarm_idx].workers[worker_idx].dispatched_issue = Some(issue_num);
             self.swarms[swarm_idx].workers[worker_idx].status.state =
                 crate::model::status::AgentState::Working { issue: Some(issue_num) };
-            self.status_message = Some(format!("Dispatched #{issue_num} → {role}"));
+            self.set_status(format!("Dispatched #{issue_num} → {role}"));
         } else {
-            self.status_message = Some(format!("Failed to dispatch #{issue_num}"));
+            self.set_status(format!("Failed to dispatch #{issue_num}"));
         }
     }
 
@@ -3113,7 +3118,7 @@ impl App {
 
                 if let Some((worker_idx, target)) = idle_worker {
                     let Some(cmd) = self.worker_dispatch_cmd(&agent_type, issue_num) else {
-                        self.status_message = Some(format!(
+                        self.set_status(format!(
                             "No worker dispatch command configured for {}",
                             agent_type
                         ));
@@ -3135,7 +3140,7 @@ impl App {
                             crate::model::status::AgentState::Working {
                                 issue: Some(issue_num),
                             };
-                        self.status_message = Some(format!(
+                        self.set_status(format!(
                             "Dispatched #{issue_num} → {}",
                             self.swarms[si].workers[worker_idx].role
                         ));
@@ -3171,7 +3176,7 @@ impl App {
         if any_repairs {
             let msg = all_repairs.join("; ");
             tracing::info!("Healed workers: {msg}");
-            self.status_message = Some(format!("Healed: {msg}"));
+            self.set_status(format!("Healed: {msg}"));
             self.start_all_pane_watchers();
         }
     }
@@ -3282,7 +3287,7 @@ impl App {
                     crate::tmux::proxy::send_keys_no_enter(&self.transport, &manager_target, &monitor_cmd).await.ok();
                     tokio::time::sleep(Duration::from_millis(200)).await;
                     crate::tmux::proxy::send_keys_no_enter(&self.transport, &manager_target, "Enter").await.ok();
-                    self.status_message = Some(format!("Sent {monitor_cmd} to manager"));
+                    self.set_status(format!("Sent {monitor_cmd} to manager"));
                 }
             } else if available_issues == 0 && blocked_issues > 0 && idle_workers > 0 {
                 // No available work but blocked issues exist — review them
@@ -3291,7 +3296,7 @@ impl App {
                     crate::tmux::proxy::send_keys_no_enter(&self.transport, &manager_target, &review_cmd).await.ok();
                     tokio::time::sleep(Duration::from_millis(200)).await;
                     crate::tmux::proxy::send_keys_no_enter(&self.transport, &manager_target, "Enter").await.ok();
-                    self.status_message = Some(format!("Sent {review_cmd} to manager"));
+                    self.set_status(format!("Sent {review_cmd} to manager"));
                 }
             }
         }
