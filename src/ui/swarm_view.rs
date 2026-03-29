@@ -84,6 +84,9 @@ impl SwarmView {
             })
             .collect();
 
+        let mut filtered_issues = filtered_issues;
+        filtered_issues.sort_by_key(|i| (&i.priority, i.number));
+
         // Pre-compute attention data before layout (needed for dynamic sizing)
         let attention = count_attention(swarm, issues);
         let working = swarm.busy_count();
