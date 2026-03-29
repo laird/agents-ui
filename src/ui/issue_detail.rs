@@ -49,6 +49,19 @@ pub fn render_markdown_line(line: &str) -> Line<'static> {
         ]);
     }
 
+    // Numbered list: "1. text", "10. text", etc.
+    {
+        let digits_end = trimmed.find(|c: char| !c.is_ascii_digit()).unwrap_or(0);
+        if digits_end > 0 && trimmed[digits_end..].starts_with(". ") {
+            let num = &trimmed[..digits_end];
+            let text = trimmed[digits_end + 2..].to_string();
+            return Line::from(vec![
+                Span::styled(format!("{num}. "), theme::help_style()),
+                Span::from(text),
+            ]);
+        }
+    }
+
     // Plain line — handle inline code and bold inline
     let owned = line.to_string();
     let spans = parse_inline(&owned);
