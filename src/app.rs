@@ -247,8 +247,8 @@ pub struct App {
     pub show_help: bool,
     /// Rich feedback dialog state (None = closed).
     pub feedback_state: Option<crate::ui::feedback_dialog::FeedbackState>,
-    /// When the current status_message was first seen (for auto-clear after ~3 seconds).
-    status_message_set_at: Option<Instant>,
+    /// Tick counter for auto-clearing transient status messages (~60 ticks = ~3 seconds at 20Hz).
+    status_message_age: u32,
 }
 
 impl App {
@@ -2953,6 +2953,12 @@ impl App {
         }
     }
 
+    /// Set a transient status message and reset the auto-clear timer.
+    fn set_status(&mut self, msg: String) {
+        self.status_message = Some(msg);
+        self.status_message_age = 0;
+    }
+
     fn start_all_pane_watchers(&mut self) {
         // Cancel existing watchers
         for handle in self.pane_watchers.drain(..) {
@@ -3109,7 +3115,7 @@ impl App {
 
                 if let Some((worker_idx, target)) = idle_worker {
                     let Some(cmd) = self.worker_dispatch_cmd(&agent_type, issue_num) else {
-                        self.status_message = Some(format!(
+                        self.set_status(format!(
                             "No worker dispatch command configured for {}",
                             agent_type
                         ));
@@ -3131,7 +3137,7 @@ impl App {
                             crate::model::status::AgentState::Working {
                                 issue: Some(issue_num),
                             };
-                        self.status_message = Some(format!(
+                        self.set_status(format!(
                             "Dispatched #{issue_num} → {}",
                             self.swarms[si].workers[worker_idx].role
                         ));
