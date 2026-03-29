@@ -59,6 +59,7 @@ pub enum InstallScope {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CreateIssueField {
     Title,
+    Body,
     Priority,
     IssueType,
     Labels,
@@ -144,6 +145,7 @@ pub const BLOCKING_LABELS: &[&str] = &[
 #[derive(Debug, Clone)]
 pub struct CreateIssueForm {
     pub title: String,
+    pub body: String,
     pub field: CreateIssueField,
     pub priority: IssuePriority,
     pub issue_type: IssueType,
@@ -157,6 +159,7 @@ impl CreateIssueForm {
     pub fn new() -> Self {
         Self {
             title: String::new(),
+            body: String::new(),
             field: CreateIssueField::Title,
             priority: IssuePriority::P2,
             issue_type: IssueType::Bug,
@@ -1897,7 +1900,8 @@ impl App {
                 }
                 KeyCode::Tab | KeyCode::Down if form.field != CreateIssueField::Labels => {
                     form.field = match form.field {
-                        CreateIssueField::Title => CreateIssueField::Priority,
+                        CreateIssueField::Title => CreateIssueField::Body,
+                        CreateIssueField::Body => CreateIssueField::Priority,
                         CreateIssueField::Priority => CreateIssueField::IssueType,
                         CreateIssueField::IssueType => CreateIssueField::Labels,
                         CreateIssueField::Labels => CreateIssueField::Labels,
@@ -1906,7 +1910,8 @@ impl App {
                 KeyCode::BackTab | KeyCode::Up if form.field != CreateIssueField::Title => {
                     form.field = match form.field {
                         CreateIssueField::Title => CreateIssueField::Title,
-                        CreateIssueField::Priority => CreateIssueField::Title,
+                        CreateIssueField::Body => CreateIssueField::Title,
+                        CreateIssueField::Priority => CreateIssueField::Body,
                         CreateIssueField::IssueType => CreateIssueField::Priority,
                         CreateIssueField::Labels => CreateIssueField::IssueType,
                     };
@@ -1914,11 +1919,16 @@ impl App {
                 KeyCode::Enter => {
                     if !form.title.is_empty() {
                         let title = form.title.clone();
+                        let body = form.body.clone();
                         let labels = form.labels_string();
                         let target = self.swarms.get(swarm_idx)
                             .map(|s| s.manager.tmux_target.clone());
                         if let Some(target) = target {
-                            let cmd = format!("create gh issue --label \"{labels}\" \"{title}\"");
+                            let cmd = if body.is_empty() {
+                                format!("create gh issue --label \"{labels}\" \"{title}\"")
+                            } else {
+                                format!("create gh issue --label \"{labels}\" --body \"{body}\" \"{title}\"")
+                            };
                             tracing::info!("Sending '{cmd}' to manager at {target}");
                             proxy::send_keys(&self.transport, &target, &cmd).await?;
                             self.set_status(format!("Created issue: {title}"));
@@ -1961,6 +1971,12 @@ impl App {
                 }
                 KeyCode::Backspace if form.field == CreateIssueField::Title => {
                     form.title.pop();
+                }
+                KeyCode::Char(c) if form.field == CreateIssueField::Body => {
+                    form.body.push(c);
+                }
+                KeyCode::Backspace if form.field == CreateIssueField::Body => {
+                    form.body.pop();
                 }
                 _ => {}
             }
