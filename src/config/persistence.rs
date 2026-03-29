@@ -69,13 +69,28 @@ pub fn list_saved_swarms() -> Result<Vec<String>> {
     Ok(names)
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct RepoConfig {
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RepoConfig {
     default_agent_type: String,
+    #[serde(default)]
+    pub codex_manager_launch_cmd: Option<String>,
+    #[serde(default)]
+    pub codex_worker_launch_cmd: Option<String>,
 }
 
 fn repo_config_path(repo_root: &Path) -> PathBuf {
     repo_root.join(".agents-ui.toml")
+}
+
+pub fn load_repo_config(repo_root: &Path) -> Result<Option<RepoConfig>> {
+    let path = repo_config_path(repo_root);
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let content = std::fs::read_to_string(path)?;
+    let cfg: RepoConfig = toml::from_str(&content)?;
+    Ok(Some(cfg))
 }
 
 pub fn find_repo_root(start: &Path) -> Option<PathBuf> {
@@ -94,20 +109,16 @@ pub fn find_repo_root(start: &Path) -> Option<PathBuf> {
 }
 
 pub fn load_repo_agent_type(repo_root: &Path) -> Result<Option<AgentType>> {
-    let path = repo_config_path(repo_root);
-    if !path.exists() {
-        return Ok(None);
-    }
-
-    let content = std::fs::read_to_string(path)?;
-    let cfg: RepoConfig = toml::from_str(&content)?;
-    Ok(AgentType::from_name(&cfg.default_agent_type))
+    Ok(load_repo_config(repo_root)?
+        .and_then(|cfg| AgentType::from_name(&cfg.default_agent_type)))
 }
 
 pub fn save_repo_agent_type(repo_root: &Path, agent_type: &AgentType) -> Result<()> {
     let path = repo_config_path(repo_root);
     let cfg = RepoConfig {
         default_agent_type: agent_type.script_flag().to_string(),
+        codex_manager_launch_cmd: None,
+        codex_worker_launch_cmd: None,
     };
     let content = toml::to_string_pretty(&cfg)?;
     std::fs::write(path, content)?;
