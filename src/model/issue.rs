@@ -144,11 +144,7 @@ impl GitHubIssue {
     }
 
     /// Returns a single-character type indicator for display in the issues table.
-    /// Shows `★` if the issue was updated within the last 24 hours.
     pub fn type_char(&self) -> &'static str {
-        if self.is_recently_updated() {
-            return "★";
-        }
         match self.issue_type {
             IssueType::Bug => "B",
             IssueType::Enhancement => "E",
@@ -404,10 +400,12 @@ mod tests {
     }
 
     #[test]
-    fn type_char_shows_star_for_recently_updated() {
+    fn recently_updated_does_not_change_type_char() {
+        // The ★ indicator is rendered by swarm_view, not type_char()
         let mut issue = make_issue(1, &["bug"]);
         issue.updated_at = Some(Utc::now() - chrono::Duration::hours(1));
-        assert_eq!(issue.type_char(), "★");
+        assert!(issue.is_recently_updated());
+        assert_eq!(issue.type_char(), "B");
     }
 
     #[test]
