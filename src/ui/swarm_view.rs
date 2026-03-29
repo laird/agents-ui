@@ -321,6 +321,9 @@ impl SwarmView {
         ])
         .style(theme::header_style());
 
+        // Fixed column widths: #(5) + Pri(4) + Status(18) + block borders(2) + column gaps(3) = 32
+        let title_col_width = (table_area.width.saturating_sub(32) as usize).max(15);
+
         let issue_rows: Vec<Row> = filtered_issues
             .iter()
             .map(|issue| {
@@ -335,7 +338,7 @@ impl SwarmView {
                 Row::new(vec![
                     Cell::from(format!("{}", issue.number)),
                     Cell::from(issue.priority_label()),
-                    Cell::from(truncate(&issue.title, 30)),
+                    Cell::from(truncate(&issue.title, title_col_width)),
                     Cell::from(status).style(status_style),
                 ])
             })
