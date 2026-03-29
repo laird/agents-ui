@@ -2964,6 +2964,30 @@ impl App {
                     view.scroll_down(1);
                 }
             }
+            KeyCode::Char('n') | KeyCode::Char('p') => {
+                // Navigate to next/previous issue in the sorted list
+                let current_num = self.issue_detail_view.as_ref().map(|v| v.issue_number);
+                if let (Some(current_num), Some(swarm)) = (current_num, self.swarms.get(swarm_idx)) {
+                    let project_name = swarm.project_name.clone();
+                    if let Some(cache) = self.issue_caches.get(&project_name) {
+                        let sorted_nums: Vec<u32> = IssueListView::sorted_open(&cache.issues)
+                            .into_iter()
+                            .map(|i| i.number)
+                            .collect();
+                        if let Some(pos) = sorted_nums.iter().position(|&n| n == current_num) {
+                            let next_pos = if key.code == KeyCode::Char('n') {
+                                (pos + 1) % sorted_nums.len()
+                            } else {
+                                if pos == 0 { sorted_nums.len() - 1 } else { pos - 1 }
+                            };
+                            if let Some(&next_num) = sorted_nums.get(next_pos) {
+                                self.issue_list_view.table_state.select(Some(next_pos));
+                                self.open_issue_detail(next_num, swarm_idx).await;
+                            }
+                        }
+                    }
+                }
+            }
             _ => {}
         }
         Ok(())
