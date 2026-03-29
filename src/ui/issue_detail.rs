@@ -1,11 +1,30 @@
 use ratatui::{
     layout::{Constraint, Layout, Rect},
+    style::Style,
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };
 
 use super::theme;
+
+/// Count checked and total task items in a markdown body.
+/// Scans for `- [x]` (checked) and `- [ ]` (unchecked) patterns.
+/// Returns `(checked, total)`.
+pub fn count_tasks(body: &str) -> (usize, usize) {
+    let mut checked = 0;
+    let mut total = 0;
+    for line in body.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("- [x]") || trimmed.starts_with("- [X]") {
+            checked += 1;
+            total += 1;
+        } else if trimmed.starts_with("- [ ]") {
+            total += 1;
+        }
+    }
+    (checked, total)
+}
 
 /// State for the issue detail view.
 pub struct IssueDetailView {
@@ -60,11 +79,24 @@ impl IssueDetailView {
                 ),
                 Span::styled(&self.title, theme::title_style()),
             ]),
-            Line::from(vec![
-                Span::styled(format!(" {} ", self.state), theme::help_style()),
-                Span::raw(" · "),
-                Span::styled(label_text, theme::help_style()),
-            ]),
+            {
+                let (checked, total) = count_tasks(&self.body);
+                let mut spans = vec![
+                    Span::styled(format!(" {} ", self.state), theme::help_style()),
+                    Span::raw(" · "),
+                    Span::styled(label_text, theme::help_style()),
+                ];
+                if total > 0 {
+                    let task_style = if checked == total {
+                        Style::default().fg(ratatui::style::Color::Green)
+                    } else {
+                        Style::default().fg(ratatui::style::Color::DarkGray)
+                    };
+                    spans.push(Span::raw("  "));
+                    spans.push(Span::styled(format!("{}/{} ✓", checked, total), task_style));
+                }
+                Line::from(spans)
+            },
         ];
 
         let header = Paragraph::new(header_lines)
@@ -106,5 +138,40 @@ impl IssueDetailView {
         ]))
         .block(Block::default().borders(Borders::TOP));
         f.render_widget(help, chunks[2]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn count_tasks_no_tasks() {
+        assert_eq!(count_tasks("No checkboxes here."), (0, 0));
+        assert_eq!(count_tasks(""), (0, 0));
+    }
+
+    #[test]
+    fn count_tasks_all_checked() {
+        let body = "- [x] Task one\n- [X] Task two\n";
+        assert_eq!(count_tasks(body), (2, 2));
+    }
+
+    #[test]
+    fn count_tasks_none_checked() {
+        let body = "- [ ] Task one\n- [ ] Task two\n- [ ] Task three\n";
+        assert_eq!(count_tasks(body), (0, 3));
+    }
+
+    #[test]
+    fn count_tasks_mixed() {
+        let body = "Some intro text.\n- [x] Done\n- [ ] Not done\n- [x] Also done\n";
+        assert_eq!(count_tasks(body), (2, 3));
+    }
+
+    #[test]
+    fn count_tasks_ignores_non_checkbox_lines() {
+        let body = "- regular list item\n- [x] checked\n* [ ] not a checkbox (wrong prefix)\n";
+        assert_eq!(count_tasks(body), (1, 1));
     }
 }
