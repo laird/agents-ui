@@ -62,6 +62,22 @@ pub fn render_markdown_line(line: &str) -> Line<'static> {
         }
     }
 
+    // Blockquote: > text
+    if let Some(text) = trimmed.strip_prefix("> ") {
+        return Line::from(vec![
+            Span::styled("│ ", theme::help_style()),
+            Span::styled(text.to_string(), Style::default().fg(Color::Gray)),
+        ]);
+    }
+
+    // Horizontal rule: ---, ***, ___
+    if trimmed == "---" || trimmed == "***" || trimmed == "___" {
+        return Line::from(Span::styled(
+            "─────────────────────────────────────".to_string(),
+            theme::help_style(),
+        ));
+    }
+
     // Plain line — handle inline code and bold inline
     let owned = line.to_string();
     let spans = parse_inline(&owned);
@@ -371,5 +387,21 @@ mod tests {
     fn render_markdown_line_empty() {
         let line = render_markdown_line("");
         assert!(!line.spans.is_empty());
+    }
+
+    #[test]
+    fn render_markdown_line_blockquote() {
+        let line = render_markdown_line("> some quoted text");
+        assert!(line.spans[0].content.contains('│'));
+        assert_eq!(line.spans[1].content, "some quoted text");
+    }
+
+    #[test]
+    fn render_markdown_line_horizontal_rule() {
+        for rule in &["---", "***", "___"] {
+            let line = render_markdown_line(rule);
+            assert_eq!(line.spans.len(), 1);
+            assert!(line.spans[0].content.contains('─'));
+        }
     }
 }
