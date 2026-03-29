@@ -1333,6 +1333,7 @@ impl App {
             },
             workers: Vec::new(),
             issue_cache: crate::model::issue::IssueCache::default(),
+            stopped: false,
         };
 
         self.swarms.push(placeholder);
@@ -1733,9 +1734,11 @@ impl App {
         if let Some(idx) = self.confirm_stop_swarm {
             self.confirm_stop_swarm = None;
             if key.code == KeyCode::Char('y') || key.code == KeyCode::Char('Y') {
-                if let Some(swarm) = self.swarms.get(swarm_idx) {
+                if let Some(swarm) = self.swarms.get_mut(swarm_idx) {
                     let targets: Vec<String> = swarm.workers.iter().map(|w| w.tmux_target.clone()).collect();
                     let count = targets.len();
+                    swarm.stopped = true;
+                    crate::config::persistence::mark_swarm_stopped(&swarm.project_name);
                     for target in targets {
                         let _ = proxy::kill_pane(&self.transport, &target).await;
                     }
@@ -2793,7 +2796,7 @@ impl App {
                 "view",
                 &issue_number.to_string(),
                 "--json",
-                "number,title,body,labels,state",
+                "number,title,body,labels,state,comments,assignees,createdAt",
             ])
             .output()
             .await;
@@ -2812,6 +2815,34 @@ impl App {
                                 .collect()
                         })
                         .unwrap_or_default();
+                    let comment_count = json["comments"]
+                        .as_array()
+                        .map(|arr| arr.len() as u32)
+                        .unwrap_or(0);
+                    let assignees: Vec<String> = json["assignees"]
+                        .as_array()
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|a| a["login"].as_str().map(|s| s.to_string()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let created_at_age = json["createdAt"]
+                        .as_str()
+                        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                        .map(|dt| {
+                            let secs = (chrono::Utc::now() - dt.to_utc()).num_seconds().max(0) as u64;
+                            if secs < 3600 {
+                                format!("{}m ", secs / 60)
+                            } else if secs < 86400 {
+                                format!("{}h ", secs / 3600)
+                            } else if secs < 7 * 86400 {
+                                format!("{}d ", secs / 86400)
+                            } else {
+                                format!("{}w ", secs / (7 * 86400))
+                            }
+                        })
+                        .unwrap_or_default();
 
                     self.issue_detail_view = Some(IssueDetailView::new(
                         issue_number,
@@ -2819,6 +2850,9 @@ impl App {
                         body,
                         labels,
                         state,
+                        comment_count,
+                        assignees,
+                        created_at_age,
                     ));
                     self.screen = Screen::IssueDetail { swarm_idx };
                 }
@@ -3830,9 +3864,10 @@ mod tests {
         let bin = home.join(".local/bin");
         std::fs::create_dir_all(&skills).unwrap();
         std::fs::create_dir_all(&bin).unwrap();
+        let transport = ServerTransport::default();
+        let _env_guard = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let original_home = std::env::var_os("HOME");
         unsafe { std::env::set_var("HOME", &home) };
-        let transport = ServerTransport::default();
 
         assert!(!codex_user_assets_present(&transport).await);
 
@@ -3847,6 +3882,7 @@ mod tests {
         } else {
             unsafe { std::env::remove_var("HOME") };
         }
+        drop(_env_guard);
         std::fs::remove_dir_all(home).ok();
     }
 

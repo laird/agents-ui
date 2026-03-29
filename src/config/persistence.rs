@@ -104,6 +104,35 @@ pub fn load_repo_agent_type(repo_root: &Path) -> Result<Option<AgentType>> {
     Ok(AgentType::from_name(&cfg.default_agent_type))
 }
 
+/// Path to the stopped tombstone for a project.
+fn stopped_tombstone_path(project_name: &str) -> PathBuf {
+    config_dir().join("swarms").join(project_name).join("stopped")
+}
+
+/// Mark a swarm as intentionally stopped so it won't be auto-revived.
+pub fn mark_swarm_stopped(project_name: &str) {
+    let path = stopped_tombstone_path(project_name);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&path, "");
+    tracing::info!("Marked swarm {project_name} as stopped");
+}
+
+/// Return true if the swarm was intentionally stopped.
+pub fn is_swarm_stopped(project_name: &str) -> bool {
+    stopped_tombstone_path(project_name).exists()
+}
+
+/// Clear the stopped tombstone so the swarm can be revived.
+pub fn clear_swarm_stopped(project_name: &str) {
+    let path = stopped_tombstone_path(project_name);
+    if path.exists() {
+        let _ = std::fs::remove_file(&path);
+        tracing::info!("Cleared stopped tombstone for swarm {project_name}");
+    }
+}
+
 pub fn save_repo_agent_type(repo_root: &Path, agent_type: &AgentType) -> Result<()> {
     let path = repo_config_path(repo_root);
     let cfg = RepoConfig {
@@ -153,5 +182,32 @@ mod tests {
         assert_eq!(loaded, Some(AgentType::Droid));
 
         std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn stopped_tombstone_round_trip() {
+        use super::{clear_swarm_stopped, config_dir, is_swarm_stopped, mark_swarm_stopped};
+
+        // Hold the env lock so HOME-mutating tests don't change config_dir() under us
+        let _env_guard = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        // Use a unique project name to avoid collisions between parallel test runs
+        let project = format!("test-project-{}", std::process::id());
+
+        assert!(!is_swarm_stopped(&project), "should not be stopped initially");
+
+        mark_swarm_stopped(&project);
+        assert!(is_swarm_stopped(&project), "should be stopped after mark");
+
+        clear_swarm_stopped(&project);
+        assert!(!is_swarm_stopped(&project), "should not be stopped after clear");
+
+        // clear is idempotent
+        clear_swarm_stopped(&project);
+        assert!(!is_swarm_stopped(&project));
+
+        // Cleanup
+        let dir = config_dir().join("swarms").join(&project);
+        std::fs::remove_dir_all(dir).ok();
     }
 }

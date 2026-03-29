@@ -39,6 +39,9 @@ impl ClaudeAdapter {
         let project_name = Self::project_name(&config.repo_path);
         let session_name = Self::session_name(runtime, &project_name);
 
+        // Clear any stopped tombstone — the user is explicitly launching this swarm.
+        crate::config::persistence::clear_swarm_stopped(&project_name);
+
         if session::has_session(&self.transport, &session_name).await {
             progress("♻️  Found existing session, reconnecting...\n");
             let swarm = self
@@ -356,6 +359,11 @@ impl ClaudeAdapter {
     }
 
     async fn ensure_swarm_agents_running(&self, swarm: &Swarm) -> Result<()> {
+        if swarm.stopped || crate::config::persistence::is_swarm_stopped(&swarm.project_name) {
+            tracing::info!("Skipping ensure_swarm_agents_running for stopped swarm {}", swarm.project_name);
+            return Ok(());
+        }
+
         self.ensure_agent_running(&swarm.manager, &swarm.tmux_session, &swarm.agent_type)
             .await?;
 
@@ -557,6 +565,7 @@ impl ClaudeAdapter {
                 .unwrap_or(0)
         });
 
+        let stopped = crate::config::persistence::is_swarm_stopped(&project_name);
         Ok(Swarm {
             repo_path,
             project_name,
@@ -566,6 +575,7 @@ impl ClaudeAdapter {
             manager,
             workers,
             issue_cache: Default::default(),
+            stopped,
         })
     }
 
@@ -684,6 +694,9 @@ impl AgentRuntime for ClaudeAdapter {
         let runtime = &config.agent_type;
         let project_name = Self::project_name(&config.repo_path);
         let session_name = Self::session_name(runtime, &project_name);
+
+        // Clear any stopped tombstone — the user is explicitly launching this swarm.
+        crate::config::persistence::clear_swarm_stopped(&project_name);
 
         // Check if session already exists
         if session::has_session(&self.transport, &session_name).await {
@@ -999,6 +1012,11 @@ impl AgentRuntime for ClaudeAdapter {
     }
 
     async fn heal_workers(&self, swarm: &mut Swarm) -> Result<Vec<String>> {
+        if swarm.stopped || crate::config::persistence::is_swarm_stopped(&swarm.project_name) {
+            tracing::info!("Skipping heal_workers for stopped swarm {}", swarm.project_name);
+            return Ok(vec![]);
+        }
+
         let mut repairs = Vec::new();
         let session_name = &swarm.tmux_session;
         let repo_path = &swarm.repo_path;
@@ -1091,12 +1109,13 @@ impl AgentRuntime for ClaudeAdapter {
                     worker.id, session_exists, agents_window_exists);
 
                 let pane_created = if !session_exists {
-                    // Session completely gone — recreate it with a new window
-                    let output = Command::new("tmux")
-                        .args(["new-session", "-d", "-s", session_name, "-n", "agents"])
-                        .output()
-                        .await;
-                    output.map(|o| o.status.success()).unwrap_or(false)
+                    // Session completely gone — do not recreate; user likely killed it intentionally.
+                    // They can use 'N' in the TUI to relaunch.
+                    tracing::info!(
+                        "Session {session_name} is gone; skipping recreation for {}",
+                        worker.id
+                    );
+                    false
                 } else if !agents_window_exists {
                     // Session exists but agents window is gone — create a new window
                     let output = Command::new("tmux")
@@ -1224,6 +1243,9 @@ impl AgentRuntime for ClaudeAdapter {
     }
 
     async fn teardown(&self, swarm: &Swarm) -> Result<()> {
+        // Mark as intentionally stopped before killing so heal_workers won't respawn it.
+        crate::config::persistence::mark_swarm_stopped(&swarm.project_name);
+
         // Kill the tmux session
         let output = self
             .output(
@@ -1258,6 +1280,9 @@ impl AgentRuntime for ClaudeAdapter {
     }
 
     async fn revive_agents(&self, swarm: &Swarm) -> Result<()> {
+        if swarm.stopped || crate::config::persistence::is_swarm_stopped(&swarm.project_name) {
+            return Ok(());
+        }
         self.ensure_swarm_agents_running(swarm).await
     }
 }
