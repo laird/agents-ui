@@ -504,6 +504,16 @@ impl SwarmView {
         self.issues_table.selected()
     }
 
+    /// Return the subset of `issues` that pass both the state filter and the type filter.
+    /// Matches the filtering applied in `render()` (excluding the search query filter).
+    pub fn apply_filters<'a>(&self, issues: &'a [GitHubIssue]) -> Vec<&'a GitHubIssue> {
+        issues
+            .iter()
+            .filter(|i| i.matches_filter(self.issue_filter))
+            .filter(|i| self.issue_type_filter.as_ref().map_or(true, |tf| &i.issue_type == tf))
+            .collect()
+    }
+
     /// Cycle the type filter: None → Bug → Enhancement → Proposal → None.
     pub fn cycle_issue_type_filter(&mut self) {
         self.issue_type_filter = match &self.issue_type_filter {

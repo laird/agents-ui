@@ -2103,13 +2103,9 @@ impl App {
                     return Ok(());
                 }
 
-                let issue_type_filter = self.swarm_view.issue_type_filter.clone();
                 let issue_count = self.swarms.get(swarm_idx)
                     .and_then(|s| self.issue_caches.get(&s.project_name))
-                    .map(|c| c.issues.iter()
-                        .filter(|i| i.matches_filter(self.swarm_view.issue_filter))
-                        .filter(|i| issue_type_filter.as_ref().map_or(true, |tf| &i.issue_type == tf))
-                        .count())
+                    .map(|c| self.swarm_view.apply_filters(&c.issues).len())
                     .unwrap_or(0);
                 match key.code {
                     KeyCode::Down | KeyCode::Char('j') => {
@@ -2164,7 +2160,7 @@ impl App {
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
                             let issues: Vec<&GitHubIssue> = self.issue_caches
                                 .get(&swarm.project_name)
-                                .map(|c| c.issues.iter().filter(|i| i.matches_filter(self.swarm_view.issue_filter)).collect())
+                                .map(|c| self.swarm_view.apply_filters(&c.issues))
                                 .unwrap_or_default();
                             if let Some(issue) = self.swarm_view.selected_issue()
                                 .and_then(|idx| issues.get(idx))
@@ -2203,7 +2199,7 @@ impl App {
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
                             let issues: Vec<&GitHubIssue> = self.issue_caches
                                 .get(&swarm.project_name)
-                                .map(|c| c.issues.iter().filter(|i| i.matches_filter(self.swarm_view.issue_filter)).collect())
+                                .map(|c| self.swarm_view.apply_filters(&c.issues))
                                 .unwrap_or_default();
                             if let Some(issue) = self.swarm_view.selected_issue()
                                 .and_then(|idx| issues.get(idx))
@@ -2238,14 +2234,11 @@ impl App {
                     _ => {
                         if let KeyCode::Char(c) = key.code {
                             let issue_num = {
-                                let filter = self.swarm_view.issue_filter;
                                 let selected = self.swarm_view.selected_issue();
                                 self.swarms.get(swarm_idx)
                                     .and_then(|s| self.issue_caches.get(&s.project_name))
                                     .and_then(|cache| {
-                                        let issues: Vec<_> = cache.issues.iter()
-                                            .filter(|i| i.matches_filter(filter))
-                                            .collect();
+                                        let issues = self.swarm_view.apply_filters(&cache.issues);
                                         selected.and_then(|idx| issues.get(idx)).map(|i| i.number)
                                     })
                             };
@@ -2273,7 +2266,7 @@ impl App {
             );
             let issues: Vec<&GitHubIssue> = self.issue_caches
                 .get(&swarm.project_name)
-                .map(|c| c.issues.iter().filter(|i| i.matches_filter(self.swarm_view.issue_filter)).collect())
+                .map(|c| self.swarm_view.apply_filters(&c.issues))
                 .unwrap_or_default();
             let issue_num = self.swarm_view.selected_issue()
                 .and_then(|idx| issues.get(idx))
@@ -3007,13 +3000,7 @@ impl App {
         // Get the selected issue number
         let issues: Vec<u32> = self.issue_caches
             .get(&project_name)
-            .map(|c| {
-                c.issues
-                    .iter()
-                    .filter(|i| i.matches_filter(self.swarm_view.issue_filter))
-                    .map(|i| i.number)
-                    .collect()
-            })
+            .map(|c| self.swarm_view.apply_filters(&c.issues).into_iter().map(|i| i.number).collect())
             .unwrap_or_default();
         let Some(issue_num) = self.swarm_view.selected_issue().and_then(|idx| issues.get(idx).copied()) else {
             self.set_status("No issue selected".to_string());
