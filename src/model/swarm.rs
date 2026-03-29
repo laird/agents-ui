@@ -350,7 +350,37 @@ impl Swarm {
 mod tests {
     use super::*;
     use crate::model::issue::{GitHubIssue, IssueCache, IssueState, IssuePriority, IssueType};
-    use crate::model::status::AgentStatus;
+    use crate::model::status::{AgentState, AgentStatus};
+
+    fn make_agent(id: &str, state: AgentState, pane_content: &str) -> AgentInfo {
+        AgentInfo {
+            id: id.to_string(),
+            role: id.to_string(),
+            worktree_path: PathBuf::from("/tmp/test"),
+            tmux_target: "test:0.0".to_string(),
+            status: AgentStatus { timestamp: None, state },
+            is_manager: id == "manager",
+            pane_content: pane_content.to_string(),
+            dispatched_issue: None,
+            current_issue: None,
+            current_issue_title: None,
+            waiting_for_input: false,
+        }
+    }
+
+    fn make_swarm(workers: Vec<AgentInfo>) -> Swarm {
+        Swarm {
+            repo_path: PathBuf::from("/tmp/repo"),
+            project_name: "test".to_string(),
+            agent_type: AgentType::Claude,
+            workflow: Some(Workflow::Autocoder),
+            tmux_session: "claude-test".to_string(),
+            manager: make_agent("manager", AgentState::Working { issue: None }, ""),
+            workers,
+            issue_cache: IssueCache::default(),
+            stopped: false,
+        }
+    }
 
     fn make_swarm_with_issues(issues: Vec<GitHubIssue>) -> Swarm {
         let manager = AgentInfo {
@@ -455,40 +485,6 @@ mod tests {
         assert_eq!(AgentType::Claude.status_dir(), ".codex/loops");
         assert_eq!(AgentType::Droid.status_dir(), ".factory/loops");
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::model::status::{AgentState, AgentStatus};
-
-    fn make_agent(id: &str, state: AgentState, pane_content: &str) -> AgentInfo {
-        AgentInfo {
-            id: id.to_string(),
-            worktree_path: PathBuf::from("/tmp/test"),
-            tmux_target: format!("test:0.0"),
-            status: AgentStatus {
-                timestamp: None,
-                state,
-            },
-            is_manager: id == "manager",
-            pane_content: pane_content.to_string(),
-        }
-    }
-
-    fn make_swarm(workers: Vec<AgentInfo>) -> Swarm {
-        Swarm {
-            repo_path: PathBuf::from("/tmp/repo"),
-            project_name: "test".to_string(),
-            agent_type: AgentType::Claude,
-            workflow: Some(Workflow::Autocoder),
-            tmux_session: "claude-test".to_string(),
-            manager: make_agent("manager", AgentState::Working { issue: None }, ""),
-            workers,
-        }
-    }
-
-    // --- AgentType tests ---
 
     #[test]
     fn agent_type_display() {
@@ -513,22 +509,10 @@ mod tests {
     }
 
     #[test]
-    fn agent_type_status_dir() {
-        assert_eq!(AgentType::Claude.status_dir(), ".codex/loops");
-        assert_eq!(AgentType::Codex.status_dir(), ".codex/loops");
-        assert_eq!(AgentType::Gemini.status_dir(), ".codex/loops");
-        assert_eq!(AgentType::Droid.status_dir(), ".factory/loops");
-    }
-
-    // --- Workflow Display ---
-
-    #[test]
     fn workflow_display() {
         assert_eq!(Workflow::Autocoder.to_string(), "Autocoder");
         assert_eq!(Workflow::Modernize.to_string(), "Modernize");
     }
-
-    // --- AgentInfo::needs_attention tests ---
 
     #[test]
     fn needs_attention_idle_agent() {
@@ -588,21 +572,13 @@ mod tests {
         assert!(!agent.needs_attention());
     }
 
-    // --- Swarm method tests ---
-
     #[test]
-    fn swarm_agent_count() {
+    fn swarm_all_agent_count() {
         let swarm = make_swarm(vec![
             make_agent("w-0", AgentState::Idle, ""),
             make_agent("w-1", AgentState::Working { issue: None }, ""),
         ]);
-        assert_eq!(swarm.agent_count(), 3); // manager + 2 workers
-    }
-
-    #[test]
-    fn swarm_agent_count_no_workers() {
-        let swarm = make_swarm(vec![]);
-        assert_eq!(swarm.agent_count(), 1); // just manager
+        assert_eq!(swarm.all_agents().len(), 3); // manager + 2 workers
     }
 
     #[test]
@@ -623,16 +599,6 @@ mod tests {
             make_agent("w-1", AgentState::Stopped, ""),
         ]);
         assert_eq!(swarm.busy_count(), 0);
-    }
-
-    #[test]
-    fn swarm_attention_count() {
-        let swarm = make_swarm(vec![
-            make_agent("w-0", AgentState::Idle, ""),
-            make_agent("w-1", AgentState::Working { issue: None }, ""),
-            make_agent("w-2", AgentState::Idle, ""),
-        ]);
-        assert_eq!(swarm.attention_count(), 2);
     }
 
     #[test]
