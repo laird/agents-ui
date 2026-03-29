@@ -2847,7 +2847,7 @@ impl App {
                     "view".to_string(),
                     issue_number.to_string(),
                     "--json".to_string(),
-                    "number,title,body,labels,state".to_string(),
+                    "number,title,body,labels,state,comments".to_string(),
                 ],
             )
             .await
@@ -2869,6 +2869,21 @@ impl App {
                                 .collect()
                         })
                         .unwrap_or_default();
+                    let comments: Vec<(String, String)> = json["comments"]
+                        .as_array()
+                        .map(|arr| {
+                            arr.iter()
+                                .rev()
+                                .take(10)
+                                .rev()
+                                .filter_map(|c| {
+                                    let author = c["author"]["login"].as_str()?;
+                                    let body = c["body"].as_str()?;
+                                    Some((author.to_string(), body.to_string()))
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
 
                     self.issue_detail_view = Some(IssueDetailView::new(
                         issue_number,
@@ -2876,6 +2891,7 @@ impl App {
                         body,
                         labels,
                         state,
+                        comments,
                     ));
                     self.screen = Screen::IssueDetail { swarm_idx };
                 }
