@@ -395,8 +395,8 @@ impl ClaudeAdapter {
                 }
             }
             PaneState::AgentIdle => {
-                if let Some(cmd) = self.bootstrap_command(runtime, agent).await {
-                    tracing::info!("Agent {} is idle, sending bootstrap: {}", agent.id, cmd);
+                if let Some(cmd) = self.continue_command(runtime, agent).await {
+                    tracing::info!("Agent {} is idle, sending continue command: {}", agent.id, cmd);
                     proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
                 }
             }
@@ -436,8 +436,8 @@ impl ClaudeAdapter {
                         }
                     }
                     PaneState::AgentIdle => {
-                        if let Some(cmd) = self.bootstrap_command(runtime, agent).await {
-                            tracing::info!("Probe: agent {} is idle, sending bootstrap: {}", agent.id, cmd);
+                        if let Some(cmd) = self.continue_command(runtime, agent).await {
+                            tracing::info!("Probe: agent {} is idle, sending continue command: {}", agent.id, cmd);
                             proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
                         }
                     }
@@ -1447,6 +1447,29 @@ fn generic_worker_bootstrap_cmd(runtime: &AgentType) -> Option<String> {
     }
 }
 
+/// Non-loop command for an already-running idle agent.
+/// Used when an agent session is live but idle; sends a single-pass command
+/// instead of a loop-start so the loop variant is only ever sent once on first launch.
+fn manager_continue_cmd(runtime: &AgentType) -> Option<String> {
+    match runtime {
+        AgentType::Claude => Some("/autocoder:monitor-workers".to_string()),
+        AgentType::Gemini => Some("/monitor-workers".to_string()),
+        AgentType::Codex => Some("/monitor-workers".to_string()),
+        AgentType::Droid => Some("/monitor-workers".to_string()),
+    }
+}
+
+fn generic_worker_continue_cmd(runtime: &AgentType) -> Option<String> {
+    match runtime {
+        AgentType::Claude => Some("/autocoder:fix".to_string()),
+        AgentType::Gemini => Some("/fix".to_string()),
+        AgentType::Codex => Some(
+            "Use the repository's Codex autocoder workflow to pick the next available issue and work it. Start by reading AGENTS.md, skills/autocoder/SKILL.md, skills/autocoder/references/workflow-map.md, and skills/autocoder/references/command-mapping.md. Choose the highest-priority available issue, do one focused pass, run relevant tests, and summarize the outcome.".to_string(),
+        ),
+        AgentType::Droid => Some("/fix".to_string()),
+    }
+}
+
 impl ClaudeAdapter {
     async fn bootstrap_command(&self, runtime: &AgentType, agent: &AgentInfo) -> Option<String> {
         if agent.is_manager {
@@ -1463,6 +1486,26 @@ impl ClaudeAdapter {
         }
 
         generic_worker_bootstrap_cmd(runtime)
+    }
+
+    /// Non-loop command for an already-running idle agent.
+    /// Like `bootstrap_command` but sends single-pass variants (`/fix`, `/monitor-workers`)
+    /// instead of loop-start variants (`/fix-loop`, `/monitor-loop`).
+    async fn continue_command(&self, runtime: &AgentType, agent: &AgentInfo) -> Option<String> {
+        if agent.is_manager {
+            return manager_continue_cmd(runtime);
+        }
+
+        let issue_num = match &agent.status.state {
+            status::AgentState::Working { issue: Some(n) } => Some(*n),
+            _ => agent.dispatched_issue.or(self.issue_from_branch(agent).await),
+        };
+
+        if let Some(issue_number) = issue_num {
+            return worker_dispatch_cmd(runtime, issue_number);
+        }
+
+        generic_worker_continue_cmd(runtime)
     }
 
     async fn issue_from_branch(&self, agent: &AgentInfo) -> Option<u32> {
@@ -1557,8 +1600,9 @@ fn strip_ansi(content: &str) -> String {
 mod tests {
     use super::{
         classify_pane_state, extract_issue_number_from_branch, generic_worker_bootstrap_cmd,
-        is_bare_shell_prompt, is_feedback_prompt, manager_bootstrap_cmd, pane_agent_is_idle,
-        pane_needs_runtime_launch, worker_dispatch_cmd, PaneState,
+        generic_worker_continue_cmd, is_bare_shell_prompt, is_feedback_prompt,
+        manager_bootstrap_cmd, manager_continue_cmd, pane_agent_is_idle, pane_needs_runtime_launch,
+        worker_dispatch_cmd, PaneState,
     };
     use crate::model::swarm::AgentType;
 
@@ -1645,6 +1689,34 @@ mod tests {
         assert_eq!(
             generic_worker_bootstrap_cmd(&AgentType::Droid),
             None
+        );
+    }
+
+    #[test]
+    fn manager_continue_uses_monitor_workers_not_loop() {
+        assert_eq!(
+            manager_continue_cmd(&AgentType::Claude),
+            Some("/autocoder:monitor-workers".to_string())
+        );
+        assert_eq!(
+            manager_continue_cmd(&AgentType::Gemini),
+            Some("/monitor-workers".to_string())
+        );
+    }
+
+    #[test]
+    fn generic_worker_continue_uses_fix_not_loop() {
+        assert_eq!(
+            generic_worker_continue_cmd(&AgentType::Claude),
+            Some("/autocoder:fix".to_string())
+        );
+        assert_eq!(
+            generic_worker_continue_cmd(&AgentType::Gemini),
+            Some("/fix".to_string())
+        );
+        assert_eq!(
+            generic_worker_continue_cmd(&AgentType::Droid),
+            Some("/fix".to_string())
         );
     }
 
