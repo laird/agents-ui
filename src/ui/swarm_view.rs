@@ -7,7 +7,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::model::issue::{GitHubIssue, IssueFilter};
+use crate::model::issue::{GitHubIssue, IssueFilter, IssuePriority};
 use crate::model::swarm::Swarm;
 use super::theme;
 
@@ -33,6 +33,7 @@ pub struct SwarmView {
     pub workers_table: TableState,
     pub issues_table: TableState,
     pub issue_filter: IssueFilter,
+    pub priority_filter: Option<IssuePriority>,
     /// Active search query (None = not searching, Some("") = searching with empty query).
     pub search_query: Option<String>,
 }
@@ -48,6 +49,7 @@ impl SwarmView {
             workers_table,
             issues_table,
             issue_filter: IssueFilter::All,
+            priority_filter: None,
             search_query: None,
         }
     }
@@ -64,6 +66,10 @@ impl SwarmView {
         let filtered_issues: Vec<&GitHubIssue> = issues
             .iter()
             .filter(|i| i.matches_filter(self.issue_filter))
+            .filter(|i| match &self.priority_filter {
+                Some(pf) => &i.priority == pf,
+                None => true,
+            })
             .filter(|i| {
                 if let Some(q) = &self.search_query {
                     if q.is_empty() {
@@ -280,6 +286,7 @@ impl SwarmView {
 
         // Issues table
         let filter_label = self.issue_filter.label();
+        let priority_label = self.priority_filter.as_ref().map(|p| format!(" [{p}]")).unwrap_or_default();
 
         // Split issues area: optional 1-line search bar + table
         let is_searching = self.search_query.is_some();
@@ -336,7 +343,7 @@ impl SwarmView {
 
         let issues_block = Block::default()
             .borders(Borders::ALL)
-            .title(format!(" Issues ({filter_label}: {}) ", filtered_issues.len()))
+            .title(format!(" Issues ({filter_label}{priority_label}: {}) ", filtered_issues.len()))
             .border_style(if focus == SwarmPanel::Issues {
                 theme::title_style()
             } else {
@@ -401,6 +408,8 @@ impl SwarmView {
                 Span::styled(" add  ", theme::help_style()),
                 Span::styled("p", theme::title_style()),
                 Span::styled(" approve  ", theme::help_style()),
+                Span::styled("P", theme::title_style()),
+                Span::styled(" priority  ", theme::help_style()),
                 Span::styled("b", theme::title_style()),
                 Span::styled(" brainstorm  ", theme::help_style()),
                 Span::styled("r", theme::title_style()),
@@ -463,6 +472,17 @@ impl SwarmView {
 
     pub fn selected_issue(&self) -> Option<usize> {
         self.issues_table.selected()
+    }
+
+    pub fn cycle_priority_filter(&mut self) {
+        self.priority_filter = match self.priority_filter {
+            None => Some(IssuePriority::P0),
+            Some(IssuePriority::P0) => Some(IssuePriority::P1),
+            Some(IssuePriority::P1) => Some(IssuePriority::P2),
+            Some(IssuePriority::P2) => Some(IssuePriority::P3),
+            Some(IssuePriority::P3) | Some(IssuePriority::None) => None,
+        };
+        self.issues_table.select(Some(0));
     }
 }
 

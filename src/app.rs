@@ -2058,6 +2058,10 @@ impl App {
                         // Approve: send "approve <issue_number>" to manager pane
                         self.send_issue_command_to_manager(swarm_idx, "approve").await?;
                     }
+                    KeyCode::Char('P') => {
+                        // Cycle priority filter: None → P0 → P1 → P2 → P3 → None
+                        self.swarm_view.cycle_priority_filter();
+                    }
                     KeyCode::Char('b') => {
                         // Jump to next blocked issue (cycle through blocked issues)
                         self.jump_to_next_blocked(swarm_idx);
