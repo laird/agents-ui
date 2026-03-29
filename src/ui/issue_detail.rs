@@ -81,7 +81,22 @@ fn parse_inline(line: &str) -> Vec<Span<'static>> {
             }
         }
 
-        // Bold: **...** or __...__
+        // Strikethrough: ~~...~~
+        if rest.starts_with("~~") {
+            let after = &rest[2..];
+            if let Some(end) = after.find("~~") {
+                spans.push(Span::styled(
+                    after[..end].to_string(),
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::CROSSED_OUT),
+                ));
+                rest = &after[end + 2..];
+                continue;
+            }
+        }
+
+        // Bold: **...** or __...__ (checked before italic to avoid consuming one * early)
         let bold_marker = if rest.starts_with("**") {
             Some("**")
         } else if rest.starts_with("__") {
@@ -96,6 +111,27 @@ fn parse_inline(line: &str) -> Vec<Span<'static>> {
                 spans.push(Span::styled(
                     after[..end].to_string(),
                     Style::default().add_modifier(Modifier::BOLD),
+                ));
+                rest = &after[end + marker.len()..];
+                continue;
+            }
+        }
+
+        // Italic: *...* or _..._ (single markers only)
+        let italic_marker = if rest.starts_with('*') {
+            Some("*")
+        } else if rest.starts_with('_') {
+            Some("_")
+        } else {
+            None
+        };
+
+        if let Some(marker) = italic_marker {
+            let after = &rest[marker.len()..];
+            if let Some(end) = after.find(marker) {
+                spans.push(Span::styled(
+                    after[..end].to_string(),
+                    Style::default().add_modifier(Modifier::ITALIC),
                 ));
                 rest = &after[end + marker.len()..];
                 continue;
@@ -358,5 +394,36 @@ mod tests {
     fn render_markdown_line_empty() {
         let line = render_markdown_line("");
         assert!(!line.spans.is_empty());
+    }
+
+    #[test]
+    fn render_markdown_line_italic_star() {
+        let line = render_markdown_line("*italic text*");
+        let combined: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(combined.contains("italic text"));
+        assert!(line.spans.iter().any(|s| s.style.add_modifier.contains(Modifier::ITALIC)));
+    }
+
+    #[test]
+    fn render_markdown_line_italic_underscore() {
+        let line = render_markdown_line("_italic text_");
+        let combined: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(combined.contains("italic text"));
+        assert!(line.spans.iter().any(|s| s.style.add_modifier.contains(Modifier::ITALIC)));
+    }
+
+    #[test]
+    fn render_markdown_line_strikethrough() {
+        let line = render_markdown_line("~~removed~~");
+        let combined: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(combined.contains("removed"));
+        assert!(line.spans.iter().any(|s| s.style.add_modifier.contains(Modifier::CROSSED_OUT)));
+    }
+
+    #[test]
+    fn bold_not_confused_with_italic() {
+        let line = render_markdown_line("**bold**");
+        assert!(line.spans.iter().any(|s| s.style.add_modifier.contains(Modifier::BOLD)));
+        assert!(!line.spans.iter().any(|s| s.style.add_modifier.contains(Modifier::ITALIC)));
     }
 }
