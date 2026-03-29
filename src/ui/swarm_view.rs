@@ -7,7 +7,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::model::issue::{GitHubIssue, IssueFilter, IssueType};
+use crate::model::issue::{GitHubIssue, IssueFilter, IssuePriority, IssueType};
 use crate::model::swarm::Swarm;
 use super::theme;
 
@@ -35,6 +35,8 @@ pub struct SwarmView {
     pub issue_filter: IssueFilter,
     /// Active type filter: None = all types, Some(t) = only issues of that type.
     pub issue_type_filter: Option<IssueType>,
+    /// Active priority filter: None = all priorities, Some(p) = only issues of that priority.
+    pub priority_filter: Option<IssuePriority>,
     /// Active search query (None = not searching, Some("") = searching with empty query).
     pub search_query: Option<String>,
 }
@@ -51,6 +53,7 @@ impl SwarmView {
             issues_table,
             issue_filter: IssueFilter::All,
             issue_type_filter: None,
+            priority_filter: None,
             search_query: None,
         }
     }
@@ -74,6 +77,9 @@ impl SwarmView {
                 } else {
                     true
                 }
+            })
+            .filter(|i| {
+                self.priority_filter.as_ref().map_or(true, |pf| &i.priority == pf)
             })
             .filter(|i| {
                 if let Some(q) = &self.search_query {
@@ -313,6 +319,10 @@ impl SwarmView {
             Some(IssueType::Other) => " · other",
             None => "",
         };
+        let priority_label = match &self.priority_filter {
+            Some(p) => format!(" · {p}"),
+            None => String::new(),
+        };
 
         // Split issues area: optional 1-line search bar + table
         let is_searching = self.search_query.is_some();
@@ -375,9 +385,15 @@ impl SwarmView {
             })
             .collect();
 
+        let total_issue_count = issues.len();
+        let count_display = if filtered_issues.len() < total_issue_count {
+            format!("{}/{}", filtered_issues.len(), total_issue_count)
+        } else {
+            format!("{}", filtered_issues.len())
+        };
         let issues_block = Block::default()
             .borders(Borders::ALL)
-            .title(format!(" Issues ({filter_label}{type_label}: {}{}) ", filtered_issues.len(), if issues_loading { ", loading\u{2026}" } else { "" }))
+            .title(format!(" Issues ({filter_label}{type_label}{priority_label}: {}{}) ", count_display, if issues_loading { ", loading\u{2026}" } else { "" }))
             .border_style(if focus == SwarmPanel::Issues {
                 theme::title_style()
             } else {
@@ -453,6 +469,8 @@ impl SwarmView {
                 Span::styled(" filter  ", theme::help_style()),
                 Span::styled("t", theme::title_style()),
                 Span::styled(" type  ", theme::help_style()),
+                Span::styled("P", theme::title_style()),
+                Span::styled(" priority  ", theme::help_style()),
                 Span::styled("/", theme::title_style()),
                 Span::styled(" search  ", theme::help_style()),
                 Span::styled("Enter", theme::title_style()),
@@ -511,16 +529,29 @@ impl SwarmView {
         self.issues_table.selected()
     }
 
-    /// Return the subset of `issues` that pass both the state filter and the type filter,
+    /// Return the subset of `issues` that pass all active filters,
     /// sorted by priority then issue number — matching the order rendered by `render()`.
     pub fn apply_filters<'a>(&self, issues: &'a [GitHubIssue]) -> Vec<&'a GitHubIssue> {
         let mut result: Vec<&'a GitHubIssue> = issues
             .iter()
             .filter(|i| i.matches_filter(self.issue_filter))
             .filter(|i| self.issue_type_filter.as_ref().map_or(true, |tf| &i.issue_type == tf))
+            .filter(|i| self.priority_filter.as_ref().map_or(true, |pf| &i.priority == pf))
             .collect();
         result.sort_by_key(|i| (&i.priority, i.number));
         result
+    }
+
+    /// Cycle the priority filter: None → P0 → P1 → P2 → P3 → None.
+    pub fn cycle_priority_filter(&mut self) {
+        self.priority_filter = match &self.priority_filter {
+            None => Some(IssuePriority::P0),
+            Some(IssuePriority::P0) => Some(IssuePriority::P1),
+            Some(IssuePriority::P1) => Some(IssuePriority::P2),
+            Some(IssuePriority::P2) => Some(IssuePriority::P3),
+            Some(IssuePriority::P3) | Some(IssuePriority::None) => None,
+        };
+        self.issues_table.select(Some(0));
     }
 
     /// Cycle the type filter: None → Bug → Enhancement → Proposal → None.
@@ -750,5 +781,33 @@ mod tests {
         assert!(rendered.contains("Issues (all: 1)"));
         assert!(rendered.contains("demo"));
         assert!(rendered.contains("#12"));
+    }
+
+    #[test]
+    fn issues_title_shows_fraction_when_type_filter_active() {
+        use crate::model::issue::{IssueType, IssuePriority};
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut view = SwarmView::new();
+        view.issue_type_filter = Some(IssueType::Bug);
+        let swarm = make_swarm();
+        let issues = vec![
+            GitHubIssue {
+                number: 1, title: "a bug".into(), state: IssueState::Open,
+                priority: IssuePriority::P2, issue_type: IssueType::Bug,
+                labels: vec!["bug".into()], is_working: false, assigned_worker: None, updated_at: None,
+            },
+            GitHubIssue {
+                number: 2, title: "an enh".into(), state: IssueState::Open,
+                priority: IssuePriority::P3, issue_type: IssueType::Enhancement,
+                labels: vec!["enhancement".into()], is_working: false, assigned_worker: None, updated_at: None,
+            },
+        ];
+        terminal.draw(|f| {
+            view.render(f, f.area(), &swarm, &issues, SwarmPanel::Issues, false, false);
+        }).unwrap();
+        let rendered: String = terminal.backend().buffer().content().iter().map(|c| c.symbol()).collect();
+        // 1 bug shown of 2 total — should show "1/2"
+        assert!(rendered.contains("1/2"), "expected '1/2' in issues title");
     }
 }
