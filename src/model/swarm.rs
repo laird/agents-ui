@@ -222,6 +222,7 @@ pub fn detect_waiting_for_input(content: &str) -> bool {
 
 impl AgentInfo {
     /// Check if this agent appears to need human attention based on pane content.
+    #[allow(dead_code)]
     pub fn needs_attention(&self) -> bool {
         let content = &self.pane_content;
         // Check last 20 lines for attention patterns
