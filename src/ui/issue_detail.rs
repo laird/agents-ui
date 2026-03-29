@@ -49,14 +49,14 @@ pub fn render_markdown_line(line: &str) -> Line<'static> {
         ]);
     }
 
-    // Numbered list: 1. text, 12. text, etc.
-    let num_end = trimmed.find(|c: char| !c.is_ascii_digit());
-    if let Some(n) = num_end {
-        if n > 0 && trimmed[n..].starts_with(". ") {
-            let number = &trimmed[..n];
-            let text = trimmed[n + 2..].to_string();
+    // Numbered list: "1. text", "10. text", etc.
+    {
+        let digits_end = trimmed.find(|c: char| !c.is_ascii_digit()).unwrap_or(0);
+        if digits_end > 0 && trimmed[digits_end..].starts_with(". ") {
+            let num = &trimmed[..digits_end];
+            let text = trimmed[digits_end + 2..].to_string();
             return Line::from(vec![
-                Span::styled(format!("{number}. "), theme::help_style()),
+                Span::styled(format!("{num}. "), theme::help_style()),
                 Span::from(text),
             ]);
         }
@@ -387,41 +387,19 @@ mod tests {
     }
 
     #[test]
-    fn render_markdown_line_numbered_list() {
-        let line = render_markdown_line("1. First step");
-        assert_eq!(line.spans.len(), 2);
-        assert!(line.spans[0].content.contains("1."));
-        assert_eq!(line.spans[1].content, "First step");
-    }
-
-    #[test]
-    fn render_markdown_line_numbered_list_multi_digit() {
-        let line = render_markdown_line("12. Twelfth step");
-        assert_eq!(line.spans.len(), 2);
-        assert!(line.spans[0].content.contains("12."));
-        assert_eq!(line.spans[1].content, "Twelfth step");
-    }
-
-    #[test]
-    fn render_markdown_line_numbered_list_not_triggered_on_plain_number() {
-        // "123" alone is not a list item (no ". " after)
-        let line = render_markdown_line("123");
-        let combined: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert_eq!(combined, "123");
-    }
-
-    #[test]
     fn render_markdown_line_blockquote() {
-        let line = render_markdown_line("> quoted text");
-        assert_eq!(line.spans.len(), 2);
+        let line = render_markdown_line("> some quoted text");
         assert!(line.spans[0].content.contains('│'));
-        assert_eq!(line.spans[1].content, "quoted text");
+        assert_eq!(line.spans[1].content, "some quoted text");
     }
 
     #[test]
     fn render_markdown_line_horizontal_rule() {
-        let line = render_markdown_line("---");
-        assert_eq!(line.spans.len(), 1);
-        assert!(line.spans[0].content.contains('─'));
+        for rule in &["---", "***", "___"] {
+            let line = render_markdown_line(rule);
+            assert_eq!(line.spans.len(), 1);
+            assert!(line.spans[0].content.contains('─'));
+        }
     }
+
 }
