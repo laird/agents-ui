@@ -1,12 +1,117 @@
 use ratatui::{
     layout::{Constraint, Layout, Rect},
-    style::Style,
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };
 
 use super::theme;
+
+/// Convert a single markdown line into a styled ratatui `Line`.
+/// Handles: headings, checkboxes, list items, inline code, bold, plain text.
+pub fn render_markdown_line(line: &str) -> Line<'static> {
+    let trimmed = line.trim_start();
+
+    // Headings: # ## ### etc.
+    if trimmed.starts_with('#') {
+        let text = trimmed.trim_start_matches('#').trim().to_string();
+        return Line::from(vec![Span::styled(
+            text,
+            theme::title_style(),
+        )]);
+    }
+
+    // Checked checkbox: - [x] or - [X]
+    if trimmed.starts_with("- [x]") || trimmed.starts_with("- [X]") {
+        let text = trimmed[5..].trim().to_string();
+        return Line::from(vec![
+            Span::styled("✓ ", Style::default().fg(Color::Green)),
+            Span::styled(text, Style::default().fg(Color::DarkGray)),
+        ]);
+    }
+
+    // Unchecked checkbox: - [ ]
+    if trimmed.starts_with("- [ ]") {
+        let text = trimmed[5..].trim().to_string();
+        return Line::from(vec![
+            Span::styled("☐ ", Style::default().fg(Color::DarkGray)),
+            Span::from(text),
+        ]);
+    }
+
+    // List item: - text or * text
+    if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
+        let text = trimmed[2..].to_string();
+        return Line::from(vec![
+            Span::styled("• ", theme::help_style()),
+            Span::from(text),
+        ]);
+    }
+
+    // Plain line — handle inline code and bold inline
+    let owned = line.to_string();
+    let spans = parse_inline(&owned);
+    Line::from(spans)
+}
+
+/// Parse a line for inline `code` and **bold**/__bold__ markers into styled spans.
+fn parse_inline(line: &str) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    let mut rest = line;
+
+    while !rest.is_empty() {
+        // Inline code: `...`
+        if let Some(start) = rest.find('`') {
+            if start > 0 {
+                spans.push(Span::from(rest[..start].to_string()));
+            }
+            let after = &rest[start + 1..];
+            if let Some(end) = after.find('`') {
+                spans.push(Span::styled(
+                    after[..end].to_string(),
+                    Style::default().fg(Color::Cyan),
+                ));
+                rest = &after[end + 1..];
+                continue;
+            } else {
+                // Unmatched backtick — treat as plain text
+                spans.push(Span::from(rest[start..].to_string()));
+                break;
+            }
+        }
+
+        // Bold: **...** or __...__
+        let bold_marker = if rest.starts_with("**") {
+            Some("**")
+        } else if rest.starts_with("__") {
+            Some("__")
+        } else {
+            None
+        };
+
+        if let Some(marker) = bold_marker {
+            let after = &rest[marker.len()..];
+            if let Some(end) = after.find(marker) {
+                spans.push(Span::styled(
+                    after[..end].to_string(),
+                    Style::default().add_modifier(Modifier::BOLD),
+                ));
+                rest = &after[end + marker.len()..];
+                continue;
+            }
+        }
+
+        // No more markers — emit the remainder
+        spans.push(Span::from(rest.to_string()));
+        break;
+    }
+
+    if spans.is_empty() {
+        spans.push(Span::from(String::new()));
+    }
+    spans
+}
 
 /// Count checked and total task items in a markdown body.
 /// Scans for `- [x]` (checked) and `- [ ]` (unchecked) patterns.
@@ -122,7 +227,7 @@ impl IssueDetailView {
 
         let mut all_lines: Vec<Line> = body_text
             .lines()
-            .map(|l| Line::from(l.to_string()))
+            .map(render_markdown_line)
             .collect();
 
         for (author, comment_body) in &self.comments {
@@ -133,7 +238,7 @@ impl IssueDetailView {
                 Span::styled(" ───", theme::help_style()),
             ]));
             for line in comment_body.replace('\r', "").lines() {
-                all_lines.push(Line::from(format!(" {line}")));
+                all_lines.push(render_markdown_line(line));
             }
         }
 
@@ -202,5 +307,56 @@ mod tests {
     fn count_tasks_ignores_non_checkbox_lines() {
         let body = "- regular list item\n- [x] checked\n* [ ] not a checkbox (wrong prefix)\n";
         assert_eq!(count_tasks(body), (1, 1));
+    }
+
+    #[test]
+    fn render_markdown_line_plain_text() {
+        let line = render_markdown_line("Hello world");
+        assert!(!line.spans.is_empty());
+        // Plain text is returned as-is in the first span
+        assert!(line.spans.iter().any(|s| s.content.contains("Hello world")));
+    }
+
+    #[test]
+    fn render_markdown_line_heading() {
+        let line = render_markdown_line("## Section heading");
+        assert_eq!(line.spans.len(), 1);
+        assert_eq!(line.spans[0].content, "Section heading");
+    }
+
+    #[test]
+    fn render_markdown_line_list_item() {
+        let line = render_markdown_line("- some item");
+        assert_eq!(line.spans.len(), 2);
+        assert!(line.spans[0].content.contains('•'));
+        assert_eq!(line.spans[1].content, "some item");
+    }
+
+    #[test]
+    fn render_markdown_line_checked_checkbox() {
+        let line = render_markdown_line("- [x] done task");
+        assert!(line.spans[0].content.contains('✓'));
+        assert!(line.spans[1].content.contains("done task"));
+    }
+
+    #[test]
+    fn render_markdown_line_unchecked_checkbox() {
+        let line = render_markdown_line("- [ ] pending task");
+        assert!(line.spans[0].content.contains('☐'));
+        assert!(line.spans[1].content.contains("pending task"));
+    }
+
+    #[test]
+    fn render_markdown_line_inline_code() {
+        let line = render_markdown_line("Use `cargo test` to run");
+        // Should have spans: "Use ", "cargo test", " to run"
+        let combined: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(combined.contains("cargo test"));
+    }
+
+    #[test]
+    fn render_markdown_line_empty() {
+        let line = render_markdown_line("");
+        assert!(!line.spans.is_empty());
     }
 }
