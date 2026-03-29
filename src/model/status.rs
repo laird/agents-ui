@@ -30,7 +30,6 @@ impl std::fmt::Display for AgentState {
 /// Parsed status of an agent from its status file.
 #[derive(Debug, Clone)]
 pub struct AgentStatus {
-    #[allow(dead_code)] // Parsed for future use in status age display
     pub timestamp: Option<NaiveDateTime>,
     pub state: AgentState,
 }
@@ -117,6 +116,24 @@ pub fn read_status_file(path: &Path) -> AgentStatus {
     }
 }
 
+/// Returns a compact elapsed-time string for a status timestamp.
+/// Returns `""` if no timestamp. Examples: `"2m"`, `"45m"`, `"2h"`.
+pub fn elapsed_display(ts: Option<NaiveDateTime>) -> String {
+    let ts = match ts {
+        Some(t) => t,
+        None => return String::new(),
+    };
+    let now = chrono::Local::now().naive_local();
+    let secs = (now - ts).num_seconds().max(0);
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3600 {
+        format!("{}m", secs / 60)
+    } else {
+        format!("{}h", secs / 3600)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct JsonAgentStatus {
     pub status: String,
@@ -190,6 +207,30 @@ mod tests {
             .map(|d| d.as_nanos())
             .unwrap_or(0);
         std::env::temp_dir().join(format!("agents-ui-status-{name}-{}-{nanos}", std::process::id()))
+    }
+
+    #[test]
+    fn elapsed_display_none_returns_empty() {
+        assert_eq!(elapsed_display(None), "");
+    }
+
+    #[test]
+    fn elapsed_display_seconds() {
+        let ts = chrono::Local::now().naive_local() - chrono::Duration::seconds(30);
+        let result = elapsed_display(Some(ts));
+        assert!(result.ends_with('s'), "Expected seconds format, got {result}");
+    }
+
+    #[test]
+    fn elapsed_display_minutes() {
+        let ts = chrono::Local::now().naive_local() - chrono::Duration::minutes(45);
+        assert_eq!(elapsed_display(Some(ts)), "45m");
+    }
+
+    #[test]
+    fn elapsed_display_hours() {
+        let ts = chrono::Local::now().naive_local() - chrono::Duration::hours(2);
+        assert_eq!(elapsed_display(Some(ts)), "2h");
     }
 
     #[test]
