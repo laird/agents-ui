@@ -2103,10 +2103,17 @@ impl App {
                     return Ok(());
                 }
 
-                let issue_count = self.swarms.get(swarm_idx)
-                    .and_then(|s| self.issue_caches.get(&s.project_name))
-                    .map(|c| c.issues.iter().filter(|i| i.matches_filter(self.swarm_view.issue_filter)).count())
-                    .unwrap_or(0);
+                let issue_count = {
+                    let filter = self.swarm_view.issue_filter;
+                    let priority_filter = self.swarm_view.priority_filter.as_ref().cloned();
+                    self.swarms.get(swarm_idx)
+                        .and_then(|s| self.issue_caches.get(&s.project_name))
+                        .map(|c| c.issues.iter()
+                            .filter(|i| i.matches_filter(filter))
+                            .filter(|i| priority_filter.as_ref().map_or(true, |p| &i.priority == p))
+                            .count())
+                        .unwrap_or(0)
+                };
                 match key.code {
                     KeyCode::Down | KeyCode::Char('j') => {
                         self.swarm_view.next_issue(issue_count);
@@ -2117,6 +2124,19 @@ impl App {
                     KeyCode::Char('f') => {
                         // Cycle issue filter
                         self.swarm_view.issue_filter = self.swarm_view.issue_filter.next();
+                        self.swarm_view.issues_table.select(Some(0));
+                    }
+                    KeyCode::Char('P') => {
+                        // Cycle priority filter: None → P0 → P1 → P2 → P3 → None
+                        use crate::model::issue::IssuePriority;
+                        self.swarm_view.priority_filter = match self.swarm_view.priority_filter {
+                            None => Some(IssuePriority::P0),
+                            Some(IssuePriority::P0) => Some(IssuePriority::P1),
+                            Some(IssuePriority::P1) => Some(IssuePriority::P2),
+                            Some(IssuePriority::P2) => Some(IssuePriority::P3),
+                            Some(IssuePriority::P3) => None,
+                            Some(IssuePriority::None) => None,
+                        };
                         self.swarm_view.issues_table.select(Some(0));
                     }
                     KeyCode::Char('a') => {
@@ -2157,9 +2177,13 @@ impl App {
                     KeyCode::Enter => {
                         // Drill into issue detail view
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            let priority_filter = self.swarm_view.priority_filter.as_ref().cloned();
                             let issues: Vec<&GitHubIssue> = self.issue_caches
                                 .get(&swarm.project_name)
-                                .map(|c| c.issues.iter().filter(|i| i.matches_filter(self.swarm_view.issue_filter)).collect())
+                                .map(|c| c.issues.iter()
+                                    .filter(|i| i.matches_filter(self.swarm_view.issue_filter))
+                                    .filter(|i| priority_filter.as_ref().map_or(true, |p| &i.priority == p))
+                                    .collect())
                                 .unwrap_or_default();
                             if let Some(issue) = self.swarm_view.selected_issue()
                                 .and_then(|idx| issues.get(idx))
@@ -2196,9 +2220,13 @@ impl App {
                     KeyCode::Char('g') => {
                         // Open selected issue in browser via gh issue view --web
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            let priority_filter = self.swarm_view.priority_filter.as_ref().cloned();
                             let issues: Vec<&GitHubIssue> = self.issue_caches
                                 .get(&swarm.project_name)
-                                .map(|c| c.issues.iter().filter(|i| i.matches_filter(self.swarm_view.issue_filter)).collect())
+                                .map(|c| c.issues.iter()
+                                    .filter(|i| i.matches_filter(self.swarm_view.issue_filter))
+                                    .filter(|i| priority_filter.as_ref().map_or(true, |p| &i.priority == p))
+                                    .collect())
                                 .unwrap_or_default();
                             if let Some(issue) = self.swarm_view.selected_issue()
                                 .and_then(|idx| issues.get(idx))
@@ -2234,12 +2262,14 @@ impl App {
                         if let KeyCode::Char(c) = key.code {
                             let issue_num = {
                                 let filter = self.swarm_view.issue_filter;
+                                let priority_filter = self.swarm_view.priority_filter.as_ref().cloned();
                                 let selected = self.swarm_view.selected_issue();
                                 self.swarms.get(swarm_idx)
                                     .and_then(|s| self.issue_caches.get(&s.project_name))
                                     .and_then(|cache| {
                                         let issues: Vec<_> = cache.issues.iter()
                                             .filter(|i| i.matches_filter(filter))
+                                            .filter(|i| priority_filter.as_ref().map_or(true, |p| &i.priority == p))
                                             .collect();
                                         selected.and_then(|idx| issues.get(idx)).map(|i| i.number)
                                     })
@@ -2266,9 +2296,13 @@ impl App {
                 swarm.manager.status.state,
                 crate::model::status::AgentState::Idle
             );
+            let priority_filter = self.swarm_view.priority_filter.as_ref().cloned();
             let issues: Vec<&GitHubIssue> = self.issue_caches
                 .get(&swarm.project_name)
-                .map(|c| c.issues.iter().filter(|i| i.matches_filter(self.swarm_view.issue_filter)).collect())
+                .map(|c| c.issues.iter()
+                    .filter(|i| i.matches_filter(self.swarm_view.issue_filter))
+                    .filter(|i| priority_filter.as_ref().map_or(true, |p| &i.priority == p))
+                    .collect())
                 .unwrap_or_default();
             let issue_num = self.swarm_view.selected_issue()
                 .and_then(|idx| issues.get(idx))
@@ -3225,12 +3259,14 @@ impl App {
         let agent_type = swarm.agent_type.clone();
 
         // Get the selected issue number
+        let priority_filter = self.swarm_view.priority_filter.as_ref().cloned();
         let issues: Vec<u32> = self.issue_caches
             .get(&project_name)
             .map(|c| {
                 c.issues
                     .iter()
                     .filter(|i| i.matches_filter(self.swarm_view.issue_filter))
+                    .filter(|i| priority_filter.as_ref().map_or(true, |p| &i.priority == p))
                     .map(|i| i.number)
                     .collect()
             })

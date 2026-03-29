@@ -7,7 +7,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::model::issue::{GitHubIssue, IssueFilter};
+use crate::model::issue::{GitHubIssue, IssueFilter, IssuePriority};
 use crate::model::swarm::Swarm;
 use super::theme;
 
@@ -33,6 +33,8 @@ pub struct SwarmView {
     pub workers_table: TableState,
     pub issues_table: TableState,
     pub issue_filter: IssueFilter,
+    /// Active priority filter (None = show all priorities).
+    pub priority_filter: Option<IssuePriority>,
     /// Active search query (None = not searching, Some("") = searching with empty query).
     pub search_query: Option<String>,
 }
@@ -48,6 +50,7 @@ impl SwarmView {
             workers_table,
             issues_table,
             issue_filter: IssueFilter::All,
+            priority_filter: None,
             search_query: None,
         }
     }
@@ -82,6 +85,7 @@ impl SwarmView {
                     true
                 }
             })
+            .filter(|i| self.priority_filter.as_ref().map_or(true, |p| &i.priority == p))
             .collect();
 
         let mut filtered_issues = filtered_issues;
@@ -354,9 +358,13 @@ impl SwarmView {
             })
             .collect();
 
+        let priority_suffix = match &self.priority_filter {
+            Some(p) => format!(" [{p}]"),
+            None => String::new(),
+        };
         let issues_block = Block::default()
             .borders(Borders::ALL)
-            .title(format!(" Issues ({filter_label}: {}{}) ",
+            .title(format!(" Issues ({filter_label}{priority_suffix}: {}{}) ",
                 filtered_issues.len(),
                 if issues_loading { ", loading…" } else { "" },
             ))
@@ -433,6 +441,8 @@ impl SwarmView {
                 Span::styled(" review-blocked  ", theme::help_style()),
                 Span::styled("f", theme::title_style()),
                 Span::styled(" filter  ", theme::help_style()),
+                Span::styled("P", theme::title_style()),
+                Span::styled(" priority  ", theme::help_style()),
                 Span::styled("/", theme::title_style()),
                 Span::styled(" search  ", theme::help_style()),
                 Span::styled("Enter", theme::title_style()),
