@@ -2017,6 +2017,31 @@ impl App {
                             }
                         }
                     }
+                    KeyCode::Char('F') => {
+                        // Send /fix-loop to all idle workers at once
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            let idle_workers: Vec<(String, String)> = swarm.workers.iter()
+                                .filter(|w| matches!(w.status.state, crate::model::status::AgentState::Idle))
+                                .map(|w| (w.role.clone(), w.tmux_target.clone()))
+                                .collect();
+                            if idle_workers.is_empty() {
+                                self.set_status("No idle workers to start".to_string());
+                            } else {
+                                let count = idle_workers.len();
+                                let mut failed = 0usize;
+                                for (_, target) in &idle_workers {
+                                    if self.adapter.start_worker_loop(target).await.is_err() {
+                                        failed += 1;
+                                    }
+                                }
+                                if failed == 0 {
+                                    self.set_status(format!("Sent /fix-loop to {count} idle worker{}", if count == 1 { "" } else { "s" }));
+                                } else {
+                                    self.set_status(format!("Sent /fix-loop to {} of {count} idle workers ({failed} failed)", count - failed));
+                                }
+                            }
+                        }
+                    }
                     KeyCode::Char('b') => {
                         self.jump_to_next_blocked(swarm_idx);
                     }
