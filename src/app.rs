@@ -16,6 +16,7 @@ use crate::tmux::proxy;
 use crate::tui::Tui;
 use crate::ui::agent_view::AgentView;
 use crate::ui::issue_detail::IssueDetailView;
+use crate::ui::issue_list::IssueListView;
 use crate::ui::repo_view::RepoView;
 use crate::ui::swarm_view::{SwarmView, SwarmPanel};
 use crate::ui::repos_list::ReposListView;
@@ -34,6 +35,8 @@ pub enum Screen {
     IssueView { swarm_idx: usize, issue_number: u32 },
     /// View full issue details (body, labels, state).
     IssueDetail { swarm_idx: usize },
+    /// Full issue list for a swarm (press 'L' from RepoView).
+    IssueList { swarm_idx: usize },
 }
 
 #[derive(Debug, Clone)]
@@ -241,6 +244,8 @@ pub struct App {
     auto_dispatch_last: Option<std::time::Instant>,
     /// Issue detail view state.
     pub issue_detail_view: Option<IssueDetailView>,
+    /// Issue list view state (full issue list screen).
+    pub issue_list_view: IssueListView,
     /// App-level keybinding configuration.
     pub keybindings: crate::config::keybindings::KeyBindings,
     /// Whether the ? help overlay is visible.
@@ -325,6 +330,7 @@ impl App {
             show_shortcuts_viewer: false,
             auto_dispatch_last: None,
             issue_detail_view: None,
+            issue_list_view: IssueListView::new(),
             keybindings: crate::config::keybindings::KeyBindings::load(),
             show_help: false,
             feedback_state: None,
@@ -448,6 +454,22 @@ impl App {
                             view.render(f, area);
                         }
                     }
+                    Screen::IssueList { swarm_idx } => {
+                        if let Some(swarm) = self.swarms.get(*swarm_idx) {
+                            let swarm = swarm.clone();
+                            let issues = self.issue_caches
+                                .get(&swarm.project_name)
+                                .map(|c| c.issues.clone())
+                                .unwrap_or_default();
+                            self.issue_list_view.render(
+                                f,
+                                area,
+                                &swarm,
+                                &issues,
+                                self.status_message.as_deref(),
+                            );
+                        }
+                    }
                 }
 
                 // Shortcuts viewer overlay
@@ -488,6 +510,9 @@ impl App {
                 }
                 Screen::IssueView { swarm_idx, .. } if *swarm_idx >= self.swarms.len() => {
                     tracing::warn!("IssueView points to invalid swarm_idx {}, falling back", swarm_idx);
+                    self.screen = Screen::ReposList;
+                }
+                Screen::IssueList { swarm_idx } if *swarm_idx >= self.swarms.len() => {
                     self.screen = Screen::ReposList;
                 }
                 Screen::RuntimeSelect | Screen::InstallScopeSelect => {}
@@ -720,7 +745,7 @@ impl App {
         // Global: Alt+Left goes back one level
         if key.modifiers.contains(KeyModifiers::ALT) && key.code == KeyCode::Left {
             match &self.screen {
-                Screen::AgentView { swarm_idx, .. } | Screen::IssueView { swarm_idx, .. } | Screen::IssueDetail { swarm_idx, .. } => {
+                Screen::AgentView { swarm_idx, .. } | Screen::IssueView { swarm_idx, .. } | Screen::IssueDetail { swarm_idx, .. } | Screen::IssueList { swarm_idx } => {
                     let idx = *swarm_idx;
                     self.enter_repo_view(idx).await;
                 }
@@ -745,7 +770,8 @@ impl App {
                 // Find the current swarm index (use 0 if on repos list)
                 let swarm_idx = match &self.screen {
                     Screen::RepoView { swarm_idx } => *swarm_idx,
-                    Screen::AgentView { swarm_idx, .. } | Screen::IssueView { swarm_idx, .. } => *swarm_idx,
+                    Screen::AgentView { swarm_idx, .. } | Screen::IssueView { swarm_idx, .. }
+                    | Screen::IssueList { swarm_idx } => *swarm_idx,
                     _ => {
                         // From repos list, use the selected swarm or first one
                         self.repos_list.selected().unwrap_or(0)
@@ -755,7 +781,7 @@ impl App {
                 if c == '0' {
                     // Alt+0: go back one level
                     match &self.screen {
-                        Screen::AgentView { swarm_idx, .. } | Screen::IssueView { swarm_idx, .. } | Screen::IssueDetail { swarm_idx, .. } => {
+                        Screen::AgentView { swarm_idx, .. } | Screen::IssueView { swarm_idx, .. } | Screen::IssueDetail { swarm_idx, .. } | Screen::IssueList { swarm_idx } => {
                             let idx = *swarm_idx;
                             self.enter_repo_view(idx).await;
                         }
@@ -863,6 +889,9 @@ impl App {
             }
             Screen::IssueDetail { swarm_idx } => {
                 self.handle_issue_detail_key(key, *swarm_idx).await?
+            }
+            Screen::IssueList { swarm_idx } => {
+                self.handle_issue_list_key(key, *swarm_idx).await?
             }
         }
 
@@ -2009,6 +2038,11 @@ impl App {
                             self.status_message = Some(format!("Teardown swarm {project}? (y to confirm, any other key to cancel)"));
                         }
                     }
+                    KeyCode::Char('L') => {
+                        // Open full issue list
+                        self.issue_list_view = IssueListView::new();
+                        self.screen = Screen::IssueList { swarm_idx };
+                    }
                     KeyCode::Char('g') => {
                         // Open selected worker's current issue in browser
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
@@ -2747,6 +2781,108 @@ impl App {
             _ => {}
         }
         Ok(())
+    }
+
+    async fn handle_issue_list_key(&mut self, key: KeyEvent, swarm_idx: usize) -> Result<()> {
+        let project_name = self.swarms.get(swarm_idx).map(|s| s.project_name.clone());
+        let issue_count = project_name.as_deref()
+            .and_then(|p| self.issue_caches.get(p))
+            .map(|c| IssueListView::sorted_open(&c.issues).len())
+            .unwrap_or(0);
+
+        match key.code {
+            KeyCode::Esc | KeyCode::Backspace => {
+                self.enter_repo_view(swarm_idx).await;
+            }
+            KeyCode::Char('q') => {
+                self.running = false;
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.issue_list_view.next(issue_count);
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.issue_list_view.previous(issue_count);
+            }
+            KeyCode::Enter => {
+                // Open issue detail view for selected issue
+                if let Some(pname) = project_name {
+                    if let Some(cache) = self.issue_caches.get(&pname) {
+                        let sorted = IssueListView::sorted_open(&cache.issues);
+                        if let Some(issue) = self.issue_list_view.selected()
+                            .and_then(|i| sorted.get(i))
+                        {
+                            let num = issue.number;
+                            self.open_issue_detail(num, swarm_idx).await;
+                        }
+                    }
+                }
+            }
+            KeyCode::Char(' ') | KeyCode::Char('d') => {
+                // Dispatch selected issue to an idle worker
+                self.dispatch_issue_from_list(swarm_idx).await;
+            }
+            KeyCode::Char('r') => {
+                // Refresh issues
+                self.start_issue_refresh(swarm_idx);
+                self.status_message = Some("Refreshing issues\u{2026}".to_string());
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    async fn dispatch_issue_from_list(&mut self, swarm_idx: usize) {
+        let Some(swarm) = self.swarms.get(swarm_idx) else { return };
+        let project_name = swarm.project_name.clone();
+        let agent_type = swarm.agent_type.clone();
+
+        let issues = self.issue_caches
+            .get(&project_name)
+            .map(|c| IssueListView::sorted_open(&c.issues)
+                .into_iter()
+                .map(|i| i.number)
+                .collect::<Vec<_>>())
+            .unwrap_or_default();
+
+        let Some(issue_num) = self.issue_list_view.selected()
+            .and_then(|idx| issues.get(idx).copied())
+        else {
+            self.status_message = Some("No issue selected".to_string());
+            return;
+        };
+
+        let idle_worker = self.swarms[swarm_idx]
+            .workers
+            .iter()
+            .enumerate()
+            .find(|(_, w)| {
+                !w.is_manager
+                    && w.dispatched_issue.is_none()
+                    && matches!(w.status.state, crate::model::status::AgentState::Idle)
+            })
+            .map(|(idx, w)| (idx, w.tmux_target.clone(), w.role.clone()));
+
+        let Some((worker_idx, target, role)) = idle_worker else {
+            self.status_message = Some("No idle workers available".to_string());
+            return;
+        };
+
+        let Some(cmd) = self.worker_dispatch_cmd(&agent_type, issue_num) else {
+            self.status_message = Some(format!("No dispatch command configured for {agent_type}"));
+            return;
+        };
+
+        tracing::info!("IssueList dispatch: #{issue_num} \u{2192} {role} via {target}");
+        if let Ok(()) = crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, &cmd).await {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, "Enter").await.ok();
+            self.swarms[swarm_idx].workers[worker_idx].dispatched_issue = Some(issue_num);
+            self.swarms[swarm_idx].workers[worker_idx].status.state =
+                crate::model::status::AgentState::Working { issue: Some(issue_num) };
+            self.status_message = Some(format!("Dispatched #{issue_num} \u{2192} {role}"));
+        } else {
+            self.status_message = Some(format!("Failed to dispatch #{issue_num}"));
+        }
     }
 
     async fn handle_feedback_key(&mut self, key: crossterm::event::KeyEvent) -> anyhow::Result<()> {
