@@ -12,6 +12,7 @@ pub enum IssueFilter {
     All,
     Open,
     Blocked,
+    Working,
 }
 
 impl IssueFilter {
@@ -19,7 +20,8 @@ impl IssueFilter {
         match self {
             IssueFilter::All => IssueFilter::Open,
             IssueFilter::Open => IssueFilter::Blocked,
-            IssueFilter::Blocked => IssueFilter::All,
+            IssueFilter::Blocked => IssueFilter::Working,
+            IssueFilter::Working => IssueFilter::All,
         }
     }
 
@@ -28,6 +30,7 @@ impl IssueFilter {
             IssueFilter::All => "all",
             IssueFilter::Open => "open",
             IssueFilter::Blocked => "blocked",
+            IssueFilter::Working => "working",
         }
     }
 }
@@ -175,6 +178,7 @@ impl GitHubIssue {
             IssueFilter::All => true,
             IssueFilter::Open => self.state == IssueState::Open && !self.is_blocked(),
             IssueFilter::Blocked => self.is_blocked(),
+            IssueFilter::Working => self.is_being_worked(),
         }
     }
 
@@ -352,6 +356,17 @@ mod tests {
         assert!(blocked.matches_filter(IssueFilter::Blocked));
 
         assert!(working.matches_filter(IssueFilter::All));
+        assert!(!working.matches_filter(IssueFilter::Blocked));
+        assert!(working.matches_filter(IssueFilter::Working));
+        assert!(!open.matches_filter(IssueFilter::Working));
+    }
+
+    #[test]
+    fn filter_cycle() {
+        assert_eq!(IssueFilter::All.next(), IssueFilter::Open);
+        assert_eq!(IssueFilter::Open.next(), IssueFilter::Blocked);
+        assert_eq!(IssueFilter::Blocked.next(), IssueFilter::Working);
+        assert_eq!(IssueFilter::Working.next(), IssueFilter::All);
     }
 
     #[test]
@@ -362,12 +377,6 @@ mod tests {
         assert_eq!(make_issue(4, &[]).type_char(), "·");
     }
 
-    #[test]
-    fn filter_cycle() {
-        assert_eq!(IssueFilter::All.next(), IssueFilter::Open);
-        assert_eq!(IssueFilter::Open.next(), IssueFilter::Blocked);
-        assert_eq!(IssueFilter::Blocked.next(), IssueFilter::All);
-    }
 
     #[test]
     fn type_char_returns_correct_indicator() {
