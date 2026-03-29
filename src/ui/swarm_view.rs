@@ -58,9 +58,9 @@ impl SwarmView {
         area: Rect,
         swarm: &Swarm,
         issues: &[GitHubIssue],
-        issues_loading: bool,
         focus: SwarmPanel,
         blink: bool,
+        issues_loading: bool,
     ) {
         let filtered_issues: Vec<&GitHubIssue> = issues
             .iter()
@@ -353,10 +353,7 @@ impl SwarmView {
 
         let issues_block = Block::default()
             .borders(Borders::ALL)
-            .title(format!(" Issues ({filter_label}: {}{}) ",
-                filtered_issues.len(),
-                if issues_loading { ", loading…" } else { "" },
-            ))
+            .title(format!(" Issues ({filter_label}: {}{}) ", filtered_issues.len(), if issues_loading { ", loading\u{2026}" } else { "" }))
             .border_style(if focus == SwarmPanel::Issues {
                 theme::title_style()
             } else {
@@ -425,7 +422,7 @@ impl SwarmView {
                 Span::styled("p", theme::title_style()),
                 Span::styled(" approve  ", theme::help_style()),
                 Span::styled("b", theme::title_style()),
-                Span::styled(" brainstorm  ", theme::help_style()),
+                Span::styled(" next blocked  ", theme::help_style()),
                 Span::styled("r", theme::title_style()),
                 Span::styled(" review-blocked  ", theme::help_style()),
                 Span::styled("f", theme::title_style()),
@@ -627,7 +624,7 @@ mod tests {
 
         terminal
             .draw(|f| {
-                view.render(f, f.area(), &swarm, &issues, false, SwarmPanel::Manager, false);
+                view.render(f, f.area(), &swarm, &issues, SwarmPanel::Manager, false, false);
             })
             .unwrap();
 

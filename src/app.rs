@@ -1,10 +1,9 @@
 use anyhow::{Context, Result};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use serde::Deserialize;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::adapter::claude::ClaudeAdapter;
 use crate::adapter::traits::{AgentRuntime, SwarmConfig};
@@ -180,22 +179,6 @@ struct PendingLaunch {
     agent_type: AgentType,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-struct CodexBlockedIssueAction {
-    issue: u32,
-    action: String,
-    #[serde(default)]
-    label: Option<String>,
-    #[serde(default)]
-    old_label: Option<String>,
-    #[serde(default)]
-    new_label: Option<String>,
-    #[serde(default)]
-    comment: Option<String>,
-    #[serde(default)]
-    duplicate_of: Option<u32>,
-}
-
 pub struct App {
     pub running: bool,
     pub screen: Screen,
@@ -264,8 +247,6 @@ pub struct App {
     pub show_help: bool,
     /// Rich feedback dialog state (None = closed).
     pub feedback_state: Option<crate::ui::feedback_dialog::FeedbackState>,
-    /// Applied Codex blocked-issue actions, keyed by raw action line.
-    applied_codex_issue_actions: HashSet<String>,
 }
 
 impl App {
@@ -345,7 +326,6 @@ impl App {
             keybindings: crate::config::keybindings::KeyBindings::load(),
             show_help: false,
             feedback_state: None,
-            applied_codex_issue_actions: HashSet::new(),
         };
 
         // Scan for available repos (git directories in cwd or children)
@@ -423,7 +403,7 @@ impl App {
                             let focus = self.swarm_focus;
                             let blink = self.blink;
                             self.swarm_view.render(
-                                f, area, &swarm, &issues, issues_loading, focus, blink,
+                                f, area, &swarm, &issues, focus, blink, issues_loading,
                             );
                         } else {
                             tracing::warn!("RepoView swarm_idx {} out of bounds (have {} swarms), falling back to ReposList", swarm_idx, self.swarms.len());
@@ -566,20 +546,13 @@ impl App {
             Event::PaneOutput { agent_id, content } => {
                 // agent_id is globally unique (e.g., "nextgen-CDD/manager")
                 let is_manager = agent_id.ends_with("/manager");
-                let mut codex_manager_repo: Option<(usize, PathBuf)> = None;
-                for (swarm_idx, swarm) in self.swarms.iter_mut().enumerate() {
+                for swarm in &mut self.swarms {
                     if let Some(agent) = swarm.agent_by_id_mut(&agent_id) {
                         agent.waiting_for_input =
                             crate::model::swarm::detect_waiting_for_input(&content);
                         agent.pane_content = content;
-                        if is_manager && swarm.agent_type == AgentType::Codex {
-                            codex_manager_repo = Some((swarm_idx, swarm.repo_path.clone()));
-                        }
                         break;
                     }
-                }
-                if let Some((swarm_idx, repo_path)) = codex_manager_repo {
-                    self.apply_codex_blocked_issue_action(swarm_idx, &repo_path).await;
                 }
                 // Auto-scroll manager panel to bottom when new content arrives
                 if is_manager {
@@ -2142,10 +2115,7 @@ impl App {
                             let target = swarm.manager.tmux_target.clone();
                             if !manager_idle {
                                 self.status_message = Some("Manager is busy — wait until idle".to_string());
-                            } else if let Some(cmd) = self.review_blocked_cmd(
-                                &agent_type,
-                                self.selected_or_next_blocked_issue(swarm_idx),
-                            ) {
+                            } else if let Some(cmd) = self.review_blocked_cmd(&agent_type) {
                                 tracing::info!("Sending '{cmd}' to manager at {target}");
                                 proxy::send_keys(&self.transport, &target, &cmd).await?;
                                 self.status_message = Some(format!("Sent: {cmd}"));
@@ -2301,31 +2271,13 @@ impl App {
         }
     }
 
-    fn review_blocked_cmd(
-        &self,
-        agent_type: &AgentType,
-        issue: Option<&GitHubIssue>,
-    ) -> Option<String> {
+    fn review_blocked_cmd(&self, agent_type: &AgentType) -> Option<String> {
         match agent_type {
             AgentType::Claude => Some("/autocoder:review-blocked".to_string()),
             AgentType::Gemini => Some("/review-blocked".to_string()),
-            AgentType::Codex => issue.map(|issue| {
-                let blocking_label = issue
-                    .labels
-                    .iter()
-                    .find(|label| crate::model::issue::BLOCKING_LABELS.contains(&label.as_str()))
-                    .cloned()
-                    .unwrap_or_else(|| "blocked".to_string());
-                let priority = issue.priority_label();
-                format!(
-                    "Review blocked issue #{issue_num}: {title}. Current labels: {labels}. The active blocking label is {blocking_label} and priority is {priority}. Read AGENTS.md, skills/autocoder/SKILL.md, workflow-map.md, and the relevant local docs/code. Decide the next unblock action. Do not run gh yourself. If the issue should be updated, output exactly one line in this format and nothing else on that line: BLOCKED_ISSUE_ACTION {{\"issue\":{issue_num},\"action\":\"remove_label|replace_label|comment_only|close_duplicate\",\"label\":\"...\",\"old_label\":\"...\",\"new_label\":\"...\",\"comment\":\"...\",\"duplicate_of\":123}}. Only include fields required for the chosen action. Use remove_label to unblock, replace_label to swap one blocking label for another, comment_only to leave guidance without changing labels, or close_duplicate when appropriate. Outside of that structured action line, provide your normal reasoning and recommendation.",
-                    issue_num = issue.number,
-                    title = issue.title.replace('"', "'"),
-                    labels = issue.labels.join(", "),
-                    blocking_label = blocking_label,
-                    priority = priority,
-                )
-            }),
+            AgentType::Codex => Some(
+                "Review the repository's blocked autocoder issues. Start by reading AGENTS.md, skills/autocoder/SKILL.md, and skills/autocoder/references/command-mapping.md. Summarize blocked issues by priority and recommend the next human review actions.".to_string()
+            ),
             AgentType::Droid => Some("/review-blocked".to_string()),
         }
     }
@@ -2686,213 +2638,6 @@ impl App {
         self.swarm_view.issue_filter = IssueFilter::Blocked;
         self.swarm_view.issues_table.select(Some(next_idx));
         self.swarm_focus = SwarmPanel::Issues;
-    }
-
-    fn selected_or_next_blocked_issue(&self, swarm_idx: usize) -> Option<&GitHubIssue> {
-        let swarm = self.swarms.get(swarm_idx)?;
-        let cache = self.issue_caches.get(&swarm.project_name)?;
-
-        let blocked: Vec<&GitHubIssue> = cache
-            .issues
-            .iter()
-            .filter(|issue| issue.is_blocked())
-            .collect();
-        if blocked.is_empty() {
-            return None;
-        }
-
-        if self.swarm_focus == SwarmPanel::Issues
-            && self.swarm_view.issue_filter == IssueFilter::Blocked
-        {
-            if let Some(selected_idx) = self.swarm_view.selected_issue() {
-                if let Some(issue) = blocked.get(selected_idx) {
-                    return Some(issue);
-                }
-            }
-        }
-
-        blocked
-            .into_iter()
-            .min_by_key(|issue| (issue.priority_num().unwrap_or(99), issue.number))
-    }
-
-    fn extract_codex_blocked_issue_action(content: &str) -> Option<String> {
-        content
-            .lines()
-            .rev()
-            .find_map(|line| line.trim().strip_prefix("BLOCKED_ISSUE_ACTION ").map(str::to_string))
-    }
-
-    async fn apply_codex_blocked_issue_action(&mut self, swarm_idx: usize, repo_path: &std::path::Path) {
-        let Some(raw_action) = self
-            .swarms
-            .get(swarm_idx)
-            .and_then(|swarm| Self::extract_codex_blocked_issue_action(&swarm.manager.pane_content))
-        else {
-            return;
-        };
-
-        if !self.applied_codex_issue_actions.insert(raw_action.clone()) {
-            return;
-        }
-
-        let action: CodexBlockedIssueAction = match serde_json::from_str(&raw_action) {
-            Ok(action) => action,
-            Err(error) => {
-                self.status_message = Some(format!("Invalid Codex blocked-issue action: {error}"));
-                return;
-            }
-        };
-
-        let issue_number = action.issue.to_string();
-        let mut command_failed = None;
-
-        match action.action.as_str() {
-            "remove_label" => {
-                let Some(label) = action.label.as_ref() else {
-                    self.status_message = Some("Codex action missing label".to_string());
-                    return;
-                };
-                let result = crate::github::gh_repo_output(
-                    &self.transport,
-                    repo_path,
-                    &[
-                        "issue".to_string(),
-                        "edit".to_string(),
-                        issue_number.clone(),
-                        "--remove-label".to_string(),
-                        label.clone(),
-                    ],
-                )
-                .await;
-                if let Ok(output) = &result {
-                    if !output.status.success() {
-                        command_failed = Some(String::from_utf8_lossy(&output.stderr).trim().to_string());
-                    }
-                } else if let Err(error) = result {
-                    command_failed = Some(error.to_string());
-                }
-            }
-            "replace_label" => {
-                let Some(old_label) = action.old_label.as_ref() else {
-                    self.status_message = Some("Codex action missing old_label".to_string());
-                    return;
-                };
-                let Some(new_label) = action.new_label.as_ref() else {
-                    self.status_message = Some("Codex action missing new_label".to_string());
-                    return;
-                };
-                let result = crate::github::gh_repo_output(
-                    &self.transport,
-                    repo_path,
-                    &[
-                        "issue".to_string(),
-                        "edit".to_string(),
-                        issue_number.clone(),
-                        "--remove-label".to_string(),
-                        old_label.clone(),
-                        "--add-label".to_string(),
-                        new_label.clone(),
-                    ],
-                )
-                .await;
-                if let Ok(output) = &result {
-                    if !output.status.success() {
-                        command_failed = Some(String::from_utf8_lossy(&output.stderr).trim().to_string());
-                    }
-                } else if let Err(error) = result {
-                    command_failed = Some(error.to_string());
-                }
-            }
-            "comment_only" => {}
-            "close_duplicate" => {
-                let mut comment = action.comment.clone().unwrap_or_default();
-                if let Some(duplicate_of) = action.duplicate_of {
-                    if !comment.is_empty() {
-                        comment.push_str("\n\n");
-                    }
-                    comment.push_str(&format!("Closing as duplicate of #{duplicate_of}."));
-                }
-                if !comment.is_empty() {
-                    let result = crate::github::gh_repo_output(
-                        &self.transport,
-                        repo_path,
-                        &[
-                            "issue".to_string(),
-                            "comment".to_string(),
-                            issue_number.clone(),
-                            "--body".to_string(),
-                            comment,
-                        ],
-                    )
-                    .await;
-                    if let Ok(output) = &result {
-                        if !output.status.success() {
-                            command_failed = Some(String::from_utf8_lossy(&output.stderr).trim().to_string());
-                        }
-                    } else if let Err(error) = result {
-                        command_failed = Some(error.to_string());
-                    }
-                }
-                if command_failed.is_none() {
-                    let result = crate::github::gh_repo_output(
-                        &self.transport,
-                        repo_path,
-                        &[
-                            "issue".to_string(),
-                            "close".to_string(),
-                            issue_number.clone(),
-                        ],
-                    )
-                    .await;
-                    if let Ok(output) = &result {
-                        if !output.status.success() {
-                            command_failed = Some(String::from_utf8_lossy(&output.stderr).trim().to_string());
-                        }
-                    } else if let Err(error) = result {
-                        command_failed = Some(error.to_string());
-                    }
-                }
-            }
-            other => {
-                self.status_message = Some(format!("Unsupported Codex blocked-issue action: {other}"));
-                return;
-            }
-        }
-
-        if command_failed.is_none() {
-            if let Some(comment) = action.comment {
-                if !comment.trim().is_empty() && action.action != "close_duplicate" {
-                    let result = crate::github::gh_repo_output(
-                        &self.transport,
-                        repo_path,
-                        &[
-                            "issue".to_string(),
-                            "comment".to_string(),
-                            issue_number.clone(),
-                            "--body".to_string(),
-                            comment,
-                        ],
-                    )
-                    .await;
-                    if let Ok(output) = &result {
-                        if !output.status.success() {
-                            command_failed = Some(String::from_utf8_lossy(&output.stderr).trim().to_string());
-                        }
-                    } else if let Err(error) = result {
-                        command_failed = Some(error.to_string());
-                    }
-                }
-            }
-        }
-
-        if let Some(error) = command_failed {
-            self.status_message = Some(format!("Failed to apply Codex issue action: {error}"));
-            return;
-        }
-
-        self.status_message = Some(format!("Applied Codex issue action to #{}", action.issue));
-        self.start_issue_refresh(swarm_idx);
     }
 
     async fn jump_to_next_waiting(&mut self, swarm_idx: usize) {
@@ -3515,10 +3260,7 @@ impl App {
                 }
             } else if available_issues == 0 && blocked_issues > 0 && idle_workers > 0 {
                 // No available work but blocked issues exist — review them
-                if let Some(review_cmd) = self.review_blocked_cmd(
-                    &swarm.agent_type,
-                    self.selected_or_next_blocked_issue(si),
-                ) {
+                if let Some(review_cmd) = self.review_blocked_cmd(&swarm.agent_type) {
                     tracing::info!("No available issues, {blocked_issues} blocked — sending {review_cmd}");
                     crate::tmux::proxy::send_keys_no_enter(&self.transport, &manager_target, &review_cmd).await.ok();
                     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -3603,6 +3345,28 @@ impl App {
         let json_statuses = crate::model::status::read_json_status_files();
 
         for swarm in &mut self.swarms {
+            // Update workers with JSON status info
+            for worker in &mut swarm.workers {
+                if let Some(json_status) = json_statuses.get(&worker.tmux_target) {
+                    worker.current_issue = json_status.issue;
+                    worker.current_issue_title = json_status.title.clone();
+                    // Update AgentState if the JSON reports working with an issue
+                    if json_status.status == "working" {
+                        if let Some(issue_num) = json_status.issue {
+                            worker.status.state = crate::model::status::AgentState::Working {
+                                issue: Some(issue_num),
+                            };
+                        }
+                    } else if json_status.status == "idle" {
+                        worker.status.state = crate::model::status::AgentState::Idle;
+                    }
+                }
+            }
+            // Also check the manager
+            if let Some(json_status) = json_statuses.get(&swarm.manager.tmux_target) {
+                swarm.manager.current_issue = json_status.issue;
+                swarm.manager.current_issue_title = json_status.title.clone();
+            }
             // Refresh all agents (manager + workers)
             let agents = std::iter::once(&mut swarm.manager)
                 .chain(swarm.workers.iter_mut());
@@ -3655,40 +3419,6 @@ impl App {
                         agent.status.state =
                             crate::model::status::AgentState::Working { issue: Some(n) };
                     }
-                }
-            }
-
-            // Apply JSON status as a best-effort overlay only.
-            // Codex does not consistently emit the /tmp/agents-ui JSON files, so
-            // the primary source of truth must remain the runtime status files and
-            // pane-content inference above.
-            for worker in &mut swarm.workers {
-                if let Some(json_status) = json_statuses.get(&worker.tmux_target) {
-                    if json_status.issue.is_some() {
-                        worker.current_issue = json_status.issue;
-                    }
-                    if json_status.title.is_some() {
-                        worker.current_issue_title = json_status.title.clone();
-                    }
-
-                    if matches!(worker.status.state, crate::model::status::AgentState::Unknown(_)) {
-                        if json_status.status == "working" {
-                            worker.status.state = crate::model::status::AgentState::Working {
-                                issue: json_status.issue,
-                            };
-                        } else if json_status.status == "idle" {
-                            worker.status.state = crate::model::status::AgentState::Idle;
-                        }
-                    }
-                }
-            }
-
-            if let Some(json_status) = json_statuses.get(&swarm.manager.tmux_target) {
-                if json_status.issue.is_some() {
-                    swarm.manager.current_issue = json_status.issue;
-                }
-                if json_status.title.is_some() {
-                    swarm.manager.current_issue_title = json_status.title.clone();
                 }
             }
 
