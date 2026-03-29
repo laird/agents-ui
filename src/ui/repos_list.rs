@@ -46,10 +46,21 @@ impl ReposListView {
         // Title
         let active_count = swarms.len();
         let avail_count = available.len();
+        let total_workers: usize = swarms.iter().map(|s| s.workers.len()).sum();
+        let idle_workers: usize = swarms.iter().map(|s| s.idle_count()).sum();
+        let worker_part = if total_workers > 0 {
+            if idle_workers == total_workers {
+                format!(" · all {total_workers} idle")
+            } else {
+                format!(" · {idle_workers}/{total_workers} idle")
+            }
+        } else {
+            String::new()
+        };
         let title_info = if active_count > 0 && avail_count > 0 {
-            format!("  ({active_count} active, {avail_count} available)")
+            format!("  ({active_count} active{worker_part}, {avail_count} available)")
         } else if active_count > 0 {
-            format!("  ({active_count} active)")
+            format!("  ({active_count} active{worker_part})")
         } else if avail_count > 0 {
             format!("  ({avail_count} repos found)")
         } else {
