@@ -46,6 +46,7 @@ pub fn resolve_agents_dir() -> PathBuf {
     PathBuf::from("../agents/plugins/autocoder")
 }
 
+#[allow(dead_code)]
 /// Find a specific script, searching installed plugin paths.
 pub fn find_script(name: &str) -> Option<PathBuf> {
     let search_paths = script_search_paths();
@@ -58,6 +59,7 @@ pub fn find_script(name: &str) -> Option<PathBuf> {
     None
 }
 
+#[allow(dead_code)]
 /// All directories where scripts might live, in priority order.
 fn script_search_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();

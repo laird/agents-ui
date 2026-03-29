@@ -1,0 +1,1 @@
+/Users/Laird.Popkin/src/agents/plugins/modernize/commands/plan.md

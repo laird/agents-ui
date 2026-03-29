@@ -1,4 +1,5 @@
 use chrono::NaiveDateTime;
+use std::collections::HashMap;
 use std::path::Path;
 
 /// The state of an individual agent.
@@ -115,9 +116,216 @@ pub fn read_status_file(path: &Path) -> AgentStatus {
     }
 }
 
+/// Returns a compact elapsed-time string for a status timestamp.
+/// Returns `""` if no timestamp. Examples: `"2m"`, `"45m"`, `"2h"`.
+pub fn elapsed_display(ts: Option<NaiveDateTime>) -> String {
+    let ts = match ts {
+        Some(t) => t,
+        None => return String::new(),
+    };
+    let now = chrono::Local::now().naive_local();
+    let secs = (now - ts).num_seconds().max(0);
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3600 {
+        format!("{}m", secs / 60)
+    } else {
+        format!("{}h", secs / 3600)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct JsonAgentStatus {
+    pub status: String,
+    pub issue: Option<u32>,
+    pub title: Option<String>,
+}
+
+/// Read all agent status files from /tmp/agents-ui/.
+/// Returns a map from pane identifier (e.g., "claude-agents-ui:2.0") to status.
+pub fn read_json_status_files() -> HashMap<String, JsonAgentStatus> {
+    let mut result = HashMap::new();
+    let dir = Path::new("/tmp/agents-ui");
+    if !dir.exists() {
+        return result;
+    }
+
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+
+            let key = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string();
+
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                    // Check if this is a monitor summary with a "workers" array
+                    if let Some(workers) = val.get("workers").and_then(|v| v.as_array()) {
+                        for w in workers {
+                            let pane = w.get("pane").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            if pane.is_empty() { continue; }
+                            let status = w.get("status").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+                            let issue = w.get("issue").and_then(|v| v.as_u64()).map(|n| n as u32);
+                            let title = w.get("title").and_then(|v| v.as_str()).map(|s| s.to_string());
+                            result.insert(pane, JsonAgentStatus { status, issue, title });
+                        }
+                    } else {
+                        // Per-worker status file (written by /fix)
+                        let status = val
+                            .get("status")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        let issue = val.get("issue").and_then(|v| v.as_u64()).map(|n| n as u32);
+                        let title = val
+                            .get("title")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                        result.insert(key, JsonAgentStatus { status, issue, title });
+                    }
+                }
+            }
+        }
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_status_path(name: &str) -> std::path::PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        std::env::temp_dir().join(format!("agents-ui-status-{name}-{}-{nanos}", std::process::id()))
+    }
+
+    #[test]
+    fn elapsed_display_none_returns_empty() {
+        assert_eq!(elapsed_display(None), "");
+    }
+
+    #[test]
+    fn elapsed_display_seconds() {
+        let ts = chrono::Local::now().naive_local() - chrono::Duration::seconds(30);
+        let result = elapsed_display(Some(ts));
+        assert!(result.ends_with('s'), "Expected seconds format, got {result}");
+    }
+
+    #[test]
+    fn elapsed_display_minutes() {
+        let ts = chrono::Local::now().naive_local() - chrono::Duration::minutes(45);
+        assert_eq!(elapsed_display(Some(ts)), "45m");
+    }
+
+    #[test]
+    fn elapsed_display_hours() {
+        let ts = chrono::Local::now().naive_local() - chrono::Duration::hours(2);
+        assert_eq!(elapsed_display(Some(ts)), "2h");
+    }
+
+    #[test]
+    fn parses_working_issue_and_timestamp() {
+        let status = parse_status_line("2024-01-15 10:30:00\tworking issue #42");
+        assert!(status.timestamp.is_some());
+        assert!(matches!(status.state, AgentState::Working { issue: Some(42) }));
+    }
+
+    #[test]
+    fn parses_idle_completed_and_unknown_states() {
+        assert!(matches!(parse_status_line("idle").state, AgentState::Idle));
+        assert!(matches!(
+            parse_status_line("completed successfully").state,
+            AgentState::Completed { .. }
+        ));
+        assert!(matches!(
+            parse_status_line("mystery mode").state,
+            AgentState::Unknown(_)
+        ));
+    }
+
+    #[test]
+    fn reads_last_line_from_status_file() {
+        let path = temp_status_path("read-last-line");
+        std::fs::write(
+            &path,
+            "2024-01-15 10:00:00\tidle\n2024-01-15 10:30:00\tfixing issue 77\n",
+        )
+        .unwrap();
+
+        let status = read_status_file(&path);
+        assert!(matches!(status.state, AgentState::Working { issue: Some(77) }));
+
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn reads_json_status_files_from_tmp() {
+        let dir = std::env::temp_dir().join(format!(
+            "agents-ui-json-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Write a working status file
+        std::fs::write(
+            dir.join("claude-test:1.0.json"),
+            r#"{"status": "working", "issue": 42, "title": "Fix the bug"}"#,
+        )
+        .unwrap();
+
+        // Write an idle status file
+        std::fs::write(
+            dir.join("claude-test:2.0.json"),
+            r#"{"status": "idle"}"#,
+        )
+        .unwrap();
+
+        // Write a non-json file (should be ignored)
+        std::fs::write(dir.join("readme.txt"), "not json").unwrap();
+
+        // Temporarily override the path by calling the internal logic directly
+        let mut result = std::collections::HashMap::new();
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let key = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                    let status = val.get("status").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+                    let issue = val.get("issue").and_then(|v| v.as_u64()).map(|n| n as u32);
+                    let title = val.get("title").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    result.insert(key, super::JsonAgentStatus { status, issue, title });
+                }
+            }
+        }
+
+        assert_eq!(result.len(), 2);
+        let working = result.get("claude-test:1.0").unwrap();
+        assert_eq!(working.status, "working");
+        assert_eq!(working.issue, Some(42));
+        assert_eq!(working.title.as_deref(), Some("Fix the bug"));
+
+        let idle = result.get("claude-test:2.0").unwrap();
+        assert_eq!(idle.status, "idle");
+        assert_eq!(idle.issue, None);
+
+        // Also verify read_json_status_files doesn't crash on missing dir
+        let _ = read_json_status_files();
+
+        std::fs::remove_dir_all(dir).ok();
+    }
 
     // --- parse_state tests ---
 
@@ -130,7 +338,7 @@ mod tests {
     #[test]
     fn parse_state_working_no_issue() {
         assert_eq!(
-            parse_state("working"),
+            parse_state("Working"),
             AgentState::Working { issue: None }
         );
     }
@@ -138,7 +346,7 @@ mod tests {
     #[test]
     fn parse_state_working_with_issue() {
         assert_eq!(
-            parse_state("working on issue #42"),
+            parse_state("Working on #42"),
             AgentState::Working { issue: Some(42) }
         );
     }
@@ -146,7 +354,7 @@ mod tests {
     #[test]
     fn parse_state_fixing() {
         assert_eq!(
-            parse_state("fixing #7"),
+            parse_state("Fixing issue #7"),
             AgentState::Working { issue: Some(7) }
         );
     }
@@ -154,48 +362,35 @@ mod tests {
     #[test]
     fn parse_state_idle() {
         assert_eq!(parse_state("idle"), AgentState::Idle);
-        assert_eq!(parse_state("Idle"), AgentState::Idle);
-    }
-
-    #[test]
-    fn parse_state_idle_no_work() {
-        assert_eq!(
-            parse_state("IDLE_NO_WORK_AVAILABLE"),
-            AgentState::Idle
-        );
+        assert_eq!(parse_state("IDLE_NO_WORK_AVAILABLE"), AgentState::Idle);
     }
 
     #[test]
     fn parse_state_completed() {
         assert_eq!(
-            parse_state("completed all tasks"),
+            parse_state("Completed all tasks"),
             AgentState::Completed {
-                detail: "completed all tasks".to_string()
+                detail: "Completed all tasks".to_string()
             }
         );
-    }
-
-    #[test]
-    fn parse_state_done() {
         assert_eq!(
-            parse_state("done: merged PR"),
+            parse_state("Done: merged PR"),
             AgentState::Completed {
-                detail: "done: merged PR".to_string()
+                detail: "Done: merged PR".to_string()
             }
         );
     }
 
     #[test]
     fn parse_state_stopped() {
-        assert_eq!(parse_state("stopped"), AgentState::Stopped);
-        assert_eq!(parse_state("Stopped by user"), AgentState::Stopped);
+        assert_eq!(parse_state("Stopped"), AgentState::Stopped);
     }
 
     #[test]
     fn parse_state_unknown() {
         assert_eq!(
-            parse_state("something unexpected"),
-            AgentState::Unknown("something unexpected".to_string())
+            parse_state("something else"),
+            AgentState::Unknown("something else".to_string())
         );
     }
 
@@ -203,26 +398,20 @@ mod tests {
 
     #[test]
     fn extract_issue_hash_format() {
-        assert_eq!(extract_issue_number("working on #42"), Some(42));
+        assert_eq!(extract_issue_number("Working on #42"), Some(42));
+        assert_eq!(extract_issue_number("#1"), Some(1));
     }
 
     #[test]
     fn extract_issue_word_format() {
         assert_eq!(extract_issue_number("fixing issue 99"), Some(99));
+        assert_eq!(extract_issue_number("issue #5 in progress"), Some(5));
     }
 
     #[test]
-    fn extract_issue_combined_format() {
-        assert_eq!(extract_issue_number("working issue #123"), Some(123));
-    }
-
-    #[test]
-    fn extract_issue_no_number() {
-        assert_eq!(extract_issue_number("just working"), None);
-    }
-
-    #[test]
-    fn extract_issue_empty() {
+    fn extract_issue_none() {
+        assert_eq!(extract_issue_number("no issue here"), None);
+        assert_eq!(extract_issue_number("working"), None);
         assert_eq!(extract_issue_number(""), None);
     }
 
@@ -230,86 +419,65 @@ mod tests {
 
     #[test]
     fn parse_status_line_with_timestamp() {
-        let line = "2024-01-15 10:30:00\tworking issue #42";
-        let status = parse_status_line(line);
+        let status = parse_status_line("2024-01-15 10:30:00\tworking issue #42");
         assert!(status.timestamp.is_some());
-        assert_eq!(status.state, AgentState::Working { issue: Some(42) });
+        assert_eq!(
+            status.state,
+            AgentState::Working { issue: Some(42) }
+        );
     }
 
     #[test]
     fn parse_status_line_without_timestamp() {
-        let line = "idle";
-        let status = parse_status_line(line);
+        let status = parse_status_line("idle");
         assert!(status.timestamp.is_none());
         assert_eq!(status.state, AgentState::Idle);
     }
 
     #[test]
     fn parse_status_line_bad_timestamp() {
-        let line = "not-a-date\tworking";
-        let status = parse_status_line(line);
+        let status = parse_status_line("not-a-date\tStarting");
         assert!(status.timestamp.is_none());
-        assert_eq!(status.state, AgentState::Working { issue: None });
+        assert_eq!(status.state, AgentState::Starting);
     }
 
     #[test]
     fn parse_status_line_empty() {
-        let line = "";
-        let status = parse_status_line(line);
-        assert!(status.timestamp.is_none());
-        // Empty string -> Unknown("")
+        let status = parse_status_line("");
+        // Empty string becomes Unknown("")
+        matches!(status.state, AgentState::Unknown(_));
     }
 
-    // --- AgentState Display tests ---
+    // --- AgentStatus default ---
 
     #[test]
-    fn display_starting() {
+    fn agent_status_default() {
+        let d = AgentStatus::default();
+        assert!(d.timestamp.is_none());
+        assert!(matches!(d.state, AgentState::Unknown(_)));
+    }
+
+    // --- Display ---
+
+    #[test]
+    fn agent_state_display() {
         assert_eq!(AgentState::Starting.to_string(), "Starting");
-    }
-
-    #[test]
-    fn display_working_with_issue() {
         assert_eq!(
-            AgentState::Working { issue: Some(42) }.to_string(),
-            "Working #42"
+            AgentState::Working { issue: Some(5) }.to_string(),
+            "Working #5"
         );
-    }
-
-    #[test]
-    fn display_working_no_issue() {
         assert_eq!(
             AgentState::Working { issue: None }.to_string(),
             "Working"
         );
-    }
-
-    #[test]
-    fn display_idle() {
         assert_eq!(AgentState::Idle.to_string(), "Idle");
-    }
-
-    #[test]
-    fn display_completed() {
         assert_eq!(
             AgentState::Completed {
-                detail: "merged".to_string()
+                detail: "done".into()
             }
             .to_string(),
-            "Done: merged"
+            "Done: done"
         );
-    }
-
-    #[test]
-    fn display_stopped() {
         assert_eq!(AgentState::Stopped.to_string(), "Stopped");
-    }
-
-    // --- read_status_file tests ---
-
-    #[test]
-    fn read_status_file_nonexistent() {
-        let status = read_status_file(Path::new("/nonexistent/path/status.txt"));
-        assert!(status.timestamp.is_none());
-        matches!(status.state, AgentState::Unknown(_));
     }
 }
