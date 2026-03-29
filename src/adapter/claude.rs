@@ -1168,7 +1168,7 @@ impl AgentRuntime for ClaudeAdapter {
 
             // 3. Check pane state: feedback prompt, shell prompt, etc.
             if pane_exists && wt_path.exists() {
-                match proxy::capture_pane(&self.transport, &worker.tmux_target, 10).await {
+                match proxy::capture_pane(&self.transport, &worker.tmux_target, 80).await {
                     Ok(content) => {
                         let trimmed = content.trim();
 
@@ -1183,11 +1183,9 @@ impl AgentRuntime for ClaudeAdapter {
                             continue;
                         }
 
-                        // 3b. Detect bare shell prompt (agent not running)
-                        // Must distinguish from an active Claude session which also shows ❯
-                        let is_bare_shell = is_bare_shell_prompt(trimmed);
-
-                        if is_bare_shell {
+                        // 3b. Detect shell prompt (agent not running) using classify_pane_state
+                        // for reliable discrimination between Claude's ❯ and a bare shell ❯.
+                        if classify_pane_state(trimmed) == PaneState::NeedsLaunch {
                             tracing::info!(
                                 "Healing {}: agent not running (shell prompt detected), restarting",
                                 worker.id
@@ -1252,7 +1250,30 @@ impl AgentRuntime for ClaudeAdapter {
     }
 
     async fn revive_agents(&self, swarm: &Swarm) -> Result<()> {
-        self.ensure_swarm_agents_running(swarm).await
+        // Only re-launch agents that have dropped back to a shell prompt.
+        // Does NOT send commands to agents that are idle (AgentIdle) — those are healthy
+        // and already running their fix-loop / monitor-loop between iterations.
+        // Sending ongoing commands to idle loop agents would queue duplicate work.
+        for agent in std::iter::once(&swarm.manager).chain(swarm.workers.iter()) {
+            if agent_is_stopped(agent) {
+                tracing::info!("Skipping revive for {} — tombstone present", agent.id);
+                continue;
+            }
+            let content = proxy::capture_pane(&self.transport, &agent.tmux_target, 80)
+                .await
+                .unwrap_or_default();
+            if classify_pane_state(&content) == PaneState::NeedsLaunch {
+                tracing::info!("Reviving {} — dropped to shell prompt", agent.id);
+                self.launch_agent_in_pane(&agent.tmux_target, &swarm.tmux_session, &swarm.agent_type)
+                    .await?;
+                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                if let Some(cmd) = self.bootstrap_command(&swarm.agent_type, agent).await {
+                    tracing::info!("Sending bootstrap command to {}: {}", agent.id, cmd);
+                    proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
+                }
+            }
+        }
+        Ok(())
     }
 }
 
