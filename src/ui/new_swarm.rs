@@ -385,6 +385,8 @@ pub fn render_create_issue_dialog(
     let chunks = Layout::vertical([
         Constraint::Length(1), // Title label
         Constraint::Length(1), // Title input
+        Constraint::Length(1), // Body label
+        Constraint::Length(1), // Body input
         Constraint::Length(1), // Priority label + selector
         Constraint::Length(1), // Type label + selector
         Constraint::Length(1), // Labels label
@@ -406,6 +408,14 @@ pub fn render_create_issue_dialog(
     let input_display = format!(" > {}{}", form.title, cursor);
     f.render_widget(Paragraph::new(Line::from(Span::styled(input_display, theme::input_style()))), chunks[1]);
 
+    // -- Body field --
+    let body_label_style = if form.field == CreateIssueField::Body { focused_style } else { normal_label };
+    f.render_widget(Paragraph::new(Line::from(Span::styled(" Body:", body_label_style))), chunks[2]);
+
+    let body_cursor = if form.field == CreateIssueField::Body { "█" } else { "" };
+    let body_display = format!(" > {}{}", form.body, body_cursor);
+    f.render_widget(Paragraph::new(Line::from(Span::styled(body_display, theme::input_style()))), chunks[3]);
+
     // -- Priority field --
     let pri_label_style = if form.field == CreateIssueField::Priority { focused_style } else { normal_label };
     let priorities = [
@@ -426,7 +436,7 @@ pub fn render_create_issue_dialog(
         };
         pri_spans.push(Span::styled(label, style));
     }
-    f.render_widget(Paragraph::new(Line::from(pri_spans)), chunks[2]);
+    f.render_widget(Paragraph::new(Line::from(pri_spans)), chunks[4]);
 
     // -- Type field --
     let type_label_style = if form.field == CreateIssueField::IssueType { focused_style } else { normal_label };
@@ -442,11 +452,11 @@ pub fn render_create_issue_dialog(
         };
         type_spans.push(Span::styled(text, style));
     }
-    f.render_widget(Paragraph::new(Line::from(type_spans)), chunks[3]);
+    f.render_widget(Paragraph::new(Line::from(type_spans)), chunks[5]);
 
     // -- Labels field --
     let lbl_label_style = if form.field == CreateIssueField::Labels { focused_style } else { normal_label };
-    f.render_widget(Paragraph::new(Line::from(Span::styled(" Labels:", lbl_label_style))), chunks[4]);
+    f.render_widget(Paragraph::new(Line::from(Span::styled(" Labels:", lbl_label_style))), chunks[6]);
 
     // Render blocking labels in two rows of 3
     for row in 0..2 {
@@ -467,7 +477,7 @@ pub fn render_create_issue_dialog(
             spans.push(Span::styled(text, style));
             spans.push(Span::styled("  ", normal_label));
         }
-        f.render_widget(Paragraph::new(Line::from(spans)), chunks[5 + row]);
+        f.render_widget(Paragraph::new(Line::from(spans)), chunks[7 + row]);
     }
 
     // -- Help bar --
@@ -485,7 +495,7 @@ pub fn render_create_issue_dialog(
         Span::styled("Esc", theme::title_style()),
         Span::styled(" cancel", theme::help_style()),
     ]));
-    f.render_widget(help, chunks[8]);
+    f.render_widget(help, chunks[10]);
 }
 
 #[cfg(test)]
