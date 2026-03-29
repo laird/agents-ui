@@ -107,6 +107,41 @@ fn parse_inline(line: &str) -> Vec<Span<'static>> {
             }
         }
 
+        // Image: ![alt](url) — emit prefix text, then render as "🖼 alt"
+        if let Some(img_start) = rest.find("![") {
+            let after = &rest[img_start + 2..];
+            if let Some(alt_end) = after.find("](") {
+                let url_part = &after[alt_end + 2..];
+                if let Some(url_end) = url_part.find(')') {
+                    let alt = &after[..alt_end];
+                    if img_start > 0 {
+                        spans.push(Span::from(rest[..img_start].to_string()));
+                    }
+                    spans.push(Span::styled("🖼 ".to_string(), theme::help_style()));
+                    spans.push(Span::styled(alt.to_string(), Style::default().fg(Color::Cyan)));
+                    rest = &url_part[url_end + 1..];
+                    continue;
+                }
+            }
+        }
+
+        // Link: [text](url) — emit prefix text, render link text, discard URL
+        if let Some(bracket_start) = rest.find('[') {
+            let after = &rest[bracket_start + 1..];
+            if let Some(text_end) = after.find("](") {
+                let link_text = &after[..text_end];
+                let url_part = &after[text_end + 2..];
+                if let Some(url_end) = url_part.find(')') {
+                    if bracket_start > 0 {
+                        spans.push(Span::from(rest[..bracket_start].to_string()));
+                    }
+                    spans.push(Span::styled(link_text.to_string(), Style::default().fg(Color::Cyan)));
+                    rest = &url_part[url_end + 1..];
+                    continue;
+                }
+            }
+        }
+
         // Strikethrough: ~~...~~
         if rest.starts_with("~~") {
             let after = &rest[2..];
@@ -523,6 +558,32 @@ mod tests {
         assert_eq!(lines[3].spans[0].style.fg, Some(Color::DarkGray));
         // "after" — plain text
         assert!(lines[4].spans.iter().any(|s| s.content.contains("after")));
+    }
+
+    #[test]
+    fn render_markdown_line_link() {
+        let line = render_markdown_line("See [the docs](https://docs.example.com) for details");
+        let combined: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(combined.contains("the docs"));
+        assert!(!combined.contains("https://"));
+        assert!(combined.contains("for details"));
+    }
+
+    #[test]
+    fn render_markdown_line_image() {
+        let line = render_markdown_line("![screenshot](https://example.com/img.png)");
+        let combined: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(combined.contains("screenshot"));
+        assert!(!combined.contains("https://"));
+        assert!(combined.contains("🖼"));
+    }
+
+    #[test]
+    fn render_markdown_line_malformed_link_passthrough() {
+        // Unclosed bracket — render as plain text
+        let line = render_markdown_line("[broken link");
+        let combined: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(combined.contains("[broken link"));
     }
 
 }
