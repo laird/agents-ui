@@ -247,6 +247,8 @@ pub struct App {
     pub show_help: bool,
     /// Rich feedback dialog state (None = closed).
     pub feedback_state: Option<crate::ui::feedback_dialog::FeedbackState>,
+    /// Projects intentionally stopped by the user — excluded from auto-heal and revival.
+    intentionally_stopped: std::collections::HashSet<String>,
 }
 
 impl App {
@@ -326,6 +328,7 @@ impl App {
             keybindings: crate::config::keybindings::KeyBindings::load(),
             show_help: false,
             feedback_state: None,
+            intentionally_stopped: std::collections::HashSet::new(),
         };
 
         // Scan for available repos (git directories in cwd or children)
@@ -1414,6 +1417,7 @@ impl App {
                     if idx < self.swarms.len() {
                         let swarm = self.swarms[idx].clone();
                         let project = swarm.project_name.clone();
+                        self.intentionally_stopped.insert(project.clone());
                         self.status_message = Some(format!("Tearing down {project}..."));
                         if let Err(e) = self.adapter.teardown(&swarm).await {
                             self.status_message = Some(format!("Teardown error: {e}"));
@@ -1717,6 +1721,7 @@ impl App {
                     if idx < self.swarms.len() {
                         let swarm = self.swarms[idx].clone();
                         let project = swarm.project_name.clone();
+                        self.intentionally_stopped.insert(project.clone());
                         self.status_message = Some(format!("Tearing down {project}..."));
                         if let Err(e) = self.adapter.teardown(&swarm).await {
                             self.status_message = Some(format!("Teardown error: {e}"));
@@ -2162,7 +2167,7 @@ impl App {
                             }
                         }
                     }
-                    KeyCode::Char('d') => {
+                    KeyCode::Char('d') | KeyCode::Char(' ') => {
                         self.dispatch_selected_issue(swarm_idx).await;
                     }
                     KeyCode::Char('g') => {
@@ -2194,9 +2199,6 @@ impl App {
                                 self.status_message = Some(format!("Opening issue #{} in browser", issue.number));
                             }
                         }
-                    }
-                    KeyCode::Char(' ') => {
-                        self.dispatch_selected_issue(swarm_idx).await;
                     }
                     KeyCode::Char('/') => {
                         self.swarm_view.search_query = Some(String::new());
@@ -3131,6 +3133,9 @@ impl App {
             if self.swarms[i].stopped {
                 continue;
             }
+            if self.intentionally_stopped.contains(&self.swarms[i].project_name) {
+                continue;
+            }
             match self.adapter.heal_workers(&mut self.swarms[i]).await {
                 Ok(repairs) => {
                     if !repairs.is_empty() {
@@ -3187,7 +3192,10 @@ impl App {
 
     /// Re-launch any agents that have dropped back to a shell prompt (e.g. after a self-update).
     async fn revive_dropped_agents(&mut self) {
-        let swarms: Vec<_> = self.swarms.iter().filter(|s| !s.stopped && !s.manager.tmux_target.is_empty()).cloned().collect();
+        let intentionally_stopped = self.intentionally_stopped.clone();
+        let swarms: Vec<_> = self.swarms.iter()
+            .filter(|s| !s.stopped && !s.manager.tmux_target.is_empty() && !intentionally_stopped.contains(&s.project_name))
+            .cloned().collect();
         for swarm in swarms {
             if let Err(e) = self.adapter.revive_agents(&swarm).await {
                 tracing::warn!("revive_agents failed for {}: {e}", swarm.project_name);
