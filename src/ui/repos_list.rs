@@ -118,12 +118,12 @@ impl ReposListView {
                 let waiting = count_attention(s, swarm_issues) - blocked_issues;
 
                 // Build issue priority summary from cache
-                let issue_summary = if let Some(cache) = issue_caches.get(&s.project_name) {
+                let (issue_summary, issue_cell_style) = if let Some(cache) = issue_caches.get(&s.project_name) {
                     let open_issues: Vec<_> = cache.issues.iter()
                         .filter(|i| i.state == crate::model::issue::IssueState::Open)
                         .collect();
                     if open_issues.is_empty() {
-                        "—".to_string()
+                        ("—".to_string(), theme::help_style())
                     } else {
                         let mut counts = [0u32; 4]; // P0, P1, P2, P3
                         for issue in &open_issues {
@@ -137,14 +137,20 @@ impl ReposListView {
                             .filter(|&(_, c)| *c > 0)
                             .map(|(i, c)| format!("P{i}:{c}"))
                             .collect();
-                        if parts.is_empty() {
+                        let text = if parts.is_empty() {
                             format!("{} open", open_issues.len())
                         } else {
                             parts.join(" ")
-                        }
+                        };
+                        let style = match counts.iter().position(|&c| c > 0) {
+                            Some(0) => theme::attention_style(),
+                            Some(1) => Style::default().fg(ratatui::style::Color::Yellow),
+                            _ => Style::default(),
+                        };
+                        (text, style)
                     }
                 } else {
-                    "—".to_string()
+                    ("—".to_string(), theme::help_style())
                 };
 
                 rows.push(Row::new(vec![
@@ -170,7 +176,7 @@ impl ReposListView {
                     } else {
                         theme::help_style()
                     }),
-                    Cell::from(issue_summary),
+                    Cell::from(issue_summary).style(issue_cell_style),
                 ]));
                 row_num += 1;
             }
