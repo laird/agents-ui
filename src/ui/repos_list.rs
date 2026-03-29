@@ -170,7 +170,27 @@ impl ReposListView {
                     } else {
                         theme::help_style()
                     }),
-                    Cell::from(issue_summary),
+                    {
+                        let highest = issue_caches.get(&s.project_name)
+                            .map(|cache| {
+                                let mut counts = [0u32; 4];
+                                for issue in cache.issues.iter()
+                                    .filter(|i| i.state == crate::model::issue::IssueState::Open)
+                                {
+                                    if let Some(p) = issue.priority_num() {
+                                        if (p as usize) < 4 { counts[p as usize] += 1; }
+                                    }
+                                }
+                                counts.iter().position(|&c| c > 0)
+                            })
+                            .flatten();
+                        let issue_style = match highest {
+                            Some(0) => theme::attention_style(),
+                            Some(1) => Style::default().fg(ratatui::style::Color::Yellow),
+                            _ => theme::help_style(),
+                        };
+                        Cell::from(issue_summary).style(issue_style)
+                    },
                 ]));
                 row_num += 1;
             }
