@@ -2027,6 +2027,7 @@ async fn ensure_gh_auth_for_repo(repo_path: &Path) {
 /// Returns true if the last line looks like a shell prompt AND there are no
 /// indicators of an active Claude session in the content. This avoids false
 /// positives where Claude's own prompt (❯) is mistaken for a shell.
+#[allow(dead_code)]
 pub(crate) fn is_bare_shell_prompt(content: &str) -> bool {
     let last_line = content.lines().last().unwrap_or("").trim();
     if last_line.is_empty() {
