@@ -147,9 +147,14 @@ impl SwarmView {
                     .find(|l| crate::model::issue::BLOCKING_LABELS.contains(&l.as_str()))
                     .map(|s| s.as_str())
                     .unwrap_or("blocked");
+                let guidance = crate::model::issue::blocking_guidance(blocking_label);
                 attn_spans.push(Span::styled(
-                    format!("#{} [{}] {}", issue.number, blocking_label, truncate(&issue.title, 30)),
+                    format!("#{} [{}] {}", issue.number, blocking_label, truncate(&issue.title, 25)),
                     theme::attention_style(),
+                ));
+                attn_spans.push(Span::styled(
+                    format!(" → {}", guidance),
+                    theme::help_style(),
                 ));
             }
             if blocked_count > 3 {
