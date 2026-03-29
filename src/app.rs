@@ -258,7 +258,6 @@ pub struct App {
     auto_dispatch_last: Option<std::time::Instant>,
     /// Issue detail view state.
     pub issue_detail_view: Option<IssueDetailView>,
-    /// Tracks last Esc press for double-Esc to go back (never forwarded to pane).
     /// App-level keybinding configuration.
     pub keybindings: crate::config::keybindings::KeyBindings,
     /// Whether the ? help overlay is visible.
@@ -811,12 +810,8 @@ impl App {
                         let worker_idx = (c as usize) - ('1' as usize);
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
                             if let Some(worker) = swarm.workers.get(worker_idx) {
-                                self.agent_view = AgentView::new();
-                                self.agent_view.scroll_to_bottom();
-                                self.screen = Screen::AgentView {
-                                    swarm_idx,
-                                    agent_id: worker.id.clone(),
-                                };
+                                let aid = worker.id.clone();
+                                self.enter_agent_view(swarm_idx, aid).await;
                                 return Ok(());
                             }
                         }
@@ -831,7 +826,7 @@ impl App {
                         _ => None,
                     };
                     if let Some(idx) = swarm_idx {
-                        self.jump_to_next_waiting(idx);
+                        self.jump_to_next_waiting(idx).await;
                         return Ok(());
                     }
                 }
@@ -1399,6 +1394,23 @@ impl App {
         self.screen = Screen::RepoView { swarm_idx };
     }
 
+    /// Enter agent view for a specific agent, resizing its tmux pane to full terminal width.
+    async fn enter_agent_view(&mut self, swarm_idx: usize, agent_id: String) {
+        if let Some(swarm) = self.swarms.get(swarm_idx) {
+            if let Some(agent) = swarm.agent(&agent_id) {
+                let target = agent.tmux_target.clone();
+                if let Ok((width, height)) = crossterm::terminal::size() {
+                    if let Err(e) = proxy::resize_pane(&self.transport, &target, width, height).await {
+                        tracing::warn!("Failed to resize agent pane {target}: {e}");
+                    }
+                }
+            }
+        }
+        self.agent_view = AgentView::new();
+        self.agent_view.scroll_to_bottom();
+        self.screen = Screen::AgentView { swarm_idx, agent_id };
+    }
+
     /// Handle selecting a row in the repos list.
     /// If it's an active swarm, jump to repo view.
     /// If it's an available repo, open the new swarm dialog pre-filled.
@@ -1938,12 +1950,8 @@ impl App {
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
                             if let Some(worker_idx) = self.swarm_view.selected_worker() {
                                 if let Some(worker) = swarm.workers.get(worker_idx) {
-                                    self.agent_view = AgentView::new();
-                                    self.agent_view.scroll_to_bottom();
-                                    self.screen = Screen::AgentView {
-                                        swarm_idx,
-                                        agent_id: worker.role.clone(),
-                                    };
+                                    let aid = worker.role.clone();
+                                    self.enter_agent_view(swarm_idx, aid).await;
                                 }
                             }
                         }
@@ -2022,16 +2030,42 @@ impl App {
                             self.status_message = Some(format!("Teardown swarm {project}? (y to confirm, any other key to cancel)"));
                         }
                     }
+                    KeyCode::Char('g') => {
+                        // Open selected worker's current issue in browser
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            if let Some(worker_idx) = self.swarm_view.selected_worker() {
+                                if let Some(worker) = swarm.workers.get(worker_idx) {
+                                    let issue_num = worker.current_issue.or(worker.dispatched_issue);
+                                    if let Some(num) = issue_num {
+                                        let repo_path = swarm.repo_path.clone();
+                                        let transport = self.transport.clone();
+                                        tokio::spawn(async move {
+                                            let _ = crate::github::gh_repo_output(
+                                                &transport,
+                                                &repo_path,
+                                                &[
+                                                    "issue".to_string(),
+                                                    "view".to_string(),
+                                                    num.to_string(),
+                                                    "--web".to_string(),
+                                                ],
+                                            )
+                                            .await;
+                                        });
+                                        self.status_message = Some(format!("Opening issue #{num} in browser"));
+                                    } else {
+                                        self.status_message = Some(format!("No issue assigned to {}", worker.role));
+                                    }
+                                }
+                            }
+                        }
+                    }
                     KeyCode::Char(c @ '1'..='9') => {
                         let worker_idx = (c as usize) - ('1' as usize);
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
                             if let Some(worker) = swarm.workers.get(worker_idx) {
-                                self.agent_view = AgentView::new();
-                                self.agent_view.scroll_to_bottom();
-                                self.screen = Screen::AgentView {
-                                    swarm_idx,
-                                    agent_id: worker.role.clone(),
-                                };
+                                let aid = worker.role.clone();
+                                self.enter_agent_view(swarm_idx, aid).await;
                             }
                         }
                     }
@@ -2396,12 +2430,7 @@ impl App {
                     return Ok(());
                 }
                 KeyCode::Char('m') => {
-                    self.agent_view = AgentView::new();
-                    self.agent_view.scroll_to_bottom();
-                    self.screen = Screen::AgentView {
-                        swarm_idx,
-                        agent_id: "manager".to_string(),
-                    };
+                    self.enter_agent_view(swarm_idx, "manager".to_string()).await;
                     return Ok(());
                 }
                 KeyCode::Char('a') => {
@@ -2490,13 +2519,8 @@ impl App {
                     let worker_idx = (c as usize) - ('1' as usize);
                     if let Some(swarm) = self.swarms.get(swarm_idx) {
                         if let Some(worker) = swarm.workers.get(worker_idx) {
-                            self.agent_view = AgentView::new();
-                            self.agent_view.scroll_to_bottom();
                             let aid = worker.id.clone();
-                            self.screen = Screen::AgentView {
-                                swarm_idx,
-                                agent_id: aid,
-                            };
+                            self.enter_agent_view(swarm_idx, aid).await;
                             return Ok(());
                         }
                     }
@@ -2872,7 +2896,7 @@ impl App {
         self.start_issue_refresh(swarm_idx);
     }
 
-    fn jump_to_next_waiting(&mut self, swarm_idx: usize) {
+    async fn jump_to_next_waiting(&mut self, swarm_idx: usize) {
         // Get the current agent ID if we're in an agent view
         let current_id = match &self.screen {
             Screen::AgentView { agent_id, .. } => Some(agent_id.clone()),
@@ -2882,12 +2906,7 @@ impl App {
         if let Some(swarm) = self.swarms.get(swarm_idx) {
             if let Some(agent) = swarm.next_waiting_agent(current_id.as_deref()) {
                 let agent_id = agent.id.clone();
-                self.agent_view = AgentView::new();
-                self.agent_view.scroll_to_bottom();
-                self.screen = Screen::AgentView {
-                    swarm_idx,
-                    agent_id,
-                };
+                self.enter_agent_view(swarm_idx, agent_id).await;
             } else {
                 self.status_message = Some("No sessions waiting for input".to_string());
             }
@@ -3112,7 +3131,7 @@ impl App {
                     "view".to_string(),
                     issue_number.to_string(),
                     "--json".to_string(),
-                    "number,title,body,labels,state".to_string(),
+                    "number,title,body,labels,state,comments".to_string(),
                 ],
             )
             .await
@@ -3134,6 +3153,21 @@ impl App {
                                 .collect()
                         })
                         .unwrap_or_default();
+                    let comments: Vec<(String, String)> = json["comments"]
+                        .as_array()
+                        .map(|arr| {
+                            arr.iter()
+                                .rev()
+                                .take(10)
+                                .rev()
+                                .filter_map(|c| {
+                                    let author = c["author"]["login"].as_str()?;
+                                    let body = c["body"].as_str()?;
+                                    Some((author.to_string(), body.to_string()))
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
 
                     self.issue_detail_view = Some(IssueDetailView::new(
                         issue_number,
@@ -3141,6 +3175,7 @@ impl App {
                         body,
                         labels,
                         state,
+                        comments,
                     ));
                     self.screen = Screen::IssueDetail { swarm_idx };
                 }
@@ -4093,8 +4128,7 @@ fn key_event_to_tmux(key: KeyEvent) -> Option<String> {
         KeyCode::Enter => Some("Enter".to_string()),
         KeyCode::Tab => Some("Tab".to_string()),
         KeyCode::Backspace => Some("BSpace".to_string()),
-        // Never forward Escape to tmux panes — it interrupts Claude sessions.
-        // Esc is handled separately as double-Esc for back navigation.
+        // Esc is handled in handle_agent_view_key before this function is reached.
         KeyCode::Esc => None,
         KeyCode::Up => Some("Up".to_string()),
         KeyCode::Down => Some("Down".to_string()),

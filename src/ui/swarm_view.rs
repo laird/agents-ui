@@ -209,6 +209,7 @@ impl SwarmView {
             Cell::from("#"),
             Cell::from("Status"),
             Cell::from("Task"),
+            Cell::from("Age"),
         ])
         .style(theme::header_style());
 
@@ -253,10 +254,12 @@ impl SwarmView {
                     }
                     _ => task,
                 };
+                let age = crate::model::status::elapsed_display(w.status.timestamp);
                 Row::new(vec![
                     Cell::from(format!("{}", i + 1)),
                     Cell::from(status_str).style(status_style),
                     Cell::from(task),
+                    Cell::from(age).style(Style::default().fg(ratatui::style::Color::DarkGray)),
                 ])
             })
             .collect();
@@ -274,8 +277,9 @@ impl SwarmView {
             worker_rows,
             [
                 Constraint::Length(3),
+                Constraint::Percentage(35),
                 Constraint::Percentage(45),
-                Constraint::Percentage(45),
+                Constraint::Length(5),
             ],
         )
         .header(worker_header)
@@ -317,6 +321,7 @@ impl SwarmView {
         }
 
         let issue_header = Row::new(vec![
+            Cell::from("T"),
             Cell::from("#"),
             Cell::from("Pri"),
             Cell::from("Title"),
@@ -336,8 +341,9 @@ impl SwarmView {
                     Style::default().fg(ratatui::style::Color::Gray)
                 };
                 Row::new(vec![
+                    Cell::from(issue.type_char()).style(theme::issue_type_style(&issue.issue_type)),
                     Cell::from(format!("{}", issue.number)),
-                    Cell::from(issue.priority_label()),
+                    Cell::from(issue.priority_label()).style(theme::priority_style(&issue.priority)),
                     Cell::from(truncate(&issue.title, 30)),
                     Cell::from(status).style(status_style),
                 ])
@@ -356,6 +362,7 @@ impl SwarmView {
         let issues_table = Table::new(
             issue_rows,
             [
+                Constraint::Length(3),
                 Constraint::Length(5),
                 Constraint::Length(4),
                 Constraint::Min(15),
@@ -395,6 +402,8 @@ impl SwarmView {
                 Span::styled(" drill in  ", theme::help_style()),
                 Span::styled("f", theme::title_style()),
                 Span::styled(" fix-loop  ", theme::help_style()),
+                Span::styled("g", theme::title_style()),
+                Span::styled(" browser  ", theme::help_style()),
                 Span::styled("d", theme::title_style()),
                 Span::styled(" shutdown  ", theme::help_style()),
                 Span::styled("a", theme::title_style()),
