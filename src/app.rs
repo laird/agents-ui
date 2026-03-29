@@ -504,7 +504,7 @@ impl App {
     }
 
     fn set_status(&mut self, msg: String) {
-        self.set_status(msg);
+        self.status_message = Some(msg);
         self.status_message_age = 0;
     }
 
