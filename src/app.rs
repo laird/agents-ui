@@ -2393,6 +2393,14 @@ impl App {
                         self.swarm_view.search_query = Some(String::new());
                         self.swarm_view.issues_table.select(Some(0));
                     }
+                    KeyCode::Char('c') => {
+                        self.swarm_view.issue_filter = IssueFilter::All;
+                        self.swarm_view.issue_type_filter = None;
+                        self.swarm_view.priority_filter = None;
+                        self.swarm_view.search_query = None;
+                        self.swarm_view.issues_table.select(Some(0));
+                        self.set_status("Filters cleared".to_string());
+                    }
                     _ => {
                         if let KeyCode::Char(c) = key.code {
                             let issue_num = {
