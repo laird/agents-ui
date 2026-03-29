@@ -659,30 +659,11 @@ impl ClaudeAdapter {
         Ok(())
     }
 
-    /// Remove worktrees for a swarm.
-    async fn remove_worktrees(&self, repo_path: &Path, worktree_paths: &[PathBuf]) -> Result<()> {
-        for wt in worktree_paths {
-            let output = self
-                .output(
-                    "git",
-                    &[
-                        "worktree".to_string(),
-                        "remove".to_string(),
-                        "--force".to_string(),
-                        wt.to_string_lossy().to_string(),
-                    ],
-                    Some(repo_path),
-                )
-                .await?;
-            if !output.status.success() {
-                tracing::warn!(
-                    "Failed to remove worktree {}: {}",
-                    wt.display(),
-                    String::from_utf8_lossy(&output.stderr)
-                );
-            }
-        }
-        Ok(())
+    fn teardown_targets(swarm: &Swarm) -> Vec<String> {
+        let mut targets = Vec::with_capacity(swarm.workers.len() + 1);
+        targets.push(swarm.manager.tmux_target.clone());
+        targets.extend(swarm.workers.iter().map(|worker| worker.tmux_target.clone()));
+        targets
     }
 }
 
@@ -1237,6 +1218,15 @@ impl AgentRuntime for ClaudeAdapter {
     }
 
     async fn teardown(&self, swarm: &Swarm) -> Result<()> {
+        // Stop each agent pane before killing the tmux session so the swarm shuts down cleanly.
+        for target in Self::teardown_targets(swarm) {
+            if let Err(err) = proxy::kill_pane(&self.transport, &target).await {
+                tracing::warn!("Failed to stop pane {target} during teardown: {err}");
+            }
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+
         // Kill the tmux session
         let output = self
             .output(
@@ -1257,15 +1247,6 @@ impl AgentRuntime for ClaudeAdapter {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
-
-        // Remove worktrees
-        let worktree_paths: Vec<PathBuf> = swarm
-            .workers
-            .iter()
-            .map(|w| w.worktree_path.clone())
-            .collect();
-        self.remove_worktrees(&swarm.repo_path, &worktree_paths)
-            .await?;
 
         Ok(())
     }
@@ -1558,9 +1539,12 @@ mod tests {
     use super::{
         classify_pane_state, extract_issue_number_from_branch, generic_worker_bootstrap_cmd,
         is_bare_shell_prompt, is_feedback_prompt, manager_bootstrap_cmd, pane_agent_is_idle,
-        pane_needs_runtime_launch, worker_dispatch_cmd, PaneState,
+        pane_needs_runtime_launch, worker_dispatch_cmd, ClaudeAdapter, PaneState,
     };
-    use crate::model::swarm::AgentType;
+    use crate::model::issue::IssueCache;
+    use crate::model::status::AgentStatus;
+    use crate::model::swarm::{AgentInfo, AgentType, Swarm};
+    use std::path::PathBuf;
 
     #[test]
     fn empty_pane_is_unknown() {
@@ -1719,6 +1703,69 @@ mod tests {
     fn normal_output_not_bare_shell() {
         assert!(!is_bare_shell_prompt("Working on issue #42"));
         assert!(!is_bare_shell_prompt("IDLE_NO_WORK_AVAILABLE"));
+    }
+
+    #[test]
+    fn teardown_targets_shutdown_manager_before_workers() {
+        let swarm = Swarm {
+            repo_path: PathBuf::from("/tmp/repo"),
+            project_name: "demo".to_string(),
+            agent_type: AgentType::Codex,
+            workflow: None,
+            tmux_session: "codex-demo".to_string(),
+            manager: AgentInfo {
+                id: "demo/manager".to_string(),
+                role: "manager".to_string(),
+                worktree_path: PathBuf::from("/tmp/repo"),
+                tmux_target: "codex-demo:review.0".to_string(),
+                status: AgentStatus::default(),
+                is_manager: true,
+                pane_content: String::new(),
+                dispatched_issue: None,
+                current_issue: None,
+                current_issue_title: None,
+                waiting_for_input: false,
+            },
+            workers: vec![
+                AgentInfo {
+                    id: "demo/worker-1".to_string(),
+                    role: "worker-1".to_string(),
+                    worktree_path: PathBuf::from("/tmp/repo-wt-1"),
+                    tmux_target: "codex-demo:worker-1.0".to_string(),
+                    status: AgentStatus::default(),
+                    is_manager: false,
+                    pane_content: String::new(),
+                    dispatched_issue: None,
+                    current_issue: None,
+                    current_issue_title: None,
+                    waiting_for_input: false,
+                },
+                AgentInfo {
+                    id: "demo/worker-2".to_string(),
+                    role: "worker-2".to_string(),
+                    worktree_path: PathBuf::from("/tmp/repo-wt-2"),
+                    tmux_target: "codex-demo:worker-2.0".to_string(),
+                    status: AgentStatus::default(),
+                    is_manager: false,
+                    pane_content: String::new(),
+                    dispatched_issue: None,
+                    current_issue: None,
+                    current_issue_title: None,
+                    waiting_for_input: false,
+                },
+            ],
+            issue_cache: IssueCache::default(),
+            stopped: false,
+        };
+
+        assert_eq!(
+            ClaudeAdapter::teardown_targets(&swarm),
+            vec![
+                "codex-demo:review.0".to_string(),
+                "codex-demo:worker-1.0".to_string(),
+                "codex-demo:worker-2.0".to_string(),
+            ]
+        );
     }
 }
 
@@ -1908,5 +1955,3 @@ pub(crate) fn is_feedback_prompt(content: &str) -> bool {
     lower.contains("how is claude doing this session")
         || (lower.contains("1: bad") && lower.contains("0: dismiss"))
 }
-
-
