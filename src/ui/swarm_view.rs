@@ -343,7 +343,7 @@ impl SwarmView {
                 Row::new(vec![
                     Cell::from(issue.type_char()).style(theme::issue_type_style(&issue.issue_type)),
                     Cell::from(format!("{}", issue.number)),
-                    Cell::from(issue.priority_label()),
+                    Cell::from(issue.priority_label()).style(theme::priority_style(&issue.priority)),
                     Cell::from(truncate(&issue.title, 30)),
                     Cell::from(status).style(status_style),
                 ])
