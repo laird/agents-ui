@@ -12,6 +12,7 @@ pub enum IssueFilter {
     All,
     Open,
     Blocked,
+    Working,
 }
 
 impl IssueFilter {
@@ -19,7 +20,8 @@ impl IssueFilter {
         match self {
             IssueFilter::All => IssueFilter::Open,
             IssueFilter::Open => IssueFilter::Blocked,
-            IssueFilter::Blocked => IssueFilter::All,
+            IssueFilter::Blocked => IssueFilter::Working,
+            IssueFilter::Working => IssueFilter::All,
         }
     }
 
@@ -28,6 +30,7 @@ impl IssueFilter {
             IssueFilter::All => "all",
             IssueFilter::Open => "open",
             IssueFilter::Blocked => "blocked",
+            IssueFilter::Working => "working",
         }
     }
 }
@@ -175,6 +178,7 @@ impl GitHubIssue {
             IssueFilter::All => true,
             IssueFilter::Open => self.state == IssueState::Open && !self.is_blocked(),
             IssueFilter::Blocked => self.is_blocked(),
+            IssueFilter::Working => self.is_being_worked(),
         }
     }
 
@@ -366,7 +370,21 @@ mod tests {
     fn filter_cycle() {
         assert_eq!(IssueFilter::All.next(), IssueFilter::Open);
         assert_eq!(IssueFilter::Open.next(), IssueFilter::Blocked);
-        assert_eq!(IssueFilter::Blocked.next(), IssueFilter::All);
+        assert_eq!(IssueFilter::Blocked.next(), IssueFilter::Working);
+        assert_eq!(IssueFilter::Working.next(), IssueFilter::All);
+    }
+
+    #[test]
+    fn filter_working_matches_only_working_issues() {
+        let working = make_issue(1, &["working"]);
+        let open = make_issue(2, &["bug"]);
+        let blocked = make_issue(3, &["needs-design"]);
+
+        assert!(working.matches_filter(IssueFilter::Working));
+        assert!(!open.matches_filter(IssueFilter::Working));
+        assert!(!blocked.matches_filter(IssueFilter::Working));
+
+        assert_eq!(IssueFilter::Working.label(), "working");
     }
 
     #[test]
