@@ -356,6 +356,11 @@ impl ClaudeAdapter {
     }
 
     async fn ensure_swarm_agents_running(&self, swarm: &Swarm) -> Result<()> {
+        if swarm.stopped || crate::config::persistence::is_swarm_stopped(&swarm.project_name) {
+            tracing::info!("Skipping ensure_swarm_agents_running for stopped swarm {}", swarm.project_name);
+            return Ok(());
+        }
+
         self.ensure_agent_running(&swarm.manager, &swarm.tmux_session, &swarm.agent_type)
             .await?;
 
@@ -570,6 +575,7 @@ impl ClaudeAdapter {
                 .unwrap_or(0)
         });
 
+        let stopped = crate::config::persistence::is_swarm_stopped(&project_name);
         Ok(Swarm {
             repo_path,
             project_name,
@@ -579,7 +585,7 @@ impl ClaudeAdapter {
             manager,
             workers,
             issue_cache: Default::default(),
-            stopped: false,
+            stopped,
         })
     }
 
@@ -679,6 +685,9 @@ impl AgentRuntime for ClaudeAdapter {
         let runtime = &config.agent_type;
         let project_name = Self::project_name(&config.repo_path);
         let session_name = Self::session_name(runtime, &project_name);
+
+        // Clear any stopped tombstone — the user is explicitly launching this swarm.
+        crate::config::persistence::clear_swarm_stopped(&project_name);
 
         // Check if session already exists
         if session::has_session(&self.transport, &session_name).await {
@@ -994,6 +1003,10 @@ impl AgentRuntime for ClaudeAdapter {
     }
 
     async fn heal_workers(&self, swarm: &mut Swarm) -> Result<Vec<String>> {
+        if swarm.stopped || crate::config::persistence::is_swarm_stopped(&swarm.project_name) {
+            tracing::info!("Skipping heal_workers for stopped swarm {}", swarm.project_name);
+            return Ok(vec![]);
+        }
         let mut repairs = Vec::new();
         let session_name = &swarm.tmux_session;
         let repo_path = &swarm.repo_path;
@@ -1223,6 +1236,9 @@ impl AgentRuntime for ClaudeAdapter {
     }
 
     async fn teardown(&self, swarm: &Swarm) -> Result<()> {
+        // Mark as intentionally stopped before killing so heal_workers won't respawn it on restart.
+        crate::config::persistence::mark_swarm_stopped(&swarm.project_name);
+
         // Stop each agent pane before killing the tmux session so the swarm shuts down cleanly.
         for target in Self::teardown_targets(swarm) {
             if let Err(err) = proxy::kill_pane(&self.transport, &target).await {
@@ -1257,6 +1273,9 @@ impl AgentRuntime for ClaudeAdapter {
     }
 
     async fn revive_agents(&self, swarm: &Swarm) -> Result<()> {
+        if swarm.stopped || crate::config::persistence::is_swarm_stopped(&swarm.project_name) {
+            return Ok(());
+        }
         // Only re-launch agents that have dropped back to a shell prompt.
         // Does NOT send commands to agents that are idle (AgentIdle) — those are healthy
         // and already running their fix-loop / monitor-loop between iterations.

@@ -1874,6 +1874,7 @@ impl App {
                         let swarm = self.swarms[idx].clone();
                         let project = swarm.project_name.clone();
                         // Write tombstones before stopping so heal/revive won't respawn.
+                        crate::config::persistence::mark_swarm_stopped(&project);
                         for worker in &swarm.workers {
                             crate::adapter::claude::mark_agent_stopped(&worker.worktree_path);
                         }
