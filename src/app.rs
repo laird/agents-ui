@@ -241,7 +241,6 @@ pub struct App {
     auto_dispatch_last: Option<std::time::Instant>,
     /// Issue detail view state.
     pub issue_detail_view: Option<IssueDetailView>,
-    /// Tracks last Esc press for double-Esc to go back (never forwarded to pane).
     /// App-level keybinding configuration.
     pub keybindings: crate::config::keybindings::KeyBindings,
     /// Whether the ? help overlay is visible.
@@ -3800,8 +3799,7 @@ fn key_event_to_tmux(key: KeyEvent) -> Option<String> {
         KeyCode::Enter => Some("Enter".to_string()),
         KeyCode::Tab => Some("Tab".to_string()),
         KeyCode::Backspace => Some("BSpace".to_string()),
-        // Never forward Escape to tmux panes — it interrupts Claude sessions.
-        // Esc is handled separately as double-Esc for back navigation.
+        // Esc is handled in handle_agent_view_key before this function is reached.
         KeyCode::Esc => None,
         KeyCode::Up => Some("Up".to_string()),
         KeyCode::Down => Some("Down".to_string()),

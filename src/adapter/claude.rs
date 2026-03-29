@@ -395,9 +395,14 @@ impl ClaudeAdapter {
                 }
             }
             PaneState::AgentIdle => {
-                if let Some(cmd) = self.bootstrap_command(runtime, agent).await {
-                    tracing::info!("Agent {} is idle, sending bootstrap: {}", agent.id, cmd);
-                    proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
+                // Don't re-bootstrap the manager when it's idle — manage_manager_sessions
+                // handles dispatching commands to the manager based on work availability.
+                // Re-bootstrapping here causes monitor-loop to fire continuously.
+                if !agent.is_manager {
+                    if let Some(cmd) = self.bootstrap_command(runtime, agent).await {
+                        tracing::info!("Agent {} is idle, sending bootstrap: {}", agent.id, cmd);
+                        proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
+                    }
                 }
             }
             PaneState::AgentBusy => {
@@ -436,9 +441,11 @@ impl ClaudeAdapter {
                         }
                     }
                     PaneState::AgentIdle => {
-                        if let Some(cmd) = self.bootstrap_command(runtime, agent).await {
-                            tracing::info!("Probe: agent {} is idle, sending bootstrap: {}", agent.id, cmd);
-                            proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
+                        if !agent.is_manager {
+                            if let Some(cmd) = self.bootstrap_command(runtime, agent).await {
+                                tracing::info!("Probe: agent {} is idle, sending bootstrap: {}", agent.id, cmd);
+                                proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
+                            }
                         }
                     }
                     _ => {
