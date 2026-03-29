@@ -2879,7 +2879,7 @@ impl App {
                     "view".to_string(),
                     issue_number.to_string(),
                     "--json".to_string(),
-                    "number,title,body,labels,state,comments".to_string(),
+                    "number,title,body,labels,state,comments,assignees,createdAt".to_string(),
                 ],
             )
             .await
@@ -2917,6 +2917,31 @@ impl App {
                         })
                         .unwrap_or_default();
 
+                    let assignees: Vec<String> = json["assignees"]
+                        .as_array()
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|a| a["login"].as_str().map(|s| s.to_string()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let created_at_age = json["createdAt"]
+                        .as_str()
+                        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                        .map(|dt| {
+                            let secs = (chrono::Utc::now() - dt.to_utc()).num_seconds().max(0) as u64;
+                            if secs < 3600 {
+                                format!("{}m ", secs / 60)
+                            } else if secs < 86400 {
+                                format!("{}h ", secs / 3600)
+                            } else if secs < 7 * 86400 {
+                                format!("{}d ", secs / 86400)
+                            } else {
+                                format!("{}w ", secs / (7 * 86400))
+                            }
+                        })
+                        .unwrap_or_default();
+
                     self.issue_detail_view = Some(IssueDetailView::new(
                         issue_number,
                         title,
@@ -2924,6 +2949,8 @@ impl App {
                         labels,
                         state,
                         comments,
+                        assignees,
+                        created_at_age,
                     ));
                     self.screen = Screen::IssueDetail { swarm_idx };
                 }

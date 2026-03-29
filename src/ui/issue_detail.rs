@@ -141,6 +141,8 @@ pub struct IssueDetailView {
     pub state: String,
     /// Recent comments as (author, body) pairs.
     pub comments: Vec<(String, String)>,
+    pub assignees: Vec<String>,
+    pub created_at_age: String,
 }
 
 impl IssueDetailView {
@@ -151,6 +153,8 @@ impl IssueDetailView {
         labels: Vec<String>,
         state: String,
         comments: Vec<(String, String)>,
+        assignees: Vec<String>,
+        created_at_age: String,
     ) -> Self {
         Self {
             scroll_offset: 0,
@@ -160,6 +164,8 @@ impl IssueDetailView {
             labels,
             state,
             comments,
+            assignees,
+            created_at_age,
         }
     }
 
@@ -173,7 +179,7 @@ impl IssueDetailView {
 
     pub fn render(&self, f: &mut Frame, area: Rect) {
         let chunks = Layout::vertical([
-            Constraint::Length(4), // Header
+            Constraint::Length(5), // Header (extra line for metadata)
             Constraint::Min(5),   // Body
             Constraint::Length(3), // Help bar
         ])
@@ -185,6 +191,27 @@ impl IssueDetailView {
         } else {
             self.labels.join(" · ")
         };
+
+        let assignee_text = if self.assignees.is_empty() {
+            "unassigned".to_string()
+        } else {
+            self.assignees.join(", ")
+        };
+        let comment_count = self.comments.len();
+        let comment_text = match comment_count {
+            0 => "no comments".to_string(),
+            1 => "1 comment".to_string(),
+            n => format!("{n} comments"),
+        };
+        let age_text = if self.created_at_age.is_empty() {
+            String::new()
+        } else {
+            format!("created {}ago", self.created_at_age)
+        };
+        let mut meta_parts = vec![assignee_text, comment_text];
+        if !age_text.is_empty() {
+            meta_parts.push(age_text);
+        }
 
         let header_lines = vec![
             Line::from(vec![
@@ -212,6 +239,10 @@ impl IssueDetailView {
                 }
                 Line::from(spans)
             },
+            Line::from(Span::styled(
+                format!(" {}", meta_parts.join("  ·  ")),
+                theme::help_style(),
+            )),
         ];
 
         let header = Paragraph::new(header_lines)
@@ -242,7 +273,6 @@ impl IssueDetailView {
             }
         }
 
-        let comment_count = self.comments.len();
         let block_title = if comment_count > 0 {
             format!(" Issue Body + {} comment{} ", comment_count, if comment_count == 1 { "" } else { "s" })
         } else {
@@ -358,5 +388,37 @@ mod tests {
     fn render_markdown_line_empty() {
         let line = render_markdown_line("");
         assert!(!line.spans.is_empty());
+    }
+
+    fn make_view(comment_count: usize, assignees: &[&str], created_at_age: &str) -> IssueDetailView {
+        let comments: Vec<(String, String)> = (0..comment_count)
+            .map(|i| (format!("user{i}"), format!("comment {i}")))
+            .collect();
+        IssueDetailView::new(
+            42,
+            "Test issue".to_string(),
+            "Body text".to_string(),
+            vec!["bug".to_string()],
+            "OPEN".to_string(),
+            comments,
+            assignees.iter().map(|s| s.to_string()).collect(),
+            created_at_age.to_string(),
+        )
+    }
+
+    #[test]
+    fn new_stores_metadata_fields() {
+        let view = make_view(5, &["alice", "bob"], "3d ");
+        assert_eq!(view.comments.len(), 5);
+        assert_eq!(view.assignees, vec!["alice", "bob"]);
+        assert_eq!(view.created_at_age, "3d ");
+    }
+
+    #[test]
+    fn new_empty_metadata() {
+        let view = make_view(0, &[], "");
+        assert!(view.comments.is_empty());
+        assert!(view.assignees.is_empty());
+        assert!(view.created_at_age.is_empty());
     }
 }
