@@ -2095,6 +2095,26 @@ impl App {
                             }
                         }
                     }
+                    KeyCode::Char('F') => {
+                        // Send /fix-loop to ALL idle workers at once
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            let idle_workers: Vec<(String, String)> = swarm.workers.iter()
+                                .filter(|w| matches!(w.status.state, crate::model::status::AgentState::Idle))
+                                .map(|w| (w.tmux_target.clone(), w.role.clone()))
+                                .collect();
+                            if idle_workers.is_empty() {
+                                self.set_status("No idle workers to start".to_string());
+                            } else {
+                                let count = idle_workers.len();
+                                for (target, id) in idle_workers {
+                                    if let Err(e) = self.adapter.start_worker_loop(&target).await {
+                                        tracing::error!("Failed to send /fix-loop to {id}: {e}");
+                                    }
+                                }
+                                self.set_status(format!("Sent /fix-loop to {count} idle worker{}", if count == 1 { "" } else { "s" }));
+                            }
+                        }
+                    }
                     KeyCode::Char('b') => {
                         self.jump_to_next_blocked(swarm_idx);
                     }
