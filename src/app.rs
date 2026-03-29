@@ -506,7 +506,13 @@ impl App {
 
                 // Help overlay (rendered on top of everything)
                 if self.show_help {
-                    crate::ui::help_overlay::render_help_overlay(f, f.area(), &self.keybindings);
+                    let context_entries = match &self.screen {
+                        Screen::RepoView { .. } if self.swarm_focus == SwarmPanel::Issues => {
+                            Some(crate::ui::help_overlay::ISSUES_PANEL_ENTRIES)
+                        }
+                        _ => None,
+                    };
+                    crate::ui::help_overlay::render_help_overlay(f, f.area(), &self.keybindings, context_entries);
                 }
                 // Feedback dialog (rendered on top of everything)
                 if let Some(ref state) = self.feedback_state {
