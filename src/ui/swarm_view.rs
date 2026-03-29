@@ -375,9 +375,16 @@ impl SwarmView {
             })
             .collect();
 
+        let total_issue_count = issues.len();
+        let is_filtered = filtered_issues.len() < total_issue_count;
+        let count_str = if is_filtered {
+            format!("{}/{}", filtered_issues.len(), total_issue_count)
+        } else {
+            filtered_issues.len().to_string()
+        };
         let issues_block = Block::default()
             .borders(Borders::ALL)
-            .title(format!(" Issues ({filter_label}{type_label}: {}{}) ", filtered_issues.len(), if issues_loading { ", loading\u{2026}" } else { "" }))
+            .title(format!(" Issues ({filter_label}{type_label}: {}{}) ", count_str, if issues_loading { ", loading\u{2026}" } else { "" }))
             .border_style(if focus == SwarmPanel::Issues {
                 theme::title_style()
             } else {
@@ -750,5 +757,61 @@ mod tests {
         assert!(rendered.contains("Issues (all: 1)"));
         assert!(rendered.contains("demo"));
         assert!(rendered.contains("#12"));
+    }
+
+    #[test]
+    fn issues_title_shows_fraction_when_filter_active() {
+        use crate::model::issue::{IssueType, IssuePriority, IssueState};
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut view = SwarmView::new();
+        view.cycle_issue_type_filter(); // → Bug filter
+        let swarm = make_swarm();
+        let issues = vec![
+            GitHubIssue {
+                number: 1, title: "A bug".into(), state: IssueState::Open,
+                priority: IssuePriority::P1, issue_type: IssueType::Bug,
+                labels: vec!["bug".into()], is_working: false, assigned_worker: None, updated_at: None,
+            },
+            GitHubIssue {
+                number: 2, title: "An enhancement".into(), state: IssueState::Open,
+                priority: IssuePriority::P2, issue_type: IssueType::Enhancement,
+                labels: vec!["enhancement".into()], is_working: false, assigned_worker: None, updated_at: None,
+            },
+        ];
+        terminal.draw(|f| {
+            view.render(f, f.area(), &swarm, &issues, SwarmPanel::Issues, false, false);
+        }).unwrap();
+        let rendered: String = terminal.backend().buffer().content().iter().map(|c| c.symbol()).collect();
+        // Bug filter active: 1 bug shown out of 2 total
+        assert!(rendered.contains("1/2"), "Expected '1/2' in rendered output, got: {rendered}");
+    }
+
+    #[test]
+    fn issues_title_shows_plain_count_when_no_filter() {
+        use crate::model::issue::{IssueType, IssuePriority, IssueState};
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut view = SwarmView::new();
+        let swarm = make_swarm();
+        let issues = vec![
+            GitHubIssue {
+                number: 1, title: "A bug".into(), state: IssueState::Open,
+                priority: IssuePriority::P1, issue_type: IssueType::Bug,
+                labels: vec!["bug".into()], is_working: false, assigned_worker: None, updated_at: None,
+            },
+            GitHubIssue {
+                number: 2, title: "An enhancement".into(), state: IssueState::Open,
+                priority: IssuePriority::P2, issue_type: IssueType::Enhancement,
+                labels: vec!["enhancement".into()], is_working: false, assigned_worker: None, updated_at: None,
+            },
+        ];
+        terminal.draw(|f| {
+            view.render(f, f.area(), &swarm, &issues, SwarmPanel::Issues, false, false);
+        }).unwrap();
+        let rendered: String = terminal.backend().buffer().content().iter().map(|c| c.symbol()).collect();
+        // No filter: plain count "all: 2", no fraction
+        assert!(rendered.contains("all: 2"), "Expected 'all: 2' in rendered output");
+        assert!(!rendered.contains("2/2"), "Should not show fraction when unfiltered");
     }
 }
