@@ -467,7 +467,26 @@ impl App {
 
                 // Help overlay (rendered on top of everything)
                 if self.show_help {
-                    crate::ui::help_overlay::render_help_overlay(f, f.area(), &self.keybindings);
+                    let context_entries: Option<&[(&str, &str)]> =
+                        if matches!(&self.screen, Screen::RepoView { .. })
+                            && self.swarm_focus == SwarmPanel::Issues
+                        {
+                            Some(&[
+                                ("filter status", "f"),
+                                ("filter priority", "P"),
+                                ("search", "/"),
+                                ("add issue", "a"),
+                                ("dispatch to agent", "d / Space"),
+                                ("approve (send to mgr)", "p"),
+                                ("next blocked", "b"),
+                                ("review-blocked", "r"),
+                                ("open in browser", "g"),
+                                ("view detail", "Enter"),
+                            ])
+                        } else {
+                            None
+                        };
+                    crate::ui::help_overlay::render_help_overlay(f, f.area(), &self.keybindings, context_entries);
                 }
                 // Feedback dialog (rendered on top of everything)
                 if let Some(ref state) = self.feedback_state {
