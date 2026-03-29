@@ -68,36 +68,7 @@ impl SwarmView {
         blink: bool,
         issues_loading: bool,
     ) {
-        let mut filtered_issues: Vec<&GitHubIssue> = issues
-            .iter()
-            .filter(|i| i.matches_filter(self.issue_filter))
-            .filter(|i| {
-                if let Some(ref tf) = self.issue_type_filter {
-                    &i.issue_type == tf
-                } else {
-                    true
-                }
-            })
-            .filter(|i| self.priority_filter.as_ref().map_or(true, |pf| &i.priority == pf))
-            .filter(|i| {
-                if let Some(q) = &self.search_query {
-                    if q.is_empty() {
-                        return true;
-                    }
-                    let q_lower = q.to_lowercase();
-                    if q.starts_with('#') {
-                        if let Ok(n) = q[1..].parse::<u32>() {
-                            return i.number == n;
-                        }
-                    }
-                    i.title.to_lowercase().contains(&q_lower)
-                        || i.number.to_string().contains(q.as_str())
-                } else {
-                    true
-                }
-            })
-            .collect();
-        filtered_issues.sort_by_key(|i| (&i.priority, i.number));
+        let filtered_issues = self.apply_filters(issues);
 
         // Pre-compute attention data before layout (needed for dynamic sizing)
         let attention = count_attention(swarm, issues);
@@ -541,12 +512,14 @@ impl SwarmView {
         self.issues_table.selected()
     }
 
-    /// Return issues matching both the active filter and the current search query.
-    #[allow(dead_code)]
-    pub fn issues_matching_search<'a>(&self, issues: &'a [GitHubIssue]) -> Vec<&'a GitHubIssue> {
-        issues
+    /// Return all issues passing every active filter (status, type, priority, search query),
+    /// sorted by priority then issue number — exactly matching the order rendered by `render()`.
+    pub fn apply_filters<'a>(&self, issues: &'a [GitHubIssue]) -> Vec<&'a GitHubIssue> {
+        let mut result: Vec<&'a GitHubIssue> = issues
             .iter()
             .filter(|i| i.matches_filter(self.issue_filter))
+            .filter(|i| self.issue_type_filter.as_ref().map_or(true, |tf| &i.issue_type == tf))
+            .filter(|i| self.priority_filter.as_ref().map_or(true, |pf| &i.priority == pf))
             .filter(|i| {
                 if let Some(q) = &self.search_query {
                     if q.is_empty() {
@@ -564,17 +537,6 @@ impl SwarmView {
                     true
                 }
             })
-            .collect()
-    }
-
-    /// Return the subset of `issues` that pass both the state filter and the type filter,
-    /// sorted by priority then issue number — matching the order rendered by `render()`.
-    pub fn apply_filters<'a>(&self, issues: &'a [GitHubIssue]) -> Vec<&'a GitHubIssue> {
-        let mut result: Vec<&'a GitHubIssue> = issues
-            .iter()
-            .filter(|i| i.matches_filter(self.issue_filter))
-            .filter(|i| self.issue_type_filter.as_ref().map_or(true, |tf| &i.issue_type == tf))
-            .filter(|i| self.priority_filter.as_ref().map_or(true, |pf| &i.priority == pf))
             .collect();
         result.sort_by_key(|i| (&i.priority, i.number));
         result
@@ -875,7 +837,7 @@ mod tests {
             make_issue(3, "Fix logout flow", &[]),
         ];
         view.search_query = Some("login".to_string());
-        let results = view.issues_matching_search(&issues);
+        let results = view.apply_filters(&issues);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].number, 1);
     }
@@ -888,7 +850,7 @@ mod tests {
             make_issue(123, "Another issue", &[]),
         ];
         view.search_query = Some("42".to_string());
-        let results = view.issues_matching_search(&issues);
+        let results = view.apply_filters(&issues);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].number, 42);
     }
@@ -901,7 +863,7 @@ mod tests {
             make_issue(123, "Another issue", &[]),
         ];
         view.search_query = Some("#42".to_string());
-        let results = view.issues_matching_search(&issues);
+        let results = view.apply_filters(&issues);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].number, 42);
     }
@@ -913,7 +875,7 @@ mod tests {
             make_issue(1, "Issue one", &[]),
             make_issue(2, "Issue two", &[]),
         ];
-        let results = view.issues_matching_search(&issues);
+        let results = view.apply_filters(&issues);
         assert_eq!(results.len(), 2);
     }
 
@@ -925,7 +887,7 @@ mod tests {
             make_issue(1, "Open issue", &[]),
             make_issue(2, "Blocked issue", &["needs-design"]),
         ];
-        let results = view.issues_matching_search(&issues);
+        let results = view.apply_filters(&issues);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].number, 2);
     }
