@@ -425,7 +425,7 @@ impl SwarmView {
                 Span::styled("p", theme::title_style()),
                 Span::styled(" approve  ", theme::help_style()),
                 Span::styled("b", theme::title_style()),
-                Span::styled(" brainstorm  ", theme::help_style()),
+                Span::styled(" next blocked  ", theme::help_style()),
                 Span::styled("r", theme::title_style()),
                 Span::styled(" review-blocked  ", theme::help_style()),
                 Span::styled("f", theme::title_style()),
