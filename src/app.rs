@@ -2242,6 +2242,15 @@ impl App {
                         // Cycle priority filter (None → P0 → P1 → P2 → P3 → None)
                         self.swarm_view.cycle_priority_filter();
                     }
+                    KeyCode::Char('c') => {
+                        // Clear all active filters at once
+                        self.swarm_view.issue_filter = crate::model::issue::IssueFilter::All;
+                        self.swarm_view.issue_type_filter = None;
+                        self.swarm_view.priority_filter = None;
+                        self.swarm_view.search_query = None;
+                        self.swarm_view.issues_table.select(Some(0));
+                        self.set_status("Filters cleared".to_string());
+                    }
                     KeyCode::Char('a') => {
                         // Add new issue: open create-issue dialog
                         self.create_issue_form = Some(CreateIssueForm::new());

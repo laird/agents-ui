@@ -78,6 +78,7 @@ pub const ISSUES_PANEL_ENTRIES: &[(&str, &str)] = &[
     ("f", "Cycle status filter"),
     ("t", "Cycle type filter"),
     ("P", "Cycle priority filter"),
+    ("c", "Clear all filters"),
     ("/", "Search issues"),
     ("a", "Add new issue"),
     ("d / Space", "Dispatch to agent"),
