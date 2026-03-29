@@ -209,6 +209,7 @@ impl SwarmView {
             Cell::from("#"),
             Cell::from("Status"),
             Cell::from("Task"),
+            Cell::from("Age"),
         ])
         .style(theme::header_style());
 
@@ -253,10 +254,12 @@ impl SwarmView {
                     }
                     _ => task,
                 };
+                let age = crate::model::status::elapsed_display(w.status.timestamp);
                 Row::new(vec![
                     Cell::from(format!("{}", i + 1)),
                     Cell::from(status_str).style(status_style),
                     Cell::from(task),
+                    Cell::from(age).style(Style::default().fg(ratatui::style::Color::DarkGray)),
                 ])
             })
             .collect();
@@ -274,8 +277,9 @@ impl SwarmView {
             worker_rows,
             [
                 Constraint::Length(3),
+                Constraint::Percentage(35),
                 Constraint::Percentage(45),
-                Constraint::Percentage(45),
+                Constraint::Length(5),
             ],
         )
         .header(worker_header)
