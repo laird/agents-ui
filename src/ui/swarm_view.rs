@@ -478,6 +478,8 @@ impl SwarmView {
                 Span::styled(" view  ", theme::help_style()),
                 Span::styled("g", theme::title_style()),
                 Span::styled(" browser  ", theme::help_style()),
+                Span::styled("u", theme::title_style()),
+                Span::styled(" release  ", theme::help_style()),
                 Span::styled("⌥a", theme::title_style()),
                 Span::styled(" next alert", theme::help_style()),
             ],
@@ -788,7 +790,7 @@ mod tests {
     }
 
     #[test]
-    fn priority_filter_excludes_non_matching() {
+    fn priority_filter_shows_only_matching_priority() {
         use crate::model::issue::{IssueType, IssuePriority, IssueState};
         let issues = vec![
             GitHubIssue { number: 1, title: "a".into(), state: IssueState::Open, priority: IssuePriority::P1, issue_type: IssueType::Bug, labels: vec![], is_working: false, assigned_worker: None, updated_at: None },
