@@ -1,3 +1,4 @@
+use std::time::Instant;
 use ansi_to_tui::IntoText;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
@@ -67,6 +68,7 @@ impl SwarmView {
         focus: SwarmPanel,
         blink: bool,
         issues_loading: bool,
+        last_fetched: Option<Instant>,
     ) {
         let filtered_issues = self.apply_filters(issues);
 
@@ -367,9 +369,14 @@ impl SwarmView {
         } else {
             filtered_issues.len().to_string()
         };
+        let staleness_secs = last_fetched.map(|t| t.elapsed().as_secs());
+        let staleness_str = match staleness_secs {
+            Some(s) if s >= 120 => format!(" · {}m old{}", s / 60, if s >= 600 { " \u{27F3}" } else { "" }),
+            _ => String::new(),
+        };
         let issues_block = Block::default()
             .borders(Borders::ALL)
-            .title(format!(" Issues ({filter_label}{type_label}{priority_label}: {}{}) ", count_str, if issues_loading { ", loading\u{2026}" } else { "" }))
+            .title(format!(" Issues ({filter_label}{type_label}{priority_label}: {}{}{}) ", count_str, if issues_loading { ", loading\u{2026}" } else { "" }, staleness_str))
             .border_style(if focus == SwarmPanel::Issues {
                 theme::title_style()
             } else {
@@ -796,7 +803,7 @@ mod tests {
 
         terminal
             .draw(|f| {
-                view.render(f, f.area(), &swarm, &issues, SwarmPanel::Manager, false, false);
+                view.render(f, f.area(), &swarm, &issues, SwarmPanel::Manager, false, false, None);
             })
             .unwrap();
 
@@ -913,7 +920,7 @@ mod tests {
             },
         ];
         terminal.draw(|f| {
-            view.render(f, f.area(), &swarm, &issues, SwarmPanel::Issues, false, false);
+            view.render(f, f.area(), &swarm, &issues, SwarmPanel::Issues, false, false, None);
         }).unwrap();
         let rendered: String = terminal.backend().buffer().content().iter().map(|c| c.symbol()).collect();
         // Bug filter active: 1 bug shown out of 2 total
@@ -940,12 +947,43 @@ mod tests {
             },
         ];
         terminal.draw(|f| {
-            view.render(f, f.area(), &swarm, &issues, SwarmPanel::Issues, false, false);
+            view.render(f, f.area(), &swarm, &issues, SwarmPanel::Issues, false, false, None);
         }).unwrap();
         let rendered: String = terminal.backend().buffer().content().iter().map(|c| c.symbol()).collect();
         // No filter: plain count "all: 2", no fraction
         assert!(rendered.contains("all: 2"), "Expected 'all: 2' in rendered output");
         assert!(!rendered.contains("2/2"), "Should not show fraction when unfiltered");
+    }
+
+    #[test]
+    fn issues_title_shows_staleness_indicator() {
+        use std::time::{Duration, Instant};
+        use crate::model::issue::{IssueType, IssuePriority, IssueState};
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let swarm = make_swarm();
+        let issues = vec![GitHubIssue {
+            number: 1, title: "A bug".into(), state: IssueState::Open,
+            priority: IssuePriority::P1, issue_type: IssueType::Bug,
+            labels: vec!["bug".into()], is_working: false, assigned_worker: None, updated_at: None,
+        }];
+
+        // Fresh: no indicator
+        let fresh = Instant::now();
+        let mut view = SwarmView::new();
+        terminal.draw(|f| {
+            view.render(f, f.area(), &swarm, &issues, SwarmPanel::Issues, false, false, Some(fresh));
+        }).unwrap();
+        let rendered: String = terminal.backend().buffer().content().iter().map(|c| c.symbol()).collect();
+        assert!(!rendered.contains("old"), "Fresh data should show no staleness indicator");
+
+        // Stale (simulate 5 min old): expect "5m old"
+        let stale = Instant::now().checked_sub(Duration::from_secs(300)).unwrap_or(Instant::now());
+        terminal.draw(|f| {
+            view.render(f, f.area(), &swarm, &issues, SwarmPanel::Issues, false, false, Some(stale));
+        }).unwrap();
+        let rendered: String = terminal.backend().buffer().content().iter().map(|c| c.symbol()).collect();
+        assert!(rendered.contains("m old"), "Stale data should show staleness indicator");
     }
 
     #[test]
@@ -1010,7 +1048,7 @@ mod tests {
             },
         ];
         terminal.draw(|f| {
-            view.render(f, f.area(), &swarm, &issues, SwarmPanel::Issues, false, false);
+            view.render(f, f.area(), &swarm, &issues, SwarmPanel::Issues, false, false, None);
         }).unwrap();
         let rendered: String = terminal.backend().buffer().content().iter().map(|c| c.symbol()).collect();
         // P1 filter active: 1 of 2 issues shown
