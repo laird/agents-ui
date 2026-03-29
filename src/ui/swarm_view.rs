@@ -58,6 +58,7 @@ impl SwarmView {
         area: Rect,
         swarm: &Swarm,
         issues: &[GitHubIssue],
+        issues_loading: bool,
         focus: SwarmPanel,
         blink: bool,
     ) {
@@ -352,7 +353,10 @@ impl SwarmView {
 
         let issues_block = Block::default()
             .borders(Borders::ALL)
-            .title(format!(" Issues ({filter_label}: {}) ", filtered_issues.len()))
+            .title(format!(" Issues ({filter_label}: {}{}) ",
+                filtered_issues.len(),
+                if issues_loading { ", loading…" } else { "" },
+            ))
             .border_style(if focus == SwarmPanel::Issues {
                 theme::title_style()
             } else {
@@ -623,7 +627,7 @@ mod tests {
 
         terminal
             .draw(|f| {
-                view.render(f, f.area(), &swarm, &issues, SwarmPanel::Manager, false);
+                view.render(f, f.area(), &swarm, &issues, false, SwarmPanel::Manager, false);
             })
             .unwrap();
 
