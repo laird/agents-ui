@@ -168,6 +168,15 @@ impl GitHubIssue {
             IssueFilter::Blocked => self.is_blocked(),
         }
     }
+
+    pub fn type_char(&self) -> &str {
+        match self.issue_type {
+            IssueType::Bug => "B",
+            IssueType::Enhancement => "E",
+            IssueType::Proposal => "P",
+            IssueType::Other => "·",
+        }
+    }
 }
 
 /// Cached issues for a project.
@@ -342,6 +351,14 @@ mod tests {
         assert!(blocked.matches_filter(IssueFilter::Blocked));
 
         assert!(working.matches_filter(IssueFilter::All));
+    }
+
+    #[test]
+    fn type_char_variants() {
+        assert_eq!(make_issue(1, &["bug"]).type_char(), "B");
+        assert_eq!(make_issue(2, &["enhancement"]).type_char(), "E");
+        assert_eq!(make_issue(3, &["proposal"]).type_char(), "P");
+        assert_eq!(make_issue(4, &[]).type_char(), "·");
     }
 
     #[test]

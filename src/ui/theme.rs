@@ -1,6 +1,6 @@
 use ratatui::style::{Color, Modifier, Style};
 
-use crate::model::issue::IssuePriority;
+use crate::model::issue::{IssuePriority, IssueType};
 use crate::model::status::AgentState;
 
 pub fn title_style() -> Style {
@@ -70,6 +70,15 @@ pub fn priority_style(priority: &IssuePriority) -> Style {
         IssuePriority::P2 => Style::default().fg(Color::Blue),
         IssuePriority::P3 => Style::default().fg(Color::DarkGray),
         IssuePriority::None => Style::default().fg(Color::DarkGray),
+    }
+}
+
+pub fn issue_type_style(issue_type: &IssueType) -> Style {
+    match issue_type {
+        IssueType::Bug => Style::default().fg(Color::Red),
+        IssueType::Enhancement => Style::default().fg(Color::Cyan),
+        IssueType::Proposal => Style::default().fg(Color::Magenta),
+        IssueType::Other => Style::default().fg(Color::DarkGray),
     }
 }
 

@@ -321,6 +321,7 @@ impl SwarmView {
         }
 
         let issue_header = Row::new(vec![
+            Cell::from("T"),
             Cell::from("#"),
             Cell::from("Pri"),
             Cell::from("Title"),
@@ -340,6 +341,7 @@ impl SwarmView {
                     Style::default().fg(ratatui::style::Color::Gray)
                 };
                 Row::new(vec![
+                    Cell::from(issue.type_char()).style(theme::issue_type_style(&issue.issue_type)),
                     Cell::from(format!("{}", issue.number)),
                     Cell::from(issue.priority_label()),
                     Cell::from(truncate(&issue.title, 30)),
@@ -360,6 +362,7 @@ impl SwarmView {
         let issues_table = Table::new(
             issue_rows,
             [
+                Constraint::Length(3),
                 Constraint::Length(5),
                 Constraint::Length(4),
                 Constraint::Min(15),
