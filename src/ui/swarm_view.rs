@@ -402,6 +402,8 @@ impl SwarmView {
                 Span::styled(" drill in  ", theme::help_style()),
                 Span::styled("f", theme::title_style()),
                 Span::styled(" fix-loop  ", theme::help_style()),
+                Span::styled("g", theme::title_style()),
+                Span::styled(" browser  ", theme::help_style()),
                 Span::styled("d", theme::title_style()),
                 Span::styled(" shutdown  ", theme::help_style()),
                 Span::styled("a", theme::title_style()),

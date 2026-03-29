@@ -2003,6 +2003,36 @@ impl App {
                             self.status_message = Some(format!("Teardown swarm {project}? (y to confirm, any other key to cancel)"));
                         }
                     }
+                    KeyCode::Char('g') => {
+                        // Open selected worker's current issue in browser
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            if let Some(worker_idx) = self.swarm_view.selected_worker() {
+                                if let Some(worker) = swarm.workers.get(worker_idx) {
+                                    let issue_num = worker.current_issue.or(worker.dispatched_issue);
+                                    if let Some(num) = issue_num {
+                                        let repo_path = swarm.repo_path.clone();
+                                        let transport = self.transport.clone();
+                                        tokio::spawn(async move {
+                                            let _ = crate::github::gh_repo_output(
+                                                &transport,
+                                                &repo_path,
+                                                &[
+                                                    "issue".to_string(),
+                                                    "view".to_string(),
+                                                    num.to_string(),
+                                                    "--web".to_string(),
+                                                ],
+                                            )
+                                            .await;
+                                        });
+                                        self.status_message = Some(format!("Opening issue #{num} in browser"));
+                                    } else {
+                                        self.status_message = Some(format!("No issue assigned to {}", worker.role));
+                                    }
+                                }
+                            }
+                        }
+                    }
                     KeyCode::Char(c @ '1'..='9') => {
                         let worker_idx = (c as usize) - ('1' as usize);
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
