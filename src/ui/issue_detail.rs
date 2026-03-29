@@ -87,6 +87,50 @@ fn parse_inline(line: &str) -> Vec<Span<'static>> {
     let mut rest = line;
 
     while !rest.is_empty() {
+        // Image: ![alt](url) → show "🖼 alt"
+        if let Some(start) = rest.find("![") {
+            if start > 0 {
+                spans.extend(parse_inline(&rest[..start]));
+            }
+            let after = &rest[start + 2..];
+            if let Some(alt_end) = after.find("](") {
+                let alt = &after[..alt_end];
+                let after_url = &after[alt_end + 2..];
+                if let Some(url_end) = after_url.find(')') {
+                    spans.push(Span::styled(
+                        format!("🖼 {alt}"),
+                        Style::default().fg(Color::Blue),
+                    ));
+                    rest = &after_url[url_end + 1..];
+                    continue;
+                }
+            }
+        }
+
+        // Link: [text](url) → show "text"
+        if let Some(start) = rest.find('[') {
+            if start > 0 {
+                spans.extend(parse_inline(&rest[..start]));
+            }
+            let after = &rest[start + 1..];
+            if let Some(text_end) = after.find("](") {
+                let text = &after[..text_end];
+                let after_url = &after[text_end + 2..];
+                if let Some(url_end) = after_url.find(')') {
+                    spans.push(Span::styled(
+                        text.to_string(),
+                        Style::default().add_modifier(Modifier::UNDERLINED),
+                    ));
+                    rest = &after_url[url_end + 1..];
+                    continue;
+                }
+            }
+            // No valid link syntax — emit up to and including '['
+            spans.push(Span::from(rest[..start + 1].to_string()));
+            rest = &rest[start + 1..];
+            continue;
+        }
+
         // Inline code: `...`
         if let Some(start) = rest.find('`') {
             if start > 0 {
@@ -523,6 +567,31 @@ mod tests {
         assert_eq!(lines[3].spans[0].style.fg, Some(Color::DarkGray));
         // "after" — plain text
         assert!(lines[4].spans.iter().any(|s| s.content.contains("after")));
+    }
+
+    #[test]
+    fn render_markdown_line_link() {
+        let line = render_markdown_line("See [the docs](https://docs.example.com) for details");
+        let combined: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(combined.contains("the docs"));
+        assert!(!combined.contains("https://"));
+        assert!(combined.contains("for details"));
+    }
+
+    #[test]
+    fn render_markdown_line_image() {
+        let line = render_markdown_line("![screenshot](https://example.com/img.png)");
+        let combined: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(combined.contains("screenshot"));
+        assert!(!combined.contains("https://"));
+        assert!(combined.contains("🖼"));
+    }
+
+    #[test]
+    fn render_markdown_line_malformed_link_passthrough() {
+        let line = render_markdown_line("[broken link");
+        let combined: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(combined.contains("[broken link"));
     }
 
 }
