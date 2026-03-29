@@ -247,6 +247,8 @@ pub struct App {
     pub show_help: bool,
     /// Rich feedback dialog state (None = closed).
     pub feedback_state: Option<crate::ui::feedback_dialog::FeedbackState>,
+    /// Tick counter for auto-clearing transient status messages (~3s at 20Hz = 60 ticks).
+    status_message_age: u32,
 }
 
 impl App {
@@ -326,6 +328,7 @@ impl App {
             keybindings: crate::config::keybindings::KeyBindings::load(),
             show_help: false,
             feedback_state: None,
+            status_message_age: 0,
         };
 
         // Scan for available repos (git directories in cwd or children)
@@ -538,6 +541,25 @@ impl App {
                     self.issue_refresh_counter = 0;
                     if let Screen::RepoView { swarm_idx } = &self.screen {
                         self.start_issue_refresh(*swarm_idx);
+                    }
+                }
+                // Auto-clear transient status messages after ~3 seconds (60 ticks at 20Hz).
+                // Confirmation prompts (containing "? (y to confirm") are never auto-cleared.
+                match &self.status_message {
+                    None => {
+                        self.status_message_age = 0;
+                    }
+                    Some(msg) => {
+                        let is_confirmation = msg.contains("? (y to confirm") || msg.contains("? (y/n)");
+                        if is_confirmation {
+                            self.status_message_age = 0;
+                        } else {
+                            self.status_message_age += 1;
+                            if self.status_message_age >= 60 {
+                                self.status_message = None;
+                                self.status_message_age = 0;
+                            }
+                        }
                     }
                 }
                 // Auto-dispatch: send /monitor-workers to manager when workers are idle
