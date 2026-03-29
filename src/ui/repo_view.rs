@@ -279,8 +279,16 @@ impl RepoView {
             .enumerate()
             .map(|(idx, w)| {
                 let key_label = format!("{} ", idx + 1);
+                let reviving_style = ratatui::style::Style::default().fg(ratatui::style::Color::Cyan);
+                let attention_style = ratatui::style::Style::default()
+                    .fg(ratatui::style::Color::Red)
+                    .add_modifier(ratatui::style::Modifier::BOLD);
                 let (dot, dot_style) = if w.waiting_for_input {
                     ("⚠ ", theme::waiting_style())
+                } else if w.resurrection_attempts >= 3 {
+                    ("⟳ ", attention_style)
+                } else if w.resurrection_attempts > 0 {
+                    ("⟳ ", reviving_style)
                 } else {
                     match &w.status.state {
                         crate::model::status::AgentState::Working { .. } => {
@@ -301,6 +309,10 @@ impl RepoView {
 
                 let status_text = if w.waiting_for_input {
                     "NEEDS INPUT".to_string()
+                } else if w.resurrection_attempts > 1 {
+                    format!("Reviving (×{})", w.resurrection_attempts)
+                } else if w.resurrection_attempts == 1 {
+                    "Reviving...".to_string()
                 } else {
                     w.status.state.to_string()
                 };

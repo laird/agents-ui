@@ -1289,6 +1289,7 @@ impl App {
                 current_issue: None,
                 current_issue_title: None,
                 waiting_for_input: false,
+            resurrection_attempts: 0,
             },
             workers: Vec::new(),
             issue_cache: crate::model::issue::IssueCache::default(),
@@ -3043,7 +3044,28 @@ impl App {
 
     /// Re-launch any agents that have dropped back to a shell prompt (e.g. after a self-update).
     async fn revive_dropped_agents(&mut self) {
-        let swarms: Vec<_> = self.swarms.iter().filter(|s| !s.manager.tmux_target.is_empty()).cloned().collect();
+        // Identify workers that look dropped before attempting revival.
+        let mut dropped: Vec<(usize, usize)> = Vec::new(); // (swarm_idx, worker_idx)
+        for (si, swarm) in self.swarms.iter().enumerate() {
+            if swarm.manager.tmux_target.is_empty() {
+                continue;
+            }
+            for (wi, worker) in swarm.workers.iter().enumerate() {
+                if matches!(
+                    worker.status.state,
+                    crate::model::status::AgentState::Stopped | crate::model::status::AgentState::Unknown(_)
+                ) {
+                    dropped.push((si, wi));
+                }
+            }
+        }
+        // Increment resurrection_attempts for dropped workers before reviving.
+        for (si, wi) in &dropped {
+            self.swarms[*si].workers[*wi].resurrection_attempts += 1;
+        }
+        let swarms: Vec<_> = self.swarms.iter()
+            .filter(|s| !s.manager.tmux_target.is_empty())
+            .cloned().collect();
         for swarm in swarms {
             if let Err(e) = self.adapter.revive_agents(&swarm).await {
                 tracing::warn!("revive_agents failed for {}: {e}", swarm.project_name);
@@ -3260,6 +3282,13 @@ impl App {
                                 crate::model::status::AgentState::Stopped
                             ) {
                                 agent.dispatched_issue = None;
+                            }
+                            // Reset resurrection counter when agent returns to healthy state
+                            if matches!(new_status.state,
+                                crate::model::status::AgentState::Working { .. } |
+                                crate::model::status::AgentState::Idle
+                            ) {
+                                agent.resurrection_attempts = 0;
                             }
                             agent.status = new_status;
                         }
