@@ -247,8 +247,8 @@ pub struct App {
     pub show_help: bool,
     /// Rich feedback dialog state (None = closed).
     pub feedback_state: Option<crate::ui::feedback_dialog::FeedbackState>,
-    /// When the current status_message was first seen (for auto-clear after ~3 seconds).
-    status_message_set_at: Option<Instant>,
+    /// Tick counter for auto-clearing transient status messages (~3s at 20Hz = 60 ticks).
+    status_message_age: u32,
 }
 
 impl App {
