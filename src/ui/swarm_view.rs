@@ -65,7 +65,7 @@ impl SwarmView {
         blink: bool,
         issues_loading: bool,
     ) {
-        let filtered_issues: Vec<&GitHubIssue> = issues
+        let mut filtered_issues: Vec<&GitHubIssue> = issues
             .iter()
             .filter(|i| i.matches_filter(self.issue_filter))
             .filter(|i| {
@@ -93,6 +93,7 @@ impl SwarmView {
                 }
             })
             .collect();
+        filtered_issues.sort_by_key(|i| (&i.priority, i.number));
 
         // Pre-compute attention data before layout (needed for dynamic sizing)
         let attention = count_attention(swarm, issues);
