@@ -693,10 +693,9 @@ mod tests {
             GitHubIssue { number: 3, title: "c".into(), state: IssueState::Open, priority: IssuePriority::P1, issue_type: IssueType::Bug, labels: vec![], is_working: false, assigned_worker: None },
             GitHubIssue { number: 8, title: "d".into(), state: IssueState::Open, priority: IssuePriority::P2, issue_type: IssueType::Enhancement, labels: vec![], is_working: false, assigned_worker: None },
         ];
-        // Use apply_filters (no search/type filter) and verify sort order
+        // apply_filters returns issues sorted by priority then number
         let view = SwarmView::new();
-        let mut filtered = view.apply_filters(&issues);
-        filtered.sort_by_key(|i| (&i.priority, i.number));
+        let filtered = view.apply_filters(&issues);
         let nums: Vec<u32> = filtered.iter().map(|i| i.number).collect();
         assert_eq!(nums, vec![3, 5, 8, 10]); // P1(3), P1(5), P2(8), P3(10)
     }
