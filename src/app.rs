@@ -397,14 +397,13 @@ impl App {
                     Screen::RepoView { swarm_idx } => {
                         if let Some(swarm) = self.swarms.get(*swarm_idx) {
                             let swarm = swarm.clone();
-                            let issues = self.issue_caches
-                                .get(&swarm.project_name)
-                                .map(|c| c.issues.clone())
-                                .unwrap_or_default();
+                            let cache = self.issue_caches.get(&swarm.project_name);
+                            let issues = cache.map(|c| c.issues.clone()).unwrap_or_default();
+                            let issues_loading = cache.map(|c| c.is_loading).unwrap_or(false);
                             let focus = self.swarm_focus;
                             let blink = self.blink;
                             self.swarm_view.render(
-                                f, area, &swarm, &issues, focus, blink,
+                                f, area, &swarm, &issues, focus, blink, issues_loading,
                             );
                         } else {
                             tracing::warn!("RepoView swarm_idx {} out of bounds (have {} swarms), falling back to ReposList", swarm_idx, self.swarms.len());
