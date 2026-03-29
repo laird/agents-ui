@@ -15,10 +15,11 @@ pub struct IssueDetailView {
     pub body: String,
     pub labels: Vec<String>,
     pub state: String,
+    pub comments: Vec<(String, String)>, // (author, body)
 }
 
 impl IssueDetailView {
-    pub fn new(issue_number: u32, title: String, body: String, labels: Vec<String>, state: String) -> Self {
+    pub fn new(issue_number: u32, title: String, body: String, labels: Vec<String>, state: String, comments: Vec<(String, String)>) -> Self {
         Self {
             scroll_offset: 0,
             issue_number,
@@ -26,6 +27,7 @@ impl IssueDetailView {
             body,
             labels,
             state,
+            comments,
         }
     }
 
@@ -71,19 +73,36 @@ impl IssueDetailView {
             .block(Block::default().borders(Borders::BOTTOM));
         f.render_widget(header, chunks[0]);
 
-        // Body content
+        // Body + comments content (combined into one scrollable area)
+        let mut all_lines: Vec<Line> = Vec::new();
+
         let body_text = if self.body.is_empty() {
             " (No description provided)".to_string()
         } else {
             format!(" {}", self.body.replace('\r', ""))
         };
+        for l in body_text.lines() {
+            all_lines.push(Line::from(l.to_string()));
+        }
 
-        let body_lines: Vec<Line> = body_text
-            .lines()
-            .map(|l| Line::from(l.to_string()))
-            .collect();
+        if !self.comments.is_empty() {
+            all_lines.push(Line::from(""));
+            for (author, comment_body) in &self.comments {
+                all_lines.push(Line::from(vec![
+                    Span::styled(format!(" @{author}:"), theme::title_style()),
+                ]));
+                let comment_text = format!(" {}", comment_body.replace('\r', ""));
+                for l in comment_text.lines() {
+                    all_lines.push(Line::from(l.to_string()));
+                }
+                all_lines.push(Line::from(Span::styled(
+                    " ─────────────────────────────────────",
+                    theme::help_style(),
+                )));
+            }
+        }
 
-        let body = Paragraph::new(body_lines)
+        let body = Paragraph::new(all_lines)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
