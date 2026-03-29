@@ -7,7 +7,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::model::issue::{GitHubIssue, IssueFilter};
+use crate::model::issue::{GitHubIssue, IssueFilter, IssueType};
 use crate::model::swarm::Swarm;
 use super::theme;
 
@@ -33,6 +33,8 @@ pub struct SwarmView {
     pub workers_table: TableState,
     pub issues_table: TableState,
     pub issue_filter: IssueFilter,
+    /// Active type filter: None = all types, Some(t) = only issues of that type.
+    pub issue_type_filter: Option<IssueType>,
     /// Active search query (None = not searching, Some("") = searching with empty query).
     pub search_query: Option<String>,
 }
@@ -48,6 +50,7 @@ impl SwarmView {
             workers_table,
             issues_table,
             issue_filter: IssueFilter::All,
+            issue_type_filter: None,
             search_query: None,
         }
     }
@@ -65,6 +68,13 @@ impl SwarmView {
         let filtered_issues: Vec<&GitHubIssue> = issues
             .iter()
             .filter(|i| i.matches_filter(self.issue_filter))
+            .filter(|i| {
+                if let Some(ref tf) = self.issue_type_filter {
+                    &i.issue_type == tf
+                } else {
+                    true
+                }
+            })
             .filter(|i| {
                 if let Some(q) = &self.search_query {
                     if q.is_empty() {
@@ -295,6 +305,13 @@ impl SwarmView {
 
         // Issues table
         let filter_label = self.issue_filter.label();
+        let type_label = match &self.issue_type_filter {
+            Some(IssueType::Bug) => " · bug",
+            Some(IssueType::Enhancement) => " · enh",
+            Some(IssueType::Proposal) => " · prop",
+            Some(IssueType::Other) => " · other",
+            None => "",
+        };
 
         // Split issues area: optional 1-line search bar + table
         let is_searching = self.search_query.is_some();
@@ -353,7 +370,7 @@ impl SwarmView {
 
         let issues_block = Block::default()
             .borders(Borders::ALL)
-            .title(format!(" Issues ({filter_label}: {}{}) ", filtered_issues.len(), if issues_loading { ", loading\u{2026}" } else { "" }))
+            .title(format!(" Issues ({filter_label}{type_label}: {}{}) ", filtered_issues.len(), if issues_loading { ", loading\u{2026}" } else { "" }))
             .border_style(if focus == SwarmPanel::Issues {
                 theme::title_style()
             } else {
@@ -427,6 +444,8 @@ impl SwarmView {
                 Span::styled(" review-blocked  ", theme::help_style()),
                 Span::styled("f", theme::title_style()),
                 Span::styled(" filter  ", theme::help_style()),
+                Span::styled("t", theme::title_style()),
+                Span::styled(" type  ", theme::help_style()),
                 Span::styled("/", theme::title_style()),
                 Span::styled(" search  ", theme::help_style()),
                 Span::styled("Enter", theme::title_style()),
@@ -483,6 +502,18 @@ impl SwarmView {
 
     pub fn selected_issue(&self) -> Option<usize> {
         self.issues_table.selected()
+    }
+
+    /// Cycle the type filter: None → Bug → Enhancement → Proposal → None.
+    pub fn cycle_issue_type_filter(&mut self) {
+        self.issue_type_filter = match &self.issue_type_filter {
+            None => Some(IssueType::Bug),
+            Some(IssueType::Bug) => Some(IssueType::Enhancement),
+            Some(IssueType::Enhancement) => Some(IssueType::Proposal),
+            Some(IssueType::Proposal) | Some(IssueType::Other) => None,
+        };
+        // Reset table selection when filter changes.
+        self.issues_table.select(Some(0));
     }
 }
 
@@ -597,6 +628,47 @@ mod tests {
             issue_cache: crate::model::issue::IssueCache::default(),
             stopped: false,
         }
+    }
+
+    #[test]
+    fn issue_type_filter_cycles() {
+        let mut view = SwarmView::new();
+        assert_eq!(view.issue_type_filter, None);
+        view.cycle_issue_type_filter();
+        assert_eq!(view.issue_type_filter, Some(crate::model::issue::IssueType::Bug));
+        view.cycle_issue_type_filter();
+        assert_eq!(view.issue_type_filter, Some(crate::model::issue::IssueType::Enhancement));
+        view.cycle_issue_type_filter();
+        assert_eq!(view.issue_type_filter, Some(crate::model::issue::IssueType::Proposal));
+        view.cycle_issue_type_filter();
+        assert_eq!(view.issue_type_filter, None);
+    }
+
+    #[test]
+    fn issue_type_filter_excludes_non_matching() {
+        use crate::model::issue::{IssueType, IssuePriority, IssueState};
+        let mut view = SwarmView::new();
+        view.cycle_issue_type_filter(); // → Bug
+
+        let bug = GitHubIssue {
+            number: 1, title: "a bug".into(), state: IssueState::Open,
+            priority: IssuePriority::P2, issue_type: IssueType::Bug,
+            labels: vec!["bug".into()], is_working: false, assigned_worker: None,
+        };
+        let enh = GitHubIssue {
+            number: 2, title: "an enh".into(), state: IssueState::Open,
+            priority: IssuePriority::P3, issue_type: IssueType::Enhancement,
+            labels: vec!["enhancement".into()], is_working: false, assigned_worker: None,
+        };
+        let issues = vec![bug, enh];
+        // Only bug should pass the type filter
+        let filtered: Vec<_> = issues.iter()
+            .filter(|i| {
+                if let Some(ref tf) = view.issue_type_filter { &i.issue_type == tf } else { true }
+            })
+            .collect();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].number, 1);
     }
 
     #[test]

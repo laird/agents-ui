@@ -2114,6 +2114,10 @@ impl App {
                         self.swarm_view.issue_filter = self.swarm_view.issue_filter.next();
                         self.swarm_view.issues_table.select(Some(0));
                     }
+                    KeyCode::Char('t') => {
+                        // Cycle issue type filter (Bug → Enhancement → Proposal → All)
+                        self.swarm_view.cycle_issue_type_filter();
+                    }
                     KeyCode::Char('a') => {
                         // Add new issue: open create-issue dialog
                         self.create_issue_form = Some(CreateIssueForm::new());
