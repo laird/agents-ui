@@ -1,8 +1,5 @@
-use anyhow::Result;
 use serde::Deserialize;
-use std::path::Path;
 use std::time::Instant;
-use tokio::process::Command;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum IssueState {
@@ -281,70 +278,6 @@ impl From<GhIssueJson> for GitHubIssue {
             assigned_worker: None,
         }
     }
-}
-
-/// Fetch open issues from GitHub using `gh` CLI.
-pub async fn fetch_issues(repo_path: &Path) -> Result<Vec<GitHubIssue>> {
-    let output = Command::new("gh")
-        .args([
-            "issue",
-            "list",
-            "--state",
-            "open",
-            "--json",
-            "number,title,labels",
-            "--limit",
-            "100",
-        ])
-        .current_dir(repo_path)
-        .output()
-        .await?;
-
-    if !output.status.success() {
-        anyhow::bail!(
-            "gh issue list failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    let json: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-    let mut issues = Vec::new();
-
-    if let Some(arr) = json.as_array() {
-        for item in arr {
-            let number = item["number"].as_u64().unwrap_or(0) as u32;
-            let title = item["title"].as_str().unwrap_or("").to_string();
-
-            let labels: Vec<String> = item["labels"]
-                .as_array()
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|l| l["name"].as_str().map(|s| s.to_string()))
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            let priority = labels_to_priority(&labels);
-            let issue_type = labels_to_type(&labels);
-            let is_working = labels.iter().any(|l| l == "working");
-
-            issues.push(GitHubIssue {
-                number,
-                title,
-                state: IssueState::Open,
-                priority,
-                issue_type,
-                labels,
-                is_working,
-                assigned_worker: None,
-            });
-        }
-    }
-
-    // Sort by priority then number
-    issues.sort_by(|a, b| a.priority.cmp(&b.priority).then(a.number.cmp(&b.number)));
-
-    Ok(issues)
 }
 
 #[cfg(test)]

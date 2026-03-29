@@ -83,14 +83,95 @@ pub async fn check_gh_auth(transport: &ServerTransport) -> Option<GhError> {
     }
 }
 
+fn repo_owner_from_remote(remote: &str) -> Option<String> {
+    if let Some(rest) = remote.trim().strip_prefix("https://github.com/") {
+        return rest.split('/').next().filter(|s| !s.is_empty()).map(ToString::to_string);
+    }
+    if let Some(rest) = remote.trim().strip_prefix("git@github.com:") {
+        return rest.split('/').next().filter(|s| !s.is_empty()).map(ToString::to_string);
+    }
+    None
+}
+
+/// Ensure `gh` is using the GitHub profile that matches the repo owner when possible.
+pub async fn ensure_gh_auth_for_repo(transport: &ServerTransport, repo_path: &Path) {
+    let remote = match transport
+        .output(
+            "git",
+            &["remote".to_string(), "get-url".to_string(), "origin".to_string()],
+            Some(repo_path),
+        )
+        .await
+    {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        _ => return,
+    };
+
+    let owner = match repo_owner_from_remote(&remote) {
+        Some(owner) => owner,
+        None => return,
+    };
+
+    let current_user = match transport
+        .output(
+            "gh",
+            &["api".to_string(), "user".to_string(), "--jq".to_string(), ".login".to_string()],
+            Some(repo_path),
+        )
+        .await
+    {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        _ => return,
+    };
+
+    if current_user == owner {
+        return;
+    }
+
+    tracing::info!(
+        "Switching gh auth from {current_user} to {owner} for repo at {}",
+        repo_path.display()
+    );
+    match transport
+        .output(
+            "gh",
+            &[
+                "auth".to_string(),
+                "switch".to_string(),
+                "--user".to_string(),
+                owner.clone(),
+            ],
+            Some(repo_path),
+        )
+        .await
+    {
+        Ok(o) if o.status.success() => tracing::info!("Successfully switched gh auth to {owner}"),
+        Ok(o) => tracing::warn!(
+            "Failed to switch gh auth to {owner}: {}",
+            String::from_utf8_lossy(&o.stderr)
+        ),
+        Err(e) => tracing::warn!("Failed to run gh auth switch: {e}"),
+    }
+}
+
+/// Run a repo-scoped `gh` command after ensuring the matching GitHub profile is active.
+pub async fn gh_repo_output(
+    transport: &ServerTransport,
+    repo_path: &Path,
+    args: &[String],
+) -> Result<std::process::Output> {
+    ensure_gh_auth_for_repo(transport, repo_path).await;
+    transport.output("gh", args, Some(repo_path)).await
+}
+
 /// Fetch open issues for the repo at the given path using `gh`.
 pub async fn fetch_issues(
     transport: &ServerTransport,
     repo_path: &Path,
 ) -> std::result::Result<Vec<GitHubIssue>, GhError> {
-    let output = transport
-        .output(
-            "gh",
+    let output = gh_repo_output(
+            transport,
+            repo_path,
             &[
                 "issue".to_string(),
                 "list".to_string(),
@@ -101,7 +182,6 @@ pub async fn fetch_issues(
                 "--json".to_string(),
                 "number,title,state,labels".to_string(),
             ],
-            Some(repo_path),
         )
         .await
         .map_err(|e| GhError::Transient(e.to_string()))?;
@@ -166,7 +246,7 @@ fn parse_issues_json(bytes: &[u8]) -> Result<Vec<GitHubIssue>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{classify_gh_error, parse_issues_json, GhError};
+    use super::{classify_gh_error, parse_issues_json, repo_owner_from_remote, GhError};
     use crate::model::issue::IssueState;
 
     #[test]
@@ -222,5 +302,18 @@ mod tests {
             classify_gh_error("error connecting to api.github.com"),
             GhError::Transient(_)
         ));
+    }
+
+    #[test]
+    fn extracts_repo_owner_from_supported_remote_urls() {
+        assert_eq!(
+            repo_owner_from_remote("https://github.com/acme/widgets.git"),
+            Some("acme".to_string())
+        );
+        assert_eq!(
+            repo_owner_from_remote("git@github.com:acme/widgets.git"),
+            Some("acme".to_string())
+        );
+        assert_eq!(repo_owner_from_remote("ssh://git.example.com/acme/widgets"), None);
     }
 }
