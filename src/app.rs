@@ -328,7 +328,7 @@ impl App {
             keybindings: crate::config::keybindings::KeyBindings::load(),
             show_help: false,
             feedback_state: None,
-            status_message_set_at: None,
+            status_message_age: 0,
         };
 
         // Scan for available repos (git directories in cwd or children)
@@ -543,26 +543,22 @@ impl App {
                         self.start_issue_refresh(*swarm_idx);
                     }
                 }
-                // Auto-clear transient status messages after ~3 seconds.
-                // On the first tick a message appears, record Instant::now(); clear after 3s.
+                // Auto-clear transient status messages after ~3 seconds (60 ticks at 20Hz).
                 // Confirmation prompts (containing "? (y to confirm") are never auto-cleared.
                 match &self.status_message {
-                    None => self.status_message_set_at = None,
+                    None => {
+                        self.status_message_age = 0;
+                    }
                     Some(msg) => {
                         let is_confirmation = msg.contains("? (y to confirm") || msg.contains("? (y/n)");
                         if is_confirmation {
-                            self.status_message_set_at = None;
-                        } else if let Some(set_at) = self.status_message_set_at {
-                            if set_at.elapsed() >= Duration::from_secs(3) {
-                                self.status_message = None;
-                                self.status_message_set_at = None;
-                            }
+                            self.status_message_age = 0;
                         } else {
-                            // First tick this message is visible — record timestamp.
-                            // If a new message is set before the old one clears, set_at resets
-                            // because status_message momentarily becomes None or changes content.
-                            // Note: this only resets if the message goes through None first.
-                            self.status_message_set_at = Some(Instant::now());
+                            self.status_message_age += 1;
+                            if self.status_message_age >= 60 {
+                                self.status_message = None;
+                                self.status_message_age = 0;
+                            }
                         }
                     }
                 }
