@@ -800,7 +800,7 @@ impl App {
                         _ => None,
                     };
                     if let Some(idx) = swarm_idx {
-                        self.jump_to_next_waiting(idx);
+                        self.jump_to_next_waiting(idx).await;
                         return Ok(());
                     }
                 }
@@ -2612,7 +2612,7 @@ impl App {
         self.swarm_focus = SwarmPanel::Issues;
     }
 
-    fn jump_to_next_waiting(&mut self, swarm_idx: usize) {
+    async fn jump_to_next_waiting(&mut self, swarm_idx: usize) {
         // Get the current agent ID if we're in an agent view
         let current_id = match &self.screen {
             Screen::AgentView { agent_id, .. } => Some(agent_id.clone()),
@@ -2622,12 +2622,7 @@ impl App {
         if let Some(swarm) = self.swarms.get(swarm_idx) {
             if let Some(agent) = swarm.next_waiting_agent(current_id.as_deref()) {
                 let agent_id = agent.id.clone();
-                self.agent_view = AgentView::new();
-                self.agent_view.scroll_to_bottom();
-                self.screen = Screen::AgentView {
-                    swarm_idx,
-                    agent_id,
-                };
+                self.enter_agent_view(swarm_idx, agent_id).await;
             } else {
                 self.status_message = Some("No sessions waiting for input".to_string());
             }

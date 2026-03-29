@@ -178,14 +178,6 @@ impl GitHubIssue {
         }
     }
 
-    pub fn type_char(&self) -> &str {
-        match self.issue_type {
-            IssueType::Bug => "B",
-            IssueType::Enhancement => "E",
-            IssueType::Proposal => "P",
-            IssueType::Other => "·",
-        }
-    }
 }
 
 /// Cached issues for a project.
