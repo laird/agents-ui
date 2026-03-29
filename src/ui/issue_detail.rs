@@ -49,6 +49,19 @@ pub fn render_markdown_line(line: &str) -> Line<'static> {
         ]);
     }
 
+    // Numbered list: 1. text, 12. text, etc.
+    let num_end = trimmed.find(|c: char| !c.is_ascii_digit());
+    if let Some(n) = num_end {
+        if n > 0 && trimmed[n..].starts_with(". ") {
+            let number = &trimmed[..n];
+            let text = trimmed[n + 2..].to_string();
+            return Line::from(vec![
+                Span::styled(format!("{number}. "), theme::help_style()),
+                Span::from(text),
+            ]);
+        }
+    }
+
     // Plain line — handle inline code and bold inline
     let owned = line.to_string();
     let spans = parse_inline(&owned);
@@ -358,5 +371,29 @@ mod tests {
     fn render_markdown_line_empty() {
         let line = render_markdown_line("");
         assert!(!line.spans.is_empty());
+    }
+
+    #[test]
+    fn render_markdown_line_numbered_list() {
+        let line = render_markdown_line("1. First step");
+        assert_eq!(line.spans.len(), 2);
+        assert!(line.spans[0].content.contains("1."));
+        assert_eq!(line.spans[1].content, "First step");
+    }
+
+    #[test]
+    fn render_markdown_line_numbered_list_multi_digit() {
+        let line = render_markdown_line("12. Twelfth step");
+        assert_eq!(line.spans.len(), 2);
+        assert!(line.spans[0].content.contains("12."));
+        assert_eq!(line.spans[1].content, "Twelfth step");
+    }
+
+    #[test]
+    fn render_markdown_line_numbered_list_not_triggered_on_plain_number() {
+        // "123" alone is not a list item (no ". " after)
+        let line = render_markdown_line("123");
+        let combined: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(combined, "123");
     }
 }
