@@ -286,6 +286,7 @@ pub struct IssueDetailView {
     pub comments: Vec<(String, String)>,
     pub assignees: Vec<String>,
     pub created_at_age: String,
+    pub updated_at_age: String,
 }
 
 impl IssueDetailView {
@@ -298,6 +299,7 @@ impl IssueDetailView {
         comments: Vec<(String, String)>,
         assignees: Vec<String>,
         created_at_age: String,
+        updated_at_age: String,
     ) -> Self {
         Self {
             scroll_offset: 0,
@@ -309,6 +311,7 @@ impl IssueDetailView {
             comments,
             assignees,
             created_at_age,
+            updated_at_age,
         }
     }
 
@@ -354,6 +357,9 @@ impl IssueDetailView {
         let mut meta_parts = vec![assignee_text, comment_text];
         if !age_text.is_empty() {
             meta_parts.push(age_text);
+        }
+        if !self.updated_at_age.is_empty() && self.updated_at_age != self.created_at_age {
+            meta_parts.push(format!("updated {}ago", self.updated_at_age));
         }
 
         let header_lines = vec![
@@ -541,6 +547,7 @@ mod tests {
             comments,
             assignees.iter().map(|s| s.to_string()).collect(),
             created_at_age.to_string(),
+            String::new(),
         )
     }
 
@@ -654,6 +661,39 @@ mod tests {
         let line = render_markdown_line("[broken link");
         let combined: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(combined.contains("[broken link"));
+    }
+
+    fn make_view_with_updated(created_age: &str, updated_age: &str) -> IssueDetailView {
+        IssueDetailView::new(
+            1,
+            "T".to_string(),
+            "B".to_string(),
+            vec![],
+            "OPEN".to_string(),
+            vec![],
+            vec![],
+            created_age.to_string(),
+            updated_age.to_string(),
+        )
+    }
+
+    #[test]
+    fn updated_at_age_shown_when_different_from_created() {
+        let view = make_view_with_updated("3d ", "4h ");
+        assert_eq!(view.updated_at_age, "4h ");
+        assert_ne!(view.updated_at_age, view.created_at_age);
+    }
+
+    #[test]
+    fn updated_at_age_omitted_when_same_as_created() {
+        let view = make_view_with_updated("3d ", "3d ");
+        assert_eq!(view.updated_at_age, view.created_at_age);
+    }
+
+    #[test]
+    fn updated_at_age_empty_when_not_provided() {
+        let view = make_view_with_updated("3d ", "");
+        assert!(view.updated_at_age.is_empty());
     }
 
 }
