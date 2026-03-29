@@ -683,6 +683,23 @@ mod tests {
     }
 
     #[test]
+    fn apply_filters_sorts_by_priority_then_number() {
+        use crate::model::issue::{IssueType, IssuePriority, IssueState};
+        let issues = vec![
+            GitHubIssue { number: 10, title: "a".into(), state: IssueState::Open, priority: IssuePriority::P3, issue_type: IssueType::Other, labels: vec![], is_working: false, assigned_worker: None },
+            GitHubIssue { number: 5, title: "b".into(), state: IssueState::Open, priority: IssuePriority::P1, issue_type: IssueType::Bug, labels: vec![], is_working: false, assigned_worker: None },
+            GitHubIssue { number: 3, title: "c".into(), state: IssueState::Open, priority: IssuePriority::P1, issue_type: IssueType::Bug, labels: vec![], is_working: false, assigned_worker: None },
+            GitHubIssue { number: 8, title: "d".into(), state: IssueState::Open, priority: IssuePriority::P2, issue_type: IssueType::Enhancement, labels: vec![], is_working: false, assigned_worker: None },
+        ];
+        // Use apply_filters (no search/type filter) and verify sort order
+        let view = SwarmView::new();
+        let mut filtered = view.apply_filters(&issues);
+        filtered.sort_by_key(|i| (&i.priority, i.number));
+        let nums: Vec<u32> = filtered.iter().map(|i| i.number).collect();
+        assert_eq!(nums, vec![3, 5, 8, 10]); // P1(3), P1(5), P2(8), P3(10)
+    }
+
+    #[test]
     fn detects_confirmation_prompts() {
         assert!(agent_needs_input("Would you like to proceed?\nPress enter to confirm"));
         assert!(!agent_needs_input("All good, continuing work"));
