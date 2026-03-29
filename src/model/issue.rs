@@ -89,6 +89,8 @@ pub struct GitHubIssue {
     pub is_working: bool,
     /// Worker ID currently working on this issue, if any.
     pub assigned_worker: Option<String>,
+    /// When this issue was last updated on GitHub.
+    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 pub const BLOCKING_LABELS: &[&str] = &[
@@ -182,6 +184,13 @@ impl GitHubIssue {
         }
     }
 
+    /// Returns true if the issue was updated within the last 24 hours.
+    pub fn is_recently_updated(&self) -> bool {
+        self.updated_at.map_or(false, |t| {
+            chrono::Utc::now().signed_duration_since(t).num_hours() < 24
+        })
+    }
+
 }
 
 /// Cached issues for a project.
@@ -237,6 +246,8 @@ pub struct GhIssueJson {
     pub title: String,
     pub state: String,
     pub labels: Vec<GhLabelJson>,
+    #[serde(rename = "updatedAt", default)]
+    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Deserialize)]
@@ -290,6 +301,7 @@ impl From<GhIssueJson> for GitHubIssue {
             labels,
             is_working,
             assigned_worker: None,
+            updated_at: raw.updated_at,
         }
     }
 }
@@ -312,6 +324,7 @@ mod tests {
             labels: label_vec,
             is_working,
             assigned_worker: None,
+            updated_at: None,
         }
     }
 
