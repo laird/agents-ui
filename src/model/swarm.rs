@@ -441,6 +441,7 @@ mod tests {
             labels: vec!["needs-design".to_string()],
             is_working: false,
             assigned_worker: None,
+            updated_at: None,
         }
     }
 
@@ -454,6 +455,7 @@ mod tests {
             labels: vec!["bug".to_string()],
             is_working: false,
             assigned_worker: None,
+            updated_at: None,
         }
     }
 

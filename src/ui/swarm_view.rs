@@ -359,8 +359,14 @@ impl SwarmView {
                 } else {
                     Style::default().fg(ratatui::style::Color::Gray)
                 };
+                let type_cell = if issue.is_recently_updated() {
+                    Cell::from(format!("{}★", issue.type_char()))
+                        .style(theme::issue_type_style(&issue.issue_type))
+                } else {
+                    Cell::from(issue.type_char()).style(theme::issue_type_style(&issue.issue_type))
+                };
                 Row::new(vec![
-                    Cell::from(issue.type_char()).style(theme::issue_type_style(&issue.issue_type)),
+                    type_cell,
                     Cell::from(format!("{}", issue.number)),
                     Cell::from(issue.priority_label()).style(theme::priority_style(&issue.priority)),
                     Cell::from(truncate(&issue.title, 30)),
@@ -667,11 +673,13 @@ mod tests {
             number: 1, title: "a bug".into(), state: IssueState::Open,
             priority: IssuePriority::P2, issue_type: IssueType::Bug,
             labels: vec!["bug".into()], is_working: false, assigned_worker: None,
+            updated_at: None,
         };
         let enh = GitHubIssue {
             number: 2, title: "an enh".into(), state: IssueState::Open,
             priority: IssuePriority::P3, issue_type: IssueType::Enhancement,
             labels: vec!["enhancement".into()], is_working: false, assigned_worker: None,
+            updated_at: None,
         };
         let issues = vec![bug, enh];
         // Only bug should pass the type filter
@@ -688,10 +696,10 @@ mod tests {
     fn apply_filters_sorts_by_priority_then_number() {
         use crate::model::issue::{IssueType, IssuePriority, IssueState};
         let issues = vec![
-            GitHubIssue { number: 10, title: "a".into(), state: IssueState::Open, priority: IssuePriority::P3, issue_type: IssueType::Other, labels: vec![], is_working: false, assigned_worker: None },
-            GitHubIssue { number: 5, title: "b".into(), state: IssueState::Open, priority: IssuePriority::P1, issue_type: IssueType::Bug, labels: vec![], is_working: false, assigned_worker: None },
-            GitHubIssue { number: 3, title: "c".into(), state: IssueState::Open, priority: IssuePriority::P1, issue_type: IssueType::Bug, labels: vec![], is_working: false, assigned_worker: None },
-            GitHubIssue { number: 8, title: "d".into(), state: IssueState::Open, priority: IssuePriority::P2, issue_type: IssueType::Enhancement, labels: vec![], is_working: false, assigned_worker: None },
+            GitHubIssue { number: 10, title: "a".into(), state: IssueState::Open, priority: IssuePriority::P3, issue_type: IssueType::Other, labels: vec![], is_working: false, assigned_worker: None, updated_at: None },
+            GitHubIssue { number: 5, title: "b".into(), state: IssueState::Open, priority: IssuePriority::P1, issue_type: IssueType::Bug, labels: vec![], is_working: false, assigned_worker: None, updated_at: None },
+            GitHubIssue { number: 3, title: "c".into(), state: IssueState::Open, priority: IssuePriority::P1, issue_type: IssueType::Bug, labels: vec![], is_working: false, assigned_worker: None, updated_at: None },
+            GitHubIssue { number: 8, title: "d".into(), state: IssueState::Open, priority: IssuePriority::P2, issue_type: IssueType::Enhancement, labels: vec![], is_working: false, assigned_worker: None, updated_at: None },
         ];
         // apply_filters returns issues sorted by priority then number
         let view = SwarmView::new();
@@ -721,6 +729,7 @@ mod tests {
             labels: vec!["P1".to_string()],
             is_working: false,
             assigned_worker: Some("worker-1".to_string()),
+            updated_at: None,
         }];
 
         terminal
