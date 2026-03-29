@@ -49,6 +49,32 @@ pub fn render_markdown_line(line: &str) -> Line<'static> {
         ]);
     }
 
+    // Numbered list: "1. text", "10. text", etc.
+    {
+        let digits_end = trimmed.find(|c: char| !c.is_ascii_digit()).unwrap_or(0);
+        if digits_end > 0 && trimmed[digits_end..].starts_with(". ") {
+            let num = &trimmed[..digits_end];
+            let text = trimmed[digits_end + 2..].to_string();
+            return Line::from(vec![
+                Span::styled(format!("{num}. "), theme::help_style()),
+                Span::from(text),
+            ]);
+        }
+    }
+
+    // Blockquote: > text
+    if let Some(text) = trimmed.strip_prefix("> ").or_else(|| trimmed.strip_prefix(">")) {
+        return Line::from(vec![
+            Span::styled("│ ", theme::help_style()),
+            Span::styled(text.to_string(), Style::default().fg(Color::Gray)),
+        ]);
+    }
+
+    // Horizontal rule: ---, ***, ___
+    if trimmed == "---" || trimmed == "***" || trimmed == "___" {
+        return Line::from(Span::styled("─────────────────────", theme::help_style()));
+    }
+
     // Plain line — handle inline code and bold inline
     let owned = line.to_string();
     let spans = parse_inline(&owned);
@@ -81,6 +107,19 @@ fn parse_inline(line: &str) -> Vec<Span<'static>> {
             }
         }
 
+        // Strikethrough: ~~...~~
+        if rest.starts_with("~~") {
+            let after = &rest[2..];
+            if let Some(end) = after.find("~~") {
+                spans.push(Span::styled(
+                    after[..end].to_string(),
+                    Style::default().add_modifier(Modifier::CROSSED_OUT),
+                ));
+                rest = &after[end + 2..];
+                continue;
+            }
+        }
+
         // Bold: **...** or __...__
         let bold_marker = if rest.starts_with("**") {
             Some("**")
@@ -100,6 +139,40 @@ fn parse_inline(line: &str) -> Vec<Span<'static>> {
                 rest = &after[end + marker.len()..];
                 continue;
             }
+        }
+
+        // Italic: *...* or _..._  (only single marker, after ruling out ** and __)
+        let italic_marker = if rest.starts_with('*') {
+            Some("*")
+        } else if rest.starts_with('_') {
+            Some("_")
+        } else {
+            None
+        };
+
+        if let Some(marker) = italic_marker {
+            let after = &rest[marker.len()..];
+            if let Some(end) = after.find(marker) {
+                spans.push(Span::styled(
+                    after[..end].to_string(),
+                    Style::default().add_modifier(Modifier::ITALIC),
+                ));
+                rest = &after[end + marker.len()..];
+                continue;
+            }
+        }
+
+        // No more markers — find the next potential marker to emit plain text up to it
+        let next_marker = ["~~", "**", "__", "`", "*", "_"]
+            .iter()
+            .filter_map(|m| rest.find(m).map(|pos| (pos, *m)))
+            .filter(|(pos, _)| *pos > 0)
+            .min_by_key(|(pos, _)| *pos);
+
+        if let Some((pos, _)) = next_marker {
+            spans.push(Span::from(rest[..pos].to_string()));
+            rest = &rest[pos..];
+            continue;
         }
 
         // No more markers — emit the remainder
@@ -131,6 +204,32 @@ pub fn count_tasks(body: &str) -> (usize, usize) {
     (checked, total)
 }
 
+/// Convert markdown text into styled lines, handling fenced code blocks (``` ... ```).
+/// Lines inside a fenced code block are rendered verbatim in Cyan.
+pub fn render_markdown_lines(text: &str) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let mut in_code_block = false;
+    for raw_line in text.lines() {
+        let trimmed = raw_line.trim_start();
+        if trimmed.starts_with("```") {
+            in_code_block = !in_code_block;
+            // Render the fence delimiter itself as a dim border
+            lines.push(Line::from(Span::styled(
+                raw_line.to_string(),
+                Style::default().fg(Color::DarkGray),
+            )));
+        } else if in_code_block {
+            lines.push(Line::from(Span::styled(
+                raw_line.to_string(),
+                Style::default().fg(Color::Cyan),
+            )));
+        } else {
+            lines.push(render_markdown_line(raw_line));
+        }
+    }
+    lines
+}
+
 /// State for the issue detail view.
 pub struct IssueDetailView {
     pub scroll_offset: u16,
@@ -141,6 +240,8 @@ pub struct IssueDetailView {
     pub state: String,
     /// Recent comments as (author, body) pairs.
     pub comments: Vec<(String, String)>,
+    pub assignees: Vec<String>,
+    pub created_at_age: String,
 }
 
 impl IssueDetailView {
@@ -151,6 +252,8 @@ impl IssueDetailView {
         labels: Vec<String>,
         state: String,
         comments: Vec<(String, String)>,
+        assignees: Vec<String>,
+        created_at_age: String,
     ) -> Self {
         Self {
             scroll_offset: 0,
@@ -160,6 +263,8 @@ impl IssueDetailView {
             labels,
             state,
             comments,
+            assignees,
+            created_at_age,
         }
     }
 
@@ -173,7 +278,7 @@ impl IssueDetailView {
 
     pub fn render(&self, f: &mut Frame, area: Rect) {
         let chunks = Layout::vertical([
-            Constraint::Length(4), // Header
+            Constraint::Length(5), // Header (extra line for metadata)
             Constraint::Min(5),   // Body
             Constraint::Length(3), // Help bar
         ])
@@ -185,6 +290,27 @@ impl IssueDetailView {
         } else {
             self.labels.join(" · ")
         };
+
+        let assignee_text = if self.assignees.is_empty() {
+            "unassigned".to_string()
+        } else {
+            self.assignees.join(", ")
+        };
+        let comment_count = self.comments.len();
+        let comment_text = match comment_count {
+            0 => "no comments".to_string(),
+            1 => "1 comment".to_string(),
+            n => format!("{n} comments"),
+        };
+        let age_text = if self.created_at_age.is_empty() {
+            String::new()
+        } else {
+            format!("created {}ago", self.created_at_age)
+        };
+        let mut meta_parts = vec![assignee_text, comment_text];
+        if !age_text.is_empty() {
+            meta_parts.push(age_text);
+        }
 
         let header_lines = vec![
             Line::from(vec![
@@ -212,6 +338,10 @@ impl IssueDetailView {
                 }
                 Line::from(spans)
             },
+            Line::from(Span::styled(
+                format!(" {}", meta_parts.join("  ·  ")),
+                theme::help_style(),
+            )),
         ];
 
         let header = Paragraph::new(header_lines)
@@ -225,10 +355,7 @@ impl IssueDetailView {
             format!(" {}", self.body.replace('\r', ""))
         };
 
-        let mut all_lines: Vec<Line> = body_text
-            .lines()
-            .map(render_markdown_line)
-            .collect();
+        let mut all_lines: Vec<Line> = render_markdown_lines(&body_text);
 
         for (author, comment_body) in &self.comments {
             all_lines.push(Line::from(""));
@@ -237,12 +364,9 @@ impl IssueDetailView {
                 Span::styled(author.clone(), theme::title_style()),
                 Span::styled(" ───", theme::help_style()),
             ]));
-            for line in comment_body.replace('\r', "").lines() {
-                all_lines.push(render_markdown_line(line));
-            }
+            all_lines.extend(render_markdown_lines(&comment_body.replace('\r', "")));
         }
 
-        let comment_count = self.comments.len();
         let block_title = if comment_count > 0 {
             format!(" Issue Body + {} comment{} ", comment_count, if comment_count == 1 { "" } else { "s" })
         } else {
@@ -265,7 +389,7 @@ impl IssueDetailView {
             Span::styled(" scroll  ", theme::help_style()),
             Span::styled("g", theme::title_style()),
             Span::styled(" open in browser  ", theme::help_style()),
-            Span::styled("Esc", theme::title_style()),
+            Span::styled("Esc/⌥←", theme::title_style()),
             Span::styled(" back  ", theme::help_style()),
             Span::styled("q", theme::title_style()),
             Span::styled(" quit", theme::help_style()),
@@ -359,4 +483,108 @@ mod tests {
         let line = render_markdown_line("");
         assert!(!line.spans.is_empty());
     }
+
+    fn make_view(comment_count: usize, assignees: &[&str], created_at_age: &str) -> IssueDetailView {
+        let comments: Vec<(String, String)> = (0..comment_count)
+            .map(|i| (format!("user{i}"), format!("comment {i}")))
+            .collect();
+        IssueDetailView::new(
+            42,
+            "Test issue".to_string(),
+            "Body text".to_string(),
+            vec!["bug".to_string()],
+            "OPEN".to_string(),
+            comments,
+            assignees.iter().map(|s| s.to_string()).collect(),
+            created_at_age.to_string(),
+        )
+    }
+
+    #[test]
+    fn new_stores_metadata_fields() {
+        let view = make_view(5, &["alice", "bob"], "3d ");
+        assert_eq!(view.comments.len(), 5);
+        assert_eq!(view.assignees, vec!["alice", "bob"]);
+        assert_eq!(view.created_at_age, "3d ");
+    }
+
+    #[test]
+    fn new_empty_metadata() {
+        let view = make_view(0, &[], "");
+        assert!(view.comments.is_empty());
+        assert!(view.assignees.is_empty());
+        assert!(view.created_at_age.is_empty());
+    }
+
+    #[test]
+    fn render_markdown_line_blockquote() {
+        let line = render_markdown_line("> some quoted text");
+        assert!(line.spans[0].content.contains('│'));
+        assert_eq!(line.spans[1].content, "some quoted text");
+    }
+
+    #[test]
+    fn render_markdown_line_horizontal_rule() {
+        for rule in &["---", "***", "___"] {
+            let line = render_markdown_line(rule);
+            assert_eq!(line.spans.len(), 1);
+            assert!(line.spans[0].content.contains('─'));
+        }
+    }
+
+    #[test]
+    fn render_markdown_line_italic_star() {
+        let line = render_markdown_line("*italic* text");
+        let combined: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(combined.contains("italic"));
+        let italic_span = line.spans.iter().find(|s| s.content == "italic").unwrap();
+        assert!(italic_span.style.add_modifier.contains(Modifier::ITALIC));
+    }
+
+    #[test]
+    fn render_markdown_line_italic_underscore() {
+        let line = render_markdown_line("_italic_ text");
+        let combined: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(combined.contains("italic"));
+        let italic_span = line.spans.iter().find(|s| s.content == "italic").unwrap();
+        assert!(italic_span.style.add_modifier.contains(Modifier::ITALIC));
+    }
+
+    #[test]
+    fn render_markdown_line_strikethrough() {
+        let line = render_markdown_line("~~struck~~ text");
+        let combined: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(combined.contains("struck"));
+        let struck_span = line.spans.iter().find(|s| s.content == "struck").unwrap();
+        assert!(struck_span.style.add_modifier.contains(Modifier::CROSSED_OUT));
+    }
+
+    #[test]
+    fn render_markdown_line_bold_not_italic() {
+        // **bold** must not be parsed as italic
+        let line = render_markdown_line("**bold** text");
+        let bold_span = line.spans.iter().find(|s| s.content == "bold").unwrap();
+        assert!(bold_span.style.add_modifier.contains(Modifier::BOLD));
+        assert!(!bold_span.style.add_modifier.contains(Modifier::ITALIC));
+    }
+
+    #[test]
+    fn render_markdown_lines_fenced_code_block() {
+        use ratatui::style::Color;
+        let text = "before\n```\nfn foo() {}\n```\nafter";
+        let lines = render_markdown_lines(text);
+        assert_eq!(lines.len(), 5);
+        // "before" — plain text
+        assert!(lines[0].spans.iter().any(|s| s.content.contains("before")));
+        // opening ``` — dark gray
+        assert_eq!(lines[1].spans[0].style.fg, Some(Color::DarkGray));
+        // code line — cyan
+        assert_eq!(lines[2].spans[0].style.fg, Some(Color::Cyan));
+        assert!(lines[2].spans[0].content.contains("fn foo()"));
+        // closing ``` — dark gray
+        assert_eq!(lines[3].spans[0].style.fg, Some(Color::DarkGray));
+        // "after" — plain text
+        assert!(lines[4].spans.iter().any(|s| s.content.contains("after")));
+    }
+
 }

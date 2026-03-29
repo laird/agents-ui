@@ -268,6 +268,35 @@ mod tests {
     }
 
     #[test]
+    fn parses_updated_at_from_gh_json() {
+        let issues = parse_issues_json(
+            br#"[{
+                "number": 5,
+                "title": "Recent issue",
+                "state": "OPEN",
+                "labels": [],
+                "updatedAt": "2024-01-15T10:30:00Z"
+            }]"#,
+        )
+        .unwrap();
+        assert!(issues[0].updated_at.is_some());
+    }
+
+    #[test]
+    fn parses_missing_updated_at_as_none() {
+        let issues = parse_issues_json(
+            br#"[{
+                "number": 6,
+                "title": "Old format issue",
+                "state": "OPEN",
+                "labels": []
+            }]"#,
+        )
+        .unwrap();
+        assert!(issues[0].updated_at.is_none());
+    }
+
+    #[test]
     fn rejects_invalid_issue_json() {
         assert!(parse_issues_json(br#"{"not":"an array"}"#).is_err());
     }

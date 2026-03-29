@@ -73,6 +73,16 @@ impl AgentType {
         }
     }
 
+    /// Returns the exit command for this agent type.
+    /// `(key, is_named)` — if `is_named` is true, send as a tmux named key (e.g. "C-c");
+    /// otherwise send as literal text followed by Enter.
+    pub fn exit_cmd(&self) -> (&str, bool) {
+        match self {
+            AgentType::Claude | AgentType::Gemini => ("q", false),
+            AgentType::Codex | AgentType::Droid => ("C-c", true),
+        }
+    }
+
     /// The slash command to start the worker fix-loop (sent once on first launch).
     pub fn worker_loop_cmd(&self) -> &str {
         match self {
@@ -442,6 +452,7 @@ mod tests {
             labels: vec!["needs-design".to_string()],
             is_working: false,
             assigned_worker: None,
+            updated_at: None,
         }
     }
 
@@ -455,6 +466,7 @@ mod tests {
             labels: vec!["bug".to_string()],
             is_working: false,
             assigned_worker: None,
+            updated_at: None,
         }
     }
 

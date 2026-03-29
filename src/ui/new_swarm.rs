@@ -89,6 +89,70 @@ pub fn render_runtime_dialog(
     f.render_widget(help, chunks[4]);
 }
 
+/// Render the "switch agent runtime" overlay for a running swarm.
+/// `selected_idx` is an index into `ALL_AGENT_TYPES`.
+pub fn render_switch_agent_dialog(
+    f: &mut Frame,
+    area: Rect,
+    project_name: &str,
+    current: &AgentType,
+    selected_idx: usize,
+) {
+    use super::theme;
+    let title = format!(" Switch agent runtime for {project_name}: ");
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title.as_str())
+        .border_style(theme::title_style());
+
+    let inner = block.inner(area);
+    f.render_widget(Clear, area);
+    f.render_widget(block, area);
+
+    // One row per agent type + instruction row + help row
+    let n = ALL_AGENT_TYPES.len();
+    let mut constraints: Vec<Constraint> = vec![Constraint::Length(2)]; // instructions
+    for _ in 0..n {
+        constraints.push(Constraint::Length(2));
+    }
+    constraints.push(Constraint::Min(0));
+    constraints.push(Constraint::Length(2)); // help
+
+    let chunks = Layout::vertical(constraints).split(inner);
+
+    let instructions = Paragraph::new(Line::from(Span::styled(
+        " Choose new agent runtime:",
+        theme::help_style(),
+    )));
+    f.render_widget(instructions, chunks[0]);
+
+    for (i, agent_type) in ALL_AGENT_TYPES.iter().enumerate() {
+        let is_selected = i == selected_idx;
+        let is_current = agent_type == current;
+        let style = if is_selected {
+            theme::input_style()
+        } else {
+            theme::help_style()
+        };
+        let suffix = if is_current { " (current)" } else { "" };
+        let label = format!(" {} {}{suffix}", if is_selected { "\u{25b6}" } else { " " }, agent_type);
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(label, style))),
+            chunks[1 + i],
+        );
+    }
+
+    let help = Paragraph::new(Line::from(vec![
+        Span::styled(" \u{2191}/\u{2193}", theme::title_style()),
+        Span::styled(" choose  ", theme::help_style()),
+        Span::styled("Enter", theme::title_style()),
+        Span::styled(" switch  ", theme::help_style()),
+        Span::styled("Esc", theme::title_style()),
+        Span::styled(" cancel", theme::help_style()),
+    ]));
+    f.render_widget(help, chunks[1 + n + 1]);
+}
+
 pub fn render_install_scope_dialog(
     f: &mut Frame,
     area: Rect,
