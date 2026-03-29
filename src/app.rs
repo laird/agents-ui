@@ -2103,9 +2103,13 @@ impl App {
                     return Ok(());
                 }
 
+                let issue_type_filter = self.swarm_view.issue_type_filter.clone();
                 let issue_count = self.swarms.get(swarm_idx)
                     .and_then(|s| self.issue_caches.get(&s.project_name))
-                    .map(|c| c.issues.iter().filter(|i| i.matches_filter(self.swarm_view.issue_filter)).count())
+                    .map(|c| c.issues.iter()
+                        .filter(|i| i.matches_filter(self.swarm_view.issue_filter))
+                        .filter(|i| issue_type_filter.as_ref().map_or(true, |tf| &i.issue_type == tf))
+                        .count())
                     .unwrap_or(0);
                 match key.code {
                     KeyCode::Down | KeyCode::Char('j') => {
