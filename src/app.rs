@@ -2845,6 +2845,31 @@ impl App {
                     view.scroll_to_end();
                 }
             }
+            KeyCode::Char('n') | KeyCode::Char('p') => {
+                let current_number = self.issue_detail_view.as_ref().map(|v| v.issue_number);
+                if let Some(current_number) = current_number {
+                    let filtered: Vec<u32> = self.swarms.get(swarm_idx)
+                        .and_then(|s| {
+                            let cache = &s.issue_cache;
+                            Some(self.swarm_view.apply_filters(&cache.issues)
+                                .into_iter()
+                                .map(|i| i.number)
+                                .collect())
+                        })
+                        .unwrap_or_default();
+                    if !filtered.is_empty() {
+                        let pos = filtered.iter().position(|&n| n == current_number).unwrap_or(0);
+                        let next_pos = if key.code == KeyCode::Char('n') {
+                            (pos + 1) % filtered.len()
+                        } else {
+                            if pos == 0 { filtered.len() - 1 } else { pos - 1 }
+                        };
+                        let next_number = filtered[next_pos];
+                        self.swarm_view.issues_table.select(Some(next_pos));
+                        self.open_issue_detail(next_number, swarm_idx).await;
+                    }
+                }
+            }
             _ => {}
         }
         Ok(())
