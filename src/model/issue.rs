@@ -1,8 +1,5 @@
-use anyhow::Result;
 use serde::Deserialize;
-use std::path::Path;
 use std::time::Instant;
-use tokio::process::Command;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum IssueState {
@@ -100,15 +97,16 @@ pub const BLOCKING_LABELS: &[&str] = &[
     "proposal",
 ];
 
+/// Returns a short action hint for a blocking label.
 pub fn blocking_guidance(label: &str) -> &'static str {
     match label {
-        "needs-design" => "add design doc or spec to issue",
-        "needs-approval" => "request stakeholder sign-off",
-        "needs-clarification" => "reply with additional context",
-        "too-complex" => "break into sub-tasks manually",
-        "future" => "defer — remove label to unblock",
-        "proposal" => "approve by removing proposal label",
-        _ => "review and remove blocking label to unblock",
+        "needs-design" => "Add design doc or spec to issue",
+        "needs-approval" => "Request stakeholder sign-off",
+        "needs-clarification" => "Reply with additional context",
+        "too-complex" => "Break into sub-tasks manually",
+        "future" => "Defer — remove label to unblock",
+        "proposal" => "Remove proposal label to approve",
+        _ => "Review and remove blocking label to unblock",
     }
 }
 
@@ -140,6 +138,16 @@ impl GitHubIssue {
             .unwrap_or_else(|| "—".to_string())
     }
 
+    /// Returns a single-character type indicator for display in the issues table.
+    pub fn type_char(&self) -> &'static str {
+        match self.issue_type {
+            IssueType::Bug => "B",
+            IssueType::Enhancement => "E",
+            IssueType::Proposal => "P",
+            IssueType::Other => "·",
+        }
+    }
+
     pub fn status_label(&self) -> String {
         if self.is_being_worked() {
             if let Some(ref w) = self.assigned_worker {
@@ -162,7 +170,6 @@ impl GitHubIssue {
         }
     }
 
-    /// Whether this issue matches the given filter.
     pub fn matches_filter(&self, filter: IssueFilter) -> bool {
         match filter {
             IssueFilter::All => true,
@@ -170,6 +177,7 @@ impl GitHubIssue {
             IssueFilter::Blocked => self.is_blocked(),
         }
     }
+
 }
 
 /// Cached issues for a project.
@@ -282,70 +290,6 @@ impl From<GhIssueJson> for GitHubIssue {
     }
 }
 
-/// Fetch open issues from GitHub using `gh` CLI.
-pub async fn fetch_issues(repo_path: &Path) -> Result<Vec<GitHubIssue>> {
-    let output = Command::new("gh")
-        .args([
-            "issue",
-            "list",
-            "--state",
-            "open",
-            "--json",
-            "number,title,labels",
-            "--limit",
-            "100",
-        ])
-        .current_dir(repo_path)
-        .output()
-        .await?;
-
-    if !output.status.success() {
-        anyhow::bail!(
-            "gh issue list failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    let json: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-    let mut issues = Vec::new();
-
-    if let Some(arr) = json.as_array() {
-        for item in arr {
-            let number = item["number"].as_u64().unwrap_or(0) as u32;
-            let title = item["title"].as_str().unwrap_or("").to_string();
-
-            let labels: Vec<String> = item["labels"]
-                .as_array()
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|l| l["name"].as_str().map(|s| s.to_string()))
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            let priority = labels_to_priority(&labels);
-            let issue_type = labels_to_type(&labels);
-            let is_working = labels.iter().any(|l| l == "working");
-
-            issues.push(GitHubIssue {
-                number,
-                title,
-                state: IssueState::Open,
-                priority,
-                issue_type,
-                labels,
-                is_working,
-                assigned_worker: None,
-            });
-        }
-    }
-
-    // Sort by priority then number
-    issues.sort_by(|a, b| a.priority.cmp(&b.priority).then(a.number.cmp(&b.number)));
-
-    Ok(issues)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -411,10 +355,26 @@ mod tests {
     }
 
     #[test]
+    fn type_char_variants() {
+        assert_eq!(make_issue(1, &["bug"]).type_char(), "B");
+        assert_eq!(make_issue(2, &["enhancement"]).type_char(), "E");
+        assert_eq!(make_issue(3, &["proposal"]).type_char(), "P");
+        assert_eq!(make_issue(4, &[]).type_char(), "·");
+    }
+
+    #[test]
     fn filter_cycle() {
         assert_eq!(IssueFilter::All.next(), IssueFilter::Open);
         assert_eq!(IssueFilter::Open.next(), IssueFilter::Blocked);
         assert_eq!(IssueFilter::Blocked.next(), IssueFilter::All);
+    }
+
+    #[test]
+    fn type_char_returns_correct_indicator() {
+        assert_eq!(make_issue(1, &["bug"]).type_char(), "B");
+        assert_eq!(make_issue(2, &["enhancement"]).type_char(), "E");
+        assert_eq!(make_issue(3, &["proposal"]).type_char(), "P");
+        assert_eq!(make_issue(4, &[]).type_char(), "·");
     }
 
     #[test]

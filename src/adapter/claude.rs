@@ -399,8 +399,8 @@ impl ClaudeAdapter {
                 // handles dispatching commands to the manager based on work availability.
                 // Re-bootstrapping here causes monitor-loop to fire continuously.
                 if !agent.is_manager {
-                    if let Some(cmd) = self.bootstrap_command(runtime, agent).await {
-                        tracing::info!("Agent {} is idle, sending bootstrap: {}", agent.id, cmd);
+                    if let Some(cmd) = self.ongoing_command(runtime, agent).await {
+                        tracing::info!("Agent {} is idle, sending ongoing command: {}", agent.id, cmd);
                         proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
                     }
                 }
@@ -442,8 +442,8 @@ impl ClaudeAdapter {
                     }
                     PaneState::AgentIdle => {
                         if !agent.is_manager {
-                            if let Some(cmd) = self.bootstrap_command(runtime, agent).await {
-                                tracing::info!("Probe: agent {} is idle, sending bootstrap: {}", agent.id, cmd);
+                            if let Some(cmd) = self.ongoing_command(runtime, agent).await {
+                                tracing::info!("Probe: agent {} is idle, sending ongoing command: {}", agent.id, cmd);
                                 proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
                             }
                         }
@@ -666,30 +666,11 @@ impl ClaudeAdapter {
         Ok(())
     }
 
-    /// Remove worktrees for a swarm.
-    async fn remove_worktrees(&self, repo_path: &Path, worktree_paths: &[PathBuf]) -> Result<()> {
-        for wt in worktree_paths {
-            let output = self
-                .output(
-                    "git",
-                    &[
-                        "worktree".to_string(),
-                        "remove".to_string(),
-                        "--force".to_string(),
-                        wt.to_string_lossy().to_string(),
-                    ],
-                    Some(repo_path),
-                )
-                .await?;
-            if !output.status.success() {
-                tracing::warn!(
-                    "Failed to remove worktree {}: {}",
-                    wt.display(),
-                    String::from_utf8_lossy(&output.stderr)
-                );
-            }
-        }
-        Ok(())
+    fn teardown_targets(swarm: &Swarm) -> Vec<String> {
+        let mut targets = Vec::with_capacity(swarm.workers.len() + 1);
+        targets.push(swarm.manager.tmux_target.clone());
+        targets.extend(swarm.workers.iter().map(|worker| worker.tmux_target.clone()));
+        targets
     }
 }
 
@@ -1244,6 +1225,15 @@ impl AgentRuntime for ClaudeAdapter {
     }
 
     async fn teardown(&self, swarm: &Swarm) -> Result<()> {
+        // Stop each agent pane before killing the tmux session so the swarm shuts down cleanly.
+        for target in Self::teardown_targets(swarm) {
+            if let Err(err) = proxy::kill_pane(&self.transport, &target).await {
+                tracing::warn!("Failed to stop pane {target} during teardown: {err}");
+            }
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+
         // Kill the tmux session
         let output = self
             .output(
@@ -1264,15 +1254,6 @@ impl AgentRuntime for ClaudeAdapter {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
-
-        // Remove worktrees
-        let worktree_paths: Vec<PathBuf> = swarm
-            .workers
-            .iter()
-            .map(|w| w.worktree_path.clone())
-            .collect();
-        self.remove_worktrees(&swarm.repo_path, &worktree_paths)
-            .await?;
 
         Ok(())
     }
@@ -1466,6 +1447,28 @@ fn generic_worker_bootstrap_cmd(runtime: &AgentType) -> Option<String> {
     }
 }
 
+/// Non-loop command sent to an idle manager on subsequent monitoring cycles.
+fn manager_ongoing_cmd(runtime: &AgentType) -> Option<String> {
+    match runtime {
+        AgentType::Claude => Some("/autocoder:monitor".to_string()),
+        AgentType::Gemini => Some("/monitor".to_string()),
+        AgentType::Codex => Some("/monitor".to_string()),
+        AgentType::Droid => Some("/monitor".to_string()),
+    }
+}
+
+/// Non-loop command sent to an idle generic worker on subsequent monitoring cycles.
+fn generic_worker_ongoing_cmd(runtime: &AgentType) -> Option<String> {
+    match runtime {
+        AgentType::Claude => Some("/autocoder:fix".to_string()),
+        AgentType::Gemini => Some("/fix".to_string()),
+        AgentType::Codex => Some(
+            "Use the repository's Codex autocoder workflow to pick the next available issue and work it. Start by reading AGENTS.md, skills/autocoder/SKILL.md, skills/autocoder/references/workflow-map.md, and skills/autocoder/references/command-mapping.md. Choose the highest-priority available issue, do one focused pass, run relevant tests, and summarize the outcome.".to_string(),
+        ),
+        AgentType::Droid => Some("/fix".to_string()),
+    }
+}
+
 impl ClaudeAdapter {
     async fn bootstrap_command(&self, runtime: &AgentType, agent: &AgentInfo) -> Option<String> {
         if agent.is_manager {
@@ -1482,6 +1485,25 @@ impl ClaudeAdapter {
         }
 
         generic_worker_bootstrap_cmd(runtime)
+    }
+
+    /// Command to send to an already-running idle agent on subsequent monitoring cycles.
+    /// Uses non-loop variants so that `/fix-loop` / `/monitor-loop` are only sent once at startup.
+    async fn ongoing_command(&self, runtime: &AgentType, agent: &AgentInfo) -> Option<String> {
+        if agent.is_manager {
+            return manager_ongoing_cmd(runtime);
+        }
+
+        let issue_num = match &agent.status.state {
+            status::AgentState::Working { issue: Some(n) } => Some(*n),
+            _ => agent.dispatched_issue.or(self.issue_from_branch(agent).await),
+        };
+
+        if let Some(issue_number) = issue_num {
+            return worker_dispatch_cmd(runtime, issue_number);
+        }
+
+        generic_worker_ongoing_cmd(runtime)
     }
 
     async fn issue_from_branch(&self, agent: &AgentInfo) -> Option<u32> {
@@ -1576,10 +1598,14 @@ fn strip_ansi(content: &str) -> String {
 mod tests {
     use super::{
         classify_pane_state, extract_issue_number_from_branch, generic_worker_bootstrap_cmd,
-        is_bare_shell_prompt, is_feedback_prompt, manager_bootstrap_cmd, pane_agent_is_idle,
-        pane_needs_runtime_launch, worker_dispatch_cmd, PaneState,
+        generic_worker_ongoing_cmd, is_bare_shell_prompt, is_feedback_prompt,
+        manager_bootstrap_cmd, manager_ongoing_cmd, pane_agent_is_idle, pane_needs_runtime_launch,
+        worker_dispatch_cmd, ClaudeAdapter, PaneState,
     };
-    use crate::model::swarm::AgentType;
+    use crate::model::issue::IssueCache;
+    use crate::model::status::AgentStatus;
+    use crate::model::swarm::{AgentInfo, AgentType, Swarm};
+    use std::path::PathBuf;
 
     #[test]
     fn empty_pane_is_unknown() {
@@ -1680,6 +1706,34 @@ mod tests {
     }
 
     #[test]
+    fn manager_ongoing_uses_monitor_not_loop() {
+        assert_eq!(
+            manager_ongoing_cmd(&AgentType::Claude),
+            Some("/autocoder:monitor".to_string())
+        );
+        assert_eq!(
+            manager_ongoing_cmd(&AgentType::Gemini),
+            Some("/monitor".to_string())
+        );
+    }
+
+    #[test]
+    fn generic_worker_ongoing_uses_fix_not_loop() {
+        assert_eq!(
+            generic_worker_ongoing_cmd(&AgentType::Claude),
+            Some("/autocoder:fix".to_string())
+        );
+        assert_eq!(
+            generic_worker_ongoing_cmd(&AgentType::Gemini),
+            Some("/fix".to_string())
+        );
+        assert_eq!(
+            generic_worker_ongoing_cmd(&AgentType::Droid),
+            Some("/fix".to_string())
+        );
+    }
+
+    #[test]
     fn branch_issue_number_is_extracted() {
         assert_eq!(
             extract_issue_number_from_branch("feature/1234-fix-bug"),
@@ -1750,6 +1804,69 @@ mod tests {
     fn normal_output_not_bare_shell() {
         assert!(!is_bare_shell_prompt("Working on issue #42"));
         assert!(!is_bare_shell_prompt("IDLE_NO_WORK_AVAILABLE"));
+    }
+
+    #[test]
+    fn teardown_targets_shutdown_manager_before_workers() {
+        let swarm = Swarm {
+            repo_path: PathBuf::from("/tmp/repo"),
+            project_name: "demo".to_string(),
+            agent_type: AgentType::Codex,
+            workflow: None,
+            tmux_session: "codex-demo".to_string(),
+            manager: AgentInfo {
+                id: "demo/manager".to_string(),
+                role: "manager".to_string(),
+                worktree_path: PathBuf::from("/tmp/repo"),
+                tmux_target: "codex-demo:review.0".to_string(),
+                status: AgentStatus::default(),
+                is_manager: true,
+                pane_content: String::new(),
+                dispatched_issue: None,
+                current_issue: None,
+                current_issue_title: None,
+                waiting_for_input: false,
+            },
+            workers: vec![
+                AgentInfo {
+                    id: "demo/worker-1".to_string(),
+                    role: "worker-1".to_string(),
+                    worktree_path: PathBuf::from("/tmp/repo-wt-1"),
+                    tmux_target: "codex-demo:worker-1.0".to_string(),
+                    status: AgentStatus::default(),
+                    is_manager: false,
+                    pane_content: String::new(),
+                    dispatched_issue: None,
+                    current_issue: None,
+                    current_issue_title: None,
+                    waiting_for_input: false,
+                },
+                AgentInfo {
+                    id: "demo/worker-2".to_string(),
+                    role: "worker-2".to_string(),
+                    worktree_path: PathBuf::from("/tmp/repo-wt-2"),
+                    tmux_target: "codex-demo:worker-2.0".to_string(),
+                    status: AgentStatus::default(),
+                    is_manager: false,
+                    pane_content: String::new(),
+                    dispatched_issue: None,
+                    current_issue: None,
+                    current_issue_title: None,
+                    waiting_for_input: false,
+                },
+            ],
+            issue_cache: IssueCache::default(),
+            stopped: false,
+        };
+
+        assert_eq!(
+            ClaudeAdapter::teardown_targets(&swarm),
+            vec![
+                "codex-demo:review.0".to_string(),
+                "codex-demo:worker-1.0".to_string(),
+                "codex-demo:worker-2.0".to_string(),
+            ]
+        );
     }
 }
 
@@ -1939,5 +2056,3 @@ pub(crate) fn is_feedback_prompt(content: &str) -> bool {
     lower.contains("how is claude doing this session")
         || (lower.contains("1: bad") && lower.contains("0: dismiss"))
 }
-
-

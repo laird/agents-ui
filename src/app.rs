@@ -783,12 +783,8 @@ impl App {
                         let worker_idx = (c as usize) - ('1' as usize);
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
                             if let Some(worker) = swarm.workers.get(worker_idx) {
-                                self.agent_view = AgentView::new();
-                                self.agent_view.scroll_to_bottom();
-                                self.screen = Screen::AgentView {
-                                    swarm_idx,
-                                    agent_id: worker.id.clone(),
-                                };
+                                let aid = worker.id.clone();
+                                self.enter_agent_view(swarm_idx, aid).await;
                                 return Ok(());
                             }
                         }
@@ -803,7 +799,7 @@ impl App {
                         _ => None,
                     };
                     if let Some(idx) = swarm_idx {
-                        self.jump_to_next_waiting(idx);
+                        self.jump_to_next_waiting(idx).await;
                         return Ok(());
                     }
                 }
@@ -1012,7 +1008,7 @@ impl App {
         }
     }
 
-    fn resolve_agent_type_for_repo(&self, repo_path: &std::path::Path) -> AgentType {
+    fn preferred_agent_type_for_repo(&self, repo_path: &std::path::Path) -> AgentType {
         if self.runtime_locked_from_cli || self.transport.is_remote() {
             return self.default_agent_type.clone();
         }
@@ -1035,6 +1031,14 @@ impl App {
             if let Err(e) = crate::config::persistence::save_repo_agent_type(&root, agent_type) {
                 tracing::warn!("Failed to persist runtime preference to {}: {e}", root.display());
             }
+        }
+    }
+
+    fn selected_agent_type_for_new_swarm(&self) -> AgentType {
+        if self.runtime_locked_from_cli || self.transport.is_remote() {
+            self.default_agent_type.clone()
+        } else {
+            self.new_swarm_agent_type.clone()
         }
     }
 
@@ -1363,6 +1367,23 @@ impl App {
         self.screen = Screen::RepoView { swarm_idx };
     }
 
+    /// Enter agent view for a specific agent, resizing its tmux pane to full terminal width.
+    async fn enter_agent_view(&mut self, swarm_idx: usize, agent_id: String) {
+        if let Some(swarm) = self.swarms.get(swarm_idx) {
+            if let Some(agent) = swarm.agent(&agent_id) {
+                let target = agent.tmux_target.clone();
+                if let Ok((width, height)) = crossterm::terminal::size() {
+                    if let Err(e) = proxy::resize_pane(&self.transport, &target, width, height).await {
+                        tracing::warn!("Failed to resize agent pane {target}: {e}");
+                    }
+                }
+            }
+        }
+        self.agent_view = AgentView::new();
+        self.agent_view.scroll_to_bottom();
+        self.screen = Screen::AgentView { swarm_idx, agent_id };
+    }
+
     /// Handle selecting a row in the repos list.
     /// If it's an active swarm, jump to repo view.
     /// If it's an available repo, open the new swarm dialog pre-filled.
@@ -1375,6 +1396,7 @@ impl App {
             let avail_idx = idx - self.swarms.len();
             if let Some(repo_path) = self.available_repos.get(avail_idx) {
                 self.new_swarm_repo = repo_path.to_string_lossy().to_string();
+                self.new_swarm_agent_type = self.preferred_agent_type_for_repo(repo_path);
                 self.dialog_input = TextInput::with_text("2".to_string());
                 self.status_message = None;
                 self.screen = Screen::NewSwarm {
@@ -1507,7 +1529,7 @@ impl App {
                     }
 
                     self.new_swarm_repo = path;
-                    self.new_swarm_agent_type = AgentType::Claude;
+                    self.new_swarm_agent_type = self.preferred_agent_type_for_repo(&repo_path);
                     self.screen = Screen::NewSwarm {
                         field: NewSwarmField::AgentRuntime,
                     };
@@ -1620,7 +1642,7 @@ impl App {
                     let num_workers: u32 = self.dialog_input.text().parse().unwrap_or(2);
                     let repo_path = PathBuf::from(&self.new_swarm_repo);
                     self.dialog_input = TextInput::new();
-                    let agent_type = self.resolve_agent_type_for_repo(&repo_path);
+                    let agent_type = self.selected_agent_type_for_new_swarm();
                     self.persist_agent_type_for_repo(&repo_path, &agent_type);
 
                     if agent_type == AgentType::Droid {
@@ -1901,12 +1923,8 @@ impl App {
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
                             if let Some(worker_idx) = self.swarm_view.selected_worker() {
                                 if let Some(worker) = swarm.workers.get(worker_idx) {
-                                    self.agent_view = AgentView::new();
-                                    self.agent_view.scroll_to_bottom();
-                                    self.screen = Screen::AgentView {
-                                        swarm_idx,
-                                        agent_id: worker.role.clone(),
-                                    };
+                                    let aid = worker.role.clone();
+                                    self.enter_agent_view(swarm_idx, aid).await;
                                 }
                             }
                         }
@@ -1989,12 +2007,8 @@ impl App {
                         let worker_idx = (c as usize) - ('1' as usize);
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
                             if let Some(worker) = swarm.workers.get(worker_idx) {
-                                self.agent_view = AgentView::new();
-                                self.agent_view.scroll_to_bottom();
-                                self.screen = Screen::AgentView {
-                                    swarm_idx,
-                                    agent_id: worker.role.clone(),
-                                };
+                                let aid = worker.role.clone();
+                                self.enter_agent_view(swarm_idx, aid).await;
                             }
                         }
                     }
@@ -2099,17 +2113,16 @@ impl App {
                                 self.screen = Screen::IssueView { swarm_idx, issue_number: num };
                                 // Fetch issue body in background
                                 tokio::spawn(async move {
-                                    let result = transport
-                                        .output(
-                                            "gh",
-                                            &[
-                                                "issue".to_string(),
-                                                "view".to_string(),
-                                                num.to_string(),
-                                            ],
-                                            Some(&repo_path),
-                                        )
-                                        .await;
+                                    let result = crate::github::gh_repo_output(
+                                        &transport,
+                                        &repo_path,
+                                        &[
+                                            "issue".to_string(),
+                                            "view".to_string(),
+                                            num.to_string(),
+                                        ],
+                                    )
+                                    .await;
                                     if let Ok(output) = result {
                                         let body = String::from_utf8_lossy(&output.stdout).to_string();
                                         let _ = tx.send(crate::event::Event::IssueFetched { issue_number: num, body });
@@ -2135,18 +2148,17 @@ impl App {
                                 let repo_path = swarm.repo_path.clone();
                                 let transport = self.transport.clone();
                                 tokio::spawn(async move {
-                                    let _ = transport
-                                        .output(
-                                            "gh",
-                                            &[
-                                                "issue".to_string(),
-                                                "view".to_string(),
-                                                num.to_string(),
-                                                "--web".to_string(),
-                                            ],
-                                            Some(&repo_path),
-                                        )
-                                        .await;
+                                    let _ = crate::github::gh_repo_output(
+                                        &transport,
+                                        &repo_path,
+                                        &[
+                                            "issue".to_string(),
+                                            "view".to_string(),
+                                            num.to_string(),
+                                            "--web".to_string(),
+                                        ],
+                                    )
+                                    .await;
                                 });
                                 self.status_message = Some(format!("Opening issue #{} in browser", issue.number));
                             }
@@ -2340,12 +2352,7 @@ impl App {
                     return Ok(());
                 }
                 KeyCode::Char('m') => {
-                    self.agent_view = AgentView::new();
-                    self.agent_view.scroll_to_bottom();
-                    self.screen = Screen::AgentView {
-                        swarm_idx,
-                        agent_id: "manager".to_string(),
-                    };
+                    self.enter_agent_view(swarm_idx, "manager".to_string()).await;
                     return Ok(());
                 }
                 KeyCode::Char('a') => {
@@ -2434,13 +2441,8 @@ impl App {
                     let worker_idx = (c as usize) - ('1' as usize);
                     if let Some(swarm) = self.swarms.get(swarm_idx) {
                         if let Some(worker) = swarm.workers.get(worker_idx) {
-                            self.agent_view = AgentView::new();
-                            self.agent_view.scroll_to_bottom();
                             let aid = worker.id.clone();
-                            self.screen = Screen::AgentView {
-                                swarm_idx,
-                                agent_id: aid,
-                            };
+                            self.enter_agent_view(swarm_idx, aid).await;
                             return Ok(());
                         }
                     }
@@ -2609,7 +2611,7 @@ impl App {
         self.swarm_focus = SwarmPanel::Issues;
     }
 
-    fn jump_to_next_waiting(&mut self, swarm_idx: usize) {
+    async fn jump_to_next_waiting(&mut self, swarm_idx: usize) {
         // Get the current agent ID if we're in an agent view
         let current_id = match &self.screen {
             Screen::AgentView { agent_id, .. } => Some(agent_id.clone()),
@@ -2619,12 +2621,7 @@ impl App {
         if let Some(swarm) = self.swarms.get(swarm_idx) {
             if let Some(agent) = swarm.next_waiting_agent(current_id.as_deref()) {
                 let agent_id = agent.id.clone();
-                self.agent_view = AgentView::new();
-                self.agent_view.scroll_to_bottom();
-                self.screen = Screen::AgentView {
-                    swarm_idx,
-                    agent_id,
-                };
+                self.enter_agent_view(swarm_idx, agent_id).await;
             } else {
                 self.status_message = Some("No sessions waiting for input".to_string());
             }
@@ -2679,9 +2676,19 @@ impl App {
             KeyCode::Char('g') => {
                 // Open issue in browser
                 if let Some(ref view) = self.issue_detail_view {
-                    let _ = tokio::process::Command::new("gh")
-                        .args(["issue", "view", "--web", &view.issue_number.to_string()])
-                        .spawn();
+                    if let Some(swarm) = self.swarms.get(swarm_idx) {
+                        let _ = crate::github::gh_repo_output(
+                            &self.transport,
+                            &swarm.repo_path,
+                            &[
+                                "issue".to_string(),
+                                "view".to_string(),
+                                "--web".to_string(),
+                                view.issue_number.to_string(),
+                            ],
+                        )
+                        .await;
+                    }
                 }
             }
             KeyCode::PageUp => {
@@ -2777,8 +2784,9 @@ impl App {
             let label = state.feedback_type.github_label().to_string();
             let repo_path = state.repo_path.clone();
 
-            let result = self.transport.output(
-                "gh",
+            let result = crate::github::gh_repo_output(
+                &self.transport,
+                &repo_path,
                 &[
                     "issue".to_string(),
                     "create".to_string(),
@@ -2789,7 +2797,6 @@ impl App {
                     "--label".to_string(),
                     label,
                 ],
-                Some(&repo_path),
             ).await;
 
             if let Some(state) = self.feedback_state.as_mut() {
@@ -2813,9 +2820,10 @@ impl App {
     fn start_issue_refresh(&self, swarm_idx: usize) {
         if let Some(swarm) = self.swarms.get(swarm_idx) {
             let repo_path = swarm.repo_path.clone();
+            let transport = self.transport.clone();
             let tx = self.events.tx();
             tokio::spawn(async move {
-                match crate::model::issue::fetch_issues(&repo_path).await {
+                match crate::github::fetch_issues(&transport, &repo_path).await {
                     Ok(issues) => {
                         let _ = tx.send(Event::IssuesRefreshed { swarm_idx, issues });
                     }
@@ -2829,17 +2837,22 @@ impl App {
 
     /// Open an issue detail view by fetching issue data from GitHub.
     async fn open_issue_detail(&mut self, issue_number: u32, swarm_idx: usize) {
-        // Fetch issue details from GitHub
-        let output = tokio::process::Command::new("gh")
-            .args([
-                "issue",
-                "view",
-                &issue_number.to_string(),
-                "--json",
-                "number,title,body,labels,state",
-            ])
-            .output()
-            .await;
+        let output = if let Some(swarm) = self.swarms.get(swarm_idx) {
+            crate::github::gh_repo_output(
+                &self.transport,
+                &swarm.repo_path,
+                &[
+                    "issue".to_string(),
+                    "view".to_string(),
+                    issue_number.to_string(),
+                    "--json".to_string(),
+                    "number,title,body,labels,state,comments".to_string(),
+                ],
+            )
+            .await
+        } else {
+            return;
+        };
 
         match output {
             Ok(out) if out.status.success() => {
@@ -2855,6 +2868,21 @@ impl App {
                                 .collect()
                         })
                         .unwrap_or_default();
+                    let comments: Vec<(String, String)> = json["comments"]
+                        .as_array()
+                        .map(|arr| {
+                            arr.iter()
+                                .rev()
+                                .take(10)
+                                .rev()
+                                .filter_map(|c| {
+                                    let author = c["author"]["login"].as_str()?;
+                                    let body = c["body"].as_str()?;
+                                    Some((author.to_string(), body.to_string()))
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
 
                     self.issue_detail_view = Some(IssueDetailView::new(
                         issue_number,
@@ -2862,6 +2890,7 @@ impl App {
                         body,
                         labels,
                         state,
+                        comments,
                     ));
                     self.screen = Screen::IssueDetail { swarm_idx };
                 }
@@ -3932,6 +3961,41 @@ mod tests {
             unsafe { std::env::remove_var("HOME") };
         }
         std::fs::remove_dir_all(home).ok();
+    }
+
+    #[tokio::test]
+    async fn selected_agent_type_for_new_swarm_uses_dialog_choice_for_all_runtimes() {
+        for runtime in [
+            AgentType::Claude,
+            AgentType::Codex,
+            AgentType::Droid,
+            AgentType::Gemini,
+        ] {
+            let mut app = App::new(None, false, None, None, None).await.unwrap();
+            app.default_agent_type = AgentType::Claude;
+            app.new_swarm_agent_type = runtime.clone();
+
+            assert_eq!(app.selected_agent_type_for_new_swarm(), runtime);
+        }
+    }
+
+    #[tokio::test]
+    async fn selected_agent_type_for_new_swarm_respects_locked_runtime() {
+        let mut app = App::new(Some(AgentType::Claude), true, None, None, None).await.unwrap();
+        app.new_swarm_agent_type = AgentType::Codex;
+
+        assert_eq!(app.selected_agent_type_for_new_swarm(), AgentType::Claude);
+    }
+
+    #[tokio::test]
+    async fn preferred_agent_type_for_repo_defaults_to_current_runtime_when_unsaved() {
+        let app = App::new(Some(AgentType::Droid), false, None, None, None).await.unwrap();
+        let repo_path = temp_path("preferred-runtime-unsaved");
+        std::fs::create_dir_all(&repo_path).unwrap();
+
+        assert_eq!(app.preferred_agent_type_for_repo(&repo_path), AgentType::Droid);
+
+        std::fs::remove_dir_all(repo_path).ok();
     }
 
     #[test]

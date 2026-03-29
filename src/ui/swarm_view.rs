@@ -209,6 +209,7 @@ impl SwarmView {
             Cell::from("#"),
             Cell::from("Status"),
             Cell::from("Task"),
+            Cell::from("Age"),
         ])
         .style(theme::header_style());
 
@@ -243,10 +244,22 @@ impl SwarmView {
                         _ => "\u{2014}".to_string(),
                     }
                 };
+                let task = match w.dispatched_issue {
+                    Some(n) if !task.contains(&format!("#{n}")) => {
+                        if task == "\u{2014}" {
+                            format!("→#{n}")
+                        } else {
+                            format!("{task} →#{n}")
+                        }
+                    }
+                    _ => task,
+                };
+                let age = crate::model::status::elapsed_display(w.status.timestamp);
                 Row::new(vec![
                     Cell::from(format!("{}", i + 1)),
                     Cell::from(status_str).style(status_style),
                     Cell::from(task),
+                    Cell::from(age).style(Style::default().fg(ratatui::style::Color::DarkGray)),
                 ])
             })
             .collect();
@@ -264,8 +277,9 @@ impl SwarmView {
             worker_rows,
             [
                 Constraint::Length(3),
+                Constraint::Percentage(35),
                 Constraint::Percentage(45),
-                Constraint::Percentage(45),
+                Constraint::Length(5),
             ],
         )
         .header(worker_header)
@@ -307,6 +321,7 @@ impl SwarmView {
         }
 
         let issue_header = Row::new(vec![
+            Cell::from("T"),
             Cell::from("#"),
             Cell::from("Pri"),
             Cell::from("Title"),
@@ -326,6 +341,7 @@ impl SwarmView {
                     Style::default().fg(ratatui::style::Color::Gray)
                 };
                 Row::new(vec![
+                    Cell::from(issue.type_char()).style(theme::issue_type_style(&issue.issue_type)),
                     Cell::from(format!("{}", issue.number)),
                     Cell::from(issue.priority_label()),
                     Cell::from(truncate(&issue.title, 30)),
@@ -346,6 +362,7 @@ impl SwarmView {
         let issues_table = Table::new(
             issue_rows,
             [
+                Constraint::Length(3),
                 Constraint::Length(5),
                 Constraint::Length(4),
                 Constraint::Min(15),
