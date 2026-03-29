@@ -772,6 +772,37 @@ mod tests {
     }
 
     #[test]
+    fn priority_filter_cycles_p0_to_none() {
+        let mut view = SwarmView::new();
+        assert_eq!(view.priority_filter, None);
+        view.cycle_priority_filter();
+        assert_eq!(view.priority_filter, Some(crate::model::issue::IssuePriority::P0));
+        view.cycle_priority_filter();
+        assert_eq!(view.priority_filter, Some(crate::model::issue::IssuePriority::P1));
+        view.cycle_priority_filter();
+        assert_eq!(view.priority_filter, Some(crate::model::issue::IssuePriority::P2));
+        view.cycle_priority_filter();
+        assert_eq!(view.priority_filter, Some(crate::model::issue::IssuePriority::P3));
+        view.cycle_priority_filter();
+        assert_eq!(view.priority_filter, None);
+    }
+
+    #[test]
+    fn priority_filter_excludes_non_matching() {
+        use crate::model::issue::{IssueType, IssuePriority, IssueState};
+        let issues = vec![
+            GitHubIssue { number: 1, title: "a".into(), state: IssueState::Open, priority: IssuePriority::P1, issue_type: IssueType::Bug, labels: vec![], is_working: false, assigned_worker: None, updated_at: None },
+            GitHubIssue { number: 2, title: "b".into(), state: IssueState::Open, priority: IssuePriority::P2, issue_type: IssueType::Enhancement, labels: vec![], is_working: false, assigned_worker: None, updated_at: None },
+            GitHubIssue { number: 3, title: "c".into(), state: IssueState::Open, priority: IssuePriority::P3, issue_type: IssueType::Other, labels: vec![], is_working: false, assigned_worker: None, updated_at: None },
+        ];
+        let mut view = SwarmView::new();
+        view.priority_filter = Some(IssuePriority::P1);
+        let filtered = view.apply_filters(&issues);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].number, 1);
+    }
+
+    #[test]
     fn detects_confirmation_prompts() {
         assert!(agent_needs_input("Would you like to proceed?\nPress enter to confirm"));
         assert!(!agent_needs_input("All good, continuing work"));
