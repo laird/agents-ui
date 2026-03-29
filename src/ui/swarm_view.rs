@@ -238,6 +238,16 @@ impl SwarmView {
                         _ => "\u{2014}".to_string(),
                     }
                 };
+                let task = match w.dispatched_issue {
+                    Some(n) if !task.contains(&format!("#{n}")) => {
+                        if task == "\u{2014}" {
+                            format!("→#{n}")
+                        } else {
+                            format!("{task} →#{n}")
+                        }
+                    }
+                    _ => task,
+                };
                 Row::new(vec![
                     Cell::from(format!("{}", i + 1)),
                     Cell::from(status_str).style(status_style),
