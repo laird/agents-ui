@@ -345,9 +345,18 @@ impl RepoView {
                     Span::styled(dot, if w.waiting_for_input { row_style } else { dot_style }),
                     Span::styled(role_label, if w.waiting_for_input { row_style } else { theme::title_style() }),
                 ]);
+                let dispatch_label = match w.dispatched_issue {
+                    Some(n) => match &w.status.state {
+                        crate::model::status::AgentState::Working { issue: Some(working_n) }
+                            if *working_n == n => String::new(),
+                        _ => format!(" ⊕#{n}"),
+                    },
+                    None => String::new(),
+                };
                 let line2 = Line::from(vec![
                     Span::styled("  ", row_style),
                     Span::styled(status_text, if w.waiting_for_input { row_style } else { status_style }),
+                    Span::styled(dispatch_label, theme::help_style()),
                 ]);
                 let mut lines = vec![line1, line2];
                 if !elapsed.is_empty() {
