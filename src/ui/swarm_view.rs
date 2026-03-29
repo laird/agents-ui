@@ -322,6 +322,7 @@ impl SwarmView {
 
         let issue_header = Row::new(vec![
             Cell::from("#"),
+            Cell::from("T"),
             Cell::from("Pri"),
             Cell::from("Title"),
             Cell::from("Status"),
@@ -339,8 +340,15 @@ impl SwarmView {
                 } else {
                     Style::default().fg(ratatui::style::Color::Gray)
                 };
+                let type_style = match issue.issue_type {
+                    crate::model::issue::IssueType::Bug => Style::default().fg(ratatui::style::Color::Red),
+                    crate::model::issue::IssueType::Enhancement => Style::default().fg(ratatui::style::Color::Cyan),
+                    crate::model::issue::IssueType::Proposal => Style::default().fg(ratatui::style::Color::Magenta),
+                    crate::model::issue::IssueType::Other => Style::default().fg(ratatui::style::Color::DarkGray),
+                };
                 Row::new(vec![
                     Cell::from(format!("{}", issue.number)),
+                    Cell::from(issue.type_char()).style(type_style),
                     Cell::from(issue.priority_label()),
                     Cell::from(truncate(&issue.title, 30)),
                     Cell::from(status).style(status_style),
@@ -361,6 +369,7 @@ impl SwarmView {
             issue_rows,
             [
                 Constraint::Length(5),
+                Constraint::Length(3),
                 Constraint::Length(4),
                 Constraint::Min(15),
                 Constraint::Length(18),

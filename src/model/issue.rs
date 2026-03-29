@@ -138,6 +138,16 @@ impl GitHubIssue {
             .unwrap_or_else(|| "—".to_string())
     }
 
+    /// Returns a single-character type indicator for display in the issues table.
+    pub fn type_char(&self) -> &'static str {
+        match self.issue_type {
+            IssueType::Bug => "B",
+            IssueType::Enhancement => "E",
+            IssueType::Proposal => "P",
+            IssueType::Other => "·",
+        }
+    }
+
     pub fn status_label(&self) -> String {
         if self.is_being_worked() {
             if let Some(ref w) = self.assigned_worker {
@@ -160,7 +170,6 @@ impl GitHubIssue {
         }
     }
 
-    /// Whether this issue matches the given filter.
     pub fn matches_filter(&self, filter: IssueFilter) -> bool {
         match filter {
             IssueFilter::All => true,
@@ -349,6 +358,14 @@ mod tests {
         assert_eq!(IssueFilter::All.next(), IssueFilter::Open);
         assert_eq!(IssueFilter::Open.next(), IssueFilter::Blocked);
         assert_eq!(IssueFilter::Blocked.next(), IssueFilter::All);
+    }
+
+    #[test]
+    fn type_char_returns_correct_indicator() {
+        assert_eq!(make_issue(1, &["bug"]).type_char(), "B");
+        assert_eq!(make_issue(2, &["enhancement"]).type_char(), "E");
+        assert_eq!(make_issue(3, &["proposal"]).type_char(), "P");
+        assert_eq!(make_issue(4, &[]).type_char(), "·");
     }
 
     #[test]
