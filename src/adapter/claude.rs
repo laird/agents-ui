@@ -395,9 +395,14 @@ impl ClaudeAdapter {
                 }
             }
             PaneState::AgentIdle => {
-                if let Some(cmd) = self.bootstrap_command(runtime, agent).await {
-                    tracing::info!("Agent {} is idle, sending bootstrap: {}", agent.id, cmd);
-                    proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
+                // Don't re-bootstrap the manager when it's idle — manage_manager_sessions
+                // handles dispatching commands to the manager based on work availability.
+                // Re-bootstrapping here causes monitor-loop to fire continuously.
+                if !agent.is_manager {
+                    if let Some(cmd) = self.ongoing_command(runtime, agent).await {
+                        tracing::info!("Agent {} is idle, sending ongoing command: {}", agent.id, cmd);
+                        proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
+                    }
                 }
             }
             PaneState::AgentBusy => {
@@ -436,9 +441,11 @@ impl ClaudeAdapter {
                         }
                     }
                     PaneState::AgentIdle => {
-                        if let Some(cmd) = self.bootstrap_command(runtime, agent).await {
-                            tracing::info!("Probe: agent {} is idle, sending bootstrap: {}", agent.id, cmd);
-                            proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
+                        if !agent.is_manager {
+                            if let Some(cmd) = self.ongoing_command(runtime, agent).await {
+                                tracing::info!("Probe: agent {} is idle, sending ongoing command: {}", agent.id, cmd);
+                                proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
+                            }
                         }
                     }
                     _ => {
@@ -1168,7 +1175,7 @@ impl AgentRuntime for ClaudeAdapter {
 
             // 3. Check pane state: feedback prompt, shell prompt, etc.
             if pane_exists && wt_path.exists() {
-                match proxy::capture_pane(&self.transport, &worker.tmux_target, 10).await {
+                match proxy::capture_pane(&self.transport, &worker.tmux_target, 80).await {
                     Ok(content) => {
                         let trimmed = content.trim();
 
@@ -1183,11 +1190,9 @@ impl AgentRuntime for ClaudeAdapter {
                             continue;
                         }
 
-                        // 3b. Detect bare shell prompt (agent not running)
-                        // Must distinguish from an active Claude session which also shows ❯
-                        let is_bare_shell = is_bare_shell_prompt(trimmed);
-
-                        if is_bare_shell {
+                        // 3b. Detect shell prompt (agent not running) using classify_pane_state
+                        // for reliable discrimination between Claude's ❯ and a bare shell ❯.
+                        if classify_pane_state(trimmed) == PaneState::NeedsLaunch {
                             tracing::info!(
                                 "Healing {}: agent not running (shell prompt detected), restarting",
                                 worker.id
@@ -1252,7 +1257,30 @@ impl AgentRuntime for ClaudeAdapter {
     }
 
     async fn revive_agents(&self, swarm: &Swarm) -> Result<()> {
-        self.ensure_swarm_agents_running(swarm).await
+        // Only re-launch agents that have dropped back to a shell prompt.
+        // Does NOT send commands to agents that are idle (AgentIdle) — those are healthy
+        // and already running their fix-loop / monitor-loop between iterations.
+        // Sending ongoing commands to idle loop agents would queue duplicate work.
+        for agent in std::iter::once(&swarm.manager).chain(swarm.workers.iter()) {
+            if agent_is_stopped(agent) {
+                tracing::info!("Skipping revive for {} — tombstone present", agent.id);
+                continue;
+            }
+            let content = proxy::capture_pane(&self.transport, &agent.tmux_target, 80)
+                .await
+                .unwrap_or_default();
+            if classify_pane_state(&content) == PaneState::NeedsLaunch {
+                tracing::info!("Reviving {} — dropped to shell prompt", agent.id);
+                self.launch_agent_in_pane(&agent.tmux_target, &swarm.tmux_session, &swarm.agent_type)
+                    .await?;
+                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                if let Some(cmd) = self.bootstrap_command(&swarm.agent_type, agent).await {
+                    tracing::info!("Sending bootstrap command to {}: {}", agent.id, cmd);
+                    proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1342,14 +1370,26 @@ fn classify_pane_state(content: &str) -> PaneState {
             saw_agent_indicator = true;
         }
 
-        // Idle agent prompt (waiting for user input)
-        if lower.contains("how can i help")
-            || lower.contains("what would you like")
-            || lower.starts_with('>')
+        // Idle agent prompt (waiting for user input, no command queued)
+        if lower.contains("how can i help") || lower.contains("what would you like") {
+            saw_idle_prompt = true;
+        } else if lower.starts_with('>')
             || lower.starts_with('\u{276f}') // ❯ (Claude prompt)
             || lower.starts_with('\u{203a}') // › (Codex prompt)
         {
-            saw_idle_prompt = true;
+            // If there is text after the prompt character, a command has been queued
+            // (sent via tmux send-keys but not yet processed). Treat as busy so the
+            // TUI does not dispatch a second command to the same session.
+            let after_prompt = lower
+                .trim_start_matches(|c: char| {
+                    c == '>' || c == '\u{276f}' || c == '\u{203a}'
+                })
+                .trim();
+            if after_prompt.is_empty() {
+                saw_idle_prompt = true;
+            } else {
+                saw_busy_indicator = true;
+            }
         }
     }
 
@@ -1428,6 +1468,28 @@ fn generic_worker_bootstrap_cmd(runtime: &AgentType) -> Option<String> {
     }
 }
 
+/// Non-loop command sent to an idle manager on subsequent monitoring cycles.
+fn manager_ongoing_cmd(runtime: &AgentType) -> Option<String> {
+    match runtime {
+        AgentType::Claude => Some("/autocoder:monitor".to_string()),
+        AgentType::Gemini => Some("/monitor".to_string()),
+        AgentType::Codex => Some("/monitor".to_string()),
+        AgentType::Droid => Some("/monitor".to_string()),
+    }
+}
+
+/// Non-loop command sent to an idle generic worker on subsequent monitoring cycles.
+fn generic_worker_ongoing_cmd(runtime: &AgentType) -> Option<String> {
+    match runtime {
+        AgentType::Claude => Some("/autocoder:fix".to_string()),
+        AgentType::Gemini => Some("/fix".to_string()),
+        AgentType::Codex => Some(
+            "Use the repository's Codex autocoder workflow to pick the next available issue and work it. Start by reading AGENTS.md, skills/autocoder/SKILL.md, skills/autocoder/references/workflow-map.md, and skills/autocoder/references/command-mapping.md. Choose the highest-priority available issue, do one focused pass, run relevant tests, and summarize the outcome.".to_string(),
+        ),
+        AgentType::Droid => Some("/fix".to_string()),
+    }
+}
+
 impl ClaudeAdapter {
     async fn bootstrap_command(&self, runtime: &AgentType, agent: &AgentInfo) -> Option<String> {
         if agent.is_manager {
@@ -1444,6 +1506,25 @@ impl ClaudeAdapter {
         }
 
         generic_worker_bootstrap_cmd(runtime)
+    }
+
+    /// Command to send to an already-running idle agent on subsequent monitoring cycles.
+    /// Uses non-loop variants so that `/fix-loop` / `/monitor-loop` are only sent once at startup.
+    async fn ongoing_command(&self, runtime: &AgentType, agent: &AgentInfo) -> Option<String> {
+        if agent.is_manager {
+            return manager_ongoing_cmd(runtime);
+        }
+
+        let issue_num = match &agent.status.state {
+            status::AgentState::Working { issue: Some(n) } => Some(*n),
+            _ => agent.dispatched_issue.or(self.issue_from_branch(agent).await),
+        };
+
+        if let Some(issue_number) = issue_num {
+            return worker_dispatch_cmd(runtime, issue_number);
+        }
+
+        generic_worker_ongoing_cmd(runtime)
     }
 
     async fn issue_from_branch(&self, agent: &AgentInfo) -> Option<u32> {
@@ -1538,8 +1619,9 @@ fn strip_ansi(content: &str) -> String {
 mod tests {
     use super::{
         classify_pane_state, extract_issue_number_from_branch, generic_worker_bootstrap_cmd,
-        is_bare_shell_prompt, is_feedback_prompt, manager_bootstrap_cmd, pane_agent_is_idle,
-        pane_needs_runtime_launch, worker_dispatch_cmd, ClaudeAdapter, PaneState,
+        generic_worker_ongoing_cmd, is_bare_shell_prompt, is_feedback_prompt,
+        manager_bootstrap_cmd, manager_ongoing_cmd, pane_agent_is_idle, pane_needs_runtime_launch,
+        worker_dispatch_cmd, ClaudeAdapter, PaneState,
     };
     use crate::model::issue::IssueCache;
     use crate::model::status::AgentStatus;
@@ -1601,6 +1683,18 @@ mod tests {
     }
 
     #[test]
+    fn queued_command_at_prompt_is_busy() {
+        // Prompt with a command queued (sent via tmux send-keys, not yet processed)
+        // should not appear idle — prevents double-dispatch.
+        assert_eq!(classify_pane_state("\u{276f} /fix 123\n"), PaneState::AgentBusy);
+        assert_eq!(classify_pane_state("\u{276f} /autocoder:monitor\n"), PaneState::AgentBusy);
+        assert_eq!(classify_pane_state("> /fix 123\n"), PaneState::AgentBusy);
+        // Bare prompt (no command) is still idle
+        assert_eq!(classify_pane_state("\u{276f} \n"), PaneState::AgentIdle);
+        assert_eq!(classify_pane_state("\u{276f}\n"), PaneState::AgentIdle);
+    }
+
+    #[test]
     fn worker_dispatch_matches_issue() {
         assert_eq!(
             worker_dispatch_cmd(&AgentType::Claude, 42),
@@ -1629,6 +1723,34 @@ mod tests {
         assert_eq!(
             generic_worker_bootstrap_cmd(&AgentType::Droid),
             None
+        );
+    }
+
+    #[test]
+    fn manager_ongoing_uses_monitor_not_loop() {
+        assert_eq!(
+            manager_ongoing_cmd(&AgentType::Claude),
+            Some("/autocoder:monitor".to_string())
+        );
+        assert_eq!(
+            manager_ongoing_cmd(&AgentType::Gemini),
+            Some("/monitor".to_string())
+        );
+    }
+
+    #[test]
+    fn generic_worker_ongoing_uses_fix_not_loop() {
+        assert_eq!(
+            generic_worker_ongoing_cmd(&AgentType::Claude),
+            Some("/autocoder:fix".to_string())
+        );
+        assert_eq!(
+            generic_worker_ongoing_cmd(&AgentType::Gemini),
+            Some("/fix".to_string())
+        );
+        assert_eq!(
+            generic_worker_ongoing_cmd(&AgentType::Droid),
+            Some("/fix".to_string())
         );
     }
 

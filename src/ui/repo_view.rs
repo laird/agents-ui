@@ -302,7 +302,18 @@ impl RepoView {
                 let status_text = if w.waiting_for_input {
                     "NEEDS INPUT".to_string()
                 } else {
-                    w.status.state.to_string()
+                    let base = w.status.state.to_string();
+                    match (&w.status.state, &w.current_issue_title) {
+                        (crate::model::status::AgentState::Working { issue: Some(_) }, Some(title)) => {
+                            let truncated = if title.len() > 40 {
+                                format!("{}…", &title[..40])
+                            } else {
+                                title.clone()
+                            };
+                            format!("{base}: {truncated}")
+                        }
+                        _ => base,
+                    }
                 };
                 let status_style = if w.waiting_for_input {
                     theme::waiting_style()

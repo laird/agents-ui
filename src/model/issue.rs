@@ -12,6 +12,7 @@ pub enum IssueFilter {
     All,
     Open,
     Blocked,
+    Working,
 }
 
 impl IssueFilter {
@@ -19,7 +20,8 @@ impl IssueFilter {
         match self {
             IssueFilter::All => IssueFilter::Open,
             IssueFilter::Open => IssueFilter::Blocked,
-            IssueFilter::Blocked => IssueFilter::All,
+            IssueFilter::Blocked => IssueFilter::Working,
+            IssueFilter::Working => IssueFilter::All,
         }
     }
 
@@ -28,6 +30,7 @@ impl IssueFilter {
             IssueFilter::All => "all",
             IssueFilter::Open => "open",
             IssueFilter::Blocked => "blocked",
+            IssueFilter::Working => "working",
         }
     }
 }
@@ -86,6 +89,8 @@ pub struct GitHubIssue {
     pub is_working: bool,
     /// Worker ID currently working on this issue, if any.
     pub assigned_worker: Option<String>,
+    /// When this issue was last updated on GitHub.
+    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 pub const BLOCKING_LABELS: &[&str] = &[
@@ -138,6 +143,16 @@ impl GitHubIssue {
             .unwrap_or_else(|| "—".to_string())
     }
 
+    /// Returns a single-character type indicator for display in the issues table.
+    pub fn type_char(&self) -> &'static str {
+        match self.issue_type {
+            IssueType::Bug => "B",
+            IssueType::Enhancement => "E",
+            IssueType::Proposal => "P",
+            IssueType::Other => "·",
+        }
+    }
+
     pub fn status_label(&self) -> String {
         if self.is_being_worked() {
             if let Some(ref w) = self.assigned_worker {
@@ -160,23 +175,22 @@ impl GitHubIssue {
         }
     }
 
-    /// Whether this issue matches the given filter.
     pub fn matches_filter(&self, filter: IssueFilter) -> bool {
         match filter {
             IssueFilter::All => true,
             IssueFilter::Open => self.state == IssueState::Open && !self.is_blocked(),
             IssueFilter::Blocked => self.is_blocked(),
+            IssueFilter::Working => self.is_being_worked(),
         }
     }
 
-    pub fn type_char(&self) -> &str {
-        match self.issue_type {
-            IssueType::Bug => "B",
-            IssueType::Enhancement => "E",
-            IssueType::Proposal => "P",
-            IssueType::Other => "·",
-        }
+    /// Returns true if the issue was updated within the last 24 hours.
+    pub fn is_recently_updated(&self) -> bool {
+        self.updated_at.map_or(false, |t| {
+            chrono::Utc::now().signed_duration_since(t).num_hours() < 24
+        })
     }
+
 }
 
 /// Cached issues for a project.
@@ -232,6 +246,8 @@ pub struct GhIssueJson {
     pub title: String,
     pub state: String,
     pub labels: Vec<GhLabelJson>,
+    #[serde(rename = "updatedAt", default)]
+    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Deserialize)]
@@ -285,6 +301,7 @@ impl From<GhIssueJson> for GitHubIssue {
             labels,
             is_working,
             assigned_worker: None,
+            updated_at: raw.updated_at,
         }
     }
 }
@@ -292,6 +309,7 @@ impl From<GhIssueJson> for GitHubIssue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
 
     fn make_issue(number: u32, labels: &[&str]) -> GitHubIssue {
         let label_vec: Vec<String> = labels.iter().map(|s| s.to_string()).collect();
@@ -307,6 +325,7 @@ mod tests {
             labels: label_vec,
             is_working,
             assigned_worker: None,
+            updated_at: None,
         }
     }
 
@@ -362,10 +381,60 @@ mod tests {
     }
 
     #[test]
+    fn recently_updated_within_24h_returns_true() {
+        let mut issue = make_issue(1, &["bug"]);
+        issue.updated_at = Some(Utc::now() - chrono::Duration::hours(1));
+        assert!(issue.is_recently_updated());
+    }
+
+    #[test]
+    fn recently_updated_older_than_24h_returns_false() {
+        let mut issue = make_issue(1, &["bug"]);
+        issue.updated_at = Some(Utc::now() - chrono::Duration::hours(25));
+        assert!(!issue.is_recently_updated());
+    }
+
+    #[test]
+    fn recently_updated_none_returns_false() {
+        assert!(!make_issue(1, &["bug"]).is_recently_updated());
+    }
+
+    #[test]
+    fn recently_updated_does_not_change_type_char() {
+        // The ★ indicator is rendered by swarm_view, not type_char()
+        let mut issue = make_issue(1, &["bug"]);
+        issue.updated_at = Some(Utc::now() - chrono::Duration::hours(1));
+        assert!(issue.is_recently_updated());
+        assert_eq!(issue.type_char(), "B");
+    }
+
+    #[test]
     fn filter_cycle() {
         assert_eq!(IssueFilter::All.next(), IssueFilter::Open);
         assert_eq!(IssueFilter::Open.next(), IssueFilter::Blocked);
-        assert_eq!(IssueFilter::Blocked.next(), IssueFilter::All);
+        assert_eq!(IssueFilter::Blocked.next(), IssueFilter::Working);
+        assert_eq!(IssueFilter::Working.next(), IssueFilter::All);
+    }
+
+    #[test]
+    fn filter_working_matches_only_working_issues() {
+        let working = make_issue(1, &["working"]);
+        let open = make_issue(2, &["bug"]);
+        let blocked = make_issue(3, &["needs-design"]);
+
+        assert!(working.matches_filter(IssueFilter::Working));
+        assert!(!open.matches_filter(IssueFilter::Working));
+        assert!(!blocked.matches_filter(IssueFilter::Working));
+
+        assert_eq!(IssueFilter::Working.label(), "working");
+    }
+
+    #[test]
+    fn type_char_returns_correct_indicator() {
+        assert_eq!(make_issue(1, &["bug"]).type_char(), "B");
+        assert_eq!(make_issue(2, &["enhancement"]).type_char(), "E");
+        assert_eq!(make_issue(3, &["proposal"]).type_char(), "P");
+        assert_eq!(make_issue(4, &[]).type_char(), "·");
     }
 
     #[test]
