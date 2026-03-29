@@ -505,14 +505,16 @@ impl SwarmView {
         self.issues_table.selected()
     }
 
-    /// Return the subset of `issues` that pass both the state filter and the type filter.
-    /// Matches the filtering applied in `render()` (excluding the search query filter).
+    /// Return the subset of `issues` that pass both the state filter and the type filter,
+    /// sorted by priority then issue number — matching the order rendered by `render()`.
     pub fn apply_filters<'a>(&self, issues: &'a [GitHubIssue]) -> Vec<&'a GitHubIssue> {
-        issues
+        let mut result: Vec<&'a GitHubIssue> = issues
             .iter()
             .filter(|i| i.matches_filter(self.issue_filter))
             .filter(|i| self.issue_type_filter.as_ref().map_or(true, |tf| &i.issue_type == tf))
-            .collect()
+            .collect();
+        result.sort_by_key(|i| (&i.priority, i.number));
+        result
     }
 
     /// Cycle the type filter: None → Bug → Enhancement → Proposal → None.
@@ -680,6 +682,22 @@ mod tests {
             .collect();
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].number, 1);
+    }
+
+    #[test]
+    fn apply_filters_sorts_by_priority_then_number() {
+        use crate::model::issue::{IssueType, IssuePriority, IssueState};
+        let issues = vec![
+            GitHubIssue { number: 10, title: "a".into(), state: IssueState::Open, priority: IssuePriority::P3, issue_type: IssueType::Other, labels: vec![], is_working: false, assigned_worker: None },
+            GitHubIssue { number: 5, title: "b".into(), state: IssueState::Open, priority: IssuePriority::P1, issue_type: IssueType::Bug, labels: vec![], is_working: false, assigned_worker: None },
+            GitHubIssue { number: 3, title: "c".into(), state: IssueState::Open, priority: IssuePriority::P1, issue_type: IssueType::Bug, labels: vec![], is_working: false, assigned_worker: None },
+            GitHubIssue { number: 8, title: "d".into(), state: IssueState::Open, priority: IssuePriority::P2, issue_type: IssueType::Enhancement, labels: vec![], is_working: false, assigned_worker: None },
+        ];
+        // apply_filters returns issues sorted by priority then number
+        let view = SwarmView::new();
+        let filtered = view.apply_filters(&issues);
+        let nums: Vec<u32> = filtered.iter().map(|i| i.number).collect();
+        assert_eq!(nums, vec![3, 5, 8, 10]); // P1(3), P1(5), P2(8), P3(10)
     }
 
     #[test]
