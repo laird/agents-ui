@@ -2336,6 +2336,53 @@ impl App {
                             }
                         }
                     }
+                    KeyCode::Char('u') => {
+                        // Release stuck issue: remove "working" label
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            let project_name = swarm.project_name.clone();
+                            let issues: Vec<&GitHubIssue> = self.issue_caches
+                                .get(&project_name)
+                                .map(|c| self.swarm_view.apply_filters(&c.issues))
+                                .unwrap_or_default();
+                            if let Some(issue) = self.swarm_view.selected_issue()
+                                .and_then(|idx| issues.get(idx))
+                            {
+                                if issue.is_working {
+                                    let num = issue.number;
+                                    let repo_path = swarm.repo_path.clone();
+                                    let transport = self.transport.clone();
+                                    // Optimistically update local cache
+                                    if let Some(cache) = self.issue_caches.get_mut(&project_name) {
+                                        if let Some(i) = cache.issues.iter_mut().find(|i| i.number == num) {
+                                            i.is_working = false;
+                                            i.assigned_worker = None;
+                                            i.labels.retain(|l| l != "working");
+                                        }
+                                    }
+                                    tokio::spawn(async move {
+                                        let _ = crate::github::gh_repo_output(
+                                            &transport,
+                                            &repo_path,
+                                            &[
+                                                "issue".to_string(),
+                                                "edit".to_string(),
+                                                num.to_string(),
+                                                "--remove-label".to_string(),
+                                                "working".to_string(),
+                                            ],
+                                        )
+                                        .await;
+                                    });
+                                    self.set_status(format!("Released issue #{num} (removed working label)"));
+                                } else {
+                                    self.set_status(format!("Issue #{} is not marked as working", issue.number));
+                                }
+                            }
+                        }
+                    }
+                    KeyCode::Char(' ') => {
+                        self.dispatch_selected_issue(swarm_idx).await;
+                    }
                     KeyCode::Char('/') => {
                         self.swarm_view.search_query = Some(String::new());
                         self.swarm_view.issues_table.select(Some(0));
