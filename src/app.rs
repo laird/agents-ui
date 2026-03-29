@@ -2845,6 +2845,12 @@ impl App {
                     view.scroll_to_end();
                 }
             }
+            KeyCode::Char('d') => {
+                let issue_number = self.issue_detail_view.as_ref().map(|v| v.issue_number);
+                if let Some(n) = issue_number {
+                    self.dispatch_issue_number(swarm_idx, n).await;
+                }
+            }
             KeyCode::Char('n') | KeyCode::Char('p') => {
                 let current_number = self.issue_detail_view.as_ref().map(|v| v.issue_number);
                 if let Some(current_number) = current_number {
@@ -3105,7 +3111,6 @@ impl App {
     async fn dispatch_selected_issue(&mut self, swarm_idx: usize) {
         let Some(swarm) = self.swarms.get(swarm_idx) else { return };
         let project_name = swarm.project_name.clone();
-        let agent_type = swarm.agent_type.clone();
 
         // Get the selected issue number
         let issues: Vec<u32> = self.issue_caches
@@ -3116,6 +3121,13 @@ impl App {
             self.set_status("No issue selected".to_string());
             return;
         };
+
+        self.dispatch_issue_number(swarm_idx, issue_num).await;
+    }
+
+    async fn dispatch_issue_number(&mut self, swarm_idx: usize, issue_num: u32) {
+        let Some(swarm) = self.swarms.get(swarm_idx) else { return };
+        let agent_type = swarm.agent_type.clone();
 
         // Find an idle worker
         let idle_worker = self.swarms[swarm_idx]
