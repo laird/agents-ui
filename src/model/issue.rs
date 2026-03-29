@@ -144,7 +144,11 @@ impl GitHubIssue {
     }
 
     /// Returns a single-character type indicator for display in the issues table.
+    /// Shows `★` if the issue was updated within the last 24 hours.
     pub fn type_char(&self) -> &'static str {
+        if self.is_recently_updated() {
+            return "★";
+        }
         match self.issue_type {
             IssueType::Bug => "B",
             IssueType::Enhancement => "E",
@@ -309,6 +313,7 @@ impl From<GhIssueJson> for GitHubIssue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
 
     fn make_issue(number: u32, labels: &[&str]) -> GitHubIssue {
         let label_vec: Vec<String> = labels.iter().map(|s| s.to_string()).collect();
@@ -377,6 +382,32 @@ mod tests {
         assert_eq!(make_issue(2, &["enhancement"]).type_char(), "E");
         assert_eq!(make_issue(3, &["proposal"]).type_char(), "P");
         assert_eq!(make_issue(4, &[]).type_char(), "·");
+    }
+
+    #[test]
+    fn recently_updated_within_24h_returns_true() {
+        let mut issue = make_issue(1, &["bug"]);
+        issue.updated_at = Some(Utc::now() - chrono::Duration::hours(1));
+        assert!(issue.is_recently_updated());
+    }
+
+    #[test]
+    fn recently_updated_older_than_24h_returns_false() {
+        let mut issue = make_issue(1, &["bug"]);
+        issue.updated_at = Some(Utc::now() - chrono::Duration::hours(25));
+        assert!(!issue.is_recently_updated());
+    }
+
+    #[test]
+    fn recently_updated_none_returns_false() {
+        assert!(!make_issue(1, &["bug"]).is_recently_updated());
+    }
+
+    #[test]
+    fn type_char_shows_star_for_recently_updated() {
+        let mut issue = make_issue(1, &["bug"]);
+        issue.updated_at = Some(Utc::now() - chrono::Duration::hours(1));
+        assert_eq!(issue.type_char(), "★");
     }
 
     #[test]
