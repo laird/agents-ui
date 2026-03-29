@@ -280,9 +280,21 @@ impl SwarmView {
             })
             .collect();
 
+        let idle_count = swarm
+            .workers
+            .iter()
+            .filter(|w| matches!(w.status.state, crate::model::status::AgentState::Idle))
+            .count();
+        let busy_count = swarm.workers.len().saturating_sub(idle_count);
+        let workers_title = match (busy_count, idle_count) {
+            (0, 0) => " Workers (0) ".to_string(),
+            (0, i) => format!(" Workers ({i} idle) "),
+            (b, 0) => format!(" Workers ({b} busy) "),
+            (b, i) => format!(" Workers ({b} busy, {i} idle) "),
+        };
         let workers_block = Block::default()
             .borders(Borders::ALL)
-            .title(format!(" Workers ({}) ", swarm.workers.len()))
+            .title(workers_title)
             .border_style(if focus == SwarmPanel::Workers {
                 theme::title_style()
             } else {
@@ -867,7 +879,7 @@ mod tests {
             .collect::<String>();
 
         assert!(rendered.contains("Manager"));
-        assert!(rendered.contains("Workers (1)"));
+        assert!(rendered.contains("Workers (1 busy)"));
         assert!(rendered.contains("Issues (all: 1)"));
         assert!(rendered.contains("demo"));
         assert!(rendered.contains("#12"));
