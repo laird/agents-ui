@@ -1,7 +1,7 @@
 use ansi_to_tui::IntoText;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
-    style::Style,
+    style::{Color, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState, Wrap},
     Frame,
@@ -67,6 +67,7 @@ impl SwarmView {
         focus: SwarmPanel,
         blink: bool,
         issues_loading: bool,
+        last_fetched: Option<std::time::Instant>,
     ) {
         let mut filtered_issues: Vec<&GitHubIssue> = issues
             .iter()
@@ -395,9 +396,30 @@ impl SwarmView {
         } else {
             filtered_issues.len().to_string()
         };
+        let loading_suffix = if issues_loading { ", loading\u{2026}" } else { "" };
+        let base_title = format!(" Issues ({filter_label}{type_label}{priority_label}: {count_str}{loading_suffix}) ");
+        let issues_title: Line = match last_fetched {
+            Some(t) => {
+                let elapsed_mins = t.elapsed().as_secs() / 60;
+                if elapsed_mins < 2 {
+                    Line::from(base_title)
+                } else if elapsed_mins <= 10 {
+                    Line::from(vec![
+                        Span::raw(base_title),
+                        Span::styled(format!("· {elapsed_mins}m old "), Style::default().fg(Color::DarkGray)),
+                    ])
+                } else {
+                    Line::from(vec![
+                        Span::raw(base_title),
+                        Span::styled(format!("· {elapsed_mins}m old \u{27f3} "), Style::default().fg(Color::Yellow)),
+                    ])
+                }
+            }
+            None => Line::from(base_title),
+        };
         let issues_block = Block::default()
             .borders(Borders::ALL)
-            .title(format!(" Issues ({filter_label}{type_label}{priority_label}: {}{}) ", count_str, if issues_loading { ", loading\u{2026}" } else { "" }))
+            .title(issues_title)
             .border_style(if focus == SwarmPanel::Issues {
                 theme::title_style()
             } else {
@@ -833,7 +855,7 @@ mod tests {
 
         terminal
             .draw(|f| {
-                view.render(f, f.area(), &swarm, &issues, SwarmPanel::Manager, false, false);
+                view.render(f, f.area(), &swarm, &issues, SwarmPanel::Manager, false, false, None);
             })
             .unwrap();
 
@@ -950,7 +972,7 @@ mod tests {
             },
         ];
         terminal.draw(|f| {
-            view.render(f, f.area(), &swarm, &issues, SwarmPanel::Issues, false, false);
+            view.render(f, f.area(), &swarm, &issues, SwarmPanel::Issues, false, false, None);
         }).unwrap();
         let rendered: String = terminal.backend().buffer().content().iter().map(|c| c.symbol()).collect();
         // Bug filter active: 1 bug shown out of 2 total
@@ -977,7 +999,7 @@ mod tests {
             },
         ];
         terminal.draw(|f| {
-            view.render(f, f.area(), &swarm, &issues, SwarmPanel::Issues, false, false);
+            view.render(f, f.area(), &swarm, &issues, SwarmPanel::Issues, false, false, None);
         }).unwrap();
         let rendered: String = terminal.backend().buffer().content().iter().map(|c| c.symbol()).collect();
         // No filter: plain count "all: 2", no fraction
