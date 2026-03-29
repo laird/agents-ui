@@ -2591,7 +2591,7 @@ impl App {
             }
         }
 
-        // PageUp/PageDown/Home/End scroll the view without sending to pane
+        // PageUp/PageDown/Home/End/Up/Down scroll the view without sending to pane
         match key.code {
             KeyCode::PageUp => {
                 self.agent_view.page_up();
@@ -2615,35 +2615,6 @@ impl App {
             }
             KeyCode::Down => {
                 self.agent_view.scroll_down(1);
-                return Ok(());
-            }
-            KeyCode::Enter => {
-                if !self.agent_view.input.is_empty() {
-                    let input = self.agent_view.input.drain();
-                    proxy::send_keys(&self.transport, &target, &input).await?;
-                    self.agent_view.scroll_to_bottom();
-                }
-                return Ok(());
-            }
-            KeyCode::Left => {
-                self.agent_view.input.move_left();
-                return Ok(());
-            }
-            KeyCode::Right => {
-                self.agent_view.input.move_right();
-                return Ok(());
-            }
-            KeyCode::Delete => {
-                self.agent_view.input.delete();
-                return Ok(());
-            }
-            KeyCode::Backspace => {
-                self.agent_view.input.backspace();
-                return Ok(());
-            }
-            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL)
-                && !key.modifiers.contains(KeyModifiers::ALT) => {
-                self.agent_view.input.insert_char(c);
                 return Ok(());
             }
             _ => {}
