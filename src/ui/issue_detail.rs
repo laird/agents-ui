@@ -265,7 +265,7 @@ impl IssueDetailView {
             Span::styled(" scroll  ", theme::help_style()),
             Span::styled("g", theme::title_style()),
             Span::styled(" open in browser  ", theme::help_style()),
-            Span::styled("Esc", theme::title_style()),
+            Span::styled("Esc/⌥←", theme::title_style()),
             Span::styled(" back  ", theme::help_style()),
             Span::styled("q", theme::title_style()),
             Span::styled(" quit", theme::help_style()),
