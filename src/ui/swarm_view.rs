@@ -825,6 +825,7 @@ mod tests {
             labels: labels.iter().map(|s| s.to_string()).collect(),
             is_working: false,
             assigned_worker: None,
+            updated_at: None,
         }
     }
 

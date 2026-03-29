@@ -216,6 +216,7 @@ mod tests {
             labels,
             is_working: false,
             assigned_worker: None,
+            updated_at: None,
         }
     }
 
