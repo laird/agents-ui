@@ -8,6 +8,26 @@ use ratatui::{
 
 use super::theme;
 
+fn format_age(dt: chrono::DateTime<chrono::Utc>) -> String {
+    let dur = chrono::Utc::now().signed_duration_since(dt);
+    let days = dur.num_days();
+    if days >= 1 {
+        format!("{days}d ago")
+    } else {
+        let hours = dur.num_hours();
+        if hours >= 1 {
+            format!("{hours}h ago")
+        } else {
+            let mins = dur.num_minutes();
+            if mins >= 1 {
+                format!("{mins}m ago")
+            } else {
+                "just now".to_string()
+            }
+        }
+    }
+}
+
 /// Convert a single markdown line into a styled ratatui `Line`.
 /// Handles: headings, checkboxes, list items, inline code, bold, plain text.
 pub fn render_markdown_line(line: &str) -> Line<'static> {
@@ -240,6 +260,8 @@ pub struct IssueDetailView {
     pub state: String,
     /// Recent comments as (author, body) pairs.
     pub comments: Vec<(String, String)>,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl IssueDetailView {
@@ -250,6 +272,8 @@ impl IssueDetailView {
         labels: Vec<String>,
         state: String,
         comments: Vec<(String, String)>,
+        created_at: Option<chrono::DateTime<chrono::Utc>>,
+        updated_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Self {
         Self {
             scroll_offset: 0,
@@ -259,6 +283,8 @@ impl IssueDetailView {
             labels,
             state,
             comments,
+            created_at,
+            updated_at,
         }
     }
 
@@ -285,6 +311,23 @@ impl IssueDetailView {
             self.labels.join(" · ")
         };
 
+        // Build age string: "created Xd ago  · updated Yh ago" when they differ by > 1 min
+        let age_text = match self.created_at {
+            Some(created) => {
+                let created_str = format!("created {}", format_age(created));
+                let show_updated = self.updated_at.map_or(false, |updated| {
+                    updated.signed_duration_since(created).num_seconds().abs() > 60
+                });
+                if show_updated {
+                    let updated_str = format!("updated {}", format_age(self.updated_at.unwrap()));
+                    format!("  {created_str}  ·  {updated_str}")
+                } else {
+                    format!("  {created_str}")
+                }
+            }
+            None => String::new(),
+        };
+
         let header_lines = vec![
             Line::from(vec![
                 Span::styled(
@@ -308,6 +351,9 @@ impl IssueDetailView {
                     };
                     spans.push(Span::raw("  "));
                     spans.push(Span::styled(format!("{}/{} ✓", checked, total), task_style));
+                }
+                if !age_text.is_empty() {
+                    spans.push(Span::styled(age_text, theme::help_style()));
                 }
                 Line::from(spans)
             },
