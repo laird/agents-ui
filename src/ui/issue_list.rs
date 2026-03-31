@@ -1,14 +1,14 @@
 use ratatui::{
+    Frame,
     layout::{Constraint, Layout, Rect},
     style::Style,
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
-    Frame,
 };
 
+use super::theme;
 use crate::model::issue::{GitHubIssue, IssueState};
 use crate::model::swarm::Swarm;
-use super::theme;
 
 pub struct IssueListView {
     pub table_state: TableState,
@@ -102,8 +102,16 @@ impl IssueListView {
                         theme::help_style()
                     };
 
-                    let skip: &[&str] =
-                        &["P0", "P1", "P2", "P3", "bug", "enhancement", "working", "proposal"];
+                    let skip: &[&str] = &[
+                        "P0",
+                        "P1",
+                        "P2",
+                        "P3",
+                        "bug",
+                        "enhancement",
+                        "working",
+                        "proposal",
+                    ];
                     let labels: Vec<&str> = issue
                         .labels
                         .iter()

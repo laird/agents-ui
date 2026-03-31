@@ -1,17 +1,17 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
 use ratatui::{
+    Frame,
     layout::{Constraint, Layout, Rect},
     style::Style,
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
-    Frame,
 };
+use std::collections::HashMap;
+use std::path::PathBuf;
 
+use super::theme;
 use crate::model::issue::IssueCache;
 use crate::model::swarm::Swarm;
 use crate::ui::swarm_view::count_attention;
-use super::theme;
 
 pub struct ReposListView {
     pub table_state: TableState,
@@ -129,40 +129,45 @@ impl ReposListView {
                 let waiting = count_attention(s, swarm_issues) - blocked_issues;
 
                 // Build issue priority summary from cache
-                let (issue_summary, issue_cell_style) = if let Some(cache) = issue_caches.get(&s.project_name) {
-                    let open_issues: Vec<_> = cache.issues.iter()
-                        .filter(|i| i.state == crate::model::issue::IssueState::Open)
-                        .collect();
-                    if open_issues.is_empty() {
-                        ("—".to_string(), theme::help_style())
-                    } else {
-                        let mut counts = [0u32; 4]; // P0, P1, P2, P3
-                        for issue in &open_issues {
-                            if let Some(p) = issue.priority_num() {
-                                if (p as usize) < 4 {
-                                    counts[p as usize] += 1;
+                let (issue_summary, issue_cell_style) =
+                    if let Some(cache) = issue_caches.get(&s.project_name) {
+                        let open_issues: Vec<_> = cache
+                            .issues
+                            .iter()
+                            .filter(|i| i.state == crate::model::issue::IssueState::Open)
+                            .collect();
+                        if open_issues.is_empty() {
+                            ("—".to_string(), theme::help_style())
+                        } else {
+                            let mut counts = [0u32; 4]; // P0, P1, P2, P3
+                            for issue in &open_issues {
+                                if let Some(p) = issue.priority_num() {
+                                    if (p as usize) < 4 {
+                                        counts[p as usize] += 1;
+                                    }
                                 }
                             }
+                            let parts: Vec<String> = counts
+                                .iter()
+                                .enumerate()
+                                .filter(|&(_, c)| *c > 0)
+                                .map(|(i, c)| format!("P{i}:{c}"))
+                                .collect();
+                            let text = if parts.is_empty() {
+                                format!("{} open", open_issues.len())
+                            } else {
+                                parts.join(" ")
+                            };
+                            let style = match counts.iter().position(|&c| c > 0) {
+                                Some(0) => theme::attention_style(),
+                                Some(1) => Style::default().fg(ratatui::style::Color::Yellow),
+                                _ => Style::default(),
+                            };
+                            (text, style)
                         }
-                        let parts: Vec<String> = counts.iter().enumerate()
-                            .filter(|&(_, c)| *c > 0)
-                            .map(|(i, c)| format!("P{i}:{c}"))
-                            .collect();
-                        let text = if parts.is_empty() {
-                            format!("{} open", open_issues.len())
-                        } else {
-                            parts.join(" ")
-                        };
-                        let style = match counts.iter().position(|&c| c > 0) {
-                            Some(0) => theme::attention_style(),
-                            Some(1) => Style::default().fg(ratatui::style::Color::Yellow),
-                            _ => Style::default(),
-                        };
-                        (text, style)
-                    }
-                } else {
-                    ("—".to_string(), theme::help_style())
-                };
+                    } else {
+                        ("—".to_string(), theme::help_style())
+                    };
 
                 rows.push(Row::new(vec![
                     Cell::from(format!("{row_num}")).style(theme::title_style()),
@@ -178,9 +183,17 @@ impl ReposListView {
                     Cell::from(format!("{busy}/{total} working")),
                     Cell::from({
                         let mut parts = Vec::new();
-                        if waiting > 0 { parts.push(format!("{waiting} input")); }
-                        if blocked_issues > 0 { parts.push(format!("{blocked_issues} blocked")); }
-                        if parts.is_empty() { "—".to_string() } else { parts.join(", ") }
+                        if waiting > 0 {
+                            parts.push(format!("{waiting} input"));
+                        }
+                        if blocked_issues > 0 {
+                            parts.push(format!("{blocked_issues} blocked"));
+                        }
+                        if parts.is_empty() {
+                            "—".to_string()
+                        } else {
+                            parts.join(", ")
+                        }
                     })
                     .style(if waiting > 0 || blocked_issues > 0 {
                         theme::attention_style()
@@ -288,7 +301,7 @@ mod tests {
     use super::ReposListView;
     use crate::model::status::{AgentState, AgentStatus};
     use crate::model::swarm::{AgentInfo, AgentType, Swarm};
-    use ratatui::{backend::TestBackend, Terminal};
+    use ratatui::{Terminal, backend::TestBackend};
     use std::path::PathBuf;
 
     fn make_agent(id: &str, is_manager: bool) -> AgentInfo {

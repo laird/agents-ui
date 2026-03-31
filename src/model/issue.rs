@@ -190,7 +190,6 @@ impl GitHubIssue {
             chrono::Utc::now().signed_duration_since(t).num_hours() < 24
         })
     }
-
 }
 
 /// Cached issues for a project.
@@ -440,8 +439,16 @@ mod tests {
     #[test]
     fn status_label_display() {
         assert_eq!(make_issue(1, &["bug"]).status_label(), "available");
-        assert!(make_issue(2, &["working"]).status_label().contains("working"));
-        assert!(make_issue(3, &["needs-design"]).status_label().contains("needs-design"));
+        assert!(
+            make_issue(2, &["working"])
+                .status_label()
+                .contains("working")
+        );
+        assert!(
+            make_issue(3, &["needs-design"])
+                .status_label()
+                .contains("needs-design")
+        );
     }
 
     #[test]

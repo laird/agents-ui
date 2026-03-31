@@ -1,13 +1,14 @@
+mod adapter;
 mod app;
 mod config;
 mod event;
 mod github;
 mod model;
+mod runtime;
 mod scripts;
 mod tmux;
-mod tui;
-mod adapter;
 mod transport;
+mod tui;
 mod ui;
 
 use anyhow::Result;
@@ -88,50 +89,6 @@ fn select_initial_agent_type(
     }
 }
 
-/// Returns Ok(optional_warning) — fatal errors bail, non-fatal gh issues return a warning string.
-async fn validate_startup_requirements(
-    transport: &ServerTransport,
-    agent_type: Option<&AgentType>,
-) -> Result<Option<String>> {
-    let location = transport.server().unwrap_or("this machine");
-
-    let tmux_hint = if cfg!(target_os = "macos") {
-        "brew install tmux"
-    } else {
-        "sudo apt install tmux"
-    };
-    if !transport.command_exists("tmux").await {
-        anyhow::bail!(
-            "tmux is not installed on {location}. Install with: {tmux_hint}"
-        );
-    }
-
-    if let Some(agent_type) = agent_type {
-        let (binary, hint) = match agent_type {
-            AgentType::Claude => ("claude", "See https://docs.anthropic.com/en/docs/claude-code"),
-            AgentType::Codex => ("codex", "npm install -g @openai/codex"),
-            AgentType::Droid => ("droid", "See https://droid.dev"),
-            AgentType::Gemini => ("gemini", "See https://ai.google.dev"),
-        };
-
-        if !transport.command_exists(binary).await {
-            anyhow::bail!(
-                "{binary} is not installed on {location}. {hint}"
-            );
-        }
-    }
-
-    // Non-fatal: check gh CLI auth status
-    if let Some(gh_err) = crate::github::check_gh_auth(transport).await {
-        let warning = gh_err.to_string();
-        // Log but don't bail — gh is optional for basic operation
-        eprintln!("Warning: {warning}");
-        return Ok(Some(warning));
-    }
-
-    Ok(None)
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = parse_cli_options(std::env::args())?;
@@ -142,8 +99,12 @@ async fn main() -> Result<()> {
         .as_deref()
         .and_then(crate::config::persistence::find_repo_root);
 
-    let initial_agent_type = select_initial_agent_type(cli.agent_type.clone(), repo_root.as_deref())?;
-    let startup_warning = validate_startup_requirements(&transport, initial_agent_type.as_ref()).await?;
+    let initial_agent_type =
+        select_initial_agent_type(cli.agent_type.clone(), repo_root.as_deref())?;
+    let startup_warning =
+        crate::runtime::validate_environment(&transport, initial_agent_type.as_ref())
+            .await?
+            .gh_warning;
 
     // Initialize logging to file (not stdout, since we own the terminal)
     tracing_subscriber::fmt()
@@ -177,7 +138,7 @@ async fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_cli_options, select_initial_agent_type, CliOptions};
+    use super::{CliOptions, parse_cli_options, select_initial_agent_type};
     use crate::model::swarm::AgentType;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -187,7 +148,10 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        std::env::temp_dir().join(format!("agents-ui-main-{name}-{}-{nanos}", std::process::id()))
+        std::env::temp_dir().join(format!(
+            "agents-ui-main-{name}-{}-{nanos}",
+            std::process::id()
+        ))
     }
 
     #[test]
@@ -205,19 +169,28 @@ mod tests {
     #[test]
     fn picks_droid_when_flag_present() {
         let args = vec!["agents-tui", "--droid"];
-        assert_eq!(parse_cli_options(args).unwrap().agent_type, Some(AgentType::Droid));
+        assert_eq!(
+            parse_cli_options(args).unwrap().agent_type,
+            Some(AgentType::Droid)
+        );
     }
 
     #[test]
     fn picks_codex_when_flag_present() {
         let args = vec!["agents-tui", "--codex"];
-        assert_eq!(parse_cli_options(args).unwrap().agent_type, Some(AgentType::Codex));
+        assert_eq!(
+            parse_cli_options(args).unwrap().agent_type,
+            Some(AgentType::Codex)
+        );
     }
 
     #[test]
     fn picks_claude_when_flag_present() {
         let args = vec!["agents-tui", "--claude"];
-        assert_eq!(parse_cli_options(args).unwrap().agent_type, Some(AgentType::Claude));
+        assert_eq!(
+            parse_cli_options(args).unwrap().agent_type,
+            Some(AgentType::Claude)
+        );
     }
 
     #[test]

@@ -109,13 +109,15 @@ pub fn find_repo_root(start: &Path) -> Option<PathBuf> {
 }
 
 pub fn load_repo_agent_type(repo_root: &Path) -> Result<Option<AgentType>> {
-    Ok(load_repo_config(repo_root)?
-        .and_then(|cfg| AgentType::from_name(&cfg.default_agent_type)))
+    Ok(load_repo_config(repo_root)?.and_then(|cfg| AgentType::from_name(&cfg.default_agent_type)))
 }
 
 /// Path to the stopped tombstone for a project.
 fn stopped_tombstone_path(project_name: &str) -> PathBuf {
-    config_dir().join("swarms").join(project_name).join("stopped")
+    config_dir()
+        .join("swarms")
+        .join(project_name)
+        .join("stopped")
 }
 
 /// Mark a swarm as intentionally stopped so it won't be auto-revived on TUI restart.
@@ -159,7 +161,10 @@ mod tests {
     use super::{find_repo_root, load_repo_agent_type, save_repo_agent_type};
     use crate::model::swarm::AgentType;
     use std::path::PathBuf;
+    use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn temp_path(name: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -200,18 +205,24 @@ mod tests {
         use super::{clear_swarm_stopped, config_dir, is_swarm_stopped, mark_swarm_stopped};
 
         // Hold the env lock so HOME-mutating tests don't change config_dir() under us
-        let _env_guard = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _env_guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         // Use a unique project name to avoid collisions between parallel test runs
         let project = format!("test-project-{}", std::process::id());
 
-        assert!(!is_swarm_stopped(&project), "should not be stopped initially");
+        assert!(
+            !is_swarm_stopped(&project),
+            "should not be stopped initially"
+        );
 
         mark_swarm_stopped(&project);
         assert!(is_swarm_stopped(&project), "should be stopped after mark");
 
         clear_swarm_stopped(&project);
-        assert!(!is_swarm_stopped(&project), "should not be stopped after clear");
+        assert!(
+            !is_swarm_stopped(&project),
+            "should not be stopped after clear"
+        );
 
         // clear is idempotent
         clear_swarm_stopped(&project);

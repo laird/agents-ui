@@ -105,14 +105,18 @@ fn shell_quote(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_shell_command, ServerTransport};
+    use super::{ServerTransport, build_shell_command};
     use std::path::Path;
 
     #[test]
     fn builds_remote_command_with_cwd() {
         let command = build_shell_command(
             "tmux",
-            &["list-sessions".to_string(), "-F".to_string(), "#{session_name}".to_string()],
+            &[
+                "list-sessions".to_string(),
+                "-F".to_string(),
+                "#{session_name}".to_string(),
+            ],
             Some(Path::new("/srv/repo")),
         );
 

@@ -88,13 +88,7 @@ pub async fn resize_session(name: &str, width: u16, height: u16) -> Result<()> {
 
     // Resize all existing windows
     let output = Command::new("tmux")
-        .args([
-            "list-windows",
-            "-t",
-            name,
-            "-F",
-            "#{window_index}",
-        ])
+        .args(["list-windows", "-t", name, "-F", "#{window_index}"])
         .output()
         .await
         .context("Failed to list windows for resize")?;
@@ -123,8 +117,7 @@ pub async fn resize_session(name: &str, width: u16, height: u16) -> Result<()> {
 
 /// Resize a session to match the current terminal size.
 pub async fn resize_session_to_terminal(name: &str) -> Result<()> {
-    let (width, height) = crossterm::terminal::size()
-        .context("Failed to get terminal size")?;
+    let (width, height) = crossterm::terminal::size().context("Failed to get terminal size")?;
     resize_session(name, width, height).await
 }
 
@@ -133,7 +126,11 @@ pub async fn has_session(transport: &ServerTransport, name: &str) -> bool {
     transport
         .output(
             "tmux",
-            &["has-session".to_string(), "-t".to_string(), name.to_string()],
+            &[
+                "has-session".to_string(),
+                "-t".to_string(),
+                name.to_string(),
+            ],
             None,
         )
         .await
@@ -224,10 +221,7 @@ mod tests {
 
     #[test]
     fn ignores_malformed_tmux_lines() {
-        let parsed = parse_list_panes_output(
-            "codex-demo",
-            "broken-line\n2\tworker-2\t0\n",
-        );
+        let parsed = parse_list_panes_output("codex-demo", "broken-line\n2\tworker-2\t0\n");
 
         assert_eq!(parsed.windows.len(), 1);
         assert_eq!(parsed.windows[0].index, 2);

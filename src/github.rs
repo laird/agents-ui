@@ -66,11 +66,7 @@ pub async fn check_gh_auth(transport: &ServerTransport) -> Option<GhError> {
     }
 
     let output = transport
-        .output(
-            "gh",
-            &["auth".to_string(), "status".to_string()],
-            None,
-        )
+        .output("gh", &["auth".to_string(), "status".to_string()], None)
         .await;
 
     match output {
@@ -85,10 +81,18 @@ pub async fn check_gh_auth(transport: &ServerTransport) -> Option<GhError> {
 
 fn repo_owner_from_remote(remote: &str) -> Option<String> {
     if let Some(rest) = remote.trim().strip_prefix("https://github.com/") {
-        return rest.split('/').next().filter(|s| !s.is_empty()).map(ToString::to_string);
+        return rest
+            .split('/')
+            .next()
+            .filter(|s| !s.is_empty())
+            .map(ToString::to_string);
     }
     if let Some(rest) = remote.trim().strip_prefix("git@github.com:") {
-        return rest.split('/').next().filter(|s| !s.is_empty()).map(ToString::to_string);
+        return rest
+            .split('/')
+            .next()
+            .filter(|s| !s.is_empty())
+            .map(ToString::to_string);
     }
     None
 }
@@ -98,7 +102,11 @@ pub async fn ensure_gh_auth_for_repo(transport: &ServerTransport, repo_path: &Pa
     let remote = match transport
         .output(
             "git",
-            &["remote".to_string(), "get-url".to_string(), "origin".to_string()],
+            &[
+                "remote".to_string(),
+                "get-url".to_string(),
+                "origin".to_string(),
+            ],
             Some(repo_path),
         )
         .await
@@ -115,7 +123,12 @@ pub async fn ensure_gh_auth_for_repo(transport: &ServerTransport, repo_path: &Pa
     let current_user = match transport
         .output(
             "gh",
-            &["api".to_string(), "user".to_string(), "--jq".to_string(), ".login".to_string()],
+            &[
+                "api".to_string(),
+                "user".to_string(),
+                "--jq".to_string(),
+                ".login".to_string(),
+            ],
             Some(repo_path),
         )
         .await
@@ -170,21 +183,21 @@ pub async fn fetch_issues(
     repo_path: &Path,
 ) -> std::result::Result<Vec<GitHubIssue>, GhError> {
     let output = gh_repo_output(
-            transport,
-            repo_path,
-            &[
-                "issue".to_string(),
-                "list".to_string(),
-                "--state".to_string(),
-                "open".to_string(),
-                "--limit".to_string(),
-                "100".to_string(),
-                "--json".to_string(),
-                "number,title,state,labels".to_string(),
-            ],
-        )
-        .await
-        .map_err(|e| GhError::Transient(e.to_string()))?;
+        transport,
+        repo_path,
+        &[
+            "issue".to_string(),
+            "list".to_string(),
+            "--state".to_string(),
+            "open".to_string(),
+            "--limit".to_string(),
+            "100".to_string(),
+            "--json".to_string(),
+            "number,title,state,labels".to_string(),
+        ],
+    )
+    .await
+    .map_err(|e| GhError::Transient(e.to_string()))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -219,7 +232,11 @@ pub fn spawn_issue_fetcher(
                         break;
                     }
                 }
-                Err(ref e @ (GhError::AuthRequired(_) | GhError::RepoNotFound(_) | GhError::NotInstalled)) => {
+                Err(
+                    ref e @ (GhError::AuthRequired(_)
+                    | GhError::RepoNotFound(_)
+                    | GhError::NotInstalled),
+                ) => {
                     let message = e.to_string();
                     tracing::warn!("Stopping issue fetch for {project_name}: {message}");
                     tx.send(crate::event::Event::GhWarning {
@@ -238,15 +255,15 @@ pub fn spawn_issue_fetcher(
 }
 
 fn parse_issues_json(bytes: &[u8]) -> Result<Vec<GitHubIssue>> {
-    let raw: Vec<GhIssueJson> = serde_json::from_slice(bytes)
-        .context("Failed to parse gh issue list JSON")?;
+    let raw: Vec<GhIssueJson> =
+        serde_json::from_slice(bytes).context("Failed to parse gh issue list JSON")?;
 
     Ok(raw.into_iter().map(GitHubIssue::from).collect())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{classify_gh_error, parse_issues_json, repo_owner_from_remote, GhError};
+    use super::{GhError, classify_gh_error, parse_issues_json, repo_owner_from_remote};
     use crate::model::issue::IssueState;
 
     #[test]
@@ -320,7 +337,9 @@ mod tests {
     #[test]
     fn classifies_repo_not_found() {
         assert!(matches!(
-            classify_gh_error("GraphQL: Could not resolve to a Repository with the name 'org/repo'. (repository)"),
+            classify_gh_error(
+                "GraphQL: Could not resolve to a Repository with the name 'org/repo'. (repository)"
+            ),
             GhError::RepoNotFound(_)
         ));
     }
@@ -343,6 +362,9 @@ mod tests {
             repo_owner_from_remote("git@github.com:acme/widgets.git"),
             Some("acme".to_string())
         );
-        assert_eq!(repo_owner_from_remote("ssh://git.example.com/acme/widgets"), None);
+        assert_eq!(
+            repo_owner_from_remote("ssh://git.example.com/acme/widgets"),
+            None
+        );
     }
 }

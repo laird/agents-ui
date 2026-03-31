@@ -1,6 +1,6 @@
+use crate::model::swarm::{AgentType, Swarm};
 use anyhow::Result;
 use std::path::PathBuf;
-use crate::model::swarm::{AgentType, Swarm};
 
 /// Configuration for launching a new swarm.
 pub struct SwarmConfig {

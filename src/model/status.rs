@@ -168,12 +168,32 @@ pub fn read_json_status_files() -> HashMap<String, JsonAgentStatus> {
                     // Check if this is a monitor summary with a "workers" array
                     if let Some(workers) = val.get("workers").and_then(|v| v.as_array()) {
                         for w in workers {
-                            let pane = w.get("pane").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                            if pane.is_empty() { continue; }
-                            let status = w.get("status").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+                            let pane = w
+                                .get("pane")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            if pane.is_empty() {
+                                continue;
+                            }
+                            let status = w
+                                .get("status")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("unknown")
+                                .to_string();
                             let issue = w.get("issue").and_then(|v| v.as_u64()).map(|n| n as u32);
-                            let title = w.get("title").and_then(|v| v.as_str()).map(|s| s.to_string());
-                            result.insert(pane, JsonAgentStatus { status, issue, title });
+                            let title = w
+                                .get("title")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string());
+                            result.insert(
+                                pane,
+                                JsonAgentStatus {
+                                    status,
+                                    issue,
+                                    title,
+                                },
+                            );
                         }
                     } else {
                         // Per-worker status file (written by /fix)
@@ -187,7 +207,14 @@ pub fn read_json_status_files() -> HashMap<String, JsonAgentStatus> {
                             .get("title")
                             .and_then(|v| v.as_str())
                             .map(|s| s.to_string());
-                        result.insert(key, JsonAgentStatus { status, issue, title });
+                        result.insert(
+                            key,
+                            JsonAgentStatus {
+                                status,
+                                issue,
+                                title,
+                            },
+                        );
                     }
                 }
             }
@@ -206,7 +233,10 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        std::env::temp_dir().join(format!("agents-ui-status-{name}-{}-{nanos}", std::process::id()))
+        std::env::temp_dir().join(format!(
+            "agents-ui-status-{name}-{}-{nanos}",
+            std::process::id()
+        ))
     }
 
     #[test]
@@ -218,7 +248,10 @@ mod tests {
     fn elapsed_display_seconds() {
         let ts = chrono::Local::now().naive_local() - chrono::Duration::seconds(30);
         let result = elapsed_display(Some(ts));
-        assert!(result.ends_with('s'), "Expected seconds format, got {result}");
+        assert!(
+            result.ends_with('s'),
+            "Expected seconds format, got {result}"
+        );
     }
 
     #[test]
@@ -237,7 +270,10 @@ mod tests {
     fn parses_working_issue_and_timestamp() {
         let status = parse_status_line("2024-01-15 10:30:00\tworking issue #42");
         assert!(status.timestamp.is_some());
-        assert!(matches!(status.state, AgentState::Working { issue: Some(42) }));
+        assert!(matches!(
+            status.state,
+            AgentState::Working { issue: Some(42) }
+        ));
     }
 
     #[test]
@@ -263,17 +299,17 @@ mod tests {
         .unwrap();
 
         let status = read_status_file(&path);
-        assert!(matches!(status.state, AgentState::Working { issue: Some(77) }));
+        assert!(matches!(
+            status.state,
+            AgentState::Working { issue: Some(77) }
+        ));
 
         std::fs::remove_file(path).ok();
     }
 
     #[test]
     fn reads_json_status_files_from_tmp() {
-        let dir = std::env::temp_dir().join(format!(
-            "agents-ui-json-test-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("agents-ui-json-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
 
         // Write a working status file
@@ -284,11 +320,7 @@ mod tests {
         .unwrap();
 
         // Write an idle status file
-        std::fs::write(
-            dir.join("claude-test:2.0.json"),
-            r#"{"status": "idle"}"#,
-        )
-        .unwrap();
+        std::fs::write(dir.join("claude-test:2.0.json"), r#"{"status": "idle"}"#).unwrap();
 
         // Write a non-json file (should be ignored)
         std::fs::write(dir.join("readme.txt"), "not json").unwrap();
@@ -300,13 +332,31 @@ mod tests {
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
-            let key = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+            let key = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string();
             if let Ok(content) = std::fs::read_to_string(&path) {
                 if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
-                    let status = val.get("status").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+                    let status = val
+                        .get("status")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string();
                     let issue = val.get("issue").and_then(|v| v.as_u64()).map(|n| n as u32);
-                    let title = val.get("title").and_then(|v| v.as_str()).map(|s| s.to_string());
-                    result.insert(key, super::JsonAgentStatus { status, issue, title });
+                    let title = val
+                        .get("title")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    result.insert(
+                        key,
+                        super::JsonAgentStatus {
+                            status,
+                            issue,
+                            title,
+                        },
+                    );
                 }
             }
         }
@@ -337,10 +387,7 @@ mod tests {
 
     #[test]
     fn parse_state_working_no_issue() {
-        assert_eq!(
-            parse_state("Working"),
-            AgentState::Working { issue: None }
-        );
+        assert_eq!(parse_state("Working"), AgentState::Working { issue: None });
     }
 
     #[test]
@@ -421,10 +468,7 @@ mod tests {
     fn parse_status_line_with_timestamp() {
         let status = parse_status_line("2024-01-15 10:30:00\tworking issue #42");
         assert!(status.timestamp.is_some());
-        assert_eq!(
-            status.state,
-            AgentState::Working { issue: Some(42) }
-        );
+        assert_eq!(status.state, AgentState::Working { issue: Some(42) });
     }
 
     #[test]
@@ -466,10 +510,7 @@ mod tests {
             AgentState::Working { issue: Some(5) }.to_string(),
             "Working #5"
         );
-        assert_eq!(
-            AgentState::Working { issue: None }.to_string(),
-            "Working"
-        );
+        assert_eq!(AgentState::Working { issue: None }.to_string(), "Working");
         assert_eq!(AgentState::Idle.to_string(), "Idle");
         assert_eq!(
             AgentState::Completed {

@@ -87,7 +87,6 @@ impl KeyBind {
             modifiers: vec!["ctrl".to_string()],
         }
     }
-
 }
 
 /// The full keybindings configuration.
@@ -107,10 +106,7 @@ impl Default for KeyBindings {
         bindings.insert(Action::ShowHelp, vec![KeyBind::new("?")]);
 
         // Navigation
-        bindings.insert(
-            Action::MoveUp,
-            vec![KeyBind::new("up"), KeyBind::new("k")],
-        );
+        bindings.insert(Action::MoveUp, vec![KeyBind::new("up"), KeyBind::new("k")]);
         bindings.insert(
             Action::MoveDown,
             vec![KeyBind::new("down"), KeyBind::new("j")],
@@ -133,10 +129,13 @@ impl Default for KeyBindings {
         bindings.insert(Action::ScrollDown, vec![KeyBind::new("pagedown")]);
 
         // Feedback
-        bindings.insert(Action::FileFeedback, vec![KeyBind {
-            key: "f".to_string(),
-            modifiers: vec!["alt".to_string()],
-        }]);
+        bindings.insert(
+            Action::FileFeedback,
+            vec![KeyBind {
+                key: "f".to_string(),
+                modifiers: vec!["alt".to_string()],
+            }],
+        );
 
         Self { bindings }
     }
@@ -220,6 +219,5 @@ impl KeyBindings {
 
 /// Path to the keybindings config file.
 fn config_path() -> PathBuf {
-    crate::config::persistence::config_dir()
-        .join("keybindings.toml")
+    crate::config::persistence::config_dir().join("keybindings.toml")
 }

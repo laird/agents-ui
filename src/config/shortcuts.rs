@@ -7,7 +7,8 @@ use std::path::PathBuf;
 pub struct Shortcut {
     /// Display label shown in help bar and viewer.
     pub label: String,
-    /// Command template to send. Supports {issue}, {worker}, {project} variables.
+    /// Command template to execute. Supports {issue}, {worker}, {project} variables.
+    /// Commands starting with `gh ` run directly in the repo; other commands go to tmux.
     pub command: String,
     /// Where to send the command: "manager" (default) or "worker".
     #[serde(default = "default_target")]
@@ -94,7 +95,12 @@ impl ShortcutsConfig {
     }
 
     /// Expand template variables in a command string.
-    pub fn expand_command(template: &str, issue: Option<u32>, worker: Option<&str>, project: Option<&str>) -> String {
+    pub fn expand_command(
+        template: &str,
+        issue: Option<u32>,
+        worker: Option<&str>,
+        project: Option<&str>,
+    ) -> String {
         let mut cmd = template.to_string();
         if let Some(n) = issue {
             cmd = cmd.replace("{issue}", &n.to_string());

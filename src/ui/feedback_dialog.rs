@@ -1,9 +1,9 @@
 use ratatui::{
+    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
-    Frame,
 };
 
 use super::theme;
@@ -83,11 +83,7 @@ impl FeedbackState {
     }
 }
 
-pub fn render_feedback_dialog(
-    f: &mut Frame,
-    area: Rect,
-    state: &FeedbackState,
-) {
+pub fn render_feedback_dialog(f: &mut Frame, area: Rect, state: &FeedbackState) {
     let dialog_area = centered_rect(70, 16, area);
     f.render_widget(Clear, dialog_area);
 
@@ -116,7 +112,9 @@ pub fn render_feedback_dialog(
         .flat_map(|(i, t)| {
             let selected = i == state.type_index;
             let style = if selected {
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 theme::help_style()
             };

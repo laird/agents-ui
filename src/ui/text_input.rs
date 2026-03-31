@@ -1,5 +1,5 @@
-use ratatui::text::{Line, Span};
 use super::theme;
+use ratatui::text::{Line, Span};
 
 /// A text input with cursor support for editing text in-place.
 #[derive(Debug, Clone)]

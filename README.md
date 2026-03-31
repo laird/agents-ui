@@ -52,7 +52,7 @@ A terminal UI (TUI) for launching, monitoring, and managing swarms of AI agents 
 On launch, `agents-tui` checks prerequisites in order:
 
 1. **tmux** — fatal if missing (prints install command and exits)
-2. **Agent runtime** (claude/codex/droid) — fatal if the selected runtime is missing (prints install hint and exits)
+2. **Agent runtime** (claude/codex/droid) — fatal if the selected runtime is missing, cannot execute, or fails a basic auth/quota preflight where supported
 3. **gh auth status** — non-fatal warning if `gh` is not installed or not authenticated. The TUI still launches, but issue tracking and work dispatch won't function. The status bar shows what to do (e.g., "Run: `gh auth login`")
 
 If `gh` authentication expires while the TUI is running, the issue fetcher detects the error, shows a warning in the status bar, and stops retrying (instead of spamming logs).
@@ -79,6 +79,31 @@ The binary is produced at `target/debug/agents-tui` (or `target/release/agents-t
 # Install to ~/.cargo/bin (must be on your PATH)
 cargo install --path .
 ```
+
+## Testing
+
+```bash
+# Run the full test suite
+cargo test
+```
+
+Snapshot tests in this repo use [`insta`](https://insta.rs/).
+
+```bash
+# Install the snapshot review helper
+cargo install cargo-insta
+
+# Run a targeted test to update snapshot outputs
+cargo test <test_name>
+
+# Review pending snapshot changes
+cargo insta review
+
+# Or accept all pending snapshots directly
+cargo insta accept
+```
+
+Use `cargo insta review` when you want to inspect diffs before updating committed snapshots.
 
 ## Run
 

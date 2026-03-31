@@ -1,9 +1,9 @@
 use ratatui::{
+    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
-    Frame,
 };
 
 use super::theme;
@@ -16,10 +16,7 @@ pub fn render_markdown_line(line: &str) -> Line<'static> {
     // Headings: # ## ### etc.
     if trimmed.starts_with('#') {
         let text = trimmed.trim_start_matches('#').trim().to_string();
-        return Line::from(vec![Span::styled(
-            text,
-            theme::title_style(),
-        )]);
+        return Line::from(vec![Span::styled(text, theme::title_style())]);
     }
 
     // Checked checkbox: - [x] or - [X]
@@ -63,7 +60,10 @@ pub fn render_markdown_line(line: &str) -> Line<'static> {
     }
 
     // Blockquote: > text
-    if let Some(text) = trimmed.strip_prefix("> ").or_else(|| trimmed.strip_prefix(">")) {
+    if let Some(text) = trimmed
+        .strip_prefix("> ")
+        .or_else(|| trimmed.strip_prefix(">"))
+    {
         return Line::from(vec![
             Span::styled("│ ", theme::help_style()),
             Span::styled(text.to_string(), Style::default().fg(Color::Gray)),
@@ -326,7 +326,7 @@ impl IssueDetailView {
     pub fn render(&self, f: &mut Frame, area: Rect) {
         let chunks = Layout::vertical([
             Constraint::Length(5), // Header (extra line for metadata)
-            Constraint::Min(5),   // Body
+            Constraint::Min(5),    // Body
             Constraint::Length(3), // Help bar
         ])
         .split(area);
@@ -364,10 +364,7 @@ impl IssueDetailView {
 
         let header_lines = vec![
             Line::from(vec![
-                Span::styled(
-                    format!(" #{}: ", self.issue_number),
-                    theme::title_style(),
-                ),
+                Span::styled(format!(" #{}: ", self.issue_number), theme::title_style()),
                 Span::styled(&self.title, theme::title_style()),
             ]),
             {
@@ -394,8 +391,7 @@ impl IssueDetailView {
             )),
         ];
 
-        let header = Paragraph::new(header_lines)
-            .block(Block::default().borders(Borders::BOTTOM));
+        let header = Paragraph::new(header_lines).block(Block::default().borders(Borders::BOTTOM));
         f.render_widget(header, chunks[0]);
 
         // Body content + comments in a single scrollable area
@@ -418,17 +414,17 @@ impl IssueDetailView {
         }
 
         let block_title = if comment_count > 0 {
-            format!(" Issue Body + {} comment{} ", comment_count, if comment_count == 1 { "" } else { "s" })
+            format!(
+                " Issue Body + {} comment{} ",
+                comment_count,
+                if comment_count == 1 { "" } else { "s" }
+            )
         } else {
             " Issue Body ".to_string()
         };
 
         let body = Paragraph::new(all_lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(block_title),
-            )
+            .block(Block::default().borders(Borders::ALL).title(block_title))
             .wrap(Wrap { trim: false })
             .scroll((self.scroll_offset, 0));
         f.render_widget(body, chunks[1]);
@@ -538,7 +534,11 @@ mod tests {
         assert!(!line.spans.is_empty());
     }
 
-    fn make_view(comment_count: usize, assignees: &[&str], created_at_age: &str) -> IssueDetailView {
+    fn make_view(
+        comment_count: usize,
+        assignees: &[&str],
+        created_at_age: &str,
+    ) -> IssueDetailView {
         let comments: Vec<(String, String)> = (0..comment_count)
             .map(|i| (format!("user{i}"), format!("comment {i}")))
             .collect();
@@ -611,7 +611,12 @@ mod tests {
         let combined: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(combined.contains("struck"));
         let struck_span = line.spans.iter().find(|s| s.content == "struck").unwrap();
-        assert!(struck_span.style.add_modifier.contains(Modifier::CROSSED_OUT));
+        assert!(
+            struck_span
+                .style
+                .add_modifier
+                .contains(Modifier::CROSSED_OUT)
+        );
     }
 
     #[test]
@@ -641,7 +646,6 @@ mod tests {
         // "after" — plain text
         assert!(lines[4].spans.iter().any(|s| s.content.contains("after")));
     }
-
     #[test]
     fn render_markdown_line_link() {
         let line = render_markdown_line("See [the docs](https://docs.example.com) for details");
@@ -699,5 +703,4 @@ mod tests {
         let view = make_view_with_updated("3d ", "");
         assert!(view.updated_at_age.is_empty());
     }
-
 }

@@ -1,14 +1,14 @@
 use ansi_to_tui::IntoText;
 use ratatui::{
+    Frame,
     layout::{Constraint, Layout, Rect},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Wrap},
-    Frame,
 };
 
-use crate::model::swarm::AgentInfo;
 use super::text_input::TextInput;
 use super::theme;
+use crate::model::swarm::AgentInfo;
 
 pub struct AgentView {
     pub input: TextInput,
@@ -63,10 +63,7 @@ impl AgentView {
                     "Working ",
                     theme::status_style(&agent.status.state),
                 ));
-                title_spans.push(Span::styled(
-                    format!("#{n}"),
-                    theme::title_style(),
-                ));
+                title_spans.push(Span::styled(format!("#{n}"), theme::title_style()));
             }
             state => {
                 title_spans.push(Span::styled(
@@ -79,13 +76,22 @@ impl AgentView {
             title_spans.push(Span::styled(" NEEDS INPUT", theme::waiting_style()));
         }
         title_spans.push(Span::styled(path_label, theme::help_style()));
-        let left_len = id_len + role_len + path_len
-            + if agent.waiting_for_input { " NEEDS INPUT".len() } else { 0 }
+        let left_len = id_len
+            + role_len
+            + path_len
+            + if agent.waiting_for_input {
+                " NEEDS INPUT".len()
+            } else {
+                0
+            }
             + 10; // approximate state label
-        title_spans.push(theme::hostname_right_span(left_len, chunks[0].width as usize));
+        title_spans.push(theme::hostname_right_span(
+            left_len,
+            chunks[0].width as usize,
+        ));
 
         let title = Paragraph::new(Line::from(title_spans))
-        .block(Block::default().borders(Borders::BOTTOM));
+            .block(Block::default().borders(Borders::BOTTOM));
         f.render_widget(title, chunks[0]);
 
         // Pane output — parse ANSI escape codes for colors
@@ -124,7 +130,11 @@ impl AgentView {
             format!(" Session — {} ", agent.tmux_target)
         };
         let pane_output = Paragraph::new(text)
-            .block(Block::default().borders(Borders::ALL).title(scroll_indicator))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(scroll_indicator),
+            )
             .wrap(Wrap { trim: false })
             .scroll((self.scroll_offset, 0));
         f.render_widget(pane_output, chunks[1]);

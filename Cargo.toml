@@ -38,6 +38,7 @@ chrono = { version = "0.4", features = ["serde"] }
 
 # Directories
 dirs = "6"
+shell-words = "1"
 
 # ANSI to ratatui conversion
 ansi-to-tui = "8"

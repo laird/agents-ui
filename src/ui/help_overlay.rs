@@ -1,8 +1,8 @@
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Row, Table};
-use ratatui::Frame;
 
 use crate::config::keybindings::KeyBindings;
 
@@ -23,7 +23,12 @@ pub fn render_help_overlay(
         .iter()
         .map(|(action, keys)| {
             Row::new(vec![
-                Span::styled(keys.clone(), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    keys.clone(),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(action.clone(), Style::default().fg(Color::White)),
             ])
         })
@@ -37,7 +42,12 @@ pub fn render_help_overlay(
         ]));
         for (action, key) in ctx {
             rows.push(Row::new(vec![
-                Span::styled(*key, Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    *key,
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(*action, Style::default().fg(Color::White)),
             ]));
         }
@@ -55,8 +65,18 @@ pub fn render_help_overlay(
 
     let table = Table::new(rows, [Constraint::Length(16), Constraint::Fill(1)])
         .header(Row::new(vec![
-            Span::styled("Key", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::styled("Action", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Key",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Action",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]))
         .block(
             Block::default()

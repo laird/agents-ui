@@ -2,15 +2,15 @@
 
 use ansi_to_tui::IntoText;
 use ratatui::{
+    Frame,
     layout::{Constraint, Layout, Rect},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
-    Frame,
 };
 
+use super::theme;
 use crate::model::issue::IssuePriority;
 use crate::model::swarm::Swarm;
-use super::theme;
 
 /// Which panel has focus in the repo view.
 #[derive(Debug, Clone, PartialEq)]
@@ -24,7 +24,10 @@ pub enum RepoViewFocus {
 #[derive(Debug, Clone, PartialEq)]
 pub enum CreateIssueState {
     SelectType,
-    EnterTitle { issue_type: NewIssueType, title: String },
+    EnterTitle {
+        issue_type: NewIssueType,
+        title: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -72,11 +75,14 @@ impl RepoView {
 
     /// Add a notification banner that auto-dismisses after ~4 seconds (16 ticks).
     pub fn add_banner(&mut self, message: String, style: ratatui::style::Style) {
-        self.banners.insert(0, Banner {
-            message,
-            style,
-            ttl: 16, // ~4 seconds at 250ms tick
-        });
+        self.banners.insert(
+            0,
+            Banner {
+                message,
+                style,
+                ttl: 16, // ~4 seconds at 250ms tick
+            },
+        );
         // Keep max 5 banners
         self.banners.truncate(5);
     }
@@ -95,9 +101,9 @@ impl RepoView {
 
         let chunks = Layout::vertical([
             Constraint::Length(banner_height), // Banners
-            Constraint::Length(1), // Title bar
-            Constraint::Min(8),   // Two-column area
-            Constraint::Length(1), // Help bar
+            Constraint::Length(1),             // Title bar
+            Constraint::Min(8),                // Two-column area
+            Constraint::Length(1),             // Help bar
         ])
         .split(area);
 
@@ -133,7 +139,12 @@ impl RepoView {
         }
     }
 
-    fn render_peek_popup(&self, f: &mut Frame, area: Rect, worker: &crate::model::swarm::AgentInfo) {
+    fn render_peek_popup(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        worker: &crate::model::swarm::AgentInfo,
+    ) {
         // Center a popup showing the last 15 lines of the worker's pane
         let popup_width = (area.width * 80 / 100).min(100);
         let popup_height = 18u16; // 15 lines + borders + title
@@ -216,21 +227,29 @@ impl RepoView {
         };
         let issues_label = format!(" P0:{p0} P1:{p1} P2:{p2} P3:{p3}");
 
-        let left_len = project_label.len() + workflow_label.len() + workers_label.len()
-            + waiting_label.len() + idle_label.len() + stopped_label.len() + issues_label.len();
+        let left_len = project_label.len()
+            + workflow_label.len()
+            + workers_label.len()
+            + waiting_label.len()
+            + idle_label.len()
+            + stopped_label.len()
+            + issues_label.len();
         let title = Paragraph::new(Line::from(vec![
             Span::styled(project_label, theme::title_style()),
             Span::styled(workflow_label, theme::help_style()),
-            Span::styled(workers_label, theme::status_style(
-                &crate::model::status::AgentState::Working { issue: None },
-            )),
+            Span::styled(
+                workers_label,
+                theme::status_style(&crate::model::status::AgentState::Working { issue: None }),
+            ),
             Span::styled(waiting_label, theme::waiting_style()),
-            Span::styled(idle_label, theme::status_style(
-                &crate::model::status::AgentState::Idle,
-            )),
-            Span::styled(stopped_label, theme::status_style(
-                &crate::model::status::AgentState::Stopped,
-            )),
+            Span::styled(
+                idle_label,
+                theme::status_style(&crate::model::status::AgentState::Idle),
+            ),
+            Span::styled(
+                stopped_label,
+                theme::status_style(&crate::model::status::AgentState::Stopped),
+            ),
             Span::styled(attention_label, theme::attention_style()),
             Span::styled(issues_label, theme::help_style()),
             theme::hostname_right_span(left_len, area.width as usize),
@@ -239,11 +258,8 @@ impl RepoView {
     }
 
     fn render_columns(&mut self, f: &mut Frame, area: Rect, swarm: &Swarm) {
-        let cols = Layout::horizontal([
-            Constraint::Percentage(40),
-            Constraint::Percentage(60),
-        ])
-        .split(area);
+        let cols = Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)])
+            .split(area);
 
         self.render_workers_column(f, cols[0], swarm);
         self.render_issues_column(f, cols[1], swarm);
@@ -264,11 +280,8 @@ impl RepoView {
             (blocked.len().min(3) + 2) as u16 // up to 3 items + border top/bottom
         };
 
-        let rows = Layout::vertical([
-            Constraint::Min(4),
-            Constraint::Length(attention_height),
-        ])
-        .split(area);
+        let rows = Layout::vertical([Constraint::Min(4), Constraint::Length(attention_height)])
+            .split(area);
 
         let sessions_area = rows[0];
         let attention_area = rows[1];
@@ -304,7 +317,10 @@ impl RepoView {
                 } else {
                     let base = w.status.state.to_string();
                     match (&w.status.state, &w.current_issue_title) {
-                        (crate::model::status::AgentState::Working { issue: Some(_) }, Some(title)) => {
+                        (
+                            crate::model::status::AgentState::Working { issue: Some(_) },
+                            Some(title),
+                        ) => {
                             let truncated = if title.len() > 40 {
                                 format!("{}…", &title[..40])
                             } else {
@@ -353,27 +369,56 @@ impl RepoView {
 
                 let line1 = Line::from(vec![
                     Span::styled(key_label, theme::help_style()),
-                    Span::styled(dot, if w.waiting_for_input { row_style } else { dot_style }),
-                    Span::styled(role_label, if w.waiting_for_input { row_style } else { theme::title_style() }),
+                    Span::styled(
+                        dot,
+                        if w.waiting_for_input {
+                            row_style
+                        } else {
+                            dot_style
+                        },
+                    ),
+                    Span::styled(
+                        role_label,
+                        if w.waiting_for_input {
+                            row_style
+                        } else {
+                            theme::title_style()
+                        },
+                    ),
                 ]);
                 let dispatch_label = match w.dispatched_issue {
                     Some(n) => match &w.status.state {
-                        crate::model::status::AgentState::Working { issue: Some(working_n) }
-                            if *working_n == n => String::new(),
+                        crate::model::status::AgentState::Working {
+                            issue: Some(working_n),
+                        } if *working_n == n => String::new(),
                         _ => format!(" ⊕#{n}"),
                     },
                     None => String::new(),
                 };
                 let line2 = Line::from(vec![
                     Span::styled("  ", row_style),
-                    Span::styled(status_text, if w.waiting_for_input { row_style } else { status_style }),
+                    Span::styled(
+                        status_text,
+                        if w.waiting_for_input {
+                            row_style
+                        } else {
+                            status_style
+                        },
+                    ),
                     Span::styled(dispatch_label, theme::help_style()),
                 ]);
                 let mut lines = vec![line1, line2];
                 if !elapsed.is_empty() {
                     lines.push(Line::from(vec![
                         Span::styled("  ", row_style),
-                        Span::styled(elapsed, if w.waiting_for_input { row_style } else { theme::help_style() }),
+                        Span::styled(
+                            elapsed,
+                            if w.waiting_for_input {
+                                row_style
+                            } else {
+                                theme::help_style()
+                            },
+                        ),
                     ]));
                 }
                 ListItem::new(lines).style(row_style)
@@ -402,7 +447,12 @@ impl RepoView {
         }
     }
 
-    fn render_attention_panel(&self, f: &mut Frame, area: Rect, blocked: &[&crate::model::issue::GitHubIssue]) {
+    fn render_attention_panel(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        blocked: &[&crate::model::issue::GitHubIssue],
+    ) {
         let max_title_width = (area.width as usize).saturating_sub(20).max(10);
         let shown = blocked.len().min(3);
         let extra = blocked.len().saturating_sub(3);
@@ -416,7 +466,12 @@ impl RepoView {
                     .find(|l| {
                         matches!(
                             l.as_str(),
-                            "needs-approval" | "needs-design" | "needs-clarification" | "too-complex" | "proposal" | "future"
+                            "needs-approval"
+                                | "needs-design"
+                                | "needs-clarification"
+                                | "too-complex"
+                                | "proposal"
+                                | "future"
                         )
                     })
                     .map(|s| s.as_str())
@@ -470,22 +525,34 @@ impl RepoView {
             if self.priority_filter == Some(IssuePriority::P0) {
                 Span::styled(format!("P0({p0}) "), theme::active_filter_style())
             } else {
-                Span::styled(format!("P0({p0}) "), theme::priority_style(&IssuePriority::P0))
+                Span::styled(
+                    format!("P0({p0}) "),
+                    theme::priority_style(&IssuePriority::P0),
+                )
             },
             if self.priority_filter == Some(IssuePriority::P1) {
                 Span::styled(format!("P1({p1}) "), theme::active_filter_style())
             } else {
-                Span::styled(format!("P1({p1}) "), theme::priority_style(&IssuePriority::P1))
+                Span::styled(
+                    format!("P1({p1}) "),
+                    theme::priority_style(&IssuePriority::P1),
+                )
             },
             if self.priority_filter == Some(IssuePriority::P2) {
                 Span::styled(format!("P2({p2}) "), theme::active_filter_style())
             } else {
-                Span::styled(format!("P2({p2}) "), theme::priority_style(&IssuePriority::P2))
+                Span::styled(
+                    format!("P2({p2}) "),
+                    theme::priority_style(&IssuePriority::P2),
+                )
             },
             if self.priority_filter == Some(IssuePriority::P3) {
                 Span::styled(format!("P3({p3}) "), theme::active_filter_style())
             } else {
-                Span::styled(format!("P3({p3}) "), theme::priority_style(&IssuePriority::P3))
+                Span::styled(
+                    format!("P3({p3}) "),
+                    theme::priority_style(&IssuePriority::P3),
+                )
             },
         ];
 
@@ -512,10 +579,7 @@ impl RepoView {
                 ),
                 Span::styled(format!("#{} ", issue.number), theme::title_style()),
                 Span::raw(truncate_str(&issue.title, max_title_width)),
-                Span::styled(
-                    format!(" {type_label}"),
-                    theme::help_style(),
-                ),
+                Span::styled(format!(" {type_label}"), theme::help_style()),
                 Span::styled(
                     working_label.to_string(),
                     theme::status_style(&crate::model::status::AgentState::Working { issue: None }),
@@ -545,13 +609,14 @@ impl RepoView {
                 ratatui::style::Style::default()
             });
 
-        let list = List::new(items)
-            .block(block)
-            .highlight_style(if self.focus == RepoViewFocus::Issues {
-                theme::selected_style()
-            } else {
-                ratatui::style::Style::default()
-            });
+        let list =
+            List::new(items)
+                .block(block)
+                .highlight_style(if self.focus == RepoViewFocus::Issues {
+                    theme::selected_style()
+                } else {
+                    ratatui::style::Style::default()
+                });
 
         f.render_stateful_widget(list, area, &mut self.issue_list_state);
     }
@@ -632,8 +697,14 @@ impl RepoView {
                     };
                     Paragraph::new(Line::from(vec![
                         Span::styled(format!(" {type_label} title: "), theme::title_style()),
-                        Span::styled(title.as_str(), ratatui::style::Style::default().fg(ratatui::style::Color::White)),
-                        Span::styled("█", ratatui::style::Style::default().fg(ratatui::style::Color::White)),
+                        Span::styled(
+                            title.as_str(),
+                            ratatui::style::Style::default().fg(ratatui::style::Color::White),
+                        ),
+                        Span::styled(
+                            "█",
+                            ratatui::style::Style::default().fg(ratatui::style::Color::White),
+                        ),
                         Span::styled("  Enter", theme::title_style()),
                         Span::styled(" create  ", theme::help_style()),
                         Span::styled("Esc", theme::title_style()),

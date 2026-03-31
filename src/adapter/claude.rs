@@ -29,6 +29,217 @@ impl ClaudeAdapter {
         self.transport.output(program, args, current_dir).await
     }
 
+    fn shell_quote(value: &str) -> String {
+        format!("'{}'", value.replace('\'', "'\"'\"'"))
+    }
+
+    fn command_with_local_path(&self, command: &str) -> String {
+        if self.transport.is_remote() {
+            return command.to_string();
+        }
+
+        match std::env::var("PATH") {
+            Ok(path) => format!("env PATH={} {command}", Self::shell_quote(&path)),
+            Err(_) => command.to_string(),
+        }
+    }
+
+    fn format_command_output(output: &std::process::Output) -> String {
+        let mut text = String::new();
+
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !stdout.is_empty() {
+            text.push_str("stdout:\n");
+            text.push_str(&stdout);
+            text.push('\n');
+        }
+
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if !stderr.is_empty() {
+            text.push_str("stderr:\n");
+            text.push_str(&stderr);
+            text.push('\n');
+        }
+
+        if text.is_empty() {
+            text.push_str("(no output)\n");
+        }
+
+        text
+    }
+
+    async fn ensure_plugin_installed_with_progress<F: Fn(&str)>(&self, progress: &F) -> Result<()> {
+        progress("$ claude plugin list\n");
+        let output = self
+            .output("claude", &["plugin".to_string(), "list".to_string()], None)
+            .await
+            .context("Failed to run 'claude plugin list'. Is claude CLI installed?")?;
+        progress(&Self::format_command_output(&output));
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if stdout.contains("autocoder") {
+            progress("✅ Autocoder plugin already installed\n");
+            return Ok(());
+        }
+
+        let marketplace_output = self
+            .output(
+                "claude",
+                &[
+                    "plugin".to_string(),
+                    "marketplace".to_string(),
+                    "list".to_string(),
+                ],
+                None,
+            )
+            .await?;
+        progress("$ claude plugin marketplace list\n");
+        progress(&Self::format_command_output(&marketplace_output));
+
+        let marketplace_stdout = String::from_utf8_lossy(&marketplace_output.stdout);
+        if !marketplace_stdout.contains("laird/agents")
+            && !marketplace_stdout.contains("plugin-marketplace")
+        {
+            let add_output = self
+                .output(
+                    "claude",
+                    &[
+                        "plugin".to_string(),
+                        "marketplace".to_string(),
+                        "add".to_string(),
+                        "laird/agents".to_string(),
+                    ],
+                    None,
+                )
+                .await
+                .context("Failed to add marketplace")?;
+            progress("$ claude plugin marketplace add laird/agents\n");
+            progress(&Self::format_command_output(&add_output));
+            if !add_output.status.success() {
+                let stderr = String::from_utf8_lossy(&add_output.stderr);
+                if !stderr.contains("already") {
+                    anyhow::bail!("Failed to add marketplace: {stderr}");
+                }
+            }
+        }
+
+        let install_output = self
+            .output(
+                "claude",
+                &[
+                    "plugin".to_string(),
+                    "install".to_string(),
+                    "autocoder".to_string(),
+                ],
+                None,
+            )
+            .await
+            .context("Failed to install autocoder plugin")?;
+        progress("$ claude plugin install autocoder\n");
+        progress(&Self::format_command_output(&install_output));
+        if !install_output.status.success() {
+            let stderr = String::from_utf8_lossy(&install_output.stderr);
+            anyhow::bail!("Failed to install autocoder plugin: {stderr}");
+        }
+
+        progress("✅ Plugin ready\n");
+        Ok(())
+    }
+
+    async fn ensure_gh_auth_for_repo_with_progress<F: Fn(&str)>(
+        &self,
+        repo_path: &Path,
+        progress: &F,
+    ) {
+        let remote = match self
+            .output(
+                "git",
+                &[
+                    "remote".to_string(),
+                    "get-url".to_string(),
+                    "origin".to_string(),
+                ],
+                Some(repo_path),
+            )
+            .await
+        {
+            Ok(o) if o.status.success() => {
+                progress("$ git remote get-url origin\n");
+                progress(&Self::format_command_output(&o));
+                String::from_utf8_lossy(&o.stdout).trim().to_string()
+            }
+            _ => return,
+        };
+
+        let owner = if let Some(rest) = remote.strip_prefix("https://github.com/") {
+            rest.split('/').next()
+        } else if let Some(rest) = remote.strip_prefix("git@github.com:") {
+            rest.split('/').next()
+        } else {
+            None
+        };
+        let owner = match owner {
+            Some(owner) if !owner.is_empty() => owner.to_string(),
+            _ => return,
+        };
+
+        let current_user = match self
+            .output(
+                "gh",
+                &[
+                    "api".to_string(),
+                    "user".to_string(),
+                    "--jq".to_string(),
+                    ".login".to_string(),
+                ],
+                Some(repo_path),
+            )
+            .await
+        {
+            Ok(o) if o.status.success() => {
+                progress("$ gh api user --jq .login\n");
+                progress(&Self::format_command_output(&o));
+                String::from_utf8_lossy(&o.stdout).trim().to_string()
+            }
+            _ => return,
+        };
+
+        if current_user == owner {
+            progress(&format!(
+                "✅ gh auth already matches repo owner ({owner})\n"
+            ));
+            return;
+        }
+
+        progress(&format!(
+            "⏳ Switching gh auth from {current_user} to {owner}...\n"
+        ));
+        match self
+            .output(
+                "gh",
+                &[
+                    "auth".to_string(),
+                    "switch".to_string(),
+                    "--user".to_string(),
+                    owner.clone(),
+                ],
+                Some(repo_path),
+            )
+            .await
+        {
+            Ok(o) => {
+                progress("$ gh auth switch --user <owner>\n");
+                progress(&Self::format_command_output(&o));
+                if o.status.success() {
+                    progress(&format!("✅ gh auth switched to {owner}\n"));
+                } else {
+                    progress(&format!("⚠️  gh auth switch failed for {owner}\n"));
+                }
+            }
+            Err(e) => progress(&format!("⚠️  Failed to run gh auth switch: {e}\n")),
+        }
+    }
+
     /// Launch a swarm with progress reporting via a callback.
     pub async fn launch_with_progress<F: Fn(&str)>(
         &self,
@@ -50,9 +261,13 @@ impl ClaudeAdapter {
 
         if matches!(runtime, AgentType::Claude) {
             progress("⏳ Checking autocoder plugin...\n");
-            self.ensure_plugin_installed().await?;
-            progress("✅ Plugin ready\n");
+            self.ensure_plugin_installed_with_progress(&progress)
+                .await?;
         }
+
+        progress("⏳ Checking gh auth for repo...\n");
+        self.ensure_gh_auth_for_repo_with_progress(&config.repo_path, &progress)
+            .await;
 
         progress(&format!(
             "⏳ Creating {} git worktrees...\n",
@@ -116,7 +331,11 @@ impl ClaudeAdapter {
         let loop_cmd = runtime.worker_loop_cmd().to_string();
         if !loop_cmd.is_empty() {
             let transport = self.transport.clone();
-            let targets: Vec<String> = swarm.workers.iter().map(|w| w.tmux_target.clone()).collect();
+            let targets: Vec<String> = swarm
+                .workers
+                .iter()
+                .map(|w| w.tmux_target.clone())
+                .collect();
             tokio::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 for target in &targets {
@@ -280,6 +499,24 @@ impl ClaudeAdapter {
         )
         .await
         .ok();
+
+        if !self.transport.is_remote() {
+            if let Ok(path) = std::env::var("PATH") {
+                self.output(
+                    "tmux",
+                    &[
+                        "set-environment".to_string(),
+                        "-t".to_string(),
+                        session_name.to_string(),
+                        "PATH".to_string(),
+                        path,
+                    ],
+                    None,
+                )
+                .await
+                .ok();
+            }
+        }
         self.output(
             "tmux",
             &[
@@ -352,12 +589,15 @@ impl ClaudeAdapter {
             ),
             _ => runtime.launch_cmd().to_string(),
         };
-        proxy::send_keys(&self.transport, target, &cmd).await
+        proxy::send_keys(&self.transport, target, &self.command_with_local_path(&cmd)).await
     }
 
     async fn ensure_swarm_agents_running(&self, swarm: &Swarm) -> Result<()> {
         if swarm.stopped || crate::config::persistence::is_swarm_stopped(&swarm.project_name) {
-            tracing::info!("Skipping ensure_swarm_agents_running for stopped swarm {}", swarm.project_name);
+            tracing::info!(
+                "Skipping ensure_swarm_agents_running for stopped swarm {}",
+                swarm.project_name
+            );
             return Ok(());
         }
 
@@ -390,7 +630,11 @@ impl ClaudeAdapter {
 
         match classify_pane_state(&content) {
             PaneState::NeedsLaunch => {
-                tracing::info!("Launching {} in existing pane {}", runtime, agent.tmux_target);
+                tracing::info!(
+                    "Launching {} in existing pane {}",
+                    runtime,
+                    agent.tmux_target
+                );
                 self.launch_agent_in_pane(&agent.tmux_target, session_name, runtime)
                     .await?;
                 tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
@@ -405,7 +649,11 @@ impl ClaudeAdapter {
                 // Re-bootstrapping here causes monitor-loop to fire continuously.
                 if !agent.is_manager {
                     if let Some(cmd) = self.ongoing_command(runtime, agent).await {
-                        tracing::info!("Agent {} is idle, sending ongoing command: {}", agent.id, cmd);
+                        tracing::info!(
+                            "Agent {} is idle, sending ongoing command: {}",
+                            agent.id,
+                            cmd
+                        );
                         proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
                     }
                 }
@@ -416,18 +664,23 @@ impl ClaudeAdapter {
             PaneState::Unknown => {
                 // Can't tell from pane content — probe by sending Enter and re-reading
                 tracing::info!("Probing pane {} for {}", agent.tmux_target, agent.id);
-                proxy::send_keys_no_enter(&self.transport, &agent.tmux_target, "").await.ok();
+                proxy::send_keys_no_enter(&self.transport, &agent.tmux_target, "")
+                    .await
+                    .ok();
                 // Send a bare Enter to elicit a prompt
-                self.transport.output(
-                    "tmux",
-                    &[
-                        "send-keys".to_string(),
-                        "-t".to_string(),
-                        agent.tmux_target.clone(),
-                        "Enter".to_string(),
-                    ],
-                    None,
-                ).await.ok();
+                self.transport
+                    .output(
+                        "tmux",
+                        &[
+                            "send-keys".to_string(),
+                            "-t".to_string(),
+                            agent.tmux_target.clone(),
+                            "Enter".to_string(),
+                        ],
+                        None,
+                    )
+                    .await
+                    .ok();
                 tokio::time::sleep(std::time::Duration::from_millis(800)).await;
 
                 let probed = proxy::capture_pane(&self.transport, &agent.tmux_target, 80)
@@ -436,7 +689,11 @@ impl ClaudeAdapter {
 
                 match classify_pane_state(&probed) {
                     PaneState::NeedsLaunch => {
-                        tracing::info!("Probe: shell detected in {}, launching {}", agent.tmux_target, runtime);
+                        tracing::info!(
+                            "Probe: shell detected in {}, launching {}",
+                            agent.tmux_target,
+                            runtime
+                        );
                         self.launch_agent_in_pane(&agent.tmux_target, session_name, runtime)
                             .await?;
                         tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
@@ -448,7 +705,11 @@ impl ClaudeAdapter {
                     PaneState::AgentIdle => {
                         if !agent.is_manager {
                             if let Some(cmd) = self.ongoing_command(runtime, agent).await {
-                                tracing::info!("Probe: agent {} is idle, sending ongoing command: {}", agent.id, cmd);
+                                tracing::info!(
+                                    "Probe: agent {} is idle, sending ongoing command: {}",
+                                    agent.id,
+                                    cmd
+                                );
                                 proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
                             }
                         }
@@ -464,7 +725,10 @@ impl ClaudeAdapter {
 
     /// Poll a tmux pane until Claude's prompt indicator appears, or timeout.
     /// Returns true if the prompt was detected, false on timeout.
-    async fn wait_for_claude_ready(transport: &crate::transport::ServerTransport, target: &str) -> bool {
+    async fn wait_for_claude_ready(
+        transport: &crate::transport::ServerTransport,
+        target: &str,
+    ) -> bool {
         let timeout = std::time::Duration::from_secs(60);
         let poll_interval = std::time::Duration::from_secs(2);
         let start = std::time::Instant::now();
@@ -544,19 +808,13 @@ impl ClaudeAdapter {
                     .unwrap_or(&repo_path)
                     .join(format!("{}-wt-{}", project_name, worker_num));
 
-                let status_file = worktree_path
-                    .join(agent_type.status_dir())
-                    .join("fix-loop.status");
-
-                let agent_status = status::read_status_file(&status_file);
-
                 let role = format!("worker-{worker_num}");
                 workers.push(AgentInfo {
                     id: format!("{project_name}/{role}"),
                     role,
                     worktree_path,
                     tmux_target: pane.target.clone(),
-                    status: agent_status,
+                    status: AgentStatus::default(),
                     is_manager: false,
                     pane_content: String::new(),
                     dispatched_issue: None,
@@ -570,7 +828,8 @@ impl ClaudeAdapter {
 
         // Sort workers by index
         workers.sort_by_key(|w| {
-            w.role.strip_prefix("worker-")
+            w.role
+                .strip_prefix("worker-")
                 .and_then(|s| s.parse::<usize>().ok())
                 .unwrap_or(0)
         });
@@ -675,7 +934,12 @@ impl ClaudeAdapter {
     fn teardown_targets(swarm: &Swarm) -> Vec<String> {
         let mut targets = Vec::with_capacity(swarm.workers.len() + 1);
         targets.push(swarm.manager.tmux_target.clone());
-        targets.extend(swarm.workers.iter().map(|worker| worker.tmux_target.clone()));
+        targets.extend(
+            swarm
+                .workers
+                .iter()
+                .map(|worker| worker.tmux_target.clone()),
+        );
         targets
     }
 }
@@ -783,7 +1047,11 @@ impl AgentRuntime for ClaudeAdapter {
         let loop_cmd = runtime.worker_loop_cmd().to_string();
         if !loop_cmd.is_empty() {
             let transport = self.transport.clone();
-            let targets: Vec<String> = swarm.workers.iter().map(|w| w.tmux_target.clone()).collect();
+            let targets: Vec<String> = swarm
+                .workers
+                .iter()
+                .map(|w| w.tmux_target.clone())
+                .collect();
             tokio::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 for target in &targets {
@@ -805,17 +1073,18 @@ impl AgentRuntime for ClaudeAdapter {
 
         for session_name in sessions {
             // Infer agent type and project name from session name prefix
-            let (agent_type, project_name) = if let Some(rest) = session_name.strip_prefix("claude-") {
-                (AgentType::Claude, rest.to_string())
-            } else if let Some(rest) = session_name.strip_prefix("codex-") {
-                (AgentType::Codex, rest.to_string())
-            } else if let Some(rest) = session_name.strip_prefix("droid-") {
-                (AgentType::Droid, rest.to_string())
-            } else if let Some(rest) = session_name.strip_prefix("gemini-") {
-                (AgentType::Gemini, rest.to_string())
-            } else {
-                continue;
-            };
+            let (agent_type, project_name) =
+                if let Some(rest) = session_name.strip_prefix("claude-") {
+                    (AgentType::Claude, rest.to_string())
+                } else if let Some(rest) = session_name.strip_prefix("codex-") {
+                    (AgentType::Codex, rest.to_string())
+                } else if let Some(rest) = session_name.strip_prefix("droid-") {
+                    (AgentType::Droid, rest.to_string())
+                } else if let Some(rest) = session_name.strip_prefix("gemini-") {
+                    (AgentType::Gemini, rest.to_string())
+                } else {
+                    continue;
+                };
 
             let repo_path = find_repo_path(&self.transport, &session_name, &project_name).await;
 
@@ -1004,7 +1273,10 @@ impl AgentRuntime for ClaudeAdapter {
 
     async fn heal_workers(&self, swarm: &mut Swarm) -> Result<Vec<String>> {
         if swarm.stopped || crate::config::persistence::is_swarm_stopped(&swarm.project_name) {
-            tracing::info!("Skipping heal_workers for stopped swarm {}", swarm.project_name);
+            tracing::info!(
+                "Skipping heal_workers for stopped swarm {}",
+                swarm.project_name
+            );
             return Ok(vec![]);
         }
         let mut repairs = Vec::new();
@@ -1016,17 +1288,17 @@ impl AgentRuntime for ClaudeAdapter {
         // Check which tmux panes actually exist in the agents window
         let session_exists = session::has_session(&self.transport, session_name).await;
         let existing_panes = if session_exists {
-            session::list_panes(&self.transport, session_name).await.ok()
+            session::list_panes(&self.transport, session_name)
+                .await
+                .ok()
         } else {
             None
         };
-        let agents_window = existing_panes
-            .as_ref()
-            .and_then(|info| {
-                info.windows
-                    .iter()
-                    .find(|w| w.name == "agents" || w.index == 0)
-            });
+        let agents_window = existing_panes.as_ref().and_then(|info| {
+            info.windows
+                .iter()
+                .find(|w| w.name == "agents" || w.index == 0)
+        });
         let agents_window_exists = agents_window.is_some();
         let agents_window_panes: Vec<String> = agents_window
             .map(|w| w.panes.iter().map(|p| p.target.clone()).collect())
@@ -1043,7 +1315,11 @@ impl AgentRuntime for ClaudeAdapter {
 
             // 1. Check worktree exists
             if !wt_path.exists() {
-                tracing::info!("Healing {}: recreating worktree at {}", worker.id, wt_path.display());
+                tracing::info!(
+                    "Healing {}: recreating worktree at {}",
+                    worker.id,
+                    wt_path.display()
+                );
 
                 // Determine branch name from path
                 let wt_name = wt_path
@@ -1101,8 +1377,12 @@ impl AgentRuntime for ClaudeAdapter {
             // 2. Check tmux pane exists; recreate session/window/pane as needed
             let pane_exists = agents_window_panes.contains(&worker.tmux_target);
             if !pane_exists {
-                tracing::info!("Healing {}: pane missing, recreating (session_exists={}, window_exists={})",
-                    worker.id, session_exists, agents_window_exists);
+                tracing::info!(
+                    "Healing {}: pane missing, recreating (session_exists={}, window_exists={})",
+                    worker.id,
+                    session_exists,
+                    agents_window_exists
+                );
 
                 let pane_created = if !session_exists {
                     // Session completely gone — recreate it with a new window
@@ -1128,7 +1408,12 @@ impl AgentRuntime for ClaudeAdapter {
                         if o.status.success() {
                             // Rebalance panes
                             let _ = Command::new("tmux")
-                                .args(["select-layout", "-t", &format!("{session_name}:0"), "even-horizontal"])
+                                .args([
+                                    "select-layout",
+                                    "-t",
+                                    &format!("{session_name}:0"),
+                                    "even-horizontal",
+                                ])
                                 .output()
                                 .await;
                         }
@@ -1170,18 +1455,17 @@ impl AgentRuntime for ClaudeAdapter {
                     }
 
                     // Launch agent
-                    let _ = proxy::send_keys(
-                        &self.transport,
-                        &worker.tmux_target,
-                        &launch_cmd,
-                    )
-                    .await;
+                    let _ =
+                        proxy::send_keys(&self.transport, &worker.tmux_target, &launch_cmd).await;
 
                     // Wait for agent to initialize, then start fix-loop
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                     let _ = proxy::send_keys(&self.transport, &worker.tmux_target, &loop_cmd).await;
 
-                    repairs.push(format!("Recreated tmux pane and launched agent for {}", worker.id));
+                    repairs.push(format!(
+                        "Recreated tmux pane and launched agent for {}",
+                        worker.id
+                    ));
                     continue; // Skip step 3 since we just launched
                 }
             }
@@ -1198,8 +1482,10 @@ impl AgentRuntime for ClaudeAdapter {
                                 "Healing {}: feedback prompt detected, auto-dismissing",
                                 worker.id
                             );
-                            let _ = proxy::send_keys(&self.transport, &worker.tmux_target, "0").await;
-                            repairs.push(format!("Auto-dismissed feedback prompt for {}", worker.id));
+                            let _ =
+                                proxy::send_keys(&self.transport, &worker.tmux_target, "0").await;
+                            repairs
+                                .push(format!("Auto-dismissed feedback prompt for {}", worker.id));
                             continue;
                         }
 
@@ -1220,9 +1506,14 @@ impl AgentRuntime for ClaudeAdapter {
 
                             // Wait for agent to initialize, then start fix-loop
                             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                            let _ = proxy::send_keys(&self.transport, &worker.tmux_target, &loop_cmd).await;
+                            let _ =
+                                proxy::send_keys(&self.transport, &worker.tmux_target, &loop_cmd)
+                                    .await;
 
-                            repairs.push(format!("Restarted agent for {} (was at shell prompt)", worker.id));
+                            repairs.push(format!(
+                                "Restarted agent for {} (was at shell prompt)",
+                                worker.id
+                            ));
                         }
                     }
                     Err(e) => {
@@ -1290,8 +1581,12 @@ impl AgentRuntime for ClaudeAdapter {
                 .unwrap_or_default();
             if classify_pane_state(&content) == PaneState::NeedsLaunch {
                 tracing::info!("Reviving {} — dropped to shell prompt", agent.id);
-                self.launch_agent_in_pane(&agent.tmux_target, &swarm.tmux_session, &swarm.agent_type)
-                    .await?;
+                self.launch_agent_in_pane(
+                    &agent.tmux_target,
+                    &swarm.tmux_session,
+                    &swarm.agent_type,
+                )
+                .await?;
                 tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
                 if let Some(cmd) = self.bootstrap_command(&swarm.agent_type, agent).await {
                     tracing::info!("Sending bootstrap command to {}: {}", agent.id, cmd);
@@ -1384,7 +1679,8 @@ fn classify_pane_state(content: &str) -> PaneState {
             || lower.contains("claude")
             || lower.contains("gemini")
             || lower.contains("droid")
-            || lower.starts_with('\u{23f5}') // ⏵ (Claude/Codex status bar)
+            || lower.starts_with('\u{23f5}')
+        // ⏵ (Claude/Codex status bar)
         {
             saw_agent_indicator = true;
         }
@@ -1394,15 +1690,14 @@ fn classify_pane_state(content: &str) -> PaneState {
             saw_idle_prompt = true;
         } else if lower.starts_with('>')
             || lower.starts_with('\u{276f}') // ❯ (Claude prompt)
-            || lower.starts_with('\u{203a}') // › (Codex prompt)
+            || lower.starts_with('\u{203a}')
+        // › (Codex prompt)
         {
             // If there is text after the prompt character, a command has been queued
             // (sent via tmux send-keys but not yet processed). Treat as busy so the
             // TUI does not dispatch a second command to the same session.
             let after_prompt = lower
-                .trim_start_matches(|c: char| {
-                    c == '>' || c == '\u{276f}' || c == '\u{203a}'
-                })
+                .trim_start_matches(|c: char| c == '>' || c == '\u{276f}' || c == '\u{203a}')
                 .trim();
             if after_prompt.is_empty() {
                 saw_idle_prompt = true;
@@ -1454,11 +1749,25 @@ fn pane_agent_is_idle(content: &str) -> bool {
     classify_pane_state(content) == PaneState::AgentIdle
 }
 
+fn codex_manager_loop_prompt() -> String {
+    "Use the autocoder skill to start the monitor loop for this repository in this manager session."
+        .to_string()
+}
+
+fn codex_monitor_once_prompt() -> String {
+    "Use the autocoder skill to monitor workers for this repository in this manager session."
+        .to_string()
+}
+
+fn codex_dispatch_prompt(issue_number: u32) -> String {
+    format!("Use the autocoder skill to fix issue #{issue_number} in this repository.")
+}
+
 fn manager_bootstrap_cmd(runtime: &AgentType) -> Option<String> {
     match runtime {
         AgentType::Claude => Some("/autocoder:monitor-loop".to_string()),
         AgentType::Gemini => Some("/manage-loop".to_string()),
-        AgentType::Codex => Some("/manage-loop".to_string()),
+        AgentType::Codex => Some(codex_manager_loop_prompt()),
         AgentType::Droid => Some("/manage-loop".to_string()),
     }
 }
@@ -1467,9 +1776,7 @@ fn worker_dispatch_cmd(runtime: &AgentType, issue_number: u32) -> Option<String>
     match runtime {
         AgentType::Claude => Some(format!("/autocoder:fix {issue_number}")),
         AgentType::Gemini => Some(format!("/fix {issue_number}")),
-        AgentType::Codex => Some(format!(
-            "Use the repository's Codex autocoder workflow to work issue #{issue_number} specifically. Start by reading AGENTS.md, skills/autocoder/SKILL.md, skills/autocoder/references/workflow-map.md, and skills/autocoder/references/command-mapping.md. Translate the legacy /fix behavior into direct Codex actions. Do one issue-focused pass, run relevant tests, and summarize the outcome."
-        )),
+        AgentType::Codex => Some(codex_dispatch_prompt(issue_number)),
         AgentType::Droid => Some(format!("/fix {issue_number}")),
     }
 }
@@ -1479,12 +1786,7 @@ fn generic_worker_bootstrap_cmd(runtime: &AgentType) -> Option<String> {
     if !loop_cmd.is_empty() {
         return Some(loop_cmd.to_string());
     }
-    match runtime {
-        AgentType::Codex => Some(
-            "Use the repository's Codex autocoder workflow to pick the next available issue and work it. Start by reading AGENTS.md, skills/autocoder/SKILL.md, skills/autocoder/references/workflow-map.md, and skills/autocoder/references/command-mapping.md. Choose the highest-priority available issue, do one focused pass, run relevant tests, and summarize the outcome.".to_string(),
-        ),
-        _ => None,
-    }
+    None
 }
 
 /// Non-loop command sent to an idle manager on subsequent monitoring cycles.
@@ -1492,7 +1794,7 @@ fn manager_ongoing_cmd(runtime: &AgentType) -> Option<String> {
     match runtime {
         AgentType::Claude => Some("/autocoder:monitor".to_string()),
         AgentType::Gemini => Some("/monitor".to_string()),
-        AgentType::Codex => Some("/monitor".to_string()),
+        AgentType::Codex => Some(codex_monitor_once_prompt()),
         AgentType::Droid => Some("/monitor".to_string()),
     }
 }
@@ -1502,9 +1804,7 @@ fn generic_worker_ongoing_cmd(runtime: &AgentType) -> Option<String> {
     match runtime {
         AgentType::Claude => Some("/autocoder:fix".to_string()),
         AgentType::Gemini => Some("/fix".to_string()),
-        AgentType::Codex => Some(
-            "Use the repository's Codex autocoder workflow to pick the next available issue and work it. Start by reading AGENTS.md, skills/autocoder/SKILL.md, skills/autocoder/references/workflow-map.md, and skills/autocoder/references/command-mapping.md. Choose the highest-priority available issue, do one focused pass, run relevant tests, and summarize the outcome.".to_string(),
-        ),
+        AgentType::Codex => Some(runtime.worker_loop_cmd().to_string()),
         AgentType::Droid => Some("/fix".to_string()),
     }
 }
@@ -1528,7 +1828,9 @@ impl ClaudeAdapter {
             if is_named {
                 proxy::send_named_key(target, exit_key).await.ok();
             } else {
-                proxy::send_keys(&self.transport, target, exit_key).await.ok();
+                proxy::send_keys(&self.transport, target, exit_key)
+                    .await
+                    .ok();
             }
         }
         tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
@@ -1538,7 +1840,9 @@ impl ClaudeAdapter {
 
         // Relaunch all panes with the new runtime
         for target in &all_targets {
-            self.launch_agent_in_pane(target, &session_name, &new_runtime).await.ok();
+            self.launch_agent_in_pane(target, &session_name, &new_runtime)
+                .await
+                .ok();
         }
         tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
 
@@ -1546,13 +1850,17 @@ impl ClaudeAdapter {
         let loop_cmd = new_runtime.worker_loop_cmd().to_string();
         if !loop_cmd.is_empty() {
             for worker in &swarm.workers {
-                proxy::send_keys(&self.transport, &worker.tmux_target, &loop_cmd).await.ok();
+                proxy::send_keys(&self.transport, &worker.tmux_target, &loop_cmd)
+                    .await
+                    .ok();
             }
         }
 
         // Restart manager bootstrap
         if let Some(cmd) = manager_bootstrap_cmd(&new_runtime) {
-            proxy::send_keys(&self.transport, &swarm.manager.tmux_target, &cmd).await.ok();
+            proxy::send_keys(&self.transport, &swarm.manager.tmux_target, &cmd)
+                .await
+                .ok();
         }
 
         Ok(())
@@ -1565,7 +1873,9 @@ impl ClaudeAdapter {
 
         let issue_num = match &agent.status.state {
             status::AgentState::Working { issue: Some(n) } => Some(*n),
-            _ => agent.dispatched_issue.or(self.issue_from_branch(agent).await),
+            _ => agent
+                .dispatched_issue
+                .or(self.issue_from_branch(agent).await),
         };
 
         if let Some(issue_number) = issue_num {
@@ -1584,7 +1894,9 @@ impl ClaudeAdapter {
 
         let issue_num = match &agent.status.state {
             status::AgentState::Working { issue: Some(n) } => Some(*n),
-            _ => agent.dispatched_issue.or(self.issue_from_branch(agent).await),
+            _ => agent
+                .dispatched_issue
+                .or(self.issue_from_branch(agent).await),
         };
 
         if let Some(issue_number) = issue_num {
@@ -1636,16 +1948,8 @@ fn extract_issue_number_from_branch(branch: &str) -> Option<u32> {
             i += 1;
         }
 
-        let prev_ok = start == 0
-            || matches!(
-                bytes[start - 1] as char,
-                '/' | '-' | '_' | '.'
-            );
-        let next_ok = i == bytes.len()
-            || matches!(
-                bytes[i] as char,
-                '/' | '-' | '_' | '.'
-            );
+        let prev_ok = start == 0 || matches!(bytes[start - 1] as char, '/' | '-' | '_' | '.');
+        let next_ok = i == bytes.len() || matches!(bytes[i] as char, '/' | '-' | '_' | '.');
 
         if prev_ok && next_ok {
             if let Ok(issue) = branch[start..i].parse::<u32>() {
@@ -1685,11 +1989,12 @@ fn strip_ansi(content: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_pane_state, extract_issue_number_from_branch, generic_worker_bootstrap_cmd,
-        generic_worker_ongoing_cmd, is_bare_shell_prompt, is_feedback_prompt,
-        manager_bootstrap_cmd, manager_ongoing_cmd, pane_agent_is_idle, pane_needs_runtime_launch,
-        worker_dispatch_cmd, ClaudeAdapter, PaneState,
+        ClaudeAdapter, PaneState, classify_pane_state, extract_issue_number_from_branch,
+        generic_worker_bootstrap_cmd, generic_worker_ongoing_cmd, is_bare_shell_prompt,
+        is_feedback_prompt, manager_bootstrap_cmd, manager_ongoing_cmd, pane_agent_is_idle,
+        pane_needs_runtime_launch, worker_dispatch_cmd,
     };
+    use crate::adapter::traits::AgentRuntime;
     use crate::model::issue::IssueCache;
     use crate::model::status::AgentStatus;
     use crate::model::swarm::{AgentInfo, AgentType, Swarm};
@@ -1704,17 +2009,32 @@ mod tests {
 
     #[test]
     fn shell_prompt_needs_launch() {
-        assert_eq!(classify_pane_state("user@host repo %"), PaneState::NeedsLaunch);
-        assert_eq!(classify_pane_state("root@host:/tmp#"), PaneState::NeedsLaunch);
-        assert_eq!(classify_pane_state("laird@mac src $"), PaneState::NeedsLaunch);
+        assert_eq!(
+            classify_pane_state("user@host repo %"),
+            PaneState::NeedsLaunch
+        );
+        assert_eq!(
+            classify_pane_state("root@host:/tmp#"),
+            PaneState::NeedsLaunch
+        );
+        assert_eq!(
+            classify_pane_state("laird@mac src $"),
+            PaneState::NeedsLaunch
+        );
         // Legacy wrapper still works
         assert!(pane_needs_runtime_launch("user@host repo %"));
     }
 
     #[test]
     fn agent_busy_detected() {
-        assert_eq!(classify_pane_state("thinking about the next edit"), PaneState::AgentBusy);
-        assert_eq!(classify_pane_state("  reading src/main.rs\n"), PaneState::AgentBusy);
+        assert_eq!(
+            classify_pane_state("thinking about the next edit"),
+            PaneState::AgentBusy
+        );
+        assert_eq!(
+            classify_pane_state("  reading src/main.rs\n"),
+            PaneState::AgentBusy
+        );
         assert_eq!(
             classify_pane_state("  bypass permissions on\n  esc to interrupt\n"),
             PaneState::AgentBusy,
@@ -1724,7 +2044,10 @@ mod tests {
     #[test]
     fn agent_idle_detected() {
         assert_eq!(classify_pane_state("> \n"), PaneState::AgentIdle);
-        assert_eq!(classify_pane_state("how can i help you today?\n"), PaneState::AgentIdle);
+        assert_eq!(
+            classify_pane_state("how can i help you today?\n"),
+            PaneState::AgentIdle
+        );
         // Claude status bar without busy indicator = idle
         assert_eq!(
             classify_pane_state(
@@ -1745,16 +2068,28 @@ mod tests {
     #[test]
     fn unknown_content_returns_unknown() {
         // Random text that's not a shell prompt or agent indicator
-        assert_eq!(classify_pane_state("some random output\n"), PaneState::Unknown);
-        assert_eq!(classify_pane_state("building project...\n"), PaneState::Unknown);
+        assert_eq!(
+            classify_pane_state("some random output\n"),
+            PaneState::Unknown
+        );
+        assert_eq!(
+            classify_pane_state("building project...\n"),
+            PaneState::Unknown
+        );
     }
 
     #[test]
     fn queued_command_at_prompt_is_busy() {
         // Prompt with a command queued (sent via tmux send-keys, not yet processed)
         // should not appear idle — prevents double-dispatch.
-        assert_eq!(classify_pane_state("\u{276f} /fix 123\n"), PaneState::AgentBusy);
-        assert_eq!(classify_pane_state("\u{276f} /autocoder:monitor\n"), PaneState::AgentBusy);
+        assert_eq!(
+            classify_pane_state("\u{276f} /fix 123\n"),
+            PaneState::AgentBusy
+        );
+        assert_eq!(
+            classify_pane_state("\u{276f} /autocoder:monitor\n"),
+            PaneState::AgentBusy
+        );
         assert_eq!(classify_pane_state("> /fix 123\n"), PaneState::AgentBusy);
         // Bare prompt (no command) is still idle
         assert_eq!(classify_pane_state("\u{276f} \n"), PaneState::AgentIdle);
@@ -1775,6 +2110,10 @@ mod tests {
             manager_bootstrap_cmd(&AgentType::Claude),
             Some("/autocoder:monitor-loop".to_string())
         );
+        assert_eq!(
+            manager_bootstrap_cmd(&AgentType::Codex),
+            Some(super::codex_manager_loop_prompt())
+        );
     }
 
     #[test]
@@ -1788,8 +2127,12 @@ mod tests {
             Some("/fix-loop".to_string())
         );
         assert_eq!(
+            generic_worker_bootstrap_cmd(&AgentType::Codex),
+            Some(AgentType::Codex.worker_loop_cmd().to_string())
+        );
+        assert_eq!(
             generic_worker_bootstrap_cmd(&AgentType::Droid),
-            None
+            Some("/fix-loop".to_string())
         );
     }
 
@@ -1802,6 +2145,10 @@ mod tests {
         assert_eq!(
             manager_ongoing_cmd(&AgentType::Gemini),
             Some("/monitor".to_string())
+        );
+        assert_eq!(
+            manager_ongoing_cmd(&AgentType::Codex),
+            Some(super::codex_monitor_once_prompt())
         );
     }
 
@@ -1816,9 +2163,299 @@ mod tests {
             Some("/fix".to_string())
         );
         assert_eq!(
+            generic_worker_ongoing_cmd(&AgentType::Codex),
+            Some(AgentType::Codex.worker_loop_cmd().to_string())
+        );
+        assert_eq!(
             generic_worker_ongoing_cmd(&AgentType::Droid),
             Some("/fix".to_string())
         );
+    }
+
+    fn temp_path(name: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        std::env::temp_dir().join(format!(
+            "agents-ui-adapter-{name}-{}-{nanos}",
+            std::process::id()
+        ))
+    }
+
+    fn test_lock() -> &'static std::sync::Mutex<()> {
+        static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        LOCK.get_or_init(|| std::sync::Mutex::new(()))
+    }
+
+    fn write_executable(path: &std::path::Path, contents: &str) {
+        std::fs::write(path, contents).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(path, perms).unwrap();
+        }
+    }
+
+    fn fake_agent_script(runtime_name: &str, manager_cmd: &str, worker_cmd: &str) -> String {
+        format!(
+            r#"#!/bin/sh
+mode="$1"
+case "{runtime_name}:$mode:$2:$3" in
+  "CLAUDE:plugin:list:"*)
+    printf '%s\n' "autocoder"
+    exit 0
+    ;;
+  "CLAUDE:plugin:marketplace:list"*)
+    printf '%s\n' "plugin-marketplace"
+    exit 0
+    ;;
+  "CLAUDE:plugin:marketplace:add"*)
+    printf '%s\n' "added marketplace"
+    exit 0
+    ;;
+  "CLAUDE:plugin:install:"*)
+    printf '%s\n' "installed autocoder"
+    exit 0
+    ;;
+esac
+
+printf 'FAKE_{runtime_name}_READY\n'
+printf 'What can I help with?\n'
+printf 'ARGS:%s\n' "$*"
+
+while IFS= read -r line; do
+  printf 'INPUT:%s\n' "$line"
+  case "$line" in
+    "{manager_cmd}")
+      printf 'MANAGER_LOOP_STARTED\n'
+      printf 'What would you like me to do next?\n'
+      ;;
+    "{worker_cmd}")
+      printf 'FIX_LOOP_STARTED\n'
+      printf 'What would you like me to do next?\n'
+      ;;
+    "")
+      ;;
+    *)
+      printf 'IGNORED:%s\n' "$line"
+      ;;
+  esac
+done
+"#
+        )
+    }
+
+    fn fake_gh_script() -> &'static str {
+        r#"#!/bin/sh
+if [ "$1" = "api" ] && [ "$2" = "user" ]; then
+  printf '%s\n' "fakeowner"
+  exit 0
+fi
+
+if [ "$1" = "auth" ] && [ "$2" = "switch" ] && [ "$3" = "--user" ]; then
+  printf 'switched to %s\n' "$4"
+  exit 0
+fi
+
+exit 0
+"#
+    }
+
+    fn command_available(name: &str) -> bool {
+        std::process::Command::new("sh")
+            .args(["-lc", &format!("command -v {name} >/dev/null 2>&1")])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
+    fn init_git_repo(repo_path: &std::path::Path) {
+        std::fs::create_dir_all(repo_path).unwrap();
+        std::fs::write(repo_path.join("README.md"), "test repo\n").unwrap();
+
+        let status = std::process::Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(repo_path)
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let status = std::process::Command::new("git")
+            .args(["config", "user.email", "test@example.com"])
+            .current_dir(repo_path)
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let status = std::process::Command::new("git")
+            .args(["config", "user.name", "Agents UI Test"])
+            .current_dir(repo_path)
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let status = std::process::Command::new("git")
+            .args(["add", "README.md"])
+            .current_dir(repo_path)
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let status = std::process::Command::new("git")
+            .args(["commit", "-m", "initial"])
+            .current_dir(repo_path)
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let status = std::process::Command::new("git")
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/fakeowner/test-repo.git",
+            ])
+            .current_dir(repo_path)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    async fn wait_for_pane_markers(
+        adapter: &ClaudeAdapter,
+        target: &str,
+        markers: &[&str],
+    ) -> String {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let mut last = String::new();
+        while std::time::Instant::now() < deadline {
+            last = adapter.capture_output(target).await.unwrap_or_default();
+            if markers.iter().all(|marker| last.contains(marker)) {
+                return last;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+        panic!(
+            "Pane {target} missing markers {:?}. Last output:\n{last}",
+            markers
+        );
+    }
+
+    async fn cleanup_tmux_session(session_name: &str) {
+        let _ = tokio::process::Command::new("tmux")
+            .args(["kill-session", "-t", session_name])
+            .output()
+            .await;
+    }
+
+    #[tokio::test]
+    async fn launches_manager_and_worker_loops_for_all_runtimes() {
+        if !command_available("tmux") || !command_available("git") {
+            return;
+        }
+
+        let _guard = test_lock().lock().unwrap();
+        let original_path = std::env::var_os("PATH");
+        let root = temp_path("runtime-launch");
+        let bin_dir = root.join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+
+        write_executable(bin_dir.join("gh").as_path(), fake_gh_script());
+        write_executable(
+            bin_dir.join("claude").as_path(),
+            &fake_agent_script("CLAUDE", "/autocoder:monitor-loop", "/autocoder:fix-loop"),
+        );
+        write_executable(
+            bin_dir.join("codex").as_path(),
+            &fake_agent_script(
+                "CODEX",
+                &super::codex_manager_loop_prompt(),
+                AgentType::Codex.worker_loop_cmd(),
+            ),
+        );
+        write_executable(
+            bin_dir.join("gemini").as_path(),
+            &fake_agent_script("GEMINI", "/manage-loop", "/fix-loop"),
+        );
+        write_executable(
+            bin_dir.join("droid").as_path(),
+            &fake_agent_script("DROID", "/manage-loop", "/fix-loop"),
+        );
+
+        let path_value = match original_path.as_ref() {
+            Some(existing) => {
+                let mut value = std::ffi::OsString::from(bin_dir.as_os_str());
+                value.push(":");
+                value.push(existing);
+                value
+            }
+            None => std::ffi::OsString::from(bin_dir.as_os_str()),
+        };
+        unsafe { std::env::set_var("PATH", &path_value) };
+
+        for runtime in [
+            AgentType::Claude,
+            AgentType::Codex,
+            AgentType::Droid,
+            AgentType::Gemini,
+        ] {
+            let repo_path = root.join(format!("repo-{}", runtime.script_flag()));
+            init_git_repo(&repo_path);
+
+            let adapter = ClaudeAdapter::new(
+                runtime.clone(),
+                crate::transport::ServerTransport::default(),
+            );
+            let config = crate::adapter::traits::SwarmConfig {
+                repo_path: repo_path.clone(),
+                agent_type: runtime.clone(),
+                num_workers: 1,
+                agents_dir: root.clone(),
+            };
+
+            let swarm = adapter.launch_with_progress(&config, |_| {}).await.unwrap();
+            let manager_output = wait_for_pane_markers(
+                &adapter,
+                &swarm.manager.tmux_target,
+                &["What can I help", "MANAGER_LOOP_STARTED"],
+            )
+            .await;
+            assert!(manager_output.contains(&format!(
+                "FAKE_{}_READY",
+                runtime.script_flag().to_uppercase()
+            )));
+
+            let worker_output = wait_for_pane_markers(
+                &adapter,
+                &swarm.workers[0].tmux_target,
+                &["What can I help", "FIX_LOOP_STARTED"],
+            )
+            .await;
+            assert!(worker_output.contains(&format!(
+                "FAKE_{}_READY",
+                runtime.script_flag().to_uppercase()
+            )));
+
+            cleanup_tmux_session(&swarm.tmux_session).await;
+            let wt_path = repo_path.parent().unwrap_or(&repo_path).join(format!(
+                "{}-wt-1",
+                super::ClaudeAdapter::project_name(&repo_path)
+            ));
+            if wt_path.exists() {
+                let _ = std::fs::remove_dir_all(&wt_path);
+            }
+            std::fs::remove_dir_all(&repo_path).ok();
+        }
+
+        if let Some(path) = original_path {
+            unsafe { std::env::set_var("PATH", path) };
+        } else {
+            unsafe { std::env::remove_var("PATH") };
+        }
+        std::fs::remove_dir_all(root).ok();
     }
 
     #[test]
@@ -1879,7 +2516,9 @@ mod tests {
         // Claude session with ❯ prompt should NOT be detected as bare shell
         assert!(!is_bare_shell_prompt("╭─ some output\n╰─ ❯"));
         assert!(!is_bare_shell_prompt("bypass permissions enabled\n❯"));
-        assert!(!is_bare_shell_prompt("Claude Code session\nBrewed for you\n❯"));
+        assert!(!is_bare_shell_prompt(
+            "Claude Code session\nBrewed for you\n❯"
+        ));
     }
 
     #[test]
@@ -2070,7 +2709,10 @@ async fn ensure_gh_auth_for_repo(repo_path: &Path) {
     }
 
     // Try to switch to the repo owner's account
-    tracing::info!("Switching gh auth from {current_user} to {owner} for repo at {}", repo_path.display());
+    tracing::info!(
+        "Switching gh auth from {current_user} to {owner} for repo at {}",
+        repo_path.display()
+    );
     match Command::new("gh")
         .args(["auth", "switch", "--user", &owner])
         .output()
@@ -2123,7 +2765,7 @@ pub(crate) fn is_bare_shell_prompt(content: &str) -> bool {
         "edit(",
         "bash(",
         "write(",
-        "╭─",  // Claude's box drawing
+        "╭─", // Claude's box drawing
         "╰─",
         "idle_no_work_available",
     ];

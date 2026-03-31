@@ -46,16 +46,12 @@ pub fn cursor_style() -> Style {
 }
 
 pub fn attention_style() -> Style {
-    Style::default()
-        .fg(Color::Red)
-        .add_modifier(Modifier::BOLD)
+    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
 }
 
 pub fn attention_blink_style(blink: bool) -> Style {
     if blink {
-        Style::default()
-            .fg(Color::Red)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
     } else {
         Style::default()
             .fg(Color::Yellow)

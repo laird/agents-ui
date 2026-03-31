@@ -16,10 +16,7 @@ pub enum Event {
     /// Periodic tick for UI refresh
     Tick,
     /// Updated pane content from tmux
-    PaneOutput {
-        agent_id: String,
-        content: String,
-    },
+    PaneOutput { agent_id: String, content: String },
     /// GitHub issues updated for a project
     IssuesUpdated {
         project_name: String,
@@ -38,10 +35,7 @@ pub enum Event {
         message: String,
     },
     /// Fetched issue body text for display in IssueView
-    IssueFetched {
-        issue_number: u32,
-        body: String,
-    },
+    IssueFetched { issue_number: u32, body: String },
     /// GitHub issues refreshed for a swarm
     IssuesRefreshed {
         swarm_idx: usize,
@@ -76,7 +70,10 @@ impl EventHandler {
                         }
                     }
                     Some(Ok(CrosstermEvent::Resize(width, height))) => {
-                        if event_tx.send(Event::TerminalResize { width, height }).is_err() {
+                        if event_tx
+                            .send(Event::TerminalResize { width, height })
+                            .is_err()
+                        {
                             break;
                         }
                     }

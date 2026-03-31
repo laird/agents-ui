@@ -1,6 +1,6 @@
-use std::path::PathBuf;
 use super::issue::IssueCache;
 use super::status::AgentStatus;
+use std::path::PathBuf;
 
 /// The type of agent runtime.
 #[derive(Debug, Clone, PartialEq)]
@@ -83,16 +83,19 @@ impl AgentType {
         }
     }
 
-    /// The slash command to start the worker fix-loop (sent once on first launch).
+    /// The command to start the worker fix-loop (sent once on first launch).
     pub fn worker_loop_cmd(&self) -> &str {
         match self {
             AgentType::Claude => "/autocoder:fix-loop",
-            AgentType::Codex | AgentType::Droid => "",
+            AgentType::Codex => {
+                "Use the autocoder skill to start the fix loop for this worker in the current repository."
+            }
+            AgentType::Droid => "/fix-loop",
             AgentType::Gemini => "/fix-loop",
         }
     }
 
-    /// The slash command to dispatch work to an already-running idle worker (ongoing cycles).
+    /// The command to dispatch work to an already-running idle worker (ongoing cycles).
     #[allow(dead_code)]
     pub fn worker_cmd(&self) -> &str {
         match self {
@@ -102,7 +105,7 @@ impl AgentType {
         }
     }
 
-    /// The slash command to send to an already-running idle manager (ongoing cycles).
+    /// The command to send to an already-running idle manager (ongoing cycles).
     #[allow(dead_code)]
     pub fn manager_cmd(&self) -> &str {
         match self {
@@ -363,7 +366,9 @@ impl Swarm {
         if self.manager.role == role || self.manager.id == role {
             Some(&mut self.manager)
         } else {
-            self.workers.iter_mut().find(|w| w.role == role || w.id == role)
+            self.workers
+                .iter_mut()
+                .find(|w| w.role == role || w.id == role)
         }
     }
 
@@ -380,7 +385,7 @@ impl Swarm {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::issue::{GitHubIssue, IssueCache, IssueState, IssuePriority, IssueType};
+    use crate::model::issue::{GitHubIssue, IssueCache, IssuePriority, IssueState, IssueType};
     use crate::model::status::{AgentState, AgentStatus};
 
     fn make_agent(id: &str, state: AgentState, pane_content: &str) -> AgentInfo {
@@ -389,7 +394,10 @@ mod tests {
             role: id.to_string(),
             worktree_path: PathBuf::from("/tmp/test"),
             tmux_target: "test:0.0".to_string(),
-            status: AgentStatus { timestamp: None, state },
+            status: AgentStatus {
+                timestamp: None,
+                state,
+            },
             is_manager: id == "manager",
             pane_content: pane_content.to_string(),
             dispatched_issue: None,
@@ -472,11 +480,7 @@ mod tests {
 
     #[test]
     fn attention_count_returns_blocked_issue_count() {
-        let swarm = make_swarm_with_issues(vec![
-            blocked_issue(1),
-            open_issue(2),
-            blocked_issue(3),
-        ]);
+        let swarm = make_swarm_with_issues(vec![blocked_issue(1), open_issue(2), blocked_issue(3)]);
         assert_eq!(swarm.attention_count(), 2);
     }
 
@@ -508,8 +512,11 @@ mod tests {
     fn worker_loop_commands_match_runtime_model() {
         assert_eq!(AgentType::Claude.worker_loop_cmd(), "/autocoder:fix-loop");
         assert_eq!(AgentType::Gemini.worker_loop_cmd(), "/fix-loop");
-        assert_eq!(AgentType::Codex.worker_loop_cmd(), "");
-        assert_eq!(AgentType::Droid.worker_loop_cmd(), "");
+        assert_eq!(
+            AgentType::Codex.worker_loop_cmd(),
+            "Use the autocoder skill to start the fix loop for this worker in the current repository."
+        );
+        assert_eq!(AgentType::Droid.worker_loop_cmd(), "/fix-loop");
     }
 
     #[test]
@@ -555,7 +562,11 @@ mod tests {
 
     #[test]
     fn needs_attention_working_agent() {
-        let agent = make_agent("w-0", AgentState::Working { issue: Some(42) }, "doing stuff");
+        let agent = make_agent(
+            "w-0",
+            AgentState::Working { issue: Some(42) },
+            "doing stuff",
+        );
         assert!(!agent.needs_attention());
     }
 
