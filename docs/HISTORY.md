@@ -200,3 +200,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Issue #235 is now an approved P3 enhancement and can be selected for implementation in a subsequent fix pass.
 
+
+---
+
+## 2026-04-01 14:51:41 - Fix #235 issue-detail inline comments
+
+**What Changed**: Added an inline comment composer in Issue Detail (Shift+C), wired Enter/Esc/editing controls, and submitted comments through project_management issue_comment wrappers; updated Issue Detail help and tests.
+
+**Why Changed**: Issue #235 requested posting issue comments directly from the TUI without leaving the app.
+
+**Impact**: Users can now post issue comments in-place with feedback status, reducing context switching while preserving existing issue-detail shortcuts.
+
