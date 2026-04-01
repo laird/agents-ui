@@ -4,6 +4,7 @@ mod tui;
 mod model;
 mod tmux;
 mod adapter;
+mod project_management;
 mod scripts;
 mod ui;
 mod config;

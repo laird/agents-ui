@@ -7,10 +7,10 @@ use crate::adapter::claude::ClaudeAdapter;
 use crate::adapter::traits::{AgentRuntime, SwarmConfig};
 use crate::event::{Event, EventHandler};
 use crate::model::swarm::{AgentType, Swarm};
+use crate::project_management::github;
 use crate::scripts::launcher;
 use crate::tmux::proxy;
 use crate::tui::Tui;
-use crate::model::issue::parse_issues;
 use crate::ui::agent_view::AgentView;
 use crate::ui::issue_detail::IssueDetailView;
 use crate::ui::issue_list::IssueListView;
@@ -914,9 +914,12 @@ impl App {
             KeyCode::Char('g') => {
                 // Open issue in browser
                 if let Some(ref view) = self.issue_detail_view {
-                    let _ = tokio::process::Command::new("gh")
-                        .args(["issue", "view", "--web", &view.issue_number.to_string()])
-                        .spawn();
+                    if let Err(e) = github::open_issue_in_browser(view.issue_number) {
+                        self.status_message = Some(format!(
+                            "Failed to open issue #{0} in browser: {e}",
+                            view.issue_number
+                        ));
+                    }
                 }
             }
             KeyCode::Char('p') => {
@@ -938,7 +941,7 @@ impl App {
                         return Ok(());
                     }
 
-                    match self.remove_issue_label(issue_num, "proposal").await {
+                    match github::remove_issue_label(issue_num, "proposal").await {
                         Ok(()) => {
                             if let Some(ref mut view) = self.issue_detail_view {
                                 view.labels
@@ -1076,7 +1079,7 @@ impl App {
                         return Ok(());
                     }
 
-                    match self.remove_issue_label(issue_num, "proposal").await {
+                    match github::remove_issue_label(issue_num, "proposal").await {
                         Ok(()) => {
                             if let Some(ref mut view) = self.issue_list_view {
                                 if let Some(issue) = view
@@ -1114,14 +1117,8 @@ impl App {
 
     /// Fetch GitHub issues and open the issue list screen.
     async fn open_issue_list(&mut self, swarm_idx: usize) {
-        let output = tokio::process::Command::new("gh")
-            .args(["issue", "list", "--state", "open", "--json", "number,title,labels", "--limit", "100"])
-            .output()
-            .await;
-
-        match output {
-            Ok(out) if out.status.success() => {
-                let issues = parse_issues(&out.stdout);
+        match github::list_open_issues(100).await {
+            Ok(issues) => {
                 self.issue_list_view = Some(IssueListView::new(issues));
                 self.screen = Screen::IssueList { swarm_idx };
             }
@@ -1133,72 +1130,22 @@ impl App {
 
     /// Open an issue detail view by fetching issue data from GitHub.
     async fn open_issue_detail(&mut self, issue_number: u32, swarm_idx: usize) {
-        // Fetch issue details from GitHub
-        let output = tokio::process::Command::new("gh")
-            .args([
-                "issue",
-                "view",
-                &issue_number.to_string(),
-                "--json",
-                "number,title,body,labels,state",
-            ])
-            .output()
-            .await;
-
-        match output {
-            Ok(out) if out.status.success() => {
-                if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&out.stdout) {
-                    let title = json["title"].as_str().unwrap_or("").to_string();
-                    let body = json["body"].as_str().unwrap_or("").to_string();
-                    let state = json["state"].as_str().unwrap_or("OPEN").to_string();
-                    let labels: Vec<String> = json["labels"]
-                        .as_array()
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(|l| l["name"].as_str().map(|s| s.to_string()))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-
-                    self.issue_detail_view = Some(IssueDetailView::new(
-                        issue_number,
-                        title,
-                        body,
-                        labels,
-                        state,
-                    ));
-                    self.screen = Screen::IssueDetail { swarm_idx };
-                }
+        match github::fetch_issue_detail(issue_number).await {
+            Ok(detail) => {
+                self.issue_detail_view = Some(IssueDetailView::new(
+                    detail.number,
+                    detail.title,
+                    detail.body,
+                    detail.labels,
+                    detail.state,
+                ));
+                self.screen = Screen::IssueDetail { swarm_idx };
             }
             _ => {
                 self.status_message =
                     Some(format!("Failed to fetch issue #{issue_number}"));
             }
         }
-    }
-
-    async fn remove_issue_label(&self, issue_number: u32, label: &str) -> Result<()> {
-        let output = tokio::process::Command::new("gh")
-            .args([
-                "issue",
-                "edit",
-                &issue_number.to_string(),
-                "--remove-label",
-                label,
-            ])
-            .output()
-            .await
-            .with_context(|| format!("Failed to run gh issue edit for #{issue_number}"))?;
-
-        if output.status.success() {
-            return Ok(());
-        }
-
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        if stderr.is_empty() {
-            anyhow::bail!("gh issue edit failed for #{issue_number}");
-        }
-        anyhow::bail!(stderr);
     }
 
     fn start_all_pane_watchers(&mut self) {
