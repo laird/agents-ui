@@ -24,3 +24,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Codex sessions are now relaunched under loop wrappers when drift is detected, reducing stalled autonomous workflows.
 
+
+---
+
+## 2026-04-01 12:32:37 - Fix #247 runtime mismatch relaunch
+
+**What Changed**: Added runtime fingerprint checks in pane-idle handling and relaunches mismatched manager/worker panes into the expected swarm runtime.
+
+**Why Changed**: --droid sessions could keep a Codex manager pane after reconnect/probe, causing mixed-runtime behavior.
+
+**Impact**: Manager and workers now converge to the selected runtime consistently; added regression tests for runtime hint/mismatch detection.
+

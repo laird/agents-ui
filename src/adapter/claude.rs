@@ -397,6 +397,24 @@ impl ClaudeAdapter {
                 }
             }
             PaneState::AgentIdle => {
+                if pane_has_runtime_mismatch(runtime, &content) {
+                    if let Some(observed) = pane_runtime_hint(&content) {
+                        tracing::info!(
+                            "Pane {} is running {} but swarm expects {}; relaunching expected runtime",
+                            agent.tmux_target,
+                            observed,
+                            runtime
+                        );
+                    } else {
+                        tracing::info!(
+                            "Pane {} appears to be running a mismatched runtime; relaunching {}",
+                            agent.tmux_target,
+                            runtime
+                        );
+                    }
+                    self.restart_agent_runtime(agent, session_name, runtime).await?;
+                    return Ok(());
+                }
                 if matches!(runtime, AgentType::Codex) {
                     if self.codex_agent_needs_relaunch(agent, &content).await {
                         tracing::info!(
@@ -453,6 +471,24 @@ impl ClaudeAdapter {
                         }
                     }
                     PaneState::AgentIdle => {
+                        if pane_has_runtime_mismatch(runtime, &probed) {
+                            if let Some(observed) = pane_runtime_hint(&probed) {
+                                tracing::info!(
+                                    "Probe: pane {} is running {} but swarm expects {}; relaunching expected runtime",
+                                    agent.tmux_target,
+                                    observed,
+                                    runtime
+                                );
+                            } else {
+                                tracing::info!(
+                                    "Probe: pane {} appears runtime-mismatched; relaunching {}",
+                                    agent.tmux_target,
+                                    runtime
+                                );
+                            }
+                            self.restart_agent_runtime(agent, session_name, runtime).await?;
+                            return Ok(());
+                        }
                         if matches!(runtime, AgentType::Codex) {
                             if self.codex_agent_needs_relaunch(agent, &probed).await {
                                 tracing::info!(
@@ -508,6 +544,16 @@ impl ClaudeAdapter {
         agent: &AgentInfo,
         session_name: &str,
     ) -> Result<()> {
+        self.restart_agent_runtime(agent, session_name, &AgentType::Codex)
+            .await
+    }
+
+    async fn restart_agent_runtime(
+        &self,
+        agent: &AgentInfo,
+        session_name: &str,
+        runtime: &AgentType,
+    ) -> Result<()> {
         self.transport
             .output(
                 "tmux",
@@ -522,7 +568,7 @@ impl ClaudeAdapter {
             .await
             .ok();
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-        self.launch_agent_in_pane(&agent.tmux_target, session_name, &AgentType::Codex)
+        self.launch_agent_in_pane(&agent.tmux_target, session_name, runtime)
             .await
     }
 
@@ -1518,6 +1564,31 @@ fn pane_agent_is_idle(content: &str) -> bool {
     classify_pane_state(content) == PaneState::AgentIdle
 }
 
+fn pane_runtime_hint(content: &str) -> Option<AgentType> {
+    let lower = strip_ansi(content).to_lowercase();
+    if lower.contains("bypass permissions")
+        || lower.contains("claude code")
+        || lower.contains("please restart claude")
+    {
+        return Some(AgentType::Claude);
+    }
+
+    if lower.contains("gpt-")
+        || lower.contains("openai codex")
+        || lower.contains("please restart codex")
+    {
+        return Some(AgentType::Codex);
+    }
+
+    None
+}
+
+fn pane_has_runtime_mismatch(expected: &AgentType, content: &str) -> bool {
+    pane_runtime_hint(content)
+        .map(|observed| observed != *expected)
+        .unwrap_or(false)
+}
+
 fn manager_bootstrap_cmd(runtime: &AgentType) -> Option<String> {
     match runtime {
         AgentType::Claude => Some("/autocoder:monitor-loop".to_string()),
@@ -1664,7 +1735,8 @@ mod tests {
     use super::{
         classify_pane_state, extract_issue_number_from_branch, generic_worker_bootstrap_cmd,
         is_bare_shell_prompt, is_feedback_prompt, manager_bootstrap_cmd, pane_agent_is_idle,
-        pane_needs_runtime_launch, worker_dispatch_cmd, PaneState,
+        pane_has_runtime_mismatch, pane_needs_runtime_launch, pane_runtime_hint,
+        worker_dispatch_cmd, PaneState,
     };
     use crate::model::swarm::AgentType;
 
@@ -1725,6 +1797,27 @@ mod tests {
             classify_pane_state("🔄 Starting Codex fix loop\n"),
             PaneState::Unknown
         );
+    }
+
+    #[test]
+    fn detects_runtime_hints_from_pane_content() {
+        assert_eq!(
+            pane_runtime_hint("  gpt-5.4 default · 100% left\n"),
+            Some(AgentType::Codex)
+        );
+        assert_eq!(
+            pane_runtime_hint("  ⏵⏵ bypass permissions on (shift+tab to cycle)\n"),
+            Some(AgentType::Claude)
+        );
+        assert_eq!(pane_runtime_hint("working on issue #247"), None);
+    }
+
+    #[test]
+    fn detects_runtime_mismatch_for_expected_runtime() {
+        let codex_idle = "gpt-5.4 default · 100% left";
+        assert!(pane_has_runtime_mismatch(&AgentType::Droid, codex_idle));
+        assert!(pane_has_runtime_mismatch(&AgentType::Claude, codex_idle));
+        assert!(!pane_has_runtime_mismatch(&AgentType::Codex, codex_idle));
     }
 
     #[test]
