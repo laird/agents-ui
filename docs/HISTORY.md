@@ -57,3 +57,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Agent and manager panes now align with terminal width during launch/discovery, improving readability in monitoring views.
 
+
+---
+
+## 2026-04-01 13:00:05 - Fix #244 project-management GitHub wrapper
+
+**What Changed**: Added a dedicated src/project_management.rs GitHub CLI wrapper for issue creation and routed feedback submission through it instead of ad hoc gh invocation in app.rs.
+
+**Why Changed**: Issue #244 requires centralizing project-management GitHub operations for command construction, auth handling, and logging consistency.
+
+**Impact**: GitHub issue creation behavior stays equivalent while providing a single extension point for future policy and provider support.
+

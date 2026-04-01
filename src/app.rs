@@ -8,6 +8,7 @@ use crate::adapter::traits::{AgentRuntime, SwarmConfig};
 use crate::config::keybindings::{Action, KeyBindings};
 use crate::event::{Event, EventHandler};
 use crate::model::swarm::{AgentType, Swarm};
+use crate::project_management::{GitHubCli, GitHubIssueRequest};
 use crate::scripts::launcher;
 use crate::tmux::proxy;
 use crate::tui::Tui;
@@ -802,29 +803,13 @@ fn tab_complete_path(input: &str) -> Option<String> {
 
 /// Submit feedback as a GitHub issue using `gh`.
 async fn submit_feedback(title: &str, body: &str, label: &str) -> Result<String> {
-    let output = tokio::process::Command::new("gh")
-        .args([
-            "issue",
-            "create",
-            "--repo",
-            "laird/agents-ui",
-            "--label",
-            label,
-            "--title",
-            title,
-            "--body",
-            body,
-        ])
-        .output()
-        .await?;
-
-    if output.status.success() {
-        let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        Ok(url)
-    } else {
-        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        anyhow::bail!("{err}")
-    }
+    GitHubCli::create_issue(GitHubIssueRequest {
+        repo: "laird/agents-ui",
+        title,
+        body,
+        label,
+    })
+    .await
 }
 
 fn longest_common_prefix(strings: &[String]) -> String {
