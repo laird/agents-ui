@@ -3,6 +3,7 @@ mod config;
 mod event;
 mod github;
 mod model;
+mod project_management;
 mod scripts;
 mod tmux;
 mod tui;

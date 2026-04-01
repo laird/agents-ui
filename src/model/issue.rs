@@ -3,7 +3,8 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use std::path::Path;
 use std::time::Instant;
-use tokio::process::Command;
+use crate::project_management;
+use crate::transport::ServerTransport;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum IssueState {
@@ -299,21 +300,14 @@ impl From<GhIssueJson> for GitHubIssue {
 }
 
 /// Fetch open issues from GitHub using `gh` CLI.
-pub async fn fetch_issues(repo_path: &Path) -> Result<Vec<GitHubIssue>> {
-    let output = Command::new("gh")
-        .args([
-            "issue",
-            "list",
-            "--state",
-            "open",
-            "--json",
-            "number,title,labels,updatedAt",
-            "--limit",
-            "100",
-        ])
-        .current_dir(repo_path)
-        .output()
-        .await?;
+pub async fn fetch_issues(transport: &ServerTransport, repo_path: &Path) -> Result<Vec<GitHubIssue>> {
+    let output = project_management::issue_list(
+        transport,
+        repo_path,
+        "number,title,labels,updatedAt",
+        100,
+    )
+    .await?;
 
     if !output.status.success() {
         anyhow::bail!(

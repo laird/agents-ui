@@ -4,6 +4,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::model::issue::{GhIssueJson, GitHubIssue};
+use crate::project_management;
 use crate::transport::ServerTransport;
 
 /// Classified GitHub CLI errors.
@@ -65,13 +66,7 @@ pub async fn check_gh_auth(transport: &ServerTransport) -> Option<GhError> {
         return Some(GhError::NotInstalled);
     }
 
-    let output = transport
-        .output(
-            "gh",
-            &["auth".to_string(), "status".to_string()],
-            None,
-        )
-        .await;
+    let output = project_management::auth_status(transport).await;
 
     match output {
         Ok(o) if o.status.success() => None,
@@ -88,23 +83,14 @@ pub async fn fetch_issues(
     transport: &ServerTransport,
     repo_path: &Path,
 ) -> std::result::Result<Vec<GitHubIssue>, GhError> {
-    let output = transport
-        .output(
-            "gh",
-            &[
-                "issue".to_string(),
-                "list".to_string(),
-                "--state".to_string(),
-                "open".to_string(),
-                "--limit".to_string(),
-                "100".to_string(),
-                "--json".to_string(),
-                "number,title,state,labels".to_string(),
-            ],
-            Some(repo_path),
-        )
-        .await
-        .map_err(|e| GhError::Transient(e.to_string()))?;
+    let output = project_management::issue_list(
+        transport,
+        repo_path,
+        "number,title,state,labels",
+        100,
+    )
+    .await
+    .map_err(|e| GhError::Transient(e.to_string()))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);

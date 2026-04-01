@@ -10,6 +10,7 @@ use crate::adapter::traits::{AgentRuntime, SwarmConfig};
 use crate::event::{Event, EventHandler};
 use crate::model::issue::{GitHubIssue, IssueCache};
 use crate::model::swarm::{AgentType, ALL_AGENT_TYPES, Swarm};
+use crate::project_management;
 use crate::scripts::launcher;
 use crate::transport::ServerTransport;
 use crate::tmux::proxy;
@@ -2098,17 +2099,7 @@ impl App {
                                 self.screen = Screen::IssueView { swarm_idx, issue_number: num };
                                 // Fetch issue body in background
                                 tokio::spawn(async move {
-                                    let result = transport
-                                        .output(
-                                            "gh",
-                                            &[
-                                                "issue".to_string(),
-                                                "view".to_string(),
-                                                num.to_string(),
-                                            ],
-                                            Some(&repo_path),
-                                        )
-                                        .await;
+                                    let result = project_management::issue_view(&transport, &repo_path, num).await;
                                     if let Ok(output) = result {
                                         let body = String::from_utf8_lossy(&output.stdout).to_string();
                                         let _ = tx.send(crate::event::Event::IssueFetched { issue_number: num, body });
@@ -2135,18 +2126,7 @@ impl App {
                                 let repo_path = swarm.repo_path.clone();
                                 let transport = self.transport.clone();
                                 tokio::spawn(async move {
-                                    let _ = transport
-                                        .output(
-                                            "gh",
-                                            &[
-                                                "issue".to_string(),
-                                                "view".to_string(),
-                                                num.to_string(),
-                                                "--web".to_string(),
-                                            ],
-                                            Some(&repo_path),
-                                        )
-                                        .await;
+                                    let _ = project_management::issue_view_web(&transport, &repo_path, num).await;
                                 });
                                 self.status_message = Some(format!("Opening issue #{} in browser", issue.number));
                             }
@@ -2226,20 +2206,13 @@ impl App {
             return Ok(());
         };
 
-        let result = self
-            .transport
-            .output(
-                "gh",
-                &[
-                    "issue".to_string(),
-                    "edit".to_string(),
-                    issue_num.to_string(),
-                    "--remove-label".to_string(),
-                    "proposal".to_string(),
-                ],
-                Some(&repo_path),
-            )
-            .await;
+        let result = project_management::issue_edit_remove_label(
+            &self.transport,
+            &repo_path,
+            issue_num,
+            "proposal",
+        )
+        .await;
 
         match result {
             Ok(output) if output.status.success() => {
@@ -2249,15 +2222,7 @@ impl App {
                 self.start_issue_refresh(swarm_idx);
             }
             Ok(output) => {
-                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                let detail = if !stderr.is_empty() {
-                    stderr
-                } else if !stdout.is_empty() {
-                    stdout
-                } else {
-                    "gh issue edit failed".to_string()
-                };
+                let detail = project_management::command_error_detail(&output, "gh issue edit failed");
                 self.status_message = Some(format!(
                     "Approve failed for #{issue_num}: {detail}"
                 ));
@@ -2324,18 +2289,7 @@ impl App {
                     let repo_path = swarm.repo_path.clone();
                     let transport = self.transport.clone();
                     tokio::spawn(async move {
-                        let _ = transport
-                            .output(
-                                "gh",
-                                &[
-                                    "issue".to_string(),
-                                    "view".to_string(),
-                                    issue_number.to_string(),
-                                    "--web".to_string(),
-                                ],
-                                Some(&repo_path),
-                            )
-                            .await;
+                        let _ = project_management::issue_view_web(&transport, &repo_path, issue_number).await;
                     });
                     self.status_message = Some(format!("Opening issue #{issue_number} in browser"));
                 }
@@ -2672,9 +2626,14 @@ impl App {
             KeyCode::Char('g') => {
                 // Open issue in browser
                 if let Some(ref view) = self.issue_detail_view {
-                    let _ = tokio::process::Command::new("gh")
-                        .args(["issue", "view", "--web", &view.issue_number.to_string()])
-                        .spawn();
+                    if let Some(swarm) = self.swarms.get(swarm_idx) {
+                        let repo_path = swarm.repo_path.clone();
+                        let transport = self.transport.clone();
+                        let issue_number = view.issue_number;
+                        tokio::spawn(async move {
+                            let _ = project_management::issue_view_web(&transport, &repo_path, issue_number).await;
+                        });
+                    }
                 }
             }
             KeyCode::PageUp => {
@@ -2770,20 +2729,9 @@ impl App {
             let label = state.feedback_type.github_label().to_string();
             let repo_path = state.repo_path.clone();
 
-            let result = self.transport.output(
-                "gh",
-                &[
-                    "issue".to_string(),
-                    "create".to_string(),
-                    "--title".to_string(),
-                    title.clone(),
-                    "--body".to_string(),
-                    body.clone(),
-                    "--label".to_string(),
-                    label,
-                ],
-                Some(&repo_path),
-            ).await;
+            let result =
+                project_management::issue_create(&self.transport, &repo_path, &title, &body, &label)
+                    .await;
 
             if let Some(state) = self.feedback_state.as_mut() {
                 state.field = match result {
@@ -2792,7 +2740,7 @@ impl App {
                         FeedbackField::Done(format!("Filed! {url}"))
                     }
                     Ok(out) => {
-                        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                        let err = project_management::command_error_detail(&out, "gh issue create failed");
                         FeedbackField::Done(format!("Error: {err}"))
                     }
                     Err(e) => FeedbackField::Done(format!("Error: {e}")),
@@ -2806,9 +2754,10 @@ impl App {
     fn start_issue_refresh(&self, swarm_idx: usize) {
         if let Some(swarm) = self.swarms.get(swarm_idx) {
             let repo_path = swarm.repo_path.clone();
+            let transport = self.transport.clone();
             let tx = self.events.tx();
             tokio::spawn(async move {
-                match crate::model::issue::fetch_issues(&repo_path).await {
+                match crate::model::issue::fetch_issues(&transport, &repo_path).await {
                     Ok(issues) => {
                         let _ = tx.send(Event::IssuesRefreshed { swarm_idx, issues });
                     }
@@ -2822,17 +2771,20 @@ impl App {
 
     /// Open an issue detail view by fetching issue data from GitHub.
     async fn open_issue_detail(&mut self, issue_number: u32, swarm_idx: usize) {
+        let Some(swarm) = self.swarms.get(swarm_idx) else {
+            self.status_message = Some("Failed to locate swarm for issue detail".to_string());
+            return;
+        };
+        let repo_path = swarm.repo_path.clone();
+
         // Fetch issue details from GitHub
-        let output = tokio::process::Command::new("gh")
-            .args([
-                "issue",
-                "view",
-                &issue_number.to_string(),
-                "--json",
-                "number,title,body,labels,state,comments,assignees,createdAt",
-            ])
-            .output()
-            .await;
+        let output = project_management::issue_view_json(
+            &self.transport,
+            &repo_path,
+            issue_number,
+            "number,title,body,labels,state,comments,assignees,createdAt",
+        )
+        .await;
 
         match output {
             Ok(out) if out.status.success() => {
