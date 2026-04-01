@@ -2208,9 +2208,7 @@ impl App {
         match agent_type {
             AgentType::Claude => Some(format!("/autocoder:fix {issue_number}")),
             AgentType::Gemini => Some(format!("/fix {issue_number}")),
-            AgentType::Codex => Some(format!(
-                "Use the repository's Codex autocoder workflow to work issue #{issue_number} specifically. Start by reading AGENTS.md, skills/autocoder/SKILL.md, skills/autocoder/references/workflow-map.md, and skills/autocoder/references/command-mapping.md. Translate the legacy /fix behavior into direct Codex actions. Do one issue-focused pass, run relevant tests, and summarize the outcome."
-            )),
+            AgentType::Codex => None,
             AgentType::Droid => Some(format!("/fix {issue_number}")),
         }
     }
@@ -2219,9 +2217,7 @@ impl App {
         match agent_type {
             AgentType::Claude => Some("/autocoder:review-blocked".to_string()),
             AgentType::Gemini => Some("/review-blocked".to_string()),
-            AgentType::Codex => Some(
-                "Review the repository's blocked autocoder issues. Start by reading AGENTS.md, skills/autocoder/SKILL.md, and skills/autocoder/references/command-mapping.md. Summarize blocked issues by priority and recommend the next human review actions.".to_string()
-            ),
+            AgentType::Codex => None,
             AgentType::Droid => Some("/review-blocked".to_string()),
         }
     }
@@ -2230,7 +2226,7 @@ impl App {
         match agent_type {
             AgentType::Claude => Some("/autocoder:monitor-workers".to_string()),
             AgentType::Gemini => Some("/monitor-workers".to_string()),
-            AgentType::Codex => Some("/monitor-workers".to_string()),
+            AgentType::Codex => None,
             AgentType::Droid => Some("/monitor-workers".to_string()),
         }
     }
@@ -2497,7 +2493,7 @@ impl App {
             }
         }
 
-        // PageUp/PageDown/Home/End scroll the view without sending to pane
+        // Navigation keys scroll the local view without sending to pane.
         match key.code {
             KeyCode::PageUp => {
                 self.agent_view.page_up();
@@ -2521,35 +2517,6 @@ impl App {
             }
             KeyCode::Down => {
                 self.agent_view.scroll_down(1);
-                return Ok(());
-            }
-            KeyCode::Enter => {
-                if !self.agent_view.input.is_empty() {
-                    let input = self.agent_view.input.drain();
-                    proxy::send_keys(&self.transport, &target, &input).await?;
-                    self.agent_view.scroll_to_bottom();
-                }
-                return Ok(());
-            }
-            KeyCode::Left => {
-                self.agent_view.input.move_left();
-                return Ok(());
-            }
-            KeyCode::Right => {
-                self.agent_view.input.move_right();
-                return Ok(());
-            }
-            KeyCode::Delete => {
-                self.agent_view.input.delete();
-                return Ok(());
-            }
-            KeyCode::Backspace => {
-                self.agent_view.input.backspace();
-                return Ok(());
-            }
-            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL)
-                && !key.modifiers.contains(KeyModifiers::ALT) => {
-                self.agent_view.input.insert_char(c);
                 return Ok(());
             }
             _ => {}
@@ -2959,6 +2926,11 @@ impl App {
         for si in 0..self.swarms.len() {
             let project_name = self.swarms[si].project_name.clone();
             let agent_type = self.swarms[si].agent_type.clone();
+            if agent_type == AgentType::Codex {
+                // Codex workers are supervised by codex-fix-loop.sh + manager loop scripts.
+                // Avoid injecting interactive prompts directly into worker panes.
+                continue;
+            }
 
             // Get dispatched issue numbers to avoid double-dispatch
             let already_dispatched: Vec<u32> = self.swarms[si]
@@ -3215,18 +3187,22 @@ impl App {
                 continue;
             }
 
-            // Send /monitor-workers to the manager pane
+            let Some(monitor_cmd) = self.monitor_workers_cmd(&swarm.agent_type) else {
+                continue;
+            };
+
+            // Send monitor command to the manager pane
             let target = &swarm.manager.tmux_target;
             tracing::info!(
-                "Auto-dispatching /monitor-workers to manager (idle worker detected in {})",
-                swarm.project_name
+                "Auto-dispatching {monitor_cmd} to manager (idle worker detected in {})",
+                swarm.project_name,
             );
-            if let Err(e) = crate::tmux::proxy::send_keys(&self.transport, target, "/monitor-workers").await {
-                tracing::warn!("Failed to auto-dispatch /monitor-workers: {e}");
+            if let Err(e) = crate::tmux::proxy::send_keys(&self.transport, target, &monitor_cmd).await {
+                tracing::warn!("Failed to auto-dispatch {monitor_cmd}: {e}");
             }
             self.auto_dispatch_last = Some(std::time::Instant::now());
             self.status_message =
-                Some("Auto-dispatched /monitor-workers (idle worker detected)".to_string());
+                Some(format!("Auto-dispatched {monitor_cmd} (idle worker detected)"));
             return; // Only dispatch once per tick
         }
     }

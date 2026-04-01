@@ -42,6 +42,7 @@ impl TextInput {
     }
 
     /// Take the text out, resetting the input.
+    #[allow(dead_code)] // Retained for dialog workflows and test coverage.
     pub fn drain(&mut self) -> String {
         self.cursor = 0;
         std::mem::take(&mut self.text)
