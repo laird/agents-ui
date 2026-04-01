@@ -248,6 +248,8 @@ pub struct App {
     auto_dispatch_last: Option<std::time::Instant>,
     /// Issue detail view state.
     pub issue_detail_view: Option<IssueDetailView>,
+    /// Inline comment input state for issue detail view.
+    pub issue_comment_input: Option<TextInput>,
     /// Tracks last Esc press for double-Esc to go back (never forwarded to pane).
     #[allow(dead_code)]
     last_esc: Option<std::time::Instant>,
@@ -335,6 +337,7 @@ impl App {
             last_esc: None,
             auto_dispatch_last: None,
             issue_detail_view: None,
+            issue_comment_input: None,
             keybindings: crate::config::keybindings::KeyBindings::load(),
             show_help: false,
             feedback_state: None,
@@ -455,7 +458,7 @@ impl App {
                     }
                     Screen::IssueDetail { .. } => {
                         if let Some(ref view) = self.issue_detail_view {
-                            view.render(f, area);
+                            view.render(f, area, self.issue_comment_input.as_ref());
                         }
                     }
                 }
@@ -2617,9 +2620,106 @@ impl App {
     }
 
     async fn handle_issue_detail_key(&mut self, key: KeyEvent, swarm_idx: usize) -> Result<()> {
+        if self.issue_comment_input.is_some() {
+            match key.code {
+                KeyCode::Esc => {
+                    self.issue_comment_input = None;
+                    self.status_message = Some("Comment cancelled".to_string());
+                }
+                KeyCode::Enter => {
+                    let comment_body = self
+                        .issue_comment_input
+                        .as_ref()
+                        .map(|input| input.text().trim().to_string())
+                        .unwrap_or_default();
+                    if comment_body.is_empty() {
+                        self.status_message = Some("Comment cannot be empty".to_string());
+                        return Ok(());
+                    }
+
+                    let Some(issue_number) = self.issue_detail_view.as_ref().map(|v| v.issue_number) else {
+                        self.status_message = Some("Failed to locate issue number".to_string());
+                        return Ok(());
+                    };
+                    let Some(repo_path) = self.swarms.get(swarm_idx).map(|s| s.repo_path.clone()) else {
+                        self.status_message = Some("Failed to locate swarm repo".to_string());
+                        return Ok(());
+                    };
+
+                    match project_management::issue_comment(
+                        &self.transport,
+                        &repo_path,
+                        issue_number,
+                        &comment_body,
+                    )
+                    .await
+                    {
+                        Ok(output) if output.status.success() => {
+                            if let Some(ref mut view) = self.issue_detail_view {
+                                view.comment_count = view.comment_count.saturating_add(1);
+                            }
+                            self.issue_comment_input = None;
+                            self.status_message = Some(format!("Comment posted to #{issue_number}"));
+                        }
+                        Ok(output) => {
+                            let detail = project_management::command_error_detail(
+                                &output,
+                                "gh issue comment failed",
+                            );
+                            self.status_message = Some(format!("Failed to post comment: {detail}"));
+                        }
+                        Err(e) => {
+                            self.status_message = Some(format!("Failed to post comment: {e}"));
+                        }
+                    }
+                }
+                KeyCode::Backspace => {
+                    if let Some(ref mut input) = self.issue_comment_input {
+                        input.backspace();
+                    }
+                }
+                KeyCode::Delete => {
+                    if let Some(ref mut input) = self.issue_comment_input {
+                        input.delete();
+                    }
+                }
+                KeyCode::Left => {
+                    if let Some(ref mut input) = self.issue_comment_input {
+                        input.move_left();
+                    }
+                }
+                KeyCode::Right => {
+                    if let Some(ref mut input) = self.issue_comment_input {
+                        input.move_right();
+                    }
+                }
+                KeyCode::Home => {
+                    if let Some(ref mut input) = self.issue_comment_input {
+                        input.move_home();
+                    }
+                }
+                KeyCode::End => {
+                    if let Some(ref mut input) = self.issue_comment_input {
+                        input.move_end();
+                    }
+                }
+                KeyCode::Char(c)
+                    if !key.modifiers.contains(KeyModifiers::CONTROL)
+                        && !key.modifiers.contains(KeyModifiers::ALT) =>
+                {
+                    if let Some(ref mut input) = self.issue_comment_input {
+                        input.insert_char(c);
+                    }
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+
         match key.code {
             KeyCode::Esc | KeyCode::Backspace => {
                 self.issue_detail_view = None;
+                self.issue_comment_input = None;
                 self.screen = Screen::RepoView { swarm_idx };
             }
             KeyCode::Char('q') => {
@@ -2636,6 +2736,13 @@ impl App {
                             let _ = project_management::issue_view_web(&transport, &repo_path, issue_number).await;
                         });
                     }
+                }
+            }
+            KeyCode::Char('C') => {
+                if self.issue_detail_view.is_some() {
+                    self.issue_comment_input = Some(TextInput::new());
+                    self.status_message =
+                        Some("Comment mode: Enter to post, Esc to cancel".to_string());
                 }
             }
             KeyCode::Char('c') => {
@@ -2856,6 +2963,7 @@ impl App {
                         assignees,
                         created_at_age,
                     ));
+                    self.issue_comment_input = None;
                     self.screen = Screen::IssueDetail { swarm_idx };
                 }
             }

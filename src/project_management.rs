@@ -180,6 +180,25 @@ impl ProjectManagementBackend {
             ],
         }
     }
+
+    fn issue_comment_args(self, issue_ref: &str, body: &str) -> Vec<String> {
+        match self {
+            ProjectManagementBackend::GitHub => vec![
+                "issue".to_string(),
+                "comment".to_string(),
+                issue_ref.to_string(),
+                "--body".to_string(),
+                body.to_string(),
+            ],
+            ProjectManagementBackend::Linear | ProjectManagementBackend::Jira => vec![
+                "issue".to_string(),
+                "comment".to_string(),
+                issue_ref.to_string(),
+                "--body".to_string(),
+                body.to_string(),
+            ],
+        }
+    }
 }
 
 pub fn configured_backend() -> ProjectManagementBackend {
@@ -349,6 +368,22 @@ pub async fn backend_issue_create(
     .await
 }
 
+pub async fn backend_issue_comment(
+    transport: &ServerTransport,
+    backend: ProjectManagementBackend,
+    repo_path: &Path,
+    issue_ref: &str,
+    body: &str,
+) -> Result<std::process::Output> {
+    run_backend(
+        transport,
+        backend,
+        Some(repo_path),
+        &backend.issue_comment_args(issue_ref, body),
+    )
+    .await
+}
+
 pub async fn auth_status(transport: &ServerTransport) -> Result<std::process::Output> {
     backend_auth_status(transport, legacy_compatible_backend()).await
 }
@@ -447,6 +482,22 @@ pub async fn issue_create(
     .await
 }
 
+pub async fn issue_comment(
+    transport: &ServerTransport,
+    repo_path: &Path,
+    issue_number: u32,
+    body: &str,
+) -> Result<std::process::Output> {
+    backend_issue_comment(
+        transport,
+        legacy_compatible_backend(),
+        repo_path,
+        &issue_number.to_string(),
+        body,
+    )
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::{configured_backend, ProjectManagementBackend};
@@ -523,6 +574,12 @@ mod tests {
                 "P3"
             ]
         );
+    }
+
+    #[test]
+    fn github_issue_comment_args_match_existing_contract() {
+        let args = ProjectManagementBackend::GitHub.issue_comment_args("123", "hello");
+        assert_eq!(args, vec!["issue", "comment", "123", "--body", "hello"]);
     }
 
     #[test]

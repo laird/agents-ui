@@ -6,6 +6,7 @@ use ratatui::{
 };
 
 use super::theme;
+use crate::ui::text_input::TextInput;
 
 /// State for the issue detail view.
 pub struct IssueDetailView {
@@ -52,13 +53,23 @@ impl IssueDetailView {
         self.scroll_offset = self.scroll_offset.saturating_add(amount);
     }
 
-    pub fn render(&self, f: &mut Frame, area: Rect) {
-        let chunks = Layout::vertical([
-            Constraint::Length(5), // Header (extra line for metadata)
-            Constraint::Min(5),   // Body
-            Constraint::Length(3), // Help bar
-        ])
-        .split(area);
+    pub fn render(&self, f: &mut Frame, area: Rect, comment_input: Option<&TextInput>) {
+        let chunks = if comment_input.is_some() {
+            Layout::vertical([
+                Constraint::Length(5), // Header (extra line for metadata)
+                Constraint::Min(5),    // Body
+                Constraint::Length(3), // Comment input
+                Constraint::Length(3), // Help bar
+            ])
+            .split(area)
+        } else {
+            Layout::vertical([
+                Constraint::Length(5), // Header (extra line for metadata)
+                Constraint::Min(5),    // Body
+                Constraint::Length(3), // Help bar
+            ])
+            .split(area)
+        };
 
         // Header
         let label_text = if self.labels.is_empty() {
@@ -89,10 +100,7 @@ impl IssueDetailView {
 
         let header_lines = vec![
             Line::from(vec![
-                Span::styled(
-                    format!(" #{}: ", self.issue_number),
-                    theme::title_style(),
-                ),
+                Span::styled(format!(" #{}: ", self.issue_number), theme::title_style()),
                 Span::styled(&self.title, theme::title_style()),
             ]),
             Line::from(vec![
@@ -106,8 +114,7 @@ impl IssueDetailView {
             )),
         ];
 
-        let header = Paragraph::new(header_lines)
-            .block(Block::default().borders(Borders::BOTTOM));
+        let header = Paragraph::new(header_lines).block(Block::default().borders(Borders::BOTTOM));
         f.render_widget(header, chunks[0]);
 
         // Body content
@@ -123,14 +130,25 @@ impl IssueDetailView {
             .collect();
 
         let body = Paragraph::new(body_lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(" Issue Body "),
-            )
+            .block(Block::default().borders(Borders::ALL).title(" Issue Body "))
             .wrap(Wrap { trim: false })
             .scroll((self.scroll_offset, 0));
         f.render_widget(body, chunks[1]);
+
+        if let Some(input) = comment_input {
+            let comment = Paragraph::new(input.render_line(" Comment: ")).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Add Comment "),
+            );
+            f.render_widget(comment, chunks[2]);
+        }
+
+        let help_chunk = if comment_input.is_some() {
+            chunks[3]
+        } else {
+            chunks[2]
+        };
 
         // Help bar
         let help = Paragraph::new(Line::from(vec![
@@ -140,13 +158,15 @@ impl IssueDetailView {
             Span::styled(" open in browser  ", theme::help_style()),
             Span::styled("c", theme::title_style()),
             Span::styled(" copy #  ", theme::help_style()),
+            Span::styled("C", theme::title_style()),
+            Span::styled(" comment  ", theme::help_style()),
             Span::styled("Esc", theme::title_style()),
             Span::styled(" back  ", theme::help_style()),
             Span::styled("q", theme::title_style()),
             Span::styled(" quit", theme::help_style()),
         ]))
         .block(Block::default().borders(Borders::TOP));
-        f.render_widget(help, chunks[2]);
+        f.render_widget(help, help_chunk);
     }
 }
 
@@ -155,7 +175,11 @@ mod tests {
     use super::IssueDetailView;
     use ratatui::{backend::TestBackend, Terminal};
 
-    fn make_view(comment_count: u32, assignees: Vec<&str>, created_at_age: &str) -> IssueDetailView {
+    fn make_view(
+        comment_count: u32,
+        assignees: Vec<&str>,
+        created_at_age: &str,
+    ) -> IssueDetailView {
         IssueDetailView::new(
             42,
             "Test issue".to_string(),
@@ -171,7 +195,7 @@ mod tests {
     fn render_to_string(view: &IssueDetailView) -> String {
         let backend = TestBackend::new(100, 20);
         let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| view.render(f, f.area())).unwrap();
+        terminal.draw(|f| view.render(f, f.area(), None)).unwrap();
         terminal
             .backend()
             .buffer()
@@ -243,5 +267,12 @@ mod tests {
         let view = make_view(0, vec![], "");
         let rendered = render_to_string(&view);
         assert!(rendered.contains("copy #"));
+    }
+
+    #[test]
+    fn renders_help_for_comment_shortcut() {
+        let view = make_view(0, vec![], "");
+        let rendered = render_to_string(&view);
+        assert!(rendered.contains("comment"));
     }
 }
