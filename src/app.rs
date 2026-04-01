@@ -1144,8 +1144,7 @@ impl App {
     }
 
     async fn codex_agents_installed(&self, repo_path: &std::path::Path) -> bool {
-        codex_repo_assets_present(&self.transport, repo_path).await
-            || codex_user_assets_present(&self.transport).await
+        codex_runtime_assets_present(&self.transport, repo_path).await
     }
 
     async fn install_agents_for_scope(
@@ -3655,14 +3654,21 @@ async fn codex_repo_assets_present(
             .await
 }
 
-async fn codex_user_assets_present(transport: &ServerTransport) -> bool {
+fn runtime_home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir)
+}
+
+async fn codex_skill_present(transport: &ServerTransport) -> bool {
     if transport.is_remote() {
         transport
             .output(
                 "sh",
                 &[
                     "-lc".to_string(),
-                    "test -e \"$HOME/.codex/skills/autocoder/SKILL.md\" && test -e \"$HOME/.local/bin/codex-start-parallel\"".to_string(),
+                    "test -e \"$HOME/.codex/skills/autocoder/SKILL.md\"".to_string(),
                 ],
                 None,
             )
@@ -3670,16 +3676,55 @@ async fn codex_user_assets_present(transport: &ServerTransport) -> bool {
             .map(|output| output.status.success())
             .unwrap_or(false)
     } else {
-        let Some(home) = dirs::home_dir() else {
+        let Some(home) = runtime_home_dir() else {
             return false;
         };
         transport
             .path_exists(&home.join(".codex/skills/autocoder/SKILL.md"))
             .await
-            && transport
-                .path_exists(&home.join(".local/bin/codex-start-parallel"))
-                .await
     }
+}
+
+async fn codex_parallel_binary_present(transport: &ServerTransport) -> bool {
+    if transport.is_remote() {
+        transport
+            .output(
+                "sh",
+                &[
+                    "-lc".to_string(),
+                    "test -e \"$HOME/.local/bin/codex-start-parallel\"".to_string(),
+                ],
+                None,
+            )
+            .await
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    } else {
+        let Some(home) = runtime_home_dir() else {
+            return false;
+        };
+        transport
+            .path_exists(&home.join(".local/bin/codex-start-parallel"))
+            .await
+    }
+}
+
+async fn codex_user_assets_present(transport: &ServerTransport) -> bool {
+    codex_skill_present(transport).await && codex_parallel_binary_present(transport).await
+}
+
+async fn codex_runtime_assets_present(
+    transport: &ServerTransport,
+    repo_path: &std::path::Path,
+) -> bool {
+    let user_assets = codex_user_assets_present(transport).await;
+    let repo_assets = codex_repo_assets_present(transport, repo_path).await;
+    let skill_present = codex_skill_present(transport).await;
+    codex_assets_ready(user_assets, repo_assets, skill_present)
+}
+
+fn codex_assets_ready(user_assets: bool, repo_assets: bool, skill_present: bool) -> bool {
+    user_assets || (repo_assets && skill_present)
 }
 
 /// Simple tab completion for file paths.
@@ -4049,6 +4094,13 @@ mod tests {
             unsafe { std::env::remove_var("HOME") };
         }
         std::fs::remove_dir_all(home).ok();
+    }
+
+    #[test]
+    fn codex_runtime_gate_requires_skill_with_repo_wrappers() {
+        assert!(!codex_assets_ready(false, true, false));
+        assert!(codex_assets_ready(false, true, true));
+        assert!(codex_assets_ready(true, false, false));
     }
 
     #[test]
