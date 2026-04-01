@@ -65,6 +65,8 @@ pub struct App {
     pub available_repos: Vec<PathBuf>,
     /// Last time we auto-dispatched /monitor-workers (for debounce).
     auto_dispatch_last: Option<std::time::Instant>,
+    /// Last known terminal size used for tmux session sizing.
+    last_terminal_size: Option<(u16, u16)>,
     /// Issue detail view state.
     pub issue_detail_view: Option<IssueDetailView>,
     /// Issue list view state (GitHub issues browser).
@@ -107,6 +109,7 @@ impl App {
             last_esc: None,
             available_repos: Vec::new(),
             auto_dispatch_last: None,
+            last_terminal_size: None,
             issue_detail_view: None,
             issue_list_view: None,
         };
@@ -116,6 +119,11 @@ impl App {
 
         // Start pane watchers for discovered swarms
         app.start_all_pane_watchers();
+
+        // Align discovered tmux sessions with the current terminal dimensions.
+        if let Some((cols, rows)) = proxy::current_terminal_size() {
+            app.resize_tmux_sessions(cols, rows).await;
+        }
 
         // Auto-select: if launched inside a repo that has a running swarm, jump straight into it
         if let Ok(cwd) = std::env::current_dir() {
@@ -241,8 +249,30 @@ impl App {
             Event::Error(msg) => {
                 tracing::error!("Background error: {msg}");
             }
+            Event::Resize { cols, rows } => {
+                self.resize_tmux_sessions(cols, rows).await;
+            }
         }
         Ok(())
+    }
+
+    async fn resize_tmux_sessions(&mut self, cols: u16, rows: u16) {
+        if self.last_terminal_size == Some((cols, rows)) {
+            return;
+        }
+        self.last_terminal_size = Some((cols, rows));
+
+        for swarm in &self.swarms {
+            if let Err(e) = proxy::resize_session_windows(&swarm.tmux_session, cols, rows).await {
+                tracing::debug!(
+                    "Failed to resize tmux session {} to {}x{}: {}",
+                    swarm.tmux_session,
+                    cols,
+                    rows,
+                    e
+                );
+            }
+        }
     }
 
     async fn handle_key(&mut self, key: KeyEvent) -> Result<()> {

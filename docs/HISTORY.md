@@ -5,6 +5,17 @@ This file tracks all significant changes, migrations, and decisions.
 
 ---
 
+## 2026-04-01 12:48:59 - Fix #246 tmux session width sync with terminal size
+
+**What Changed**: Added tmux window resizing support, wired terminal resize events through the app event loop, and applied session sizing on startup, session creation, and worker-add flows.
+
+**Why Changed**: Issue #246 reported wrapped output caused by tmux windows not matching the active terminal size.
+
+**Impact**: Manager and worker panes now stay aligned with terminal dimensions, reducing unnecessary line wrapping in captured output.
+
+
+---
+
 ## 2026-04-01 12:19:06 - Fix runtime consistency for swarm launch
 
 **What Changed**: Made swarm launch/discovery/add-worker honor selected AgentType for both manager and workers, including session naming and loop command routing; added runtime parsing tests.

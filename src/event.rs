@@ -30,6 +30,8 @@ pub enum Event {
     },
     /// Error from a background task
     Error(String),
+    /// Terminal resize event (columns, rows)
+    Resize { cols: u16, rows: u16 },
 }
 
 pub struct EventHandler {
@@ -54,6 +56,11 @@ impl EventHandler {
                             if event_tx.send(Event::Key(key)).is_err() {
                                 break;
                             }
+                        }
+                    }
+                    Some(Ok(CrosstermEvent::Resize(cols, rows))) => {
+                        if event_tx.send(Event::Resize { cols, rows }).is_err() {
+                            break;
                         }
                     }
                     Some(Err(_)) | None => break,

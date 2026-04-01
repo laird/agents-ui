@@ -1,7 +1,8 @@
 use anyhow::{Context, Result};
+use std::env;
+use std::time::Duration;
 use tokio::process::Command;
 use tokio::sync::mpsc;
-use std::time::Duration;
 
 /// Capture the current content of a tmux pane.
 pub async fn capture_pane(target: &str, scrollback_lines: u32) -> Result<String> {
@@ -62,6 +63,62 @@ pub async fn kill_pane(target: &str) -> Result<()> {
         .args(["send-keys", "-t", target, "exit", "Enter"])
         .output()
         .await;
+
+    Ok(())
+}
+
+fn parse_env_u16(name: &str) -> Option<u16> {
+    env::var(name).ok()?.parse::<u16>().ok()
+}
+
+/// Return the active terminal size (columns, rows), if available.
+pub fn current_terminal_size() -> Option<(u16, u16)> {
+    if let Ok((cols, rows)) = crossterm::terminal::size() {
+        return Some((cols, rows));
+    }
+    Some((parse_env_u16("COLUMNS")?, parse_env_u16("LINES")?))
+}
+
+/// Resize all windows in a tmux session to the given dimensions.
+pub async fn resize_session_windows(session_name: &str, cols: u16, rows: u16) -> Result<()> {
+    let output = Command::new("tmux")
+        .args(["list-windows", "-t", session_name, "-F", "#{window_index}"])
+        .output()
+        .await
+        .context("Failed to list tmux windows")?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "tmux list-windows failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let cols = cols.to_string();
+    let rows = rows.to_string();
+    for window_idx in String::from_utf8_lossy(&output.stdout).lines() {
+        let target = format!("{session_name}:{window_idx}");
+        let resize = Command::new("tmux")
+            .args([
+                "resize-window",
+                "-t",
+                &target,
+                "-x",
+                cols.as_str(),
+                "-y",
+                rows.as_str(),
+            ])
+            .output()
+            .await
+            .with_context(|| format!("Failed to resize tmux window {target}"))?;
+
+        if !resize.status.success() {
+            tracing::warn!(
+                "tmux resize-window failed for {target}: {}",
+                String::from_utf8_lossy(&resize.stderr)
+            );
+        }
+    }
 
     Ok(())
 }

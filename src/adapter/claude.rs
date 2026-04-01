@@ -144,17 +144,22 @@ impl ClaudeAdapter {
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|| repo_path.to_string_lossy().to_string());
 
-        let output = Command::new("tmux")
-            .args([
-                "new-session",
-                "-d",
-                "-s",
-                session_name,
-                "-n",
-                "agents",
-                "-c",
-                &first_wt,
-            ])
+        let mut cmd = Command::new("tmux");
+        cmd.arg("new-session")
+            .arg("-d")
+            .arg("-s")
+            .arg(session_name)
+            .arg("-n")
+            .arg("agents");
+        if let Some((cols, rows)) = proxy::current_terminal_size() {
+            cmd.arg("-x")
+                .arg(cols.to_string())
+                .arg("-y")
+                .arg(rows.to_string());
+        }
+        let output = cmd
+            .arg("-c")
+            .arg(&first_wt)
             .output()
             .await
             .context("Failed to create tmux session")?;
@@ -239,6 +244,13 @@ impl ClaudeAdapter {
             .output()
             .await
             .ok();
+
+        // Ensure all windows match the active terminal size.
+        if let Some((cols, rows)) = proxy::current_terminal_size() {
+            if let Err(e) = proxy::resize_session_windows(session_name, cols, rows).await {
+                tracing::debug!("Unable to resize tmux session {session_name}: {e}");
+            }
+        }
 
         Ok(())
     }
@@ -701,6 +713,12 @@ impl AgentRuntime for ClaudeAdapter {
             ])
             .output()
             .await;
+
+        if let Some((cols, rows)) = proxy::current_terminal_size() {
+            if let Err(e) = proxy::resize_session_windows(session_name, cols, rows).await {
+                tracing::debug!("Unable to resize tmux session {session_name}: {e}");
+            }
+        }
 
         // Figure out the new pane index (it's the highest pane index now)
         let pane_output = Command::new("tmux")
