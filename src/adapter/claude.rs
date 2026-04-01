@@ -297,6 +297,77 @@ impl ClaudeAdapter {
         }
     }
 
+    fn runtime_installer_script_name(agent_type: &AgentType) -> Option<&'static str> {
+        match agent_type {
+            AgentType::Codex => Some("install-codex.sh"),
+            AgentType::Droid => Some("install-droid.sh"),
+            _ => None,
+        }
+    }
+
+    fn installer_candidates(agents_dir: &Path, script_name: &str) -> Vec<PathBuf> {
+        let mut candidates = Vec::new();
+        candidates.push(agents_dir.join("scripts").join(script_name));
+
+        if let Some(parent) = agents_dir.parent() {
+            candidates.push(parent.join("scripts").join(script_name));
+            if let Some(grandparent) = parent.parent() {
+                candidates.push(grandparent.join("scripts").join(script_name));
+            }
+        }
+
+        candidates
+    }
+
+    fn find_runtime_installer_script(agents_dir: &Path, agent_type: &AgentType) -> Option<PathBuf> {
+        let script_name = Self::runtime_installer_script_name(agent_type)?;
+        Self::installer_candidates(agents_dir, script_name)
+            .into_iter()
+            .find(|candidate| candidate.exists())
+    }
+
+    async fn ensure_runtime_assets(
+        repo_path: &Path,
+        agents_dir: &Path,
+        agent_type: &AgentType,
+    ) -> Result<()> {
+        if let Some(script_path) = Self::find_runtime_installer_script(agents_dir, agent_type) {
+            tracing::info!(
+                "Ensuring runtime assets for {} using {}",
+                agent_type,
+                script_path.display()
+            );
+            let output = Command::new("bash")
+                .arg(&script_path)
+                .arg(repo_path)
+                .output()
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to execute {} installer at {}",
+                        agent_type,
+                        script_path.display()
+                    )
+                })?;
+
+            if !output.status.success() {
+                anyhow::bail!(
+                    "{} installer failed: {}",
+                    agent_type,
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+
+            return Ok(());
+        }
+
+        anyhow::bail!(
+            "Required installer for {} runtime was not found under {}",
+            agent_type,
+            agents_dir.display()
+        );
+    }
+
     /// Build a Swarm model from an existing tmux session.
     async fn build_swarm_from_session(
         session_name: &str,
@@ -462,9 +533,20 @@ impl AgentRuntime for ClaudeAdapter {
             .await;
         }
 
-        // Ensure the autocoder plugin is installed for Claude runtime.
-        if matches!(config.agent_type, AgentType::Claude) {
-            Self::ensure_plugin_installed().await?;
+        // Ensure runtime-specific dependencies are available before launching workers.
+        match config.agent_type {
+            AgentType::Claude => {
+                Self::ensure_plugin_installed().await?;
+            }
+            AgentType::Codex | AgentType::Droid => {
+                Self::ensure_runtime_assets(
+                    &config.repo_path,
+                    &config.agents_dir,
+                    &config.agent_type,
+                )
+                .await?;
+            }
+            AgentType::Gemini => {}
         }
 
         tracing::info!(
@@ -760,6 +842,7 @@ async fn find_repo_path(session_name: &str, project_name: &str) -> Option<PathBu
 mod tests {
     use super::ClaudeAdapter;
     use crate::model::swarm::AgentType;
+    use std::path::Path;
 
     #[test]
     fn session_name_uses_selected_runtime_prefix() {
@@ -798,6 +881,47 @@ mod tests {
         assert_eq!(
             ClaudeAdapter::agent_type_from_tmux_target("droid-demo:review.0"),
             AgentType::Droid
+        );
+    }
+
+    #[test]
+    fn installer_candidates_cover_repo_relative_and_agents_dir_locations() {
+        let agents_dir = Path::new("/tmp/example/agents/plugins/autocoder");
+        let candidates = ClaudeAdapter::installer_candidates(agents_dir, "install-codex.sh");
+        let candidate_strings: Vec<String> = candidates
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+
+        assert!(candidate_strings.contains(
+            &"/tmp/example/agents/plugins/autocoder/scripts/install-codex.sh".to_string()
+        ));
+        assert!(
+            candidate_strings
+                .contains(&"/tmp/example/agents/plugins/scripts/install-codex.sh".to_string())
+        );
+        assert!(
+            candidate_strings.contains(&"/tmp/example/agents/scripts/install-codex.sh".to_string())
+        );
+    }
+
+    #[test]
+    fn runtime_installer_script_name_matches_supported_runtimes() {
+        assert_eq!(
+            ClaudeAdapter::runtime_installer_script_name(&AgentType::Codex),
+            Some("install-codex.sh")
+        );
+        assert_eq!(
+            ClaudeAdapter::runtime_installer_script_name(&AgentType::Droid),
+            Some("install-droid.sh")
+        );
+        assert_eq!(
+            ClaudeAdapter::runtime_installer_script_name(&AgentType::Claude),
+            None
+        );
+        assert_eq!(
+            ClaudeAdapter::runtime_installer_script_name(&AgentType::Gemini),
+            None
         );
     }
 }
