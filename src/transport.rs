@@ -61,25 +61,33 @@ impl ServerTransport {
     }
 
     pub async fn path_exists(&self, path: &Path) -> bool {
-        self.output(
-            "test",
-            &["-e".to_string(), path.to_string_lossy().to_string()],
-            None,
-        )
-        .await
-        .map(|output| output.status.success())
-        .unwrap_or(false)
+        if self.is_remote() {
+            self.output(
+                "test",
+                &["-e".to_string(), path.to_string_lossy().to_string()],
+                None,
+            )
+            .await
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+        } else {
+            path.exists()
+        }
     }
 
     pub async fn dir_exists(&self, path: &Path) -> bool {
-        self.output(
-            "test",
-            &["-d".to_string(), path.to_string_lossy().to_string()],
-            None,
-        )
-        .await
-        .map(|output| output.status.success())
-        .unwrap_or(false)
+        if self.is_remote() {
+            self.output(
+                "test",
+                &["-d".to_string(), path.to_string_lossy().to_string()],
+                None,
+            )
+            .await
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+        } else {
+            path.is_dir()
+        }
     }
 }
 
@@ -107,6 +115,15 @@ fn shell_quote(value: &str) -> String {
 mod tests {
     use super::{build_shell_command, ServerTransport};
     use std::path::Path;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_path(name: &str) -> std::path::PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        std::env::temp_dir().join(format!("agents-ui-{name}-{}-{nanos}", std::process::id()))
+    }
 
     #[test]
     fn builds_remote_command_with_cwd() {
@@ -126,5 +143,51 @@ mod tests {
     fn detects_remote_transport() {
         assert!(ServerTransport::new(Some("buildbox".to_string())).is_remote());
         assert!(!ServerTransport::new(None).is_remote());
+    }
+
+    #[tokio::test]
+    async fn local_path_exists_does_not_depend_on_path_env() {
+        let root = temp_path("transport-local-path-exists");
+        let file = root.join("sentinel.txt");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(&file, "ok").unwrap();
+
+        let _env_guard = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let original_path = std::env::var_os("PATH");
+        unsafe { std::env::set_var("PATH", "") };
+
+        let present = ServerTransport::default().path_exists(&file).await;
+
+        if let Some(path) = original_path {
+            unsafe { std::env::set_var("PATH", path) };
+        } else {
+            unsafe { std::env::remove_var("PATH") };
+        }
+        drop(_env_guard);
+        std::fs::remove_dir_all(root).ok();
+
+        assert!(present);
+    }
+
+    #[tokio::test]
+    async fn local_dir_exists_does_not_depend_on_path_env() {
+        let root = temp_path("transport-local-dir-exists");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let _env_guard = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let original_path = std::env::var_os("PATH");
+        unsafe { std::env::set_var("PATH", "") };
+
+        let present = ServerTransport::default().dir_exists(&root).await;
+
+        if let Some(path) = original_path {
+            unsafe { std::env::set_var("PATH", path) };
+        } else {
+            unsafe { std::env::remove_var("PATH") };
+        }
+        drop(_env_guard);
+        std::fs::remove_dir_all(root).ok();
+
+        assert!(present);
     }
 }
