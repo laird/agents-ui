@@ -101,3 +101,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Users can now close or reopen the currently viewed issue directly from Issue Detail with immediate state/status feedback.
 
+
+---
+
+## 2026-04-01 13:30:47 - Fix #234: remove unused AgentView input field
+
+**What Changed**: Removed unused AgentView.input state from src/ui/agent_view.rs and simplified AgentView::new().
+
+**Why Changed**: Issue #234 identified stale dead-code remnants and requested warning cleanup.
+
+**Impact**: Keeps the agent detail UI code lean and reduces dead-code maintenance noise.
+
