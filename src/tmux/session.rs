@@ -75,7 +75,7 @@ pub async fn discover_agent_sessions(transport: &ServerTransport) -> Result<Vec<
 /// Resize all windows in a session to the given dimensions.
 pub async fn resize_session(name: &str, width: u16, height: u16) -> Result<()> {
     // First, set the session's default size so new windows inherit it
-    let _ = Command::new("tmux")
+    match Command::new("tmux")
         .args([
             "set-option",
             "-t",
@@ -84,7 +84,20 @@ pub async fn resize_session(name: &str, width: u16, height: u16) -> Result<()> {
             &format!("{width}x{height}"),
         ])
         .output()
-        .await;
+        .await
+    {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => {
+            tracing::warn!(
+                "Failed to set default-size for session {}: {}",
+                name,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        Err(e) => {
+            tracing::warn!("Failed to run tmux set-option for session {}: {}", name, e);
+        }
+    }
 
     // Resize all existing windows
     let output = Command::new("tmux")
@@ -97,7 +110,7 @@ pub async fn resize_session(name: &str, width: u16, height: u16) -> Result<()> {
         let stdout = String::from_utf8_lossy(&output.stdout);
         for win_idx in stdout.lines() {
             let target = format!("{name}:{win_idx}");
-            let _ = Command::new("tmux")
+            match Command::new("tmux")
                 .args([
                     "resize-window",
                     "-t",
@@ -108,8 +121,27 @@ pub async fn resize_session(name: &str, width: u16, height: u16) -> Result<()> {
                     &height.to_string(),
                 ])
                 .output()
-                .await;
+                .await
+            {
+                Ok(out) if out.status.success() => {}
+                Ok(out) => {
+                    tracing::warn!(
+                        "Failed to resize tmux window {}: {}",
+                        target,
+                        String::from_utf8_lossy(&out.stderr).trim()
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to run tmux resize-window for {}: {}", target, e);
+                }
+            }
         }
+    } else {
+        tracing::warn!(
+            "Failed to list tmux windows for {}: {}",
+            name,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
     }
 
     Ok(())

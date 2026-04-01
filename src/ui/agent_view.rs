@@ -33,6 +33,7 @@ impl AgentView {
         let chunks = Layout::vertical([
             Constraint::Length(3),
             Constraint::Min(5),
+            Constraint::Length(1),
             Constraint::Length(3),
         ])
         .split(area);
@@ -139,6 +140,10 @@ impl AgentView {
             .scroll((self.scroll_offset, 0));
         f.render_widget(pane_output, chunks[1]);
 
+        let input = Paragraph::new(self.input.render_line("> "))
+            .block(Block::default().borders(Borders::TOP));
+        f.render_widget(input, chunks[2]);
+
         // Help bar with key shortcuts
         let help = Paragraph::new(Line::from(vec![
             Span::styled(" keys → session  ", theme::help_style()),
@@ -154,7 +159,7 @@ impl AgentView {
             Span::styled(" next waiting", theme::help_style()),
         ]))
         .block(Block::default().borders(Borders::TOP));
-        f.render_widget(help, chunks[2]);
+        f.render_widget(help, chunks[3]);
     }
 
     pub fn scroll_up(&mut self, amount: u16) {

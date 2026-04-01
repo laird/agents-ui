@@ -2,6 +2,8 @@ use chrono::NaiveDateTime;
 use std::collections::HashMap;
 use std::path::Path;
 
+use super::swarm::AgentType;
+
 /// The state of an individual agent.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentState {
@@ -33,6 +35,43 @@ pub struct AgentStatus {
     pub timestamp: Option<NaiveDateTime>,
     pub state: AgentState,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaneActivity {
+    NeedsLaunch,
+    AgentBusy,
+    AgentIdle,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkerSupervisionState {
+    Healthy,
+    DeadShellPrompt,
+    DeadIdleOutsideLoop,
+    DeadMissingStatus,
+    DeadStaleStatus,
+    DeadStopped,
+}
+
+impl WorkerSupervisionState {
+    pub fn is_dead(self) -> bool {
+        !matches!(self, WorkerSupervisionState::Healthy)
+    }
+
+    pub fn detail(self) -> &'static str {
+        match self {
+            WorkerSupervisionState::Healthy => "healthy",
+            WorkerSupervisionState::DeadShellPrompt => "dead: shell prompt",
+            WorkerSupervisionState::DeadIdleOutsideLoop => "dead: idle outside loop",
+            WorkerSupervisionState::DeadMissingStatus => "dead: missing loop status",
+            WorkerSupervisionState::DeadStaleStatus => "dead: stale loop heartbeat",
+            WorkerSupervisionState::DeadStopped => "dead: stopped loop",
+        }
+    }
+}
+
+const LOOP_STATUS_STALE_SECONDS: i64 = 30 * 60;
 
 impl Default for AgentStatus {
     fn default() -> Self {
@@ -116,6 +155,160 @@ pub fn read_status_file(path: &Path) -> AgentStatus {
     }
 }
 
+pub fn classify_pane_activity(content: &str) -> PaneActivity {
+    let stripped = strip_ansi(content);
+    let non_empty_lines: Vec<&str> = stripped
+        .lines()
+        .rev()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+
+    if non_empty_lines.is_empty() {
+        return PaneActivity::Unknown;
+    }
+
+    let mut saw_agent_indicator = false;
+    let mut saw_idle_prompt = false;
+    let mut saw_busy_indicator = false;
+
+    for line in non_empty_lines.iter().take(8) {
+        let lower = line.trim().to_lowercase();
+
+        if lower.contains("thinking")
+            || lower.contains("working")
+            || lower.contains("reading")
+            || lower.contains("writing")
+            || lower.contains("analyzing")
+            || lower.contains("esc to interrupt")
+        {
+            saw_busy_indicator = true;
+        }
+
+        if lower.contains("bypass permissions")
+            || lower.contains("permissions on")
+            || lower.contains("permissions off")
+            || lower.contains("gpt-")
+            || lower.contains("codex")
+            || lower.contains("claude")
+            || lower.contains("gemini")
+            || lower.contains("droid")
+            || lower.starts_with('\u{23f5}')
+        {
+            saw_agent_indicator = true;
+        }
+
+        if lower.contains("how can i help") || lower.contains("what would you like") {
+            saw_idle_prompt = true;
+        } else if lower.starts_with('>')
+            || lower.starts_with('\u{276f}')
+            || lower.starts_with('\u{203a}')
+        {
+            let after_prompt = lower
+                .trim_start_matches(|c: char| c == '>' || c == '\u{276f}' || c == '\u{203a}')
+                .trim();
+            if after_prompt.is_empty() {
+                saw_idle_prompt = true;
+            } else {
+                saw_busy_indicator = true;
+            }
+        }
+    }
+
+    if saw_busy_indicator {
+        return PaneActivity::AgentBusy;
+    }
+    if saw_idle_prompt || (saw_agent_indicator && !saw_busy_indicator) {
+        return PaneActivity::AgentIdle;
+    }
+
+    for line in non_empty_lines.iter().take(5) {
+        let lower = line.trim().to_lowercase();
+        if lower.contains("please restart codex")
+            || lower.contains("update ran successfully")
+            || lower.contains("please restart claude")
+            || lower.contains("restart to apply")
+        {
+            return PaneActivity::NeedsLaunch;
+        }
+    }
+
+    if let Some(last_line) = non_empty_lines.first() {
+        let trimmed = last_line.trim();
+        if trimmed.ends_with('%') || trimmed.ends_with('$') || trimmed.ends_with('#') {
+            return PaneActivity::NeedsLaunch;
+        }
+    }
+
+    PaneActivity::Unknown
+}
+
+pub fn worker_supervision_state(
+    runtime: &AgentType,
+    worktree_path: &Path,
+    pane_content: &str,
+) -> WorkerSupervisionState {
+    if !runtime.uses_loop_wrapper() {
+        return WorkerSupervisionState::Healthy;
+    }
+
+    let pane_state = classify_pane_activity(pane_content);
+    if pane_state == PaneActivity::NeedsLaunch {
+        return WorkerSupervisionState::DeadShellPrompt;
+    }
+    if pane_state == PaneActivity::AgentIdle {
+        return WorkerSupervisionState::DeadIdleOutsideLoop;
+    }
+
+    let status_path = worktree_path
+        .join(runtime.status_dir())
+        .join("fix-loop.status");
+    if !status_path.exists() {
+        return if pane_state == PaneActivity::AgentBusy {
+            WorkerSupervisionState::Healthy
+        } else {
+            WorkerSupervisionState::DeadMissingStatus
+        };
+    }
+
+    let status = read_status_file(&status_path);
+    if matches!(status.state, AgentState::Stopped) {
+        return WorkerSupervisionState::DeadStopped;
+    }
+    if matches!(status.state, AgentState::Unknown(_)) && pane_state != PaneActivity::AgentBusy {
+        return WorkerSupervisionState::DeadMissingStatus;
+    }
+    if status_timestamp_is_stale(status.timestamp) && pane_state != PaneActivity::AgentBusy {
+        return WorkerSupervisionState::DeadStaleStatus;
+    }
+
+    WorkerSupervisionState::Healthy
+}
+
+pub fn dead_worker_status(
+    runtime: &AgentType,
+    worktree_path: &Path,
+    pane_content: &str,
+) -> Option<AgentStatus> {
+    let status_path = worktree_path
+        .join(runtime.status_dir())
+        .join("fix-loop.status");
+    let current = if status_path.exists() {
+        read_status_file(&status_path)
+    } else {
+        AgentStatus::default()
+    };
+
+    let supervision = worker_supervision_state(runtime, worktree_path, pane_content);
+    if !supervision.is_dead() {
+        return None;
+    }
+
+    Some(AgentStatus {
+        timestamp: current.timestamp,
+        state: AgentState::Unknown(supervision.detail().to_string()),
+    })
+}
+
 /// Returns a compact elapsed-time string for a status timestamp.
 /// Returns `""` if no timestamp. Examples: `"2m"`, `"45m"`, `"2h"`.
 pub fn elapsed_display(ts: Option<NaiveDateTime>) -> String {
@@ -132,6 +325,30 @@ pub fn elapsed_display(ts: Option<NaiveDateTime>) -> String {
     } else {
         format!("{}h", secs / 3600)
     }
+}
+
+fn status_timestamp_is_stale(timestamp: Option<NaiveDateTime>) -> bool {
+    let Some(timestamp) = timestamp else {
+        return true;
+    };
+    let now = chrono::Local::now().naive_local();
+    (now - timestamp).num_seconds() > LOOP_STATUS_STALE_SECONDS
+}
+
+fn strip_ansi(content: &str) -> String {
+    content
+        .chars()
+        .fold((String::new(), false), |(mut s, in_esc), c| {
+            if c == '\x1b' {
+                (s, true)
+            } else if in_esc {
+                (s, c != 'm' && !c.is_ascii_uppercase())
+            } else {
+                s.push(c);
+                (s, false)
+            }
+        })
+        .0
 }
 
 #[derive(Debug, Clone)]
@@ -520,5 +737,61 @@ mod tests {
             "Done: done"
         );
         assert_eq!(AgentState::Stopped.to_string(), "Stopped");
+    }
+
+    #[test]
+    fn classify_pane_activity_detects_shell_idle_and_busy() {
+        assert_eq!(
+            classify_pane_activity("user@host repo %"),
+            PaneActivity::NeedsLaunch
+        );
+        assert_eq!(classify_pane_activity("> \n"), PaneActivity::AgentIdle);
+        assert_eq!(
+            classify_pane_activity("reading src/main.rs\n"),
+            PaneActivity::AgentBusy
+        );
+    }
+
+    #[test]
+    fn wrapper_worker_missing_status_is_dead_when_not_busy() {
+        let dir = temp_status_path("dead-worker");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        assert_eq!(
+            worker_supervision_state(&AgentType::Codex, &dir, ""),
+            WorkerSupervisionState::DeadMissingStatus
+        );
+        assert_eq!(
+            worker_supervision_state(&AgentType::Codex, &dir, "> \n"),
+            WorkerSupervisionState::DeadIdleOutsideLoop
+        );
+        assert_eq!(
+            worker_supervision_state(&AgentType::Codex, &dir, "reading src/main.rs\n"),
+            WorkerSupervisionState::Healthy
+        );
+
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn wrapper_worker_stale_status_is_dead_when_not_busy() {
+        let dir = temp_status_path("stale-worker");
+        let loops = dir.join(".codex/loops");
+        std::fs::create_dir_all(&loops).unwrap();
+        std::fs::write(loops.join("fix-loop.status"), "2024-01-15 10:00:00\tidle\n").unwrap();
+
+        assert_eq!(
+            worker_supervision_state(&AgentType::Codex, &dir, ""),
+            WorkerSupervisionState::DeadStaleStatus
+        );
+        assert_eq!(
+            dead_worker_status(&AgentType::Codex, &dir, "")
+                .unwrap()
+                .state
+                .to_string(),
+            "dead: stale loop heartbeat"
+        );
+
+        std::fs::remove_dir_all(dir).ok();
     }
 }

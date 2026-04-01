@@ -229,6 +229,10 @@ pub fn spawn_issue_fetcher(
                         })
                         .is_err()
                     {
+                        tracing::debug!(
+                            "Issue fetcher channel closed for {}, stopping watcher",
+                            project_name
+                        );
                         break;
                     }
                 }
@@ -239,11 +243,16 @@ pub fn spawn_issue_fetcher(
                 ) => {
                     let message = e.to_string();
                     tracing::warn!("Stopping issue fetch for {project_name}: {message}");
-                    tx.send(crate::event::Event::GhWarning {
+                    if let Err(send_err) = tx.send(crate::event::Event::GhWarning {
                         project_name: project_name.clone(),
                         message,
-                    })
-                    .ok();
+                    }) {
+                        tracing::debug!(
+                            "Failed to send gh warning event for {}: {}",
+                            project_name,
+                            send_err
+                        );
+                    }
                     break; // Don't retry permanent errors
                 }
                 Err(GhError::Transient(msg)) => {

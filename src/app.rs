@@ -22,11 +22,26 @@ use crate::ui::repos_list::ReposListView;
 use crate::ui::swarm_view::{SwarmPanel, SwarmView};
 use crate::ui::text_input::TextInput;
 
-fn parse_direct_gh_command(command: &str) -> Result<Option<Vec<String>>> {
-    let argv = shell_words::split(command).context("Failed to parse gh command")?;
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ParsedGhCommand {
+    NotGh,
+    Parsed(Vec<String>),
+    Malformed(String),
+}
+
+fn parse_direct_gh_command(command: &str) -> ParsedGhCommand {
+    if command.split_whitespace().next() != Some("gh") {
+        return ParsedGhCommand::NotGh;
+    }
+
+    let argv = match shell_words::split(command) {
+        Ok(argv) => argv,
+        Err(err) => return ParsedGhCommand::Malformed(err.to_string()),
+    };
+
     match argv.split_first() {
-        Some((program, args)) if program == "gh" => Ok(Some(args.to_vec())),
-        _ => Ok(None),
+        Some((program, args)) if program == "gh" => ParsedGhCommand::Parsed(args.to_vec()),
+        _ => ParsedGhCommand::NotGh,
     }
 }
 
@@ -48,6 +63,152 @@ fn gh_issue_command_mutates(args: &[String]) -> bool {
                     | "unpin"
             )
         )
+}
+
+const AGENTS_UI_GH_REPO: &str = "laird/agents-ui";
+const REPORT_LOG_ERRORS_COMMAND: &str = "gh agents-ui report-errors";
+const REPORT_LOG_ERRORS_COMMAND_ALIAS: &str = "/report-errors";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LogErrorCandidate {
+    fingerprint: String,
+    summary: String,
+    occurrences: usize,
+    samples: Vec<String>,
+}
+
+fn is_report_log_errors_command(command: &str) -> bool {
+    let trimmed = command.trim();
+    trimmed == REPORT_LOG_ERRORS_COMMAND || trimmed == REPORT_LOG_ERRORS_COMMAND_ALIAS
+}
+
+fn normalize_whitespace(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut prev_ws = false;
+    for ch in input.chars() {
+        if ch.is_whitespace() {
+            if !prev_ws {
+                out.push(' ');
+            }
+            prev_ws = true;
+        } else {
+            out.push(ch);
+            prev_ws = false;
+        }
+    }
+    out.trim().to_string()
+}
+
+fn truncate_chars(input: &str, max_chars: usize) -> String {
+    let mut chars = input.chars();
+    let collected: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        format!("{collected}…")
+    } else {
+        collected
+    }
+}
+
+fn extract_error_message(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if let Some(idx) = trimmed.find(" ERROR ") {
+        return Some(trimmed[(idx + " ERROR ".len())..].trim().to_string());
+    }
+    trimmed.strip_prefix("ERROR ").map(|s| s.trim().to_string())
+}
+
+fn log_error_fingerprint(summary: &str) -> String {
+    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+    let mut hash = FNV_OFFSET;
+    for byte in summary.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    format!("{hash:016x}")
+}
+
+fn collect_recent_log_error_candidates(
+    log_contents: &str,
+    max_errors: usize,
+    max_samples: usize,
+) -> Vec<LogErrorCandidate> {
+    let mut by_fingerprint: HashMap<String, LogErrorCandidate> = HashMap::new();
+    let mut order = Vec::new();
+
+    for line in log_contents.lines().rev() {
+        let Some(raw_message) = extract_error_message(line) else {
+            continue;
+        };
+        let normalized = normalize_whitespace(&raw_message);
+        if normalized.is_empty() {
+            continue;
+        }
+        let summary = truncate_chars(&normalized, 140);
+        let fingerprint = log_error_fingerprint(&summary.to_lowercase());
+
+        if let Some(existing) = by_fingerprint.get_mut(&fingerprint) {
+            existing.occurrences += 1;
+            if existing.samples.len() < max_samples {
+                existing.samples.push(truncate_chars(line.trim(), 240));
+            }
+            continue;
+        }
+
+        if order.len() >= max_errors {
+            continue;
+        }
+
+        order.push(fingerprint.clone());
+        by_fingerprint.insert(
+            fingerprint.clone(),
+            LogErrorCandidate {
+                fingerprint,
+                summary,
+                occurrences: 1,
+                samples: vec![truncate_chars(line.trim(), 240)],
+            },
+        );
+    }
+
+    order
+        .into_iter()
+        .filter_map(|fingerprint| by_fingerprint.remove(&fingerprint))
+        .collect()
+}
+
+fn agents_tui_log_path() -> PathBuf {
+    dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("agents-ui")
+        .join("agents-ui.log")
+}
+
+fn format_log_samples(samples: &[String]) -> String {
+    samples
+        .iter()
+        .map(|line| format!("- `{}`", line.replace('`', "'")))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn build_log_issue_body(candidate: &LogErrorCandidate) -> String {
+    format!(
+        "Automated report from `agents-tui` log analysis.\n\nFingerprint: `[log-fingerprint:{}]`\nOccurrences in scan: {}\n\nSummary:\n{}\n\nRecent log lines:\n{}\n",
+        candidate.fingerprint,
+        candidate.occurrences,
+        candidate.summary,
+        format_log_samples(&candidate.samples)
+    )
+}
+
+fn build_log_issue_comment(candidate: &LogErrorCandidate) -> String {
+    format!(
+        "Additional `agents-tui` log evidence at {}.\n\nOccurrences in latest scan: {}\n\nRecent log lines:\n{}\n",
+        chrono::Utc::now().to_rfc3339(),
+        candidate.occurrences,
+        format_log_samples(&candidate.samples)
+    )
 }
 
 /// Which screen we're on.
@@ -259,6 +420,7 @@ pub struct App {
     issue_watchers: Vec<tokio::task::JoinHandle<()>>,
     /// Input buffer for new swarm dialog.
     pub dialog_input: TextInput,
+    pub manager_input: TextInput,
     /// Stored repo path during new swarm flow.
     pub new_swarm_repo: String,
     /// Selected agent type during new swarm flow.
@@ -370,6 +532,7 @@ impl App {
             pane_watchers: Vec::new(),
             issue_watchers: Vec::new(),
             dialog_input: TextInput::new(),
+            manager_input: TextInput::new(),
             new_swarm_repo: String::new(),
             new_swarm_agent_type: AgentType::Claude,
             status_message: startup_warning,
@@ -483,7 +646,15 @@ impl App {
                             let focus = self.swarm_focus;
                             let blink = self.blink;
                             self.swarm_view.render(
-                                f, area, &swarm, &issues, focus, blink, issues_loading, last_fetched,
+                                f,
+                                area,
+                                &swarm,
+                                &issues,
+                                focus,
+                                blink,
+                                issues_loading,
+                                last_fetched,
+                                &self.manager_input,
                             );
                         } else {
                             tracing::warn!("RepoView swarm_idx {} out of bounds (have {} swarms), falling back to ReposList", swarm_idx, self.swarms.len());
@@ -867,9 +1038,11 @@ impl App {
         Ok(())
     }
 
-    /// Returns true if we're in a passthrough mode where keystrokes go directly to tmux.
+    /// Returns true if we're in a passthrough mode where keystrokes go directly to a session.
     fn is_passthrough_mode(&self) -> bool {
         matches!(&self.screen, Screen::AgentView { .. })
+            || matches!(&self.screen, Screen::RepoView { .. })
+                && self.swarm_focus == SwarmPanel::Manager
     }
 
     async fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
@@ -1167,11 +1340,16 @@ impl App {
                         }
                         Ok(()) => {
                             let repo_path = self.swarms[swarm_idx].repo_path.clone();
-                            crate::config::persistence::save_repo_agent_type(
+                            if let Err(e) = crate::config::persistence::save_repo_agent_type(
                                 &repo_path,
                                 &new_runtime,
-                            )
-                            .ok();
+                            ) {
+                                tracing::warn!(
+                                    "Failed to persist switched runtime for {}: {}",
+                                    repo_path.display(),
+                                    e
+                                );
+                            }
                             self.status_message = Some(format!("Switched to {}", new_runtime));
                         }
                     }
@@ -1512,11 +1690,12 @@ impl App {
             let tx2 = tx.clone();
             let pname2 = pname.clone();
             let progress = move |msg: &str| {
-                tx2.send(Event::LaunchProgress {
+                if let Err(e) = tx2.send(Event::LaunchProgress {
                     project_name: pname2.clone(),
                     message: msg.to_string(),
-                })
-                .ok();
+                }) {
+                    tracing::debug!("Failed to send launch progress event: {e}");
+                }
             };
 
             tracing::info!(
@@ -1552,7 +1731,9 @@ impl App {
                         swarm.tmux_session
                     );
                     progress("✅ Triggering swarm discovery...\n");
-                    tx.send(Event::SwarmDiscovered).ok();
+                    if let Err(e) = tx.send(Event::SwarmDiscovered) {
+                        tracing::warn!("Failed to send swarm discovered event: {e}");
+                    }
                 }
                 Err(e) => {
                     tracing::error!("Background launch failed: {e}");
@@ -1686,14 +1867,7 @@ impl App {
                 };
             }
             KeyCode::Char('r') => {
-                // Refresh: re-discover swarms
-                self.set_status("Refreshing...".to_string());
-                if let Ok(swarms) = self.adapter.discover(&self.agents_dir).await {
-                    self.swarms = swarms;
-                    self.refresh_statuses();
-                    self.start_all_pane_watchers();
-                    self.set_status(format!("Found {} swarm(s)", self.swarms.len()));
-                }
+                self.refresh_repo_list().await;
             }
             KeyCode::Char('d') => {
                 // Tear down the selected swarm (with confirmation)
@@ -2129,6 +2303,24 @@ impl App {
                 }
 
                 // Forward everything else to the manager tmux pane
+                match key.code {
+                    KeyCode::Enter => {
+                        self.manager_input.drain();
+                    }
+                    KeyCode::Left => self.manager_input.move_left(),
+                    KeyCode::Right => self.manager_input.move_right(),
+                    KeyCode::Home => self.manager_input.move_home(),
+                    KeyCode::End => self.manager_input.move_end(),
+                    KeyCode::Delete => self.manager_input.delete(),
+                    KeyCode::Backspace => self.manager_input.backspace(),
+                    KeyCode::Char(c)
+                        if !key.modifiers.contains(KeyModifiers::CONTROL)
+                            && !key.modifiers.contains(KeyModifiers::ALT) =>
+                    {
+                        self.manager_input.insert_char(c);
+                    }
+                    _ => {}
+                }
                 let tmux_key = key_event_to_tmux(key);
                 if let Some(tmux_key) = tmux_key {
                     send_raw_key(&self.transport, &target, &tmux_key).await?;
@@ -2241,6 +2433,10 @@ impl App {
                     KeyCode::Char('b') => {
                         self.jump_to_next_blocked(swarm_idx);
                     }
+                    KeyCode::Char('r') => {
+                        self.refresh_statuses();
+                        self.set_status("Refreshed worker list".to_string());
+                    }
                     KeyCode::Char('d') => {
                         // Shut down selected worker
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
@@ -2252,8 +2448,13 @@ impl App {
                                     crate::adapter::claude::mark_agent_stopped(
                                         &worker.worktree_path,
                                     );
-                                    let _ = proxy::kill_pane(&self.transport, &target).await;
-                                    self.set_status(format!("Shutting down {id}..."));
+                                    if let Err(e) = proxy::kill_pane(&self.transport, &target).await
+                                    {
+                                        tracing::warn!("Failed to shut down {id} at {target}: {e}");
+                                        self.set_status(format!("Failed shutting down {id}: {e}"));
+                                    } else {
+                                        self.set_status(format!("Shutting down {id}..."));
+                                    }
                                 }
                             }
                         }
@@ -2315,7 +2516,7 @@ impl App {
                                         let repo_path = swarm.repo_path.clone();
                                         let transport = self.transport.clone();
                                         tokio::spawn(async move {
-                                            let _ = crate::github::gh_repo_output(
+                                            match crate::github::gh_repo_output(
                                                 &transport,
                                                 &repo_path,
                                                 &[
@@ -2325,7 +2526,29 @@ impl App {
                                                     "--web".to_string(),
                                                 ],
                                             )
-                                            .await;
+                                            .await
+                                            {
+                                                Ok(out) if out.status.success() => {}
+                                                Ok(out) => {
+                                                    let err = String::from_utf8_lossy(&out.stderr)
+                                                        .trim()
+                                                        .to_string();
+                                                    tracing::warn!(
+                                                        "Failed opening issue #{} in browser for {}: {}",
+                                                        num,
+                                                        repo_path.display(),
+                                                        err
+                                                    );
+                                                }
+                                                Err(e) => {
+                                                    tracing::warn!(
+                                                        "Error opening issue #{} in browser for {}: {}",
+                                                        num,
+                                                        repo_path.display(),
+                                                        e
+                                                    );
+                                                }
+                                            }
                                         });
                                         self.set_status(format!("Opening issue #{num} in browser"));
                                     } else {
@@ -2423,6 +2646,10 @@ impl App {
                         self.jump_to_next_blocked(swarm_idx);
                     }
                     KeyCode::Char('r') => {
+                        self.start_issue_refresh(swarm_idx);
+                        self.status_message = Some("Refreshing issues...".to_string());
+                    }
+                    KeyCode::Char('R') => {
                         // Review-blocked in selected runtime (only if manager is idle)
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
                             let manager_idle = matches!(
@@ -2475,13 +2702,42 @@ impl App {
                                         &["issue".to_string(), "view".to_string(), num.to_string()],
                                     )
                                     .await;
-                                    if let Ok(output) = result {
-                                        let body =
-                                            String::from_utf8_lossy(&output.stdout).to_string();
-                                        let _ = tx.send(crate::event::Event::IssueFetched {
-                                            issue_number: num,
-                                            body,
-                                        });
+                                    match result {
+                                        Ok(output) if output.status.success() => {
+                                            let body =
+                                                String::from_utf8_lossy(&output.stdout).to_string();
+                                            if let Err(e) =
+                                                tx.send(crate::event::Event::IssueFetched {
+                                                    issue_number: num,
+                                                    body,
+                                                })
+                                            {
+                                                tracing::debug!(
+                                                    "Failed sending issue body update for #{}: {}",
+                                                    num,
+                                                    e
+                                                );
+                                            }
+                                        }
+                                        Ok(output) => {
+                                            let err = String::from_utf8_lossy(&output.stderr)
+                                                .trim()
+                                                .to_string();
+                                            tracing::warn!(
+                                                "Failed to fetch issue #{} body for {}: {}",
+                                                num,
+                                                repo_path.display(),
+                                                err
+                                            );
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                "Error fetching issue #{} body for {}: {}",
+                                                num,
+                                                repo_path.display(),
+                                                e
+                                            );
+                                        }
                                     }
                                 });
                             }
@@ -2507,7 +2763,7 @@ impl App {
                                 let repo_path = swarm.repo_path.clone();
                                 let transport = self.transport.clone();
                                 tokio::spawn(async move {
-                                    let _ = crate::github::gh_repo_output(
+                                    match crate::github::gh_repo_output(
                                         &transport,
                                         &repo_path,
                                         &[
@@ -2517,7 +2773,29 @@ impl App {
                                             "--web".to_string(),
                                         ],
                                     )
-                                    .await;
+                                    .await
+                                    {
+                                        Ok(out) if out.status.success() => {}
+                                        Ok(out) => {
+                                            let err = String::from_utf8_lossy(&out.stderr)
+                                                .trim()
+                                                .to_string();
+                                            tracing::warn!(
+                                                "Failed opening selected issue #{} in browser for {}: {}",
+                                                num,
+                                                repo_path.display(),
+                                                err
+                                            );
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                "Error opening selected issue #{} in browser for {}: {}",
+                                                num,
+                                                repo_path.display(),
+                                                e
+                                            );
+                                        }
+                                    }
                                 });
                                 self.set_status(format!(
                                     "Opening issue #{} in browser",
@@ -2555,7 +2833,7 @@ impl App {
                                         }
                                     }
                                     tokio::spawn(async move {
-                                        let _ = crate::github::gh_repo_output(
+                                        match crate::github::gh_repo_output(
                                             &transport,
                                             &repo_path,
                                             &[
@@ -2566,7 +2844,29 @@ impl App {
                                                 "working".to_string(),
                                             ],
                                         )
-                                        .await;
+                                        .await
+                                        {
+                                            Ok(out) if out.status.success() => {}
+                                            Ok(out) => {
+                                                let err = String::from_utf8_lossy(&out.stderr)
+                                                    .trim()
+                                                    .to_string();
+                                                tracing::warn!(
+                                                    "Failed removing `working` label for issue #{} in {}: {}",
+                                                    num,
+                                                    repo_path.display(),
+                                                    err
+                                                );
+                                            }
+                                            Err(e) => {
+                                                tracing::warn!(
+                                                    "Error removing `working` label for issue #{} in {}: {}",
+                                                    num,
+                                                    repo_path.display(),
+                                                    e
+                                                );
+                                            }
+                                        }
                                     });
                                     self.set_status(format!(
                                         "Released issue #{num} (removed working label)"
@@ -2696,17 +2996,223 @@ impl App {
             None => return Ok(()),
         };
 
-        let output = crate::github::gh_repo_output(&self.transport, &repo_path, &args).await?;
-        if output.status.success() {
-            self.set_status(format!("[{label}] {command}"));
-            if gh_issue_command_mutates(&args) {
-                self.start_issue_refresh(swarm_idx);
+        match crate::github::gh_repo_output(&self.transport, &repo_path, &args).await {
+            Ok(output) => {
+                if output.status.success() {
+                    self.set_status(format!("[{label}] {command}"));
+                    if gh_issue_command_mutates(&args) {
+                        self.start_issue_refresh(swarm_idx);
+                    }
+                } else {
+                    let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                    tracing::warn!(
+                        "Direct gh command failed in {}: `{}` -> {}",
+                        repo_path.display(),
+                        command,
+                        err
+                    );
+                    self.set_status(format!("[{label}] failed: {err}"));
+                }
             }
-        } else {
-            let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            self.set_status(format!("[{label}] failed: {err}"));
+            Err(e) => {
+                tracing::error!(
+                    "Direct gh command errored in {}: `{}` -> {}",
+                    repo_path.display(),
+                    command,
+                    e
+                );
+                self.set_status(format!("[{label}] failed: {e}"));
+            }
         }
         Ok(())
+    }
+
+    async fn run_direct_gh_command(&mut self, swarm_idx: usize, command: &str) -> Result<bool> {
+        let args = match parse_direct_gh_command(command) {
+            ParsedGhCommand::Parsed(args) => args,
+            ParsedGhCommand::Malformed(err) => {
+                tracing::warn!("Malformed direct gh command `{command}`: {err}");
+                self.set_status(format!("Invalid gh command: {err}"));
+                return Ok(true);
+            }
+            ParsedGhCommand::NotGh => return Ok(false),
+        };
+
+        self.run_direct_gh_shortcut(swarm_idx, "gh", command, args)
+            .await?;
+        Ok(true)
+    }
+
+    async fn gh_agents_ui_output(&self, mut args: Vec<String>) -> Result<std::process::Output> {
+        let mut full_args = vec!["-R".to_string(), AGENTS_UI_GH_REPO.to_string()];
+        full_args.append(&mut args);
+        self.transport
+            .output("gh", &full_args, None)
+            .await
+            .context("Failed to execute gh command for laird/agents-ui")
+    }
+
+    async fn find_existing_log_issue(&self, fingerprint: &str) -> Result<Option<u32>> {
+        let search = format!("\"[log-fingerprint:{fingerprint}]\" in:body");
+        let output = self
+            .gh_agents_ui_output(vec![
+                "issue".to_string(),
+                "list".to_string(),
+                "--state".to_string(),
+                "all".to_string(),
+                "--search".to_string(),
+                search,
+                "--json".to_string(),
+                "number".to_string(),
+                "--limit".to_string(),
+                "1".to_string(),
+            ])
+            .await?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(anyhow::anyhow!("gh issue list failed: {stderr}"));
+        }
+
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&output.stdout).context("Failed to parse gh issue list JSON")?;
+        Ok(parsed
+            .as_array()
+            .and_then(|arr| arr.first())
+            .and_then(|value| value.get("number"))
+            .and_then(|n| n.as_u64())
+            .map(|n| n as u32))
+    }
+
+    async fn create_log_issue(&self, candidate: &LogErrorCandidate) -> Result<()> {
+        let title = format!("TUI log error: {}", truncate_chars(&candidate.summary, 90));
+        let body = build_log_issue_body(candidate);
+        let output = self
+            .gh_agents_ui_output(vec![
+                "issue".to_string(),
+                "create".to_string(),
+                "--title".to_string(),
+                title.clone(),
+                "--body".to_string(),
+                body,
+            ])
+            .await?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(anyhow::anyhow!(
+                "gh issue create failed for `{title}`: {stderr}"
+            ));
+        }
+
+        let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        tracing::info!(
+            "Created log issue for fingerprint {}: {}",
+            candidate.fingerprint,
+            url
+        );
+        Ok(())
+    }
+
+    async fn append_log_issue_comment(&self, issue_number: u32, candidate: &LogErrorCandidate) -> Result<()> {
+        let body = build_log_issue_comment(candidate);
+        let output = self
+            .gh_agents_ui_output(vec![
+                "issue".to_string(),
+                "comment".to_string(),
+                issue_number.to_string(),
+                "--body".to_string(),
+                body,
+            ])
+            .await?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(anyhow::anyhow!(
+                "gh issue comment failed for #{}: {}",
+                issue_number,
+                stderr
+            ));
+        }
+
+        tracing::info!(
+            "Appended log evidence to issue #{} for fingerprint {}",
+            issue_number,
+            candidate.fingerprint
+        );
+        Ok(())
+    }
+
+    async fn sync_log_errors_to_github(&mut self) -> Result<()> {
+        let log_path = agents_tui_log_path();
+        let log_contents = std::fs::read_to_string(&log_path)
+            .with_context(|| format!("Failed to read {}", log_path.display()))?;
+        let candidates = collect_recent_log_error_candidates(&log_contents, 10, 3);
+
+        if candidates.is_empty() {
+            self.set_status("No recent ERROR entries found in agents-ui log".to_string());
+            return Ok(());
+        }
+
+        let mut created = 0;
+        let mut commented = 0;
+        let mut failed = 0;
+
+        for candidate in candidates {
+            match self.find_existing_log_issue(&candidate.fingerprint).await {
+                Ok(Some(issue_number)) => match self.append_log_issue_comment(issue_number, &candidate).await {
+                    Ok(()) => commented += 1,
+                    Err(e) => {
+                        failed += 1;
+                        tracing::error!(
+                            "Failed to append log evidence to #{} for fingerprint {}: {:#}",
+                            issue_number,
+                            candidate.fingerprint,
+                            e
+                        );
+                    }
+                },
+                Ok(None) => match self.create_log_issue(&candidate).await {
+                    Ok(()) => created += 1,
+                    Err(e) => {
+                        failed += 1;
+                        tracing::error!(
+                            "Failed to create log issue for fingerprint {}: {:#}",
+                            candidate.fingerprint,
+                            e
+                        );
+                    }
+                },
+                Err(e) => {
+                    failed += 1;
+                    tracing::error!(
+                        "Failed to look up issue for fingerprint {}: {:#}",
+                        candidate.fingerprint,
+                        e
+                    );
+                }
+            }
+        }
+
+        self.set_status(format!(
+            "Log sync to {}: {} created, {} updated, {} failed",
+            AGENTS_UI_GH_REPO, created, commented, failed
+        ));
+        Ok(())
+    }
+
+    async fn run_report_log_errors_command(&mut self, command: &str) -> Result<bool> {
+        if !is_report_log_errors_command(command) {
+            return Ok(false);
+        }
+
+        tracing::info!("Running log error report command: {command}");
+        self.set_status(format!("Syncing log errors to {}...", AGENTS_UI_GH_REPO));
+        if let Err(e) = self.sync_log_errors_to_github().await {
+            tracing::error!("Log error sync command failed: {:#}", e);
+            self.set_status(format!("Log sync failed: {e}"));
+        }
+        Ok(true)
     }
 
     fn worker_dispatch_cmd(&self, agent_type: &AgentType, issue_number: u32) -> Option<String> {
@@ -2769,7 +3275,7 @@ impl App {
                     let repo_path = swarm.repo_path.clone();
                     let transport = self.transport.clone();
                     tokio::spawn(async move {
-                        let _ = transport
+                        match transport
                             .output(
                                 "gh",
                                 &[
@@ -2780,7 +3286,27 @@ impl App {
                                 ],
                                 Some(&repo_path),
                             )
-                            .await;
+                            .await
+                        {
+                            Ok(out) if out.status.success() => {}
+                            Ok(out) => {
+                                let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                                tracing::warn!(
+                                    "Failed opening issue #{} in browser for {}: {}",
+                                    issue_number,
+                                    repo_path.display(),
+                                    err
+                                );
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    "Error opening issue #{} in browser for {}: {}",
+                                    issue_number,
+                                    repo_path.display(),
+                                    e
+                                );
+                            }
+                        }
                     });
                     self.set_status(format!("Opening issue #{issue_number} in browser"));
                 }
@@ -3012,28 +3538,16 @@ impl App {
                 self.agent_view.scroll_to_bottom();
                 return Ok(());
             }
-            KeyCode::Up => {
-                self.agent_view.scroll_up(1);
-                return Ok(());
-            }
-            KeyCode::Down => {
-                self.agent_view.scroll_down(1);
-                return Ok(());
-            }
             KeyCode::Enter => {
                 if !self.agent_view.input.is_empty() {
                     let input = self.agent_view.input.drain();
-                    proxy::send_keys(&self.transport, &target, &input).await?;
-                    self.agent_view.scroll_to_bottom();
+                    if !self.run_report_log_errors_command(&input).await?
+                        && !self.run_direct_gh_command(swarm_idx, &input).await?
+                    {
+                        proxy::send_keys(&self.transport, &target, &input).await?;
+                        self.agent_view.scroll_to_bottom();
+                    }
                 }
-                return Ok(());
-            }
-            KeyCode::Left => {
-                self.agent_view.input.move_left();
-                return Ok(());
-            }
-            KeyCode::Right => {
-                self.agent_view.input.move_right();
                 return Ok(());
             }
             KeyCode::Delete => {
@@ -3128,24 +3642,44 @@ impl App {
                 .repo_view
                 .selected_worker()
                 .and_then(|idx| self.swarms.get(swarm_idx).and_then(|s| s.workers.get(idx)))
-                .map(|w| w.tmux_target.as_str());
+                .map(|w| w.tmux_target.clone());
 
             let cmd =
-                ShortcutsConfig::expand_command(&shortcut.command, issue, worker_target, project);
+                ShortcutsConfig::expand_command(&shortcut.command, issue, worker_target.as_deref(), project);
+
+            if !shortcut.raw && self.run_report_log_errors_command(&cmd).await? {
+                return Ok(());
+            }
 
             if let Some(swarm) = self.swarms.get(swarm_idx) {
                 if !shortcut.raw {
-                    if let Some(args) = parse_direct_gh_command(&cmd)? {
-                        self.run_direct_gh_shortcut(swarm_idx, &shortcut.label, &cmd, args)
-                            .await?;
-                        return Ok(());
+                    match parse_direct_gh_command(&cmd) {
+                        ParsedGhCommand::Parsed(args) => {
+                            self.run_direct_gh_shortcut(swarm_idx, &shortcut.label, &cmd, args)
+                                .await?;
+                            return Ok(());
+                        }
+                        ParsedGhCommand::Malformed(err) => {
+                            tracing::warn!(
+                                "Malformed gh shortcut `{}` command `{}`: {}",
+                                shortcut.label,
+                                cmd,
+                                err
+                            );
+                            self.set_status(format!(
+                                "[{}] invalid gh command: {err}",
+                                shortcut.label
+                            ));
+                            return Ok(());
+                        }
+                        ParsedGhCommand::NotGh => {}
                     }
                 }
 
                 let target = if shortcut.target == "worker" {
                     worker_target
-                        .unwrap_or(&swarm.manager.tmux_target)
-                        .to_string()
+                        .clone()
+                        .unwrap_or_else(|| swarm.manager.tmux_target.clone())
                 } else {
                     swarm.manager.tmux_target.clone()
                 };
@@ -3174,7 +3708,7 @@ impl App {
                 // Open issue in browser
                 if let Some(ref view) = self.issue_detail_view {
                     if let Some(swarm) = self.swarms.get(swarm_idx) {
-                        let _ = crate::github::gh_repo_output(
+                        match crate::github::gh_repo_output(
                             &self.transport,
                             &swarm.repo_path,
                             &[
@@ -3184,7 +3718,34 @@ impl App {
                                 view.issue_number.to_string(),
                             ],
                         )
-                        .await;
+                        .await
+                        {
+                            Ok(out) if out.status.success() => {
+                                self.set_status(format!(
+                                    "Opening issue #{} in browser",
+                                    view.issue_number
+                                ));
+                            }
+                            Ok(out) => {
+                                let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                                tracing::warn!(
+                                    "Failed opening issue #{} in browser for {}: {}",
+                                    view.issue_number,
+                                    swarm.repo_path.display(),
+                                    err
+                                );
+                                self.set_status(format!("Open issue failed: {err}"));
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    "Error opening issue #{} in browser for {}: {}",
+                                    view.issue_number,
+                                    swarm.repo_path.display(),
+                                    e
+                                );
+                                self.set_status(format!("Open issue failed: {e}"));
+                            }
+                        }
                     }
                 }
             }
@@ -3290,11 +3851,21 @@ impl App {
             KeyCode::Char('r') => {
                 // Refresh issues
                 self.start_issue_refresh(swarm_idx);
-                self.status_message = Some("Refreshing issues\u{2026}".to_string());
+                self.status_message = Some("Refreshing issues...".to_string());
             }
             _ => {}
         }
         Ok(())
+    }
+
+    async fn refresh_repo_list(&mut self) {
+        self.set_status("Refreshing...".to_string());
+        if let Ok(swarms) = self.adapter.discover(&self.agents_dir).await {
+            self.swarms = swarms;
+            self.refresh_statuses();
+            self.start_all_pane_watchers();
+            self.set_status(format!("Found {} swarm(s)", self.swarms.len()));
+        }
     }
 
     async fn dispatch_issue_from_list(&mut self, swarm_idx: usize) {
@@ -3349,9 +3920,16 @@ impl App {
         if let Ok(()) = crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, &cmd).await
         {
             tokio::time::sleep(Duration::from_millis(200)).await;
-            crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, "Enter")
-                .await
-                .ok();
+            if let Err(e) =
+                crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, "Enter").await
+            {
+                tracing::warn!(
+                    "Failed sending Enter after dispatching issue #{} to {}: {}",
+                    issue_num,
+                    role,
+                    e
+                );
+            }
             self.swarms[swarm_idx].workers[worker_idx].dispatched_issue = Some(issue_num);
             self.swarms[swarm_idx].workers[worker_idx].status.state =
                 crate::model::status::AgentState::Working {
@@ -3505,7 +4083,13 @@ impl App {
             tokio::spawn(async move {
                 match crate::github::fetch_issues(&transport, &repo_path).await {
                     Ok(issues) => {
-                        let _ = tx.send(Event::IssuesRefreshed { swarm_idx, issues });
+                        if let Err(e) = tx.send(Event::IssuesRefreshed { swarm_idx, issues }) {
+                            tracing::debug!(
+                                "Failed to send issue refresh event for {}: {}",
+                                repo_path.display(),
+                                e
+                            );
+                        }
                     }
                     Err(e) => {
                         tracing::warn!("Failed to fetch issues: {e}");
@@ -3702,9 +4286,16 @@ impl App {
         if let Ok(()) = crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, &cmd).await
         {
             tokio::time::sleep(Duration::from_millis(200)).await;
-            crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, "Enter")
-                .await
-                .ok();
+            if let Err(e) =
+                crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, "Enter").await
+            {
+                tracing::warn!(
+                    "Failed sending Enter after dispatching issue #{} to {}: {}",
+                    issue_num,
+                    role,
+                    e
+                );
+            }
             self.swarms[swarm_idx].workers[worker_idx].dispatched_issue = Some(issue_num);
             self.swarms[swarm_idx].workers[worker_idx].status.state =
                 crate::model::status::AgentState::Working {
@@ -3747,9 +4338,16 @@ impl App {
         if let Ok(()) = crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, &cmd).await
         {
             tokio::time::sleep(Duration::from_millis(200)).await;
-            crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, "Enter")
-                .await
-                .ok();
+            if let Err(e) =
+                crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, "Enter").await
+            {
+                tracing::warn!(
+                    "Failed sending Enter after dispatching issue #{} to {}: {}",
+                    issue_num,
+                    role,
+                    e
+                );
+            }
             self.swarms[swarm_idx].workers[worker_idx].dispatched_issue = Some(issue_num);
             self.swarms[swarm_idx].workers[worker_idx].status.state =
                 crate::model::status::AgentState::Working {
@@ -3841,9 +4439,17 @@ impl App {
                         crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, &cmd).await
                     {
                         tokio::time::sleep(Duration::from_millis(200)).await;
-                        crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, "Enter")
-                            .await
-                            .ok();
+                        if let Err(e) =
+                            crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, "Enter")
+                                .await
+                        {
+                            tracing::warn!(
+                                "Failed sending Enter after auto-dispatching issue #{} to {}: {}",
+                                issue_num,
+                                self.swarms[si].workers[worker_idx].role,
+                                e
+                            );
+                        }
 
                         // Track the dispatch
                         self.swarms[si].workers[worker_idx].dispatched_issue = Some(issue_num);
@@ -3960,6 +4566,9 @@ impl App {
             if swarm.stopped {
                 continue;
             }
+            if matches!(swarm.agent_type, AgentType::Codex) {
+                continue;
+            }
             let manager_target = swarm.manager.tmux_target.clone();
             if manager_target.is_empty() {
                 continue; // Placeholder swarm, not ready yet
@@ -4013,22 +4622,44 @@ impl App {
                     tracing::info!(
                         "Manager idle with {idle_workers} idle workers and {available_issues} available issues — sending {monitor_cmd}"
                     );
-                    crate::tmux::proxy::send_keys_no_enter(
+                    match crate::tmux::proxy::send_keys_no_enter(
                         &self.transport,
                         &manager_target,
                         &monitor_cmd,
                     )
                     .await
-                    .ok();
-                    tokio::time::sleep(Duration::from_millis(200)).await;
-                    crate::tmux::proxy::send_keys_no_enter(
-                        &self.transport,
-                        &manager_target,
-                        "Enter",
-                    )
-                    .await
-                    .ok();
-                    self.set_status(format!("Sent {monitor_cmd} to manager"));
+                    {
+                        Ok(()) => {
+                            tokio::time::sleep(Duration::from_millis(200)).await;
+                            match crate::tmux::proxy::send_keys_no_enter(
+                                &self.transport,
+                                &manager_target,
+                                "Enter",
+                            )
+                            .await
+                            {
+                                Ok(()) => {
+                                    self.set_status(format!("Sent {monitor_cmd} to manager"));
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "Failed sending Enter after monitor command to {}: {}",
+                                        manager_target,
+                                        e
+                                    );
+                                    self.set_status(format!("Failed sending {monitor_cmd}: {e}"));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed sending monitor command to {}: {}",
+                                manager_target,
+                                e
+                            );
+                            self.set_status(format!("Failed sending {monitor_cmd}: {e}"));
+                        }
+                    }
                 }
             } else if available_issues == 0 && blocked_issues > 0 && idle_workers > 0 {
                 // No available work but blocked issues exist — review them
@@ -4036,22 +4667,44 @@ impl App {
                     tracing::info!(
                         "No available issues, {blocked_issues} blocked — sending {review_cmd}"
                     );
-                    crate::tmux::proxy::send_keys_no_enter(
+                    match crate::tmux::proxy::send_keys_no_enter(
                         &self.transport,
                         &manager_target,
                         &review_cmd,
                     )
                     .await
-                    .ok();
-                    tokio::time::sleep(Duration::from_millis(200)).await;
-                    crate::tmux::proxy::send_keys_no_enter(
-                        &self.transport,
-                        &manager_target,
-                        "Enter",
-                    )
-                    .await
-                    .ok();
-                    self.set_status(format!("Sent {review_cmd} to manager"));
+                    {
+                        Ok(()) => {
+                            tokio::time::sleep(Duration::from_millis(200)).await;
+                            match crate::tmux::proxy::send_keys_no_enter(
+                                &self.transport,
+                                &manager_target,
+                                "Enter",
+                            )
+                            .await
+                            {
+                                Ok(()) => {
+                                    self.set_status(format!("Sent {review_cmd} to manager"));
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "Failed sending Enter after review-blocked command to {}: {}",
+                                        manager_target,
+                                        e
+                                    );
+                                    self.set_status(format!("Failed sending {review_cmd}: {e}"));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed sending review-blocked command to {}: {}",
+                                manager_target,
+                                e
+                            );
+                            self.set_status(format!("Failed sending {review_cmd}: {e}"));
+                        }
+                    }
                 }
             }
         }
@@ -4214,6 +4867,17 @@ impl App {
                             crate::model::status::AgentState::Working { issue: Some(n) };
                     }
                 }
+
+                if !agent.is_manager {
+                    if let Some(dead_status) = crate::model::status::dead_worker_status(
+                        &swarm.agent_type,
+                        &agent.worktree_path,
+                        &agent.pane_content,
+                    ) {
+                        agent.dispatched_issue = None;
+                        agent.status = dead_status;
+                    }
+                }
             }
 
             // Parse manager pane for /monitor-workers output to supplement worker statuses
@@ -4230,10 +4894,16 @@ impl App {
                             .unwrap_or_default();
                         if wt_name.ends_with(&format!("-{wt_suffix}")) || wt_name == *wt_suffix {
                             // Only update if the worker doesn't already have issue info
-                            if let crate::model::status::AgentState::Working { issue: None }
-                            | crate::model::status::AgentState::Idle
-                            | crate::model::status::AgentState::Unknown(_) = &worker.status.state
-                            {
+                            let can_supplement = matches!(
+                                &worker.status.state,
+                                crate::model::status::AgentState::Working { issue: None }
+                                    | crate::model::status::AgentState::Idle
+                            ) || matches!(
+                                &worker.status.state,
+                                crate::model::status::AgentState::Unknown(detail)
+                                    if !detail.to_lowercase().starts_with("dead:")
+                            );
+                            if can_supplement {
                                 let lower = status_text.to_lowercase();
                                 if lower.contains("dispatched")
                                     || lower.contains("working")
@@ -5218,8 +5888,8 @@ mod tests {
     #[test]
     fn parse_direct_gh_command_extracts_repo_scoped_args() {
         assert_eq!(
-            parse_direct_gh_command("gh issue edit 123 --remove-label proposal").unwrap(),
-            Some(vec![
+            parse_direct_gh_command("gh issue edit 123 --remove-label proposal"),
+            ParsedGhCommand::Parsed(vec![
                 "issue".to_string(),
                 "edit".to_string(),
                 "123".to_string(),
@@ -5232,8 +5902,8 @@ mod tests {
     #[test]
     fn parse_direct_gh_command_preserves_quoted_arguments() {
         assert_eq!(
-            parse_direct_gh_command("gh issue create --title \"Fix flaky test\"").unwrap(),
-            Some(vec![
+            parse_direct_gh_command("gh issue create --title \"Fix flaky test\""),
+            ParsedGhCommand::Parsed(vec![
                 "issue".to_string(),
                 "create".to_string(),
                 "--title".to_string(),
@@ -5244,7 +5914,43 @@ mod tests {
 
     #[test]
     fn parse_direct_gh_command_ignores_non_gh_commands() {
-        assert_eq!(parse_direct_gh_command("/autocoder:fix 42").unwrap(), None);
+        assert_eq!(
+            parse_direct_gh_command("/autocoder:fix 42"),
+            ParsedGhCommand::NotGh
+        );
+    }
+
+    #[test]
+    fn parse_direct_gh_command_handles_unclosed_quotes_without_crashing() {
+        let parsed = parse_direct_gh_command("gh issue create --title \"unterminated");
+        match parsed {
+            ParsedGhCommand::Malformed(msg) => {
+                assert!(msg.contains("missing closing quote"));
+            }
+            other => panic!("expected malformed gh command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn report_log_errors_command_matches_primary_and_alias() {
+        assert!(is_report_log_errors_command("gh agents-ui report-errors"));
+        assert!(is_report_log_errors_command("/report-errors"));
+        assert!(!is_report_log_errors_command("gh issue list"));
+    }
+
+    #[test]
+    fn collect_recent_log_error_candidates_dedupes_and_counts() {
+        let log = "\
+2026-04-01T10:00:00Z  INFO agents_tui::app: startup
+2026-04-01T10:01:00Z ERROR agents_tui::app: Failed to parse gh command
+2026-04-01T10:02:00Z ERROR agents_tui::app: Failed to parse gh command
+2026-04-01T10:03:00Z ERROR agents_tui::tmux: tmux send-keys failed
+";
+        let candidates = collect_recent_log_error_candidates(log, 10, 3);
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].summary, "agents_tui::tmux: tmux send-keys failed");
+        assert_eq!(candidates[1].summary, "agents_tui::app: Failed to parse gh command");
+        assert_eq!(candidates[1].occurrences, 2);
     }
 
     #[test]

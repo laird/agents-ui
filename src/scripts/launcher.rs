@@ -53,7 +53,7 @@ pub fn find_script(name: &str) -> Option<PathBuf> {
     for dir in search_paths {
         let candidate = dir.join(name);
         if candidate.exists() {
-            return Some(candidate);
+            return Some(std::fs::canonicalize(&candidate).unwrap_or(candidate));
         }
     }
     None

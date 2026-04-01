@@ -8,6 +8,7 @@ use ratatui::{
 };
 use std::time::Instant;
 
+use super::text_input::TextInput;
 use super::theme;
 use crate::model::issue::{GitHubIssue, IssueFilter, IssuePriority, IssueType};
 use crate::model::swarm::Swarm;
@@ -69,6 +70,7 @@ impl SwarmView {
         blink: bool,
         issues_loading: bool,
         last_fetched: Option<Instant>,
+        manager_input: &TextInput,
     ) {
         let filtered_issues = self.apply_filters(issues);
 
@@ -198,11 +200,25 @@ impl SwarmView {
                 Style::default()
             });
 
+        let manager_rows =
+            Layout::vertical([Constraint::Min(4), Constraint::Length(1)]).split(body_chunks[0]);
+
         let manager = Paragraph::new(text)
             .block(manager_block)
             .wrap(Wrap { trim: false })
             .scroll((self.manager_scroll, 0));
-        f.render_widget(manager, body_chunks[0]);
+        f.render_widget(manager, manager_rows[0]);
+
+        let manager_input = Paragraph::new(manager_input.render_line("> ")).block(
+            Block::default()
+                .borders(Borders::TOP)
+                .border_style(if focus == SwarmPanel::Manager {
+                    theme::title_style()
+                } else {
+                    Style::default()
+                }),
+        );
+        f.render_widget(manager_input, manager_rows[1]);
 
         // --- Bottom split: Workers (left) | Issues (right) ---
         let bottom_cols =
@@ -467,6 +483,8 @@ impl SwarmView {
                 Span::styled(" cycle  ", theme::help_style()),
                 Span::styled("Enter", theme::title_style()),
                 Span::styled(" drill in  ", theme::help_style()),
+                Span::styled("r", theme::title_style()),
+                Span::styled(" refresh  ", theme::help_style()),
                 Span::styled("f", theme::title_style()),
                 Span::styled(" fix-loop  ", theme::help_style()),
                 Span::styled("F", theme::title_style()),
@@ -492,6 +510,8 @@ impl SwarmView {
                 Span::styled("b", theme::title_style()),
                 Span::styled(" next blocked  ", theme::help_style()),
                 Span::styled("r", theme::title_style()),
+                Span::styled(" refresh  ", theme::help_style()),
+                Span::styled("R", theme::title_style()),
                 Span::styled(" review-blocked  ", theme::help_style()),
                 Span::styled("f", theme::title_style()),
                 Span::styled(" filter  ", theme::help_style()),
@@ -708,6 +728,7 @@ mod tests {
     use crate::model::issue::{GitHubIssue, IssueFilter, IssueState};
     use crate::model::status::{AgentState, AgentStatus};
     use crate::model::swarm::{AgentInfo, AgentType, Swarm};
+    use crate::ui::text_input::TextInput;
     use ratatui::{Terminal, backend::TestBackend};
     use std::path::PathBuf;
 
@@ -958,6 +979,7 @@ mod tests {
         let backend = TestBackend::new(100, 30);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut view = SwarmView::new();
+        let manager_input = TextInput::new();
         let swarm = make_swarm();
         let issues = vec![GitHubIssue {
             number: 12,
@@ -982,6 +1004,7 @@ mod tests {
                     false,
                     false,
                     None,
+                    &manager_input,
                 );
             })
             .unwrap();
@@ -1084,6 +1107,7 @@ mod tests {
         let backend = TestBackend::new(100, 30);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut view = SwarmView::new();
+        let manager_input = TextInput::new();
         view.cycle_issue_type_filter(); // → Bug filter
         let swarm = make_swarm();
         let issues = vec![
@@ -1121,6 +1145,7 @@ mod tests {
                     false,
                     false,
                     None,
+                    &manager_input,
                 );
             })
             .unwrap();
@@ -1144,6 +1169,7 @@ mod tests {
         let backend = TestBackend::new(100, 30);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut view = SwarmView::new();
+        let manager_input = TextInput::new();
         let swarm = make_swarm();
         let issues = vec![
             GitHubIssue {
@@ -1180,6 +1206,7 @@ mod tests {
                     false,
                     false,
                     None,
+                    &manager_input,
                 );
             })
             .unwrap();
@@ -1208,6 +1235,7 @@ mod tests {
         let backend = TestBackend::new(120, 30);
         let mut terminal = Terminal::new(backend).unwrap();
         let swarm = make_swarm();
+        let manager_input = TextInput::new();
         let issues = vec![GitHubIssue {
             number: 1,
             title: "A bug".into(),
@@ -1234,6 +1262,7 @@ mod tests {
                     false,
                     false,
                     Some(fresh),
+                    &manager_input,
                 );
             })
             .unwrap();
@@ -1264,6 +1293,7 @@ mod tests {
                     false,
                     false,
                     Some(stale),
+                    &manager_input,
                 );
             })
             .unwrap();
@@ -1356,6 +1386,7 @@ mod tests {
         let backend = TestBackend::new(100, 30);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut view = SwarmView::new();
+        let manager_input = TextInput::new();
         view.cycle_priority_filter(); // → P0 (no issues match)
         view.cycle_priority_filter(); // → P1
         let swarm = make_swarm();
@@ -1394,6 +1425,7 @@ mod tests {
                     false,
                     false,
                     None,
+                    &manager_input,
                 );
             })
             .unwrap();

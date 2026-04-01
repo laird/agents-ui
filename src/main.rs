@@ -112,12 +112,30 @@ async fn main() -> Result<()> {
             let log_dir = dirs::data_local_dir()
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
                 .join("agents-ui");
-            std::fs::create_dir_all(&log_dir).ok();
-            std::fs::OpenOptions::new()
+            if let Err(e) = std::fs::create_dir_all(&log_dir) {
+                eprintln!(
+                    "agents-tui: failed to create log directory {}: {}",
+                    log_dir.display(),
+                    e
+                );
+                return Box::new(std::io::sink()) as Box<dyn std::io::Write + Send>;
+            }
+
+            match std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
                 .open(log_dir.join("agents-ui.log"))
-                .unwrap()
+            {
+                Ok(file) => Box::new(file) as Box<dyn std::io::Write + Send>,
+                Err(e) => {
+                    eprintln!(
+                        "agents-tui: failed to open log file in {}: {}",
+                        log_dir.display(),
+                        e
+                    );
+                    Box::new(std::io::sink()) as Box<dyn std::io::Write + Send>
+                }
+            }
         })
         .with_ansi(false)
         .init();
@@ -132,7 +150,13 @@ async fn main() -> Result<()> {
     )
     .await?;
     let result = app.run(&mut terminal).await;
-    tui::restore()?;
+    if let Err(e) = &result {
+        tracing::error!("TUI runtime failed: {e:#}");
+    }
+    if let Err(e) = tui::restore() {
+        tracing::error!("Failed to restore terminal state: {e:#}");
+        return Err(e);
+    }
     result
 }
 

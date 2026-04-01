@@ -65,6 +65,7 @@ impl EventHandler {
                         // Only handle key press events, not release/repeat
                         if key.kind == KeyEventKind::Press {
                             if event_tx.send(Event::Key(key)).is_err() {
+                                tracing::debug!("Event channel closed while sending key event");
                                 break;
                             }
                         }
@@ -74,10 +75,18 @@ impl EventHandler {
                             .send(Event::TerminalResize { width, height })
                             .is_err()
                         {
+                            tracing::debug!("Event channel closed while sending resize event");
                             break;
                         }
                     }
-                    Some(Err(_)) | None => break,
+                    Some(Err(e)) => {
+                        tracing::warn!("Crossterm event stream error: {e}");
+                        break;
+                    }
+                    None => {
+                        tracing::warn!("Crossterm event stream closed");
+                        break;
+                    }
                     _ => {}
                 }
             }
@@ -90,6 +99,7 @@ impl EventHandler {
             loop {
                 interval.tick().await;
                 if tick_tx.send(Event::Tick).is_err() {
+                    tracing::debug!("Event channel closed while sending tick");
                     break;
                 }
             }

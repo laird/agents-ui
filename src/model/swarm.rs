@@ -123,6 +123,11 @@ impl AgentType {
         }
     }
 
+    /// Whether this runtime is supervised by an outer shell loop wrapper.
+    pub fn uses_loop_wrapper(&self) -> bool {
+        matches!(self, AgentType::Codex | AgentType::Droid)
+    }
+
     pub fn from_name(value: &str) -> Option<Self> {
         match value.trim().to_lowercase().as_str() {
             "claude" => Some(AgentType::Claude),
@@ -524,6 +529,14 @@ mod tests {
         assert_eq!(AgentType::Codex.status_dir(), ".codex/loops");
         assert_eq!(AgentType::Claude.status_dir(), ".codex/loops");
         assert_eq!(AgentType::Droid.status_dir(), ".factory/loops");
+    }
+
+    #[test]
+    fn loop_wrappers_match_runtime_requirements() {
+        assert!(AgentType::Codex.uses_loop_wrapper());
+        assert!(AgentType::Droid.uses_loop_wrapper());
+        assert!(!AgentType::Claude.uses_loop_wrapper());
+        assert!(!AgentType::Gemini.uses_loop_wrapper());
     }
 
     #[test]

@@ -161,7 +161,7 @@ pub async fn resize_pane(
 /// Send Ctrl+C followed by kill to a tmux pane to shut down the session.
 pub async fn kill_pane(transport: &ServerTransport, target: &str) -> Result<()> {
     // Send Ctrl+C to interrupt any running process
-    let _ = transport
+    if let Err(e) = transport
         .output(
             "tmux",
             &[
@@ -173,12 +173,15 @@ pub async fn kill_pane(transport: &ServerTransport, target: &str) -> Result<()> 
             ],
             None,
         )
-        .await;
+        .await
+    {
+        tracing::warn!("Failed sending Ctrl+C to pane {target}: {e}");
+    }
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     // Send "exit" to close the shell
-    let _ = transport
+    if let Err(e) = transport
         .output(
             "tmux",
             &[
@@ -190,7 +193,10 @@ pub async fn kill_pane(transport: &ServerTransport, target: &str) -> Result<()> 
             ],
             None,
         )
-        .await;
+        .await
+    {
+        tracing::warn!("Failed sending exit to pane {target}: {e}");
+    }
 
     Ok(())
 }
