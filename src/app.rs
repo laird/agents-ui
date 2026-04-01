@@ -3326,11 +3326,13 @@ impl App {
                 }
 
                 // Clear dispatch tracking when worker is no longer active.
-                if matches!(
-                    agent.status.state,
+                let clear_dispatch = match &agent.status.state {
                     crate::model::status::AgentState::Idle
-                        | crate::model::status::AgentState::Stopped
-                ) {
+                    | crate::model::status::AgentState::Stopped => true,
+                    crate::model::status::AgentState::Unknown(detail) if detail == "Shell" => true,
+                    _ => false,
+                };
+                if clear_dispatch {
                     agent.dispatched_issue = None;
                 }
 
@@ -3699,10 +3701,17 @@ fn infer_status_from_pane(content: &str) -> crate::model::status::AgentStatus {
         .take(15)
         .collect();
 
+    let last_non_empty = stripped
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .map(str::trim)
+        .unwrap_or("");
+
     let tail = last_lines.join(" ").to_lowercase();
 
-    let state = if tail.contains("waiting for input")
-        || tail.contains("> ")
+    let state = if is_idle_prompt_line(last_non_empty)
+        || tail.contains("waiting for input")
         || tail.contains("what would you like")
         || tail.contains("how can i help")
     {
@@ -3743,8 +3752,18 @@ fn merge_agent_status(
     use crate::model::status::AgentState;
 
     if has_status_file {
-        // Status files are authoritative; only let pane inference fill missing details.
+        // Status files are authoritative; only let pane inference fill missing
+        // details or override obviously stale "working" states when the pane is
+        // clearly idle / at shell.
         match (&current_status.state, &inferred_status.state) {
+            (
+                AgentState::Working { .. } | AgentState::Starting,
+                AgentState::Idle,
+            ) => inferred_status.clone(),
+            (
+                AgentState::Working { .. } | AgentState::Starting,
+                AgentState::Unknown(detail),
+            ) if detail == "Shell" => inferred_status.clone(),
             (
                 AgentState::Working { issue: None },
                 AgentState::Working { issue: Some(_) },
@@ -3763,6 +3782,15 @@ fn merge_agent_status(
             _ => inferred_status.clone(),
         }
     }
+}
+
+fn is_idle_prompt_line(line: &str) -> bool {
+    let trimmed = line.trim().to_lowercase();
+    trimmed.starts_with('>')
+        || trimmed.starts_with('❯')
+        || trimmed.starts_with('›')
+        || trimmed.contains("what would you like")
+        || trimmed.contains("how can i help")
 }
 
 /// Parse /monitor-workers output from manager pane content.
@@ -4108,6 +4136,10 @@ mod tests {
 
         let idle = infer_status_from_pane("What would you like me to do next?");
         assert!(matches!(idle.state, AgentState::Idle));
+
+        let idle_with_stale_busy_history =
+            infer_status_from_pane("working on issue #88\nediting tests\n> ");
+        assert!(matches!(idle_with_stale_busy_history.state, AgentState::Idle));
     }
 
     #[test]
@@ -4131,6 +4163,34 @@ mod tests {
         };
         let merged = merge_agent_status(&current, &inferred, true);
         assert!(matches!(merged.state, AgentState::Idle));
+    }
+
+    #[test]
+    fn merge_agent_status_allows_idle_override_for_stale_working_status_file() {
+        let current = crate::model::status::AgentStatus {
+            timestamp: None,
+            state: AgentState::Working { issue: Some(42) },
+        };
+        let inferred = crate::model::status::AgentStatus {
+            timestamp: None,
+            state: AgentState::Idle,
+        };
+        let merged = merge_agent_status(&current, &inferred, true);
+        assert!(matches!(merged.state, AgentState::Idle));
+    }
+
+    #[test]
+    fn merge_agent_status_allows_shell_override_for_stale_working_status_file() {
+        let current = crate::model::status::AgentStatus {
+            timestamp: None,
+            state: AgentState::Working { issue: Some(42) },
+        };
+        let inferred = crate::model::status::AgentStatus {
+            timestamp: None,
+            state: AgentState::Unknown("Shell".to_string()),
+        };
+        let merged = merge_agent_status(&current, &inferred, true);
+        assert!(matches!(merged.state, AgentState::Unknown(detail) if detail == "Shell"));
     }
 
     #[test]

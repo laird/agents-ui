@@ -1450,6 +1450,12 @@ fn classify_pane_state(content: &str) -> PaneState {
         return PaneState::Unknown;
     }
 
+    // If the newest line is an idle prompt, prefer Idle even when older lines
+    // still include stale "working"/"thinking" text.
+    if looks_like_idle_prompt_line(non_empty_lines[0]) {
+        return PaneState::AgentIdle;
+    }
+
     let mut saw_agent_indicator = false;
     let mut saw_idle_prompt = false;
     let mut saw_busy_indicator = false;
@@ -1518,6 +1524,15 @@ fn classify_pane_state(content: &str) -> PaneState {
     }
 
     PaneState::Unknown
+}
+
+fn looks_like_idle_prompt_line(line: &str) -> bool {
+    let lower = line.trim().to_lowercase();
+    lower.contains("how can i help")
+        || lower.contains("what would you like")
+        || lower.starts_with('>')
+        || lower.starts_with('\u{276f}') // ❯
+        || lower.starts_with('\u{203a}') // ›
 }
 
 // Legacy wrappers used by tests
@@ -1737,6 +1752,10 @@ mod tests {
     fn agent_idle_detected() {
         assert_eq!(classify_pane_state("> \n"), PaneState::AgentIdle);
         assert_eq!(classify_pane_state("how can i help you today?\n"), PaneState::AgentIdle);
+        assert_eq!(
+            classify_pane_state("working on issue #77\nediting files\n> "),
+            PaneState::AgentIdle
+        );
         // Claude status bar without busy indicator = idle
         assert_eq!(
             classify_pane_state(

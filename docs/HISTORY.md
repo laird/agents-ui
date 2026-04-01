@@ -79,3 +79,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Codex swarms can now receive compatible fix and monitor-workers instructions from the TUI, improving issue dispatch reliability.
 
+
+---
+
+## 2026-04-01 12:52:46 - Fix #242 stale worker status detection
+
+**What Changed**: Updated pane/status merging to prefer explicit idle prompts and shell states over stale working signals, added idle-prompt-first pane classification, and expanded regression tests for stale-history cases.
+
+**Why Changed**: Workers could appear stuck because older 'working' text or stale status-file state overshadowed a current idle prompt, delaying recovery and obscuring true state.
+
+**Impact**: Worker state now converges to idle/shell more reliably, clearing stale dispatch assignments and improving automatic recovery visibility.
+
