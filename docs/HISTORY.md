@@ -68,3 +68,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Terminal resize and session discovery now resize tmux windows consistently in local and remote modes.
 
+
+---
+
+## 2026-04-01 12:51:52 - Close #246 as resolved
+
+**What Changed**: Verified that issue #246 was already fixed by commit 0a91b66 and closed the GitHub issue.
+
+**Why Changed**: The fix was implemented and pushed but the issue stayed open.
+
+**Impact**: Bug queue now advances to the next unblocked item without duplicate implementation work.
+
