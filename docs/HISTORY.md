@@ -79,3 +79,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Users can now refresh repo and worker/task state in-place via r, reducing stale UI state and extra navigation.
 
+
+---
+
+## 2026-04-01 13:03:23 - Fix #244: add project-management GitHub wrapper
+
+**What Changed**: Added a project_management::github wrapper module and routed issue list/view/edit plus browser-open actions in App through it; added parsing/error-handling tests for issue detail mapping.
+
+**Why Changed**: Issue #244 requires centralizing project-management gh command construction and execution behind a dedicated boundary for future backend expansion.
+
+**Impact**: GitHub operations are now centralized in one wrapper API, reducing duplicated command logic and making future policy/observability changes easier.
+
