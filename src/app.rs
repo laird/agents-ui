@@ -2053,8 +2053,8 @@ impl App {
                         self.create_issue_form = Some(CreateIssueForm::new());
                     }
                     KeyCode::Char('p') => {
-                        // Approve: send "approve <issue_number>" to manager pane
-                        self.send_issue_command_to_manager(swarm_idx, "approve").await?;
+                        // Approve: remove the proposal label from the selected issue.
+                        self.approve_selected_issue(swarm_idx).await?;
                     }
                     KeyCode::Char('b') => {
                         // Brainstorm: send "brainstorm <issue_number>" to manager pane
@@ -2193,6 +2193,80 @@ impl App {
             proxy::send_keys(&self.transport, &target, &full_cmd).await?;
             self.status_message = Some(format!("Sent: {full_cmd}"));
         }
+        Ok(())
+    }
+
+    /// Approve the selected issue by removing its `proposal` label directly via GitHub CLI.
+    async fn approve_selected_issue(&mut self, swarm_idx: usize) -> Result<()> {
+        let (repo_path, issue_num) = {
+            let swarm = match self.swarms.get(swarm_idx) {
+                Some(s) => s,
+                None => return Ok(()),
+            };
+            let issues: Vec<&GitHubIssue> = self
+                .issue_caches
+                .get(&swarm.project_name)
+                .map(|c| {
+                    c.issues
+                        .iter()
+                        .filter(|i| i.matches_filter(self.swarm_view.issue_filter))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let issue_num = self
+                .swarm_view
+                .selected_issue()
+                .and_then(|idx| issues.get(idx))
+                .map(|i| i.number);
+            (swarm.repo_path.clone(), issue_num)
+        };
+
+        let Some(issue_num) = issue_num else {
+            self.status_message = Some("No issue selected".to_string());
+            return Ok(());
+        };
+
+        let result = self
+            .transport
+            .output(
+                "gh",
+                &[
+                    "issue".to_string(),
+                    "edit".to_string(),
+                    issue_num.to_string(),
+                    "--remove-label".to_string(),
+                    "proposal".to_string(),
+                ],
+                Some(&repo_path),
+            )
+            .await;
+
+        match result {
+            Ok(output) if output.status.success() => {
+                self.status_message = Some(format!(
+                    "Approved issue #{issue_num} (removed proposal label)"
+                ));
+                self.start_issue_refresh(swarm_idx);
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let detail = if !stderr.is_empty() {
+                    stderr
+                } else if !stdout.is_empty() {
+                    stdout
+                } else {
+                    "gh issue edit failed".to_string()
+                };
+                self.status_message = Some(format!(
+                    "Approve failed for #{issue_num}: {detail}"
+                ));
+            }
+            Err(e) => {
+                self.status_message = Some(format!("Approve failed for #{issue_num}: {e}"));
+            }
+        }
+
         Ok(())
     }
 
