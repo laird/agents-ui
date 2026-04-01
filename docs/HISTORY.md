@@ -68,3 +68,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Pressing p now performs approval consistently across runtimes and gives clear success/failure status in the UI.
 
+
+---
+
+## 2026-04-01 12:40:54 - Fix #240 Codex session commands
+
+**What Changed**: Updated Codex command generation in src/app.rs and src/adapter/claude.rs to send 'use autocoder to fix <issue>' and 'use autocoder to monitor-workers', and adjusted adapter unit tests.
+
+**Why Changed**: Codex sessions do not handle the slash-command forms used by other runtimes, so dispatch/monitor commands were ineffective.
+
+**Impact**: Codex swarms can now receive compatible fix and monitor-workers instructions from the TUI, improving issue dispatch reliability.
+
