@@ -23,13 +23,43 @@ impl ClaudeAdapter {
             .unwrap_or_else(|| "unknown".to_string())
     }
 
-    /// Expected tmux session name for a given project.
-    fn session_name(project: &str) -> String {
-        format!("claude-{project}")
+    /// Expected tmux session name for a given project/runtime.
+    fn session_name(project: &str, agent_type: &AgentType) -> String {
+        format!("{}-{project}", agent_type.session_prefix())
+    }
+
+    /// Parse runtime from tmux session prefix.
+    fn agent_type_from_session_name(session_name: &str) -> AgentType {
+        match session_name.split('-').next().unwrap_or_default() {
+            "claude" => AgentType::Claude,
+            "codex" => AgentType::Codex,
+            "droid" => AgentType::Droid,
+            "gemini" => AgentType::Gemini,
+            _ => AgentType::Claude,
+        }
+    }
+
+    /// Extract project name from a runtime-prefixed session.
+    fn project_name_from_session_name(session_name: &str, agent_type: &AgentType) -> String {
+        let prefix = format!("{}-", agent_type.session_prefix());
+        session_name
+            .strip_prefix(&prefix)
+            .unwrap_or(session_name)
+            .to_string()
+    }
+
+    /// Parse runtime from a full tmux target like "droid-myrepo:0.1".
+    fn agent_type_from_tmux_target(tmux_target: &str) -> AgentType {
+        let session_name = tmux_target.split(':').next().unwrap_or_default();
+        Self::agent_type_from_session_name(session_name)
     }
 
     /// Create git worktrees for workers.
-    async fn create_worktrees(repo_path: &Path, project_name: &str, num_workers: u32) -> Result<Vec<PathBuf>> {
+    async fn create_worktrees(
+        repo_path: &Path,
+        project_name: &str,
+        num_workers: u32,
+    ) -> Result<Vec<PathBuf>> {
         let parent = repo_path.parent().unwrap_or(repo_path);
         let mut worktree_paths = Vec::new();
 
@@ -213,15 +243,21 @@ impl ClaudeAdapter {
         Ok(())
     }
 
-    /// Launch claude in a specific tmux pane.
-    async fn launch_claude_in_pane(target: &str, session_name: &str) -> Result<()> {
-        // Launch claude with system prompt instructing it to use tmux (not cmux)
-        let cmd = format!(
-            "claude --dangerously-skip-permissions --append-system-prompt 'This session is managed by agents-ui via tmux. \
-            IMPORTANT: Always use tmux commands (tmux capture-pane, tmux send-keys, etc.) \
-            for reading worker screens and dispatching work. Do NOT use cmux. \
-            The tmux session is named {session_name}.'"
-        );
+    /// Launch the selected runtime in a specific tmux pane.
+    async fn launch_agent_in_pane(
+        target: &str,
+        session_name: &str,
+        agent_type: &AgentType,
+    ) -> Result<()> {
+        let cmd = match agent_type {
+            AgentType::Claude => format!(
+                "claude --dangerously-skip-permissions --append-system-prompt 'This session is managed by agents-ui via tmux. \
+                IMPORTANT: Always use tmux commands (tmux capture-pane, tmux send-keys, etc.) \
+                for reading worker screens and dispatching work. Do NOT use cmux. \
+                The tmux session is named {session_name}.'"
+            ),
+            _ => agent_type.launch_cmd().to_string(),
+        };
         proxy::send_keys(target, &cmd).await
     }
 
@@ -254,10 +290,18 @@ impl ClaudeAdapter {
         false
     }
 
+    async fn wait_for_agent_ready(target: &str, agent_type: &AgentType) -> bool {
+        match agent_type {
+            AgentType::Claude => Self::wait_for_claude_ready(target).await,
+            _ => true,
+        }
+    }
+
     /// Build a Swarm model from an existing tmux session.
     async fn build_swarm_from_session(
         session_name: &str,
         repo_path: PathBuf,
+        agent_type: AgentType,
     ) -> Result<Swarm> {
         let project_name = Self::project_name(&repo_path);
         let session_info = session::list_panes(session_name).await?;
@@ -284,13 +328,14 @@ impl ClaudeAdapter {
             } else if window.name == "agents" || window.index == 0 {
                 for pane in &window.panes {
                     let worker_idx = pane.index as usize;
-                    let worktree_path = repo_path
-                        .parent()
-                        .unwrap_or(&repo_path)
-                        .join(format!("{}-wt-{}", project_name, worker_idx + 1));
+                    let worktree_path = repo_path.parent().unwrap_or(&repo_path).join(format!(
+                        "{}-wt-{}",
+                        project_name,
+                        worker_idx + 1
+                    ));
 
                     let status_file = worktree_path
-                        .join(AgentType::Claude.status_dir())
+                        .join(agent_type.status_dir())
                         .join("fix-loop.status");
 
                     let agent_status = status::read_status_file(&status_file);
@@ -310,7 +355,7 @@ impl ClaudeAdapter {
         Ok(Swarm {
             repo_path,
             project_name,
-            agent_type: AgentType::Claude,
+            agent_type,
             workflow: None,
             tmux_session: session_name.to_string(),
             manager,
@@ -344,7 +389,9 @@ impl ClaudeAdapter {
 
         let marketplace_stdout = String::from_utf8_lossy(&marketplace_output.stdout);
 
-        if !marketplace_stdout.contains("laird/agents") && !marketplace_stdout.contains("plugin-marketplace") {
+        if !marketplace_stdout.contains("laird/agents")
+            && !marketplace_stdout.contains("plugin-marketplace")
+        {
             tracing::info!("Adding laird/agents marketplace...");
             let add_output = Command::new("claude")
                 .args(["plugin", "marketplace", "add", "laird/agents"])
@@ -402,16 +449,23 @@ impl ClaudeAdapter {
 impl AgentRuntime for ClaudeAdapter {
     async fn launch(&self, config: &SwarmConfig) -> Result<Swarm> {
         let project_name = Self::project_name(&config.repo_path);
-        let session_name = Self::session_name(&project_name);
+        let session_name = Self::session_name(&project_name, &config.agent_type);
 
         // Check if session already exists
         if session::has_session(&session_name).await {
             tracing::info!("Session {session_name} already exists, reconnecting");
-            return Self::build_swarm_from_session(&session_name, config.repo_path.clone()).await;
+            return Self::build_swarm_from_session(
+                &session_name,
+                config.repo_path.clone(),
+                config.agent_type.clone(),
+            )
+            .await;
         }
 
-        // Ensure the autocoder plugin is installed
-        Self::ensure_plugin_installed().await?;
+        // Ensure the autocoder plugin is installed for Claude runtime.
+        if matches!(config.agent_type, AgentType::Claude) {
+            Self::ensure_plugin_installed().await?;
+        }
 
         tracing::info!(
             "Launching swarm: {} workers for {}",
@@ -426,24 +480,36 @@ impl AgentRuntime for ClaudeAdapter {
         // 2. Create tmux session with windows/panes
         Self::create_tmux_session(&session_name, &config.repo_path, &worktree_paths).await?;
 
-        // 3. Launch claude in each worker pane
+        // 3. Launch runtime in each worker pane
         for i in 0..worktree_paths.len() {
             let target = format!("{session_name}:agents.{i}");
-            if let Err(e) = Self::launch_claude_in_pane(&target, &session_name).await {
-                tracing::warn!("Failed to launch claude in pane {i}: {e}");
+            if let Err(e) =
+                Self::launch_agent_in_pane(&target, &session_name, &config.agent_type).await
+            {
+                tracing::warn!("Failed to launch {} in pane {i}: {e}", config.agent_type);
             }
             // Small delay between launches to avoid overwhelming
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
 
-        // 4. Launch claude in manager pane
+        // 4. Launch runtime in manager pane
         let manager_target = format!("{session_name}:review.0");
-        if let Err(e) = Self::launch_claude_in_pane(&manager_target, &session_name).await {
-            tracing::warn!("Failed to launch claude in manager pane: {e}");
+        if let Err(e) =
+            Self::launch_agent_in_pane(&manager_target, &session_name, &config.agent_type).await
+        {
+            tracing::warn!(
+                "Failed to launch {} in manager pane: {e}",
+                config.agent_type
+            );
         }
 
         // 6. Build and return swarm model
-        Self::build_swarm_from_session(&session_name, config.repo_path.clone()).await
+        Self::build_swarm_from_session(
+            &session_name,
+            config.repo_path.clone(),
+            config.agent_type.clone(),
+        )
+        .await
     }
 
     async fn discover(&self, _agents_dir: &Path) -> Result<Vec<Swarm>> {
@@ -451,19 +517,13 @@ impl AgentRuntime for ClaudeAdapter {
         let mut swarms = Vec::new();
 
         for session_name in sessions {
-            if !session_name.starts_with("claude-") {
-                continue;
-            }
+            let agent_type = Self::agent_type_from_session_name(&session_name);
+            let project_name = Self::project_name_from_session_name(&session_name, &agent_type);
 
-            let project_name = session_name
-                .strip_prefix("claude-")
-                .unwrap_or(&session_name)
-                .to_string();
-
-            let repo_path = find_repo_path(&project_name).await;
+            let repo_path = find_repo_path(&session_name, &project_name).await;
 
             if let Some(repo_path) = repo_path {
-                match Self::build_swarm_from_session(&session_name, repo_path).await {
+                match Self::build_swarm_from_session(&session_name, repo_path, agent_type).await {
                     Ok(swarm) => swarms.push(swarm),
                     Err(e) => tracing::warn!("Failed to build swarm from {session_name}: {e}"),
                 }
@@ -549,7 +609,12 @@ impl AgentRuntime for ClaudeAdapter {
 
         // Rebalance panes
         let _ = Command::new("tmux")
-            .args(["select-layout", "-t", &format!("{session_name}:0"), "even-horizontal"])
+            .args([
+                "select-layout",
+                "-t",
+                &format!("{session_name}:0"),
+                "even-horizontal",
+            ])
             .output()
             .await;
 
@@ -577,13 +642,16 @@ impl AgentRuntime for ClaudeAdapter {
         proxy::send_keys(&tmux_target, &format!("cd '{}'", worktree_path.display())).await?;
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-        // Launch claude with the same command used for initial session setup
-        Self::launch_claude_in_pane(&tmux_target, &swarm.tmux_session).await?;
+        // Launch runtime with the same command used for initial session setup
+        Self::launch_agent_in_pane(&tmux_target, &swarm.tmux_session, &swarm.agent_type).await?;
 
-        // Wait for Claude to be ready by polling for its prompt indicator
-        let ready = Self::wait_for_claude_ready(&tmux_target).await;
+        // Wait for runtime to be ready where needed.
+        let ready = Self::wait_for_agent_ready(&tmux_target, &swarm.agent_type).await;
         if !ready {
-            tracing::warn!("Claude may not be fully ready in pane {tmux_target}, sending worker loop command anyway");
+            tracing::warn!(
+                "{} may not be fully ready in pane {tmux_target}, sending worker loop command anyway",
+                swarm.agent_type
+            );
         }
 
         // Send the worker loop command
@@ -600,7 +668,8 @@ impl AgentRuntime for ClaudeAdapter {
     }
 
     async fn start_worker_loop(&self, tmux_target: &str) -> Result<()> {
-        proxy::send_keys(tmux_target, AgentType::Claude.worker_loop_cmd()).await
+        let agent_type = Self::agent_type_from_tmux_target(tmux_target);
+        proxy::send_keys(tmux_target, agent_type.worker_loop_cmd()).await
     }
 
     async fn stop(&self, swarm: &Swarm) -> Result<()> {
@@ -643,15 +712,10 @@ impl AgentRuntime for ClaudeAdapter {
 }
 
 /// Try to find a repo path given a project name.
-async fn find_repo_path(project_name: &str) -> Option<PathBuf> {
+async fn find_repo_path(session_name: &str, project_name: &str) -> Option<PathBuf> {
     // Check tmux environment
     let output = Command::new("tmux")
-        .args([
-            "show-environment",
-            "-t",
-            &format!("claude-{project_name}"),
-            "PWD",
-        ])
+        .args(["show-environment", "-t", session_name, "PWD"])
         .output()
         .await
         .ok()?;
@@ -690,4 +754,50 @@ async fn find_repo_path(project_name: &str) -> Option<PathBuf> {
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ClaudeAdapter;
+    use crate::model::swarm::AgentType;
+
+    #[test]
+    fn session_name_uses_selected_runtime_prefix() {
+        assert_eq!(
+            ClaudeAdapter::session_name("demo", &AgentType::Droid),
+            "droid-demo"
+        );
+        assert_eq!(
+            ClaudeAdapter::session_name("demo", &AgentType::Codex),
+            "codex-demo"
+        );
+    }
+
+    #[test]
+    fn parses_runtime_from_session_name() {
+        assert_eq!(
+            ClaudeAdapter::agent_type_from_session_name("droid-demo"),
+            AgentType::Droid
+        );
+        assert_eq!(
+            ClaudeAdapter::agent_type_from_session_name("gemini-demo"),
+            AgentType::Gemini
+        );
+        assert_eq!(
+            ClaudeAdapter::agent_type_from_session_name("claude-demo"),
+            AgentType::Claude
+        );
+    }
+
+    #[test]
+    fn parses_runtime_from_tmux_target() {
+        assert_eq!(
+            ClaudeAdapter::agent_type_from_tmux_target("codex-demo:0.1"),
+            AgentType::Codex
+        );
+        assert_eq!(
+            ClaudeAdapter::agent_type_from_tmux_target("droid-demo:review.0"),
+            AgentType::Droid
+        );
+    }
 }
