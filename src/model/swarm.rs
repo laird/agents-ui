@@ -68,6 +68,14 @@ impl AgentType {
             _ => "/fix-loop",
         }
     }
+
+    /// The slash command to run manager dispatch/monitor workflow.
+    pub fn monitor_workers_cmd(&self) -> &str {
+        match self {
+            AgentType::Claude => "/autocoder:monitor-workers",
+            _ => "/monitor-workers",
+        }
+    }
 }
 
 /// The workflow type for a swarm.
@@ -121,6 +129,25 @@ pub struct Swarm {
     pub manager: AgentInfo,
     /// Worker agents (each in their own worktree)
     pub workers: Vec<AgentInfo>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AgentType;
+
+    #[test]
+    fn command_mapping_for_worker_and_monitor_matches_runtime() {
+        assert_eq!(AgentType::Claude.worker_loop_cmd(), "/autocoder:fix-loop");
+        assert_eq!(
+            AgentType::Claude.monitor_workers_cmd(),
+            "/autocoder:monitor-workers"
+        );
+
+        for agent_type in [AgentType::Codex, AgentType::Droid, AgentType::Gemini] {
+            assert_eq!(agent_type.worker_loop_cmd(), "/fix-loop");
+            assert_eq!(agent_type.monitor_workers_cmd(), "/monitor-workers");
+        }
+    }
 }
 
 #[allow(dead_code)]

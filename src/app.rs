@@ -1065,7 +1065,7 @@ impl App {
     }
 
     /// Refresh agent statuses from status files and pane content.
-    /// Check if any worker is idle and auto-dispatch /monitor-workers to the manager.
+    /// Check if any worker is idle and auto-dispatch monitor-workers to the manager.
     /// Debounced to at most once every 3 minutes.
     async fn check_auto_dispatch(&mut self) {
         use crate::model::status::AgentState;
@@ -1101,18 +1101,21 @@ impl App {
                 continue;
             }
 
-            // Send /monitor-workers to the manager pane
+            // Send monitor-workers command to the manager pane
+            let monitor_cmd = swarm.agent_type.monitor_workers_cmd();
             let target = &swarm.manager.tmux_target;
             tracing::info!(
-                "Auto-dispatching /monitor-workers to manager (idle worker detected in {})",
-                swarm.project_name
+                "Auto-dispatching {} to manager (idle worker detected in {})",
+                monitor_cmd,
+                swarm.project_name,
             );
-            if let Err(e) = crate::tmux::proxy::send_keys(target, "/monitor-workers").await {
-                tracing::warn!("Failed to auto-dispatch /monitor-workers: {e}");
+            if let Err(e) = crate::tmux::proxy::send_keys(target, monitor_cmd).await {
+                tracing::warn!("Failed to auto-dispatch {monitor_cmd}: {e}");
             }
             self.auto_dispatch_last = Some(std::time::Instant::now());
-            self.status_message =
-                Some("Auto-dispatched /monitor-workers (idle worker detected)".to_string());
+            self.status_message = Some(format!(
+                "Auto-dispatched {monitor_cmd} (idle worker detected)"
+            ));
             return; // Only dispatch once per tick
         }
     }

@@ -24,3 +24,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Selected runtime launches now validate and install required assets up front, reducing broken workflow starts due to missing skills.
 
+
+---
+
+## 2026-04-01 12:30:39 - Fix #248 runtime-specific monitor-workers command
+
+**What Changed**: Added AgentType::monitor_workers_cmd and switched auto-dispatch to use runtime-specific monitor command; added unit test coverage for loop/monitor command mapping.
+
+**Why Changed**: Claude runtime requires autocoder-prefixed monitor command while other runtimes use the generic command; hardcoding /monitor-workers broke Claude manager monitoring.
+
+**Impact**: Idle-worker auto-dispatch now invokes the correct command per runtime, restoring monitor-workers workflow reliability.
+
