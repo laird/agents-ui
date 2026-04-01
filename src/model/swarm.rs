@@ -65,6 +65,7 @@ impl AgentType {
     pub fn worker_loop_cmd(&self) -> &str {
         match self {
             AgentType::Claude => "/autocoder:fix-loop",
+            AgentType::Codex => "use autocoder to fix-loop",
             _ => "/fix-loop",
         }
     }
@@ -73,7 +74,33 @@ impl AgentType {
     pub fn monitor_workers_cmd(&self) -> &str {
         match self {
             AgentType::Claude => "/autocoder:monitor-workers",
+            AgentType::Codex => "use autocoder to monitor-workers",
             _ => "/monitor-workers",
+        }
+    }
+
+    /// Normalize direct user input for runtimes that do not support Claude-style slash commands.
+    pub fn normalize_input(&self, input: &str) -> String {
+        if !matches!(self, AgentType::Codex) {
+            return input.to_string();
+        }
+
+        let trimmed = input.trim();
+        let mapped = match trimmed {
+            "/monitor-workers" | "/autocoder:monitor-workers" => {
+                Some("monitor-workers".to_string())
+            }
+            "/fix-loop" | "/autocoder:fix-loop" => Some("fix-loop".to_string()),
+            "/fix" | "/autocoder:fix" => Some("fix".to_string()),
+            _ => trimmed
+                .strip_prefix("/fix ")
+                .or_else(|| trimmed.strip_prefix("/autocoder:fix "))
+                .map(|rest| format!("fix {}", rest.trim())),
+        };
+
+        match mapped {
+            Some(cmd) => format!("use autocoder to {cmd}"),
+            None => input.to_string(),
         }
     }
 }
@@ -143,10 +170,42 @@ mod tests {
             "/autocoder:monitor-workers"
         );
 
-        for agent_type in [AgentType::Codex, AgentType::Droid, AgentType::Gemini] {
+        assert_eq!(AgentType::Codex.worker_loop_cmd(), "use autocoder to fix-loop");
+        assert_eq!(
+            AgentType::Codex.monitor_workers_cmd(),
+            "use autocoder to monitor-workers"
+        );
+
+        for agent_type in [AgentType::Droid, AgentType::Gemini] {
             assert_eq!(agent_type.worker_loop_cmd(), "/fix-loop");
             assert_eq!(agent_type.monitor_workers_cmd(), "/monitor-workers");
         }
+    }
+
+    #[test]
+    fn codex_normalizes_slash_inputs_to_skill_prompts() {
+        let codex = AgentType::Codex;
+        assert_eq!(
+            codex.normalize_input("/monitor-workers"),
+            "use autocoder to monitor-workers"
+        );
+        assert_eq!(
+            codex.normalize_input("/autocoder:monitor-workers"),
+            "use autocoder to monitor-workers"
+        );
+        assert_eq!(codex.normalize_input("/fix"), "use autocoder to fix");
+        assert_eq!(
+            codex.normalize_input("/fix 240"),
+            "use autocoder to fix 240"
+        );
+        assert_eq!(
+            codex.normalize_input("/autocoder:fix 240"),
+            "use autocoder to fix 240"
+        );
+        assert_eq!(
+            codex.normalize_input("plain text"),
+            "plain text"
+        );
     }
 }
 

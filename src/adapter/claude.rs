@@ -618,7 +618,9 @@ impl AgentRuntime for ClaudeAdapter {
     }
 
     async fn send_input(&self, tmux_target: &str, input: &str) -> Result<()> {
-        proxy::send_keys(tmux_target, input).await
+        let agent_type = Self::agent_type_from_tmux_target(tmux_target);
+        let normalized = agent_type.normalize_input(input);
+        proxy::send_keys(tmux_target, &normalized).await
     }
 
     async fn capture_output(&self, tmux_target: &str) -> Result<String> {

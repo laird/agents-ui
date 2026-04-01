@@ -46,3 +46,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Users can now approve proposal issues directly from the TUI, with immediate feedback and updated labels.
 
+
+---
+
+## 2026-04-01 12:42:10 - Fix #240 Codex session command translation
+
+**What Changed**: Updated runtime command mapping so Codex receives 'use autocoder to ...' for monitor-workers/fix-loop, added Codex slash-command normalization for direct input, and surfaced runtime-specific worker-loop command text in status messages.
+
+**Why Changed**: Issue #240 reported that commands sent from the UI did not execute in Codex because Claude-style slash syntax was being sent directly.
+
+**Impact**: Codex manager/worker sessions now receive executable autocoder prompts (including fix issue commands), improving cross-runtime workflow reliability.
+

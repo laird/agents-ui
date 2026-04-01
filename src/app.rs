@@ -615,9 +615,10 @@ impl App {
                                 if let Some(swarm) = self.swarms.get_mut(swarm_idx) {
                                     swarm.workers.push(worker);
                                 }
+                                let worker_cmd = swarm_clone.agent_type.worker_loop_cmd();
                                 self.start_all_pane_watchers();
                                 self.status_message =
-                                    Some(format!("Added {id} (running /fix-loop)"));
+                                    Some(format!("Added {id} (running {worker_cmd})"));
                             }
                             Err(e) => {
                                 self.status_message =
@@ -633,14 +634,15 @@ impl App {
                             if let Some(worker) = swarm.workers.get(worker_idx) {
                                 let target = worker.tmux_target.clone();
                                 let id = worker.id.clone();
-                                tracing::info!("Sending /fix-loop to {id} at {target}");
+                                let worker_cmd = swarm.agent_type.worker_loop_cmd();
+                                tracing::info!("Sending {worker_cmd} to {id} at {target}");
                                 if let Err(e) = self.adapter.start_worker_loop(&target).await {
-                                    tracing::error!("Failed to send /fix-loop to {id}: {e}");
+                                    tracing::error!("Failed to send {worker_cmd} to {id}: {e}");
                                     self.status_message =
                                         Some(format!("Failed to start {id}: {e}"));
                                 } else {
                                     self.status_message =
-                                        Some(format!("Sent /fix-loop to {id}"));
+                                        Some(format!("Sent {worker_cmd} to {id}"));
                                 }
                             }
                         }
