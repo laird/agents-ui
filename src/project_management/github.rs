@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use serde_json::Value;
+use std::path::Path;
 use tokio::process::Command;
 
 use crate::model::issue::{GithubIssue, parse_issues};
@@ -42,6 +43,25 @@ pub async fn fetch_issue_detail(issue_number: u32) -> Result<IssueDetail> {
     .await?;
 
     parse_issue_detail(&output.stdout, issue_number)
+}
+
+pub async fn count_open_issues(repo_path: &Path, limit: u32) -> Result<usize> {
+    let limit = limit.to_string();
+    let output = run_gh_in_dir(
+        &[
+            "issue", "list", "--state", "open", "--json", "number", "--limit", &limit,
+        ],
+        Some(repo_path),
+    )
+    .await?;
+
+    let issues: Vec<Value> = serde_json::from_slice(&output.stdout).with_context(|| {
+        format!(
+            "Failed to parse gh issue list JSON in {}",
+            repo_path.display()
+        )
+    })?;
+    Ok(issues.len())
 }
 
 pub async fn remove_issue_label(issue_number: u32, label: &str) -> Result<()> {
@@ -101,8 +121,17 @@ fn parse_issue_detail(stdout: &[u8], fallback_number: u32) -> Result<IssueDetail
 }
 
 async fn run_gh(args: &[&str]) -> Result<std::process::Output> {
-    let output = Command::new("gh")
-        .args(args)
+    run_gh_in_dir(args, None).await
+}
+
+async fn run_gh_in_dir(args: &[&str], cwd: Option<&Path>) -> Result<std::process::Output> {
+    let mut command = Command::new("gh");
+    command.args(args);
+    if let Some(dir) = cwd {
+        command.current_dir(dir);
+    }
+
+    let output = command
         .output()
         .await
         .with_context(|| format!("Failed to run gh {}", args.join(" ")))?;

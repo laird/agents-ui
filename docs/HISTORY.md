@@ -123,3 +123,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Issue Detail now supports quick issue-number copying without leaving the TUI, improving workflow speed.
 
+
+---
+
+## 2026-04-01 13:59:57 - Fix #236: show repos-list issue delta on refresh
+
+**What Changed**: Added repo-scoped open-issue count tracking, repos-list +N delta rendering, refresh-time delta updates, and delta clear-on-repo-open behavior.
+
+**Why Changed**: Issue #236 requested highlighting newly arrived issues since refresh in the repos list.
+
+**Impact**: Repos list now surfaces new issue growth with attention-styled +N indicators that clear once the repo is opened.
+

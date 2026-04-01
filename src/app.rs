@@ -22,13 +22,24 @@ use crate::ui::repos_list::ReposListView;
 pub enum Screen {
     ReposList,
     /// Prompt for repo path to launch a new swarm.
-    NewSwarm { field: NewSwarmField },
-    RepoView { swarm_idx: usize },
-    AgentView { swarm_idx: usize, agent_id: String },
+    NewSwarm {
+        field: NewSwarmField,
+    },
+    RepoView {
+        swarm_idx: usize,
+    },
+    AgentView {
+        swarm_idx: usize,
+        agent_id: String,
+    },
     /// View full issue details (body, labels, state).
-    IssueDetail { swarm_idx: usize },
+    IssueDetail {
+        swarm_idx: usize,
+    },
     /// Browse GitHub issues for a repo (press 'L' in RepoView).
-    IssueList { swarm_idx: usize },
+    IssueList {
+        swarm_idx: usize,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -116,6 +127,7 @@ impl App {
 
         // Scan for available repos (git directories in cwd or children)
         app.scan_available_repos();
+        app.refresh_issue_count_deltas().await;
 
         // Start pane watchers for discovered swarms
         app.start_all_pane_watchers();
@@ -131,11 +143,7 @@ impl App {
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default();
-            if let Some(idx) = app
-                .swarms
-                .iter()
-                .position(|s| s.project_name == cwd_name)
-            {
+            if let Some(idx) = app.swarms.iter().position(|s| s.project_name == cwd_name) {
                 app.repos_list.table_state.select(Some(idx));
                 app.repo_view = RepoView::new();
                 app.screen = Screen::RepoView { swarm_idx: idx };
@@ -166,7 +174,12 @@ impl App {
                         let repo = self.new_swarm_repo.clone();
                         let agent_type = self.new_swarm_agent_type.clone();
                         crate::ui::new_swarm::render_new_swarm_dialog(
-                            f, area, &field, &input, &repo, &agent_type,
+                            f,
+                            area,
+                            &field,
+                            &input,
+                            &repo,
+                            &agent_type,
                         );
                     }
                     Screen::RepoView { swarm_idx } => {
@@ -195,7 +208,17 @@ impl App {
                         let idle = self
                             .swarms
                             .get(*swarm_idx)
-                            .map(|s| s.workers.iter().filter(|w| matches!(w.status.state, crate::model::status::AgentState::Idle)).count())
+                            .map(|s| {
+                                s.workers
+                                    .iter()
+                                    .filter(|w| {
+                                        matches!(
+                                            w.status.state,
+                                            crate::model::status::AgentState::Idle
+                                        )
+                                    })
+                                    .count()
+                            })
                             .unwrap_or(0);
                         if let Some(ref mut view) = self.issue_list_view {
                             view.render(f, area, idle);
@@ -322,12 +345,8 @@ impl App {
 
         match &self.screen.clone() {
             Screen::ReposList => self.handle_repos_list_key(key).await?,
-            Screen::NewSwarm { field } => {
-                self.handle_new_swarm_key(key, field.clone()).await?
-            }
-            Screen::RepoView { swarm_idx } => {
-                self.handle_repo_view_key(key, *swarm_idx).await?
-            }
+            Screen::NewSwarm { field } => self.handle_new_swarm_key(key, field.clone()).await?,
+            Screen::RepoView { swarm_idx } => self.handle_repo_view_key(key, *swarm_idx).await?,
             Screen::AgentView {
                 swarm_idx,
                 agent_id,
@@ -338,9 +357,7 @@ impl App {
             Screen::IssueDetail { swarm_idx } => {
                 self.handle_issue_detail_key(key, *swarm_idx).await?
             }
-            Screen::IssueList { swarm_idx } => {
-                self.handle_issue_list_key(key, *swarm_idx).await?
-            }
+            Screen::IssueList { swarm_idx } => self.handle_issue_list_key(key, *swarm_idx).await?,
         }
 
         Ok(())
@@ -357,6 +374,9 @@ impl App {
     async fn select_repo_row(&mut self, idx: usize) -> Result<()> {
         if idx < self.swarms.len() {
             // Active swarm — jump to repo view
+            if let Some(swarm) = self.swarms.get(idx) {
+                self.repos_list.clear_issue_delta(&swarm.project_name);
+            }
             self.repo_view = RepoView::new();
             self.screen = Screen::RepoView { swarm_idx: idx };
         } else {
@@ -407,6 +427,7 @@ impl App {
                     self.swarms = swarms;
                     self.scan_available_repos();
                     self.refresh_statuses();
+                    self.refresh_issue_count_deltas().await;
                     self.start_all_pane_watchers();
 
                     let total = self.repos_list_len();
@@ -558,12 +579,10 @@ impl App {
                             let idx = self.swarms.len() - 1;
                             self.repo_view = RepoView::new();
                             self.screen = Screen::RepoView { swarm_idx: idx };
-                            self.status_message =
-                                Some(format!("Launched swarm for {project}"));
+                            self.status_message = Some(format!("Launched swarm for {project}"));
                         }
                         Err(e) => {
-                            self.status_message =
-                                Some(format!("Failed to launch: {e}"));
+                            self.status_message = Some(format!("Failed to launch: {e}"));
                             self.screen = Screen::ReposList;
                         }
                     }
@@ -666,8 +685,7 @@ impl App {
                                     Some(format!("Added {id} (running {worker_cmd})"));
                             }
                             Err(e) => {
-                                self.status_message =
-                                    Some(format!("Failed to add worker: {e}"));
+                                self.status_message = Some(format!("Failed to add worker: {e}"));
                             }
                         }
                     }
@@ -739,8 +757,7 @@ impl App {
                                 if let Err(e) = proxy::kill_pane(&target).await {
                                     tracing::error!("Failed to kill pane for {id}: {e}");
                                 }
-                                self.status_message =
-                                    Some(format!("Shutting down {id}..."));
+                                self.status_message = Some(format!("Shutting down {id}..."));
                             }
                         }
                     }
@@ -931,9 +948,8 @@ impl App {
                             self.status_message = Some(format!("Copied {text} to clipboard"));
                         }
                         Err(_) => {
-                            self.status_message = Some(format!(
-                                "Clipboard unavailable; could not copy {text}"
-                            ));
+                            self.status_message =
+                                Some(format!("Clipboard unavailable; could not copy {text}"));
                         }
                     }
                 }
@@ -979,11 +995,7 @@ impl App {
                 let has_proposal = self
                     .issue_detail_view
                     .as_ref()
-                    .map(|v| {
-                        v.labels
-                            .iter()
-                            .any(|l| l.eq_ignore_ascii_case("proposal"))
-                    })
+                    .map(|v| v.labels.iter().any(|l| l.eq_ignore_ascii_case("proposal")))
                     .unwrap_or(false);
 
                 if let Some(issue_num) = issue_num {
@@ -996,17 +1008,14 @@ impl App {
                     match github::remove_issue_label(issue_num, "proposal").await {
                         Ok(()) => {
                             if let Some(ref mut view) = self.issue_detail_view {
-                                view.labels
-                                    .retain(|l| !l.eq_ignore_ascii_case("proposal"));
+                                view.labels.retain(|l| !l.eq_ignore_ascii_case("proposal"));
                             }
-                            self.status_message = Some(format!(
-                                "Approved #{issue_num} (removed proposal label)"
-                            ));
+                            self.status_message =
+                                Some(format!("Approved #{issue_num} (removed proposal label)"));
                         }
                         Err(e) => {
-                            self.status_message = Some(format!(
-                                "Failed to approve #{issue_num}: {e}"
-                            ));
+                            self.status_message =
+                                Some(format!("Failed to approve #{issue_num}: {e}"));
                         }
                     }
                 }
@@ -1079,9 +1088,8 @@ impl App {
                         });
                         match idle_worker {
                             Some(worker) => {
-                                let dispatch_path = worker
-                                    .worktree_path
-                                    .join(".codex/loops/fix-loop.dispatch");
+                                let dispatch_path =
+                                    worker.worktree_path.join(".codex/loops/fix-loop.dispatch");
                                 let worker_id = worker.id.clone();
                                 if let Some(parent) = dispatch_path.parent() {
                                     let _ = std::fs::create_dir_all(parent);
@@ -1089,9 +1097,8 @@ impl App {
                                 match std::fs::write(&dispatch_path, num.to_string()) {
                                     Ok(_) => {
                                         if let Some(ref mut view) = self.issue_list_view {
-                                            view.status_msg = Some(format!(
-                                                " Dispatched #{num} to {worker_id}"
-                                            ));
+                                            view.status_msg =
+                                                Some(format!(" Dispatched #{num} to {worker_id}"));
                                         }
                                     }
                                     Err(e) => {
@@ -1134,14 +1141,10 @@ impl App {
                     match github::remove_issue_label(issue_num, "proposal").await {
                         Ok(()) => {
                             if let Some(ref mut view) = self.issue_list_view {
-                                if let Some(issue) = view
-                                    .issues
-                                    .iter_mut()
-                                    .find(|i| i.number == issue_num)
+                                if let Some(issue) =
+                                    view.issues.iter_mut().find(|i| i.number == issue_num)
                                 {
-                                    issue
-                                        .labels
-                                        .retain(|l| !l.eq_ignore_ascii_case("proposal"));
+                                    issue.labels.retain(|l| !l.eq_ignore_ascii_case("proposal"));
                                 }
                                 view.status_msg = Some(format!(
                                     " Approved #{issue_num} (removed proposal label)"
@@ -1150,9 +1153,8 @@ impl App {
                         }
                         Err(e) => {
                             if let Some(ref mut view) = self.issue_list_view {
-                                view.status_msg = Some(format!(
-                                    " Approve failed for #{issue_num}: {e}"
-                                ));
+                                view.status_msg =
+                                    Some(format!(" Approve failed for #{issue_num}: {e}"));
                             }
                         }
                     }
@@ -1180,6 +1182,23 @@ impl App {
         }
     }
 
+    async fn refresh_issue_count_deltas(&mut self) {
+        for swarm in &self.swarms {
+            match github::count_open_issues(&swarm.repo_path, 200).await {
+                Ok(count) => {
+                    self.repos_list
+                        .update_issue_count(&swarm.project_name, count);
+                }
+                Err(e) => {
+                    tracing::debug!(
+                        "Skipping issue count update for {}: {e}",
+                        swarm.project_name
+                    );
+                }
+            }
+        }
+    }
+
     /// Open an issue detail view by fetching issue data from GitHub.
     async fn open_issue_detail(&mut self, issue_number: u32, swarm_idx: usize) {
         match github::fetch_issue_detail(issue_number).await {
@@ -1194,8 +1213,7 @@ impl App {
                 self.screen = Screen::IssueDetail { swarm_idx };
             }
             _ => {
-                self.status_message =
-                    Some(format!("Failed to fetch issue #{issue_number}"));
+                self.status_message = Some(format!("Failed to fetch issue #{issue_number}"));
             }
         }
     }
@@ -1290,8 +1308,7 @@ impl App {
     fn refresh_statuses(&mut self) {
         for swarm in &mut self.swarms {
             // Refresh all agents (manager + workers)
-            let agents = std::iter::once(&mut swarm.manager)
-                .chain(swarm.workers.iter_mut());
+            let agents = std::iter::once(&mut swarm.manager).chain(swarm.workers.iter_mut());
 
             for agent in agents {
                 // Try status file first
@@ -1333,11 +1350,13 @@ impl App {
                             // Only update if the worker doesn't already have issue info
                             if let crate::model::status::AgentState::Working { issue: None }
                             | crate::model::status::AgentState::Idle
-                            | crate::model::status::AgentState::Unknown(_) =
-                                &worker.status.state
+                            | crate::model::status::AgentState::Unknown(_) = &worker.status.state
                             {
                                 let lower = status_text.to_lowercase();
-                                if lower.contains("dispatched") || lower.contains("working") || lower.contains("active") {
+                                if lower.contains("dispatched")
+                                    || lower.contains("working")
+                                    || lower.contains("active")
+                                {
                                     worker.status.state =
                                         crate::model::status::AgentState::Working {
                                             issue: *issue_num,
@@ -1360,8 +1379,11 @@ impl App {
         if let Ok(cwd) = std::env::current_dir() {
             // Check if cwd itself is a git repo
             if cwd.join(".git").exists() {
-                let active_names: Vec<&str> =
-                    self.swarms.iter().map(|s| s.project_name.as_str()).collect();
+                let active_names: Vec<&str> = self
+                    .swarms
+                    .iter()
+                    .map(|s| s.project_name.as_str())
+                    .collect();
                 let name = cwd
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
@@ -1490,11 +1512,7 @@ fn infer_status_from_pane(content: &str) -> crate::model::status::AgentStatus {
         })
         .0;
 
-    let last_lines: Vec<&str> = stripped
-        .lines()
-        .rev()
-        .take(15)
-        .collect();
+    let last_lines: Vec<&str> = stripped.lines().rev().take(15).collect();
 
     let tail = last_lines.join(" ").to_lowercase();
 
@@ -1540,7 +1558,10 @@ fn parse_monitor_workers_output(content: &str) -> Vec<(String, Option<u32>, Stri
     for line in content.lines() {
         let trimmed = line.trim();
         // Match table rows like: | wt-2 | 2.0 | **dispatched** | #100 (P2 issue detail) |
-        if !trimmed.starts_with('|') || trimmed.starts_with("| Worker") || trimmed.starts_with("|--") {
+        if !trimmed.starts_with('|')
+            || trimmed.starts_with("| Worker")
+            || trimmed.starts_with("|--")
+        {
             continue;
         }
 
@@ -1562,7 +1583,12 @@ fn parse_monitor_workers_output(content: &str) -> Vec<(String, Option<u32>, Stri
             let issue_num = issue_cell
                 .split_whitespace()
                 .find(|w| w.starts_with('#'))
-                .and_then(|w| w.trim_start_matches('#').trim_end_matches(|c: char| !c.is_ascii_digit()).parse::<u32>().ok());
+                .and_then(|w| {
+                    w.trim_start_matches('#')
+                        .trim_end_matches(|c: char| !c.is_ascii_digit())
+                        .parse::<u32>()
+                        .ok()
+                });
 
             // Clean status text (remove ** markdown bold markers)
             let status = status_cell.replace("**", "");
@@ -1592,7 +1618,8 @@ fn issue_from_git_branch(worktree_path: &std::path::Path) -> Option<u32> {
 
     let branch = head_content.trim().strip_prefix("ref: refs/heads/")?;
     // Match "fix/issue-N-auto" or "enhancement/issue-N-auto"
-    let after_issue = branch.strip_prefix("fix/issue-")
+    let after_issue = branch
+        .strip_prefix("fix/issue-")
         .or_else(|| branch.strip_prefix("enhancement/issue-"))?;
     let num_str = after_issue.split('-').next()?;
     num_str.parse::<u32>().ok()
@@ -1602,7 +1629,10 @@ fn issue_from_git_branch(worktree_path: &std::path::Path) -> Option<u32> {
 fn extract_issue_from_text(text: &str) -> Option<u32> {
     for word in text.split_whitespace() {
         if let Some(stripped) = word.strip_prefix('#') {
-            if let Ok(n) = stripped.trim_end_matches(|c: char| !c.is_ascii_digit()).parse::<u32>() {
+            if let Ok(n) = stripped
+                .trim_end_matches(|c: char| !c.is_ascii_digit())
+                .parse::<u32>()
+            {
                 if n > 0 && n < 100000 {
                     return Some(n);
                 }

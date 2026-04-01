@@ -1,24 +1,47 @@
-use std::path::PathBuf;
 use ratatui::{
+    Frame,
     layout::{Constraint, Layout, Rect},
     style::Style,
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
-    Frame,
 };
+use std::collections::HashMap;
+use std::path::PathBuf;
 
-use crate::model::swarm::Swarm;
 use super::theme;
+use crate::model::swarm::Swarm;
 
 pub struct ReposListView {
     pub table_state: TableState,
+    issue_count_deltas: HashMap<String, usize>,
+    issue_counts: HashMap<String, usize>,
 }
 
 impl ReposListView {
     pub fn new() -> Self {
         let mut table_state = TableState::default();
         table_state.select(Some(0));
-        Self { table_state }
+        Self {
+            table_state,
+            issue_count_deltas: HashMap::new(),
+            issue_counts: HashMap::new(),
+        }
+    }
+
+    pub fn update_issue_count(&mut self, repo_key: &str, new_count: usize) {
+        if let Some(prev) = self.issue_counts.get(repo_key).copied() {
+            if new_count > prev {
+                self.issue_count_deltas
+                    .insert(repo_key.to_string(), new_count - prev);
+            } else {
+                self.issue_count_deltas.remove(repo_key);
+            }
+        }
+        self.issue_counts.insert(repo_key.to_string(), new_count);
+    }
+
+    pub fn clear_issue_delta(&mut self, repo_key: &str) {
+        self.issue_count_deltas.remove(repo_key);
     }
 
     pub fn render(
@@ -86,6 +109,24 @@ impl ReposListView {
                 let busy = s.busy_count();
                 let total = s.workers.len();
                 let attention = s.attention_count();
+                let mut attention_spans = vec![Span::styled(
+                    if attention > 0 {
+                        format!("{attention} items")
+                    } else {
+                        "—".to_string()
+                    },
+                    if attention > 0 {
+                        theme::attention_style()
+                    } else {
+                        theme::help_style()
+                    },
+                )];
+                if let Some(delta) = self.issue_count_deltas.get(&s.project_name) {
+                    if *delta > 0 {
+                        attention_spans
+                            .push(Span::styled(format!(" +{delta}"), theme::attention_style()));
+                    }
+                }
                 rows.push(Row::new(vec![
                     Cell::from(format!("{row_num}")).style(theme::title_style()),
                     Cell::from(s.project_name.clone()),
@@ -98,16 +139,7 @@ impl ReposListView {
                     ),
                     Cell::from(s.agent_type.to_string()),
                     Cell::from(format!("{busy}/{total} busy")),
-                    Cell::from(if attention > 0 {
-                        format!("{attention} items")
-                    } else {
-                        "—".to_string()
-                    })
-                    .style(if attention > 0 {
-                        theme::attention_style()
-                    } else {
-                        theme::help_style()
-                    }),
+                    Cell::from(Line::from(attention_spans)),
                 ]));
                 row_num += 1;
             }
@@ -196,5 +228,35 @@ impl ReposListView {
 
     pub fn selected(&self) -> Option<usize> {
         self.table_state.selected()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ReposListView;
+
+    #[test]
+    fn issue_delta_only_tracks_increases() {
+        let mut view = ReposListView::new();
+
+        view.update_issue_count("repo-a", 3);
+        assert_eq!(view.issue_count_deltas.get("repo-a"), None);
+
+        view.update_issue_count("repo-a", 5);
+        assert_eq!(view.issue_count_deltas.get("repo-a"), Some(&2));
+
+        view.update_issue_count("repo-a", 4);
+        assert_eq!(view.issue_count_deltas.get("repo-a"), None);
+    }
+
+    #[test]
+    fn clear_issue_delta_removes_indicator() {
+        let mut view = ReposListView::new();
+        view.update_issue_count("repo-a", 1);
+        view.update_issue_count("repo-a", 2);
+        assert_eq!(view.issue_count_deltas.get("repo-a"), Some(&1));
+
+        view.clear_issue_delta("repo-a");
+        assert_eq!(view.issue_count_deltas.get("repo-a"), None);
     }
 }
