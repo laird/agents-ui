@@ -609,6 +609,10 @@ impl App {
                     self.start_all_pane_watchers();
                     self.start_all_issue_watchers();
                     self.scan_available_repos();
+                    for idx in 0..self.swarms.len() {
+                        self.start_issue_refresh(idx);
+                    }
+                    self.status_message = Some(format!("Found {} swarm(s)", self.swarms.len()));
 
                     // Re-point the screen to the same project after re-discovery
                     if let Some(project) = current_project {
@@ -1466,13 +1470,9 @@ impl App {
                 };
             }
             KeyCode::Char('r') => {
-                // Refresh: re-discover swarms
-                self.status_message = Some("Refreshing...".to_string());
-                if let Ok(swarms) = self.adapter.discover(&self.agents_dir).await {
-                    self.swarms = swarms;
-                    self.start_all_pane_watchers();
-                    self.status_message = Some(format!("Found {} swarm(s)", self.swarms.len()));
-                }
+                // Refresh: re-discover swarms and list data
+                self.status_message = Some("Refreshing repos...".to_string());
+                let _ = self.events.tx().send(Event::SwarmDiscovered);
             }
             KeyCode::Char('d') => {
                 // Tear down the selected swarm (with confirmation)
@@ -1952,6 +1952,11 @@ impl App {
                             }
                         }
                     }
+                    KeyCode::Char('r') => {
+                        // Refresh worker list/status by re-discovering swarms
+                        self.status_message = Some("Refreshing workers...".to_string());
+                        let _ = self.events.tx().send(Event::SwarmDiscovered);
+                    }
                     _ => {}
                 }
             }
@@ -1985,6 +1990,11 @@ impl App {
                         self.send_issue_command_to_manager(swarm_idx, "brainstorm").await?;
                     }
                     KeyCode::Char('r') => {
+                        // Refresh issue list/status for this repo
+                        self.start_issue_refresh(swarm_idx);
+                        self.status_message = Some("Refreshing issues...".to_string());
+                    }
+                    KeyCode::Char('R') => {
                         // Review-blocked in selected runtime (only if manager is idle)
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
                             let manager_idle = matches!(

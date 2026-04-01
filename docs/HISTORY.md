@@ -68,3 +68,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Pane/session widths now consistently track the active terminal width for new, discovered, and live sessions.
 
+
+---
+
+## 2026-04-01 12:57:08 - Fix #241 manual refresh hotkeys
+
+**What Changed**: Bound r to refresh repos list, workers list, and issues list; moved review-blocked to uppercase R in issues pane; updated swarm help text.
+
+**Why Changed**: Issue #241 requested lightweight manual refresh from each pane without navigation.
+
+**Impact**: Users can refresh the active list/status in place, improving responsiveness during triage and swarm monitoring.
+
