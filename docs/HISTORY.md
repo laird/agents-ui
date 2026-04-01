@@ -35,3 +35,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Idle-worker auto-dispatch now invokes the correct command per runtime, restoring monitor-workers workflow reliability.
 
+
+---
+
+## 2026-04-01 12:36:49 - Fix #238 approve key removes proposal label
+
+**What Changed**: Added p-key handlers in Issue List and Issue Detail to call gh issue edit --remove-label proposal, update local label state, and show status/help text for approval action.
+
+**Why Changed**: Issue #238 reported that approving with p did not work; approval should remove the proposal label.
+
+**Impact**: Users can now approve proposal issues directly from the TUI, with immediate feedback and updated labels.
+
