@@ -57,3 +57,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: atui now detects incomplete runtime installs earlier and prompts installer fallback, improving manager monitor-workers reliability across Codex/Droid runtimes.
 
+
+---
+
+## 2026-04-01 12:36:47 - Fix #238 approve action removes proposal label
+
+**What Changed**: Updated the Issues-panel 'p' action in src/app.rs to execute gh issue edit <issue> --remove-label proposal directly and refresh issue data on success.
+
+**Why Changed**: The previous implementation sent a runtime text command ('approve <issue>') that did not reliably remove the proposal label.
+
+**Impact**: Pressing p now performs approval consistently across runtimes and gives clear success/failure status in the UI.
+
