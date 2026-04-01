@@ -109,6 +109,11 @@ impl ClaudeAdapter {
             }
         }
 
+        // Resize the tmux session to match the current terminal size.
+        if let Err(e) = session::resize_session_to_terminal(&session_name).await {
+            progress(&format!("⚠️  Failed to resize session {session_name}: {e}\n"));
+        }
+
         progress("\n🎉 Swarm launched!\n");
 
         let swarm = self
@@ -1092,6 +1097,11 @@ impl AgentRuntime for ClaudeAdapter {
         }
 
         let tmux_target = format!("{session_name}:{window_name}.0");
+
+        // Keep new worker windows aligned with the current terminal dimensions.
+        if let Err(e) = session::resize_session_to_terminal(session_name).await {
+            tracing::warn!("Failed to resize session {session_name}: {e}");
+        }
 
         self.launch_agent_in_pane(&tmux_target, session_name, &swarm.agent_type)
             .await?;

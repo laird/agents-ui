@@ -90,3 +90,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Worker state now converges to idle/shell more reliably, clearing stale dispatch assignments and improving automatic recovery visibility.
 
+
+---
+
+## 2026-04-01 12:55:36 - Fix #246 tmux width sync
+
+**What Changed**: Added tmux session resize calls in launch_with_progress and add_worker in src/adapter/claude.rs.
+
+**Why Changed**: Issue #246 reported wrapped lines when session/window widths stayed at stale defaults during launch/manage flows.
+
+**Impact**: New swarms and newly added worker windows now proactively resize to current terminal dimensions, improving pane readability.
+
