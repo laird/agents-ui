@@ -46,3 +46,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Operators can detect stalled workers faster and recover without waiting for manual deep inspection.
 
+
+---
+
+## 2026-04-01 12:53:33 - Fix #246 tmux session width sync
+
+**What Changed**: Updated Claude adapter to resize tmux session windows to current terminal dimensions when connecting to sessions, with terminal-size parsing safeguards and tests.
+
+**Why Changed**: tmux sessions launched without an attached client were defaulting to narrow widths and wrapping output.
+
+**Impact**: Agent and manager panes now align with terminal width during launch/discovery, improving readability in monitoring views.
+

@@ -55,6 +55,94 @@ impl ClaudeAdapter {
             .collect()
     }
 
+    fn parse_terminal_size(columns: Option<&str>, lines: Option<&str>) -> Option<(u16, u16)> {
+        let columns = columns?.trim().parse::<u16>().ok()?;
+        let lines = lines?.trim().parse::<u16>().ok()?;
+        (columns > 0 && lines > 0).then_some((columns, lines))
+    }
+
+    fn terminal_size() -> Option<(u16, u16)> {
+        crossterm::terminal::size().ok().or_else(|| {
+            let columns = std::env::var("COLUMNS").ok();
+            let lines = std::env::var("LINES").ok();
+            Self::parse_terminal_size(columns.as_deref(), lines.as_deref())
+        })
+    }
+
+    async fn sync_tmux_session_size(session_name: &str) {
+        let Some((columns, lines)) = Self::terminal_size() else {
+            return;
+        };
+
+        if let Err(e) = Self::resize_tmux_session_windows(session_name, columns, lines).await {
+            tracing::warn!(
+                "Failed to sync tmux session size for {session_name} to {columns}x{lines}: {e}"
+            );
+        }
+    }
+
+    async fn resize_tmux_session_windows(
+        session_name: &str,
+        columns: u16,
+        lines: u16,
+    ) -> Result<()> {
+        let list_windows_output = Command::new("tmux")
+            .args(["list-windows", "-t", session_name, "-F", "#{window_index}"])
+            .output()
+            .await
+            .context("Failed to list tmux windows for resize")?;
+
+        if !list_windows_output.status.success() {
+            anyhow::bail!(
+                "tmux list-windows failed while resizing session {}: {}",
+                session_name,
+                String::from_utf8_lossy(&list_windows_output.stderr)
+            );
+        }
+
+        let columns = columns.to_string();
+        let lines = lines.to_string();
+        let stdout = String::from_utf8_lossy(&list_windows_output.stdout);
+
+        for window_index in stdout
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+        {
+            let target = format!("{session_name}:{window_index}");
+            let resize_output = Command::new("tmux")
+                .args(["resize-window", "-t", &target, "-x", &columns, "-y", &lines])
+                .output()
+                .await
+                .with_context(|| format!("Failed to resize tmux window {target}"))?;
+
+            if !resize_output.status.success() {
+                tracing::warn!(
+                    "tmux resize-window failed for {}: {}",
+                    target,
+                    String::from_utf8_lossy(&resize_output.stderr)
+                );
+            }
+        }
+
+        let agents_window = format!("{session_name}:0");
+        match Command::new("tmux")
+            .args(["select-layout", "-t", &agents_window, "even-horizontal"])
+            .output()
+            .await
+        {
+            Ok(output) if !output.status.success() => tracing::debug!(
+                "tmux select-layout failed for {}: {}",
+                agents_window,
+                String::from_utf8_lossy(&output.stderr)
+            ),
+            Err(e) => tracing::debug!("Failed to rebalance tmux layout for {agents_window}: {e}"),
+            _ => {}
+        }
+
+        Ok(())
+    }
+
     /// Ensure runtime-specific skill files are present for the repo and any existing worktrees.
     fn ensure_runtime_skills_for_launch(config: &SwarmConfig) -> Result<()> {
         crate::scripts::launcher::ensure_runtime_skills(
@@ -82,6 +170,8 @@ impl ClaudeAdapter {
         repo_path: PathBuf,
         agent_type: AgentType,
     ) -> Result<Swarm> {
+        Self::sync_tmux_session_size(session_name).await;
+
         let project_name = Self::project_name(&repo_path);
         let session_info = session::list_panes(session_name).await?;
 
@@ -378,5 +468,30 @@ mod tests {
 
         let parsed = ClaudeAdapter::parse_session_name("codex-myproj");
         assert!(matches!(parsed, Some((AgentType::Codex, ref p)) if p == "myproj"));
+    }
+
+    #[test]
+    fn parse_terminal_size_accepts_positive_values() {
+        assert_eq!(
+            ClaudeAdapter::parse_terminal_size(Some("120"), Some("40")),
+            Some((120, 40))
+        );
+    }
+
+    #[test]
+    fn parse_terminal_size_rejects_invalid_values() {
+        assert_eq!(
+            ClaudeAdapter::parse_terminal_size(Some("0"), Some("40")),
+            None
+        );
+        assert_eq!(
+            ClaudeAdapter::parse_terminal_size(Some("80"), Some("0")),
+            None
+        );
+        assert_eq!(
+            ClaudeAdapter::parse_terminal_size(Some("abc"), Some("40")),
+            None
+        );
+        assert_eq!(ClaudeAdapter::parse_terminal_size(Some("80"), None), None);
     }
 }
