@@ -350,6 +350,14 @@ impl ClaudeAdapter {
                 for reading worker screens and dispatching work. Do NOT use cmux. \
                 The tmux session is named {session_name}.'"
             ),
+            AgentType::Codex => {
+                let script = if target.contains(":review.") {
+                    "codex-manage-workers-loop.sh"
+                } else {
+                    "codex-fix-loop.sh"
+                };
+                codex_supervisor_script_cmd(script)
+            }
             _ => runtime.launch_cmd().to_string(),
         };
         proxy::send_keys(&self.transport, target, &cmd).await
@@ -405,6 +413,21 @@ impl ClaudeAdapter {
                 }
             }
             PaneState::AgentIdle => {
+                if matches!(runtime, AgentType::Codex) {
+                    if self.codex_agent_needs_relaunch(agent, &content).await {
+                        tracing::info!(
+                            "Codex pane {} drifted to interactive idle without healthy supervisor state; relaunching loop wrapper",
+                            agent.tmux_target
+                        );
+                        self.restart_codex_supervisor(agent, session_name).await?;
+                    } else {
+                        tracing::info!(
+                            "Codex pane {} appears healthy under loop supervision",
+                            agent.tmux_target
+                        );
+                    }
+                    return Ok(());
+                }
                 if let Some(cmd) = self.bootstrap_command(runtime, agent).await {
                     tracing::info!("Agent {} is idle, sending bootstrap: {}", agent.id, cmd);
                     proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
@@ -446,6 +469,21 @@ impl ClaudeAdapter {
                         }
                     }
                     PaneState::AgentIdle => {
+                        if matches!(runtime, AgentType::Codex) {
+                            if self.codex_agent_needs_relaunch(agent, &probed).await {
+                                tracing::info!(
+                                    "Probe: Codex pane {} drifted to interactive idle; relaunching loop wrapper",
+                                    agent.tmux_target
+                                );
+                                self.restart_codex_supervisor(agent, session_name).await?;
+                            } else {
+                                tracing::info!(
+                                    "Probe: Codex pane {} appears healthy under loop supervision",
+                                    agent.tmux_target
+                                );
+                            }
+                            return Ok(());
+                        }
                         if let Some(cmd) = self.bootstrap_command(runtime, agent).await {
                             tracing::info!("Probe: agent {} is idle, sending bootstrap: {}", agent.id, cmd);
                             proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
@@ -458,6 +496,50 @@ impl ClaudeAdapter {
             }
         }
         Ok(())
+    }
+
+    async fn codex_agent_needs_relaunch(&self, agent: &AgentInfo, pane_content: &str) -> bool {
+        let lower = pane_content.to_lowercase();
+        if agent.is_manager {
+            return !(lower.contains("starting codex monitor loop")
+                || lower.contains("codex worker monitor")
+                || lower.contains("codex monitor loop"));
+        }
+
+        let status_file = agent
+            .worktree_path
+            .join(AgentType::Codex.status_dir())
+            .join("fix-loop.status");
+        if self.transport.path_exists(&status_file).await {
+            return false;
+        }
+
+        !(lower.contains("starting codex fix loop")
+            || lower.contains("codex_fix_loop_idle")
+            || lower.contains("targeted issue pass complete"))
+    }
+
+    async fn restart_codex_supervisor(
+        &self,
+        agent: &AgentInfo,
+        session_name: &str,
+    ) -> Result<()> {
+        self.transport
+            .output(
+                "tmux",
+                &[
+                    "send-keys".to_string(),
+                    "-t".to_string(),
+                    agent.tmux_target.clone(),
+                    "C-c".to_string(),
+                ],
+                None,
+            )
+            .await
+            .ok();
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        self.launch_agent_in_pane(&agent.tmux_target, session_name, &AgentType::Codex)
+            .await
     }
 
     /// Poll a tmux pane until Claude's prompt indicator appears, or timeout.
@@ -968,7 +1050,8 @@ impl AgentRuntime for ClaudeAdapter {
 
         let tmux_target = format!("{session_name}:{window_name}.0");
 
-        proxy::send_keys(&self.transport, &tmux_target, swarm.agent_type.launch_cmd()).await?;
+        self.launch_agent_in_pane(&tmux_target, session_name, &swarm.agent_type)
+            .await?;
 
         let role = format!("worker-{next_num}");
         Ok(AgentInfo {
@@ -1335,10 +1418,6 @@ fn classify_pane_state(content: &str) -> PaneState {
             || lower.contains("permissions on")
             || lower.contains("permissions off")
             || lower.contains("gpt-")
-            || lower.contains("codex")
-            || lower.contains("claude")
-            || lower.contains("gemini")
-            || lower.contains("droid")
             || lower.starts_with('\u{23f5}') // ⏵ (Claude/Codex status bar)
         {
             saw_agent_indicator = true;
@@ -1423,7 +1502,7 @@ fn manager_bootstrap_cmd(runtime: &AgentType) -> Option<String> {
     match runtime {
         AgentType::Claude => Some("/autocoder:monitor-loop".to_string()),
         AgentType::Gemini => Some("/manage-loop".to_string()),
-        AgentType::Codex => Some("/manage-loop".to_string()),
+        AgentType::Codex => None,
         AgentType::Droid => Some("/manage-loop".to_string()),
     }
 }
@@ -1432,9 +1511,7 @@ fn worker_dispatch_cmd(runtime: &AgentType, issue_number: u32) -> Option<String>
     match runtime {
         AgentType::Claude => Some(format!("/autocoder:fix {issue_number}")),
         AgentType::Gemini => Some(format!("/fix {issue_number}")),
-        AgentType::Codex => Some(format!(
-            "Use the repository's Codex autocoder workflow to work issue #{issue_number} specifically. Start by reading AGENTS.md, skills/autocoder/SKILL.md, skills/autocoder/references/workflow-map.md, and skills/autocoder/references/command-mapping.md. Translate the legacy /fix behavior into direct Codex actions. Do one issue-focused pass, run relevant tests, and summarize the outcome."
-        )),
+        AgentType::Codex => None,
         AgentType::Droid => Some(format!("/fix {issue_number}")),
     }
 }
@@ -1445,11 +1522,15 @@ fn generic_worker_bootstrap_cmd(runtime: &AgentType) -> Option<String> {
         return Some(loop_cmd.to_string());
     }
     match runtime {
-        AgentType::Codex => Some(
-            "Use the repository's Codex autocoder workflow to pick the next available issue and work it. Start by reading AGENTS.md, skills/autocoder/SKILL.md, skills/autocoder/references/workflow-map.md, and skills/autocoder/references/command-mapping.md. Choose the highest-priority available issue, do one focused pass, run relevant tests, and summarize the outcome.".to_string(),
-        ),
+        AgentType::Codex => None,
         _ => None,
     }
+}
+
+fn codex_supervisor_script_cmd(script_name: &str) -> String {
+    format!(
+        "for script in ./scripts/{script_name} ../agents/scripts/{script_name} \"$HOME/.claude/plugins/autocoder/scripts/{script_name}\" \"$HOME/.config/claude-code/plugins/autocoder/scripts/{script_name}\" \"$HOME/.codex/scripts/{script_name}\"; do if [ -f \"$script\" ]; then exec bash \"$script\"; fi; done; echo \"❌ Missing {script_name} in expected script locations\""
+    )
 }
 
 impl ClaudeAdapter {
@@ -1619,6 +1700,11 @@ mod tests {
         // Random text that's not a shell prompt or agent indicator
         assert_eq!(classify_pane_state("some random output\n"), PaneState::Unknown);
         assert_eq!(classify_pane_state("building project...\n"), PaneState::Unknown);
+        // Codex shell-loop banners should not be mistaken for an interactive agent prompt.
+        assert_eq!(
+            classify_pane_state("🔄 Starting Codex fix loop\n"),
+            PaneState::Unknown
+        );
     }
 
     #[test]
@@ -1627,6 +1713,7 @@ mod tests {
             worker_dispatch_cmd(&AgentType::Claude, 42),
             Some("/autocoder:fix 42".to_string())
         );
+        assert_eq!(worker_dispatch_cmd(&AgentType::Codex, 42), None);
     }
 
     #[test]
@@ -1635,6 +1722,7 @@ mod tests {
             manager_bootstrap_cmd(&AgentType::Claude),
             Some("/autocoder:monitor-loop".to_string())
         );
+        assert_eq!(manager_bootstrap_cmd(&AgentType::Codex), None);
     }
 
     #[test]
@@ -1647,6 +1735,7 @@ mod tests {
             generic_worker_bootstrap_cmd(&AgentType::Gemini),
             Some("/fix-loop".to_string())
         );
+        assert_eq!(generic_worker_bootstrap_cmd(&AgentType::Codex), None);
         assert_eq!(
             generic_worker_bootstrap_cmd(&AgentType::Droid),
             None
