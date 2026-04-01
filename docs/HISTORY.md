@@ -145,3 +145,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Users can now post GitHub issue comments directly from Issue Detail with Enter/Esc flow and confirmation status messages.
 
+
+---
+
+## 2026-04-01 14:47:43 - Close #235 after validation pass
+
+**What Changed**: Validated the implemented Issue Detail comment-input enhancement with cargo test and closed GitHub issue #235 as resolved.
+
+**Why Changed**: Issue #235 remained open after implementation; this one-pass autocoder run resolves the highest-priority unblocked enhancement item.
+
+**Impact**: The open queue now advances to proposal-only work (#236) with no runtime behavior changes in this commit.
+
