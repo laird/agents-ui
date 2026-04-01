@@ -68,3 +68,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Codex manager/worker sessions now receive executable autocoder prompts (including fix issue commands), improving cross-runtime workflow reliability.
 
+
+---
+
+## 2026-04-01 12:55:20 - Fix #241: add manual refresh keys
+
+**What Changed**: Added manual r refresh in Repo View worker pane, expanded Repos List refresh to re-scan available repos and statuses, and updated Repo View key hints.
+
+**Why Changed**: Issue #241 requested lightweight refresh actions directly from worker/task/repo views without navigation churn.
+
+**Impact**: Users can now refresh repo and worker/task state in-place via r, reducing stale UI state and extra navigation.
+

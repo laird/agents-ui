@@ -401,12 +401,27 @@ impl App {
                 };
             }
             KeyCode::Char('r') => {
-                // Refresh: re-discover swarms
+                // Refresh: re-discover swarms and available repos
                 self.status_message = Some("Refreshing...".to_string());
                 if let Ok(swarms) = self.adapter.discover(&self.agents_dir).await {
                     self.swarms = swarms;
+                    self.scan_available_repos();
+                    self.refresh_statuses();
                     self.start_all_pane_watchers();
-                    self.status_message = Some(format!("Found {} swarm(s)", self.swarms.len()));
+
+                    let total = self.repos_list_len();
+                    if total == 0 {
+                        self.repos_list.table_state.select(None);
+                    } else {
+                        let selected = self.repos_list.selected().unwrap_or(0).min(total - 1);
+                        self.repos_list.table_state.select(Some(selected));
+                    }
+
+                    self.status_message = Some(format!(
+                        "Refreshed {} swarm(s), {} repo(s)",
+                        self.swarms.len(),
+                        self.available_repos.len()
+                    ));
                 }
             }
             KeyCode::Char(c @ '1'..='9') => {
@@ -694,6 +709,19 @@ impl App {
                                 }
                             }
                         }
+                    }
+                }
+                KeyCode::Char('r') => {
+                    // Manual refresh for worker/task status in this repo view
+                    self.refresh_statuses();
+                    if let Some(swarm) = self.swarms.get(swarm_idx) {
+                        self.status_message = Some(format!(
+                            "Refreshed {} ({} worker(s))",
+                            swarm.project_name,
+                            swarm.workers.len()
+                        ));
+                    } else {
+                        self.status_message = Some("Refreshed".to_string());
                     }
                 }
                 KeyCode::Char('L') => {
