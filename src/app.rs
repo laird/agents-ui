@@ -2225,7 +2225,7 @@ impl App {
         match agent_type {
             AgentType::Claude => Some(format!("/autocoder:fix {issue_number}")),
             AgentType::Gemini => Some(format!("/fix {issue_number}")),
-            AgentType::Codex => None,
+            AgentType::Codex => Some(format!("use autocoder to fix {issue_number}")),
             AgentType::Droid => Some(format!("/fix {issue_number}")),
         }
     }
@@ -2234,7 +2234,7 @@ impl App {
         match agent_type {
             AgentType::Claude => Some("/autocoder:review-blocked".to_string()),
             AgentType::Gemini => Some("/review-blocked".to_string()),
-            AgentType::Codex => None,
+            AgentType::Codex => Some("use autocoder to review-blocked".to_string()),
             AgentType::Droid => Some("/review-blocked".to_string()),
         }
     }
@@ -2243,7 +2243,7 @@ impl App {
         match agent_type {
             AgentType::Claude => Some("/autocoder:monitor-workers".to_string()),
             AgentType::Gemini => Some("/monitor-workers".to_string()),
-            AgentType::Codex => None,
+            AgentType::Codex => Some("use autocoder to monitor-workers".to_string()),
             AgentType::Droid => Some("/monitor-workers".to_string()),
         }
     }

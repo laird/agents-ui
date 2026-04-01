@@ -1511,7 +1511,7 @@ fn worker_dispatch_cmd(runtime: &AgentType, issue_number: u32) -> Option<String>
     match runtime {
         AgentType::Claude => Some(format!("/autocoder:fix {issue_number}")),
         AgentType::Gemini => Some(format!("/fix {issue_number}")),
-        AgentType::Codex => None,
+        AgentType::Codex => Some(format!("use autocoder to fix {issue_number}")),
         AgentType::Droid => Some(format!("/fix {issue_number}")),
     }
 }
@@ -1713,7 +1713,10 @@ mod tests {
             worker_dispatch_cmd(&AgentType::Claude, 42),
             Some("/autocoder:fix 42".to_string())
         );
-        assert_eq!(worker_dispatch_cmd(&AgentType::Codex, 42), None);
+        assert_eq!(
+            worker_dispatch_cmd(&AgentType::Codex, 42),
+            Some("use autocoder to fix 42".to_string())
+        );
     }
 
     #[test]

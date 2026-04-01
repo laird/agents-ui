@@ -46,3 +46,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Pressing 'p' now performs approval in-app with clear success/failure status messaging.
 
+
+---
+
+## 2026-04-01 12:42:46 - Fix #240 codex command phrases
+
+**What Changed**: Updated Codex command strings for issue dispatch, monitor-workers, and review-blocked flows to use plain-language autocoder prompts; aligned adapter tests.
+
+**Why Changed**: Codex sessions do not reliably support slash commands used by other runtimes.
+
+**Impact**: Codex-targeted commands now execute with runtime-compatible phrasing and dispatch behavior is validated by unit tests.
+
