@@ -3,6 +3,7 @@ mod config;
 mod event;
 mod github;
 mod model;
+mod project_management;
 mod scripts;
 mod tmux;
 mod tui;
@@ -92,6 +93,7 @@ fn select_initial_agent_type(
 async fn validate_startup_requirements(
     transport: &ServerTransport,
     agent_type: Option<&AgentType>,
+    repo_path: &Path,
 ) -> Result<Option<String>> {
     let location = transport.server().unwrap_or("this machine");
 
@@ -121,9 +123,9 @@ async fn validate_startup_requirements(
         }
     }
 
-    // Non-fatal: check gh CLI auth status
-    if let Some(gh_err) = crate::github::check_gh_auth(transport).await {
-        let warning = gh_err.to_string();
+    // Non-fatal: check project-management auth status (GitHub by default)
+    if let Some(pm_err) = crate::project_management::check_auth(transport, repo_path).await {
+        let warning = pm_err.to_string();
         // Log but don't bail — gh is optional for basic operation
         eprintln!("Warning: {warning}");
         return Ok(Some(warning));
@@ -143,7 +145,15 @@ async fn main() -> Result<()> {
         .and_then(crate::config::persistence::find_repo_root);
 
     let initial_agent_type = select_initial_agent_type(cli.agent_type.clone(), repo_root.as_deref())?;
-    let startup_warning = validate_startup_requirements(&transport, initial_agent_type.as_ref()).await?;
+    let startup_warning = validate_startup_requirements(
+        &transport,
+        initial_agent_type.as_ref(),
+        repo_root
+            .as_deref()
+            .or(cwd.as_deref())
+            .unwrap_or_else(|| Path::new(".")),
+    )
+    .await?;
 
     // Initialize logging to file (not stdout, since we own the terminal)
     tracing_subscriber::fmt()

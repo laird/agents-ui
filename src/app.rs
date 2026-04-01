@@ -2767,9 +2767,10 @@ impl App {
     fn start_issue_refresh(&self, swarm_idx: usize) {
         if let Some(swarm) = self.swarms.get(swarm_idx) {
             let repo_path = swarm.repo_path.clone();
+            let transport = self.transport.clone();
             let tx = self.events.tx();
             tokio::spawn(async move {
-                match crate::model::issue::fetch_issues(&repo_path).await {
+                match crate::project_management::fetch_issues(&transport, &repo_path).await {
                     Ok(issues) => {
                         let _ = tx.send(Event::IssuesRefreshed { swarm_idx, issues });
                     }
@@ -3135,7 +3136,7 @@ impl App {
         }
         let tx = self.events.tx();
         for swarm in &self.swarms {
-            let handle = crate::github::spawn_issue_fetcher(
+            let handle = crate::project_management::spawn_issue_fetcher(
                 self.transport.clone(),
                 swarm.repo_path.clone(),
                 swarm.project_name.clone(),

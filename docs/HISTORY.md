@@ -79,3 +79,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Users can refresh the active list/status in place, improving responsiveness during triage and swarm monitoring.
 
+
+---
+
+## 2026-04-01 13:07:51 - Fix #245: add project-management backend abstraction
+
+**What Changed**: Added src/project_management.rs with GitHub/Linear/Jira issue adapters, backend resolution via .agents-ui.toml/env, and wired app/main issue fetch/auth through the new wrapper.
+
+**Why Changed**: Enable non-GitHub project-management backends without changing existing GitHub-first runtime behavior.
+
+**Impact**: Issue polling/auth now support Linear and Jira credentials while default GitHub workflow remains intact.
+
