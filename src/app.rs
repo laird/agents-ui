@@ -54,10 +54,12 @@ pub struct App {
     pub new_swarm_repo: String,
     /// Status message shown at bottom of repos list.
     pub status_message: Option<String>,
+    /// Runtime selected from CLI flags for new swarm launches.
+    pub default_agent_type: AgentType,
 }
 
 impl App {
-    pub async fn new() -> Result<Self> {
+    pub async fn new(default_agent_type: AgentType) -> Result<Self> {
         let agents_dir = launcher::resolve_agents_dir();
         let adapter = ClaudeAdapter::new();
         let events = EventHandler::new();
@@ -92,6 +94,7 @@ impl App {
             dialog_input: String::new(),
             new_swarm_repo: String::new(),
             status_message: None,
+            default_agent_type,
         };
 
         // Start pane watchers for discovered swarms
@@ -389,7 +392,7 @@ impl App {
                     // Launch the swarm
                     let config = SwarmConfig {
                         repo_path: repo_path.clone(),
-                        agent_type: AgentType::Claude,
+                        agent_type: self.default_agent_type.clone(),
                         num_workers,
                         agents_dir: self.agents_dir.clone(),
                     };

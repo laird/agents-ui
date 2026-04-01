@@ -23,15 +23,34 @@ impl ClaudeAdapter {
             .unwrap_or_else(|| "unknown".to_string())
     }
 
-    /// Expected tmux session name for a given project.
-    fn session_name(project: &str) -> String {
-        format!("claude-{project}")
+    /// Expected tmux session name for a given project/runtime.
+    fn session_name(project: &str, agent_type: &AgentType) -> String {
+        format!("{}-{project}", agent_type.script_flag())
+    }
+
+    /// Parse tmux session into (agent_type, project_name).
+    fn parse_session_name(session_name: &str) -> Option<(AgentType, String)> {
+        let known = [
+            ("claude-", AgentType::Claude),
+            ("codex-", AgentType::Codex),
+            ("droid-", AgentType::Droid),
+            ("gemini-", AgentType::Gemini),
+        ];
+
+        for (prefix, agent_type) in known {
+            if let Some(project) = session_name.strip_prefix(prefix) {
+                return Some((agent_type, project.to_string()));
+            }
+        }
+
+        None
     }
 
     /// Build a Swarm model from an existing tmux session.
     async fn build_swarm_from_session(
         session_name: &str,
         repo_path: PathBuf,
+        agent_type: AgentType,
     ) -> Result<Swarm> {
         let project_name = Self::project_name(&repo_path);
         let session_info = session::list_panes(session_name).await?;
@@ -66,7 +85,7 @@ impl ClaudeAdapter {
                         .join(format!("{}-wt-{}", project_name, worker_idx + 1));
 
                     let status_file = worktree_path
-                        .join(AgentType::Claude.status_dir())
+                        .join(agent_type.status_dir())
                         .join("fix-loop.status");
 
                     let agent_status = status::read_status_file(&status_file);
@@ -86,7 +105,7 @@ impl ClaudeAdapter {
         Ok(Swarm {
             repo_path,
             project_name,
-            agent_type: AgentType::Claude,
+            agent_type,
             workflow: None, // Can't determine from session alone
             tmux_session: session_name.to_string(),
             manager,
@@ -98,12 +117,17 @@ impl ClaudeAdapter {
 impl AgentRuntime for ClaudeAdapter {
     async fn launch(&self, config: &SwarmConfig) -> Result<Swarm> {
         let project_name = Self::project_name(&config.repo_path);
-        let session_name = Self::session_name(&project_name);
+        let session_name = Self::session_name(&project_name, &config.agent_type);
 
         // Check if session already exists
         if session::has_session(&session_name).await {
             tracing::info!("Session {session_name} already exists, reconnecting");
-            return Self::build_swarm_from_session(&session_name, config.repo_path.clone()).await;
+            return Self::build_swarm_from_session(
+                &session_name,
+                config.repo_path.clone(),
+                config.agent_type.clone(),
+            )
+            .await;
         }
 
         let script_path = crate::scripts::launcher::find_script("start-parallel-agents.sh")
@@ -162,7 +186,12 @@ impl AgentRuntime for ClaudeAdapter {
         // Kill the script process (it's blocking on tmux attach which we don't need)
         child.kill().await.ok();
 
-        Self::build_swarm_from_session(&session_name, config.repo_path.clone()).await
+        Self::build_swarm_from_session(
+            &session_name,
+            config.repo_path.clone(),
+            config.agent_type.clone(),
+        )
+        .await
     }
 
     async fn discover(&self, _agents_dir: &Path) -> Result<Vec<Swarm>> {
@@ -170,21 +199,16 @@ impl AgentRuntime for ClaudeAdapter {
         let mut swarms = Vec::new();
 
         for session_name in sessions {
-            if !session_name.starts_with("claude-") {
+            let Some((agent_type, project_name)) = Self::parse_session_name(&session_name) else {
                 continue;
-            }
-
-            let project_name = session_name
-                .strip_prefix("claude-")
-                .unwrap_or(&session_name)
-                .to_string();
+            };
 
             // Try to find the repo path from git worktree in one of the panes,
             // or fall back to looking in common locations
-            let repo_path = find_repo_path(&project_name).await;
+            let repo_path = find_repo_path(&session_name, &project_name).await;
 
             if let Some(repo_path) = repo_path {
-                match Self::build_swarm_from_session(&session_name, repo_path).await {
+                match Self::build_swarm_from_session(&session_name, repo_path, agent_type).await {
                     Ok(swarm) => swarms.push(swarm),
                     Err(e) => tracing::warn!("Failed to build swarm from {session_name}: {e}"),
                 }
@@ -242,15 +266,10 @@ impl AgentRuntime for ClaudeAdapter {
 
 /// Try to find a repo path given a project name.
 /// Checks the current directory and common parent directories.
-async fn find_repo_path(project_name: &str) -> Option<PathBuf> {
+async fn find_repo_path(session_name: &str, project_name: &str) -> Option<PathBuf> {
     // Check if there's a tmux environment variable with the path
     let output = Command::new("tmux")
-        .args([
-            "show-environment",
-            "-t",
-            &format!("claude-{project_name}"),
-            "PWD",
-        ])
+        .args(["show-environment", "-t", session_name, "PWD"])
         .output()
         .await
         .ok()?;
@@ -289,4 +308,31 @@ async fn find_repo_path(project_name: &str) -> Option<PathBuf> {
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ClaudeAdapter;
+    use crate::model::swarm::AgentType;
+
+    #[test]
+    fn session_name_uses_selected_runtime_prefix() {
+        assert_eq!(
+            ClaudeAdapter::session_name("agents-ui", &AgentType::Droid),
+            "droid-agents-ui"
+        );
+        assert_eq!(
+            ClaudeAdapter::session_name("agents-ui", &AgentType::Codex),
+            "codex-agents-ui"
+        );
+    }
+
+    #[test]
+    fn parse_session_name_detects_agent_type_and_project() {
+        let parsed = ClaudeAdapter::parse_session_name("droid-myproj");
+        assert!(matches!(parsed, Some((AgentType::Droid, ref p)) if p == "myproj"));
+
+        let parsed = ClaudeAdapter::parse_session_name("codex-myproj");
+        assert!(matches!(parsed, Some((AgentType::Codex, ref p)) if p == "myproj"));
+    }
 }
