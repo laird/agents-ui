@@ -13,3 +13,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Codex runtime setup now correctly triggers installation when skills are missing, reducing workflow failures from missing runtime skills.
 
+
+---
+
+## 2026-04-01 12:27:43 - Fix #243 codex loop supervision
+
+**What Changed**: Cherry-picked commit 95af0b9 onto fix/issue-132-auto to keep Codex manager/workers under loop wrappers and restore direct key passthrough in Agent View.
+
+**Why Changed**: Issue #243 was the highest-priority unblocked P1 bug in the queue and already had a validated implementation available on worker-2.
+
+**Impact**: Codex sessions are now relaunched under loop wrappers when drift is detected, reducing stalled autonomous workflows.
+
