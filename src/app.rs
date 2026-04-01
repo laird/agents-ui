@@ -1102,15 +1102,7 @@ impl App {
     }
 
     async fn droid_repo_assets_present(&self, repo_path: &std::path::Path) -> bool {
-        self.transport
-            .path_exists(
-                &repo_path
-                    .join(".factory")
-                    .join("skills")
-                    .join("autocoder")
-                    .join("SKILL.md"),
-            )
-            .await
+        droid_repo_assets_present(&self.transport, repo_path).await
     }
 
     fn find_droid_installer_script(&self, repo_path: &std::path::Path) -> Option<PathBuf> {
@@ -3442,6 +3434,35 @@ fn installer_script_candidates(
     candidates
 }
 
+async fn droid_repo_assets_present(
+    transport: &ServerTransport,
+    repo_path: &std::path::Path,
+) -> bool {
+    let has_skill = transport
+        .path_exists(
+            &repo_path
+                .join(".factory")
+                .join("skills")
+                .join("autocoder")
+                .join("SKILL.md"),
+        )
+        .await;
+
+    let has_monitor_workers_command = transport
+        .path_exists(
+            &repo_path
+                .join(".factory")
+                .join("commands")
+                .join("monitor-workers.md"),
+        )
+        .await
+        || transport
+            .path_exists(&repo_path.join("commands").join("monitor-workers.md"))
+            .await;
+
+    has_skill && has_monitor_workers_command
+}
+
 async fn codex_repo_assets_present(
     transport: &ServerTransport,
     repo_path: &std::path::Path,
@@ -3451,6 +3472,9 @@ async fn codex_repo_assets_present(
         .await
         && transport
             .path_exists(&repo_path.join("scripts").join("codex-autocoder.sh"))
+            .await
+        && transport
+            .path_exists(&repo_path.join("scripts").join("codex-monitor-workers.sh"))
             .await;
 
     let has_skill = transport
@@ -3856,7 +3880,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn codex_repo_assets_require_both_core_wrappers_and_skill() {
+    async fn codex_repo_assets_require_core_wrappers_monitor_workers_and_skill() {
         let root = temp_path("codex-repo-assets");
         let scripts = root.join("scripts");
         let skill_dir = root.join(".factory/skills/autocoder");
@@ -3869,6 +3893,9 @@ mod tests {
         assert!(!codex_repo_assets_present(&transport, &root).await);
 
         std::fs::write(scripts.join("codex-autocoder.sh"), "#!/bin/bash\n").unwrap();
+        assert!(!codex_repo_assets_present(&transport, &root).await);
+
+        std::fs::write(scripts.join("codex-monitor-workers.sh"), "#!/bin/bash\n").unwrap();
         assert!(!codex_repo_assets_present(&transport, &root).await);
 
         std::fs::create_dir_all(&skill_dir).unwrap();
@@ -3889,9 +3916,51 @@ mod tests {
 
         std::fs::write(scripts.join("codex-fix-loop.sh"), "#!/bin/bash\n").unwrap();
         std::fs::write(scripts.join("codex-autocoder.sh"), "#!/bin/bash\n").unwrap();
+        std::fs::write(scripts.join("codex-monitor-workers.sh"), "#!/bin/bash\n").unwrap();
         std::fs::write(skill_dir.join("SKILL.md"), "name: autocoder\n").unwrap();
 
         assert!(codex_repo_assets_present(&transport, &root).await);
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[tokio::test]
+    async fn droid_repo_assets_require_skill_and_monitor_workers_command() {
+        let root = temp_path("droid-repo-assets");
+        let skill_dir = root.join(".factory/skills/autocoder");
+        let command_dir = root.join(".factory/commands");
+        let transport = ServerTransport::default();
+
+        assert!(!droid_repo_assets_present(&transport, &root).await);
+
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "name: autocoder\n").unwrap();
+        assert!(!droid_repo_assets_present(&transport, &root).await);
+
+        std::fs::create_dir_all(&command_dir).unwrap();
+        std::fs::write(command_dir.join("monitor-workers.md"), "# Monitor Workers\n").unwrap();
+        assert!(droid_repo_assets_present(&transport, &root).await);
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[tokio::test]
+    async fn droid_repo_assets_accept_legacy_commands_path() {
+        let root = temp_path("droid-repo-assets-legacy-command");
+        let skill_dir = root.join(".factory/skills/autocoder");
+        let legacy_command_dir = root.join("commands");
+        let transport = ServerTransport::default();
+
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::create_dir_all(&legacy_command_dir).unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "name: autocoder\n").unwrap();
+        std::fs::write(
+            legacy_command_dir.join("monitor-workers.md"),
+            "# Monitor Workers\n",
+        )
+        .unwrap();
+
+        assert!(droid_repo_assets_present(&transport, &root).await);
 
         std::fs::remove_dir_all(root).ok();
     }

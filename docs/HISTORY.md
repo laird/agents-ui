@@ -46,3 +46,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Codex runtime setup now triggers install flow when skills are missing, reducing launch failures and ensuring consistent startup behavior.
 
+
+---
+
+## 2026-04-01 12:29:05 - Fix #248 monitor-workers assets
+
+**What Changed**: Updated runtime asset checks so Codex requires codex-monitor-workers.sh and Droid requires monitor-workers command availability; added regression tests for both.
+
+**Why Changed**: Issue #248 reported monitor-workers workflow failures when required autocoder assets were missing but installation checks passed.
+
+**Impact**: atui now detects incomplete runtime installs earlier and prompts installer fallback, improving manager monitor-workers reliability across Codex/Droid runtimes.
+
