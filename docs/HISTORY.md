@@ -101,3 +101,25 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: New swarms and newly added worker windows now proactively resize to current terminal dimensions, improving pane readability.
 
+
+---
+
+## 2026-04-01 13:03:42 - Fix #244: wrap project-management gh calls
+
+**What Changed**: Added src/project_management.rs wrapper and routed app/github/issue gh issue operations through it.
+
+**Why Changed**: Centralizes gh command construction, execution context, and error handling behind one boundary for project-management workflows.
+
+**Impact**: Improves maintainability and prepares backend abstraction work while preserving existing behavior.
+
+
+---
+
+## 2026-04-01 13:04:03 - Fix #244: centralize project-management gh calls
+
+**What Changed**: Added src/project_management.rs and routed app/model/github issue operations through that wrapper for list/view/create/edit/auth flows.
+
+**Why Changed**: This centralizes GitHub command construction, logging, and error-detail handling in one boundary for the project-management layer.
+
+**Impact**: Behavior remains equivalent while making future backend/policy extensions easier.
+
