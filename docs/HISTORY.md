@@ -13,3 +13,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Codex runtime install checks now prevent false-ready state and prompt installation when skills are missing.
 
+
+---
+
+## 2026-04-01 12:25:08 - Fix #247 runtime drift relaunch
+
+**What Changed**: Added Codex-runtime drift detection in pane supervision and forced relaunch with expected runtime; added regression test for drift detection.
+
+**Why Changed**: Prevent mixed-runtime swarms where a non-Codex session reconnects to a Codex manager pane.
+
+**Impact**: Improves runtime consistency during session reconnects and reduces manager/worker runtime mismatches.
+

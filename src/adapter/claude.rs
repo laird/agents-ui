@@ -377,6 +377,22 @@ impl ClaudeAdapter {
             .await
             .unwrap_or_default();
 
+        if pane_runtime_drift_detected(&content, runtime) {
+            tracing::warn!(
+                "Runtime drift detected in {} (expected {}), relaunching",
+                agent.tmux_target,
+                runtime
+            );
+            self.launch_agent_in_pane(&agent.tmux_target, session_name, runtime)
+                .await?;
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+            if let Some(cmd) = self.bootstrap_command(runtime, agent).await {
+                tracing::info!("Sending bootstrap command to {}: {}", agent.id, cmd);
+                proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
+            }
+            return Ok(());
+        }
+
         match classify_pane_state(&content) {
             PaneState::NeedsLaunch => {
                 tracing::info!("Launching {} in existing pane {}", runtime, agent.tmux_target);
@@ -1370,6 +1386,28 @@ fn classify_pane_state(content: &str) -> PaneState {
     PaneState::Unknown
 }
 
+fn pane_runtime_drift_detected(content: &str, expected: &AgentType) -> bool {
+    // Primary regression guard for mixed-runtime panes:
+    // if a pane clearly shows a Codex prompt/model line but we're expecting a
+    // different runtime, force a relaunch with the expected runtime.
+    if *expected == AgentType::Codex {
+        return false;
+    }
+    pane_looks_like_codex(content)
+}
+
+fn pane_looks_like_codex(content: &str) -> bool {
+    let stripped = strip_ansi(content);
+    stripped
+        .lines()
+        .rev()
+        .take(20)
+        .any(|line| {
+            let lower = line.trim().to_lowercase();
+            lower.contains("gpt-") || lower.starts_with("codex ") || lower.ends_with(" codex")
+        })
+}
+
 // Legacy wrappers used by tests
 #[cfg(test)]
 fn pane_needs_runtime_launch(content: &str) -> bool {
@@ -1525,7 +1563,7 @@ mod tests {
     use super::{
         classify_pane_state, extract_issue_number_from_branch, generic_worker_bootstrap_cmd,
         is_bare_shell_prompt, is_feedback_prompt, manager_bootstrap_cmd, pane_agent_is_idle,
-        pane_needs_runtime_launch, worker_dispatch_cmd, PaneState,
+        pane_needs_runtime_launch, pane_runtime_drift_detected, worker_dispatch_cmd, PaneState,
     };
     use crate::model::swarm::AgentType;
 
@@ -1652,6 +1690,14 @@ mod tests {
         assert!(!is_feedback_prompt("Working on issue #42"));
         assert!(!is_feedback_prompt("idle"));
         assert!(!is_feedback_prompt(""));
+    }
+
+    #[test]
+    fn runtime_drift_detects_codex_prompt_for_non_codex_expected_runtime() {
+        let codex_prompt = "  gpt-5.4 default · 100% left\n";
+        assert!(pane_runtime_drift_detected(codex_prompt, &AgentType::Droid));
+        assert!(pane_runtime_drift_detected(codex_prompt, &AgentType::Claude));
+        assert!(!pane_runtime_drift_detected(codex_prompt, &AgentType::Codex));
     }
 
     // --- is_bare_shell_prompt tests ---
