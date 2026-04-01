@@ -24,3 +24,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Swarm startup now verifies and bootstraps required skill assets automatically, reducing launch-time runtime failures.
 
+
+---
+
+## 2026-04-01 12:39:26 - Fix #240 codex command translation
+
+**What Changed**: Added runtime-aware input normalization so Codex sessions convert legacy autocoder slash commands (for example /monitor-workers and /fix 240) into 'use autocoder to ...' text before tmux send-keys, and added unit tests.
+
+**Why Changed**: Codex sessions did not reliably handle legacy slash command syntax, so manager/worker commands could fail to execute.
+
+**Impact**: Codex-directed commands now execute in a compatible format while Claude/Droid behavior remains unchanged.
+

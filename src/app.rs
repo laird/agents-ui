@@ -461,7 +461,9 @@ impl App {
                         let input = self.repo_view.input.drain(..).collect::<String>();
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
                             let target = swarm.manager.tmux_target.clone();
-                            self.adapter.send_input(&target, &input).await?;
+                            let normalized_input =
+                                normalize_autocoder_input(&swarm.agent_type, &input);
+                            self.adapter.send_input(&target, &normalized_input).await?;
                         }
                         self.repo_view.scroll_manager_to_bottom();
                     } else {
@@ -551,7 +553,9 @@ impl App {
                     if let Some(swarm) = self.swarms.get(swarm_idx) {
                         if let Some(agent) = swarm.agent(&agent_id) {
                             let target = agent.tmux_target.clone();
-                            self.adapter.send_input(&target, &input).await?;
+                            let normalized_input =
+                                normalize_autocoder_input(&swarm.agent_type, &input);
+                            self.adapter.send_input(&target, &normalized_input).await?;
                         }
                     }
                     self.agent_view.scroll_to_bottom();
@@ -830,4 +834,85 @@ fn longest_common_prefix(strings: &[String]) -> String {
         }
     }
     first[..len].to_string()
+}
+
+fn normalize_autocoder_input(agent_type: &AgentType, input: &str) -> String {
+    if !matches!(agent_type, AgentType::Codex) {
+        return input.to_string();
+    }
+
+    let trimmed = input.trim();
+    let Some(without_slash) = trimmed.strip_prefix('/') else {
+        return input.to_string();
+    };
+
+    let mut parts = without_slash.splitn(2, char::is_whitespace);
+    let command = parts.next().unwrap_or_default().trim();
+    let args = parts.next().unwrap_or_default().trim();
+
+    const LEGACY_AUTOCODER_COMMANDS: &[&str] = &[
+        "fix",
+        "fix-loop",
+        "stop-loop",
+        "review-blocked",
+        "monitor-workers",
+        "assess",
+        "full-regression-test",
+        "improve-test-coverage",
+        "list-proposals",
+        "approve-proposal",
+        "list-needs-design",
+        "list-needs-feedback",
+        "brainstorm-issue",
+        "install",
+        "autocoder-help",
+    ];
+
+    if !LEGACY_AUTOCODER_COMMANDS.contains(&command) {
+        return input.to_string();
+    }
+
+    if args.is_empty() {
+        format!("use autocoder to {command}")
+    } else {
+        format!("use autocoder to {command} {args}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_autocoder_input;
+    use crate::model::swarm::AgentType;
+
+    #[test]
+    fn codex_translates_fix_command() {
+        assert_eq!(
+            normalize_autocoder_input(&AgentType::Codex, "/fix 240"),
+            "use autocoder to fix 240"
+        );
+    }
+
+    #[test]
+    fn codex_translates_monitor_workers_command() {
+        assert_eq!(
+            normalize_autocoder_input(&AgentType::Codex, "/monitor-workers"),
+            "use autocoder to monitor-workers"
+        );
+    }
+
+    #[test]
+    fn codex_keeps_non_autocoder_slash_input() {
+        assert_eq!(
+            normalize_autocoder_input(&AgentType::Codex, "/tmp/path"),
+            "/tmp/path"
+        );
+    }
+
+    #[test]
+    fn non_codex_keeps_original_input() {
+        assert_eq!(
+            normalize_autocoder_input(&AgentType::Droid, "/fix 240"),
+            "/fix 240"
+        );
+    }
 }
