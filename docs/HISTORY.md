@@ -57,3 +57,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Queue is unblocked for the next P2 bug; no product code changes were required in this pass.
 
+
+---
+
+## 2026-04-01 12:48:48 - Fix #246 tmux session resize transport
+
+**What Changed**: Updated tmux session resize helpers to execute through ServerTransport and wired all resize call sites to pass transport.
+
+**Why Changed**: Session width syncing previously used local tmux commands, which could miss remote sessions and leave wrapped output.
+
+**Impact**: Terminal resize and session discovery now resize tmux windows consistently in local and remote modes.
+

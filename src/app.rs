@@ -673,12 +673,13 @@ impl App {
             Event::TerminalResize { width, height } => {
                 // Resize all tmux sessions to match the new terminal size
                 for swarm in &self.swarms {
+                    let transport = self.transport.clone();
                     let session = swarm.tmux_session.clone();
                     let w = width;
                     let h = height;
                     tokio::spawn(async move {
                         if let Err(e) =
-                            crate::tmux::session::resize_session(&session, w, h).await
+                            crate::tmux::session::resize_session(&transport, &session, w, h).await
                         {
                             tracing::warn!("Failed to resize session {session}: {e}");
                         }

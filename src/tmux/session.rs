@@ -1,6 +1,4 @@
 use anyhow::{Context, Result};
-use tokio::process::Command;
-
 use crate::transport::ServerTransport;
 
 /// A discovered tmux session.
@@ -73,47 +71,64 @@ pub async fn discover_agent_sessions(transport: &ServerTransport) -> Result<Vec<
 }
 
 /// Resize all windows in a session to the given dimensions.
-pub async fn resize_session(name: &str, width: u16, height: u16) -> Result<()> {
+pub async fn resize_session(
+    transport: &ServerTransport,
+    name: &str,
+    width: u16,
+    height: u16,
+) -> Result<()> {
     // First, set the session's default size so new windows inherit it
-    let _ = Command::new("tmux")
-        .args([
-            "set-option",
-            "-t",
-            name,
-            "default-size",
-            &format!("{width}x{height}"),
-        ])
-        .output()
+    let _ = transport
+        .output(
+            "tmux",
+            &[
+                "set-option".to_string(),
+                "-t".to_string(),
+                name.to_string(),
+                "default-size".to_string(),
+                format!("{width}x{height}"),
+            ],
+            None,
+        )
         .await;
 
     // Resize all existing windows
-    let output = Command::new("tmux")
-        .args([
-            "list-windows",
-            "-t",
-            name,
-            "-F",
-            "#{window_index}",
-        ])
-        .output()
+    let output = transport
+        .output(
+            "tmux",
+            &[
+                "list-windows".to_string(),
+                "-t".to_string(),
+                name.to_string(),
+                "-F".to_string(),
+                "#{window_index}".to_string(),
+            ],
+            None,
+        )
         .await
         .context("Failed to list windows for resize")?;
 
     if output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         for win_idx in stdout.lines() {
+            if win_idx.trim().is_empty() {
+                continue;
+            }
             let target = format!("{name}:{win_idx}");
-            let _ = Command::new("tmux")
-                .args([
-                    "resize-window",
-                    "-t",
-                    &target,
-                    "-x",
-                    &width.to_string(),
-                    "-y",
-                    &height.to_string(),
-                ])
-                .output()
+            let _ = transport
+                .output(
+                    "tmux",
+                    &[
+                        "resize-window".to_string(),
+                        "-t".to_string(),
+                        target,
+                        "-x".to_string(),
+                        width.to_string(),
+                        "-y".to_string(),
+                        height.to_string(),
+                    ],
+                    None,
+                )
                 .await;
         }
     }
@@ -122,10 +137,10 @@ pub async fn resize_session(name: &str, width: u16, height: u16) -> Result<()> {
 }
 
 /// Resize a session to match the current terminal size.
-pub async fn resize_session_to_terminal(name: &str) -> Result<()> {
+pub async fn resize_session_to_terminal(transport: &ServerTransport, name: &str) -> Result<()> {
     let (width, height) = crossterm::terminal::size()
         .context("Failed to get terminal size")?;
-    resize_session(name, width, height).await
+    resize_session(transport, name, width, height).await
 }
 
 /// Check if a specific session exists.

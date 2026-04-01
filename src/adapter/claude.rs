@@ -894,7 +894,7 @@ impl AgentRuntime for ClaudeAdapter {
         tracing::info!("\n🎉 Swarm launched! Waiting for sessions to initialize...\n");
 
         // Resize the tmux session to match the current terminal size
-        if let Err(e) = session::resize_session_to_terminal(&session_name).await {
+        if let Err(e) = session::resize_session_to_terminal(&self.transport, &session_name).await {
             tracing::warn!("Failed to resize session {session_name}: {e}");
         }
 
@@ -948,7 +948,7 @@ impl AgentRuntime for ClaudeAdapter {
                 ensure_gh_auth_for_repo(&repo_path).await;
 
                 // Resize discovered session to match current terminal
-                if let Err(e) = session::resize_session_to_terminal(&session_name).await {
+                if let Err(e) = session::resize_session_to_terminal(&self.transport, &session_name).await {
                     tracing::warn!("Failed to resize session {session_name}: {e}");
                 }
 
