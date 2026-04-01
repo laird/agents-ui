@@ -134,3 +134,25 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Core workflow remains GitHub-compatible, and backend-specific wrappers now exist for future Linear/Jira integration.
 
+
+---
+
+## 2026-04-01 13:33:13 - Approve #237 proposal
+
+**What Changed**: Removed the proposal label from GitHub issue #237 and posted an approval comment using the autocoder approval script.
+
+**Why Changed**: Queue review found no bugs/regressions; next actionable item was a proposal requiring approval to become implementable.
+
+**Impact**: Issue #237 is now an approved enhancement (P3) ready for implementation in a future fix pass.
+
+
+---
+
+## 2026-04-01 13:38:09 - Implement #237 issue-detail clipboard shortcut
+
+**What Changed**: Added Issue Detail key handling for 'c' to copy #<issue> to clipboard with pbcopy/wl-copy/xclip/xsel fallbacks, updated help bar text, and added regression tests.
+
+**Why Changed**: Issue #237 was the highest-priority unblocked approved enhancement in the queue.
+
+**Impact**: Issue detail navigation now supports faster issue-number reuse in terminal workflows, with graceful fallback when no clipboard utility exists.
+

@@ -138,6 +138,8 @@ impl IssueDetailView {
             Span::styled(" scroll  ", theme::help_style()),
             Span::styled("g", theme::title_style()),
             Span::styled(" open in browser  ", theme::help_style()),
+            Span::styled("c", theme::title_style()),
+            Span::styled(" copy #  ", theme::help_style()),
             Span::styled("Esc", theme::title_style()),
             Span::styled(" back  ", theme::help_style()),
             Span::styled("q", theme::title_style()),
@@ -234,5 +236,12 @@ mod tests {
         let view = make_view(0, vec![], "");
         let rendered = render_to_string(&view);
         assert!(!rendered.contains("created"));
+    }
+
+    #[test]
+    fn renders_help_for_copy_shortcut() {
+        let view = make_view(0, vec![], "");
+        let rendered = render_to_string(&view);
+        assert!(rendered.contains("copy #"));
     }
 }

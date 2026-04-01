@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use std::io::Write;
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use std::collections::HashMap;
@@ -2636,6 +2638,21 @@ impl App {
                     }
                 }
             }
+            KeyCode::Char('c') => {
+                if let Some(ref view) = self.issue_detail_view {
+                    let text = issue_clipboard_text(view.issue_number);
+                    match copy_to_clipboard(&text) {
+                        Ok(_) => {
+                            self.status_message = Some(format!("Copied {text} to clipboard"));
+                        }
+                        Err(_) => {
+                            self.status_message = Some(format!(
+                                "Clipboard unavailable — couldn't copy {text}"
+                            ));
+                        }
+                    }
+                }
+            }
             KeyCode::PageUp => {
                 if let Some(ref mut view) = self.issue_detail_view {
                     view.scroll_up(10);
@@ -3811,6 +3828,63 @@ fn issue_from_git_branch(worktree_path: &std::path::Path) -> Option<u32> {
     num_str.parse::<u32>().ok()
 }
 
+fn issue_clipboard_text(issue_number: u32) -> String {
+    format!("#{issue_number}")
+}
+
+fn copy_to_clipboard(text: &str) -> std::io::Result<&'static str> {
+    const CANDIDATES: [(&str, &[&str]); 4] = [
+        ("pbcopy", &[]),
+        ("wl-copy", &[]),
+        ("xclip", &["-selection", "clipboard"]),
+        ("xsel", &["--clipboard", "--input"]),
+    ];
+
+    let mut last_error = None;
+
+    for (program, args) in CANDIDATES {
+        let mut child = match Command::new(program)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(err) => {
+                last_error = Some(err);
+                continue;
+            }
+        };
+
+        let Some(mut stdin) = child.stdin.take() else {
+            let _ = child.kill();
+            let _ = child.wait();
+            continue;
+        };
+
+        if stdin.write_all(text.as_bytes()).is_err() {
+            let _ = child.kill();
+            let _ = child.wait();
+            continue;
+        }
+        drop(stdin);
+
+        match child.wait() {
+            Ok(status) if status.success() => return Ok(program),
+            Ok(_) => {}
+            Err(err) => last_error = Some(err),
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "No supported clipboard command found",
+        )
+    }))
+}
+
 /// Try to extract an issue number from text (e.g., "#42", "issue 42").
 fn extract_issue_from_text(text: &str) -> Option<u32> {
     for word in text.split_whitespace() {
@@ -4076,6 +4150,29 @@ mod tests {
         );
         assert_eq!(extract_issue_from_text("done with #100000"), None);
         assert_eq!(extract_issue_from_text("nothing assigned"), None);
+    }
+
+    #[test]
+    fn issue_clipboard_text_formats_issue_number() {
+        assert_eq!(issue_clipboard_text(237), "#237");
+    }
+
+    #[test]
+    fn copy_to_clipboard_gracefully_errors_when_no_commands_available() {
+        let _env_guard = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let original_path = std::env::var_os("PATH");
+        unsafe { std::env::set_var("PATH", "") };
+
+        let result = copy_to_clipboard("#237");
+
+        if let Some(path) = original_path {
+            unsafe { std::env::set_var("PATH", path) };
+        } else {
+            unsafe { std::env::remove_var("PATH") };
+        }
+        drop(_env_guard);
+
+        assert!(result.is_err());
     }
 
     #[test]
