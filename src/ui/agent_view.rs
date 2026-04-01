@@ -6,8 +6,8 @@ use ratatui::{
     Frame,
 };
 
-use crate::model::swarm::AgentInfo;
 use super::theme;
+use crate::model::swarm::AgentInfo;
 
 pub struct AgentView {
     pub scroll_offset: u16,
@@ -73,7 +73,11 @@ impl AgentView {
             format!(" Session — {} ", agent.tmux_target)
         };
         let pane_output = Paragraph::new(text)
-            .block(Block::default().borders(Borders::ALL).title(scroll_indicator))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(scroll_indicator),
+            )
             .wrap(Wrap { trim: false })
             .scroll((self.scroll_offset, 0));
         f.render_widget(pane_output, chunks[1]);
@@ -83,7 +87,11 @@ impl AgentView {
             " Keys forwarded to agent — Tab, /, etc. work natively",
             theme::help_style(),
         )))
-        .block(Block::default().borders(Borders::ALL).title(" Passthrough Mode "));
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Passthrough Mode "),
+        );
         f.render_widget(mode_info, chunks[2]);
 
         // Help
