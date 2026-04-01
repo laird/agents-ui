@@ -131,7 +131,14 @@ impl Swarm {
     pub fn attention_count(&self) -> usize {
         self.workers
             .iter()
-            .filter(|w| matches!(w.status.state, super::status::AgentState::Idle))
+            .filter(|w| {
+                matches!(
+                    w.status.state,
+                    super::status::AgentState::Idle
+                        | super::status::AgentState::Stopped
+                        | super::status::AgentState::Unknown(_)
+                )
+            })
             .count()
     }
 

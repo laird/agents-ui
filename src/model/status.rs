@@ -115,3 +115,95 @@ pub fn read_status_file(path: &Path) -> AgentStatus {
         Err(_) => AgentStatus::default(),
     }
 }
+
+/// Mark a worker as stalled when it has remained in a "working" or "starting"
+/// state without status updates for too long.
+pub fn mark_stalled_if_needed(
+    mut status: AgentStatus,
+    now: NaiveDateTime,
+    stale_after_minutes: i64,
+) -> AgentStatus {
+    if stale_after_minutes <= 0 {
+        return status;
+    }
+
+    let Some(timestamp) = status.timestamp else {
+        return status;
+    };
+
+    let age = now.signed_duration_since(timestamp);
+    if age.num_seconds() < 0 {
+        return status;
+    }
+
+    let age_minutes = age.num_minutes();
+    if age_minutes < stale_after_minutes {
+        return status;
+    }
+
+    let stalled_message = match &status.state {
+        AgentState::Working { issue: Some(n) } => {
+            format!("Stalled #{n} ({age_minutes}m no status updates)")
+        }
+        AgentState::Working { issue: None } => {
+            format!("Stalled ({age_minutes}m no status updates)")
+        }
+        AgentState::Starting => format!("Starting stalled ({age_minutes}m no status updates)"),
+        _ => return status,
+    };
+
+    status.state = AgentState::Unknown(stalled_message);
+    status
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{mark_stalled_if_needed, parse_status_line, AgentState};
+    use chrono::{Duration, NaiveDateTime};
+
+    fn parse_ts(ts: &str) -> NaiveDateTime {
+        NaiveDateTime::parse_from_str(ts, "%Y-%m-%d %H:%M:%S").expect("valid test timestamp")
+    }
+
+    #[test]
+    fn parses_working_issue_number() {
+        let status = parse_status_line("2026-04-01 11:00:00\tworking issue #42");
+        assert!(matches!(
+            status.state,
+            AgentState::Working { issue: Some(42) }
+        ));
+    }
+
+    #[test]
+    fn marks_old_working_status_as_stalled() {
+        let status = parse_status_line("2026-04-01 11:00:00\tworking issue #42");
+        let now = parse_ts("2026-04-01 11:20:00");
+
+        let stalled = mark_stalled_if_needed(status, now, 15);
+        assert!(matches!(
+            stalled.state,
+            AgentState::Unknown(ref msg) if msg.contains("Stalled #42")
+        ));
+    }
+
+    #[test]
+    fn keeps_recent_working_status_active() {
+        let status = parse_status_line("2026-04-01 11:10:00\tworking issue #42");
+        let now = parse_ts("2026-04-01 11:20:00");
+
+        let refreshed = mark_stalled_if_needed(status, now, 15);
+        assert!(matches!(
+            refreshed.state,
+            AgentState::Working { issue: Some(42) }
+        ));
+    }
+
+    #[test]
+    fn does_not_mark_idle_status_as_stalled() {
+        let status = parse_status_line("2026-04-01 11:00:00\tidle");
+        let now = parse_ts("2026-04-01 12:00:00") + Duration::minutes(1);
+
+        let refreshed = mark_stalled_if_needed(status, now, 15);
+        assert!(matches!(refreshed.state, AgentState::Idle));
+    }
+}

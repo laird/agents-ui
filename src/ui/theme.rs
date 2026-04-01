@@ -28,6 +28,11 @@ pub fn status_style(state: &AgentState) -> Style {
         AgentState::Idle => Style::default().fg(Color::Gray),
         AgentState::Completed { .. } => Style::default().fg(Color::Blue),
         AgentState::Stopped => Style::default().fg(Color::Red),
+        AgentState::Unknown(message) if message.to_lowercase().contains("stalled") => {
+            Style::default()
+                .fg(Color::Red)
+                .add_modifier(Modifier::BOLD)
+        }
         AgentState::Unknown(_) => Style::default().fg(Color::DarkGray),
     }
 }

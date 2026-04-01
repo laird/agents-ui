@@ -702,6 +702,9 @@ impl App {
 
     /// Refresh agent statuses from status files.
     fn refresh_statuses(&mut self) {
+        const WORKER_STALE_MINUTES: i64 = 15;
+        let now = chrono::Local::now().naive_local();
+
         for swarm in &mut self.swarms {
             for worker in &mut swarm.workers {
                 let status_file = worker
@@ -709,7 +712,13 @@ impl App {
                     .join(swarm.agent_type.status_dir())
                     .join("fix-loop.status");
                 if status_file.exists() {
-                    worker.status = crate::model::status::read_status_file(&status_file);
+                    let status = crate::model::status::read_status_file(&status_file);
+                    worker.status =
+                        crate::model::status::mark_stalled_if_needed(
+                            status,
+                            now,
+                            WORKER_STALE_MINUTES,
+                        );
                 }
             }
         }

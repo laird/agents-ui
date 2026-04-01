@@ -35,3 +35,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Codex-directed commands now execute in a compatible format while Claude/Droid behavior remains unchanged.
 
+
+---
+
+## 2026-04-01 12:47:08 - Fix #242: surface stalled worker states
+
+**What Changed**: Added stale-status detection for working/starting workers, surfaced stalled states in UI styling, and counted stalled/unknown/stopped workers in attention indicators.
+
+**Why Changed**: Workers can appear stuck with no obvious status changes; this makes stalled workers explicit and visible in the repo attention summary.
+
+**Impact**: Operators can detect stalled workers faster and recover without waiting for manual deep inspection.
+
