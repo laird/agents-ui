@@ -922,6 +922,42 @@ impl App {
                     }
                 }
             }
+            KeyCode::Char('x') => {
+                let selected_issue = self
+                    .issue_detail_view
+                    .as_ref()
+                    .map(|v| (v.issue_number, v.state.eq_ignore_ascii_case("open")));
+
+                if let Some((issue_num, is_open)) = selected_issue {
+                    let result = if is_open {
+                        github::close_issue(issue_num).await
+                    } else {
+                        github::reopen_issue(issue_num).await
+                    };
+
+                    match result {
+                        Ok(()) => {
+                            if let Some(ref mut view) = self.issue_detail_view {
+                                view.state = if is_open {
+                                    "closed".to_string()
+                                } else {
+                                    "open".to_string()
+                                };
+                            }
+                            self.status_message = Some(format!(
+                                "Issue #{issue_num} {}",
+                                if is_open { "closed" } else { "reopened" }
+                            ));
+                        }
+                        Err(e) => {
+                            self.status_message = Some(format!(
+                                "Failed to {} issue #{issue_num}: {e}",
+                                if is_open { "close" } else { "reopen" }
+                            ));
+                        }
+                    }
+                }
+            }
             KeyCode::Char('p') => {
                 let issue_num = self.issue_detail_view.as_ref().map(|v| v.issue_number);
                 let has_proposal = self

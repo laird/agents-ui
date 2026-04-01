@@ -50,6 +50,18 @@ pub async fn remove_issue_label(issue_number: u32, label: &str) -> Result<()> {
     Ok(())
 }
 
+pub async fn close_issue(issue_number: u32) -> Result<()> {
+    let issue_number_arg = issue_number.to_string();
+    run_gh(&["issue", "close", &issue_number_arg]).await?;
+    Ok(())
+}
+
+pub async fn reopen_issue(issue_number: u32) -> Result<()> {
+    let issue_number_arg = issue_number.to_string();
+    run_gh(&["issue", "reopen", &issue_number_arg]).await?;
+    Ok(())
+}
+
 pub fn open_issue_in_browser(issue_number: u32) -> Result<()> {
     let issue_number_arg = issue_number.to_string();
     Command::new("gh")

@@ -90,3 +90,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: GitHub operations are now centralized in one wrapper API, reducing duplicated command logic and making future policy/observability changes easier.
 
+
+---
+
+## 2026-04-01 13:08:26 - Fix #233 toggle close/reopen in issue detail
+
+**What Changed**: Added issue-detail x key handling to close/reopen via project_management::github wrapper and updated the Issue Detail help bar.
+
+**Why Changed**: Issue #233 requested in-TUI issue state toggling to avoid leaving the interface.
+
+**Impact**: Users can now close or reopen the currently viewed issue directly from Issue Detail with immediate state/status feedback.
+
