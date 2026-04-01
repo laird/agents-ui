@@ -10,17 +10,12 @@ use crate::model::swarm::AgentInfo;
 use super::theme;
 
 pub struct AgentView {
-    #[allow(dead_code)]
-    pub input: String,
     pub scroll_offset: u16,
 }
 
 impl AgentView {
     pub fn new() -> Self {
-        Self {
-            input: String::new(),
-            scroll_offset: 0,
-        }
+        Self { scroll_offset: 0 }
     }
 
     pub fn render(&mut self, f: &mut Frame, area: Rect, agent: &AgentInfo) {
