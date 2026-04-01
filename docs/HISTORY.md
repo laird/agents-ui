@@ -57,3 +57,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Codex-targeted commands now execute with runtime-compatible phrasing and dispatch behavior is validated by unit tests.
 
+
+---
+
+## 2026-04-01 12:50:59 - Fix #246: tmux width follows terminal
+
+**What Changed**: Updated tmux session resizing to run through ServerTransport, enforce manual window sizing, and resize sessions before/after launch and on terminal resize events.
+
+**Why Changed**: Tmux sessions were sometimes left at default width (especially outside local direct tmux execution), causing wrapped output in agent panes.
+
+**Impact**: Pane/session widths now consistently track the active terminal width for new, discovered, and live sessions.
+
