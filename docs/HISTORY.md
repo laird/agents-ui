@@ -13,3 +13,36 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Repo view now reflects worker loop state reliably when status files exist, reducing false idle/working transitions.
 
+
+---
+
+## 2026-04-01 12:04:18 - Triage issue #249 priority
+
+**What Changed**: Assigned P1 label and added triage rationale comment on GitHub issue #249.
+
+**Why Changed**: Workflow order requires triaging unprioritized issues before bug-fix execution.
+
+**Impact**: Issue #249 is now prioritized for upcoming fix passes, reducing queue ambiguity for workers.
+
+
+---
+
+## 2026-04-01 12:14:35 - Fix #243 Codex loop supervision
+
+**What Changed**: Routed Codex manager/workers to shell loop wrappers, added Codex drift recovery in pane supervision, and restored immediate passthrough keystrokes in Agent View.
+
+**Why Changed**: Codex swarms were drifting into interactive prompts and losing loop ownership; passthrough keystrokes also lagged until Enter.
+
+**Impact**: Codex sessions stay under wrapper supervision and Agent View input now reaches live sessions immediately.
+
+
+---
+
+## 2026-04-01 12:24:36 - Fix #249 Codex skill asset validation
+
+**What Changed**: Updated Codex repo readiness checks to require autocoder SKILL.md alongside wrapper scripts, and added tests for both .factory and legacy skills paths.
+
+**Why Changed**: Codex launch readiness produced false positives when wrappers existed but runtime skills were missing, causing broken starts.
+
+**Impact**: Codex runtime setup now triggers install flow when skills are missing, reducing launch failures and ensuring consistent startup behavior.
+

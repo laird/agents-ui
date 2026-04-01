@@ -3446,12 +3446,32 @@ async fn codex_repo_assets_present(
     transport: &ServerTransport,
     repo_path: &std::path::Path,
 ) -> bool {
-    transport
+    let has_wrappers = transport
         .path_exists(&repo_path.join("scripts").join("codex-fix-loop.sh"))
         .await
         && transport
             .path_exists(&repo_path.join("scripts").join("codex-autocoder.sh"))
-            .await
+            .await;
+
+    let has_skill = transport
+        .path_exists(
+            &repo_path
+                .join(".factory")
+                .join("skills")
+                .join("autocoder")
+                .join("SKILL.md"),
+        )
+        .await
+        || transport
+            .path_exists(
+                &repo_path
+                    .join("skills")
+                    .join("autocoder")
+                    .join("SKILL.md"),
+            )
+            .await;
+
+    has_wrappers && has_skill
 }
 
 async fn codex_user_assets_present(transport: &ServerTransport) -> bool {
@@ -3836,9 +3856,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn codex_repo_assets_require_both_core_wrappers() {
+    async fn codex_repo_assets_require_both_core_wrappers_and_skill() {
         let root = temp_path("codex-repo-assets");
         let scripts = root.join("scripts");
+        let skill_dir = root.join(".factory/skills/autocoder");
         std::fs::create_dir_all(&scripts).unwrap();
         let transport = ServerTransport::default();
 
@@ -3848,6 +3869,28 @@ mod tests {
         assert!(!codex_repo_assets_present(&transport, &root).await);
 
         std::fs::write(scripts.join("codex-autocoder.sh"), "#!/bin/bash\n").unwrap();
+        assert!(!codex_repo_assets_present(&transport, &root).await);
+
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "name: autocoder\n").unwrap();
+        assert!(codex_repo_assets_present(&transport, &root).await);
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[tokio::test]
+    async fn codex_repo_assets_accept_legacy_skill_path() {
+        let root = temp_path("codex-repo-assets-legacy-skill");
+        let scripts = root.join("scripts");
+        let skill_dir = root.join("skills/autocoder");
+        std::fs::create_dir_all(&scripts).unwrap();
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        let transport = ServerTransport::default();
+
+        std::fs::write(scripts.join("codex-fix-loop.sh"), "#!/bin/bash\n").unwrap();
+        std::fs::write(scripts.join("codex-autocoder.sh"), "#!/bin/bash\n").unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "name: autocoder\n").unwrap();
+
         assert!(codex_repo_assets_present(&transport, &root).await);
 
         std::fs::remove_dir_all(root).ok();
