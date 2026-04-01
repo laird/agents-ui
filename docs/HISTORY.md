@@ -123,3 +123,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Behavior remains equivalent while making future backend/policy extensions easier.
 
+
+---
+
+## 2026-04-01 13:10:30 - Issue #245 backend abstraction
+
+**What Changed**: Extended src/project_management.rs with a backend abstraction that supports GitHub, Linear, and Jira command generation while keeping legacy GitHub behavior.
+
+**Why Changed**: Issue #245 requires project-management wrappers to be backend-agnostic and ready for non-GitHub integrations.
+
+**Impact**: Core workflow remains GitHub-compatible, and backend-specific wrappers now exist for future Linear/Jira integration.
+
