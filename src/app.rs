@@ -3464,38 +3464,29 @@ impl App {
                     .worktree_path
                     .join(swarm.agent_type.status_dir())
                     .join("fix-loop.status");
-                if !self.transport.is_remote() && status_file.exists() {
+                let has_status_file = !self.transport.is_remote() && status_file.exists();
+                if has_status_file {
                     agent.status = crate::model::status::read_status_file(&status_file);
                 } else if !agent.pane_content.is_empty() {
                     // Infer status from pane content
                     agent.status = infer_status_from_pane(&agent.pane_content);
                 }
 
-                // Re-infer from pane content, persisting "Working #N" status
-                // until we see an explicit change
+                // Re-infer from pane content; merge with status-file state when present.
                 if !agent.pane_content.is_empty() {
-                    let new_status = infer_status_from_pane(&agent.pane_content);
-                    // Persist "Working #N" status until we see an explicit change
-                    // (Idle, Stopped, or a different issue number)
-                    match (&agent.status.state, &new_status.state) {
-                        (
-                            crate::model::status::AgentState::Working { issue: Some(_) },
-                            crate::model::status::AgentState::Working { issue: None },
-                        ) => {
-                            // Keep the old status with issue number — new inference
-                            // just lost track of it because the text scrolled
-                        }
-                        _ => {
-                            // Clear dispatch tracking when worker goes idle
-                            if matches!(new_status.state,
-                                crate::model::status::AgentState::Idle |
-                                crate::model::status::AgentState::Stopped
-                            ) {
-                                agent.dispatched_issue = None;
-                            }
-                            agent.status = new_status;
-                        }
-                    }
+                    let inferred_status = infer_status_from_pane(&agent.pane_content);
+                    agent.status = merge_agent_status(&agent.status, &inferred_status, has_status_file);
+                }
+
+                // Clear dispatch tracking when worker is no longer active.
+                let clear_dispatch = match &agent.status.state {
+                    crate::model::status::AgentState::Idle
+                    | crate::model::status::AgentState::Stopped => true,
+                    crate::model::status::AgentState::Unknown(detail) if detail == "Shell" => true,
+                    _ => false,
+                };
+                if clear_dispatch {
+                    agent.dispatched_issue = None;
                 }
 
                 // If we detected "Working" but have no issue number, try the git branch
@@ -3857,10 +3848,17 @@ fn infer_status_from_pane(content: &str) -> crate::model::status::AgentStatus {
         .take(15)
         .collect();
 
+    let last_non_empty = stripped
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .map(str::trim)
+        .unwrap_or("");
+
     let tail = last_lines.join(" ").to_lowercase();
 
-    let state = if tail.contains("waiting for input")
-        || tail.contains("> ")
+    let state = if is_idle_prompt_line(last_non_empty)
+        || tail.contains("waiting for input")
         || tail.contains("what would you like")
         || tail.contains("how can i help")
     {
@@ -3893,6 +3891,54 @@ fn infer_status_from_pane(content: &str) -> crate::model::status::AgentStatus {
     }
 }
 
+fn merge_agent_status(
+    current_status: &crate::model::status::AgentStatus,
+    inferred_status: &crate::model::status::AgentStatus,
+    has_status_file: bool,
+) -> crate::model::status::AgentStatus {
+    use crate::model::status::AgentState;
+
+    if has_status_file {
+        // Status files are authoritative; only let pane inference fill missing
+        // details or override obviously stale "working" states when the pane is
+        // clearly idle / at shell.
+        match (&current_status.state, &inferred_status.state) {
+            (
+                AgentState::Working { .. } | AgentState::Starting,
+                AgentState::Idle,
+            ) => inferred_status.clone(),
+            (
+                AgentState::Working { .. } | AgentState::Starting,
+                AgentState::Unknown(detail),
+            ) if detail == "Shell" => inferred_status.clone(),
+            (
+                AgentState::Working { issue: None },
+                AgentState::Working { issue: Some(_) },
+            )
+            | (AgentState::Unknown(_), _) => inferred_status.clone(),
+            _ => current_status.clone(),
+        }
+    } else {
+        // Without status files, pane inference drives status, while preserving
+        // known issue numbers when the pane text scrolls.
+        match (&current_status.state, &inferred_status.state) {
+            (
+                AgentState::Working { issue: Some(_) },
+                AgentState::Working { issue: None },
+            ) => current_status.clone(),
+            _ => inferred_status.clone(),
+        }
+    }
+}
+
+fn is_idle_prompt_line(line: &str) -> bool {
+    let trimmed = line.trim().to_lowercase();
+    trimmed.starts_with('>')
+        || trimmed.starts_with('❯')
+        || trimmed.starts_with('›')
+        || trimmed.contains("what would you like")
+        || trimmed.contains("how can i help")
+}
 /// Parse /monitor-workers output from manager pane content.
 /// Returns Vec of (worktree_suffix, optional_issue_num, status_text).
 fn parse_monitor_workers_output(content: &str) -> Vec<(String, Option<u32>, String)> {
@@ -4173,6 +4219,10 @@ mod tests {
 
         let idle = infer_status_from_pane("What would you like me to do next?");
         assert!(matches!(idle.state, AgentState::Idle));
+
+        let idle_with_stale_busy_history =
+            infer_status_from_pane("working on issue #88\nediting tests\n> ");
+        assert!(matches!(idle_with_stale_busy_history.state, AgentState::Idle));
     }
 
     #[test]
@@ -4182,6 +4232,82 @@ mod tests {
 
         let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
         assert_eq!(key_event_to_tmux(enter).as_deref(), Some("Enter"));
+    }
+
+    #[test]
+    fn merge_agent_status_prefers_status_file_for_idle_worker() {
+        let current = crate::model::status::AgentStatus {
+            timestamp: None,
+            state: AgentState::Idle,
+        };
+        let inferred = crate::model::status::AgentStatus {
+            timestamp: None,
+            state: AgentState::Working { issue: None },
+        };
+        let merged = merge_agent_status(&current, &inferred, true);
+        assert!(matches!(merged.state, AgentState::Idle));
+    }
+
+    #[test]
+    fn merge_agent_status_allows_idle_override_for_stale_working_status_file() {
+        let current = crate::model::status::AgentStatus {
+            timestamp: None,
+            state: AgentState::Working { issue: Some(42) },
+        };
+        let inferred = crate::model::status::AgentStatus {
+            timestamp: None,
+            state: AgentState::Idle,
+        };
+        let merged = merge_agent_status(&current, &inferred, true);
+        assert!(matches!(merged.state, AgentState::Idle));
+    }
+
+    #[test]
+    fn merge_agent_status_allows_shell_override_for_stale_working_status_file() {
+        let current = crate::model::status::AgentStatus {
+            timestamp: None,
+            state: AgentState::Working { issue: Some(42) },
+        };
+        let inferred = crate::model::status::AgentStatus {
+            timestamp: None,
+            state: AgentState::Unknown("Shell".to_string()),
+        };
+        let merged = merge_agent_status(&current, &inferred, true);
+        assert!(matches!(merged.state, AgentState::Unknown(detail) if detail == "Shell"));
+    }
+
+    #[test]
+    fn merge_agent_status_allows_issue_fill_from_pane_with_status_file() {
+        let current = crate::model::status::AgentStatus {
+            timestamp: None,
+            state: AgentState::Working { issue: None },
+        };
+        let inferred = crate::model::status::AgentStatus {
+            timestamp: None,
+            state: AgentState::Working { issue: Some(77) },
+        };
+        let merged = merge_agent_status(&current, &inferred, true);
+        assert!(matches!(
+            merged.state,
+            AgentState::Working { issue: Some(77) }
+        ));
+    }
+
+    #[test]
+    fn merge_agent_status_preserves_issue_without_status_file() {
+        let current = crate::model::status::AgentStatus {
+            timestamp: None,
+            state: AgentState::Working { issue: Some(42) },
+        };
+        let inferred = crate::model::status::AgentStatus {
+            timestamp: None,
+            state: AgentState::Working { issue: None },
+        };
+        let merged = merge_agent_status(&current, &inferred, false);
+        assert!(matches!(
+            merged.state,
+            AgentState::Working { issue: Some(42) }
+        ));
     }
 
     #[test]

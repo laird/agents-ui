@@ -79,3 +79,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Bug queue now advances to the next unblocked item without duplicate implementation work.
 
+
+---
+
+## 2026-04-01 12:57:27 - Fix #242 stale worker status detection
+
+**What Changed**: Updated pane state classification and status merging to prefer current idle/shell signals over stale working state, and added regression tests in app/adapter status inference paths.
+
+**Why Changed**: Workers could appear stuck due to stale pane or status-file signals overriding current idle prompts.
+
+**Impact**: Worker state transitions now recover to idle/shell more reliably, improving visibility and reducing manual intervention.
+
