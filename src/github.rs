@@ -4,6 +4,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::model::issue::{GhIssueJson, GitHubIssue};
+use crate::project_management::ProjectManagementClient;
 use crate::transport::ServerTransport;
 
 /// Classified GitHub CLI errors.
@@ -88,19 +89,12 @@ pub async fn fetch_issues(
     transport: &ServerTransport,
     repo_path: &Path,
 ) -> std::result::Result<Vec<GitHubIssue>, GhError> {
+    let pm = ProjectManagementClient::from_env();
+    let cmd = pm.list_open_issues("number,title,state,labels", 100);
     let output = transport
         .output(
-            "gh",
-            &[
-                "issue".to_string(),
-                "list".to_string(),
-                "--state".to_string(),
-                "open".to_string(),
-                "--limit".to_string(),
-                "100".to_string(),
-                "--json".to_string(),
-                "number,title,state,labels".to_string(),
-            ],
+            cmd.program,
+            &cmd.args,
             Some(repo_path),
         )
         .await

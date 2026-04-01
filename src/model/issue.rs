@@ -3,6 +3,7 @@ use serde::Deserialize;
 use std::path::Path;
 use std::time::Instant;
 use tokio::process::Command;
+use crate::project_management::ProjectManagementClient;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum IssueState {
@@ -272,17 +273,10 @@ impl From<GhIssueJson> for GitHubIssue {
 
 /// Fetch open issues from GitHub using `gh` CLI.
 pub async fn fetch_issues(repo_path: &Path) -> Result<Vec<GitHubIssue>> {
-    let output = Command::new("gh")
-        .args([
-            "issue",
-            "list",
-            "--state",
-            "open",
-            "--json",
-            "number,title,labels",
-            "--limit",
-            "100",
-        ])
+    let pm = ProjectManagementClient::from_env();
+    let cmd = pm.list_open_issues("number,title,labels", 100);
+    let output = Command::new(cmd.program)
+        .args(cmd.args)
         .current_dir(repo_path)
         .output()
         .await?;

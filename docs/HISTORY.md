@@ -90,3 +90,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Worker state transitions now recover to idle/shell more reliably, improving visibility and reducing manual intervention.
 
+
+---
+
+## 2026-04-01 13:10:00 - Add project-management backend wrapper
+
+**What Changed**: Added a project-management command wrapper with GitHub/Linear/Jira backends and routed existing issue command construction through it.
+
+**Why Changed**: Issue #245 requires backend abstraction beyond GitHub while keeping current behavior stable.
+
+**Impact**: Project-management calls are now centralized, reducing backend leakage and enabling future auth/field mapping extensions.
+

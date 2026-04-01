@@ -10,6 +10,7 @@ use crate::adapter::traits::{AgentRuntime, SwarmConfig};
 use crate::event::{Event, EventHandler};
 use crate::model::issue::{GitHubIssue, IssueCache};
 use crate::model::swarm::{AgentType, ALL_AGENT_TYPES, Swarm};
+use crate::project_management::ProjectManagementClient;
 use crate::scripts::launcher;
 use crate::transport::ServerTransport;
 use crate::tmux::proxy;
@@ -1762,7 +1763,8 @@ impl App {
                         let target = self.swarms.get(swarm_idx)
                             .map(|s| s.manager.tmux_target.clone());
                         if let Some(target) = target {
-                            let cmd = format!("create gh issue --label \"{labels}\" \"{title}\"");
+                            let cmd = ProjectManagementClient::from_env()
+                                .manager_create_issue_prompt(&labels, &title);
                             tracing::info!("Sending '{cmd}' to manager at {target}");
                             proxy::send_keys(&self.transport, &target, &cmd).await?;
                             self.status_message = Some(format!("Created issue: {title}"));
@@ -2116,16 +2118,9 @@ impl App {
                                 self.screen = Screen::IssueView { swarm_idx, issue_number: num };
                                 // Fetch issue body in background
                                 tokio::spawn(async move {
+                                    let cmd = ProjectManagementClient::from_env().view_issue(num);
                                     let result = transport
-                                        .output(
-                                            "gh",
-                                            &[
-                                                "issue".to_string(),
-                                                "view".to_string(),
-                                                num.to_string(),
-                                            ],
-                                            Some(&repo_path),
-                                        )
+                                        .output(cmd.program, &cmd.args, Some(&repo_path))
                                         .await;
                                     if let Ok(output) = result {
                                         let body = String::from_utf8_lossy(&output.stdout).to_string();
@@ -2193,17 +2188,9 @@ impl App {
                                 let repo_path = swarm.repo_path.clone();
                                 let transport = self.transport.clone();
                                 tokio::spawn(async move {
+                                    let cmd = ProjectManagementClient::from_env().view_issue_web(num);
                                     let _ = transport
-                                        .output(
-                                            "gh",
-                                            &[
-                                                "issue".to_string(),
-                                                "view".to_string(),
-                                                num.to_string(),
-                                                "--web".to_string(),
-                                            ],
-                                            Some(&repo_path),
-                                        )
+                                        .output(cmd.program, &cmd.args, Some(&repo_path))
                                         .await;
                                 });
                                 self.status_message = Some(format!("Opening issue #{} in browser", issue.number));
@@ -2244,20 +2231,11 @@ impl App {
             self.status_message = Some("No issue selected".to_string());
             return Ok(());
         };
+        let cmd = ProjectManagementClient::from_env().remove_label(issue_num, "proposal");
 
         let output = self
             .transport
-            .output(
-                "gh",
-                &[
-                    "issue".to_string(),
-                    "edit".to_string(),
-                    issue_num.to_string(),
-                    "--remove-label".to_string(),
-                    "proposal".to_string(),
-                ],
-                Some(&repo_path),
-            )
+            .output(cmd.program, &cmd.args, Some(&repo_path))
             .await?;
 
         if output.status.success() {
@@ -2365,17 +2343,9 @@ impl App {
                     let repo_path = swarm.repo_path.clone();
                     let transport = self.transport.clone();
                     tokio::spawn(async move {
+                        let cmd = ProjectManagementClient::from_env().view_issue_web(issue_number);
                         let _ = transport
-                            .output(
-                                "gh",
-                                &[
-                                    "issue".to_string(),
-                                    "view".to_string(),
-                                    issue_number.to_string(),
-                                    "--web".to_string(),
-                                ],
-                                Some(&repo_path),
-                            )
+                            .output(cmd.program, &cmd.args, Some(&repo_path))
                             .await;
                     });
                     self.status_message = Some(format!("Opening issue #{issue_number} in browser"));
@@ -2493,16 +2463,9 @@ impl App {
                         self.issue_view = Some(crate::ui::issue_view::IssueView::new(num));
                         self.screen = Screen::IssueView { swarm_idx, issue_number: num };
                         tokio::spawn(async move {
+                            let cmd = ProjectManagementClient::from_env().view_issue(num);
                             let result = transport
-                                .output(
-                                    "gh",
-                                    &[
-                                        "issue".to_string(),
-                                        "view".to_string(),
-                                        num.to_string(),
-                                    ],
-                                    Some(&repo_path),
-                                )
+                                .output(cmd.program, &cmd.args, Some(&repo_path))
                                 .await;
                             if let Ok(output) = result {
                                 let body = String::from_utf8_lossy(&output.stdout).to_string();
@@ -2857,8 +2820,9 @@ impl App {
             KeyCode::Char('g') => {
                 // Open issue in browser
                 if let Some(ref view) = self.issue_detail_view {
-                    let _ = tokio::process::Command::new("gh")
-                        .args(["issue", "view", "--web", &view.issue_number.to_string()])
+                    let cmd = ProjectManagementClient::from_env().view_issue_web(view.issue_number);
+                    let _ = tokio::process::Command::new(cmd.program)
+                        .args(cmd.args)
                         .spawn();
                 }
             }
@@ -2954,21 +2918,10 @@ impl App {
             let body = state.body.clone();
             let label = state.feedback_type.github_label().to_string();
             let repo_path = state.repo_path.clone();
+            let labels = vec![label];
+            let cmd = ProjectManagementClient::from_env().create_issue(&title, Some(&body), &labels);
 
-            let result = self.transport.output(
-                "gh",
-                &[
-                    "issue".to_string(),
-                    "create".to_string(),
-                    "--title".to_string(),
-                    title.clone(),
-                    "--body".to_string(),
-                    body.clone(),
-                    "--label".to_string(),
-                    label,
-                ],
-                Some(&repo_path),
-            ).await;
+            let result = self.transport.output(cmd.program, &cmd.args, Some(&repo_path)).await;
 
             if let Some(state) = self.feedback_state.as_mut() {
                 state.field = match result {
@@ -3008,14 +2961,10 @@ impl App {
     /// Open an issue detail view by fetching issue data from GitHub.
     async fn open_issue_detail(&mut self, issue_number: u32, swarm_idx: usize) {
         // Fetch issue details from GitHub
-        let output = tokio::process::Command::new("gh")
-            .args([
-                "issue",
-                "view",
-                &issue_number.to_string(),
-                "--json",
-                "number,title,body,labels,state",
-            ])
+        let cmd = ProjectManagementClient::from_env()
+            .view_issue_json(issue_number, "number,title,body,labels,state");
+        let output = tokio::process::Command::new(cmd.program)
+            .args(cmd.args)
             .output()
             .await;
 

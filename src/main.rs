@@ -7,6 +7,7 @@ mod scripts;
 mod tmux;
 mod tui;
 mod adapter;
+mod project_management;
 mod transport;
 mod ui;
 
