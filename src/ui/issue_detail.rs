@@ -37,13 +37,23 @@ impl IssueDetailView {
         self.scroll_offset = self.scroll_offset.saturating_add(amount);
     }
 
-    pub fn render(&self, f: &mut Frame, area: Rect) {
-        let chunks = Layout::vertical([
-            Constraint::Length(4), // Header
-            Constraint::Min(5),   // Body
-            Constraint::Length(3), // Help bar
-        ])
-        .split(area);
+    pub fn render(&self, f: &mut Frame, area: Rect, comment_input: Option<&str>) {
+        let chunks = if comment_input.is_some() {
+            Layout::vertical([
+                Constraint::Length(4), // Header
+                Constraint::Min(4),    // Body
+                Constraint::Length(3), // Comment input
+                Constraint::Length(3), // Help bar
+            ])
+            .split(area)
+        } else {
+            Layout::vertical([
+                Constraint::Length(4), // Header
+                Constraint::Min(5),    // Body
+                Constraint::Length(3), // Help bar
+            ])
+            .split(area)
+        };
 
         // Header
         let label_text = if self.labels.is_empty() {
@@ -93,6 +103,23 @@ impl IssueDetailView {
             .scroll((self.scroll_offset, 0));
         f.render_widget(body, chunks[1]);
 
+        let help_chunk = if let Some(input) = comment_input {
+            let input_line = Line::from(vec![
+                Span::styled(" Comment: ", theme::title_style()),
+                Span::raw(input),
+                Span::styled("█", theme::title_style()),
+            ]);
+            let input_box = Paragraph::new(input_line).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Post Comment (Enter submit, Esc cancel) "),
+            );
+            f.render_widget(input_box, chunks[2]);
+            chunks[3]
+        } else {
+            chunks[2]
+        };
+
         // Help bar
         let help = Paragraph::new(Line::from(vec![
             Span::styled(" PgUp/PgDn", theme::title_style()),
@@ -101,6 +128,8 @@ impl IssueDetailView {
             Span::styled(" open in browser  ", theme::help_style()),
             Span::styled("c", theme::title_style()),
             Span::styled(" copy #  ", theme::help_style()),
+            Span::styled("C", theme::title_style()),
+            Span::styled(" comment  ", theme::help_style()),
             Span::styled("x", theme::title_style()),
             Span::styled(" close/reopen  ", theme::help_style()),
             Span::styled("p", theme::title_style()),
@@ -111,6 +140,6 @@ impl IssueDetailView {
             Span::styled(" quit", theme::help_style()),
         ]))
         .block(Block::default().borders(Borders::TOP));
-        f.render_widget(help, chunks[2]);
+        f.render_widget(help, help_chunk);
     }
 }

@@ -134,3 +134,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Repos list now surfaces new issue growth with attention-styled +N indicators that clear once the repo is opened.
 
+
+---
+
+## 2026-04-01 14:23:16 - Fix #235: add Issue Detail inline comment input
+
+**What Changed**: Added uppercase C handling in Issue Detail to open an inline comment box, routed typed input/submit/cancel in app state, added GitHub wrapper issue comment command, and updated Issue Detail help/overlay rendering.
+
+**Why Changed**: Proposal #235 requested in-TUI commenting without leaving the app.
+
+**Impact**: Users can now post GitHub issue comments directly from Issue Detail with Enter/Esc flow and confirmation status messages.
+

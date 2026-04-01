@@ -80,6 +80,8 @@ pub struct App {
     last_terminal_size: Option<(u16, u16)>,
     /// Issue detail view state.
     pub issue_detail_view: Option<IssueDetailView>,
+    /// Inline comment input for issue detail view (opened with `C`).
+    pub issue_comment_input: Option<String>,
     /// Issue list view state (GitHub issues browser).
     pub issue_list_view: Option<IssueListView>,
 }
@@ -122,6 +124,7 @@ impl App {
             auto_dispatch_last: None,
             last_terminal_size: None,
             issue_detail_view: None,
+            issue_comment_input: None,
             issue_list_view: None,
         };
 
@@ -201,7 +204,7 @@ impl App {
                     }
                     Screen::IssueDetail { .. } => {
                         if let Some(ref view) = self.issue_detail_view {
-                            view.render(f, area);
+                            view.render(f, area, self.issue_comment_input.as_deref());
                         }
                     }
                     Screen::IssueList { swarm_idx } => {
@@ -920,9 +923,64 @@ impl App {
 
     /// Start pane watchers for all agents in all swarms.
     async fn handle_issue_detail_key(&mut self, key: KeyEvent, swarm_idx: usize) -> Result<()> {
+        if self.issue_comment_input.is_some() {
+            match key.code {
+                KeyCode::Esc => {
+                    self.issue_comment_input = None;
+                    self.status_message = Some("Comment canceled".to_string());
+                }
+                KeyCode::Enter => {
+                    let issue_num = self.issue_detail_view.as_ref().map(|v| v.issue_number);
+                    let body = self
+                        .issue_comment_input
+                        .as_ref()
+                        .map(|s| s.trim().to_string())
+                        .unwrap_or_default();
+
+                    if body.is_empty() {
+                        self.status_message = Some("Comment cannot be empty".to_string());
+                        return Ok(());
+                    }
+
+                    if let Some(issue_num) = issue_num {
+                        match github::comment_on_issue(issue_num, &body).await {
+                            Ok(()) => {
+                                self.issue_comment_input = None;
+                                self.status_message =
+                                    Some(format!("Comment posted to #{issue_num}"));
+                            }
+                            Err(e) => {
+                                self.status_message =
+                                    Some(format!("Failed to post comment to #{issue_num}: {e}"));
+                            }
+                        }
+                    } else {
+                        self.issue_comment_input = None;
+                        self.status_message = Some("No issue selected for comment".to_string());
+                    }
+                }
+                KeyCode::Backspace => {
+                    if let Some(input) = self.issue_comment_input.as_mut() {
+                        input.pop();
+                    }
+                }
+                KeyCode::Char(ch)
+                    if !key.modifiers.contains(KeyModifiers::CONTROL)
+                        && !key.modifiers.contains(KeyModifiers::ALT) =>
+                {
+                    if let Some(input) = self.issue_comment_input.as_mut() {
+                        input.push(ch);
+                    }
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+
         match key.code {
             KeyCode::Esc | KeyCode::Backspace => {
                 self.issue_detail_view = None;
+                self.issue_comment_input = None;
                 self.screen = Screen::RepoView { swarm_idx };
             }
             KeyCode::Char('q') => {
@@ -953,6 +1011,9 @@ impl App {
                         }
                     }
                 }
+            }
+            KeyCode::Char('C') => {
+                self.issue_comment_input = Some(String::new());
             }
             KeyCode::Char('x') => {
                 let selected_issue = self
@@ -1210,6 +1271,7 @@ impl App {
                     detail.labels,
                     detail.state,
                 ));
+                self.issue_comment_input = None;
                 self.screen = Screen::IssueDetail { swarm_idx };
             }
             _ => {

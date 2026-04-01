@@ -82,6 +82,12 @@ pub async fn reopen_issue(issue_number: u32) -> Result<()> {
     Ok(())
 }
 
+pub async fn comment_on_issue(issue_number: u32, body: &str) -> Result<()> {
+    let issue_number_arg = issue_number.to_string();
+    run_gh(&["issue", "comment", &issue_number_arg, "--body", body]).await?;
+    Ok(())
+}
+
 pub fn open_issue_in_browser(issue_number: u32) -> Result<()> {
     let issue_number_arg = issue_number.to_string();
     Command::new("gh")
