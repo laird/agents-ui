@@ -922,6 +922,22 @@ impl App {
                     }
                 }
             }
+            KeyCode::Char('c') => {
+                let issue_num = self.issue_detail_view.as_ref().map(|v| v.issue_number);
+                if let Some(issue_num) = issue_num {
+                    let text = format!("#{issue_num}");
+                    match copy_to_system_clipboard(&text) {
+                        Ok(()) => {
+                            self.status_message = Some(format!("Copied {text} to clipboard"));
+                        }
+                        Err(_) => {
+                            self.status_message = Some(format!(
+                                "Clipboard unavailable; could not copy {text}"
+                            ));
+                        }
+                    }
+                }
+            }
             KeyCode::Char('x') => {
                 let selected_issue = self
                     .issue_detail_view
@@ -1661,4 +1677,57 @@ fn longest_common_prefix(strings: &[String]) -> String {
         }
     }
     first[..len].to_string()
+}
+
+fn copy_to_system_clipboard(text: &str) -> Result<(), String> {
+    let candidates = [
+        ("pbcopy", &[][..]),
+        ("wl-copy", &[][..]),
+        ("xclip", &["-selection", "clipboard"][..]),
+        ("xsel", &["--clipboard", "--input"][..]),
+    ];
+
+    let mut last_error = None;
+
+    for (program, args) in candidates {
+        match run_clipboard_command(program, args, text) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                last_error = Some(format!("{program}: {e}"));
+            }
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| "No clipboard command available".to_string()))
+}
+
+fn run_clipboard_command(program: &str, args: &[&str], text: &str) -> Result<(), String> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(text.as_bytes())
+            .map_err(|e| e.to_string())?;
+    }
+
+    let output = child.wait_with_output().map_err(|e| e.to_string())?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if stderr.is_empty() {
+        Err(format!("exit status {}", output.status))
+    } else {
+        Err(stderr)
+    }
 }

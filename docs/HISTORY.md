@@ -112,3 +112,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Keeps the agent detail UI code lean and reduces dead-code maintenance noise.
 
+
+---
+
+## 2026-04-01 13:35:48 - Fix #237 issue-detail copy shortcut
+
+**What Changed**: Added issue-detail c key handling to copy #<issue> to system clipboard via pbcopy/wl-copy/xclip/xsel with graceful fallback status, and updated the Issue Detail help bar.
+
+**Why Changed**: Approved enhancement #237 requested a fast in-TUI way to copy issue numbers for terminal/GitHub commands.
+
+**Impact**: Issue Detail now supports quick issue-number copying without leaving the TUI, improving workflow speed.
+
