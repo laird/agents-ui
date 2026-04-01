@@ -156,3 +156,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: The open queue now advances to proposal-only work (#236) with no runtime behavior changes in this commit.
 
+
+---
+
+## 2026-04-01 14:52:01 - Close #236 after validation
+
+**What Changed**: Validated the repos-list issue-delta enhancement implementation, removed the proposal label, and closed GitHub issue #236.
+
+**Why Changed**: Issue #236 was the highest-priority unblocked queue item and implementation already existed; this pass completed approval/closure workflow.
+
+**Impact**: Autocoder queue now has no open actionable issues; no runtime code behavior changed in this pass.
+
