@@ -24,3 +24,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Improves runtime consistency during session reconnects and reduces manager/worker runtime mismatches.
 
+
+---
+
+## 2026-04-01 12:30:19 - Fix #243 Codex loop supervision
+
+**What Changed**: Codex manager/workers now launch via shell loop wrappers, Codex monitor/fix prompt injection from App was disabled, and Agent View key passthrough is direct to tmux.
+
+**Why Changed**: Codex panes could drift into interactive prompts and escape loop supervision, which broke monitor-workers dispatch and input behavior.
+
+**Impact**: Codex swarms remain under loop control with automatic relaunch on drift; session input behavior is consistent and issue dispatch remains managed by loop scripts.
+
