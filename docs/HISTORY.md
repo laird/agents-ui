@@ -35,3 +35,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Codex swarms remain under loop control with automatic relaunch on drift; session input behavior is consistent and issue dispatch remains managed by loop scripts.
 
+
+---
+
+## 2026-04-01 12:37:02 - Fix #238 approval hotkey
+
+**What Changed**: Changed issue-panel 'p' handling to directly remove the proposal label from the selected issue via gh issue edit and refresh issue cache.
+
+**Why Changed**: The previous behavior sent a manager command that did not reliably approve proposals.
+
+**Impact**: Pressing 'p' now performs approval in-app with clear success/failure status messaging.
+
