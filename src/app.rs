@@ -859,6 +859,43 @@ impl App {
                         .spawn();
                 }
             }
+            KeyCode::Char('p') => {
+                let issue_num = self.issue_detail_view.as_ref().map(|v| v.issue_number);
+                let has_proposal = self
+                    .issue_detail_view
+                    .as_ref()
+                    .map(|v| {
+                        v.labels
+                            .iter()
+                            .any(|l| l.eq_ignore_ascii_case("proposal"))
+                    })
+                    .unwrap_or(false);
+
+                if let Some(issue_num) = issue_num {
+                    if !has_proposal {
+                        self.status_message =
+                            Some(format!("Issue #{issue_num} has no proposal label"));
+                        return Ok(());
+                    }
+
+                    match self.remove_issue_label(issue_num, "proposal").await {
+                        Ok(()) => {
+                            if let Some(ref mut view) = self.issue_detail_view {
+                                view.labels
+                                    .retain(|l| !l.eq_ignore_ascii_case("proposal"));
+                            }
+                            self.status_message = Some(format!(
+                                "Approved #{issue_num} (removed proposal label)"
+                            ));
+                        }
+                        Err(e) => {
+                            self.status_message = Some(format!(
+                                "Failed to approve #{issue_num}: {e}"
+                            ));
+                        }
+                    }
+                }
+            }
             KeyCode::PageUp => {
                 if let Some(ref mut view) = self.issue_detail_view {
                     view.scroll_up(10);
@@ -959,6 +996,53 @@ impl App {
                     }
                 }
             }
+            KeyCode::Char('p') => {
+                let selected_issue = self.issue_list_view.as_ref().and_then(|view| {
+                    view.selected_issue().map(|issue| {
+                        let has_proposal = issue
+                            .labels
+                            .iter()
+                            .any(|l| l.eq_ignore_ascii_case("proposal"));
+                        (issue.number, has_proposal)
+                    })
+                });
+
+                if let Some((issue_num, has_proposal)) = selected_issue {
+                    if !has_proposal {
+                        if let Some(ref mut view) = self.issue_list_view {
+                            view.status_msg =
+                                Some(format!(" Issue #{issue_num} has no proposal label"));
+                        }
+                        return Ok(());
+                    }
+
+                    match self.remove_issue_label(issue_num, "proposal").await {
+                        Ok(()) => {
+                            if let Some(ref mut view) = self.issue_list_view {
+                                if let Some(issue) = view
+                                    .issues
+                                    .iter_mut()
+                                    .find(|i| i.number == issue_num)
+                                {
+                                    issue
+                                        .labels
+                                        .retain(|l| !l.eq_ignore_ascii_case("proposal"));
+                                }
+                                view.status_msg = Some(format!(
+                                    " Approved #{issue_num} (removed proposal label)"
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            if let Some(ref mut view) = self.issue_list_view {
+                                view.status_msg = Some(format!(
+                                    " Approve failed for #{issue_num}: {e}"
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
             KeyCode::Char('r') => {
                 // Refresh issue list
                 self.open_issue_list(swarm_idx).await;
@@ -1031,6 +1115,30 @@ impl App {
                     Some(format!("Failed to fetch issue #{issue_number}"));
             }
         }
+    }
+
+    async fn remove_issue_label(&self, issue_number: u32, label: &str) -> Result<()> {
+        let output = tokio::process::Command::new("gh")
+            .args([
+                "issue",
+                "edit",
+                &issue_number.to_string(),
+                "--remove-label",
+                label,
+            ])
+            .output()
+            .await
+            .with_context(|| format!("Failed to run gh issue edit for #{issue_number}"))?;
+
+        if output.status.success() {
+            return Ok(());
+        }
+
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if stderr.is_empty() {
+            anyhow::bail!("gh issue edit failed for #{issue_number}");
+        }
+        anyhow::bail!(stderr);
     }
 
     fn start_all_pane_watchers(&mut self) {

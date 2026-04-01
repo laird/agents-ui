@@ -136,6 +136,8 @@ impl IssueListView {
         let help = Paragraph::new(Line::from(vec![
             Span::styled(" Enter", theme::title_style()),
             Span::styled(" view detail  ", theme::help_style()),
+            Span::styled("p", theme::title_style()),
+            Span::styled(" approve proposal  ", theme::help_style()),
             Span::styled("Space/d", theme::title_style()),
             Span::styled(" dispatch to idle worker  ", theme::help_style()),
             Span::styled("r", theme::title_style()),
