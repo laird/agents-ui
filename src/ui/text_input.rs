@@ -41,13 +41,6 @@ impl TextInput {
         self.text.is_empty()
     }
 
-    /// Take the text out, resetting the input.
-    #[allow(dead_code)] // Retained for dialog workflows and test coverage.
-    pub fn drain(&mut self) -> String {
-        self.cursor = 0;
-        std::mem::take(&mut self.text)
-    }
-
     /// Set the text content (cursor moves to end).
     pub fn set_text(&mut self, text: String) {
         self.cursor = text.len();
@@ -230,15 +223,6 @@ mod tests {
         input.backspace();
         assert_eq!(input.text(), "ac");
         assert_eq!(input.cursor(), 1);
-    }
-
-    #[test]
-    fn drain_resets() {
-        let mut input = TextInput::with_text("hello".into());
-        let text = input.drain();
-        assert_eq!(text, "hello");
-        assert!(input.is_empty());
-        assert_eq!(input.cursor(), 0);
     }
 
     #[test]
