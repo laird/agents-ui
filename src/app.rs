@@ -1377,6 +1377,9 @@ impl App {
             KeyCode::Char('d') => {
                 self.apply_runtime_selection(AgentType::Droid).await?;
             }
+            KeyCode::Char('g') => {
+                self.apply_runtime_selection(AgentType::Gemini).await?;
+            }
             KeyCode::Enter => {
                 self.apply_runtime_selection(self.default_agent_type.clone())
                     .await?;
@@ -1571,6 +1574,10 @@ impl App {
             || codex_user_assets_present(&self.transport).await
     }
 
+    async fn gemini_agents_installed(&self, repo_path: &std::path::Path) -> bool {
+        gemini_agents_assets_present(&self.transport, Some(&self.agents_dir), repo_path).await
+    }
+
     async fn runtime_options_for_repo(
         &self,
         repo_path: &std::path::Path,
@@ -1583,7 +1590,7 @@ impl App {
                 AgentType::Claude => ("claude", None),
                 AgentType::Codex => ("codex", Some("needs Codex repo/user assets")),
                 AgentType::Droid => ("droid", Some("needs Droid plugin/assets")),
-                AgentType::Gemini => ("gemini", None),
+                AgentType::Gemini => ("gemini", Some("needs laird/agents skills/scripts/agents")),
             };
 
             if agent_type != current && !self.transport.command_exists(binary).await {
@@ -1601,6 +1608,7 @@ impl App {
                     .droid_agents_installed(repo_path)
                     .await
                     .unwrap_or(false),
+                AgentType::Gemini => self.gemini_agents_installed(repo_path).await,
                 _ => true,
             };
 
@@ -2069,6 +2077,18 @@ impl App {
                                 self.set_status(format!("Failed to check Droid install: {e}"));
                                 self.screen = Screen::ReposList;
                             }
+                        }
+                    } else if agent_type == AgentType::Gemini {
+                        if self.gemini_agents_installed(&repo_path).await {
+                            self.start_swarm_bootstrap(repo_path, num_workers, agent_type, None);
+                        } else {
+                            self.set_status(
+                                "Gemini requires laird/agents skills, .agent scripts, and agents content alongside the repo"
+                                    .to_string(),
+                            );
+                            self.screen = Screen::NewSwarm {
+                                field: NewSwarmField::RuntimeSelection,
+                            };
                         }
                     } else if agent_type == AgentType::Codex {
                         if self.codex_agents_installed(&repo_path).await {
@@ -4983,8 +5003,12 @@ impl App {
     }
 
     async fn ensure_runtime_prerequisites(&self, agent_type: &AgentType) -> Result<()> {
-        let outcome =
-            crate::runtime::validate_environment(&self.transport, Some(agent_type)).await?;
+        let outcome = crate::runtime::validate_environment(
+            &self.transport,
+            Some(agent_type),
+            self.runtime_pref_repo_root.as_deref(),
+        )
+        .await?;
         if let Some(gh_warning) = outcome.gh_warning {
             tracing::warn!("{gh_warning}");
         }
@@ -4997,14 +5021,14 @@ fn next_runtime(agent_type: &AgentType) -> AgentType {
     match agent_type {
         AgentType::Claude => AgentType::Codex,
         AgentType::Codex => AgentType::Droid,
-        AgentType::Droid => AgentType::Claude,
+        AgentType::Droid => AgentType::Gemini,
         AgentType::Gemini => AgentType::Claude,
     }
 }
 
 fn prev_runtime(agent_type: &AgentType) -> AgentType {
     match agent_type {
-        AgentType::Claude => AgentType::Droid,
+        AgentType::Claude => AgentType::Gemini,
         AgentType::Codex => AgentType::Claude,
         AgentType::Droid => AgentType::Codex,
         AgentType::Gemini => AgentType::Droid,
@@ -5028,6 +5052,35 @@ fn installer_script_candidates(
     if agents_dir.ends_with("plugins/autocoder") {
         if let Some(root) = agents_dir.parent().and_then(|p| p.parent()) {
             candidates.push(root.join("scripts").join(script_name));
+        }
+    }
+
+    candidates
+}
+
+fn agents_repo_root_candidates(
+    agents_dir: Option<&std::path::Path>,
+    repo_path: &std::path::Path,
+) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Some(parent) = repo_path.parent() {
+        candidates.push(parent.join("agents"));
+    }
+
+    if let Some(agents_dir) = agents_dir {
+        let root = if agents_dir.ends_with("plugins/autocoder") {
+            agents_dir
+                .parent()
+                .and_then(|p| p.parent())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| agents_dir.to_path_buf())
+        } else {
+            agents_dir.to_path_buf()
+        };
+
+        if !candidates.contains(&root) {
+            candidates.push(root);
         }
     }
 
@@ -5071,6 +5124,34 @@ async fn codex_user_assets_present(transport: &ServerTransport) -> bool {
                 .path_exists(&home.join(".local/bin/codex-start-parallel"))
                 .await
     }
+}
+
+async fn gemini_agents_assets_present(
+    transport: &ServerTransport,
+    agents_dir: Option<&std::path::Path>,
+    repo_path: &std::path::Path,
+) -> bool {
+    for root in agents_repo_root_candidates(agents_dir, repo_path) {
+        if transport
+            .path_exists(&root.join("skills").join("autocoder").join("SKILL.md"))
+            .await
+            && transport
+                .path_exists(
+                    &root
+                        .join(".agent")
+                        .join("scripts")
+                        .join("start-parallel-agents.sh"),
+                )
+                .await
+            && transport
+                .path_exists(&root.join("agents").join("autocoder").join("agent.md"))
+                .await
+        {
+            return true;
+        }
+    }
+
+    false
 }
 
 fn format_command_output(output: &std::process::Output) -> String {
@@ -5674,9 +5755,11 @@ mod tests {
     fn runtime_navigation_cycles_through_supported_runtimes() {
         assert_eq!(next_runtime(&AgentType::Claude), AgentType::Codex);
         assert_eq!(next_runtime(&AgentType::Codex), AgentType::Droid);
-        assert_eq!(next_runtime(&AgentType::Droid), AgentType::Claude);
+        assert_eq!(next_runtime(&AgentType::Droid), AgentType::Gemini);
+        assert_eq!(next_runtime(&AgentType::Gemini), AgentType::Claude);
 
-        assert_eq!(prev_runtime(&AgentType::Claude), AgentType::Droid);
+        assert_eq!(prev_runtime(&AgentType::Claude), AgentType::Gemini);
+        assert_eq!(prev_runtime(&AgentType::Gemini), AgentType::Droid);
         assert_eq!(prev_runtime(&AgentType::Droid), AgentType::Codex);
         assert_eq!(prev_runtime(&AgentType::Codex), AgentType::Claude);
     }
@@ -5724,6 +5807,37 @@ mod tests {
             unsafe { std::env::remove_var("HOME") };
         }
         std::fs::remove_dir_all(home).ok();
+    }
+
+    #[tokio::test]
+    async fn gemini_assets_require_skill_script_and_agent_definition() {
+        let root = temp_path("gemini-assets");
+        let repo_parent = root.join("workspace");
+        let repo = repo_parent.join("repo");
+        let agents = repo_parent.join("agents");
+        let transport = ServerTransport::default();
+
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::create_dir_all(&agents).unwrap();
+
+        assert!(!gemini_agents_assets_present(&transport, None, &repo).await);
+
+        let skills = agents.join("skills/autocoder");
+        std::fs::create_dir_all(&skills).unwrap();
+        std::fs::write(skills.join("SKILL.md"), "name: autocoder\n").unwrap();
+        assert!(!gemini_agents_assets_present(&transport, None, &repo).await);
+
+        let scripts = agents.join(".agent/scripts");
+        std::fs::create_dir_all(&scripts).unwrap();
+        std::fs::write(scripts.join("start-parallel-agents.sh"), "#!/bin/bash\n").unwrap();
+        assert!(!gemini_agents_assets_present(&transport, None, &repo).await);
+
+        let agent_def = agents.join("agents/autocoder");
+        std::fs::create_dir_all(&agent_def).unwrap();
+        std::fs::write(agent_def.join("agent.md"), "# autocoder\n").unwrap();
+        assert!(gemini_agents_assets_present(&transport, None, &repo).await);
+
+        std::fs::remove_dir_all(root).ok();
     }
 
     #[tokio::test]

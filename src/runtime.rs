@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, anyhow, bail};
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::time::timeout;
 
@@ -13,6 +14,7 @@ pub struct ValidationOutcome {
 pub async fn validate_environment(
     transport: &ServerTransport,
     agent_type: Option<&AgentType>,
+    repo_root: Option<&Path>,
 ) -> Result<ValidationOutcome> {
     let location = transport.server().unwrap_or("this machine");
     let tmux_hint = if cfg!(target_os = "macos") {
@@ -26,7 +28,7 @@ pub async fn validate_environment(
     }
 
     if let Some(agent_type) = agent_type {
-        validate_runtime(transport, agent_type).await?;
+        validate_runtime(transport, agent_type, repo_root).await?;
     }
 
     let gh_warning = crate::github::check_gh_auth(transport)
@@ -36,7 +38,11 @@ pub async fn validate_environment(
     Ok(ValidationOutcome { gh_warning })
 }
 
-pub async fn validate_runtime(transport: &ServerTransport, agent_type: &AgentType) -> Result<()> {
+pub async fn validate_runtime(
+    transport: &ServerTransport,
+    agent_type: &AgentType,
+    repo_root: Option<&Path>,
+) -> Result<()> {
     let location = transport.server().unwrap_or("this machine");
     let (binary, hint) = runtime_binary_hint(agent_type);
 
@@ -61,7 +67,52 @@ pub async fn validate_runtime(transport: &ServerTransport, agent_type: &AgentTyp
         run_probe(transport, probe, agent_type).await?;
     }
 
+    if matches!(agent_type, AgentType::Gemini)
+        && let Some(repo_root) = repo_root
+        && !gemini_agents_assets_present(transport, repo_root).await
+    {
+        bail!(
+            "Gemini runtime assets are missing for {}. Expected the sibling laird/agents repo with skills, .agent scripts, and agents content near {}",
+            location,
+            repo_root.display()
+        );
+    }
+
     Ok(())
+}
+
+fn agents_repo_root_candidates(repo_root: &Path) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Some(parent) = repo_root.parent() {
+        candidates.push(parent.join("agents"));
+    }
+
+    candidates
+}
+
+async fn gemini_agents_assets_present(transport: &ServerTransport, repo_root: &Path) -> bool {
+    for root in agents_repo_root_candidates(repo_root) {
+        if transport
+            .path_exists(&root.join("skills").join("autocoder").join("SKILL.md"))
+            .await
+            && transport
+                .path_exists(
+                    &root
+                        .join(".agent")
+                        .join("scripts")
+                        .join("start-parallel-agents.sh"),
+                )
+                .await
+            && transport
+                .path_exists(&root.join("agents").join("autocoder").join("agent.md"))
+                .await
+        {
+            return true;
+        }
+    }
+
+    false
 }
 
 pub fn detect_runtime_alert(content: &str) -> Option<String> {
@@ -232,8 +283,9 @@ fn summarize_output(output: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{detect_runtime_alert, runtime_live_probes};
+    use super::{agents_repo_root_candidates, detect_runtime_alert, runtime_live_probes};
     use crate::model::swarm::AgentType;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn detects_runtime_quota_alerts() {
@@ -278,5 +330,14 @@ mod tests {
     #[test]
     fn claude_has_no_live_probe_yet() {
         assert!(runtime_live_probes(&AgentType::Claude).is_empty());
+    }
+
+    #[test]
+    fn gemini_asset_candidates_use_repo_sibling_agents_repo() {
+        let repo = Path::new("/tmp/workspace/project");
+        assert_eq!(
+            agents_repo_root_candidates(repo),
+            vec![PathBuf::from("/tmp/workspace/agents")]
+        );
     }
 }

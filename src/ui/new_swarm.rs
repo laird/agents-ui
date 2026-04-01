@@ -27,6 +27,7 @@ pub fn render_runtime_dialog(f: &mut Frame, area: Rect, selected: AgentType) {
         Constraint::Length(2),
         Constraint::Length(2),
         Constraint::Length(2),
+        Constraint::Length(2),
         Constraint::Min(0),
         Constraint::Length(2),
     ])
@@ -53,6 +54,11 @@ pub fn render_runtime_dialog(f: &mut Frame, area: Rect, selected: AgentType) {
     } else {
         theme::help_style()
     };
+    let gemini_style = if selected == AgentType::Gemini {
+        theme::input_style()
+    } else {
+        theme::help_style()
+    };
 
     let claude = Paragraph::new(Line::from(Span::styled(
         " > Claude Code (autocoder plugin from ../agents)",
@@ -72,6 +78,12 @@ pub fn render_runtime_dialog(f: &mut Frame, area: Rect, selected: AgentType) {
     )));
     f.render_widget(droid, chunks[3]);
 
+    let gemini = Paragraph::new(Line::from(Span::styled(
+        " > Gemini (laird/agents skills + .agent scripts)",
+        gemini_style,
+    )));
+    f.render_widget(gemini, chunks[4]);
+
     let help = Paragraph::new(Line::from(vec![
         Span::styled(" ↑/↓", theme::title_style()),
         Span::styled(" choose  ", theme::help_style()),
@@ -81,10 +93,12 @@ pub fn render_runtime_dialog(f: &mut Frame, area: Rect, selected: AgentType) {
         Span::styled(" codex  ", theme::help_style()),
         Span::styled("d", theme::title_style()),
         Span::styled(" droid  ", theme::help_style()),
+        Span::styled("g", theme::title_style()),
+        Span::styled(" gemini  ", theme::help_style()),
         Span::styled("Enter", theme::title_style()),
         Span::styled(" confirm", theme::help_style()),
     ]));
-    f.render_widget(help, chunks[4]);
+    f.render_widget(help, chunks[5]);
 }
 
 /// Render the "switch agent runtime" overlay for a running swarm.

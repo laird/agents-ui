@@ -30,6 +30,7 @@ where
     let mut has_claude = false;
     let mut has_codex = false;
     let mut has_droid = false;
+    let mut has_gemini = false;
     let mut server = None;
 
     let mut iter = args.into_iter().skip(1);
@@ -38,6 +39,7 @@ where
             "--claude" => has_claude = true,
             "--codex" => has_codex = true,
             "--droid" => has_droid = true,
+            "--gemini" => has_gemini = true,
             "--server" => {
                 let Some(value) = iter.next() else {
                     anyhow::bail!("--server requires a hostname");
@@ -55,15 +57,17 @@ where
         }
     }
 
-    let selected = [has_claude, has_codex, has_droid]
+    let selected = [has_claude, has_codex, has_droid, has_gemini]
         .into_iter()
         .filter(|flag| *flag)
         .count();
     if selected > 1 {
-        anyhow::bail!("Use only one runtime flag: --claude, --codex, or --droid");
+        anyhow::bail!("Use only one runtime flag: --claude, --codex, --droid, or --gemini");
     }
 
-    let agent_type = if has_droid {
+    let agent_type = if has_gemini {
+        Some(AgentType::Gemini)
+    } else if has_droid {
         Some(AgentType::Droid)
     } else if has_codex {
         Some(AgentType::Codex)
@@ -102,7 +106,11 @@ async fn main() -> Result<()> {
     let initial_agent_type =
         select_initial_agent_type(cli.agent_type.clone(), repo_root.as_deref())?;
     let startup_warning =
-        crate::runtime::validate_environment(&transport, initial_agent_type.as_ref())
+        crate::runtime::validate_environment(
+            &transport,
+            initial_agent_type.as_ref(),
+            repo_root.as_deref(),
+        )
             .await?
             .gh_warning;
 
@@ -218,8 +226,17 @@ mod tests {
     }
 
     #[test]
+    fn picks_gemini_when_flag_present() {
+        let args = vec!["agents-tui", "--gemini"];
+        assert_eq!(
+            parse_cli_options(args).unwrap().agent_type,
+            Some(AgentType::Gemini)
+        );
+    }
+
+    #[test]
     fn rejects_conflicting_runtime_flags() {
-        let args = vec!["agents-tui", "--claude", "--codex"];
+        let args = vec!["agents-tui", "--claude", "--gemini"];
         assert!(parse_cli_options(args).is_err());
     }
 
