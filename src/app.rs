@@ -244,6 +244,8 @@ pub struct App {
     auto_dispatch_last: Option<std::time::Instant>,
     /// Issue detail view state.
     pub issue_detail_view: Option<IssueDetailView>,
+    /// Inline comment input state for issue detail view.
+    pub issue_comment_input: Option<TextInput>,
     /// App-level keybinding configuration.
     pub keybindings: crate::config::keybindings::KeyBindings,
     /// Whether the ? help overlay is visible.
@@ -325,6 +327,7 @@ impl App {
             show_shortcuts_viewer: false,
             auto_dispatch_last: None,
             issue_detail_view: None,
+            issue_comment_input: None,
             keybindings: crate::config::keybindings::KeyBindings::load(),
             show_help: false,
             feedback_state: None,
@@ -445,7 +448,7 @@ impl App {
                     }
                     Screen::IssueDetail { .. } => {
                         if let Some(ref view) = self.issue_detail_view {
-                            view.render(f, area);
+                            view.render(f, area, self.issue_comment_input.as_ref());
                         }
                     }
                     Screen::IssueList { swarm_idx } => {
@@ -710,9 +713,17 @@ impl App {
         if key.modifiers.contains(KeyModifiers::CONTROL)
             && key.code == KeyCode::Char('c')
             && !self.is_passthrough_mode()
+            && self.issue_comment_input.is_none()
         {
             self.running = false;
             return Ok(());
+        }
+
+        // While issue comment input is active, route all keys to issue detail handling.
+        if self.issue_comment_input.is_some() {
+            if let Screen::IssueDetail { swarm_idx } = &self.screen {
+                return self.handle_issue_detail_key(key, *swarm_idx).await;
+            }
         }
 
         // Help overlay: Esc or ? closes it; all other keys are consumed
@@ -1405,6 +1416,8 @@ impl App {
             }
         }
         self.repo_view = RepoView::new();
+        self.issue_detail_view = None;
+        self.issue_comment_input = None;
         self.screen = Screen::RepoView { swarm_idx };
     }
 
@@ -2809,8 +2822,100 @@ impl App {
     }
 
     async fn handle_issue_detail_key(&mut self, key: KeyEvent, swarm_idx: usize) -> Result<()> {
+        if self.issue_comment_input.is_some() {
+            match key.code {
+                KeyCode::Esc => {
+                    self.issue_comment_input = None;
+                }
+                KeyCode::Enter => {
+                    let comment_body = self
+                        .issue_comment_input
+                        .as_ref()
+                        .map(|input| input.text().trim().to_string())
+                        .unwrap_or_default();
+
+                    if comment_body.is_empty() {
+                        self.status_message = Some("Comment cannot be empty".to_string());
+                        return Ok(());
+                    }
+
+                    let issue_number = self.issue_detail_view.as_ref().map(|view| view.issue_number);
+                    let repo_path = self.swarms.get(swarm_idx).map(|swarm| swarm.repo_path.clone());
+
+                    match (issue_number, repo_path) {
+                        (Some(issue_number), Some(repo_path)) => {
+                            let cmd = ProjectManagementClient::from_env()
+                                .comment_issue(issue_number, &comment_body);
+                            match self.transport.output(cmd.program, &cmd.args, Some(&repo_path)).await {
+                                Ok(out) if out.status.success() => {
+                                    self.issue_comment_input = None;
+                                    self.status_message = Some(format!("Comment posted to #{issue_number}"));
+                                }
+                                Ok(out) => {
+                                    let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                                    self.status_message = Some(if err.is_empty() {
+                                        format!("Failed to post comment to #{issue_number}")
+                                    } else {
+                                        format!("Failed to post comment: {err}")
+                                    });
+                                }
+                                Err(e) => {
+                                    self.status_message = Some(format!("Failed to post comment: {e}"));
+                                }
+                            }
+                        }
+                        _ => {
+                            self.status_message =
+                                Some("Unable to resolve issue context for comment".to_string());
+                        }
+                    }
+                }
+                KeyCode::Backspace => {
+                    if let Some(input) = self.issue_comment_input.as_mut() {
+                        input.backspace();
+                    }
+                }
+                KeyCode::Delete => {
+                    if let Some(input) = self.issue_comment_input.as_mut() {
+                        input.delete();
+                    }
+                }
+                KeyCode::Left => {
+                    if let Some(input) = self.issue_comment_input.as_mut() {
+                        input.move_left();
+                    }
+                }
+                KeyCode::Right => {
+                    if let Some(input) = self.issue_comment_input.as_mut() {
+                        input.move_right();
+                    }
+                }
+                KeyCode::Home => {
+                    if let Some(input) = self.issue_comment_input.as_mut() {
+                        input.move_home();
+                    }
+                }
+                KeyCode::End => {
+                    if let Some(input) = self.issue_comment_input.as_mut() {
+                        input.move_end();
+                    }
+                }
+                KeyCode::Char(c)
+                    if !key.modifiers.contains(KeyModifiers::CONTROL)
+                        && !key.modifiers.contains(KeyModifiers::ALT) =>
+                {
+                    if let Some(input) = self.issue_comment_input.as_mut() {
+                        input.insert_char(c);
+                    }
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+
         match key.code {
             KeyCode::Esc | KeyCode::Backspace => {
+                self.issue_comment_input = None;
                 self.issue_detail_view = None;
                 self.screen = Screen::RepoView { swarm_idx };
             }
@@ -2825,6 +2930,9 @@ impl App {
                         .args(cmd.args)
                         .spawn();
                 }
+            }
+            KeyCode::Char('C') | KeyCode::Char('c') => {
+                self.issue_comment_input = Some(TextInput::new());
             }
             KeyCode::PageUp => {
                 if let Some(ref mut view) = self.issue_detail_view {
@@ -2990,10 +3098,12 @@ impl App {
                         labels,
                         state,
                     ));
+                    self.issue_comment_input = None;
                     self.screen = Screen::IssueDetail { swarm_idx };
                 }
             }
             _ => {
+                self.issue_comment_input = None;
                 self.status_message =
                     Some(format!("Failed to fetch issue #{issue_number}"));
             }

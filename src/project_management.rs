@@ -171,6 +171,18 @@ impl ProjectManagementClient {
         ProjectCommand::new(self.program(), args)
     }
 
+    pub fn comment_issue(&self, issue_id: impl std::fmt::Display, body: &str) -> ProjectCommand {
+        let mut args = vec![
+            "issue".to_string(),
+            "comment".to_string(),
+            issue_id.to_string(),
+            "--body".to_string(),
+            body.to_string(),
+        ];
+        self.append_backend_auth_args(&mut args);
+        ProjectCommand::new(self.program(), args)
+    }
+
     pub fn remove_label(&self, issue_id: impl std::fmt::Display, label: &str) -> ProjectCommand {
         let mut args = vec![
             "issue".to_string(),
@@ -274,6 +286,16 @@ mod tests {
                 "--label",
                 "enhancement,P3",
             ]
+        );
+    }
+
+    #[test]
+    fn github_comment_issue_matches_existing_flags() {
+        let cmd = ProjectManagementClient::github().comment_issue(235, "Looks good");
+        assert_eq!(cmd.program, "gh");
+        assert_eq!(
+            cmd.args,
+            vec!["issue", "comment", "235", "--body", "Looks good"]
         );
     }
 
