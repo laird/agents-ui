@@ -46,3 +46,14 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Pressing 'p' now performs approval directly from the UI across runtimes without relying on manager command support.
 
+
+---
+
+## 2026-04-01 12:42:35 - Resolve #239 as already implemented
+
+**What Changed**: Validated that Repos List already supports adding a repo and starting a swarm via the n key New Swarm flow, then closed issue #239 with clarification comments.
+
+**Why Changed**: Issue #239 was the highest-priority unblocked P2 bug in queue order, but the behavior exists in current code.
+
+**Impact**: Queue is unblocked for the next P2 bug; no product code changes were required in this pass.
+
