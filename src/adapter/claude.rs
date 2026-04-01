@@ -46,6 +46,36 @@ impl ClaudeAdapter {
         None
     }
 
+    /// Expected worker worktree paths for a given repo and worker count.
+    fn expected_worktree_paths(repo_path: &Path, num_workers: u32) -> Vec<PathBuf> {
+        let project_name = Self::project_name(repo_path);
+        let parent = repo_path.parent().unwrap_or(repo_path);
+        (1..=num_workers)
+            .map(|idx| parent.join(format!("{project_name}-wt-{idx}")))
+            .collect()
+    }
+
+    /// Ensure runtime-specific skill files are present for the repo and any existing worktrees.
+    fn ensure_runtime_skills_for_launch(config: &SwarmConfig) -> Result<()> {
+        crate::scripts::launcher::ensure_runtime_skills(
+            &config.repo_path,
+            &config.agent_type,
+            &config.agents_dir,
+        )?;
+
+        for worktree_path in Self::expected_worktree_paths(&config.repo_path, config.num_workers) {
+            if worktree_path.exists() {
+                crate::scripts::launcher::ensure_runtime_skills(
+                    &worktree_path,
+                    &config.agent_type,
+                    &config.agents_dir,
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+
     /// Build a Swarm model from an existing tmux session.
     async fn build_swarm_from_session(
         session_name: &str,
@@ -79,10 +109,11 @@ impl ClaudeAdapter {
                 // Worker panes
                 for pane in &window.panes {
                     let worker_idx = pane.index as usize;
-                    let worktree_path = repo_path
-                        .parent()
-                        .unwrap_or(&repo_path)
-                        .join(format!("{}-wt-{}", project_name, worker_idx + 1));
+                    let worktree_path = repo_path.parent().unwrap_or(&repo_path).join(format!(
+                        "{}-wt-{}",
+                        project_name,
+                        worker_idx + 1
+                    ));
 
                     let status_file = worktree_path
                         .join(agent_type.status_dir())
@@ -119,6 +150,9 @@ impl AgentRuntime for ClaudeAdapter {
         let project_name = Self::project_name(&config.repo_path);
         let session_name = Self::session_name(&project_name, &config.agent_type);
 
+        Self::ensure_runtime_skills_for_launch(config)
+            .context("Failed to ensure runtime skills before launch")?;
+
         // Check if session already exists
         if session::has_session(&session_name).await {
             tracing::info!("Session {session_name} already exists, reconnecting");
@@ -132,7 +166,9 @@ impl AgentRuntime for ClaudeAdapter {
 
         let script_path = crate::scripts::launcher::find_script("start-parallel-agents.sh")
             .or_else(|| {
-                let p = config.agents_dir.join("plugins/autocoder/scripts/start-parallel-agents.sh");
+                let p = config
+                    .agents_dir
+                    .join("plugins/autocoder/scripts/start-parallel-agents.sh");
                 p.exists().then_some(p)
             });
 
@@ -185,6 +221,11 @@ impl AgentRuntime for ClaudeAdapter {
 
         // Kill the script process (it's blocking on tmux attach which we don't need)
         child.kill().await.ok();
+
+        // New worktrees may have been created by the launch script; install runtime skills there.
+        if let Err(e) = Self::ensure_runtime_skills_for_launch(config) {
+            tracing::warn!("Failed to install runtime skills in worker worktrees: {e}");
+        }
 
         Self::build_swarm_from_session(
             &session_name,
@@ -244,7 +285,9 @@ impl AgentRuntime for ClaudeAdapter {
 
     async fn teardown(&self, swarm: &Swarm) -> Result<()> {
         let script_path = crate::scripts::launcher::find_script("stop-parallel-agents.sh")
-            .unwrap_or_else(|| PathBuf::from("../agents/plugins/autocoder/scripts/stop-parallel-agents.sh"));
+            .unwrap_or_else(|| {
+                PathBuf::from("../agents/plugins/autocoder/scripts/stop-parallel-agents.sh")
+            });
 
         let output = Command::new("bash")
             .arg(&script_path)
@@ -286,7 +329,8 @@ async fn find_repo_path(session_name: &str, project_name: &str) -> Option<PathBu
 
     // Try current directory
     if let Ok(cwd) = std::env::current_dir() {
-        if cwd.file_name().map(|n| n.to_string_lossy().to_string()) == Some(project_name.to_string())
+        if cwd.file_name().map(|n| n.to_string_lossy().to_string())
+            == Some(project_name.to_string())
         {
             return Some(cwd);
         }
