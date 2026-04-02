@@ -101,3 +101,223 @@ This file tracks all significant changes, migrations, and decisions.
 
 **Impact**: Project-management calls are now centralized, reducing backend leakage and enabling future auth/field mapping extensions.
 
+
+---
+
+## 2026-04-01 13:32:24 - Autocoder one-pass queue check
+
+**What Changed**: Reviewed the issue queue and ran regression checks (cargo test, cargo build).
+
+**Why Changed**: To execute one autocoder workflow pass in required order and verify project health before acting.
+
+**Impact**: No actionable unblocked issues were found; only proposal-labeled enhancements remain open (#234-#237).
+
+
+---
+
+## 2026-04-01 14:10:35 - Autocoder pass: queue triage + regression check
+
+**What Changed**: Reviewed open issue queue by workflow priority, confirmed only proposal-labeled P3 enhancements are open, and ran cargo test + cargo build regression checks.
+
+**Why Changed**: To execute one full autocoder workflow pass and verify no active bug/regression work is pending before proposals.
+
+**Impact**: All tests/build passed; no unblocked actionable issue available without human proposal approval.
+
+
+---
+
+## 2026-04-01 14:28:18 - Autocoder one-pass queue evaluation
+
+**What Changed**: Reviewed open GitHub issue queue in workflow order, found no unprioritized issues, no P0-P3 bugs, no approved enhancements, and only proposal issues awaiting human approval; ran cargo test and cargo build regression checks (all passing).
+
+**Why Changed**: To complete exactly one autocoder pass and verify there is no autonomous actionable work before proposals are approved.
+
+**Impact**: Queue remains idle for autonomous execution; no code changes were required and existing proposals remain pending human approval.
+
+
+---
+
+## 2026-04-01 14:50:02 - Issue #235: inline issue-detail comments
+
+**What Changed**: Added Issue Detail comment input state, UI overlay/help hint, and gh issue comment command wiring.
+
+**Why Changed**: To implement approved enhancement #235 so users can post comments without leaving the TUI.
+
+**Impact**: Issue Detail now supports C to draft/post comments with Enter, Esc cancel behavior, and status feedback.
+
+
+---
+
+## 2026-04-01 14:56:22 - Autocoder one-pass idle check
+
+**What Changed**: Reviewed GitHub issue queue (no open issues) and ran cargo build/cargo test at regression stage.
+
+**Why Changed**: The autocoder workflow requires regression verification when no prioritized bug issues are available.
+
+**Impact**: Confirmed no actionable work items; current branch remains functionally healthy with build/tests passing.
+
+
+---
+
+## 2026-04-01 17:18:34 - Autocoder pass: regression check
+
+**What Changed**: Checked GitHub issue queue (none open) and ran cargo test + cargo build as regression/build verification
+
+**Why Changed**: Workflow order requires regression validation when no prioritized bugs are available
+
+**Impact**: Confirmed green baseline for one-pass autocoder run; no code changes or issue actions were needed
+
+
+---
+
+## 2026-04-01 18:27:58 - Autocoder one-pass queue check
+
+**What Changed**: Read autocoder workflow docs, checked issue queues, attempted plugin regression script (failed due REPORT_DIR parse), then ran cargo build && cargo test successfully (120/120).
+
+**Why Changed**: Workflow-ordered one-pass execution required selecting highest-priority unblocked work; no open issues existed, so regression phase was executed.
+
+**Impact**: Validated repository health with no new actionable issues found; no code changes were required.
+
+
+---
+
+## 2026-04-02 13:18:38 - Autocoder one-pass idle check
+
+**What Changed**: Reviewed the GitHub issue queue in workflow order, confirmed there are no open issues, attempted the shared regression script (it failed immediately on CLAUDE.md report-dir parsing), then ran cargo test and cargo build successfully.
+
+**Why Changed**: To complete exactly one autocoder workflow pass when no triage, bug, regression-failure issue, or approved enhancement work was available.
+
+**Impact**: Confirmed a green baseline for this repository with no actionable unblocked work items; no code changes or issue actions were required.
+
+
+---
+
+## 2026-04-02 13:35:12 - Autocoder one-pass queue review and regression check
+
+**What Changed**: Read the autocoder workflow references, confirmed AGENTS.md and the expected helper scripts are not vendored in this repo, checked the open GitHub issue queue (none open), and ran cargo test plus cargo build successfully.
+
+**Why Changed**: The workflow order reached the regression stage because there were no unprioritized issues, bugs, regression-failure issues, approved enhancements, or proposals actionable in this worktree.
+
+**Impact**: Validated a green baseline for one exact autocoder pass with no actionable unblocked work items; no product code changes, commit, or push were required.
+
+
+---
+
+## 2026-04-02 14:08:52 - Autocoder one-pass regression check
+
+**What Changed**: Read the shared autocoder workflow docs, checked the GitHub issue queue with gh, confirmed there are no open actionable issues, and ran cargo test plus cargo build successfully.
+
+**Why Changed**: The workflow order reached regression verification because there were no unprioritized issues, bugs, regression failures, approved enhancements, or actionable proposals in this repository.
+
+**Impact**: Validated a green baseline for this repository for exactly one autocoder pass; no code changes, commit, or push were needed.
+
+
+---
+
+## 2026-04-02 14:25:57 - Autocoder one-pass queue check
+
+**What Changed**: Read the autocoder workflow references, confirmed `AGENTS.md` plus the shared autocoder helper scripts are not vendored in this checkout, queried the open GitHub issue queue (`gh issue list`, none open), and ran `cargo test` plus `cargo build` successfully.
+
+**Why Changed**: The required one-pass workflow advanced from triage and bug stages to regression verification because there were no unprioritized issues, open bugs, regression-failure issues, approved enhancements, or proposals actionable in this repository.
+
+**Impact**: Confirmed the repository is currently idle for autonomous work with a green regression baseline; no code changes, commit, or push were required in this pass.
+
+---
+
+## 2026-04-02 14:42:19 - Autocoder single-pass regression sweep
+
+**What Changed**: Checked the GitHub issue queue, found no open issues, then ran cargo test and cargo build successfully in the agents-ui repo.
+
+**Why Changed**: The autocoder workflow requires regression verification when no prioritized bugs or approved enhancements are available.
+
+**Impact**: Confirmed the current codebase passes its Rust test and build gates; no actionable issue was available for this pass.
+
+---
+
+## 2026-04-02 14:59:11 - Autocoder single-pass idle verification
+
+**What Changed**: Read the repo autocoder workflow references, confirmed `AGENTS.md` and the shared helper scripts are not vendored in this checkout, checked the GitHub issue queue (`gh issue list`, none open; `gh label list` hit an API connectivity error), and ran `cargo test` plus `cargo build` successfully.
+
+**Why Changed**: The required one-pass workflow reached regression verification because there were no unprioritized issues, prioritized bugs, regression-failure issues, approved enhancements, or proposals actionable in this environment.
+
+**Impact**: Confirmed a green repository baseline for this pass with no actionable unblocked work items; no product code changes, commit, or push were required.
+
+---
+
+## 2026-04-02 15:16:05 - Autocoder one-pass queue check and regression verification
+
+**What Changed**: Checked the GitHub issue queue for open actionable work, found no open issues, then ran cargo test and cargo build as the repo's regression/build verification steps.
+
+**Why Changed**: The autocoder workflow requires regression verification when no prioritized bugs remain; this repo's native checks are Rust cargo commands rather than the legacy JS-oriented regression helper defaults.
+
+**Impact**: Confirmed the current branch has no actionable queue item and the codebase passes 120 tests plus a clean build.
+
+---
+
+## 2026-04-02 15:32:18 - Autocoder one-pass idle queue verification
+
+**What Changed**: Read the required autocoder workflow references, confirmed `AGENTS.md`, `plugins/autocoder/scripts/regression-test.sh`, and `scripts/append-to-history.sh` are not vendored in this checkout, queried the open GitHub issue queue (`gh issue list`, none open), and ran `cargo test` plus `cargo build` successfully.
+
+**Why Changed**: The one-pass workflow had no unprioritized issues, bugs, regression-failure issues, approved enhancements, or actionable proposals, so it advanced to regression verification using the repo's available Rust checks.
+
+**Impact**: Confirmed the repository is idle for autonomous issue work with a green baseline; no product code changes, commit, or push were required in this pass.
+
+---
+
+## 2026-04-02 15:49:28 - Autocoder one-pass idle verification
+
+**What Changed**: Read the required autocoder workflow references, confirmed `AGENTS.md`, `plugins/autocoder/scripts/regression-test.sh`, and `scripts/append-to-history.sh` are not vendored in this checkout, queried the open GitHub issue queue (`gh issue list`, none open; `gh label list` hit an API connectivity error), and ran `cargo test` plus `cargo build` successfully.
+
+**Why Changed**: The one-pass autocoder workflow requires queue inspection in priority order followed by regression verification when there is no unblocked triage, bug, regression-failure, approved enhancement, or proposal work to execute.
+
+**Impact**: Confirmed a green repository baseline for this pass with no actionable unblocked work items; no product code changes, commit, or push were required.
+
+---
+
+## 2026-04-02 16:05:57 - Autocoder one-pass idle verification
+
+**What Changed**: Read the required autocoder workflow references, used `CLAUDE.md` only as legacy fallback because `AGENTS.md` is not present in this checkout, confirmed the shared helper scripts (`plugins/autocoder/scripts/regression-test.sh` and `scripts/append-to-history.sh`) are not vendored here, checked the live GitHub queue (`gh issue list`, none open), and ran `cargo test` plus `cargo build` successfully.
+
+**Why Changed**: The workflow order reached regression verification because there were no unprioritized issues, prioritized bugs, regression failures, approved enhancements, or actionable proposals available for a single-pass autocoder run.
+
+**Impact**: Confirmed the repository is idle for autonomous work on branch `fix/issue-132-auto` with a green baseline; no code changes, commit, or push were required in this pass.
+
+---
+
+## 2026-04-02 16:39:28 - Autocoder single-pass queue check
+
+**What Changed**: Checked the GitHub issue queue, found no open issues, and ran the configured regression verification with cargo test and cargo build.
+
+**Why Changed**: The autocoder workflow requires regression verification when no prioritized bug or enhancement work is available.
+
+**Impact**: Confirmed the current branch is clean from a workflow perspective: no queue items were available and the Rust test/build gates passed without creating new follow-up work.
+
+---
+
+## 2026-04-02 16:55:50 - Autocoder one-pass idle check
+
+**What Changed**: Read the required autocoder workflow references, used `CLAUDE.md` as the documented legacy fallback because `AGENTS.md` is not present in this checkout, confirmed the shared helper scripts (`plugins/autocoder/scripts/regression-test.sh` and `scripts/append-to-history.sh`) are not vendored here, queried the live GitHub queue (`gh issue list`, none open; `gh issue status` hit an API connectivity error), and ran `cargo test` plus `cargo build` successfully.
+
+**Why Changed**: The one-pass workflow had no unprioritized issues, bugs, regression-failure items, approved enhancements, or actionable proposals, so it advanced to regression verification using the repo's available Rust checks.
+
+**Impact**: Confirmed a green baseline for exactly one autocoder pass with no actionable unblocked work items; no product code changes, commit, or push were needed.
+
+---
+
+## 2026-04-02 17:12:58 - Autocoder one-pass idle verification
+
+**What Changed**: Read the required autocoder workflow references, used `CLAUDE.md` only as legacy fallback because `AGENTS.md` is not present in this checkout, confirmed `plugins/autocoder/scripts/regression-test.sh` and `scripts/append-to-history.sh` are not vendored here, queried the live GitHub queue (`gh issue list --repo laird/agents-ui --state open --limit 100`, none open), and ran `cargo test` plus `cargo build` successfully.
+
+**Why Changed**: The workflow order for exactly one autocoder pass reached regression verification because there were no unprioritized issues, open bugs, regression-failure issues, approved enhancements, or actionable proposals available in the queue.
+
+**Impact**: Confirmed this branch remains idle for autonomous issue work with a green baseline of 120 passing tests and a successful build; no code changes, commit, or push were required.
+
+---
+
+## 2026-04-02 17:29:45 - Autocoder one-pass idle verification
+
+**What Changed**: Read the required autocoder workflow references, used `CLAUDE.md` only as legacy fallback because `AGENTS.md` is not present in this checkout, confirmed `plugins/autocoder/scripts/regression-test.sh` and `scripts/append-to-history.sh` are not vendored here, queried the live GitHub queue (`gh issue list --repo laird/agents-ui --state open --limit 100`, none open), and ran `cargo test` plus `cargo build` successfully.
+
+**Why Changed**: The one-pass workflow had no unprioritized issues, open bugs, regression-failure issues, approved enhancements, or actionable proposals, so it advanced to regression verification using the repo's available Rust checks.
+
+**Impact**: Confirmed a green baseline for exactly one autocoder pass with no actionable unblocked work; no product code changes, commit, or push were required.
