@@ -5,6 +5,17 @@ This file tracks all significant changes, migrations, and decisions.
 
 ---
 
+## 2026-04-03 00:44:17 - Autocoder one-pass idle verification
+
+**What Changed**: Read the required autocoder workflow references, confirmed `AGENTS.md`, `plugins/autocoder/scripts/regression-test.sh`, and `scripts/append-to-history.sh` are not vendored in this checkout, queried the live GitHub queue (`gh issue list --repo laird/agents-ui --state open --limit 100`, none open), and ran `cargo test` plus `cargo build` successfully.
+
+**Why Changed**: The required single-pass workflow reached regression verification because there were no unprioritized issues, prioritized bugs, regression-failure issues, approved enhancements, or actionable proposals available in the queue.
+
+**Impact**: Confirmed the repository is idle for autonomous work on this pass with a green baseline of 120 passing tests and a successful build; no code changes, commit, or push were required.
+
+
+---
+
 ## 2026-04-01 12:24:04 - Fix #249 codex runtime skill checks
 
 **What Changed**: Updated Codex runtime asset detection to require the autocoder skill when relying on repo wrappers, and added regression tests for the gating logic.
@@ -304,6 +315,16 @@ This file tracks all significant changes, migrations, and decisions.
 
 ---
 
+## 2026-04-03 07:24:56 - Autocoder one-pass idle verification
+
+**What Changed**: Read the required autocoder workflow references, used `CLAUDE.md` as the documented legacy fallback because `AGENTS.md` is not present in this checkout, confirmed the shared helper scripts (`plugins/autocoder/scripts/regression-test.sh` and `scripts/append-to-history.sh`) are not vendored here, queried the live GitHub queue (`gh issue list --repo laird/agents-ui --state open --limit 100`, none open), and ran `cargo test` plus `cargo build` successfully.
+
+**Why Changed**: The workflow order for exactly one autocoder pass reached regression verification because there were no unprioritized issues, prioritized bugs, regression-failure issues, approved enhancements, or actionable proposals available in the queue.
+
+**Impact**: Confirmed a green baseline for exactly one autocoder pass with no actionable unblocked work; no product code changes, commit, or push were required.
+
+---
+
 ## 2026-04-02 17:12:58 - Autocoder one-pass idle verification
 
 **What Changed**: Read the required autocoder workflow references, used `CLAUDE.md` only as legacy fallback because `AGENTS.md` is not present in this checkout, confirmed `plugins/autocoder/scripts/regression-test.sh` and `scripts/append-to-history.sh` are not vendored here, queried the live GitHub queue (`gh issue list --repo laird/agents-ui --state open --limit 100`, none open), and ran `cargo test` plus `cargo build` successfully.
@@ -321,3 +342,13 @@ This file tracks all significant changes, migrations, and decisions.
 **Why Changed**: The one-pass workflow had no unprioritized issues, open bugs, regression-failure issues, approved enhancements, or actionable proposals, so it advanced to regression verification using the repo's available Rust checks.
 
 **Impact**: Confirmed a green baseline for exactly one autocoder pass with no actionable unblocked work; no product code changes, commit, or push were required.
+
+---
+
+## 2026-04-02 22:16:19 - Autocoder one-pass idle verification
+
+**What Changed**: Read the required autocoder workflow references, used CLAUDE.md as the documented legacy fallback because AGENTS.md is not present in this checkout, confirmed the live GitHub queue is empty with gh issue list, attempted the shared regression helper (it failed immediately on legacy CLAUDE.md report-dir parsing via mkdir), then ran cargo test and cargo build successfully.
+
+**Why Changed**: The one-pass workflow had no unprioritized issues, bugs, regression-failure items, approved enhancements, or actionable proposals, so it advanced to regression verification using the repo's available Rust checks.
+
+**Impact**: Confirmed a green baseline for exactly one autocoder pass with no actionable unblocked work items; no product code changes, commit, or push were needed.
