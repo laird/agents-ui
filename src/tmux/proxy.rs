@@ -229,6 +229,9 @@ pub fn spawn_pane_watcher(
                         tracing::info!(
                             "Pane {target} failed {consecutive_failures} times consecutively, stopping watcher"
                         );
+                        let _ = tx.send(crate::event::Event::PaneDead {
+                            agent_id: agent_id.clone(),
+                        });
                         break;
                     }
                     tracing::warn!("Pane capture failed for {target}: {e}");

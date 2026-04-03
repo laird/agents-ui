@@ -2,6 +2,54 @@ use std::path::PathBuf;
 use super::issue::IssueCache;
 use super::status::AgentStatus;
 
+/// Health status of a worker agent.
+#[derive(Debug, Clone, PartialEq)]
+pub enum HealthStatus {
+    Healthy,
+    Stalled,
+    Restarting,
+    Dead,
+}
+
+/// Per-agent health tracking for auto-recovery.
+#[derive(Debug, Clone)]
+pub struct WorkerHealth {
+    /// Whether the tmux pane is currently known to be alive.
+    pub pane_alive: bool,
+    /// Consecutive ticks where the agent was Working but pane content didn't change.
+    pub stall_ticks: u32,
+    /// How many times this agent has been auto-restarted this session.
+    pub restart_count: u8,
+    /// Last pane content snapshot (for stall detection).
+    pub last_content: String,
+}
+
+impl Default for WorkerHealth {
+    fn default() -> Self {
+        Self {
+            pane_alive: true,
+            stall_ticks: 0,
+            restart_count: 0,
+            last_content: String::new(),
+        }
+    }
+}
+
+impl WorkerHealth {
+    /// Derive the observable health status from current fields.
+    pub fn status(&self) -> HealthStatus {
+        if self.restart_count >= 3 {
+            HealthStatus::Dead
+        } else if !self.pane_alive {
+            HealthStatus::Restarting
+        } else if self.stall_ticks >= 3 {
+            HealthStatus::Stalled
+        } else {
+            HealthStatus::Healthy
+        }
+    }
+}
+
 /// The type of agent runtime.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentType {
@@ -160,6 +208,8 @@ pub struct AgentInfo {
     pub current_issue_title: Option<String>,
     /// Whether the agent is waiting for user input (detected from pane content)
     pub waiting_for_input: bool,
+    /// Health tracking for auto-recovery
+    pub health: WorkerHealth,
 }
 
 /// Detect if pane content indicates the session is waiting for user input.
@@ -345,6 +395,7 @@ mod tests {
             current_issue: None,
             current_issue_title: None,
             waiting_for_input: false,
+            health: WorkerHealth::default(),
         };
         let mut cache = IssueCache::default();
         cache.issues = issues;
@@ -433,5 +484,49 @@ mod tests {
         assert_eq!(AgentType::Codex.status_dir(), ".codex/loops");
         assert_eq!(AgentType::Claude.status_dir(), ".codex/loops");
         assert_eq!(AgentType::Droid.status_dir(), ".factory/loops");
+    }
+
+    #[test]
+    fn worker_health_default_is_healthy() {
+        let h = WorkerHealth::default();
+        assert_eq!(h.status(), HealthStatus::Healthy);
+    }
+
+    #[test]
+    fn worker_health_stall_ticks_triggers_stalled() {
+        let mut h = WorkerHealth::default();
+        h.stall_ticks = 3;
+        assert_eq!(h.status(), HealthStatus::Stalled);
+    }
+
+    #[test]
+    fn worker_health_pane_dead_triggers_restarting() {
+        let mut h = WorkerHealth::default();
+        h.pane_alive = false;
+        assert_eq!(h.status(), HealthStatus::Restarting);
+    }
+
+    #[test]
+    fn worker_health_restart_cap_triggers_dead() {
+        let mut h = WorkerHealth::default();
+        h.restart_count = 3;
+        assert_eq!(h.status(), HealthStatus::Dead);
+    }
+
+    #[test]
+    fn worker_health_dead_takes_priority_over_stalled() {
+        let mut h = WorkerHealth::default();
+        h.restart_count = 3;
+        h.stall_ticks = 10;
+        h.pane_alive = false;
+        assert_eq!(h.status(), HealthStatus::Dead);
+    }
+
+    #[test]
+    fn worker_health_restarting_takes_priority_over_stalled() {
+        let mut h = WorkerHealth::default();
+        h.pane_alive = false;
+        h.stall_ticks = 5;
+        assert_eq!(h.status(), HealthStatus::Restarting);
     }
 }
