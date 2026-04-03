@@ -3,6 +3,7 @@ use tokio::process::Command;
 use tokio::sync::mpsc;
 use std::time::Duration;
 
+use crate::tmux::session::pane_exists;
 use crate::transport::ServerTransport;
 
 /// Capture the current content of a tmux pane.
@@ -226,15 +227,24 @@ pub fn spawn_pane_watcher(
                 Err(e) => {
                     consecutive_failures += 1;
                     if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
-                        tracing::info!(
-                            "Pane {target} failed {consecutive_failures} times consecutively, stopping watcher"
+                        // Confirm the pane is truly gone before declaring it dead,
+                        // to avoid false positives from transient capture failures.
+                        if !pane_exists(&transport, &target).await {
+                            tracing::info!(
+                                "Pane {target} confirmed gone after {consecutive_failures} failures, stopping watcher"
+                            );
+                            let _ = tx.send(crate::event::Event::PaneDead {
+                                agent_id: agent_id.clone(),
+                            });
+                            break;
+                        }
+                        tracing::warn!(
+                            "Pane {target} failed {consecutive_failures} times but still exists — resetting failure count"
                         );
-                        let _ = tx.send(crate::event::Event::PaneDead {
-                            agent_id: agent_id.clone(),
-                        });
-                        break;
+                        consecutive_failures = 0;
+                    } else {
+                        tracing::warn!("Pane capture failed for {target}: {e}");
                     }
-                    tracing::warn!("Pane capture failed for {target}: {e}");
                 }
             }
         }

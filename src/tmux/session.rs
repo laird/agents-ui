@@ -61,12 +61,14 @@ pub async fn list_sessions(transport: &ServerTransport) -> Result<Vec<String>> {
 }
 
 /// Check whether a specific tmux pane target is still alive.
+/// Uses `tmux list-panes` which correctly checks pane existence (unlike `has-session`
+/// which only checks session existence).
 pub async fn pane_exists(transport: &ServerTransport, target: &str) -> bool {
     transport
         .output(
             "tmux",
             &[
-                "has-session".to_string(),
+                "list-panes".to_string(),
                 "-t".to_string(),
                 target.to_string(),
             ],
