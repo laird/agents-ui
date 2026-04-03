@@ -86,7 +86,7 @@ pub async fn fetch_issues(
     let output = project_management::issue_list(
         transport,
         repo_path,
-        "number,title,state,labels",
+        "number,title,state,labels,updatedAt",
         100,
     )
     .await

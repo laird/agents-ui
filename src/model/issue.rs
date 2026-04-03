@@ -241,6 +241,8 @@ pub struct GhIssueJson {
     pub title: String,
     pub state: String,
     pub labels: Vec<GhLabelJson>,
+    #[serde(rename = "updatedAt", default)]
+    pub updated_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Deserialize)]
@@ -294,7 +296,7 @@ impl From<GhIssueJson> for GitHubIssue {
             labels,
             is_working,
             assigned_worker: None,
-            updated_at: None,
+            updated_at: raw.updated_at,
         }
     }
 }
