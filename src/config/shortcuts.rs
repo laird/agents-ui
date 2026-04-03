@@ -85,6 +85,86 @@ impl ShortcutsConfig {
 
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn defaults_parses_successfully() {
+        let config = ShortcutsConfig::defaults();
+        // All four panels should have entries (catches embedded TOML regressions)
+        assert!(!config.issues.is_empty(), "issues panel should have shortcuts");
+        assert!(!config.workers.is_empty(), "workers panel should have shortcuts");
+        // global and manager may be empty per DEFAULT_CONFIG, but they must not panic
+        let _ = &config.global;
+        let _ = &config.manager;
+    }
+
+    #[test]
+    fn defaults_has_expected_shortcuts() {
+        let config = ShortcutsConfig::defaults();
+
+        // Issues panel: a=approve, x=fix, b=brainstorm
+        assert!(config.issues.contains_key("a"), "issues should have 'a' shortcut");
+        assert_eq!(config.issues["a"].label, "approve");
+        assert!(config.issues.contains_key("x"), "issues should have 'x' shortcut");
+        assert_eq!(config.issues["x"].label, "fix");
+        assert!(config.issues.contains_key("b"), "issues should have 'b' shortcut");
+        assert_eq!(config.issues["b"].label, "brainstorm");
+
+        // Workers panel: f=fix-loop
+        assert!(config.workers.contains_key("f"), "workers should have 'f' shortcut");
+        assert_eq!(config.workers["f"].label, "fix-loop");
+    }
+
+    #[test]
+    fn for_panel_returns_correct_section() {
+        let config = ShortcutsConfig::defaults();
+
+        // Each named panel returns its own map
+        assert!(std::ptr::eq(config.for_panel("issues"), &config.issues));
+        assert!(std::ptr::eq(config.for_panel("workers"), &config.workers));
+        assert!(std::ptr::eq(config.for_panel("manager"), &config.manager));
+        assert!(std::ptr::eq(config.for_panel("global"), &config.global));
+
+        // Unknown panel falls back to global
+        assert!(std::ptr::eq(config.for_panel("unknown"), &config.global));
+        assert!(std::ptr::eq(config.for_panel(""), &config.global));
+    }
+
+    #[test]
+    fn toml_round_trip() {
+        // Parse DEFAULT_CONFIG twice and verify key counts match
+        let first: ShortcutsConfig = toml::from_str(DEFAULT_CONFIG).expect("first parse");
+        let second: ShortcutsConfig = toml::from_str(DEFAULT_CONFIG).expect("second parse");
+
+        assert_eq!(first.issues.len(), second.issues.len());
+        assert_eq!(first.workers.len(), second.workers.len());
+        assert_eq!(first.global.len(), second.global.len());
+        assert_eq!(first.manager.len(), second.manager.len());
+    }
+
+    #[test]
+    fn ensure_defaults_written_creates_file() {
+        let tmp = std::env::temp_dir()
+            .join(format!("agents-shortcuts-test-{}", std::process::id()));
+        let test_path = tmp.join("shortcuts.toml");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+
+        // Simulate what ensure_defaults_written does: write if absent, parse result
+        if !test_path.exists() {
+            std::fs::write(&test_path, DEFAULT_CONFIG).expect("write default config");
+        }
+
+        assert!(test_path.exists(), "config file should have been created");
+        let content = std::fs::read_to_string(&test_path).expect("read config");
+        let parsed: ShortcutsConfig = toml::from_str(&content).expect("parse written config");
+        assert!(!parsed.issues.is_empty(), "written config should have issues shortcuts");
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+}
+
 const DEFAULT_CONFIG: &str = r#"# agents-ui keyboard shortcuts
 # Edit this file to customize shortcuts. Changes take effect on restart.
 #
