@@ -112,6 +112,12 @@ impl SwarmView {
         ])
         .split(chunks[1]);
 
+        use crate::model::swarm::HealthStatus;
+        let healthy = swarm.workers.iter().filter(|w| w.health.status() == HealthStatus::Healthy).count();
+        let stalled = swarm.workers.iter().filter(|w| w.health.status() == HealthStatus::Stalled).count();
+        let dead = swarm.workers.iter().filter(|w| w.health.status() == HealthStatus::Dead).count();
+        let restarting = swarm.workers.iter().filter(|w| w.health.status() == HealthStatus::Restarting).count();
+
         let mut header_spans = vec![
             Span::styled(format!(" {} ", swarm.project_name), theme::title_style()),
             Span::styled("Active ", Style::default().fg(ratatui::style::Color::Green)),
@@ -124,6 +130,16 @@ impl SwarmView {
                 theme::help_style(),
             ),
         ];
+        if stalled > 0 || dead > 0 || restarting > 0 {
+            header_spans.push(Span::styled(
+                format!("Health: ✓{} ⚠{} ↺{} ✗{}  ", healthy, stalled, restarting, dead),
+                if dead > 0 {
+                    Style::default().fg(ratatui::style::Color::Red)
+                } else {
+                    Style::default().fg(ratatui::style::Color::Yellow)
+                },
+            ));
+        }
         if attention > 0 {
             let style = theme::attention_blink_style(blink);
             header_spans.push(Span::styled(format!("⚠ {attention} need attention"), style));
@@ -202,6 +218,7 @@ impl SwarmView {
         // Workers table
         let worker_header = Row::new(vec![
             Cell::from("#"),
+            Cell::from("H"),
             Cell::from("Status"),
             Cell::from("Task"),
         ])
@@ -238,8 +255,16 @@ impl SwarmView {
                         _ => "\u{2014}".to_string(),
                     }
                 };
+                use crate::model::swarm::HealthStatus;
+                let (health_sym, health_style) = match w.health.status() {
+                    HealthStatus::Healthy => ("✓", Style::default().fg(ratatui::style::Color::Green)),
+                    HealthStatus::Stalled => ("⚠", Style::default().fg(ratatui::style::Color::Yellow)),
+                    HealthStatus::Restarting => ("↺", Style::default().fg(ratatui::style::Color::Cyan)),
+                    HealthStatus::Dead => ("✗", Style::default().fg(ratatui::style::Color::Red)),
+                };
                 Row::new(vec![
                     Cell::from(format!("{}", i + 1)),
+                    Cell::from(health_sym).style(health_style),
                     Cell::from(status_str).style(status_style),
                     Cell::from(task),
                 ])
@@ -259,8 +284,9 @@ impl SwarmView {
             worker_rows,
             [
                 Constraint::Length(3),
-                Constraint::Percentage(45),
-                Constraint::Percentage(45),
+                Constraint::Length(2),
+                Constraint::Percentage(40),
+                Constraint::Percentage(50),
             ],
         )
         .header(worker_header)
@@ -689,6 +715,7 @@ mod tests {
             current_issue: None,
             current_issue_title: None,
             waiting_for_input: false,
+            health: crate::model::swarm::WorkerHealth::default(),
         }
     }
 

@@ -594,6 +594,19 @@ impl App {
                     if let Some(agent) = swarm.agent_by_id_mut(&agent_id) {
                         agent.waiting_for_input =
                             crate::model::swarm::detect_waiting_for_input(&content);
+                        // Stall detection: if Working and content unchanged, increment stall_ticks
+                        if matches!(agent.status.state, crate::model::status::AgentState::Working { .. }) {
+                            if content == agent.health.last_content {
+                                agent.health.stall_ticks += 1;
+                            } else {
+                                agent.health.stall_ticks = 0;
+                                agent.health.last_content = content.clone();
+                            }
+                        } else {
+                            agent.health.stall_ticks = 0;
+                            agent.health.last_content = content.clone();
+                        }
+                        agent.health.pane_alive = true;
                         agent.pane_content = content;
                         break;
                     }
@@ -602,6 +615,18 @@ impl App {
                 if is_manager {
                     self.swarm_view.scroll_manager_to_bottom();
                 }
+            }
+            Event::PaneDead { agent_id } => {
+                tracing::warn!("Pane dead signal for agent {agent_id}");
+                for swarm in &mut self.swarms {
+                    if let Some(agent) = swarm.agent_by_id_mut(&agent_id) {
+                        agent.health.pane_alive = false;
+                        agent.health.stall_ticks = 0;
+                        break;
+                    }
+                }
+                // Trigger an immediate heal pass
+                self.heal_all_workers().await;
             }
             Event::LaunchProgress { project_name, message } => {
                 // Append progress to the placeholder swarm's manager pane_content
@@ -1352,6 +1377,7 @@ impl App {
                 current_issue: None,
                 current_issue_title: None,
                 waiting_for_input: false,
+                health: crate::model::swarm::WorkerHealth::default(),
             },
             workers: Vec::new(),
             issue_cache: crate::model::issue::IssueCache::default(),
@@ -3307,6 +3333,30 @@ impl App {
         let mut all_repairs = Vec::new();
 
         for i in 0..self.swarms.len() {
+            // Mark agents that are stalled or dead as needing healing (skip Dead ones at cap)
+            let workers_needing_heal: Vec<String> = self.swarms[i]
+                .workers
+                .iter()
+                .filter(|w| {
+                    let hs = w.health.status();
+                    (hs == crate::model::swarm::HealthStatus::Stalled
+                        || hs == crate::model::swarm::HealthStatus::Restarting)
+                        && w.health.restart_count < 3
+                })
+                .map(|w| w.id.clone())
+                .collect();
+
+            for agent_id in &workers_needing_heal {
+                tracing::info!("Auto-heal: restarting unhealthy worker {agent_id}");
+                all_repairs.push(format!("restarted {agent_id}"));
+                any_repairs = true;
+                if let Some(agent) = self.swarms[i].agent_by_id_mut(agent_id) {
+                    agent.health.restart_count += 1;
+                    agent.health.pane_alive = true;
+                    agent.health.stall_ticks = 0;
+                }
+            }
+
             match self.adapter.heal_workers(&mut self.swarms[i]).await {
                 Ok(repairs) => {
                     if !repairs.is_empty() {

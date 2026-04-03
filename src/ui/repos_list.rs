@@ -289,6 +289,7 @@ mod tests {
             current_issue: None,
             current_issue_title: None,
             waiting_for_input: false,
+            health: crate::model::swarm::WorkerHealth::default(),
         }
     }
 

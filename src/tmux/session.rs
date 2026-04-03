@@ -60,6 +60,23 @@ pub async fn list_sessions(transport: &ServerTransport) -> Result<Vec<String>> {
     Ok(stdout.lines().map(|s| s.to_string()).collect())
 }
 
+/// Check whether a specific tmux pane target is still alive.
+pub async fn pane_exists(transport: &ServerTransport, target: &str) -> bool {
+    transport
+        .output(
+            "tmux",
+            &[
+                "has-session".to_string(),
+                "-t".to_string(),
+                target.to_string(),
+            ],
+            None,
+        )
+        .await
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 /// Discover agent sessions matching known prefixes (claude-, codex-, droid-, gemini-).
 pub async fn discover_agent_sessions(transport: &ServerTransport) -> Result<Vec<String>> {
     let prefixes = ["claude-", "codex-", "droid-", "gemini-"];
