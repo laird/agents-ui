@@ -87,3 +87,46 @@ pub fn render_shortcuts_viewer(
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
     f.render_widget(paragraph, inner);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::shortcuts::ShortcutsConfig;
+    use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn render_shortcuts_viewer_smoke() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let config = ShortcutsConfig::defaults();
+        terminal
+            .draw(|f| render_shortcuts_viewer(f, f.area(), &config, "agents"))
+            .unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(rendered.contains("Shortcuts"));
+    }
+
+    #[test]
+    fn render_shortcuts_viewer_shows_active_panel() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let config = ShortcutsConfig::defaults();
+        terminal
+            .draw(|f| render_shortcuts_viewer(f, f.area(), &config, "repos"))
+            .unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(rendered.contains("repos"));
+    }
+}

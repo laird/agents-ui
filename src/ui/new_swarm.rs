@@ -628,9 +628,9 @@ pub fn render_create_issue_dialog(f: &mut Frame, area: Rect, form: &CreateIssueF
 mod tests {
     use super::{
         render_create_issue_dialog, render_install_scope_dialog, render_new_swarm_dialog,
-        render_runtime_dialog,
+        render_runtime_dialog, render_switch_agent_dialog,
     };
-    use crate::app::{CreateIssueForm, InstallScope, NewSwarmField};
+    use crate::app::{CreateIssueForm, InstallScope, NewSwarmField, RuntimeOption};
     use crate::model::swarm::AgentType;
     use crate::ui::text_input::TextInput;
     use ratatui::{Terminal, backend::TestBackend};
@@ -730,5 +730,31 @@ mod tests {
         assert!(rendered.contains("needs-design"));
         assert!(rendered.contains("proposal"));
         assert!(rendered.contains("create"));
+    }
+
+    #[test]
+    fn switch_agent_dialog_shows_project_and_runtimes() {
+        let options = vec![
+            RuntimeOption {
+                agent_type: AgentType::Codex,
+                available: true,
+                detail: "(current)".to_string(),
+            },
+            RuntimeOption {
+                agent_type: AgentType::Claude,
+                available: true,
+                detail: String::new(),
+            },
+        ];
+        let rendered = rendered_text(|terminal| {
+            terminal
+                .draw(|f| {
+                    render_switch_agent_dialog(f, f.area(), "demo", &AgentType::Codex, &options, 0)
+                })
+                .unwrap();
+        });
+        assert!(rendered.contains("Switch agent runtime for demo"));
+        assert!(rendered.contains("Codex"));
+        assert!(rendered.contains("Claude"));
     }
 }
