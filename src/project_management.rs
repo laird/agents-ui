@@ -339,4 +339,84 @@ mod tests {
             vec!["issue", "create", "--summary", "Title", "--tag", "P3",]
         );
     }
+
+    #[test]
+    fn github_view_issue_produces_correct_args() {
+        let cmd = ProjectManagementClient::github().view_issue(42);
+        assert_eq!(cmd.program, "gh");
+        assert_eq!(cmd.args, vec!["issue", "view", "42"]);
+    }
+
+    #[test]
+    fn github_view_issue_web_adds_web_flag() {
+        let cmd = ProjectManagementClient::github().view_issue_web(42);
+        assert_eq!(cmd.program, "gh");
+        assert_eq!(cmd.args, vec!["issue", "view", "42", "--web"]);
+    }
+
+    #[test]
+    fn github_view_issue_json_adds_json_flag_and_fields() {
+        let cmd = ProjectManagementClient::github().view_issue_json(42, "number,title,body");
+        assert_eq!(cmd.program, "gh");
+        assert_eq!(
+            cmd.args,
+            vec!["issue", "view", "42", "--json", "number,title,body"]
+        );
+    }
+
+    #[test]
+    fn github_remove_label_produces_correct_args() {
+        let cmd = ProjectManagementClient::github().remove_label(99, "working");
+        assert_eq!(cmd.program, "gh");
+        assert_eq!(
+            cmd.args,
+            vec!["issue", "edit", "99", "--remove-label", "working"]
+        );
+    }
+
+    #[test]
+    fn manager_create_issue_prompt_formats_github_command() {
+        let prompt = ProjectManagementClient::github()
+            .manager_create_issue_prompt("P3,enhancement", "Fix the bug");
+        assert_eq!(
+            prompt,
+            r#"create gh issue --label "P3,enhancement" "Fix the bug""#
+        );
+    }
+
+    #[test]
+    fn linear_view_issue_uses_linear_program() {
+        let cmd = ProjectManagementClient::new(
+            ProjectManagementBackend::Linear,
+            BackendOptions::default(),
+        )
+        .view_issue(7);
+        assert_eq!(cmd.program, "linear");
+        assert_eq!(cmd.args, vec!["issue", "view", "7"]);
+    }
+
+    #[test]
+    fn linear_view_issue_with_auth_profile_appends_profile_args() {
+        let options = BackendOptions {
+            auth_profile: Some("myprofile".to_string()),
+            ..BackendOptions::default()
+        };
+        let cmd =
+            ProjectManagementClient::new(ProjectManagementBackend::Linear, options).view_issue(7);
+        assert_eq!(cmd.program, "linear");
+        assert_eq!(
+            cmd.args,
+            vec!["issue", "view", "7", "--profile", "myprofile"]
+        );
+    }
+
+    #[test]
+    fn manager_create_issue_prompt_formats_linear_command() {
+        let prompt = ProjectManagementClient::new(
+            ProjectManagementBackend::Linear,
+            BackendOptions::default(),
+        )
+        .manager_create_issue_prompt("P2", "New feature");
+        assert_eq!(prompt, r#"create linear issue --label "P2" "New feature""#);
+    }
 }
