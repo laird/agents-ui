@@ -529,4 +529,122 @@ mod tests {
         h.stall_ticks = 5;
         assert_eq!(h.status(), HealthStatus::Restarting);
     }
+
+    fn make_agent(id: &str, role: &str, is_manager: bool) -> AgentInfo {
+        AgentInfo {
+            id: id.to_string(),
+            role: role.to_string(),
+            worktree_path: PathBuf::from("/tmp/test"),
+            tmux_target: format!("test:0.{}", if is_manager { 0 } else { 1 }),
+            status: AgentStatus::default(),
+            is_manager,
+            pane_content: String::new(),
+            dispatched_issue: None,
+            current_issue: None,
+            current_issue_title: None,
+            waiting_for_input: false,
+            health: WorkerHealth::default(),
+        }
+    }
+
+    fn make_swarm_with_agents(manager: AgentInfo, workers: Vec<AgentInfo>) -> Swarm {
+        Swarm {
+            repo_path: PathBuf::from("/tmp/test"),
+            project_name: "test".to_string(),
+            agent_type: AgentType::Claude,
+            workflow: None,
+            tmux_session: "claude-test".to_string(),
+            manager,
+            workers,
+            issue_cache: IssueCache::default(),
+        }
+    }
+
+    #[test]
+    fn detect_waiting_recognizes_input_prompt() {
+        assert!(detect_waiting_for_input("some output\nAllow? (y/n)"));
+        assert!(detect_waiting_for_input("text\nWhat should Claude do instead?"));
+        assert!(detect_waiting_for_input("bypass permissions on this file with shift+tab"));
+    }
+
+    #[test]
+    fn detect_waiting_returns_false_for_normal_output() {
+        assert!(!detect_waiting_for_input("Running tests...\nAll tests passed."));
+        assert!(!detect_waiting_for_input(""));
+        assert!(!detect_waiting_for_input("Working on issue #42"));
+    }
+
+    #[test]
+    fn idle_count_counts_idle_agents() {
+        let manager = make_agent("mgr", "manager", true);
+        let mut w1 = make_agent("w1", "worker1", false);
+        let mut w2 = make_agent("w2", "worker2", false);
+        let mut w3 = make_agent("w3", "worker3", false);
+        w1.status.state = super::super::status::AgentState::Idle;
+        w2.status.state = super::super::status::AgentState::Working { issue: Some(1) };
+        w3.status.state = super::super::status::AgentState::Idle;
+        let mut swarm = make_swarm_with_agents(manager, vec![w1, w2, w3]);
+        assert_eq!(swarm.idle_count(), 2);
+        swarm.workers[1].status.state = super::super::status::AgentState::Idle;
+        assert_eq!(swarm.idle_count(), 3);
+    }
+
+    #[test]
+    fn waiting_count_counts_waiting_agents() {
+        let mut manager = make_agent("mgr", "manager", true);
+        let mut w1 = make_agent("w1", "worker1", false);
+        let w2 = make_agent("w2", "worker2", false);
+        manager.waiting_for_input = true;
+        w1.waiting_for_input = true;
+        let swarm = make_swarm_with_agents(manager, vec![w1, w2]);
+        assert_eq!(swarm.waiting_count(), 2);
+    }
+
+    #[test]
+    fn waiting_count_zero_when_none_waiting() {
+        let manager = make_agent("mgr", "manager", true);
+        let w1 = make_agent("w1", "worker1", false);
+        let swarm = make_swarm_with_agents(manager, vec![w1]);
+        assert_eq!(swarm.waiting_count(), 0);
+    }
+
+    #[test]
+    fn all_agents_includes_manager_and_workers() {
+        let manager = make_agent("mgr", "manager", true);
+        let w1 = make_agent("w1", "worker1", false);
+        let w2 = make_agent("w2", "worker2", false);
+        let swarm = make_swarm_with_agents(manager, vec![w1, w2]);
+        let all = swarm.all_agents();
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[0].id, "mgr");
+        assert_eq!(all[1].id, "w1");
+        assert_eq!(all[2].id, "w2");
+    }
+
+    #[test]
+    fn next_waiting_agent_finds_first_when_none_specified() {
+        let manager = make_agent("mgr", "manager", true);
+        let mut w1 = make_agent("w1", "worker1", false);
+        w1.waiting_for_input = true;
+        let swarm = make_swarm_with_agents(manager, vec![w1]);
+        let found = swarm.next_waiting_agent(None);
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().id, "w1");
+    }
+
+    #[test]
+    fn next_waiting_agent_cycles_past_current_and_wraps() {
+        let manager = make_agent("mgr", "manager", true);
+        let mut w1 = make_agent("w1", "worker1", false);
+        let mut w2 = make_agent("w2", "worker2", false);
+        w1.waiting_for_input = true;
+        w2.waiting_for_input = true;
+        let swarm = make_swarm_with_agents(manager, vec![w1, w2]);
+        // After w1, should get w2
+        let next = swarm.next_waiting_agent(Some("w1"));
+        assert_eq!(next.unwrap().id, "w2");
+        // After w2 (last), should wrap to w1
+        let wrapped = swarm.next_waiting_agent(Some("w2"));
+        assert_eq!(wrapped.unwrap().id, "w1");
+    }
 }
