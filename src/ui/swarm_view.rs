@@ -771,6 +771,138 @@ mod tests {
     }
 
     #[test]
+    fn swarm_panel_next_cycles() {
+        assert!(matches!(SwarmPanel::Manager.next(), SwarmPanel::Workers));
+        assert!(matches!(SwarmPanel::Workers.next(), SwarmPanel::Issues));
+        assert!(matches!(SwarmPanel::Issues.next(), SwarmPanel::Manager));
+    }
+
+    #[test]
+    fn scroll_manager_up_saturates_at_zero() {
+        let mut view = SwarmView::new();
+        view.scroll_manager_down(5);
+        view.scroll_manager_up(3);
+        assert_eq!(view.manager_scroll, 2);
+        view.scroll_manager_up(100);
+        assert_eq!(view.manager_scroll, 0);
+    }
+
+    #[test]
+    fn scroll_manager_down_increments() {
+        let mut view = SwarmView::new();
+        view.scroll_manager_down(10);
+        assert_eq!(view.manager_scroll, 10);
+    }
+
+    #[test]
+    fn next_worker_increments_selection() {
+        let mut view = SwarmView::new();
+        view.next_worker(3);
+        assert_eq!(view.selected_worker(), Some(1));
+    }
+
+    #[test]
+    fn next_worker_wraps_at_end() {
+        let mut view = SwarmView::new();
+        view.next_worker(3); // 0->1
+        view.next_worker(3); // 1->2
+        view.next_worker(3); // 2->0
+        assert_eq!(view.selected_worker(), Some(0));
+    }
+
+    #[test]
+    fn next_worker_with_empty_list_does_not_panic() {
+        let mut view = SwarmView::new();
+        view.next_worker(0);
+        assert_eq!(view.selected_worker(), Some(0));
+    }
+
+    #[test]
+    fn prev_worker_returns_true_at_top() {
+        let mut view = SwarmView::new(); // starts at 0
+        let at_top = view.prev_worker(3);
+        assert!(at_top);
+        assert_eq!(view.selected_worker(), Some(0));
+    }
+
+    #[test]
+    fn prev_worker_decrements_selection() {
+        let mut view = SwarmView::new();
+        view.next_worker(3); // 0->1
+        let at_top = view.prev_worker(3); // 1->0
+        assert!(!at_top);
+        assert_eq!(view.selected_worker(), Some(0));
+    }
+
+    #[test]
+    fn prev_worker_with_empty_list_returns_true() {
+        let mut view = SwarmView::new();
+        let at_top = view.prev_worker(0);
+        assert!(at_top);
+    }
+
+    #[test]
+    fn next_issue_increments_selection() {
+        let mut view = SwarmView::new();
+        view.next_issue(3);
+        assert_eq!(view.selected_issue(), Some(1));
+    }
+
+    #[test]
+    fn next_issue_wraps_at_end() {
+        let mut view = SwarmView::new();
+        view.next_issue(3); // 0->1
+        view.next_issue(3); // 1->2
+        view.next_issue(3); // 2->0
+        assert_eq!(view.selected_issue(), Some(0));
+    }
+
+    #[test]
+    fn prev_issue_wraps_to_last() {
+        let mut view = SwarmView::new();
+        view.prev_issue(3); // 0->2
+        assert_eq!(view.selected_issue(), Some(2));
+    }
+
+    #[test]
+    fn next_issue_with_empty_list_does_not_panic() {
+        let mut view = SwarmView::new();
+        view.next_issue(0);
+        assert_eq!(view.selected_issue(), Some(0));
+    }
+
+    #[test]
+    fn prev_issue_with_empty_list_does_not_panic() {
+        let mut view = SwarmView::new();
+        view.prev_issue(0);
+        assert_eq!(view.selected_issue(), Some(0));
+    }
+
+    #[test]
+    fn count_attention_counts_waiting_agents_and_blocked_issues() {
+        use super::count_attention;
+        use crate::model::issue::GitHubIssue;
+
+        let mut swarm = make_swarm();
+        // Give manager waiting pane content
+        swarm.manager.pane_content = "Do you want to proceed? (y/n)".to_string();
+        // Give worker-1 waiting pane content (matches "should i proceed" pattern)
+        swarm.workers[0].pane_content = "should i proceed with this change?".to_string();
+
+        let issues: Vec<GitHubIssue> = vec![];
+        // 2 agents waiting, 0 blocked issues
+        assert_eq!(count_attention(&swarm, &issues), 2);
+    }
+
+    #[test]
+    fn count_attention_zero_when_all_idle() {
+        use super::count_attention;
+        let swarm = make_swarm();
+        let issues: Vec<crate::model::issue::GitHubIssue> = vec![];
+        assert_eq!(count_attention(&swarm, &issues), 0);
+    }
+
+    #[test]
     fn issue_type_filter_cycles() {
         let mut view = SwarmView::new();
         assert_eq!(view.issue_type_filter, None);
