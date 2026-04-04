@@ -193,7 +193,7 @@ mod tests {
 
     #[test]
     fn scroll_roundtrip_returns_to_zero() {
-        let mut v = make_view(0, &[], "");
+        let mut v = make_view();
         v.scroll_down(15);
         v.scroll_up(15);
         assert_eq!(v.scroll_offset, 0);
@@ -201,7 +201,7 @@ mod tests {
 
     #[test]
     fn scroll_down_then_up_partial_stays_positive() {
-        let mut v = make_view(0, &[], "");
+        let mut v = make_view();
         v.scroll_down(20);
         v.scroll_up(5);
         assert_eq!(v.scroll_offset, 15);
@@ -215,10 +215,6 @@ mod tests {
             "Body".into(),
             vec!["bug".into(), "P1".into(), "enhancement".into()],
             "open".into(),
-            vec![],
-            vec![],
-            String::new(),
-            String::new(),
         );
         let label_text = v.labels.join(" · ");
         assert_eq!(label_text, "bug · P1 · enhancement");
@@ -226,7 +222,7 @@ mod tests {
 
     #[test]
     fn empty_labels_produces_empty_string() {
-        let v = make_view_with_updated("", "");
+        let v = IssueDetailView::new(1, "T".into(), "B".into(), vec![], "open".into());
         assert!(v.labels.is_empty());
         let label_text = v.labels.join(" · ");
         assert_eq!(label_text, "");
@@ -234,17 +230,7 @@ mod tests {
 
     #[test]
     fn state_string_stored_correctly() {
-        let v = IssueDetailView::new(
-            1,
-            "T".into(),
-            "B".into(),
-            vec![],
-            "CLOSED".into(),
-            vec![],
-            vec![],
-            String::new(),
-            String::new(),
-        );
+        let v = IssueDetailView::new(1, "T".into(), "B".into(), vec![], "CLOSED".into());
         assert_eq!(v.state, "CLOSED");
     }
 }
