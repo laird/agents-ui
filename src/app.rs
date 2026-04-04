@@ -4440,4 +4440,19 @@ mod tests {
             "ab"
         );
     }
+
+    #[tokio::test]
+    async fn question_mark_not_intercepted_in_agent_view() {
+        let mut app = App::new(None, false, None, None, None).await.unwrap();
+        app.screen = Screen::AgentView {
+            swarm_idx: 0,
+            agent_id: String::new(),
+        };
+        let key = KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE);
+        app.handle_key(key).await.unwrap();
+        assert!(
+            !app.show_shortcuts_viewer,
+            "? key must not open shortcuts viewer in AgentView (passthrough mode)"
+        );
+    }
 }
