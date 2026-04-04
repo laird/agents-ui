@@ -101,3 +101,56 @@ impl IssueView {
         self.scroll_offset = self.scroll_offset.saturating_add(amount);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_sets_initial_state() {
+        let v = IssueView::new(7);
+        assert_eq!(v.issue_number, 7);
+        assert_eq!(v.scroll_offset, 0);
+        assert_eq!(v.body, "Loading…");
+    }
+
+    #[test]
+    fn scroll_down_increments_offset() {
+        let mut v = IssueView::new(1);
+        v.scroll_down(3);
+        assert_eq!(v.scroll_offset, 3);
+        v.scroll_down(2);
+        assert_eq!(v.scroll_offset, 5);
+    }
+
+    #[test]
+    fn scroll_up_decrements_offset() {
+        let mut v = IssueView::new(1);
+        v.scroll_down(10);
+        v.scroll_up(4);
+        assert_eq!(v.scroll_offset, 6);
+    }
+
+    #[test]
+    fn scroll_up_saturates_at_zero() {
+        let mut v = IssueView::new(1);
+        v.scroll_up(5);
+        assert_eq!(v.scroll_offset, 0);
+    }
+
+    #[test]
+    fn scroll_down_saturates_at_max() {
+        let mut v = IssueView::new(1);
+        v.scroll_offset = u16::MAX;
+        v.scroll_down(1);
+        assert_eq!(v.scroll_offset, u16::MAX);
+    }
+
+    #[test]
+    fn scroll_roundtrip_returns_to_zero() {
+        let mut v = IssueView::new(1);
+        v.scroll_down(20);
+        v.scroll_up(20);
+        assert_eq!(v.scroll_offset, 0);
+    }
+}
