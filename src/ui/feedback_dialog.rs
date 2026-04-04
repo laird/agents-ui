@@ -225,6 +225,46 @@ pub fn render_feedback_dialog(f: &mut Frame, area: Rect, state: &FeedbackState) 
     f.render_widget(help, chunks[4]);
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn feedback_type_label_returns_human_readable_string() {
+        assert_eq!(FeedbackType::Bug.label(), "bug");
+        assert_eq!(FeedbackType::Enhancement.label(), "enhancement");
+        assert_eq!(FeedbackType::FeatureRequest.label(), "feature request");
+    }
+
+    #[test]
+    fn feedback_type_github_label_maps_feature_request_to_enhancement() {
+        assert_eq!(FeedbackType::Bug.github_label(), "bug");
+        assert_eq!(FeedbackType::Enhancement.github_label(), "enhancement");
+        assert_eq!(FeedbackType::FeatureRequest.github_label(), "enhancement");
+    }
+
+    #[test]
+    fn feedback_type_all_returns_three_variants() {
+        let all = FeedbackType::all();
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[0], FeedbackType::Bug);
+        assert_eq!(all[1], FeedbackType::Enhancement);
+        assert_eq!(all[2], FeedbackType::FeatureRequest);
+    }
+
+    #[test]
+    fn feedback_state_new_sets_defaults() {
+        let state =
+            FeedbackState::new("myrepo".to_string(), std::path::PathBuf::from("/repo/path"));
+        assert_eq!(state.repo_name, "myrepo");
+        assert_eq!(state.repo_path, std::path::PathBuf::from("/repo/path"));
+        assert!(state.title.is_empty());
+        assert!(state.body.is_empty());
+        assert_eq!(state.type_index, 0);
+        assert_eq!(state.feedback_type, FeedbackType::Bug);
+    }
+}
+
 fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
     let popup_layout = Layout::vertical([
         Constraint::Fill(1),
