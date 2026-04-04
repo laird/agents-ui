@@ -111,12 +111,112 @@ pub fn hostname_right_span(left_len: usize, width: usize) -> ratatui::text::Span
         format!("{hn}  ")
     };
     let right_len = right_text.len();
-    let padded = if width > left_len + right_len {
-        format!("{}{}", " ".repeat(width - left_len - right_len), right_text)
-    } else if !right_text.is_empty() {
-        format!(" {right_text}")
-    } else {
+    let padded = if right_text.is_empty() {
         String::new()
+    } else if width > left_len + right_len {
+        format!("{}{}", " ".repeat(width - left_len - right_len), right_text)
+    } else {
+        format!(" {right_text}")
     };
     ratatui::text::Span::styled(padded, help_style())
+}
+
+/// Build a right-aligned span using an explicit hostname (for testing without /proc).
+fn hostname_right_span_with(hn: &str, left_len: usize, width: usize) -> ratatui::text::Span<'static> {
+    let right_text = if hn.is_empty() {
+        String::new()
+    } else {
+        format!("{hn}  ")
+    };
+    let right_len = right_text.len();
+    let padded = if right_text.is_empty() {
+        String::new()
+    } else if width > left_len + right_len {
+        format!("{}{}", " ".repeat(width - left_len - right_len), right_text)
+    } else {
+        format!(" {right_text}")
+    };
+    ratatui::text::Span::styled(padded, help_style())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::style::Color;
+
+    #[test]
+    fn status_style_covers_all_variants() {
+        let cases = [
+            (AgentState::Working { issue: None }, Color::Green),
+            (AgentState::Working { issue: Some(1) }, Color::Green),
+            (AgentState::Starting, Color::Yellow),
+            (AgentState::Idle, Color::Gray),
+            (AgentState::Completed { detail: "done".into() }, Color::Blue),
+            (AgentState::Stopped, Color::Red),
+            (AgentState::Unknown("?".into()), Color::DarkGray),
+        ];
+        for (state, expected_fg) in cases {
+            let style = status_style(&state);
+            assert_eq!(
+                style.fg,
+                Some(expected_fg),
+                "status_style({state:?}) should be {expected_fg:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn priority_style_covers_all_variants() {
+        let cases = [
+            (IssuePriority::P0, Color::Red),
+            (IssuePriority::P1, Color::Yellow),
+            (IssuePriority::P2, Color::Blue),
+            (IssuePriority::P3, Color::DarkGray),
+            (IssuePriority::None, Color::DarkGray),
+        ];
+        for (priority, expected_fg) in cases {
+            let style = priority_style(&priority);
+            assert_eq!(
+                style.fg,
+                Some(expected_fg),
+                "priority_style({priority:?}) should be {expected_fg:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn attention_blink_style_toggles() {
+        let on = attention_blink_style(true);
+        let off = attention_blink_style(false);
+        assert_ne!(on, off, "blink=true and blink=false should produce different styles");
+        assert_eq!(on.fg, Some(Color::Red));
+        assert_eq!(off.fg, Some(Color::Yellow));
+    }
+
+    #[test]
+    fn hostname_right_span_fits_when_room_available() {
+        // hostname="host", right_text="host  " (6 chars), left_len=10, width=40
+        // padding = 40 - 10 - 6 = 24 spaces
+        let span = hostname_right_span_with("host", 10, 40);
+        let content = span.content.as_ref();
+        assert!(content.ends_with("host  "), "should end with hostname + 2 spaces");
+        assert_eq!(content.len(), 30, "padding(24) + 'host  '(6) = 30");
+    }
+
+    #[test]
+    fn hostname_right_span_empty_when_no_hostname() {
+        let span = hostname_right_span_with("", 10, 40);
+        assert_eq!(span.content.as_ref(), "", "empty hostname → empty span");
+    }
+
+    #[test]
+    fn hostname_right_span_handles_overflow() {
+        // left_len(30) + right_len(8) = 38 > width(20) → fallback to " hostname  "
+        let span = hostname_right_span_with("hello", 30, 20);
+        let content = span.content.as_ref();
+        assert!(
+            content.starts_with(' '),
+            "overflow fallback should start with a space, got: {content:?}"
+        );
+    }
 }
