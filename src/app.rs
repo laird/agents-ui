@@ -784,9 +784,16 @@ impl App {
         }
 
         // ? key opens shortcuts viewer (not in passthrough mode, not on non-session screens)
-        if key.code == KeyCode::Char('?') && !self.is_passthrough_mode()
-            && !matches!(self.screen, Screen::ReposList | Screen::NewSwarm { .. }
-                | Screen::RuntimeSelect | Screen::InstallScopeSelect)
+        if key.code == KeyCode::Char('?')
+            && !self.is_passthrough_mode()
+            && !matches!(
+                self.screen,
+                Screen::ReposList
+                    | Screen::NewSwarm { .. }
+                    | Screen::RuntimeSelect
+                    | Screen::InstallScopeSelect
+                    | Screen::AgentView { .. }
+            )
         {
             self.show_shortcuts_viewer = true;
             return Ok(());
