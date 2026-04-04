@@ -126,12 +126,15 @@ impl ClaudeAdapter {
             let transport = self.transport.clone();
             let targets: Vec<String> = swarm.workers.iter().map(|w| w.tmux_target.clone()).collect();
             tokio::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 for target in &targets {
-                    if let Err(e) = proxy::send_keys(&transport, target, &loop_cmd).await {
-                        tracing::warn!("Failed to send {loop_cmd} to {target}: {e}");
+                    if Self::wait_for_claude_ready(&transport, target).await {
+                        if let Err(e) = proxy::send_keys(&transport, target, &loop_cmd).await {
+                            tracing::warn!("Failed to send {loop_cmd} to {target}: {e}");
+                        } else {
+                            tracing::info!("Sent {loop_cmd} to worker at {target}");
+                        }
                     } else {
-                        tracing::info!("Sent {loop_cmd} to worker at {target}");
+                        tracing::warn!("Worker {target} not ready; skipping {loop_cmd}");
                     }
                 }
             });
@@ -927,12 +930,15 @@ impl AgentRuntime for ClaudeAdapter {
             let transport = self.transport.clone();
             let targets: Vec<String> = swarm.workers.iter().map(|w| w.tmux_target.clone()).collect();
             tokio::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 for target in &targets {
-                    if let Err(e) = proxy::send_keys(&transport, target, &loop_cmd).await {
-                        tracing::warn!("Failed to send {loop_cmd} to {target}: {e}");
+                    if Self::wait_for_claude_ready(&transport, target).await {
+                        if let Err(e) = proxy::send_keys(&transport, target, &loop_cmd).await {
+                            tracing::warn!("Failed to send {loop_cmd} to {target}: {e}");
+                        } else {
+                            tracing::info!("Sent {loop_cmd} to worker at {target}");
+                        }
                     } else {
-                        tracing::info!("Sent {loop_cmd} to worker at {target}");
+                        tracing::warn!("Worker {target} not ready; skipping {loop_cmd}");
                     }
                 }
             });
@@ -1322,8 +1328,9 @@ impl AgentRuntime for ClaudeAdapter {
                     .await;
 
                     // Wait for agent to initialize, then start fix-loop
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                    let _ = proxy::send_keys(&self.transport, &worker.tmux_target, &loop_cmd).await;
+                    if Self::wait_for_claude_ready(&self.transport, &worker.tmux_target).await {
+                        let _ = proxy::send_keys(&self.transport, &worker.tmux_target, &loop_cmd).await;
+                    }
 
                     repairs.push(format!("Recreated tmux pane and launched agent for {}", worker.id));
                     continue; // Skip step 3 since we just launched
@@ -1365,8 +1372,9 @@ impl AgentRuntime for ClaudeAdapter {
                             .await;
 
                             // Wait for agent to initialize, then start fix-loop
-                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                            let _ = proxy::send_keys(&self.transport, &worker.tmux_target, &loop_cmd).await;
+                            if Self::wait_for_claude_ready(&self.transport, &worker.tmux_target).await {
+                                let _ = proxy::send_keys(&self.transport, &worker.tmux_target, &loop_cmd).await;
+                            }
 
                             repairs.push(format!("Restarted agent for {} (was at shell prompt)", worker.id));
                         }
