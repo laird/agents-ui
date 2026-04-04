@@ -307,6 +307,59 @@ mod tests {
     }
 
     #[test]
+    fn new_starts_selected_at_zero() {
+        let view = ReposListView::new();
+        assert_eq!(view.selected(), Some(0));
+    }
+
+    #[test]
+    fn next_increments_selection() {
+        let mut view = ReposListView::new();
+        view.next(3);
+        assert_eq!(view.selected(), Some(1));
+    }
+
+    #[test]
+    fn next_wraps_at_end() {
+        let mut view = ReposListView::new();
+        view.next(3); // 0 -> 1
+        view.next(3); // 1 -> 2
+        view.next(3); // 2 -> 0 (wrap)
+        assert_eq!(view.selected(), Some(0));
+    }
+
+    #[test]
+    fn previous_decrements_selection() {
+        let mut view = ReposListView::new();
+        view.next(3); // 0 -> 1
+        view.previous(3); // 1 -> 0
+        assert_eq!(view.selected(), Some(0));
+    }
+
+    #[test]
+    fn previous_wraps_to_last() {
+        let mut view = ReposListView::new();
+        view.previous(3); // 0 -> 2 (wrap)
+        assert_eq!(view.selected(), Some(2));
+    }
+
+    #[test]
+    fn next_with_empty_list_does_not_panic() {
+        let mut view = ReposListView::new();
+        view.next(0);
+        // no panic; selection unchanged
+        assert_eq!(view.selected(), Some(0));
+    }
+
+    #[test]
+    fn previous_with_empty_list_does_not_panic() {
+        let mut view = ReposListView::new();
+        view.previous(0);
+        // no panic; selection unchanged
+        assert_eq!(view.selected(), Some(0));
+    }
+
+    #[test]
     fn render_smoke_shows_active_and_available_repos() {
         use std::collections::HashMap;
         let backend = TestBackend::new(120, 30);
