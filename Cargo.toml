@@ -42,3 +42,7 @@ shell-words = "1"
 
 # ANSI to ratatui conversion
 ansi-to-tui = "8"
+
+# Web interface
+axum = "0.8"
+tower = "0.5"

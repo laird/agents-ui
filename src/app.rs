@@ -482,6 +482,8 @@ pub struct App {
     switch_agent_options: Vec<RuntimeOption>,
     /// Deduplicated runtime-limit alerts seen in pane output.
     runtime_alerts: HashMap<String, String>,
+    /// Shared state for the web server (None when web server is not running).
+    web_state: Option<crate::web::SharedWebState>,
 }
 
 impl App {
@@ -491,6 +493,7 @@ impl App {
         runtime_pref_repo_root: Option<PathBuf>,
         remote_server: Option<String>,
         startup_warning: Option<String>,
+        web_state: Option<crate::web::SharedWebState>,
     ) -> Result<Self> {
         let agents_dir = launcher::resolve_agents_dir();
         let transport = ServerTransport::new(remote_server);
@@ -567,6 +570,7 @@ impl App {
             status_message_age: 0,
             switch_agent_options: Vec::new(),
             runtime_alerts: HashMap::new(),
+            web_state,
         };
 
         // Scan for available repos (git directories in cwd or children)
@@ -586,6 +590,21 @@ impl App {
         }
 
         Ok(app)
+    }
+
+    /// Push the current swarm state to the shared web state (if web server is running).
+    fn push_web_state(&self) {
+        let Some(ref shared) = self.web_state else {
+            return;
+        };
+        let snapshots: Vec<crate::web::SwarmSnapshot> = self
+            .swarms
+            .iter()
+            .map(crate::web::SwarmSnapshot::from_swarm)
+            .collect();
+        if let Ok(mut guard) = shared.write() {
+            *guard = snapshots;
+        }
     }
 
     pub async fn run(&mut self, terminal: &mut Tui) -> Result<()> {
@@ -796,6 +815,9 @@ impl App {
             if let Some(event) = self.events.next().await {
                 self.handle_event(event).await?;
             }
+
+            // Keep web state in sync after each event
+            self.push_web_state();
         }
 
         Ok(())
@@ -6096,7 +6118,7 @@ mod tests {
             AgentType::Droid,
             AgentType::Gemini,
         ] {
-            let mut app = App::new(None, false, None, None, None).await.unwrap();
+            let mut app = App::new(None, false, None, None, None, None).await.unwrap();
             app.default_agent_type = AgentType::Claude;
             app.new_swarm_agent_type = runtime.clone();
 
@@ -6106,7 +6128,7 @@ mod tests {
 
     #[tokio::test]
     async fn selected_agent_type_for_new_swarm_respects_locked_runtime() {
-        let mut app = App::new(Some(AgentType::Claude), true, None, None, None)
+        let mut app = App::new(Some(AgentType::Claude), true, None, None, None, None)
             .await
             .unwrap();
         app.new_swarm_agent_type = AgentType::Codex;
@@ -6119,7 +6141,7 @@ mod tests {
         let repo_path = temp_path("new-swarm-repo-flow");
         std::fs::create_dir_all(&repo_path).unwrap();
 
-        let mut unlocked = App::new(None, false, None, None, None).await.unwrap();
+        let mut unlocked = App::new(None, false, None, None, None, None).await.unwrap();
         unlocked.available_repos = vec![repo_path.clone()];
         unlocked.select_repo_row(0).await.unwrap();
         assert!(matches!(
@@ -6129,7 +6151,7 @@ mod tests {
             }
         ));
 
-        let mut locked = App::new(Some(AgentType::Gemini), true, None, None, None)
+        let mut locked = App::new(Some(AgentType::Gemini), true, None, None, None, None)
             .await
             .unwrap();
         locked.available_repos = vec![repo_path.clone()];
@@ -6146,7 +6168,7 @@ mod tests {
 
     #[tokio::test]
     async fn preferred_agent_type_for_repo_defaults_to_current_runtime_when_unsaved() {
-        let app = App::new(Some(AgentType::Droid), false, None, None, None)
+        let app = App::new(Some(AgentType::Droid), false, None, None, None, None)
             .await
             .unwrap();
         let repo_path = temp_path("preferred-runtime-unsaved");

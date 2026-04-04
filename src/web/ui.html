@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agents UI</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --card: #21262d;
+      --border: #30363d;
+      --accent: #58a6ff;
+      --text: #e6edf3;
+      --text-dim: #8b949e;
+      --success: #3fb950;
+      --warning: #d29922;
+      --error: #f85149;
+      --working: #58a6ff;
+      --idle: #8b949e;
+      --radius: 6px;
+      --shadow: 0 1px 3px rgba(0,0,0,0.4);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+
+    /* ---- Header ---- */
+    header {
+      background: var(--surface);
+      padding: 0.75rem 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .header-title {
+      font-size: 1rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .header-title svg { flex-shrink: 0; }
+
+    .refresh-indicator {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+    }
+
+    /* ---- Main content ---- */
+    main {
+      padding: 1.25rem;
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+
+    /* ---- Breadcrumb ---- */
+    .breadcrumb {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 1.25rem;
+      font-size: 0.875rem;
+      color: var(--text-dim);
+    }
+
+    .breadcrumb .crumb-link {
+      color: var(--accent);
+      cursor: pointer;
+      text-decoration: none;
+      background: none;
+      border: none;
+      font: inherit;
+      padding: 0;
+    }
+
+    .breadcrumb .crumb-link:hover { text-decoration: underline; }
+    .breadcrumb .crumb-sep { color: var(--border); }
+    .breadcrumb .crumb-current { color: var(--text); }
+
+    /* ---- Section heading ---- */
+    .section-heading {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-dim);
+      margin-bottom: 0.75rem;
+    }
+
+    /* ---- Swarms grid ---- */
+    .swarms-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0.75rem;
+    }
+
+    @media (min-width: 540px) {
+      .swarms-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    @media (min-width: 900px) {
+      .swarms-grid { grid-template-columns: repeat(3, 1fr); }
+    }
+
+    @media (min-width: 1200px) {
+      .swarms-grid { grid-template-columns: repeat(4, 1fr); }
+    }
+
+    /* ---- Swarm card ---- */
+    .swarm-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+
+    .swarm-card:hover {
+      border-color: var(--accent);
+      background: #2d333b;
+    }
+
+    .swarm-card:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .swarm-card.stopped { opacity: 0.55; }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 0.5rem;
+      gap: 0.5rem;
+    }
+
+    .project-name {
+      font-weight: 600;
+      font-size: 0.9375rem;
+      word-break: break-word;
+    }
+
+    .badge {
+      flex-shrink: 0;
+      font-size: 0.6875rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: 2em;
+      background: rgba(88,166,255,0.12);
+      color: var(--accent);
+      border: 1px solid rgba(88,166,255,0.25);
+    }
+
+    .card-path {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      margin-bottom: 0.75rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .card-stats {
+      display: flex;
+      gap: 1rem;
+    }
+
+    .stat {
+      display: flex;
+      flex-direction: column;
+      gap: 0.1rem;
+    }
+
+    .stat-value {
+      font-size: 1.25rem;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .stat-label {
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-dim);
+    }
+
+    /* ---- Status dot ---- */
+    .status-dot {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .s-working  { background: var(--working); }
+    .s-idle     { background: var(--idle); }
+    .s-stopped  { background: var(--error); }
+    .s-starting { background: var(--warning); animation: pulse 1s ease-in-out infinite; }
+    .s-unknown  { background: var(--text-dim); }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.35; }
+    }
+
+    /* ---- Detail view ---- */
+    .detail-title {
+      font-size: 1.375rem;
+      font-weight: 700;
+      margin-bottom: 0.35rem;
+    }
+
+    .detail-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.625rem;
+      font-size: 0.8125rem;
+      color: var(--text-dim);
+      margin-bottom: 1.25rem;
+    }
+
+    .detail-meta .meta-item {
+      display: flex;
+      align-items: center;
+      gap: 0.3rem;
+    }
+
+    .detail-layout {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0.75rem;
+    }
+
+    @media (min-width: 640px) {
+      .detail-layout { grid-template-columns: 1fr 1fr; }
+    }
+
+    @media (min-width: 1024px) {
+      .detail-layout { grid-template-columns: 320px 1fr; }
+    }
+
+    /* ---- Panel ---- */
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .panel-header {
+      padding: 0.5rem 0.875rem;
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--text-dim);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .panel-count {
+      background: rgba(255,255,255,0.08);
+      padding: 0.1rem 0.4rem;
+      border-radius: 2em;
+      font-size: 0.6875rem;
+    }
+
+    .agent-list { padding: 0.25rem; }
+
+    .agent-row {
+      display: flex;
+      align-items: center;
+      gap: 0.625rem;
+      padding: 0.625rem 0.625rem;
+      border-radius: calc(var(--radius) - 1px);
+    }
+
+    .agent-row:hover { background: rgba(255,255,255,0.04); }
+
+    .agent-info { flex: 1; min-width: 0; }
+
+    .agent-role {
+      font-size: 0.875rem;
+      font-weight: 500;
+    }
+
+    .agent-state-text {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .agent-state-text .needs-input {
+      color: var(--warning);
+    }
+
+    /* ---- Empty / loading states ---- */
+    .empty-state {
+      padding: 2.5rem 1.5rem;
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 0.875rem;
+    }
+
+    .loading-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 5rem 1.5rem;
+      gap: 1rem;
+      color: var(--text-dim);
+    }
+
+    .spinner {
+      width: 20px;
+      height: 20px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ---- Error banner ---- */
+    .error-banner {
+      background: rgba(248,81,73,0.12);
+      border: 1px solid rgba(248,81,73,0.3);
+      color: var(--error);
+      border-radius: var(--radius);
+      padding: 0.75rem 1rem;
+      font-size: 0.875rem;
+      margin-bottom: 1rem;
+    }
+
+    /* ---- Stopped badge (detail title) ---- */
+    .stopped-badge {
+      color: var(--error);
+      font-size: 0.75rem;
+    }
+
+    /* ---- Empty-state hint line ---- */
+    .empty-hint {
+      margin-top: 0.5rem;
+      font-size: 0.8125rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-title">
+      <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+        <path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Zm4.879-2.773 4.264 2.559a.25.25 0 0 1 0 .428l-4.264 2.559A.25.25 0 0 1 6 10.559V5.442a.25.25 0 0 1 .379-.215Z"/>
+      </svg>
+      Agents UI
+    </div>
+    <span class="refresh-indicator" id="refresh-indicator" aria-live="polite">Connecting…</span>
+  </header>
+
+  <main id="app" role="main">
+    <div class="loading-state">
+      <div class="spinner" role="status" aria-label="Loading"></div>
+      <span>Loading swarm data…</span>
+    </div>
+  </main>
+
+  <script>
+    'use strict';
+
+    // ── State ──────────────────────────────────────────────────────────────────
+    const state = {
+      swarms: [],
+      selected: null,   // project_name string or null
+      error:    null,
+    };
+
+    // ── Helpers ────────────────────────────────────────────────────────────────
+    function esc(v) {
+      if (v == null) return '';
+      return String(v)
+        .replace(/&/g,  '&amp;')
+        .replace(/</g,  '&lt;')
+        .replace(/>/g,  '&gt;')
+        .replace(/"/g,  '&quot;')
+        .replace(/'/g,  '&#39;');
+    }
+
+    function statusClass(stateStr) {
+      if (!stateStr) return 'unknown';
+      const lower = stateStr.toLowerCase();
+      if (lower.startsWith('working'))  return 'working';
+      if (lower === 'idle')             return 'idle';
+      if (lower === 'stopped')          return 'stopped';
+      if (lower === 'starting')         return 'starting';
+      return 'unknown';
+    }
+
+    // ── API ────────────────────────────────────────────────────────────────────
+    async function fetchSwarms() {
+      const r = await fetch('/api/swarms');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      return Array.isArray(data.swarms) ? data.swarms : [];
+    }
+
+    // ── Renderers ──────────────────────────────────────────────────────────────
+    function formatIssueInfo(agent) {
+      if (!agent.current_issue) return '';
+      return ' · #' + agent.current_issue +
+        (agent.current_issue_title ? ' ' + agent.current_issue_title : '');
+    }
+
+    function renderAgentRow(agent) {
+      const cls = statusClass(agent.state);
+      const issueText = formatIssueInfo(agent);
+      const waitText = agent.waiting_for_input
+        ? '<span class="needs-input"> · ⚠ Needs input</span>'
+        : '';
+      return (
+        '<div class="agent-row">' +
+          '<span class="status-dot s-' + cls + '" aria-hidden="true"></span>' +
+          '<div class="agent-info">' +
+            '<div class="agent-role">' + esc(agent.role) + '</div>' +
+            '<div class="agent-state-text">' +
+              esc(agent.state) + esc(issueText) + waitText +
+            '</div>' +
+          '</div>' +
+        '</div>'
+      );
+    }
+
+    function renderDetailView(swarm) {
+      const workers = swarm.workers || [];
+      const workerRows = workers.length
+        ? workers.map(renderAgentRow).join('')
+        : '<div class="empty-state">No workers</div>';
+
+      const stoppedBadge = swarm.stopped
+        ? ' <span class="stopped-badge">(stopped)</span>'
+        : '';
+
+      return (
+        '<nav class="breadcrumb" aria-label="Breadcrumb">' +
+          '<button class="crumb-link" onclick="navigate(null)">Repos</button>' +
+          '<span class="crumb-sep" aria-hidden="true">›</span>' +
+          '<span class="crumb-current">' + esc(swarm.project_name) + '</span>' +
+        '</nav>' +
+
+        '<div class="detail-title">' + esc(swarm.project_name) + stoppedBadge + '</div>' +
+        '<div class="detail-meta">' +
+          '<span class="meta-item">' + esc(swarm.agent_type) + '</span>' +
+          (swarm.workflow ? '<span class="meta-item">' + esc(swarm.workflow) + '</span>' : '') +
+          '<span class="meta-item" style="font-family:monospace;font-size:0.75rem">' + esc(swarm.tmux_session) + '</span>' +
+          '<span class="meta-item" style="opacity:0.7">' + esc(swarm.repo_path) + '</span>' +
+        '</div>' +
+
+        '<div class="detail-layout">' +
+          '<div class="panel">' +
+            '<div class="panel-header">Manager</div>' +
+            '<div class="agent-list">' + renderAgentRow(swarm.manager) + '</div>' +
+          '</div>' +
+          '<div class="panel">' +
+            '<div class="panel-header">' +
+              'Workers' +
+              '<span class="panel-count">' + workers.length + '</span>' +
+            '</div>' +
+            '<div class="agent-list">' + workerRows + '</div>' +
+          '</div>' +
+        '</div>'
+      );
+    }
+
+    function renderSwarmCard(swarm) {
+      const busy = swarm.busy_count  || 0;
+      const idle = swarm.idle_count  || 0;
+      const attn = swarm.attention_count || 0;
+      const stoppedClass = swarm.stopped ? ' stopped' : '';
+      const attnColor = attn > 0 ? 'var(--error)' : 'var(--text-dim)';
+
+      return (
+        '<div class="swarm-card' + stoppedClass + '" ' +
+             'role="button" tabindex="0" ' +
+             'aria-label="View swarm ' + esc(swarm.project_name) + '" ' +
+             'onclick="navigate(\'' + esc(swarm.project_name) + '\')" ' +
+             'onkeydown="if(event.key===\'Enter\'||(event.key===\' \'&&(event.preventDefault(),true))){navigate(\'' + esc(swarm.project_name) + '\')}">' +
+          '<div class="card-header">' +
+            '<div class="project-name">' + esc(swarm.project_name) + '</div>' +
+            '<span class="badge">' + esc(swarm.agent_type) + '</span>' +
+          '</div>' +
+          '<div class="card-path">' + esc(swarm.repo_path) + '</div>' +
+          '<div class="card-stats">' +
+            '<div class="stat">' +
+              '<span class="stat-value" style="color:var(--working)">' + busy + '</span>' +
+              '<span class="stat-label">Busy</span>' +
+            '</div>' +
+            '<div class="stat">' +
+              '<span class="stat-value" style="color:var(--idle)">' + idle + '</span>' +
+              '<span class="stat-label">Idle</span>' +
+            '</div>' +
+            '<div class="stat">' +
+              '<span class="stat-value" style="color:' + attnColor + '">' + attn + '</span>' +
+              '<span class="stat-label">Attention</span>' +
+            '</div>' +
+          '</div>' +
+        '</div>'
+      );
+    }
+
+    function renderReposList() {
+      const swarms = state.swarms;
+      if (!swarms.length) {
+        return (
+          '<div class="empty-state">' +
+            '<p>No active swarms.</p>' +
+            '<p class="empty-hint">Launch a swarm from <code>agents-tui</code> and it will appear here.</p>' +
+          '</div>'
+        );
+      }
+      return (
+        '<p class="section-heading">' + swarms.length + ' Swarm' + (swarms.length !== 1 ? 's' : '') + '</p>' +
+        '<div class="swarms-grid">' + swarms.map(renderSwarmCard).join('') + '</div>'
+      );
+    }
+
+    function render() {
+      const app = document.getElementById('app');
+      if (state.error && !state.swarms.length) {
+        app.innerHTML =
+          '<div class="error-banner">Could not reach API: ' + esc(state.error) + '</div>' +
+          renderReposList();
+        return;
+      }
+      if (state.selected) {
+        const swarm = state.swarms.find(s => s.project_name === state.selected);
+        if (swarm) {
+          app.innerHTML = renderDetailView(swarm);
+          return;
+        }
+        // selected swarm disappeared – fall back
+        state.selected = null;
+      }
+      app.innerHTML = renderReposList();
+    }
+
+    // ── Navigation ─────────────────────────────────────────────────────────────
+    function navigate(projectName) {
+      state.selected = projectName;
+      render();
+      window.scrollTo(0, 0);
+    }
+
+    // ── Refresh loop ───────────────────────────────────────────────────────────
+    async function refresh() {
+      const ind = document.getElementById('refresh-indicator');
+      try {
+        state.swarms = await fetchSwarms();
+        state.error  = null;
+        const t = new Date();
+        ind.textContent = 'Updated ' + t.toLocaleTimeString();
+      } catch (err) {
+        state.error = err.message;
+        ind.textContent = 'Error: ' + err.message;
+      }
+      render();
+    }
+
+    refresh();
+    setInterval(refresh, 5000);
+  </script>
+</body>
+</html>
