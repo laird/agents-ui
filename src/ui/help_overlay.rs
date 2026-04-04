@@ -50,3 +50,30 @@ pub fn render_help_overlay(f: &mut Frame, area: Rect, keybindings: &KeyBindings)
 
     f.render_widget(table, popup_area);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::keybindings::KeyBindings;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    #[test]
+    fn render_help_overlay_smoke() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let keybindings = KeyBindings::default();
+        terminal
+            .draw(|f| render_help_overlay(f, f.area(), &keybindings))
+            .unwrap();
+
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+
+        assert!(rendered.contains("Keyboard Shortcuts"));
+    }
+}

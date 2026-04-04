@@ -543,7 +543,7 @@ pub fn render_create_issue_dialog(
 mod tests {
     use super::{
         render_create_issue_dialog, render_install_scope_dialog, render_new_swarm_dialog,
-        render_runtime_dialog,
+        render_runtime_dialog, render_switch_agent_dialog,
     };
     use crate::app::{CreateIssueForm, InstallScope, NewSwarmField};
     use crate::model::swarm::AgentType;
@@ -645,5 +645,26 @@ mod tests {
         assert!(rendered.contains("needs-design"));
         assert!(rendered.contains("proposal"));
         assert!(rendered.contains("create"));
+    }
+
+    #[test]
+    fn switch_agent_dialog_shows_project_and_runtimes() {
+        let rendered = rendered_text(|terminal| {
+            terminal
+                .draw(|f| {
+                    render_switch_agent_dialog(
+                        f,
+                        f.area(),
+                        "demo",
+                        &AgentType::Codex,
+                        0,
+                    )
+                })
+                .unwrap();
+        });
+
+        assert!(rendered.contains("Switch agent runtime for demo"));
+        assert!(rendered.contains("Codex (current)"));
+        assert!(rendered.contains("Claude"));
     }
 }
