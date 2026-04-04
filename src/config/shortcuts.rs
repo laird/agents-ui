@@ -104,9 +104,7 @@ mod tests {
     fn defaults_has_expected_shortcuts() {
         let config = ShortcutsConfig::defaults();
 
-        // Issues panel: a=approve, x=fix, b=brainstorm
-        assert!(config.issues.contains_key("a"), "issues should have 'a' shortcut");
-        assert_eq!(config.issues["a"].label, "approve");
+        // Issues panel: x=fix, b=brainstorm (a is hardcoded to "new issue" in the TUI)
         assert!(config.issues.contains_key("x"), "issues should have 'x' shortcut");
         assert_eq!(config.issues["x"].label, "fix");
         assert!(config.issues.contains_key("b"), "issues should have 'b' shortcut");
@@ -169,11 +167,12 @@ const DEFAULT_CONFIG: &str = r#"# agents-ui keyboard shortcuts
 # Edit this file to customize shortcuts. Changes take effect on restart.
 #
 # Panels: [global], [workers], [issues], [manager]
-# Fields: label (display name), command (template), target ("manager" or "worker"), raw (bool)
+# Fields: label (display name), command (template)
 # Variables: {issue} = selected issue number, {worker} = worker tmux target, {project} = project name
+#
+# Issue panel keys: x=fix (sends /fix {issue} to manager), b=brainstorm, p=approve, a=new issue
 
 [issues]
-a = { label = "approve", command = "gh issue edit {issue} --remove-label proposal" }
 x = { label = "fix", command = "/autocoder:fix {issue}" }
 b = { label = "brainstorm", command = "/brainstorm {issue}" }
 

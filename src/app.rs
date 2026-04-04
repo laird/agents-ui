@@ -2126,6 +2126,14 @@ impl App {
                         // Brainstorm: send "brainstorm <issue_number>" to manager pane
                         self.send_issue_command_to_manager(swarm_idx, "brainstorm").await?;
                     }
+                    KeyCode::Char('x') => {
+                        // Fix: send fix command for selected issue to manager
+                        let fix_cmd = self.swarms.get(swarm_idx)
+                            .and_then(|s| self.fix_cmd_prefix(&s.agent_type));
+                        if let Some(cmd) = fix_cmd {
+                            self.send_issue_command_to_manager(swarm_idx, &cmd).await?;
+                        }
+                    }
                     KeyCode::Char('r') => {
                         // Review-blocked in selected runtime (only if manager is idle)
                         if let Some(swarm) = self.swarms.get(swarm_idx) {
@@ -2344,6 +2352,14 @@ impl App {
         }
     }
 
+    fn fix_cmd_prefix(&self, agent_type: &AgentType) -> Option<String> {
+        match agent_type {
+            AgentType::Claude => Some("/autocoder:fix".to_string()),
+            AgentType::Gemini | AgentType::Droid => Some("/fix".to_string()),
+            AgentType::Codex => None,
+        }
+    }
+
     fn review_blocked_cmd(&self, agent_type: &AgentType) -> Option<String> {
         match agent_type {
             AgentType::Claude => Some("/autocoder:review-blocked".to_string()),
@@ -2523,6 +2539,14 @@ impl App {
             }
             KeyCode::Char('d') | KeyCode::Char(' ') => {
                 self.dispatch_selected_issue(swarm_idx).await;
+            }
+            KeyCode::Char('x') => {
+                // Fix: send fix command for selected issue to manager
+                let fix_cmd = self.swarms.get(swarm_idx)
+                    .and_then(|s| self.fix_cmd_prefix(&s.agent_type));
+                if let Some(cmd) = fix_cmd {
+                    self.send_issue_command_to_manager(swarm_idx, &cmd).await?;
+                }
             }
             _ => {}
         }
