@@ -703,4 +703,61 @@ mod tests {
         let view = make_view_with_updated("3d ", "");
         assert!(view.updated_at_age.is_empty());
     }
+
+    #[test]
+    fn scroll_roundtrip_returns_to_zero() {
+        let mut v = make_view(0, &[], "");
+        v.scroll_down(15);
+        v.scroll_up(15);
+        assert_eq!(v.scroll_offset, 0);
+    }
+
+    #[test]
+    fn scroll_down_then_up_partial_stays_positive() {
+        let mut v = make_view(0, &[], "");
+        v.scroll_down(20);
+        v.scroll_up(5);
+        assert_eq!(v.scroll_offset, 15);
+    }
+
+    #[test]
+    fn labels_join_formats_correctly() {
+        let v = IssueDetailView::new(
+            1,
+            "Title".into(),
+            "Body".into(),
+            vec!["bug".into(), "P1".into(), "enhancement".into()],
+            "open".into(),
+            vec![],
+            vec![],
+            String::new(),
+            String::new(),
+        );
+        let label_text = v.labels.join(" · ");
+        assert_eq!(label_text, "bug · P1 · enhancement");
+    }
+
+    #[test]
+    fn empty_labels_produces_empty_string() {
+        let v = make_view_with_updated("", "");
+        assert!(v.labels.is_empty());
+        let label_text = v.labels.join(" · ");
+        assert_eq!(label_text, "");
+    }
+
+    #[test]
+    fn state_string_stored_correctly() {
+        let v = IssueDetailView::new(
+            1,
+            "T".into(),
+            "B".into(),
+            vec![],
+            "CLOSED".into(),
+            vec![],
+            vec![],
+            String::new(),
+            String::new(),
+        );
+        assert_eq!(v.state, "CLOSED");
+    }
 }
