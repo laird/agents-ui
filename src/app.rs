@@ -4482,4 +4482,26 @@ mod tests {
             "ab"
         );
     }
+
+    /// Regression test for #278: `?` must NOT open the shortcuts viewer when
+    /// the current screen is `AgentView` (the key should pass through to tmux).
+    #[tokio::test]
+    async fn question_mark_does_not_open_shortcuts_viewer_in_agent_view() {
+        let mut app = App::new(None, false, None, None, None)
+            .await
+            .expect("App::new failed");
+        app.screen = Screen::AgentView {
+            swarm_idx: 0,
+            agent_id: "test-agent".to_string(),
+        };
+        app.show_shortcuts_viewer = false;
+
+        let key = KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE);
+        let _ = app.handle_key(key).await;
+
+        assert!(
+            !app.show_shortcuts_viewer,
+            "show_shortcuts_viewer must stay false when screen is AgentView"
+        );
+    }
 }
