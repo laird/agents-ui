@@ -97,8 +97,104 @@ fn repo_owner_from_remote(remote: &str) -> Option<String> {
     None
 }
 
-/// Ensure `gh` is using the GitHub profile that matches the repo owner when possible.
+/// Return the list of logged-in gh usernames (one per line from `gh auth status`).
+async fn list_gh_users(transport: &ServerTransport) -> Vec<String> {
+    let Ok(o) = transport
+        .output(
+            "gh",
+            &["auth".to_string(), "status".to_string()],
+            None,
+        )
+        .await
+    else {
+        return vec![];
+    };
+    // `gh auth status` prints to stderr; lines like "✓ Logged in to github.com account foo (keyring)"
+    let text = String::from_utf8_lossy(&o.stderr);
+    text.lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            // Match "Logged in to github.com account <username>"
+            let marker = "account ";
+            let pos = line.find(marker)?;
+            let rest = &line[pos + marker.len()..];
+            let user = rest.split_whitespace().next()?;
+            if user.is_empty() { None } else { Some(user.to_string()) }
+        })
+        .collect()
+}
+
+/// Return the currently active gh username, or None on failure.
+async fn current_gh_user(transport: &ServerTransport, repo_path: &Path) -> Option<String> {
+    let o = transport
+        .output(
+            "gh",
+            &[
+                "api".to_string(),
+                "user".to_string(),
+                "--jq".to_string(),
+                ".login".to_string(),
+            ],
+            Some(repo_path),
+        )
+        .await
+        .ok()?;
+    if o.status.success() {
+        Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+    } else {
+        None
+    }
+}
+
+/// Switch gh to `user` and return true on success.
+async fn switch_gh_user(transport: &ServerTransport, user: &str) -> bool {
+    transport
+        .output(
+            "gh",
+            &[
+                "auth".to_string(),
+                "switch".to_string(),
+                "--user".to_string(),
+                user.to_string(),
+            ],
+            None,
+        )
+        .await
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Return true if the current active gh account can reach `repo_path`'s origin repo.
+async fn gh_can_access_repo(transport: &ServerTransport, repo_path: &Path) -> bool {
+    transport
+        .output(
+            "gh",
+            &[
+                "repo".to_string(),
+                "view".to_string(),
+                "--json".to_string(),
+                "name".to_string(),
+            ],
+            Some(repo_path),
+        )
+        .await
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Ensure `gh` is using a profile that can access the repo.
+///
+/// Strategy:
+/// 1. If the current profile already works, do nothing.
+/// 2. Try the profile whose username matches the repo owner.
+/// 3. If that fails (org repo, member account, etc.), try every other configured profile.
+/// 4. Log a warning only if no profile works.
 pub async fn ensure_gh_auth_for_repo(transport: &ServerTransport, repo_path: &Path) {
+    // Fast path: current profile already has access.
+    if gh_can_access_repo(transport, repo_path).await {
+        return;
+    }
+
     let remote = match transport
         .output(
             "git",
@@ -115,56 +211,39 @@ pub async fn ensure_gh_auth_for_repo(transport: &ServerTransport, repo_path: &Pa
         _ => return,
     };
 
-    let owner = match repo_owner_from_remote(&remote) {
-        Some(owner) => owner,
-        None => return,
-    };
+    let owner = repo_owner_from_remote(&remote);
+    let current = current_gh_user(transport, repo_path).await;
+    let all_users = list_gh_users(transport).await;
 
-    let current_user = match transport
-        .output(
-            "gh",
-            &[
-                "api".to_string(),
-                "user".to_string(),
-                "--jq".to_string(),
-                ".login".to_string(),
-            ],
-            Some(repo_path),
-        )
-        .await
-    {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
-        _ => return,
-    };
-
-    if current_user == owner {
-        return;
+    // Build candidate list: owner-matching account first, then all others.
+    let mut candidates: Vec<String> = Vec::new();
+    if let Some(ref o) = owner {
+        if all_users.iter().any(|u| u == o) {
+            candidates.push(o.clone());
+        }
+    }
+    for u in &all_users {
+        if Some(u) != current.as_ref() && !candidates.contains(u) {
+            candidates.push(u.clone());
+        }
     }
 
-    tracing::info!(
-        "Switching gh auth from {current_user} to {owner} for repo at {}",
-        repo_path.display()
+    for user in &candidates {
+        tracing::info!(
+            "Trying gh profile '{user}' for repo at {}",
+            repo_path.display()
+        );
+        if switch_gh_user(transport, user).await && gh_can_access_repo(transport, repo_path).await {
+            tracing::info!("Switched gh auth to '{user}' for repo at {}", repo_path.display());
+            return;
+        }
+    }
+
+    tracing::warn!(
+        "No configured gh profile can access repo at {} (tried: {})",
+        repo_path.display(),
+        candidates.join(", ")
     );
-    match transport
-        .output(
-            "gh",
-            &[
-                "auth".to_string(),
-                "switch".to_string(),
-                "--user".to_string(),
-                owner.clone(),
-            ],
-            Some(repo_path),
-        )
-        .await
-    {
-        Ok(o) if o.status.success() => tracing::info!("Successfully switched gh auth to {owner}"),
-        Ok(o) => tracing::warn!(
-            "Failed to switch gh auth to {owner}: {}",
-            String::from_utf8_lossy(&o.stderr)
-        ),
-        Err(e) => tracing::warn!("Failed to run gh auth switch: {e}"),
-    }
 }
 
 /// Run a repo-scoped `gh` command after ensuring the matching GitHub profile is active.

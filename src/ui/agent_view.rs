@@ -33,7 +33,7 @@ impl AgentView {
         let chunks = Layout::vertical([
             Constraint::Length(3),
             Constraint::Min(5),
-            Constraint::Length(1),
+            Constraint::Length(2),
             Constraint::Length(3),
         ])
         .split(area);
@@ -101,7 +101,8 @@ impl AgentView {
             .as_bytes()
             .into_text()
             .unwrap_or_else(|_| Text::raw(content.clone()));
-        let total_lines = text.lines.len() as u16;
+        let content_width = chunks[1].width.saturating_sub(2).max(1);
+        let total_lines = wrapped_line_count(&text, content_width);
 
         let visible_height = chunks[1].height.saturating_sub(2);
         self.visible_height = visible_height;
@@ -191,6 +192,23 @@ impl AgentView {
         self.scroll_offset = u16::MAX;
         self.following = true;
     }
+}
+
+fn wrapped_line_count(text: &Text<'_>, content_width: u16) -> u16 {
+    let width = content_width.max(1) as usize;
+    let total: usize = text
+        .lines
+        .iter()
+        .map(|line| {
+            let line_width = line.width();
+            if line_width == 0 {
+                1
+            } else {
+                line_width.div_ceil(width)
+            }
+        })
+        .sum();
+    total.min(u16::MAX as usize) as u16
 }
 
 #[cfg(test)]

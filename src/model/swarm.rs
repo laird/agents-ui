@@ -109,8 +109,8 @@ impl AgentType {
     #[allow(dead_code)]
     pub fn manager_cmd(&self) -> &str {
         match self {
-            AgentType::Claude => "/autocoder:monitor",
-            AgentType::Gemini => "/manage",
+            AgentType::Claude => "/autocoder:monitor-workers",
+            AgentType::Gemini => "/monitor-workers",
             AgentType::Codex | AgentType::Droid => "",
         }
     }
@@ -125,7 +125,10 @@ impl AgentType {
 
     /// Whether this runtime is supervised by an outer shell loop wrapper.
     pub fn uses_loop_wrapper(&self) -> bool {
-        matches!(self, AgentType::Codex | AgentType::Droid)
+        matches!(
+            self,
+            AgentType::Codex | AgentType::Droid | AgentType::Gemini
+        )
     }
 
     pub fn from_name(value: &str) -> Option<Self> {
@@ -209,7 +212,10 @@ pub fn detect_waiting_for_input(content: &str) -> bool {
     }
 
     // Interrupted state
-    if tail_text.contains("What should Claude do instead?") {
+    if tail_text.contains("What should Claude do instead?")
+        || tail_text.contains("What should Gemini do instead?")
+        || tail_text.contains("What should the agent do instead?")
+    {
         return true;
     }
 
@@ -252,6 +258,8 @@ impl AgentInfo {
             let lower = trimmed.to_lowercase();
             if lower.contains("interrupted")
                 || lower.contains("what should claude do")
+                || lower.contains("what should gemini do")
+                || lower.contains("what should the agent do")
                 || lower.contains("do you want to")
                 || lower.contains("waiting for your")
                 || lower.contains("permission denied")
@@ -536,7 +544,7 @@ mod tests {
         assert!(AgentType::Codex.uses_loop_wrapper());
         assert!(AgentType::Droid.uses_loop_wrapper());
         assert!(!AgentType::Claude.uses_loop_wrapper());
-        assert!(!AgentType::Gemini.uses_loop_wrapper());
+        assert!(AgentType::Gemini.uses_loop_wrapper());
     }
 
     #[test]

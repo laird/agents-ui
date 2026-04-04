@@ -184,13 +184,6 @@ impl SwarmView {
             .as_bytes()
             .into_text()
             .unwrap_or_else(|_| Text::raw(manager_content.clone()));
-        let total_lines = text.lines.len() as u16;
-        let visible = body_chunks[0].height.saturating_sub(2);
-        let max_scroll = total_lines.saturating_sub(visible);
-        if self.manager_scroll > max_scroll {
-            self.manager_scroll = max_scroll;
-        }
-
         let manager_block = Block::default()
             .borders(Borders::ALL)
             .title(" Manager ")
@@ -202,6 +195,13 @@ impl SwarmView {
 
         let manager_rows =
             Layout::vertical([Constraint::Min(4), Constraint::Length(1)]).split(body_chunks[0]);
+        let content_width = manager_rows[0].width.saturating_sub(2).max(1);
+        let total_lines = wrapped_line_count(&text, content_width);
+        let visible = manager_rows[0].height.saturating_sub(2);
+        let max_scroll = total_lines.saturating_sub(visible);
+        if self.manager_scroll > max_scroll {
+            self.manager_scroll = max_scroll;
+        }
 
         let manager = Paragraph::new(text)
             .block(manager_block)
@@ -690,6 +690,8 @@ pub fn agent_needs_input(pane_content: &str) -> bool {
     let lower = tail.to_lowercase();
 
     lower.contains("what should claude do instead")
+        || lower.contains("what should gemini do instead")
+        || lower.contains("what should the agent do instead")
         || lower.contains("interrupted")
         || lower.contains("do you want to proceed")
         || lower.contains("should i proceed")
@@ -720,6 +722,23 @@ fn truncate(s: &str, max: usize) -> String {
     } else {
         format!("{}…", &s[..max - 1])
     }
+}
+
+fn wrapped_line_count(text: &Text<'_>, content_width: u16) -> u16 {
+    let width = content_width.max(1) as usize;
+    let total: usize = text
+        .lines
+        .iter()
+        .map(|line| {
+            let line_width = line.width();
+            if line_width == 0 {
+                1
+            } else {
+                line_width.div_ceil(width)
+            }
+        })
+        .sum();
+    total.min(u16::MAX as usize) as u16
 }
 
 #[cfg(test)]

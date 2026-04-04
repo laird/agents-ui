@@ -67,15 +67,10 @@ impl RuntimeSupervisor for ClaudeSupervisor {
     fn launch_command(
         &self,
         _runtime: &AgentType,
-        session_name: &str,
+        _session_name: &str,
         _is_manager: bool,
     ) -> String {
-        format!(
-            "claude --dangerously-skip-permissions --append-system-prompt 'This session is managed by agents-ui via tmux. \
-IMPORTANT: Always use tmux commands (tmux capture-pane, tmux send-keys, etc.) \
-for reading worker screens and dispatching work. Do NOT use cmux. \
-The tmux session is named {session_name}.'"
-        )
+        "claude code --dangerously-skip-permissions .".to_string()
     }
 
     fn bootstrap_command(
@@ -100,7 +95,7 @@ The tmux session is named {session_name}.'"
         issue: Option<u32>,
     ) -> Option<String> {
         if is_manager {
-            Some("/autocoder:monitor".to_string())
+            Some("/autocoder:monitor-workers".to_string())
         } else if let Some(issue_number) = issue {
             Some(format!("/autocoder:fix {issue_number}"))
         } else {
@@ -111,7 +106,7 @@ The tmux session is named {session_name}.'"
 
 impl RuntimeSupervisor for CodexSupervisor {
     fn uses_loop_wrapper(&self) -> bool {
-        true
+        launcher::find_script("codex-fix-loop.sh").is_some()
     }
 
     fn launch_command(
@@ -177,13 +172,28 @@ impl RuntimeSupervisor for CodexSupervisor {
 }
 
 impl RuntimeSupervisor for GeminiSupervisor {
+    fn uses_loop_wrapper(&self) -> bool {
+        launcher::find_script("gemini-fix-loop.sh").is_some()
+    }
+
     fn launch_command(
         &self,
-        runtime: &AgentType,
+        _runtime: &AgentType,
         _session_name: &str,
-        _is_manager: bool,
+        is_manager: bool,
     ) -> String {
-        runtime.launch_cmd().to_string()
+        self.wrapper_command(is_manager)
+            .unwrap_or_else(|| "gemini --sandbox=false".to_string())
+    }
+
+    fn wrapper_command(&self, is_manager: bool) -> Option<String> {
+        let script = if is_manager {
+            "gemini-manage-workers-loop.sh"
+        } else {
+            "gemini-fix-loop.sh"
+        };
+        let path = launcher::find_script(script)?;
+        Some(format!("bash {}", shell_quote(&path.to_string_lossy())))
     }
 
     fn bootstrap_command(
@@ -193,7 +203,7 @@ impl RuntimeSupervisor for GeminiSupervisor {
         issue: Option<u32>,
     ) -> Option<String> {
         if is_manager {
-            Some("/manage-loop".to_string())
+            Some("/monitor-loop".to_string())
         } else if let Some(issue_number) = issue {
             Some(format!("/fix {issue_number}"))
         } else {
@@ -208,7 +218,7 @@ impl RuntimeSupervisor for GeminiSupervisor {
         issue: Option<u32>,
     ) -> Option<String> {
         if is_manager {
-            Some("/monitor".to_string())
+            Some("/monitor-workers".to_string())
         } else if let Some(issue_number) = issue {
             Some(format!("/fix {issue_number}"))
         } else {
@@ -219,7 +229,7 @@ impl RuntimeSupervisor for GeminiSupervisor {
 
 impl RuntimeSupervisor for DroidSupervisor {
     fn uses_loop_wrapper(&self) -> bool {
-        true
+        launcher::find_script("droid-fix-loop.sh").is_some()
     }
 
     fn launch_command(
@@ -249,7 +259,7 @@ impl RuntimeSupervisor for DroidSupervisor {
         issue: Option<u32>,
     ) -> Option<String> {
         if is_manager {
-            Some("/manage-loop".to_string())
+            Some("/monitor-loop".to_string())
         } else if let Some(issue_number) = issue {
             Some(format!("/fix {issue_number}"))
         } else {
@@ -264,7 +274,7 @@ impl RuntimeSupervisor for DroidSupervisor {
         issue: Option<u32>,
     ) -> Option<String> {
         if is_manager {
-            Some("/monitor".to_string())
+            Some("/monitor-workers".to_string())
         } else if let Some(issue_number) = issue {
             Some(format!("/fix {issue_number}"))
         } else {
@@ -286,6 +296,6 @@ mod tests {
         assert!(!for_runtime(&AgentType::Claude).uses_loop_wrapper());
         assert!(for_runtime(&AgentType::Codex).uses_loop_wrapper());
         assert!(for_runtime(&AgentType::Droid).uses_loop_wrapper());
-        assert!(!for_runtime(&AgentType::Gemini).uses_loop_wrapper());
+        assert!(for_runtime(&AgentType::Gemini).uses_loop_wrapper());
     }
 }

@@ -226,6 +226,7 @@ pub fn classify_pane_activity(content: &str) -> PaneActivity {
         if lower.contains("please restart codex")
             || lower.contains("update ran successfully")
             || lower.contains("please restart claude")
+            || lower.contains("please restart gemini")
             || lower.contains("restart to apply")
         {
             return PaneActivity::NeedsLaunch;
@@ -255,13 +256,27 @@ pub fn worker_supervision_state(
     if pane_state == PaneActivity::NeedsLaunch {
         return WorkerSupervisionState::DeadShellPrompt;
     }
-    if pane_state == PaneActivity::AgentIdle {
-        return WorkerSupervisionState::DeadIdleOutsideLoop;
-    }
 
     let status_path = worktree_path
         .join(runtime.status_dir())
         .join("fix-loop.status");
+    if pane_state == PaneActivity::AgentIdle {
+        if matches!(runtime, AgentType::Droid) && status_path.exists() {
+            let status = read_status_file(&status_path);
+            if matches!(status.state, AgentState::Stopped) {
+                return WorkerSupervisionState::DeadStopped;
+            }
+            if matches!(status.state, AgentState::Unknown(_)) {
+                return WorkerSupervisionState::DeadMissingStatus;
+            }
+            if status_timestamp_is_stale(status.timestamp) {
+                return WorkerSupervisionState::DeadStaleStatus;
+            }
+            return WorkerSupervisionState::Healthy;
+        }
+        return WorkerSupervisionState::DeadIdleOutsideLoop;
+    }
+
     if !status_path.exists() {
         return if pane_state == PaneActivity::AgentBusy {
             WorkerSupervisionState::Healthy
@@ -790,6 +805,25 @@ mod tests {
                 .state
                 .to_string(),
             "dead: stale loop heartbeat"
+        );
+
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn droid_wrapper_idle_with_fresh_status_is_healthy() {
+        let dir = temp_status_path("droid-idle-healthy");
+        let loops = dir.join(".factory/loops");
+        std::fs::create_dir_all(&loops).unwrap();
+        let now = chrono::Local::now()
+            .naive_local()
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string();
+        std::fs::write(loops.join("fix-loop.status"), format!("{now}\tidle\n")).unwrap();
+
+        assert_eq!(
+            worker_supervision_state(&AgentType::Droid, &dir, "DROID_FIX_LOOP_IDLE\n"),
+            WorkerSupervisionState::Healthy
         );
 
         std::fs::remove_dir_all(dir).ok();

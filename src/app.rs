@@ -1014,9 +1014,10 @@ impl App {
             }
             Event::TerminalResize { width, height } => {
                 // Resize all tmux sessions to match the new terminal size
+                let tmux_width = width.saturating_sub(2);
                 for swarm in &self.swarms {
                     let session = swarm.tmux_session.clone();
-                    let w = width;
+                    let w = tmux_width;
                     let h = height;
                     tokio::spawn(async move {
                         if let Err(e) = crate::tmux::session::resize_session(&session, w, h).await {
@@ -1576,7 +1577,7 @@ impl App {
     }
 
     async fn gemini_agents_installed(&self, repo_path: &std::path::Path) -> bool {
-        gemini_agents_assets_present(&self.transport, Some(&self.agents_dir), repo_path).await
+        gemini_repo_assets_present(&self.transport, repo_path).await
     }
 
     async fn runtime_options_for_repo(
@@ -1764,7 +1765,10 @@ impl App {
         if let Some(swarm) = self.swarms.get(swarm_idx) {
             let target = swarm.manager.tmux_target.clone();
             if let Ok((width, height)) = crossterm::terminal::size() {
-                if let Err(e) = proxy::resize_pane(&self.transport, &target, width, height).await {
+                if let Err(e) =
+                    proxy::resize_pane(&self.transport, &target, width.saturating_sub(2), height)
+                        .await
+                {
                     tracing::warn!("Failed to resize manager pane {target}: {e}");
                 }
             }
@@ -1779,8 +1783,13 @@ impl App {
             if let Some(agent) = swarm.agent(&agent_id) {
                 let target = agent.tmux_target.clone();
                 if let Ok((width, height)) = crossterm::terminal::size() {
-                    if let Err(e) =
-                        proxy::resize_pane(&self.transport, &target, width, height).await
+                    if let Err(e) = proxy::resize_pane(
+                        &self.transport,
+                        &target,
+                        width.saturating_sub(2),
+                        height,
+                    )
+                    .await
                     {
                         tracing::warn!("Failed to resize agent pane {target}: {e}");
                     }
@@ -1810,8 +1819,14 @@ impl App {
                 self.new_swarm_agent_type = self.preferred_agent_type_for_repo(repo_path);
                 self.dialog_input = TextInput::with_text("2".to_string());
                 self.status_message = None;
-                self.screen = Screen::NewSwarm {
-                    field: NewSwarmField::NumWorkers,
+                self.screen = if self.runtime_locked_from_cli || self.transport.is_remote() {
+                    Screen::NewSwarm {
+                        field: NewSwarmField::NumWorkers,
+                    }
+                } else {
+                    Screen::NewSwarm {
+                        field: NewSwarmField::AgentRuntime,
+                    }
                 };
             }
         }
@@ -2083,13 +2098,13 @@ impl App {
                         if self.gemini_agents_installed(&repo_path).await {
                             self.start_swarm_bootstrap(repo_path, num_workers, agent_type, None);
                         } else {
-                            self.set_status(
-                                "Gemini requires laird/agents skills, .agent scripts, and agents content alongside the repo"
-                                    .to_string(),
-                            );
-                            self.screen = Screen::NewSwarm {
-                                field: NewSwarmField::RuntimeSelection,
-                            };
+                            self.pending_launch = Some(PendingLaunch {
+                                repo_path,
+                                num_workers,
+                                agent_type,
+                            });
+                            self.install_scope = InstallScope::User;
+                            self.screen = Screen::InstallScopeSelect;
                         }
                     } else if agent_type == AgentType::Codex {
                         if self.codex_agents_installed(&repo_path).await {
@@ -3135,7 +3150,11 @@ impl App {
         Ok(())
     }
 
-    async fn append_log_issue_comment(&self, issue_number: u32, candidate: &LogErrorCandidate) -> Result<()> {
+    async fn append_log_issue_comment(
+        &self,
+        issue_number: u32,
+        candidate: &LogErrorCandidate,
+    ) -> Result<()> {
         let body = build_log_issue_comment(candidate);
         let output = self
             .gh_agents_ui_output(vec![
@@ -3181,7 +3200,10 @@ impl App {
 
         for candidate in candidates {
             match self.find_existing_log_issue(&candidate.fingerprint).await {
-                Ok(Some(issue_number)) => match self.append_log_issue_comment(issue_number, &candidate).await {
+                Ok(Some(issue_number)) => match self
+                    .append_log_issue_comment(issue_number, &candidate)
+                    .await
+                {
                     Ok(()) => commented += 1,
                     Err(e) => {
                         failed += 1;
@@ -3665,8 +3687,12 @@ impl App {
                 .and_then(|idx| self.swarms.get(swarm_idx).and_then(|s| s.workers.get(idx)))
                 .map(|w| w.tmux_target.clone());
 
-            let cmd =
-                ShortcutsConfig::expand_command(&shortcut.command, issue, worker_target.as_deref(), project);
+            let cmd = ShortcutsConfig::expand_command(
+                &shortcut.command,
+                issue,
+                worker_target.as_deref(),
+                project,
+            );
 
             if !shortcut.raw && self.run_report_log_errors_command(&cmd).await? {
                 return Ok(());
@@ -4460,9 +4486,12 @@ impl App {
                         crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, &cmd).await
                     {
                         tokio::time::sleep(Duration::from_millis(200)).await;
-                        if let Err(e) =
-                            crate::tmux::proxy::send_keys_no_enter(&self.transport, &target, "Enter")
-                                .await
+                        if let Err(e) = crate::tmux::proxy::send_keys_no_enter(
+                            &self.transport,
+                            &target,
+                            "Enter",
+                        )
+                        .await
                         {
                             tracing::warn!(
                                 "Failed sending Enter after auto-dispatching issue #{} to {}: {}",
@@ -5127,32 +5156,134 @@ async fn codex_user_assets_present(transport: &ServerTransport) -> bool {
     }
 }
 
+async fn gemini_repo_assets_present(
+    transport: &ServerTransport,
+    repo_path: &std::path::Path,
+) -> bool {
+    transport
+        .path_exists(
+            &repo_path
+                .join(".agent")
+                .join("scripts")
+                .join("start-parallel-agents.sh"),
+        )
+        .await
+        && transport
+            .path_exists(
+                &repo_path
+                    .join(".agent")
+                    .join("workflows")
+                    .join("fix-loop.md"),
+            )
+            .await
+        && transport
+            .path_exists(
+                &repo_path
+                    .join(".agent")
+                    .join("workflows")
+                    .join("monitor-workers.md"),
+            )
+            .await
+}
+
+async fn gemini_support_root(
+    transport: &ServerTransport,
+    agents_dir: Option<&std::path::Path>,
+    repo_path: &std::path::Path,
+) -> Option<PathBuf> {
+    for root in agents_repo_root_candidates(agents_dir, repo_path) {
+        if transport
+            .path_exists(
+                &root
+                    .join(".agent")
+                    .join("scripts")
+                    .join("start-parallel-agents.sh"),
+            )
+            .await
+            && transport
+                .path_exists(&root.join(".agent").join("workflows").join("fix-loop.md"))
+                .await
+            && transport
+                .path_exists(
+                    &root
+                        .join(".agent")
+                        .join("workflows")
+                        .join("monitor-workers.md"),
+                )
+                .await
+        {
+            return Some(root);
+        }
+    }
+
+    None
+}
+
 async fn gemini_agents_assets_present(
     transport: &ServerTransport,
     agents_dir: Option<&std::path::Path>,
     repo_path: &std::path::Path,
 ) -> bool {
-    for root in agents_repo_root_candidates(agents_dir, repo_path) {
-        if transport
-            .path_exists(&root.join("skills").join("autocoder").join("SKILL.md"))
+    gemini_repo_assets_present(transport, repo_path).await
+        || gemini_support_root(transport, agents_dir, repo_path)
             .await
-            && transport
-                .path_exists(
-                    &root
-                        .join(".agent")
-                        .join("scripts")
-                        .join("start-parallel-agents.sh"),
+            .is_some()
+}
+
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<()> {
+    std::fs::create_dir_all(dst).with_context(|| format!("Failed to create {}", dst.display()))?;
+
+    for entry in
+        std::fs::read_dir(src).with_context(|| format!("Failed to read {}", src.display()))?
+    {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        if file_type.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else if file_type.is_symlink() {
+            let target = std::fs::read_link(&src_path)
+                .with_context(|| format!("Failed to read link {}", src_path.display()))?;
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&target, &dst_path).with_context(|| {
+                format!(
+                    "Failed to create symlink {} -> {}",
+                    dst_path.display(),
+                    target.display()
                 )
-                .await
-            && transport
-                .path_exists(&root.join("agents").join("autocoder").join("agent.md"))
-                .await
-        {
-            return true;
+            })?;
+            #[cfg(windows)]
+            {
+                let target_path = src_path
+                    .canonicalize()
+                    .with_context(|| format!("Failed to resolve {}", src_path.display()))?;
+                if target_path.is_dir() {
+                    std::os::windows::fs::symlink_dir(&target, &dst_path)
+                } else {
+                    std::os::windows::fs::symlink_file(&target, &dst_path)
+                }
+                .with_context(|| {
+                    format!(
+                        "Failed to create symlink {} -> {}",
+                        dst_path.display(),
+                        target.display()
+                    )
+                })?;
+            }
+        } else {
+            std::fs::copy(&src_path, &dst_path).with_context(|| {
+                format!(
+                    "Failed to copy {} to {}",
+                    src_path.display(),
+                    dst_path.display()
+                )
+            })?;
         }
     }
 
-    false
+    Ok(())
 }
 
 fn format_command_output(output: &std::process::Output) -> String {
@@ -5191,6 +5322,79 @@ async fn install_agents_for_scope_with_progress<F: Fn(&str)>(
     scope: InstallScope,
     progress: &F,
 ) -> Result<()> {
+    if agent_type == AgentType::Gemini {
+        if gemini_repo_assets_present(transport, repo_path).await {
+            progress("✅ Gemini runtime assets already installed\n");
+            return Ok(());
+        }
+
+        progress("⏳ Checking Gemini CLI...\n");
+        let version = transport
+            .output("gemini", &["--help".to_string()], Some(repo_path))
+            .await
+            .context("Failed to run gemini. Is gemini CLI installed?")?;
+        progress(&format!(
+            "$ gemini --help\n{}",
+            format_command_output(&version)
+        ));
+        if !version.status.success() {
+            anyhow::bail!("gemini CLI is not available");
+        }
+
+        let support_root = gemini_support_root(transport, Some(agents_dir), repo_path)
+            .await
+            .context("Could not find laird/agents support files in ../agents")?;
+        let source_agent_dir = support_root.join(".agent");
+        let target_agent_dir = repo_path.join(".agent");
+
+        if target_agent_dir.exists() {
+            anyhow::bail!(
+                "Gemini install target already exists at {}",
+                target_agent_dir.display()
+            );
+        }
+
+        match scope {
+            InstallScope::User => {
+                progress(&format!(
+                    "⏳ Symlinking shared Gemini assets from {} into {}\n",
+                    source_agent_dir.display(),
+                    target_agent_dir.display()
+                ));
+                #[cfg(unix)]
+                std::os::unix::fs::symlink(&source_agent_dir, &target_agent_dir).with_context(
+                    || {
+                        format!(
+                            "Failed to create symlink {} -> {}",
+                            target_agent_dir.display(),
+                            source_agent_dir.display()
+                        )
+                    },
+                )?;
+                #[cfg(windows)]
+                std::os::windows::fs::symlink_dir(&source_agent_dir, &target_agent_dir)
+                    .with_context(|| {
+                        format!(
+                            "Failed to create symlink {} -> {}",
+                            target_agent_dir.display(),
+                            source_agent_dir.display()
+                        )
+                    })?;
+            }
+            InstallScope::Repo => {
+                progress(&format!(
+                    "⏳ Copying Gemini assets from {} into {}\n",
+                    source_agent_dir.display(),
+                    target_agent_dir.display()
+                ));
+                copy_dir_recursive(&source_agent_dir, &target_agent_dir)?;
+            }
+        }
+
+        progress("✅ Gemini runtime assets installed\n");
+        return Ok(());
+    }
+
     if agent_type == AgentType::Codex {
         if codex_repo_assets_present(transport, repo_path).await
             || codex_user_assets_present(transport).await
@@ -5534,7 +5738,12 @@ fn infer_status_from_pane(content: &str) -> crate::model::status::AgentStatus {
 
     let tail = last_lines.join(" ").to_lowercase();
 
-    let state = if tail.contains("waiting for input")
+    let state = if tail.contains("droid_fix_loop_idle")
+        || tail.contains("idle_no_work_available")
+        || tail.contains("fix_loop_idle")
+    {
+        AgentState::Idle
+    } else if tail.contains("waiting for input")
         || tail.contains("> ")
         || tail.contains("what would you like")
         || tail.contains("how can i help")
@@ -5811,7 +6020,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn gemini_assets_require_skill_script_and_agent_definition() {
+    async fn gemini_assets_require_repo_workflows_or_shared_source() {
         let root = temp_path("gemini-assets");
         let repo_parent = root.join("workspace");
         let repo = repo_parent.join("repo");
@@ -5823,19 +6032,45 @@ mod tests {
 
         assert!(!gemini_agents_assets_present(&transport, None, &repo).await);
 
-        let skills = agents.join("skills/autocoder");
-        std::fs::create_dir_all(&skills).unwrap();
-        std::fs::write(skills.join("SKILL.md"), "name: autocoder\n").unwrap();
+        let repo_scripts = repo.join(".agent/scripts");
+        std::fs::create_dir_all(&repo_scripts).unwrap();
+        std::fs::write(
+            repo_scripts.join("start-parallel-agents.sh"),
+            "#!/bin/bash\n",
+        )
+        .unwrap();
         assert!(!gemini_agents_assets_present(&transport, None, &repo).await);
 
-        let scripts = agents.join(".agent/scripts");
-        std::fs::create_dir_all(&scripts).unwrap();
-        std::fs::write(scripts.join("start-parallel-agents.sh"), "#!/bin/bash\n").unwrap();
+        let repo_workflows = repo.join(".agent/workflows");
+        std::fs::create_dir_all(&repo_workflows).unwrap();
+        std::fs::write(repo_workflows.join("fix-loop.md"), "# fix-loop\n").unwrap();
         assert!(!gemini_agents_assets_present(&transport, None, &repo).await);
 
-        let agent_def = agents.join("agents/autocoder");
-        std::fs::create_dir_all(&agent_def).unwrap();
-        std::fs::write(agent_def.join("agent.md"), "# autocoder\n").unwrap();
+        std::fs::write(
+            repo_workflows.join("monitor-workers.md"),
+            "# monitor-workers\n",
+        )
+        .unwrap();
+        assert!(gemini_agents_assets_present(&transport, None, &repo).await);
+
+        std::fs::remove_dir_all(repo.join(".agent")).ok();
+        assert!(!gemini_agents_assets_present(&transport, None, &repo).await);
+
+        let shared_scripts = agents.join(".agent/scripts");
+        std::fs::create_dir_all(&shared_scripts).unwrap();
+        std::fs::write(
+            shared_scripts.join("start-parallel-agents.sh"),
+            "#!/bin/bash\n",
+        )
+        .unwrap();
+        let shared_workflows = agents.join(".agent/workflows");
+        std::fs::create_dir_all(&shared_workflows).unwrap();
+        std::fs::write(shared_workflows.join("fix-loop.md"), "# fix-loop\n").unwrap();
+        std::fs::write(
+            shared_workflows.join("monitor-workers.md"),
+            "# monitor-workers\n",
+        )
+        .unwrap();
         assert!(gemini_agents_assets_present(&transport, None, &repo).await);
 
         std::fs::remove_dir_all(root).ok();
@@ -5865,6 +6100,36 @@ mod tests {
         app.new_swarm_agent_type = AgentType::Codex;
 
         assert_eq!(app.selected_agent_type_for_new_swarm(), AgentType::Claude);
+    }
+
+    #[tokio::test]
+    async fn selecting_available_repo_shows_runtime_picker_only_when_unlocked() {
+        let repo_path = temp_path("new-swarm-repo-flow");
+        std::fs::create_dir_all(&repo_path).unwrap();
+
+        let mut unlocked = App::new(None, false, None, None, None).await.unwrap();
+        unlocked.available_repos = vec![repo_path.clone()];
+        unlocked.select_repo_row(0).await.unwrap();
+        assert!(matches!(
+            unlocked.screen,
+            Screen::NewSwarm {
+                field: NewSwarmField::AgentRuntime
+            }
+        ));
+
+        let mut locked = App::new(Some(AgentType::Gemini), true, None, None, None)
+            .await
+            .unwrap();
+        locked.available_repos = vec![repo_path.clone()];
+        locked.select_repo_row(0).await.unwrap();
+        assert!(matches!(
+            locked.screen,
+            Screen::NewSwarm {
+                field: NewSwarmField::NumWorkers
+            }
+        ));
+
+        std::fs::remove_dir_all(repo_path).ok();
     }
 
     #[tokio::test]
@@ -5934,6 +6199,12 @@ mod tests {
         ));
 
         let idle = infer_status_from_pane("What would you like me to do next?");
+        assert!(matches!(idle.state, AgentState::Idle));
+    }
+
+    #[test]
+    fn infer_status_from_pane_detects_fix_loop_idle_markers() {
+        let idle = infer_status_from_pane("IDLE_NO_WORK_AVAILABLE\nDROID_FIX_LOOP_IDLE");
         assert!(matches!(idle.state, AgentState::Idle));
     }
 
@@ -6063,8 +6334,14 @@ mod tests {
 ";
         let candidates = collect_recent_log_error_candidates(log, 10, 3);
         assert_eq!(candidates.len(), 2);
-        assert_eq!(candidates[0].summary, "agents_tui::tmux: tmux send-keys failed");
-        assert_eq!(candidates[1].summary, "agents_tui::app: Failed to parse gh command");
+        assert_eq!(
+            candidates[0].summary,
+            "agents_tui::tmux: tmux send-keys failed"
+        );
+        assert_eq!(
+            candidates[1].summary,
+            "agents_tui::app: Failed to parse gh command"
+        );
         assert_eq!(candidates[1].occurrences, 2);
     }
 

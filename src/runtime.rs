@@ -231,6 +231,11 @@ async fn run_probe(
     .with_context(|| format!("Failed to run {} {}", probe.program, probe.label))?;
 
     let combined = command_output_text(&output);
+
+    if output.status.success() {
+        return Ok(());
+    }
+
     if let Some(alert) = detect_runtime_alert(&combined) {
         let detail = summarize_output(&combined);
         if detail.is_empty() {
@@ -240,10 +245,6 @@ async fn run_probe(
             "{agent_type} failed {label}: {alert}. {detail}",
             label = probe.label
         );
-    }
-
-    if output.status.success() {
-        return Ok(());
     }
 
     let detail = summarize_output(&combined);

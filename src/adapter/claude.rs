@@ -311,7 +311,7 @@ impl ClaudeAdapter {
             if !runtime_uses_loop_wrappers(runtime) {
                 if let Some(cmd) = manager_bootstrap_cmd(runtime) {
                     progress("⏳ Waiting for manager to be ready...\n");
-                    if Self::wait_for_claude_ready(&self.transport, &manager_target).await {
+                    if Self::wait_for_agent_ready(&self.transport, &manager_target).await {
                         progress(&format!("⏳ Sending {cmd} to manager...\n"));
                         proxy::send_keys(&self.transport, &manager_target, &cmd)
                             .await
@@ -800,9 +800,9 @@ impl ClaudeAdapter {
         Ok(())
     }
 
-    /// Poll a tmux pane until Claude's prompt indicator appears, or timeout.
+    /// Poll a tmux pane until the agent prompt indicator appears, or timeout.
     /// Returns true if the prompt was detected, false on timeout.
-    async fn wait_for_claude_ready(
+    async fn wait_for_agent_ready(
         transport: &crate::transport::ServerTransport,
         target: &str,
     ) -> bool {
@@ -815,20 +815,20 @@ impl ClaudeAdapter {
 
         while start.elapsed() < timeout {
             if let Ok(content) = proxy::capture_pane(transport, target, 50).await {
-                // Claude Code shows a "❯" or ">" prompt when ready
+                // Agent shows a "❯" or ">" prompt when ready
                 // Also check for the tips/help text that appears on startup
                 if content.contains('❯')
                     || content.contains("What can I help")
                     || content.contains("/help")
                 {
-                    tracing::info!("Claude ready in pane {target}");
+                    tracing::info!("Agent ready in pane {target}");
                     return true;
                 }
             }
             tokio::time::sleep(poll_interval).await;
         }
 
-        tracing::warn!("Timed out waiting for Claude ready in pane {target}");
+        tracing::warn!("Timed out waiting for agent ready in pane {target}");
         false
     }
 
@@ -1098,7 +1098,7 @@ impl AgentRuntime for ClaudeAdapter {
             // Wait for Claude to be ready, then send the manage-loop bootstrap command
             if !runtime_uses_loop_wrappers(runtime) {
                 if let Some(cmd) = manager_bootstrap_cmd(runtime) {
-                    if Self::wait_for_claude_ready(&self.transport, &manager_target).await {
+                    if Self::wait_for_agent_ready(&self.transport, &manager_target).await {
                         tracing::info!("Sending manage-loop to manager: {cmd}");
                         proxy::send_keys(&self.transport, &manager_target, &cmd)
                             .await
@@ -2060,7 +2060,7 @@ mod tests {
             PaneActivity::AgentBusy
         );
         assert_eq!(
-            classify_pane_activity("\u{276f} /autocoder:monitor\n"),
+            classify_pane_activity("\u{276f} /autocoder:monitor-workers\n"),
             PaneActivity::AgentBusy
         );
         assert_eq!(
@@ -2120,11 +2120,11 @@ mod tests {
     fn manager_ongoing_uses_monitor_not_loop() {
         assert_eq!(
             manager_ongoing_cmd(&AgentType::Claude),
-            Some("/autocoder:monitor".to_string())
+            Some("/autocoder:monitor-workers".to_string())
         );
         assert_eq!(
             manager_ongoing_cmd(&AgentType::Gemini),
-            Some("/monitor".to_string())
+            Some("/monitor-workers".to_string())
         );
         assert_eq!(
             manager_ongoing_cmd(&AgentType::Codex),
@@ -2358,11 +2358,11 @@ exit 0
         );
         write_executable(
             bin_dir.join("gemini").as_path(),
-            &fake_agent_script("GEMINI", "/manage-loop", "/fix-loop"),
+            &fake_agent_script("GEMINI", "/monitor-loop", "/fix-loop"),
         );
         write_executable(
             bin_dir.join("droid").as_path(),
-            &fake_agent_script("DROID", "/manage-loop", "/fix-loop"),
+            &fake_agent_script("DROID", "/monitor-loop", "/fix-loop"),
         );
 
         let path_value = match original_path.as_ref() {
@@ -2409,7 +2409,10 @@ exit 0
                 // Gemini's fake runtime is flaky in tmux worker panes and can drop back to a
                 // shell prompt before the historical test marker is observed. The wrapper-launch
                 // regression in #243 is specific to Codex, so keep this smoke-level for Gemini.
-                AgentType::Gemini => (&["What can I help", "MANAGER_LOOP_STARTED"], &[]),
+                AgentType::Gemini => (
+                    &["What can I help", "MANAGER_LOOP_STARTED"],
+                    &["What can I help", "FIX_LOOP_STARTED"],
+                ),
                 AgentType::Claude => (
                     &["What can I help", "MANAGER_LOOP_STARTED"],
                     &["What can I help", "FIX_LOOP_STARTED"],

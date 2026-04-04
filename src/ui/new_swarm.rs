@@ -193,6 +193,10 @@ pub fn render_install_scope_dialog(
             " Install Codex Agents ",
             " Codex runtime assets are not installed for this repo.",
         ),
+        AgentType::Gemini => (
+            " Install Gemini Agents ",
+            " Gemini needs `.agent` installed from the shared `../agents` checkout.",
+        ),
         _ => (
             " Install Runtime Assets ",
             " Required runtime assets are not installed.",
@@ -239,13 +243,19 @@ pub fn render_install_scope_dialog(
     };
 
     let user_option = Paragraph::new(Line::from(Span::styled(
-        " > Install for user (--scope user)",
+        match agent_type {
+            AgentType::Gemini => " > Symlink shared assets into repo",
+            _ => " > Install for user (--scope user)",
+        },
         user_style,
     )));
     f.render_widget(user_option, chunks[2]);
 
     let repo_option = Paragraph::new(Line::from(Span::styled(
-        " > Install for repo (--scope project)",
+        match agent_type {
+            AgentType::Gemini => " > Copy assets into repo",
+            _ => " > Install for repo (--scope project)",
+        },
         repo_style,
     )));
     f.render_widget(repo_option, chunks[3]);

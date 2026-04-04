@@ -105,14 +105,13 @@ async fn main() -> Result<()> {
 
     let initial_agent_type =
         select_initial_agent_type(cli.agent_type.clone(), repo_root.as_deref())?;
-    let startup_warning =
-        crate::runtime::validate_environment(
-            &transport,
-            initial_agent_type.as_ref(),
-            repo_root.as_deref(),
-        )
-            .await?
-            .gh_warning;
+    let startup_warning = crate::runtime::validate_environment(
+        &transport,
+        initial_agent_type.as_ref(),
+        repo_root.as_deref(),
+    )
+    .await?
+    .gh_warning;
 
     // Initialize logging to file (not stdout, since we own the terminal)
     tracing_subscriber::fmt()

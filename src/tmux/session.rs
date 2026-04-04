@@ -150,7 +150,7 @@ pub async fn resize_session(name: &str, width: u16, height: u16) -> Result<()> {
 /// Resize a session to match the current terminal size.
 pub async fn resize_session_to_terminal(name: &str) -> Result<()> {
     let (width, height) = crossterm::terminal::size().context("Failed to get terminal size")?;
-    resize_session(name, width, height).await
+    resize_session(name, width.saturating_sub(2), height).await
 }
 
 /// Check if a specific session exists.
