@@ -779,4 +779,144 @@ mod tests {
         assert!(rendered.contains("demo"));
         assert!(rendered.contains("#12"));
     }
+
+    fn make_issue(number: u32, labels: &[&str]) -> GitHubIssue {
+        GitHubIssue {
+            number,
+            title: format!("Issue #{number}"),
+            state: IssueState::Open,
+            priority: crate::model::issue::IssuePriority::None,
+            issue_type: crate::model::issue::IssueType::Other,
+            labels: labels.iter().map(|s| s.to_string()).collect(),
+            is_working: false,
+            assigned_worker: None,
+        }
+    }
+
+    #[test]
+    fn swarm_panel_next_cycles() {
+        assert!(matches!(SwarmPanel::Manager.next(), SwarmPanel::Workers));
+        assert!(matches!(SwarmPanel::Workers.next(), SwarmPanel::Issues));
+        assert!(matches!(SwarmPanel::Issues.next(), SwarmPanel::Manager));
+    }
+
+    #[test]
+    fn scroll_manager_up_saturates_at_zero() {
+        let mut view = SwarmView::new();
+        view.scroll_manager_down(5);
+        view.scroll_manager_up(3);
+        assert_eq!(view.manager_scroll, 2);
+        view.scroll_manager_up(100);
+        assert_eq!(view.manager_scroll, 0);
+    }
+
+    #[test]
+    fn scroll_manager_down_increments() {
+        let mut view = SwarmView::new();
+        view.scroll_manager_down(10);
+        assert_eq!(view.manager_scroll, 10);
+    }
+
+    #[test]
+    fn scroll_manager_to_bottom_sets_to_max() {
+        let mut view = SwarmView::new();
+        view.scroll_manager_to_bottom();
+        assert_eq!(view.manager_scroll, u16::MAX);
+    }
+
+    #[test]
+    fn next_worker_increments_and_wraps() {
+        let mut view = SwarmView::new();
+        view.next_worker(3);
+        assert_eq!(view.selected_worker(), Some(1));
+        view.next_worker(3);
+        view.next_worker(3);
+        assert_eq!(view.selected_worker(), Some(0));
+    }
+
+    #[test]
+    fn prev_worker_wraps_to_last() {
+        let mut view = SwarmView::new();
+        view.prev_worker(3);
+        assert_eq!(view.selected_worker(), Some(2));
+    }
+
+    #[test]
+    fn next_worker_with_empty_list_does_not_panic() {
+        let mut view = SwarmView::new();
+        view.next_worker(0);
+        assert_eq!(view.selected_worker(), Some(0));
+    }
+
+    #[test]
+    fn prev_worker_with_empty_list_does_not_panic() {
+        let mut view = SwarmView::new();
+        view.prev_worker(0);
+        assert_eq!(view.selected_worker(), Some(0));
+    }
+
+    #[test]
+    fn next_issue_increments_and_wraps() {
+        let mut view = SwarmView::new();
+        view.next_issue(3);
+        assert_eq!(view.selected_issue(), Some(1));
+        view.next_issue(3);
+        view.next_issue(3);
+        assert_eq!(view.selected_issue(), Some(0));
+    }
+
+    #[test]
+    fn prev_issue_wraps_to_last() {
+        let mut view = SwarmView::new();
+        view.prev_issue(3);
+        assert_eq!(view.selected_issue(), Some(2));
+    }
+
+    #[test]
+    fn next_issue_with_empty_list_does_not_panic() {
+        let mut view = SwarmView::new();
+        view.next_issue(0);
+        assert_eq!(view.selected_issue(), Some(0));
+    }
+
+    #[test]
+    fn prev_issue_with_empty_list_does_not_panic() {
+        let mut view = SwarmView::new();
+        view.prev_issue(0);
+        assert_eq!(view.selected_issue(), Some(0));
+    }
+
+    #[test]
+    fn count_attention_counts_waiting_agents() {
+        use super::count_attention;
+        let mut swarm = make_swarm();
+        swarm.workers[0].pane_content = "should i proceed with this change?".to_string();
+        let issues: Vec<GitHubIssue> = vec![];
+        assert_eq!(count_attention(&swarm, &issues), 1);
+    }
+
+    #[test]
+    fn count_attention_includes_blocked_issues() {
+        use super::count_attention;
+        let swarm = make_swarm();
+        let issues = vec![make_issue(1, &["needs-design"]), make_issue(2, &[])];
+        assert_eq!(count_attention(&swarm, &issues), 1);
+    }
+
+    #[test]
+    fn count_attention_combines_blocked_and_waiting() {
+        use super::count_attention;
+        let mut swarm = make_swarm();
+        swarm.workers[0].pane_content = "should i proceed with this?".to_string();
+        let issues = vec![make_issue(1, &["needs-approval"])];
+        assert_eq!(count_attention(&swarm, &issues), 2);
+    }
+
+    #[test]
+    fn count_attention_zero_when_all_idle() {
+        use super::count_attention;
+        let swarm = make_swarm();
+        let issues: Vec<GitHubIssue> = vec![];
+        assert_eq!(count_attention(&swarm, &issues), 0);
+    }
 }
