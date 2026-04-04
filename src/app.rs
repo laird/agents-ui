@@ -1102,6 +1102,7 @@ impl App {
                     | Screen::NewSwarm { .. }
                     | Screen::RuntimeSelect
                     | Screen::InstallScopeSelect
+                    | Screen::AgentView { .. }
             )
         {
             self.show_shortcuts_viewer = true;
