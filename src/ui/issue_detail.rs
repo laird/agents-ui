@@ -128,3 +128,66 @@ impl IssueDetailView {
         f.render_widget(help, help_chunk);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_view() -> IssueDetailView {
+        IssueDetailView::new(
+            42,
+            "Test issue".into(),
+            "Body text".into(),
+            vec!["bug".into()],
+            "open".into(),
+        )
+    }
+
+    #[test]
+    fn new_sets_fields() {
+        let v = make_view();
+        assert_eq!(v.issue_number, 42);
+        assert_eq!(v.title, "Test issue");
+        assert_eq!(v.body, "Body text");
+        assert_eq!(v.labels, vec!["bug"]);
+        assert_eq!(v.state, "open");
+    }
+
+    #[test]
+    fn new_scroll_starts_at_zero() {
+        let v = make_view();
+        assert_eq!(v.scroll_offset, 0);
+    }
+
+    #[test]
+    fn scroll_down_increments_offset() {
+        let mut v = make_view();
+        v.scroll_down(5);
+        assert_eq!(v.scroll_offset, 5);
+        v.scroll_down(3);
+        assert_eq!(v.scroll_offset, 8);
+    }
+
+    #[test]
+    fn scroll_up_decrements_offset() {
+        let mut v = make_view();
+        v.scroll_down(10);
+        v.scroll_up(4);
+        assert_eq!(v.scroll_offset, 6);
+    }
+
+    #[test]
+    fn scroll_up_saturates_at_zero() {
+        let mut v = make_view();
+        v.scroll_up(10); // offset is 0, can't go negative
+        assert_eq!(v.scroll_offset, 0);
+    }
+
+    #[test]
+    fn scroll_down_saturates_at_max() {
+        let mut v = make_view();
+        v.scroll_offset = u16::MAX;
+        v.scroll_down(1); // saturating_add → stays at u16::MAX
+        assert_eq!(v.scroll_offset, u16::MAX);
+    }
+}
