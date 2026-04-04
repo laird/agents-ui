@@ -682,3 +682,130 @@ fn truncate_str(s: &str, max_len: usize) -> String {
         format!("{}…", &s[..max_len - 1])
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_view() -> RepoView {
+        RepoView::new()
+    }
+
+    // --- Worker navigation ---
+
+    #[test]
+    fn next_worker_wraps() {
+        let mut view = make_view();
+        view.worker_list_state.select(Some(2));
+        view.next_worker(3);
+        assert_eq!(view.worker_list_state.selected(), Some(0));
+    }
+
+    #[test]
+    fn next_worker_noop_on_empty() {
+        let mut view = make_view();
+        view.worker_list_state.select(Some(0));
+        view.next_worker(0); // should not panic
+        assert_eq!(view.worker_list_state.selected(), Some(0));
+    }
+
+    #[test]
+    fn previous_worker_signals_focus_at_top() {
+        let mut view = make_view();
+        view.worker_list_state.select(Some(0));
+        let signal = view.previous_worker(3);
+        assert!(signal, "should return true (focus manager) when at index 0");
+    }
+
+    #[test]
+    fn previous_worker_decrements_normally() {
+        let mut view = make_view();
+        view.worker_list_state.select(Some(2));
+        let signal = view.previous_worker(3);
+        assert!(!signal, "should return false when not at top");
+        assert_eq!(view.worker_list_state.selected(), Some(1));
+    }
+
+    // --- Issue navigation ---
+
+    #[test]
+    fn next_issue_clamps_at_max() {
+        let mut view = make_view();
+        view.issue_list_state.select(Some(3)); // at last item (len=3)
+        view.next_issue(3);
+        assert_eq!(view.issue_list_state.selected(), Some(3), "should not exceed len");
+    }
+
+    #[test]
+    fn next_issue_noop_on_empty() {
+        let mut view = make_view();
+        view.issue_list_state.select(Some(0));
+        view.next_issue(0); // should not panic
+        assert_eq!(view.issue_list_state.selected(), Some(0));
+    }
+
+    #[test]
+    fn previous_issue_signals_focus_at_header() {
+        let mut view = make_view();
+        view.issue_list_state.select(Some(1)); // first issue row
+        let signal = view.previous_issue();
+        assert!(signal, "should return true when at first issue (index 1)");
+    }
+
+    #[test]
+    fn previous_issue_signals_focus_at_zero() {
+        let mut view = make_view();
+        view.issue_list_state.select(Some(0)); // header row
+        let signal = view.previous_issue();
+        assert!(signal, "should return true when at header row (index 0)");
+    }
+
+    #[test]
+    fn selected_issue_idx_accounts_for_header() {
+        let mut view = make_view();
+        view.issue_list_state.select(Some(2));
+        assert_eq!(view.selected_issue_idx(), Some(1), "selection=2 → index 1");
+    }
+
+    #[test]
+    fn selected_issue_idx_none_at_header() {
+        let mut view = make_view();
+        view.issue_list_state.select(Some(0));
+        assert_eq!(view.selected_issue_idx(), None, "selection=0 (header) → None");
+    }
+
+    // --- Banner management ---
+
+    #[test]
+    fn add_banner_prepends() {
+        let mut view = make_view();
+        let style = ratatui::style::Style::default();
+        view.add_banner("first".to_string(), style);
+        view.add_banner("second".to_string(), style);
+        assert_eq!(view.banners[0].message, "second", "newest banner should be at index 0");
+        assert_eq!(view.banners[1].message, "first");
+    }
+
+    #[test]
+    fn tick_banners_decrements_ttl() {
+        let mut view = make_view();
+        let style = ratatui::style::Style::default();
+        view.add_banner("msg".to_string(), style);
+        let initial_ttl = view.banners[0].ttl;
+        view.tick_banners();
+        assert_eq!(view.banners[0].ttl, initial_ttl - 1);
+    }
+
+    #[test]
+    fn tick_banners_removes_expired() {
+        let mut view = make_view();
+        let style = ratatui::style::Style::default();
+        view.banners.push(Banner {
+            message: "dying".to_string(),
+            style,
+            ttl: 1,
+        });
+        view.tick_banners();
+        assert!(view.banners.is_empty(), "banner with ttl=1 should be removed after one tick");
+    }
+}
