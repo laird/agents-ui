@@ -174,3 +174,93 @@ impl AgentView {
         self.following = true;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_sets_defaults() {
+        let v = AgentView::new();
+        assert_eq!(v.scroll_offset, 0);
+        assert!(v.following, "new() should start in following mode");
+    }
+
+    #[test]
+    fn scroll_up_decrements_offset() {
+        let mut v = AgentView::new();
+        v.scroll_offset = 20;
+        v.scroll_up(5);
+        assert_eq!(v.scroll_offset, 15);
+    }
+
+    #[test]
+    fn scroll_up_disables_following() {
+        let mut v = AgentView::new();
+        assert!(v.following);
+        v.scroll_offset = 10;
+        v.scroll_up(1);
+        assert!(!v.following, "scroll_up should disable following mode");
+    }
+
+    #[test]
+    fn scroll_up_saturates_at_zero() {
+        let mut v = AgentView::new();
+        v.scroll_offset = 3;
+        v.scroll_up(10);
+        assert_eq!(v.scroll_offset, 0);
+    }
+
+    #[test]
+    fn scroll_down_increments_offset() {
+        let mut v = AgentView::new();
+        v.scroll_offset = 5;
+        v.scroll_down(3);
+        assert_eq!(v.scroll_offset, 8);
+    }
+
+    #[test]
+    fn scroll_down_saturates_at_max() {
+        let mut v = AgentView::new();
+        v.scroll_offset = u16::MAX;
+        v.scroll_down(1);
+        assert_eq!(v.scroll_offset, u16::MAX);
+    }
+
+    #[test]
+    fn page_up_uses_visible_height() {
+        let mut v = AgentView::new();
+        v.scroll_offset = 50;
+        v.visible_height = 10;
+        v.page_up();
+        assert_eq!(v.scroll_offset, 40);
+        assert!(!v.following);
+    }
+
+    #[test]
+    fn page_down_uses_visible_height() {
+        let mut v = AgentView::new();
+        v.scroll_offset = 0;
+        v.visible_height = 10;
+        v.page_down();
+        assert_eq!(v.scroll_offset, 10);
+    }
+
+    #[test]
+    fn scroll_to_top_resets_and_disables_following() {
+        let mut v = AgentView::new();
+        v.scroll_offset = 100;
+        v.scroll_to_top();
+        assert_eq!(v.scroll_offset, 0);
+        assert!(!v.following);
+    }
+
+    #[test]
+    fn scroll_to_bottom_enables_following() {
+        let mut v = AgentView::new();
+        v.following = false;
+        v.scroll_to_bottom();
+        assert_eq!(v.scroll_offset, u16::MAX);
+        assert!(v.following);
+    }
+}
