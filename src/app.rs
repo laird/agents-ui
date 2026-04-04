@@ -3900,7 +3900,18 @@ impl App {
                 self.start_issue_refresh(swarm_idx);
                 self.status_message = Some("Refreshing issues...".to_string());
             }
-            _ => {}
+            _ => {
+                // Fall through to config-driven shortcuts (e.g. x=fix, b=brainstorm)
+                if let KeyCode::Char(c) = key.code {
+                    let issue_num = self.swarms.get(swarm_idx)
+                        .and_then(|s| self.issue_caches.get(&s.project_name))
+                        .and_then(|cache| {
+                            let sorted = IssueListView::sorted_open(&cache.issues);
+                            self.issue_list_view.selected().and_then(|i| sorted.get(i)).map(|iss| iss.number)
+                        });
+                    self.try_shortcut("issues", &c.to_string(), swarm_idx, issue_num).await?;
+                }
+            }
         }
         Ok(())
     }
@@ -5219,6 +5230,7 @@ async fn gemini_support_root(
     None
 }
 
+#[cfg(test)]
 async fn gemini_agents_assets_present(
     transport: &ServerTransport,
     agents_dir: Option<&std::path::Path>,

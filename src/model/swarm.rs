@@ -64,6 +64,7 @@ impl AgentType {
     }
 
     /// The shell command to launch this agent with autonomous permissions.
+    #[cfg(test)]
     pub fn launch_cmd(&self) -> &str {
         match self {
             AgentType::Claude => "claude code --dangerously-skip-permissions .",

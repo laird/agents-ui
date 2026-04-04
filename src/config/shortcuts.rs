@@ -121,9 +121,10 @@ const DEFAULT_CONFIG: &str = r#"# agents-ui keyboard shortcuts
 # Panels: [global], [workers], [issues], [manager]
 # Fields: label (display name), command (template), target ("manager" or "worker"), raw (bool)
 # Variables: {issue} = selected issue number, {worker} = worker tmux target, {project} = project name
+#
+# Note: keys explicitly bound in the TUI (j/k/enter/esc/p/r/d/space) take priority over shortcuts.
 
 [issues]
-a = { label = "approve", command = "gh issue edit {issue} --remove-label proposal" }
 x = { label = "fix", command = "/autocoder:fix {issue}" }
 b = { label = "brainstorm", command = "/brainstorm {issue}" }
 
