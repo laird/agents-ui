@@ -419,4 +419,52 @@ mod tests {
         assert_eq!(p2, 1);
         assert_eq!(p3, 0);
     }
+
+    #[test]
+    fn priority_label_returns_correct_strings() {
+        assert_eq!(make_issue(1, &["P0"]).priority_label(), "P0");
+        assert_eq!(make_issue(2, &["P1"]).priority_label(), "P1");
+        assert_eq!(make_issue(3, &["P2"]).priority_label(), "P2");
+        assert_eq!(make_issue(4, &["P3"]).priority_label(), "P3");
+        assert_eq!(make_issue(5, &["bug"]).priority_label(), "\u{2014}");
+    }
+
+    #[test]
+    fn priority_num_returns_correct_values() {
+        assert_eq!(make_issue(1, &["P0"]).priority_num(), Some(0));
+        assert_eq!(make_issue(2, &["P1"]).priority_num(), Some(1));
+        assert_eq!(make_issue(3, &["P2"]).priority_num(), Some(2));
+        assert_eq!(make_issue(4, &["P3"]).priority_num(), Some(3));
+        assert_eq!(make_issue(5, &["bug"]).priority_num(), None);
+    }
+
+    #[test]
+    fn issue_filter_label_covers_all_variants() {
+        assert!(!IssueFilter::All.label().is_empty());
+        assert!(!IssueFilter::Open.label().is_empty());
+        assert!(!IssueFilter::Blocked.label().is_empty());
+    }
+
+    #[test]
+    fn labels_to_type_maps_correctly() {
+        assert_eq!(make_issue(1, &["bug"]).issue_type, IssueType::Bug);
+        assert_eq!(make_issue(2, &["enhancement"]).issue_type, IssueType::Enhancement);
+        assert_eq!(make_issue(3, &["proposal"]).issue_type, IssueType::Proposal);
+        assert_eq!(make_issue(4, &[]).issue_type, IssueType::Other);
+    }
+
+    #[test]
+    fn issue_cache_filtered_by_priority() {
+        let mut cache = IssueCache::default();
+        cache.issues.push(make_issue(1, &["P1", "bug"]));
+        cache.issues.push(make_issue(2, &["P2", "bug"]));
+        cache.issues.push(make_issue(3, &["P1", "enhancement"]));
+
+        let p1_issues = cache.filtered(Some(&IssuePriority::P1));
+        assert_eq!(p1_issues.len(), 2);
+        assert!(p1_issues.iter().all(|i| i.priority == IssuePriority::P1));
+
+        let all_issues = cache.filtered(None);
+        assert_eq!(all_issues.len(), 3);
+    }
 }
