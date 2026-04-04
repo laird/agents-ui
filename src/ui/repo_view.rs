@@ -779,3 +779,126 @@ fn truncate_str(s: &str, max_len: usize) -> String {
         format!("{}…", &s[..max_len - 1])
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_sets_initial_focus_to_workers() {
+        let v = RepoView::new();
+        assert_eq!(v.focus, RepoViewFocus::Workers);
+    }
+
+    #[test]
+    fn new_selects_first_worker_by_default() {
+        let v = RepoView::new();
+        assert_eq!(v.selected_worker(), Some(0));
+    }
+
+    #[test]
+    fn next_worker_increments_and_wraps() {
+        let mut v = RepoView::new();
+        v.next_worker(3);
+        assert_eq!(v.selected_worker(), Some(1));
+        v.next_worker(3);
+        assert_eq!(v.selected_worker(), Some(2));
+        v.next_worker(3);
+        assert_eq!(v.selected_worker(), Some(0));
+    }
+
+    #[test]
+    fn next_worker_with_empty_list_does_nothing() {
+        let mut v = RepoView::new();
+        v.next_worker(0);
+        assert_eq!(v.selected_worker(), Some(0));
+    }
+
+    #[test]
+    fn previous_worker_at_zero_signals_manager_focus() {
+        let mut v = RepoView::new();
+        let signal = v.previous_worker(3);
+        assert!(signal, "previous_worker at index 0 should return true");
+        assert_eq!(v.selected_worker(), Some(0));
+    }
+
+    #[test]
+    fn previous_worker_decrements_from_nonzero() {
+        let mut v = RepoView::new();
+        v.next_worker(3); // select index 1
+        let signal = v.previous_worker(3);
+        assert!(!signal);
+        assert_eq!(v.selected_worker(), Some(0));
+    }
+
+    #[test]
+    fn next_issue_increments_up_to_len() {
+        let mut v = RepoView::new();
+        v.next_issue(3); // len=3, header at 0, items at 1-3
+        assert_eq!(v.issue_list_state.selected(), Some(1));
+        v.next_issue(3);
+        assert_eq!(v.issue_list_state.selected(), Some(2));
+        v.next_issue(3);
+        assert_eq!(v.issue_list_state.selected(), Some(3));
+        // Should not go past len
+        v.next_issue(3);
+        assert_eq!(v.issue_list_state.selected(), Some(3));
+    }
+
+    #[test]
+    fn next_issue_with_empty_list_does_nothing() {
+        let mut v = RepoView::new();
+        v.next_issue(0);
+        assert_eq!(v.issue_list_state.selected(), Some(0));
+    }
+
+    #[test]
+    fn previous_issue_at_top_signals_manager_focus() {
+        let mut v = RepoView::new();
+        let signal = v.previous_issue();
+        assert!(signal);
+    }
+
+    #[test]
+    fn previous_issue_decrements_from_nonzero() {
+        let mut v = RepoView::new();
+        v.next_issue(3);
+        v.next_issue(3);
+        assert_eq!(v.issue_list_state.selected(), Some(2));
+        let signal = v.previous_issue();
+        assert!(!signal);
+        assert_eq!(v.issue_list_state.selected(), Some(1));
+    }
+
+    #[test]
+    fn selected_issue_idx_accounts_for_header_row() {
+        let mut v = RepoView::new();
+        assert_eq!(v.selected_issue_idx(), None); // index 0 is header
+        v.next_issue(3); // now at index 1
+        assert_eq!(v.selected_issue_idx(), Some(0));
+        v.next_issue(3); // now at index 2
+        assert_eq!(v.selected_issue_idx(), Some(1));
+    }
+
+    #[test]
+    fn add_banner_prepends_and_truncates_to_five() {
+        let mut v = RepoView::new();
+        for i in 0..6 {
+            v.add_banner(format!("msg{i}"), ratatui::style::Style::default());
+        }
+        assert_eq!(v.banners.len(), 5);
+        assert_eq!(v.banners[0].message, "msg5");
+    }
+
+    #[test]
+    fn tick_banners_removes_expired() {
+        let mut v = RepoView::new();
+        v.add_banner("test".to_string(), ratatui::style::Style::default());
+        assert_eq!(v.banners.len(), 1);
+        // tick 16 times to expire
+        for _ in 0..16 {
+            v.tick_banners();
+        }
+        assert_eq!(v.banners.len(), 0);
+    }
+}
