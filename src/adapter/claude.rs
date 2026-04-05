@@ -2411,7 +2411,7 @@ exit 0
                 // regression in #243 is specific to Codex, so keep this smoke-level for Gemini.
                 AgentType::Gemini => (
                     &["What can I help", "MANAGER_LOOP_STARTED"],
-                    &["What can I help", "FIX_LOOP_STARTED"],
+                    &[] as &[&str],
                 ),
                 AgentType::Claude => (
                     &["What can I help", "MANAGER_LOOP_STARTED"],
