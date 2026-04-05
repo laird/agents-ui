@@ -292,9 +292,21 @@
       gap: 0.625rem;
       padding: 0.625rem 0.625rem;
       border-radius: calc(var(--radius) - 1px);
+      cursor: pointer;
     }
 
-    .agent-row:hover { background: rgba(255,255,255,0.04); }
+    .agent-row:hover { background: rgba(255,255,255,0.06); }
+
+    .agent-row:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: -2px;
+    }
+
+    .agent-row-arrow {
+      color: var(--text-dim);
+      font-size: 0.75rem;
+      flex-shrink: 0;
+    }
 
     .agent-info { flex: 1; min-width: 0; }
 
@@ -314,6 +326,126 @@
     .agent-state-text .needs-input {
       color: var(--warning);
     }
+
+    /* ---- Session view ---- */
+    .session-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.875rem;
+    }
+
+    .session-title {
+      font-size: 1.125rem;
+      font-weight: 700;
+    }
+
+    .session-target {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      font-family: monospace;
+    }
+
+    .terminal-wrap {
+      background: #0a0c10;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin-bottom: 0.75rem;
+    }
+
+    .terminal-toolbar {
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      padding: 0.4rem 0.75rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.7rem;
+      color: var(--text-dim);
+    }
+
+    .terminal-toolbar button {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      font: inherit;
+      font-size: 0.7rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+
+    .terminal-toolbar button:hover {
+      background: rgba(255,255,255,0.06);
+      color: var(--text);
+    }
+
+    .terminal-output {
+      font-family: 'SFMono-Regular', 'Cascadia Code', Consolas, 'Liberation Mono', monospace;
+      font-size: 0.8125rem;
+      line-height: 1.45;
+      color: #c9d1d9;
+      white-space: pre-wrap;
+      word-break: break-all;
+      padding: 0.75rem 1rem;
+      min-height: 200px;
+      max-height: 55vh;
+      overflow-y: auto;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 0.5rem;
+      align-items: stretch;
+    }
+
+    .session-input {
+      flex: 1;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: 'SFMono-Regular', Consolas, monospace;
+      font-size: 0.875rem;
+      padding: 0.5rem 0.75rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .session-input:focus {
+      border-color: var(--accent);
+    }
+
+    .session-input::placeholder {
+      color: var(--text-dim);
+    }
+
+    .send-btn {
+      background: var(--accent);
+      border: none;
+      border-radius: var(--radius);
+      color: #0d1117;
+      font-weight: 600;
+      font-size: 0.875rem;
+      padding: 0.5rem 1rem;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: opacity 0.15s;
+    }
+
+    .send-btn:hover   { opacity: 0.85; }
+    .send-btn:active  { opacity: 0.7;  }
+    .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .send-feedback {
+      font-size: 0.75rem;
+      margin-top: 0.4rem;
+      min-height: 1rem;
+    }
+
+    .send-feedback.ok    { color: var(--success); }
+    .send-feedback.error { color: var(--error); }
 
     /* ---- Empty / loading states ---- */
     .empty-state {
@@ -391,9 +523,19 @@
 
     // ── State ──────────────────────────────────────────────────────────────────
     const state = {
-      swarms: [],
-      selected: null,   // project_name string or null
-      error:    null,
+      swarms:  [],
+      project: null,   // selected project_name (Level 2)
+      agent:   null,   // selected agent role (Level 3)
+      error:   null,
+      // session view state
+      session: {
+        paneContent:  '',
+        tmuxTarget:   '',
+        agentState:   '',
+        sending:      false,
+        lastFeedback: null,  // { ok, msg }
+        refreshTimer: null,
+      },
     };
 
     // ── Helpers ────────────────────────────────────────────────────────────────
@@ -425,6 +567,25 @@
       return Array.isArray(data.swarms) ? data.swarms : [];
     }
 
+    async function fetchPane(project, role) {
+      const r = await fetch('/api/swarms/' + encodeURIComponent(project) + '/agents/' + encodeURIComponent(role) + '/pane');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }
+
+    async function sendInput(project, role, text) {
+      const r = await fetch(
+        '/api/swarms/' + encodeURIComponent(project) + '/agents/' + encodeURIComponent(role) + '/input',
+        {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ text }),
+        }
+      );
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }
+
     // ── Renderers ──────────────────────────────────────────────────────────────
     function formatIssueInfo(agent) {
       if (!agent.current_issue) return '';
@@ -432,14 +593,19 @@
         (agent.current_issue_title ? ' ' + agent.current_issue_title : '');
     }
 
-    function renderAgentRow(agent) {
-      const cls = statusClass(agent.state);
+    function renderAgentRow(agent, project) {
+      const cls      = statusClass(agent.state);
       const issueText = formatIssueInfo(agent);
-      const waitText = agent.waiting_for_input
+      const waitText  = agent.waiting_for_input
         ? '<span class="needs-input"> · ⚠ Needs input</span>'
         : '';
+      const proj = project || '';
       return (
-        '<div class="agent-row">' +
+        '<div class="agent-row" ' +
+             'role="button" tabindex="0" ' +
+             'aria-label="Open session for ' + esc(agent.role) + '" ' +
+             'onclick="openSession(\'' + esc(proj) + '\',\'' + esc(agent.role) + '\')" ' +
+             'onkeydown="if(event.key===\'Enter\'||(event.key===\' \'&&(event.preventDefault(),true))){openSession(\'' + esc(proj) + '\',\'' + esc(agent.role) + '\')}">' +
           '<span class="status-dot s-' + cls + '" aria-hidden="true"></span>' +
           '<div class="agent-info">' +
             '<div class="agent-role">' + esc(agent.role) + '</div>' +
@@ -447,14 +613,15 @@
               esc(agent.state) + esc(issueText) + waitText +
             '</div>' +
           '</div>' +
+          '<span class="agent-row-arrow" aria-hidden="true">›</span>' +
         '</div>'
       );
     }
 
     function renderDetailView(swarm) {
-      const workers = swarm.workers || [];
+      const workers    = swarm.workers || [];
       const workerRows = workers.length
-        ? workers.map(renderAgentRow).join('')
+        ? workers.map(a => renderAgentRow(a, swarm.project_name)).join('')
         : '<div class="empty-state">No workers</div>';
 
       const stoppedBadge = swarm.stopped
@@ -479,7 +646,7 @@
         '<div class="detail-layout">' +
           '<div class="panel">' +
             '<div class="panel-header">Manager</div>' +
-            '<div class="agent-list">' + renderAgentRow(swarm.manager) + '</div>' +
+            '<div class="agent-list">' + renderAgentRow(swarm.manager, swarm.project_name) + '</div>' +
           '</div>' +
           '<div class="panel">' +
             '<div class="panel-header">' +
@@ -492,12 +659,58 @@
       );
     }
 
+    function renderSessionView(project, role) {
+      const s    = state.session;
+      const cls  = statusClass(s.agentState);
+      const feedbackHtml = s.lastFeedback
+        ? '<p class="send-feedback ' + (s.lastFeedback.ok ? 'ok' : 'error') + '">' +
+            esc(s.lastFeedback.msg) + '</p>'
+        : '<p class="send-feedback"></p>';
+
+      return (
+        '<nav class="breadcrumb" aria-label="Breadcrumb">' +
+          '<button class="crumb-link" onclick="navigate(null)">Repos</button>' +
+          '<span class="crumb-sep" aria-hidden="true">›</span>' +
+          '<button class="crumb-link" onclick="navigate(\'' + esc(project) + '\')">' + esc(project) + '</button>' +
+          '<span class="crumb-sep" aria-hidden="true">›</span>' +
+          '<span class="crumb-current">' + esc(role) + '</span>' +
+        '</nav>' +
+
+        '<div class="session-header">' +
+          '<span class="status-dot s-' + cls + '" aria-hidden="true"></span>' +
+          '<span class="session-title">' + esc(role) + '</span>' +
+          '<span class="session-target">' + esc(s.tmuxTarget) + '</span>' +
+          '<span style="font-size:0.8125rem;color:var(--text-dim);margin-left:auto">' + esc(s.agentState) + '</span>' +
+        '</div>' +
+
+        '<div class="terminal-wrap">' +
+          '<div class="terminal-toolbar">' +
+            '<span>pane output</span>' +
+            '<button onclick="refreshSessionPane()" aria-label="Refresh pane">↺ Refresh</button>' +
+          '</div>' +
+          '<div class="terminal-output" id="terminal-output">' + esc(s.paneContent) + '</div>' +
+        '</div>' +
+
+        '<div class="input-row">' +
+          '<input class="session-input" id="session-input" type="text" ' +
+                 'placeholder="Type a command and press Enter or Send…" ' +
+                 'onkeydown="if(event.key===\'Enter\'){event.preventDefault();submitSessionInput()}" ' +
+                 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />' +
+          '<button class="send-btn" id="send-btn" onclick="submitSessionInput()" ' +
+                  (s.sending ? 'disabled' : '') + '>' +
+            (s.sending ? '…' : 'Send') +
+          '</button>' +
+        '</div>' +
+        feedbackHtml
+      );
+    }
+
     function renderSwarmCard(swarm) {
-      const busy = swarm.busy_count  || 0;
-      const idle = swarm.idle_count  || 0;
-      const attn = swarm.attention_count || 0;
+      const busy  = swarm.busy_count       || 0;
+      const idle  = swarm.idle_count       || 0;
+      const attn  = swarm.attention_count  || 0;
       const stoppedClass = swarm.stopped ? ' stopped' : '';
-      const attnColor = attn > 0 ? 'var(--error)' : 'var(--text-dim)';
+      const attnColor    = attn > 0 ? 'var(--error)' : 'var(--text-dim)';
 
       return (
         '<div class="swarm-card' + stoppedClass + '" ' +
@@ -544,6 +757,7 @@
       );
     }
 
+    // ── Render dispatcher ──────────────────────────────────────────────────────
     function render() {
       const app = document.getElementById('app');
       if (state.error && !state.swarms.length) {
@@ -552,26 +766,145 @@
           renderReposList();
         return;
       }
-      if (state.selected) {
-        const swarm = state.swarms.find(s => s.project_name === state.selected);
+
+      if (state.agent && state.project) {
+        app.innerHTML = renderSessionView(state.project, state.agent);
+        // Scroll terminal to bottom
+        const t = document.getElementById('terminal-output');
+        if (t) t.scrollTop = t.scrollHeight;
+        // Focus the input
+        const inp = document.getElementById('session-input');
+        if (inp && document.activeElement !== inp) inp.focus();
+        return;
+      }
+
+      if (state.project) {
+        const swarm = state.swarms.find(s => s.project_name === state.project);
         if (swarm) {
           app.innerHTML = renderDetailView(swarm);
           return;
         }
-        // selected swarm disappeared – fall back
-        state.selected = null;
+        state.project = null;
       }
+
       app.innerHTML = renderReposList();
     }
 
     // ── Navigation ─────────────────────────────────────────────────────────────
     function navigate(projectName) {
-      state.selected = projectName;
+      // Stop any session pane-refresh timer before leaving
+      stopSessionRefresh();
+      state.project = projectName;
+      state.agent   = null;
       render();
       window.scrollTo(0, 0);
     }
 
-    // ── Refresh loop ───────────────────────────────────────────────────────────
+    function openSession(project, role) {
+      stopSessionRefresh();
+      state.project = project;
+      state.agent   = role;
+      state.session = {
+        paneContent:  'Loading…',
+        tmuxTarget:   '',
+        agentState:   '',
+        sending:      false,
+        lastFeedback: null,
+        refreshTimer: null,
+      };
+      render();
+      window.scrollTo(0, 0);
+      // Load initial pane content then start refresh loop
+      refreshSessionPane();
+    }
+
+    // ── Session pane refresh ───────────────────────────────────────────────────
+    function stopSessionRefresh() {
+      if (state.session.refreshTimer !== null) {
+        clearInterval(state.session.refreshTimer);
+        state.session.refreshTimer = null;
+      }
+    }
+
+    async function refreshSessionPane() {
+      if (!state.project || !state.agent) return;
+      try {
+        const data = await fetchPane(state.project, state.agent);
+        state.session.paneContent = data.pane_content || '';
+        state.session.tmuxTarget  = data.tmux_target  || '';
+        state.session.agentState  = data.state        || '';
+        // Update DOM directly to avoid re-rendering the whole view (which would
+        // clear the input field and reset focus).
+        const t = document.getElementById('terminal-output');
+        if (t) {
+          const wasAtBottom = t.scrollHeight - t.scrollTop <= t.clientHeight + 20;
+          t.textContent = state.session.paneContent;
+          if (wasAtBottom) t.scrollTop = t.scrollHeight;
+        }
+        // Update status in session header if visible
+        const hdr = document.querySelector('.session-header .s-' + statusClass(state.session.agentState));
+        // Update the target label & state text without full re-render
+        const targetEl = document.querySelector('.session-target');
+        if (targetEl) targetEl.textContent = state.session.tmuxTarget;
+        const stateEl = document.querySelector('.session-header span:last-child');
+        if (stateEl) stateEl.textContent = state.session.agentState;
+      } catch (err) {
+        // Non-fatal; just leave stale content
+        traceSessionError(err);
+      }
+      // Start periodic refresh if not already running
+      if (state.session.refreshTimer === null && state.agent) {
+        state.session.refreshTimer = setInterval(refreshSessionPane, 2000);
+      }
+    }
+
+    function traceSessionError(err) {
+      // Suppress noisy errors when navigating away; only log in session context
+      if (state.agent) {
+        const t = document.getElementById('terminal-output');
+        if (t && t.textContent === 'Loading…') {
+          t.textContent = 'Could not load pane: ' + err.message;
+        }
+      }
+    }
+
+    // ── Send input ─────────────────────────────────────────────────────────────
+    async function submitSessionInput() {
+      const inp = document.getElementById('session-input');
+      if (!inp) return;
+      const text = inp.value.trim();
+      if (!text) return;
+
+      state.session.sending      = true;
+      state.session.lastFeedback = null;
+      const btn = document.getElementById('send-btn');
+      if (btn) { btn.disabled = true; btn.textContent = '…'; }
+
+      try {
+        await sendInput(state.project, state.agent, text);
+        inp.value = '';
+        state.session.lastFeedback = { ok: true, msg: 'Sent ✓' };
+        // Refresh pane immediately after sending
+        await refreshSessionPane();
+      } catch (err) {
+        state.session.lastFeedback = { ok: false, msg: 'Error: ' + err.message };
+      } finally {
+        state.session.sending = false;
+        if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
+        // Update feedback display without full re-render
+        const fb = document.querySelector('.send-feedback');
+        if (fb && state.session.lastFeedback) {
+          fb.className = 'send-feedback ' + (state.session.lastFeedback.ok ? 'ok' : 'error');
+          fb.textContent = state.session.lastFeedback.msg;
+          setTimeout(() => {
+            if (fb) { fb.className = 'send-feedback'; fb.textContent = ''; }
+          }, 3000);
+        }
+        inp.focus();
+      }
+    }
+
+    // ── Swarms refresh loop ────────────────────────────────────────────────────
     async function refresh() {
       const ind = document.getElementById('refresh-indicator');
       try {
@@ -583,7 +916,10 @@
         state.error = err.message;
         ind.textContent = 'Error: ' + err.message;
       }
-      render();
+      // Only re-render repos/detail levels; session view does its own live updates
+      if (!state.agent) {
+        render();
+      }
     }
 
     refresh();

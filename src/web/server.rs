@@ -1,5 +1,12 @@
 use anyhow::Result;
-use axum::{Json, Router, extract::State, response::Html, routing::get};
+use axum::{
+    Json, Router,
+    extract::{Path, State},
+    http::StatusCode,
+    response::Html,
+    routing::{get, post},
+};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::net::SocketAddr;
 
@@ -25,12 +32,113 @@ async fn api_swarms_handler(State(state): State<SharedWebState>) -> Json<Value> 
     Json(json!({ "swarms": swarms }))
 }
 
+/// Returns the pane content for a specific agent.
+/// `GET /api/swarms/:project/agents/:role/pane`
+async fn api_pane_handler(
+    Path((project, role)): Path<(String, String)>,
+    State(state): State<SharedWebState>,
+) -> Result<Json<Value>, StatusCode> {
+    let guard = state
+        .read()
+        .map_err(|e| {
+            tracing::warn!("Web state lock poisoned: {e}");
+        })
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let swarm = guard
+        .iter()
+        .find(|s| s.project_name == project)
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let agent = find_agent(swarm, &role).ok_or(StatusCode::NOT_FOUND)?;
+
+    Ok(Json(json!({
+        "role": agent.role,
+        "tmux_target": agent.tmux_target,
+        "state": agent.state,
+        "pane_content": agent.pane_content,
+    })))
+}
+
+/// Body for the send-input endpoint.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct SendInputBody {
+    /// Text to send to the agent (Enter appended).
+    pub text: String,
+}
+
+/// Send a line of input to an agent's tmux pane.
+/// `POST /api/swarms/:project/agents/:role/input`
+async fn api_input_handler(
+    Path((project, role)): Path<(String, String)>,
+    State(state): State<SharedWebState>,
+    Json(body): Json<SendInputBody>,
+) -> Result<Json<Value>, StatusCode> {
+    // Look up the tmux target while holding only a read lock.
+    let tmux_target = {
+        let guard = state
+            .read()
+            .map_err(|e| {
+                tracing::warn!("Web state lock poisoned: {e}");
+            })
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        let swarm = guard
+            .iter()
+            .find(|s| s.project_name == project)
+            .ok_or(StatusCode::NOT_FOUND)?;
+
+        find_agent(swarm, &role)
+            .ok_or(StatusCode::NOT_FOUND)?
+            .tmux_target
+            .clone()
+    };
+
+    // Reject empty input.
+    if body.text.is_empty() {
+        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    // Send the text via tmux send-keys (text + Enter).
+    crate::tmux::proxy::send_keys(
+        &crate::transport::ServerTransport::new(None),
+        &tmux_target,
+        &body.text,
+    )
+    .await
+    .map_err(|e| {
+        tracing::warn!("tmux send-keys failed for {tmux_target}: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(Json(json!({ "ok": true })))
+}
+
+/// Find an agent (manager or worker) by role within a swarm snapshot.
+fn find_agent<'a>(
+    swarm: &'a super::SwarmSnapshot,
+    role: &str,
+) -> Option<&'a super::AgentSnapshot> {
+    if swarm.manager.role == role {
+        return Some(&swarm.manager);
+    }
+    swarm.workers.iter().find(|w| w.role == role)
+}
+
 /// Start the web server on the given port, sharing `state` with the TUI app.
 /// This function runs until the server shuts down or an error occurs.
 pub async fn run(port: u16, state: SharedWebState) -> Result<()> {
     let app = Router::new()
         .route("/", get(index_handler))
         .route("/api/swarms", get(api_swarms_handler))
+        .route(
+            "/api/swarms/{project}/agents/{role}/pane",
+            get(api_pane_handler),
+        )
+        .route(
+            "/api/swarms/{project}/agents/{role}/input",
+            post(api_input_handler),
+        )
         .with_state(state);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
@@ -54,6 +162,14 @@ mod tests {
         Router::new()
             .route("/", get(index_handler))
             .route("/api/swarms", get(api_swarms_handler))
+            .route(
+                "/api/swarms/{project}/agents/{role}/pane",
+                get(api_pane_handler),
+            )
+            .route(
+                "/api/swarms/{project}/agents/{role}/input",
+                post(api_input_handler),
+            )
             .with_state(state)
     }
 
@@ -66,6 +182,8 @@ mod tests {
             waiting_for_input: false,
             current_issue: None,
             current_issue_title: None,
+            pane_content: format!("Pane output for {role}"),
+            tmux_target: format!("claude-test:0.{}", if is_manager { 0 } else { 1 }),
         }
     }
 
@@ -146,10 +264,110 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn api_pane_returns_agent_content() {
+        let state = new_shared_state();
+        {
+            let mut guard = state.write().unwrap();
+            guard.push(sample_swarm("test-proj"));
+        }
+
+        let app = make_app(state);
+        let req = Request::builder()
+            .uri("/api/swarms/test-proj/agents/manager/pane")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["role"], "manager");
+        assert!(json["pane_content"].as_str().unwrap().contains("manager"));
+    }
+
+    #[tokio::test]
+    async fn api_pane_returns_worker_content() {
+        let state = new_shared_state();
+        {
+            let mut guard = state.write().unwrap();
+            guard.push(sample_swarm("test-proj"));
+        }
+
+        let app = make_app(state);
+        let req = Request::builder()
+            .uri("/api/swarms/test-proj/agents/worker-1/pane")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["role"], "worker-1");
+    }
+
+    #[tokio::test]
+    async fn api_pane_returns_404_for_unknown_swarm() {
+        let state = new_shared_state();
+        let app = make_app(state);
+        let req = Request::builder()
+            .uri("/api/swarms/ghost-project/agents/manager/pane")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn api_pane_returns_404_for_unknown_agent() {
+        let state = new_shared_state();
+        {
+            let mut guard = state.write().unwrap();
+            guard.push(sample_swarm("test-proj"));
+        }
+        let app = make_app(state);
+        let req = Request::builder()
+            .uri("/api/swarms/test-proj/agents/tester/pane")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn api_input_rejects_empty_text() {
+        let state = new_shared_state();
+        {
+            let mut guard = state.write().unwrap();
+            guard.push(sample_swarm("test-proj"));
+        }
+        let app = make_app(state);
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/swarms/test-proj/agents/manager/input")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"text":""}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[tokio::test]
     async fn index_html_contains_expected_content() {
         let body = INDEX_HTML;
         assert!(body.contains("Agents UI"));
         assert!(body.contains("/api/swarms"));
         assert!(body.contains("viewport"));
+    }
+
+    #[tokio::test]
+    async fn index_html_contains_session_view() {
+        let body = INDEX_HTML;
+        assert!(body.contains("/pane"));
+        assert!(body.contains("/input"));
     }
 }

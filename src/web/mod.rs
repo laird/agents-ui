@@ -13,6 +13,10 @@ pub struct AgentSnapshot {
     pub waiting_for_input: bool,
     pub current_issue: Option<u32>,
     pub current_issue_title: Option<String>,
+    /// Latest captured pane output (updated each TUI tick).
+    pub pane_content: String,
+    /// tmux pane target (e.g., "claude-myrepo:0.0") used to send input.
+    pub tmux_target: String,
 }
 
 /// Snapshot of a full swarm suitable for JSON serialization.
@@ -49,6 +53,8 @@ impl AgentSnapshot {
             waiting_for_input: info.waiting_for_input,
             current_issue: info.current_issue,
             current_issue_title: info.current_issue_title.clone(),
+            pane_content: info.pane_content.clone(),
+            tmux_target: info.tmux_target.clone(),
         }
     }
 }
