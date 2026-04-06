@@ -4,6 +4,7 @@ mod config;
 mod event;
 mod github;
 mod model;
+mod project_management;
 mod runtime;
 mod scripts;
 mod tmux;

@@ -82,3 +82,80 @@ fn script_search_paths() -> Vec<PathBuf> {
 
     paths
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn resolve_agents_dir_returns_path() {
+        // Must always return some path (never panics)
+        let path = resolve_agents_dir();
+        // Path should be non-empty
+        assert!(path.components().count() > 0);
+    }
+
+    #[test]
+    fn resolve_agents_dir_env_override_used_when_exists() {
+        let tmp = std::env::temp_dir()
+            .join(format!("agents-launcher-test-{}", std::process::id()));
+        fs::create_dir_all(&tmp).expect("create temp dir");
+
+        // AGENTS_DIR only affects resolve_agents_dir if NO earlier path exists.
+        // We can confirm it's in the search paths by checking script_search_paths.
+        // SAFETY: test-only, single-threaded context; no other threads read AGENTS_DIR here.
+        unsafe { std::env::set_var("AGENTS_DIR", tmp.to_str().unwrap()); }
+        let paths = script_search_paths();
+        unsafe { std::env::remove_var("AGENTS_DIR"); }
+
+        let expected_scripts = tmp.join("plugins/autocoder/scripts");
+        let expected_plain = tmp.join("scripts");
+        assert!(
+            paths.contains(&expected_scripts),
+            "Expected {expected_scripts:?} in search paths"
+        );
+        assert!(
+            paths.contains(&expected_plain),
+            "Expected {expected_plain:?} in search paths"
+        );
+
+        fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn find_script_returns_none_when_not_found() {
+        // Script that certainly doesn't exist
+        assert_eq!(find_script("__nonexistent_script_xyz__.sh"), None);
+    }
+
+    #[test]
+    fn find_script_returns_path_when_found() {
+        let tmp = std::env::temp_dir()
+            .join(format!("agents-launcher-find-{}", std::process::id()));
+        let scripts_dir = tmp.join("plugins/autocoder/scripts");
+        fs::create_dir_all(&scripts_dir).expect("create scripts dir");
+        let script_file = scripts_dir.join("test-script.sh");
+        fs::write(&script_file, "#!/bin/sh\n").expect("write script");
+
+        // SAFETY: test-only, single-threaded context; no other threads read AGENTS_DIR here.
+        unsafe { std::env::set_var("AGENTS_DIR", tmp.to_str().unwrap()); }
+        let result = find_script("test-script.sh");
+        unsafe { std::env::remove_var("AGENTS_DIR"); }
+
+        assert_eq!(result, Some(script_file));
+
+        fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn script_search_paths_includes_home_subdirs() {
+        let paths = script_search_paths();
+        if let Some(home) = dirs::home_dir() {
+            assert!(
+                paths.contains(&home.join(".claude/plugins/autocoder/scripts")),
+                "Should include ~/.claude/plugins/autocoder/scripts"
+            );
+        }
+    }
+}

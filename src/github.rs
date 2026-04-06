@@ -4,6 +4,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::model::issue::{GhIssueJson, GitHubIssue};
+use crate::project_management::ProjectManagementClient;
 use crate::transport::ServerTransport;
 
 /// Classified GitHub CLI errors.

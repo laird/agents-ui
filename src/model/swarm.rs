@@ -2,6 +2,54 @@ use super::issue::IssueCache;
 use super::status::AgentStatus;
 use std::path::PathBuf;
 
+/// Health status of a worker agent.
+#[derive(Debug, Clone, PartialEq)]
+pub enum HealthStatus {
+    Healthy,
+    Stalled,
+    Restarting,
+    Dead,
+}
+
+/// Per-agent health tracking for auto-recovery.
+#[derive(Debug, Clone)]
+pub struct WorkerHealth {
+    /// Whether the tmux pane is currently known to be alive.
+    pub pane_alive: bool,
+    /// Consecutive ticks where the agent was Working but pane content didn't change.
+    pub stall_ticks: u32,
+    /// How many times this agent has been auto-restarted this session.
+    pub restart_count: u8,
+    /// Last pane content snapshot (for stall detection).
+    pub last_content: String,
+}
+
+impl Default for WorkerHealth {
+    fn default() -> Self {
+        Self {
+            pane_alive: true,
+            stall_ticks: 0,
+            restart_count: 0,
+            last_content: String::new(),
+        }
+    }
+}
+
+impl WorkerHealth {
+    /// Derive the observable health status from current fields.
+    pub fn status(&self) -> HealthStatus {
+        if self.restart_count >= 3 {
+            HealthStatus::Dead
+        } else if !self.pane_alive {
+            HealthStatus::Restarting
+        } else if self.stall_ticks >= 3 {
+            HealthStatus::Stalled
+        } else {
+            HealthStatus::Healthy
+        }
+    }
+}
+
 /// The type of agent runtime.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentType {
@@ -113,6 +161,12 @@ impl AgentType {
             AgentType::Claude => "/autocoder:monitor-workers",
             AgentType::Gemini => "/monitor-workers",
             AgentType::Codex | AgentType::Droid => "",
+    /// The tmux send-keys key sequence to gracefully exit this agent (returns to shell).
+    /// Returns ("key", literal) where literal=true means use -l flag (send as text).
+    pub fn exit_key(&self) -> (&str, bool) {
+        match self {
+            AgentType::Claude | AgentType::Gemini => ("q", true),
+            AgentType::Codex | AgentType::Droid => ("C-c", false),
         }
     }
 
@@ -193,6 +247,12 @@ pub struct AgentInfo {
     pub current_issue_title: Option<String>,
     /// Whether the agent is waiting for user input (detected from pane content)
     pub waiting_for_input: bool,
+    /// Number of times the TUI has attempted to revive this agent in the current session.
+    pub resurrection_attempts: u32,
+    /// Number of issues completed (dispatched → cleared) in this session.
+    pub completed_issue_count: u32,
+    /// Health tracking for auto-recovery
+    pub health: WorkerHealth,
 }
 
 /// Detect if pane content indicates the session is waiting for user input.
@@ -448,6 +508,9 @@ mod tests {
             current_issue: None,
             current_issue_title: None,
             waiting_for_input: false,
+            resurrection_attempts: 0,
+            completed_issue_count: 0,
+            health: WorkerHealth::default(),
         };
         let mut cache = IssueCache::default();
         cache.issues = issues;
@@ -709,5 +772,218 @@ mod tests {
         assert_eq!(all[0].id, "manager");
         assert_eq!(all[1].id, "w-0");
         assert_eq!(all[2].id, "w-1");
+    }
+
+    // --- detect_waiting_for_input ---
+
+    #[test]
+    fn waiting_detected_for_bypass_permissions_prompt() {
+        assert!(detect_waiting_for_input("bypass permissions\nsome output"));
+    }
+
+    #[test]
+    fn waiting_detected_for_allow_prompt() {
+        assert!(detect_waiting_for_input("Running tool...\nAllow?"));
+    }
+
+    #[test]
+    fn waiting_detected_for_allow_this_action() {
+        assert!(detect_waiting_for_input("allow this action (y/n)"));
+    }
+
+    #[test]
+    fn waiting_detected_for_yn_brackets() {
+        assert!(detect_waiting_for_input("Continue? [Y/n]"));
+        assert!(detect_waiting_for_input("Continue? [y/N]"));
+    }
+
+    #[test]
+    fn waiting_detected_for_interrupted_state() {
+        assert!(detect_waiting_for_input(
+            "Some output\nWhat should Claude do instead?\nmore"
+        ));
+    }
+
+    #[test]
+    fn waiting_detected_for_interrupted_with_prompt_indicator() {
+        assert!(detect_waiting_for_input("Interrupted\nSome context\n❯"));
+    }
+
+    #[test]
+    fn waiting_detected_for_shift_tab_bypass_line() {
+        assert!(detect_waiting_for_input(
+            "bypass permissions on /some/file (shift+tab to allow)"
+        ));
+    }
+
+    #[test]
+    fn waiting_not_detected_for_normal_output() {
+        assert!(!detect_waiting_for_input(
+            "Running cargo build...\nCompiling foo v1.0\nFinished"
+        ));
+    }
+
+    #[test]
+    fn waiting_not_detected_for_empty_string() {
+        assert!(!detect_waiting_for_input(""));
+    fn worker_health_default_is_healthy() {
+        let h = WorkerHealth::default();
+        assert_eq!(h.status(), HealthStatus::Healthy);
+    }
+
+    #[test]
+    fn worker_health_stall_ticks_triggers_stalled() {
+        let mut h = WorkerHealth::default();
+        h.stall_ticks = 3;
+        assert_eq!(h.status(), HealthStatus::Stalled);
+    }
+
+    #[test]
+    fn worker_health_pane_dead_triggers_restarting() {
+        let mut h = WorkerHealth::default();
+        h.pane_alive = false;
+        assert_eq!(h.status(), HealthStatus::Restarting);
+    }
+
+    #[test]
+    fn worker_health_restart_cap_triggers_dead() {
+        let mut h = WorkerHealth::default();
+        h.restart_count = 3;
+        assert_eq!(h.status(), HealthStatus::Dead);
+    }
+
+    #[test]
+    fn worker_health_dead_takes_priority_over_stalled() {
+        let mut h = WorkerHealth::default();
+        h.restart_count = 3;
+        h.stall_ticks = 10;
+        h.pane_alive = false;
+        assert_eq!(h.status(), HealthStatus::Dead);
+    }
+
+    #[test]
+    fn worker_health_restarting_takes_priority_over_stalled() {
+        let mut h = WorkerHealth::default();
+        h.pane_alive = false;
+        h.stall_ticks = 5;
+        assert_eq!(h.status(), HealthStatus::Restarting);
+    }
+
+    fn make_agent(id: &str, role: &str, is_manager: bool) -> AgentInfo {
+        AgentInfo {
+            id: id.to_string(),
+            role: role.to_string(),
+            worktree_path: PathBuf::from("/tmp/test"),
+            tmux_target: format!("test:0.{}", if is_manager { 0 } else { 1 }),
+            status: AgentStatus::default(),
+            is_manager,
+            pane_content: String::new(),
+            dispatched_issue: None,
+            current_issue: None,
+            current_issue_title: None,
+            waiting_for_input: false,
+            health: WorkerHealth::default(),
+        }
+    }
+
+    fn make_swarm_with_agents(manager: AgentInfo, workers: Vec<AgentInfo>) -> Swarm {
+        Swarm {
+            repo_path: PathBuf::from("/tmp/test"),
+            project_name: "test".to_string(),
+            agent_type: AgentType::Claude,
+            workflow: None,
+            tmux_session: "claude-test".to_string(),
+            manager,
+            workers,
+            issue_cache: IssueCache::default(),
+        }
+    }
+
+    #[test]
+    fn detect_waiting_recognizes_input_prompt() {
+        assert!(detect_waiting_for_input("some output\nAllow? (y/n)"));
+        assert!(detect_waiting_for_input("text\nWhat should Claude do instead?"));
+        assert!(detect_waiting_for_input("bypass permissions on this file with shift+tab"));
+    }
+
+    #[test]
+    fn detect_waiting_returns_false_for_normal_output() {
+        assert!(!detect_waiting_for_input("Running tests...\nAll tests passed."));
+        assert!(!detect_waiting_for_input(""));
+        assert!(!detect_waiting_for_input("Working on issue #42"));
+    }
+
+    #[test]
+    fn idle_count_counts_idle_agents() {
+        let manager = make_agent("mgr", "manager", true);
+        let mut w1 = make_agent("w1", "worker1", false);
+        let mut w2 = make_agent("w2", "worker2", false);
+        let mut w3 = make_agent("w3", "worker3", false);
+        w1.status.state = super::super::status::AgentState::Idle;
+        w2.status.state = super::super::status::AgentState::Working { issue: Some(1) };
+        w3.status.state = super::super::status::AgentState::Idle;
+        let mut swarm = make_swarm_with_agents(manager, vec![w1, w2, w3]);
+        assert_eq!(swarm.idle_count(), 2);
+        swarm.workers[1].status.state = super::super::status::AgentState::Idle;
+        assert_eq!(swarm.idle_count(), 3);
+    }
+
+    #[test]
+    fn waiting_count_counts_waiting_agents() {
+        let mut manager = make_agent("mgr", "manager", true);
+        let mut w1 = make_agent("w1", "worker1", false);
+        let w2 = make_agent("w2", "worker2", false);
+        manager.waiting_for_input = true;
+        w1.waiting_for_input = true;
+        let swarm = make_swarm_with_agents(manager, vec![w1, w2]);
+        assert_eq!(swarm.waiting_count(), 2);
+    }
+
+    #[test]
+    fn waiting_count_zero_when_none_waiting() {
+        let manager = make_agent("mgr", "manager", true);
+        let w1 = make_agent("w1", "worker1", false);
+        let swarm = make_swarm_with_agents(manager, vec![w1]);
+        assert_eq!(swarm.waiting_count(), 0);
+    }
+
+    #[test]
+    fn all_agents_includes_manager_and_workers() {
+        let manager = make_agent("mgr", "manager", true);
+        let w1 = make_agent("w1", "worker1", false);
+        let w2 = make_agent("w2", "worker2", false);
+        let swarm = make_swarm_with_agents(manager, vec![w1, w2]);
+        let all = swarm.all_agents();
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[0].id, "mgr");
+        assert_eq!(all[1].id, "w1");
+        assert_eq!(all[2].id, "w2");
+    }
+
+    #[test]
+    fn next_waiting_agent_finds_first_when_none_specified() {
+        let manager = make_agent("mgr", "manager", true);
+        let mut w1 = make_agent("w1", "worker1", false);
+        w1.waiting_for_input = true;
+        let swarm = make_swarm_with_agents(manager, vec![w1]);
+        let found = swarm.next_waiting_agent(None);
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().id, "w1");
+    }
+
+    #[test]
+    fn next_waiting_agent_cycles_past_current_and_wraps() {
+        let manager = make_agent("mgr", "manager", true);
+        let mut w1 = make_agent("w1", "worker1", false);
+        let mut w2 = make_agent("w2", "worker2", false);
+        w1.waiting_for_input = true;
+        w2.waiting_for_input = true;
+        let swarm = make_swarm_with_agents(manager, vec![w1, w2]);
+        // After w1, should get w2
+        let next = swarm.next_waiting_agent(Some("w1"));
+        assert_eq!(next.unwrap().id, "w2");
+        // After w2 (last), should wrap to w1
+        let wrapped = swarm.next_waiting_agent(Some("w2"));
+        assert_eq!(wrapped.unwrap().id, "w1");
     }
 }

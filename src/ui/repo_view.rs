@@ -292,8 +292,18 @@ impl RepoView {
             .enumerate()
             .map(|(idx, w)| {
                 let key_label = format!("{} ", idx + 1);
+                let reviving_style = ratatui::style::Style::default().fg(ratatui::style::Color::Cyan);
+                let attention_style = ratatui::style::Style::default()
+                    .fg(ratatui::style::Color::Red)
+                    .add_modifier(ratatui::style::Modifier::BOLD);
                 let (dot, dot_style) = if w.waiting_for_input {
                     ("⚠ ", theme::waiting_style())
+                } else if w.resurrection_attempts >= 3 {
+                    ("⟳ ", attention_style)
+                } else if w.resurrection_attempts > 0 {
+                    ("⟳ ", reviving_style)
+                } else if w.status.is_stale(300) {
+                    ("⚠ ", ratatui::style::Style::default().fg(ratatui::style::Color::Yellow))
                 } else {
                     match &w.status.state {
                         crate::model::status::AgentState::Working { .. } => {
@@ -314,6 +324,10 @@ impl RepoView {
 
                 let status_text = if w.waiting_for_input {
                     "NEEDS INPUT".to_string()
+                } else if w.resurrection_attempts > 1 {
+                    format!("Reviving (×{})", w.resurrection_attempts)
+                } else if w.resurrection_attempts == 1 {
+                    "Reviving...".to_string()
                 } else {
                     let base = w.status.state.to_string();
                     match (&w.status.state, &w.current_issue_title) {
@@ -367,6 +381,11 @@ impl RepoView {
                     ratatui::style::Style::default()
                 };
 
+                let done_label = if w.completed_issue_count > 0 {
+                    format!(" ({} done)", w.completed_issue_count)
+                } else {
+                    String::new()
+                };
                 let line1 = Line::from(vec![
                     Span::styled(key_label, theme::help_style()),
                     Span::styled(
@@ -385,6 +404,7 @@ impl RepoView {
                             theme::title_style()
                         },
                     ),
+                    Span::styled(done_label, theme::help_style()),
                 ]);
                 let dispatch_label = match w.dispatched_issue {
                     Some(n) => match &w.status.state {
@@ -784,6 +804,10 @@ fn truncate_str(s: &str, max_len: usize) -> String {
 mod tests {
     use super::*;
 
+    fn make_view() -> RepoView {
+        RepoView::new()
+    }
+
     #[test]
     fn new_sets_initial_focus_to_workers() {
         let v = RepoView::new();
@@ -808,10 +832,26 @@ mod tests {
     }
 
     #[test]
+    fn next_worker_wraps() {
+        let mut view = make_view();
+        view.worker_list_state.select(Some(2));
+        view.next_worker(3);
+        assert_eq!(view.worker_list_state.selected(), Some(0));
+    }
+
+    #[test]
     fn next_worker_with_empty_list_does_nothing() {
         let mut v = RepoView::new();
         v.next_worker(0);
         assert_eq!(v.selected_worker(), Some(0));
+    }
+
+    #[test]
+    fn next_worker_noop_on_empty() {
+        let mut view = make_view();
+        view.worker_list_state.select(Some(0));
+        view.next_worker(0);
+        assert_eq!(view.worker_list_state.selected(), Some(0));
     }
 
     #[test]
@@ -823,26 +863,50 @@ mod tests {
     }
 
     #[test]
+    fn previous_worker_signals_focus_at_top() {
+        let mut view = make_view();
+        view.worker_list_state.select(Some(0));
+        let signal = view.previous_worker(3);
+        assert!(signal, "should return true (focus manager) when at index 0");
+    }
+
+    #[test]
     fn previous_worker_decrements_from_nonzero() {
         let mut v = RepoView::new();
-        v.next_worker(3); // select index 1
+        v.next_worker(3);
         let signal = v.previous_worker(3);
         assert!(!signal);
         assert_eq!(v.selected_worker(), Some(0));
     }
 
     #[test]
+    fn previous_worker_decrements_normally() {
+        let mut view = make_view();
+        view.worker_list_state.select(Some(2));
+        let signal = view.previous_worker(3);
+        assert!(!signal, "should return false when not at top");
+        assert_eq!(view.worker_list_state.selected(), Some(1));
+    }
+
+    #[test]
     fn next_issue_increments_up_to_len() {
         let mut v = RepoView::new();
-        v.next_issue(3); // len=3, header at 0, items at 1-3
+        v.next_issue(3);
         assert_eq!(v.issue_list_state.selected(), Some(1));
         v.next_issue(3);
         assert_eq!(v.issue_list_state.selected(), Some(2));
         v.next_issue(3);
         assert_eq!(v.issue_list_state.selected(), Some(3));
-        // Should not go past len
         v.next_issue(3);
         assert_eq!(v.issue_list_state.selected(), Some(3));
+    }
+
+    #[test]
+    fn next_issue_clamps_at_max() {
+        let mut view = make_view();
+        view.issue_list_state.select(Some(3));
+        view.next_issue(3);
+        assert_eq!(view.issue_list_state.selected(), Some(3), "should not exceed len");
     }
 
     #[test]
@@ -853,10 +917,34 @@ mod tests {
     }
 
     #[test]
+    fn next_issue_noop_on_empty() {
+        let mut view = make_view();
+        view.issue_list_state.select(Some(0));
+        view.next_issue(0);
+        assert_eq!(view.issue_list_state.selected(), Some(0));
+    }
+
+    #[test]
     fn previous_issue_at_top_signals_manager_focus() {
         let mut v = RepoView::new();
         let signal = v.previous_issue();
         assert!(signal);
+    }
+
+    #[test]
+    fn previous_issue_signals_focus_at_header() {
+        let mut view = make_view();
+        view.issue_list_state.select(Some(1));
+        let signal = view.previous_issue();
+        assert!(signal, "should return true when at first issue (index 1)");
+    }
+
+    #[test]
+    fn previous_issue_signals_focus_at_zero() {
+        let mut view = make_view();
+        view.issue_list_state.select(Some(0));
+        let signal = view.previous_issue();
+        assert!(signal, "should return true when at header row (index 0)");
     }
 
     #[test]
@@ -873,11 +961,25 @@ mod tests {
     #[test]
     fn selected_issue_idx_accounts_for_header_row() {
         let mut v = RepoView::new();
-        assert_eq!(v.selected_issue_idx(), None); // index 0 is header
-        v.next_issue(3); // now at index 1
+        assert_eq!(v.selected_issue_idx(), None);
+        v.next_issue(3);
         assert_eq!(v.selected_issue_idx(), Some(0));
-        v.next_issue(3); // now at index 2
+        v.next_issue(3);
         assert_eq!(v.selected_issue_idx(), Some(1));
+    }
+
+    #[test]
+    fn selected_issue_idx_accounts_for_header() {
+        let mut view = make_view();
+        view.issue_list_state.select(Some(2));
+        assert_eq!(view.selected_issue_idx(), Some(1), "selection=2 → index 1");
+    }
+
+    #[test]
+    fn selected_issue_idx_none_at_header() {
+        let mut view = make_view();
+        view.issue_list_state.select(Some(0));
+        assert_eq!(view.selected_issue_idx(), None, "selection=0 (header) → None");
     }
 
     #[test]
@@ -891,14 +993,114 @@ mod tests {
     }
 
     #[test]
+    fn add_banner_prepends() {
+        let mut view = make_view();
+        let style = ratatui::style::Style::default();
+        view.add_banner("first".to_string(), style);
+        view.add_banner("second".to_string(), style);
+        assert_eq!(view.banners[0].message, "second", "newest banner should be at index 0");
+        assert_eq!(view.banners[1].message, "first");
+    }
+
+    #[test]
+    fn tick_banners_decrements_ttl() {
+        let mut view = make_view();
+        let style = ratatui::style::Style::default();
+        view.add_banner("msg".to_string(), style);
+        let initial_ttl = view.banners[0].ttl;
+        view.tick_banners();
+        assert_eq!(view.banners[0].ttl, initial_ttl - 1);
+    }
+
+    #[test]
     fn tick_banners_removes_expired() {
+        let mut view = make_view();
+        let style = ratatui::style::Style::default();
+        view.banners.push(Banner {
+            message: "dying".to_string(),
+            style,
+            ttl: 1,
+        });
+        view.tick_banners();
+        assert!(view.banners.is_empty(), "banner with ttl=1 should be removed after one tick");
+    }
+
+    #[test]
+    fn tick_banners_removes_after_default_ttl_expires() {
         let mut v = RepoView::new();
         v.add_banner("test".to_string(), ratatui::style::Style::default());
         assert_eq!(v.banners.len(), 1);
-        // tick 16 times to expire
         for _ in 0..16 {
             v.tick_banners();
         }
         assert_eq!(v.banners.len(), 0);
+    }
+
+    fn view() -> RepoView {
+        RepoView::new()
+    }
+
+    #[test]
+    fn next_worker_is_noop_for_empty_list() {
+        let mut rv = view();
+        rv.worker_list_state.select(Some(0));
+        rv.next_worker(0);
+        assert_eq!(rv.selected_worker(), Some(0));
+    }
+
+    #[test]
+    fn previous_worker_returns_true_for_empty_list() {
+        let mut rv = view();
+        let at_top = rv.previous_worker(0);
+        assert!(at_top);
+    }
+
+    #[test]
+    fn next_issue_is_noop_for_empty_list() {
+        let mut rv = view();
+        rv.issue_list_state.select(Some(0));
+        rv.next_issue(0);
+        assert_eq!(rv.issue_list_state.selected(), Some(0));
+    }
+
+    #[test]
+    fn previous_issue_moves_up() {
+        let mut rv = view();
+        rv.issue_list_state.select(Some(2));
+        let at_top = rv.previous_issue();
+        assert!(!at_top);
+        assert_eq!(rv.issue_list_state.selected(), Some(1));
+    }
+
+    #[test]
+    fn previous_issue_returns_true_at_header_row() {
+        let mut rv = view();
+        rv.issue_list_state.select(Some(1));
+        let at_top = rv.previous_issue();
+        assert!(at_top);
+    }
+
+    #[test]
+    fn previous_issue_returns_true_at_zero() {
+        let mut rv = view();
+        rv.issue_list_state.select(Some(0));
+        let at_top = rv.previous_issue();
+        assert!(at_top);
+    }
+
+    #[test]
+    fn selected_issue_idx_accounts_for_header_offset() {
+        let mut rv = view();
+        rv.issue_list_state.select(Some(1));
+        assert_eq!(rv.selected_issue_idx(), Some(0));
+        rv.issue_list_state.select(Some(3));
+        assert_eq!(rv.selected_issue_idx(), Some(2));
+    }
+
+    #[test]
+    fn selected_issue_idx_returns_none_for_header_row() {
+        let mut rv = view();
+        rv.issue_list_state.select(Some(0));
+        assert_eq!(rv.selected_issue_idx(), None);
     }
 }

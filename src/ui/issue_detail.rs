@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 use super::theme;
+use crate::ui::text_input::TextInput;
 
 /// Convert a single markdown line into a styled ratatui `Line`.
 /// Handles: headings, checkboxes, list items, inline code, bold, plain text.
@@ -330,6 +331,22 @@ impl IssueDetailView {
             Constraint::Length(3), // Help bar
         ])
         .split(area);
+    pub fn render(&self, f: &mut Frame, area: Rect, comment_input: Option<&TextInput>) {
+        let constraints = if comment_input.is_some() {
+            vec![
+                Constraint::Length(4), // Header
+                Constraint::Min(5),    // Body
+                Constraint::Length(3), // Comment input
+                Constraint::Length(3), // Help bar
+            ]
+        } else {
+            vec![
+                Constraint::Length(4), // Header
+                Constraint::Min(5),    // Body
+                Constraint::Length(3), // Help bar
+            ]
+        };
+        let chunks = Layout::vertical(constraints).split(area);
 
         // Header
         let label_text = if self.labels.is_empty() {
@@ -425,10 +442,22 @@ impl IssueDetailView {
 
         let body = Paragraph::new(all_lines)
             .block(Block::default().borders(Borders::ALL).title(block_title))
+        let body = Paragraph::new(body_lines)
+            .block(Block::default().borders(Borders::ALL).title(" Issue Body "))
             .wrap(Wrap { trim: false })
             .scroll((self.scroll_offset, 0));
         f.render_widget(body, chunks[1]);
 
+        if let Some(input) = comment_input {
+            let comment = Paragraph::new(input.render_line(" Comment: ")).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Post Comment "),
+            );
+            f.render_widget(comment, chunks[2]);
+        }
+
+        let help_chunk = chunks[chunks.len() - 1];
         // Help bar
         let help = Paragraph::new(Line::from(vec![
             Span::styled(" PgUp/PgDn", theme::title_style()),
@@ -437,6 +466,8 @@ impl IssueDetailView {
             Span::styled(" next/prev  ", theme::help_style()),
             Span::styled("d", theme::title_style()),
             Span::styled(" dispatch  ", theme::help_style()),
+            Span::styled("C", theme::title_style()),
+            Span::styled(" comment  ", theme::help_style()),
             Span::styled("g", theme::title_style()),
             Span::styled(" browser  ", theme::help_style()),
             Span::styled("Esc/⌥←", theme::title_style()),
@@ -445,7 +476,113 @@ impl IssueDetailView {
             Span::styled(" quit", theme::help_style()),
         ]))
         .block(Block::default().borders(Borders::TOP));
-        f.render_widget(help, chunks[2]);
+        f.render_widget(help, help_chunk);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_view() -> IssueDetailView {
+        IssueDetailView::new(
+            42,
+            "Test issue".into(),
+            "Body text".into(),
+            vec!["bug".into()],
+            "open".into(),
+        )
+    }
+
+    #[test]
+    fn new_sets_fields() {
+        let v = make_view();
+        assert_eq!(v.issue_number, 42);
+        assert_eq!(v.title, "Test issue");
+        assert_eq!(v.body, "Body text");
+        assert_eq!(v.labels, vec!["bug"]);
+        assert_eq!(v.state, "open");
+    }
+
+    #[test]
+    fn new_scroll_starts_at_zero() {
+        let v = make_view();
+        assert_eq!(v.scroll_offset, 0);
+    }
+
+    #[test]
+    fn scroll_down_increments_offset() {
+        let mut v = make_view();
+        v.scroll_down(5);
+        assert_eq!(v.scroll_offset, 5);
+        v.scroll_down(3);
+        assert_eq!(v.scroll_offset, 8);
+    }
+
+    #[test]
+    fn scroll_up_decrements_offset() {
+        let mut v = make_view();
+        v.scroll_down(10);
+        v.scroll_up(4);
+        assert_eq!(v.scroll_offset, 6);
+    }
+
+    #[test]
+    fn scroll_up_saturates_at_zero() {
+        let mut v = make_view();
+        v.scroll_up(10); // offset is 0, can't go negative
+        assert_eq!(v.scroll_offset, 0);
+    }
+
+    #[test]
+    fn scroll_down_saturates_at_max() {
+        let mut v = make_view();
+        v.scroll_offset = u16::MAX;
+        v.scroll_down(1); // saturating_add → stays at u16::MAX
+        assert_eq!(v.scroll_offset, u16::MAX);
+    }
+
+    #[test]
+    fn scroll_roundtrip_returns_to_zero() {
+        let mut v = make_view();
+        v.scroll_down(15);
+        v.scroll_up(15);
+        assert_eq!(v.scroll_offset, 0);
+    }
+
+    #[test]
+    fn scroll_down_then_up_partial_stays_positive() {
+        let mut v = make_view();
+        v.scroll_down(20);
+        v.scroll_up(5);
+        assert_eq!(v.scroll_offset, 15);
+    }
+
+    #[test]
+    fn labels_join_formats_correctly() {
+        let v = IssueDetailView::new(
+            1,
+            "Title".into(),
+            "Body".into(),
+            vec!["bug".into(), "P1".into(), "enhancement".into()],
+            "open".into(),
+        );
+        let label_text = v.labels.join(" · ");
+        assert_eq!(label_text, "bug · P1 · enhancement");
+    }
+
+    #[test]
+    fn empty_labels_produces_empty_string() {
+        let v = IssueDetailView::new(1, "T".into(), "B".into(), vec![], "open".into());
+        assert!(v.labels.is_empty());
+        let label_text = v.labels.join(" · ");
+        assert_eq!(label_text, "");
+    }
+
+    #[test]
+    fn state_string_stored_correctly() {
+        let v = IssueDetailView::new(1, "T".into(), "B".into(), vec![], "CLOSED".into());
+        assert_eq!(v.state, "CLOSED");
     }
 }
 

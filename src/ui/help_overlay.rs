@@ -136,21 +136,3 @@ mod tests {
         assert!(rendered.contains("Issues Panel"));
     }
 }
-
-/// Issue panel context entries for the help overlay.
-pub const ISSUES_PANEL_CONTEXT: &[(&str, &str)] = &[
-    ("cycle status filter", "f"),
-    ("cycle type filter", "t"),
-    ("cycle priority filter", "P"),
-    ("clear all filters", "c"),
-    ("search issues", "/"),
-    ("add new issue", "a"),
-    ("dispatch to agent", "d / Space"),
-    ("approve issue", "p"),
-    ("next blocked issue", "b"),
-    ("refresh issues", "r"),
-    ("review-blocked", "R"),
-    ("open in browser", "g"),
-    ("release working label", "u"),
-    ("view issue detail", "Enter"),
-];
