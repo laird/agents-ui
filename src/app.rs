@@ -7075,4 +7075,97 @@ mod tests {
             "show_shortcuts_viewer must stay false when screen is AgentView"
         );
     }
+
+    #[test]
+    fn normalize_whitespace_collapses_spaces() {
+        assert_eq!(super::normalize_whitespace("a  b   c"), "a b c");
+    }
+
+    #[test]
+    fn normalize_whitespace_trims_leading_trailing() {
+        assert_eq!(super::normalize_whitespace("  hello  "), "hello");
+    }
+
+    #[test]
+    fn normalize_whitespace_collapses_mixed_whitespace() {
+        assert_eq!(super::normalize_whitespace("a\t\n b"), "a b");
+    }
+
+    #[test]
+    fn normalize_whitespace_empty_stays_empty() {
+        assert_eq!(super::normalize_whitespace(""), "");
+    }
+
+    #[test]
+    fn truncate_chars_short_string_unchanged() {
+        assert_eq!(super::truncate_chars("hello", 10), "hello");
+    }
+
+    #[test]
+    fn truncate_chars_exact_length_unchanged() {
+        assert_eq!(super::truncate_chars("hello", 5), "hello");
+    }
+
+    #[test]
+    fn truncate_chars_over_limit_gets_ellipsis() {
+        let result = super::truncate_chars("hello world", 5);
+        assert_eq!(result, "hello…");
+    }
+
+    #[test]
+    fn truncate_chars_handles_unicode() {
+        // "héllo" is 5 chars; truncating to 3 gives "hél…"
+        assert_eq!(super::truncate_chars("héllo", 3), "hél…");
+    }
+
+    #[test]
+    fn extract_error_message_with_prefix_context() {
+        let line = "2026-01-01T00:00:00Z ERROR something went wrong";
+        assert_eq!(
+            super::extract_error_message(line),
+            Some("something went wrong".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_error_message_bare_prefix() {
+        assert_eq!(
+            super::extract_error_message("ERROR oops"),
+            Some("oops".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_error_message_no_error_returns_none() {
+        assert_eq!(super::extract_error_message("INFO all good"), None);
+    }
+
+    #[test]
+    fn extract_error_message_trims_whitespace() {
+        assert_eq!(
+            super::extract_error_message("  ERROR   trimmed  "),
+            Some("trimmed".to_string())
+        );
+    }
+
+    #[test]
+    fn log_error_fingerprint_is_deterministic() {
+        let a = super::log_error_fingerprint("some error");
+        let b = super::log_error_fingerprint("some error");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn log_error_fingerprint_different_inputs_differ() {
+        let a = super::log_error_fingerprint("error one");
+        let b = super::log_error_fingerprint("error two");
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn log_error_fingerprint_is_16_hex_chars() {
+        let fp = super::log_error_fingerprint("test");
+        assert_eq!(fp.len(), 16);
+        assert!(fp.chars().all(|c| c.is_ascii_hexdigit()));
+    }
 }
