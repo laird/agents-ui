@@ -298,4 +298,141 @@ mod tests {
         assert!(for_runtime(&AgentType::Droid).uses_loop_wrapper());
         assert!(for_runtime(&AgentType::Gemini).uses_loop_wrapper());
     }
+
+    // ── Claude ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn claude_launch_command() {
+        let sup = ClaudeSupervisor;
+        assert_eq!(
+            sup.launch_command(&AgentType::Claude, "any-session", false),
+            "claude code --dangerously-skip-permissions ."
+        );
+    }
+
+    #[test]
+    fn claude_bootstrap_manager() {
+        let sup = ClaudeSupervisor;
+        assert_eq!(
+            sup.bootstrap_command(&AgentType::Claude, true, None),
+            Some("/autocoder:monitor-loop".to_string())
+        );
+    }
+
+    #[test]
+    fn claude_bootstrap_worker_with_issue() {
+        let sup = ClaudeSupervisor;
+        assert_eq!(
+            sup.bootstrap_command(&AgentType::Claude, false, Some(42)),
+            Some("/autocoder:fix 42".to_string())
+        );
+    }
+
+    #[test]
+    fn claude_bootstrap_worker_no_issue() {
+        let sup = ClaudeSupervisor;
+        assert_eq!(
+            sup.bootstrap_command(&AgentType::Claude, false, None),
+            Some("/autocoder:fix-loop".to_string())
+        );
+    }
+
+    #[test]
+    fn claude_ongoing_manager() {
+        let sup = ClaudeSupervisor;
+        assert_eq!(
+            sup.ongoing_command(&AgentType::Claude, true, None),
+            Some("/autocoder:monitor-workers".to_string())
+        );
+    }
+
+    #[test]
+    fn claude_ongoing_worker_with_issue() {
+        let sup = ClaudeSupervisor;
+        assert_eq!(
+            sup.ongoing_command(&AgentType::Claude, false, Some(99)),
+            Some("/autocoder:fix 99".to_string())
+        );
+    }
+
+    #[test]
+    fn claude_ongoing_worker_no_issue() {
+        let sup = ClaudeSupervisor;
+        assert_eq!(
+            sup.ongoing_command(&AgentType::Claude, false, None),
+            Some("/autocoder:fix".to_string())
+        );
+    }
+
+    // ── Gemini ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn gemini_bootstrap_manager() {
+        let sup = GeminiSupervisor;
+        assert_eq!(
+            sup.bootstrap_command(&AgentType::Gemini, true, None),
+            Some("/monitor-loop".to_string())
+        );
+    }
+
+    #[test]
+    fn gemini_bootstrap_worker_with_issue() {
+        let sup = GeminiSupervisor;
+        assert_eq!(
+            sup.bootstrap_command(&AgentType::Gemini, false, Some(7)),
+            Some("/fix 7".to_string())
+        );
+    }
+
+    #[test]
+    fn gemini_ongoing_manager() {
+        let sup = GeminiSupervisor;
+        assert_eq!(
+            sup.ongoing_command(&AgentType::Gemini, true, None),
+            Some("/monitor-workers".to_string())
+        );
+    }
+
+    // ── Droid ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn droid_bootstrap_matches_gemini_pattern() {
+        let droid = DroidSupervisor;
+        let gemini = GeminiSupervisor;
+        // Droid uses the same slash-command patterns as Gemini
+        assert_eq!(
+            droid.bootstrap_command(&AgentType::Droid, true, None),
+            gemini.bootstrap_command(&AgentType::Gemini, true, None)
+        );
+        assert_eq!(
+            droid.bootstrap_command(&AgentType::Droid, false, Some(5)),
+            gemini.bootstrap_command(&AgentType::Gemini, false, Some(5))
+        );
+    }
+
+    // ── Codex ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn codex_bootstrap_manager_returns_prompt() {
+        let sup = CodexSupervisor;
+        let cmd = sup.bootstrap_command(&AgentType::Codex, true, None);
+        assert!(cmd.is_some());
+        let text = cmd.unwrap();
+        assert!(
+            text.contains("monitor"),
+            "manager bootstrap should mention monitor, got: {text}"
+        );
+    }
+
+    #[test]
+    fn codex_bootstrap_worker_with_issue_includes_number() {
+        let sup = CodexSupervisor;
+        let cmd = sup.bootstrap_command(&AgentType::Codex, false, Some(123));
+        assert!(cmd.is_some());
+        let text = cmd.unwrap();
+        assert!(
+            text.contains("123"),
+            "worker bootstrap should include issue number, got: {text}"
+        );
+    }
 }
