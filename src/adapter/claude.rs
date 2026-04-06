@@ -609,24 +609,6 @@ impl ClaudeAdapter {
 
         self.launch_agent_in_pane(target, session_name, runtime, is_manager)
             .await
-        let cmd = match runtime {
-            AgentType::Claude => format!(
-                "claude --dangerously-skip-permissions --append-system-prompt 'This session is managed by agents-ui via tmux. \
-                IMPORTANT: Always use tmux commands (tmux capture-pane, tmux send-keys, etc.) \
-                for reading worker screens and dispatching work. Do NOT use cmux. \
-                The tmux session is named {session_name}.'"
-            ),
-            AgentType::Codex => {
-                let script = if target.contains(":review.") {
-                    "codex-manage-workers-loop.sh"
-                } else {
-                    "codex-fix-loop.sh"
-                };
-                codex_supervisor_script_cmd(script)
-            }
-            _ => runtime.launch_cmd().to_string(),
-        };
-        proxy::send_keys(&self.transport, target, &cmd).await
     }
 
     async fn ensure_swarm_agents_running(&self, swarm: &Swarm) -> Result<()> {
@@ -720,43 +702,6 @@ impl ClaudeAdapter {
                         );
                         proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
                     }
-            PaneState::AgentIdle => {
-                if pane_has_runtime_mismatch(runtime, &content) {
-                    if let Some(observed) = pane_runtime_hint(&content) {
-                        tracing::info!(
-                            "Pane {} is running {} but swarm expects {}; relaunching expected runtime",
-                            agent.tmux_target,
-                            observed,
-                            runtime
-                        );
-                    } else {
-                        tracing::info!(
-                            "Pane {} appears to be running a mismatched runtime; relaunching {}",
-                            agent.tmux_target,
-                            runtime
-                        );
-                    }
-                    self.restart_agent_runtime(agent, session_name, runtime).await?;
-                    return Ok(());
-                }
-                if matches!(runtime, AgentType::Codex) {
-                    if self.codex_agent_needs_relaunch(agent, &content).await {
-                        tracing::info!(
-                            "Codex pane {} drifted to interactive idle without healthy supervisor state; relaunching loop wrapper",
-                            agent.tmux_target
-                        );
-                        self.restart_codex_supervisor(agent, session_name).await?;
-                    } else {
-                        tracing::info!(
-                            "Codex pane {} appears healthy under loop supervision",
-                            agent.tmux_target
-                        );
-                    }
-                    return Ok(());
-                }
-                if let Some(cmd) = self.bootstrap_command(runtime, agent).await {
-                    tracing::info!("Agent {} is idle, sending bootstrap: {}", agent.id, cmd);
-                    proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
                 }
             }
             PaneActivity::AgentBusy => {
@@ -844,43 +789,6 @@ impl ClaudeAdapter {
                                 );
                                 proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
                             }
-                    PaneState::AgentIdle => {
-                        if pane_has_runtime_mismatch(runtime, &probed) {
-                            if let Some(observed) = pane_runtime_hint(&probed) {
-                                tracing::info!(
-                                    "Probe: pane {} is running {} but swarm expects {}; relaunching expected runtime",
-                                    agent.tmux_target,
-                                    observed,
-                                    runtime
-                                );
-                            } else {
-                                tracing::info!(
-                                    "Probe: pane {} appears runtime-mismatched; relaunching {}",
-                                    agent.tmux_target,
-                                    runtime
-                                );
-                            }
-                            self.restart_agent_runtime(agent, session_name, runtime).await?;
-                            return Ok(());
-                        }
-                        if matches!(runtime, AgentType::Codex) {
-                            if self.codex_agent_needs_relaunch(agent, &probed).await {
-                                tracing::info!(
-                                    "Probe: Codex pane {} drifted to interactive idle; relaunching loop wrapper",
-                                    agent.tmux_target
-                                );
-                                self.restart_codex_supervisor(agent, session_name).await?;
-                            } else {
-                                tracing::info!(
-                                    "Probe: Codex pane {} appears healthy under loop supervision",
-                                    agent.tmux_target
-                                );
-                            }
-                            return Ok(());
-                        }
-                        if let Some(cmd) = self.bootstrap_command(runtime, agent).await {
-                            tracing::info!("Probe: agent {} is idle, sending bootstrap: {}", agent.id, cmd);
-                            proxy::send_keys(&self.transport, &agent.tmux_target, &cmd).await?;
                         }
                     }
                     _ => {
@@ -943,7 +851,7 @@ impl ClaudeAdapter {
             .await
             .ok();
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-        self.launch_agent_in_pane(&agent.tmux_target, session_name, runtime)
+        self.launch_agent_in_pane(&agent.tmux_target, session_name, runtime, agent.is_manager)
             .await
     }
 
@@ -1452,7 +1360,6 @@ impl AgentRuntime for ClaudeAdapter {
         let tmux_target = format!("{session_name}:{window_name}.0");
 
         self.launch_agent_in_pane(&tmux_target, session_name, &swarm.agent_type, false)
-        self.launch_agent_in_pane(&tmux_target, session_name, &swarm.agent_type)
             .await?;
 
         let role = format!("worker-{next_num}");
@@ -1519,8 +1426,9 @@ impl AgentRuntime for ClaudeAdapter {
         swarm.agent_type = new_runtime.clone();
 
         // Step 3: Relaunch agent in each pane
-        for target in &targets {
-            self.launch_agent_in_pane(target, &session_name, &new_runtime).await.ok();
+        self.launch_agent_in_pane(&swarm.manager.tmux_target, &session_name, &new_runtime, true).await.ok();
+        for worker in &swarm.workers {
+            self.launch_agent_in_pane(&worker.tmux_target, &session_name, &new_runtime, false).await.ok();
         }
         tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
 
@@ -1925,89 +1833,6 @@ pub fn mark_agent_stopped(worktree_path: &std::path::Path) {
 #[allow(dead_code)] // Counterpart to mark_agent_stopped; available for future restart UI
 pub fn clear_agent_stopped(worktree_path: &std::path::Path) {
     let _ = std::fs::remove_file(worktree_path.join(".codex").join("stopped"));
-    // If the newest line is an idle prompt, prefer Idle even when older lines
-    // still include stale "working"/"thinking" text.
-    if looks_like_idle_prompt_line(non_empty_lines[0]) {
-        return PaneState::AgentIdle;
-    }
-
-    let mut saw_agent_indicator = false;
-    let mut saw_idle_prompt = false;
-    let mut saw_busy_indicator = false;
-
-    for line in non_empty_lines.iter().take(8) {
-        let lower = line.trim().to_lowercase();
-
-        // Busy agent indicators — actively working
-        if lower.contains("thinking")
-            || lower.contains("working")
-            || lower.contains("reading")
-            || lower.contains("writing")
-            || lower.contains("analyzing")
-            || lower.contains("esc to interrupt")
-        {
-            saw_busy_indicator = true;
-        }
-
-        // Agent UI elements (proves an agent is running, but not whether busy/idle)
-        if lower.contains("bypass permissions")
-            || lower.contains("permissions on")
-            || lower.contains("permissions off")
-            || lower.contains("gpt-")
-            || lower.starts_with('\u{23f5}') // ⏵ (Claude/Codex status bar)
-        {
-            saw_agent_indicator = true;
-        }
-
-        // Idle agent prompt (waiting for user input)
-        if lower.contains("how can i help")
-            || lower.contains("what would you like")
-            || lower.starts_with('>')
-            || lower.starts_with('\u{276f}') // ❯ (Claude prompt)
-            || lower.starts_with('\u{203a}') // › (Codex prompt)
-        {
-            saw_idle_prompt = true;
-        }
-    }
-
-    // Decide based on what we found
-    if saw_busy_indicator {
-        return PaneState::AgentBusy;
-    }
-    if saw_idle_prompt || (saw_agent_indicator && !saw_busy_indicator) {
-        return PaneState::AgentIdle;
-    }
-
-    // Agent exited with an "update yourself and restart" message
-    for line in non_empty_lines.iter().take(5) {
-        let lower = line.trim().to_lowercase();
-        if lower.contains("please restart codex")
-            || lower.contains("update ran successfully")
-            || lower.contains("please restart claude")
-            || lower.contains("restart to apply")
-        {
-            return PaneState::NeedsLaunch;
-        }
-    }
-
-    // Check for shell prompt (bare command line, no agent)
-    if let Some(last_line) = non_empty_lines.first() {
-        let trimmed = last_line.trim();
-        if trimmed.ends_with('%') || trimmed.ends_with('$') || trimmed.ends_with('#') {
-            return PaneState::NeedsLaunch;
-        }
-    }
-
-    PaneState::Unknown
-}
-
-fn looks_like_idle_prompt_line(line: &str) -> bool {
-    let lower = line.trim().to_lowercase();
-    lower.contains("how can i help")
-        || lower.contains("what would you like")
-        || lower.starts_with('>')
-        || lower.starts_with('\u{276f}') // ❯
-        || lower.starts_with('\u{203a}') // ›
 }
 
 // Legacy wrappers used by tests
@@ -2045,8 +1870,25 @@ fn runtime_uses_loop_wrappers(runtime: &AgentType) -> bool {
     runtime_supervisor(runtime).uses_loop_wrapper()
 }
 
+fn strip_ansi_simple(s: &str) -> String {
+    let mut out = String::new();
+    let mut in_esc = false;
+    for c in s.chars() {
+        if c == '\x1b' {
+            in_esc = true;
+        } else if in_esc {
+            if c.is_ascii_alphabetic() {
+                in_esc = false;
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 fn pane_runtime_hint(content: &str) -> Option<AgentType> {
-    let lower = strip_ansi(content).to_lowercase();
+    let lower = strip_ansi_simple(content).to_lowercase();
     if lower.contains("bypass permissions")
         || lower.contains("claude code")
         || lower.contains("please restart claude")
@@ -2090,107 +1932,9 @@ fn manager_ongoing_cmd(runtime: &AgentType) -> Option<String> {
 /// Non-loop command sent to an idle generic worker on subsequent monitoring cycles.
 fn generic_worker_ongoing_cmd(runtime: &AgentType) -> Option<String> {
     runtime_supervisor(runtime).ongoing_command(runtime, false, None)
-    match runtime {
-        AgentType::Claude => Some("/autocoder:monitor-loop".to_string()),
-        AgentType::Gemini => Some("/manage-loop".to_string()),
-        AgentType::Codex => None,
-        AgentType::Droid => Some("/manage-loop".to_string()),
-    }
-}
-
-fn worker_dispatch_cmd(runtime: &AgentType, issue_number: u32) -> Option<String> {
-    match runtime {
-        AgentType::Claude => Some(format!("/autocoder:fix {issue_number}")),
-        AgentType::Gemini => Some(format!("/fix {issue_number}")),
-        AgentType::Codex => None,
-        AgentType::Droid => Some(format!("/fix {issue_number}")),
-    }
-}
-
-fn generic_worker_bootstrap_cmd(runtime: &AgentType) -> Option<String> {
-    let loop_cmd = runtime.worker_loop_cmd();
-    if !loop_cmd.is_empty() {
-        return Some(loop_cmd.to_string());
-    }
-    match runtime {
-        AgentType::Codex => None,
-        _ => None,
-    }
-}
-
-fn codex_supervisor_script_cmd(script_name: &str) -> String {
-    format!(
-        "for script in ./scripts/{script_name} ../agents/scripts/{script_name} \"$HOME/.claude/plugins/autocoder/scripts/{script_name}\" \"$HOME/.config/claude-code/plugins/autocoder/scripts/{script_name}\" \"$HOME/.codex/scripts/{script_name}\"; do if [ -f \"$script\" ]; then exec bash \"$script\"; fi; done; echo \"❌ Missing {script_name} in expected script locations\""
-    )
 }
 
 impl ClaudeAdapter {
-    pub async fn switch_agent(&self, swarm: &mut Swarm, new_runtime: AgentType) -> Result<()> {
-        let old_runtime = swarm.agent_type.clone();
-        let (exit_key, is_named) = old_runtime.exit_cmd();
-        let session_name = swarm.tmux_session.clone();
-
-        // Collect all pane targets: workers first, then manager
-        let all_targets: Vec<String> = swarm
-            .workers
-            .iter()
-            .map(|w| w.tmux_target.clone())
-            .chain(std::iter::once(swarm.manager.tmux_target.clone()))
-            .collect();
-
-        // Send exit command to each pane
-        for target in &all_targets {
-            if is_named {
-                proxy::send_named_key(target, exit_key).await.ok();
-            } else {
-                proxy::send_keys(&self.transport, target, exit_key)
-                    .await
-                    .ok();
-            }
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-
-        // Update swarm agent type
-        swarm.agent_type = new_runtime.clone();
-
-        // Relaunch all panes with the new runtime
-        for worker in &swarm.workers {
-            self.launch_agent_in_pane(&worker.tmux_target, &session_name, &new_runtime, false)
-                .await
-                .ok();
-        }
-        self.launch_agent_in_pane(
-            &swarm.manager.tmux_target,
-            &session_name,
-            &new_runtime,
-            true,
-        )
-        .await
-        .ok();
-        tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
-
-        // Restart worker fix-loops
-        let loop_cmd = new_runtime.worker_loop_cmd().to_string();
-        if !loop_cmd.is_empty() && !runtime_uses_loop_wrappers(&new_runtime) {
-            for worker in &swarm.workers {
-                proxy::send_keys(&self.transport, &worker.tmux_target, &loop_cmd)
-                    .await
-                    .ok();
-            }
-        }
-
-        // Restart manager bootstrap
-        if !runtime_uses_loop_wrappers(&new_runtime) {
-            if let Some(cmd) = manager_bootstrap_cmd(&new_runtime) {
-                proxy::send_keys(&self.transport, &swarm.manager.tmux_target, &cmd)
-                    .await
-                    .ok();
-            }
-        }
-
-        Ok(())
-    }
-
     async fn bootstrap_command(&self, runtime: &AgentType, agent: &AgentInfo) -> Option<String> {
         if agent.is_manager {
             return manager_bootstrap_cmd(runtime);
@@ -2320,11 +2064,8 @@ mod tests {
         ClaudeAdapter, extract_issue_number_from_branch, generic_worker_bootstrap_cmd,
         generic_worker_ongoing_cmd, is_bare_shell_prompt, is_feedback_prompt,
         manager_bootstrap_cmd, manager_ongoing_cmd, pane_agent_is_idle, pane_needs_runtime_launch,
+        pane_has_runtime_mismatch, pane_runtime_hint,
         parse_agent_session_name, project_session_names, worker_dispatch_cmd,
-        classify_pane_state, extract_issue_number_from_branch, generic_worker_bootstrap_cmd,
-        is_bare_shell_prompt, is_feedback_prompt, manager_bootstrap_cmd, pane_agent_is_idle,
-        pane_has_runtime_mismatch, pane_needs_runtime_launch, pane_runtime_hint,
-        worker_dispatch_cmd, PaneState,
     };
     use crate::adapter::traits::AgentRuntime;
     use crate::model::issue::IssueCache;
@@ -2379,11 +2120,6 @@ mod tests {
         assert_eq!(
             classify_pane_activity("how can i help you today?\n"),
             PaneActivity::AgentIdle
-        assert_eq!(classify_pane_state("> \n"), PaneState::AgentIdle);
-        assert_eq!(classify_pane_state("how can i help you today?\n"), PaneState::AgentIdle);
-        assert_eq!(
-            classify_pane_state("working on issue #77\nediting files\n> "),
-            PaneState::AgentIdle
         );
         // Claude status bar without busy indicator = idle
         assert_eq!(
@@ -2412,12 +2148,6 @@ mod tests {
         assert_eq!(
             classify_pane_activity("building project...\n"),
             PaneActivity::Unknown
-        assert_eq!(classify_pane_state("some random output\n"), PaneState::Unknown);
-        assert_eq!(classify_pane_state("building project...\n"), PaneState::Unknown);
-        // Codex shell-loop banners should not be mistaken for an interactive agent prompt.
-        assert_eq!(
-            classify_pane_state("🔄 Starting Codex fix loop\n"),
-            PaneState::Unknown
         );
     }
 
@@ -2446,6 +2176,9 @@ mod tests {
             classify_pane_activity("\u{276f}\n"),
             PaneActivity::AgentIdle
         );
+    }
+
+    #[test]
     fn detects_runtime_hints_from_pane_content() {
         assert_eq!(
             pane_runtime_hint("  gpt-5.4 default · 100% left\n"),
@@ -2472,7 +2205,8 @@ mod tests {
             worker_dispatch_cmd(&AgentType::Claude, 42),
             Some("/autocoder:fix 42".to_string())
         );
-        assert_eq!(worker_dispatch_cmd(&AgentType::Codex, 42), None);
+        // Codex uses prompt-based bootstrap, returns Some for dispatch
+        assert!(worker_dispatch_cmd(&AgentType::Codex, 42).is_some());
     }
 
     #[test]
@@ -2483,7 +2217,6 @@ mod tests {
         );
         let codex_cmd = manager_bootstrap_cmd(&AgentType::Codex).unwrap();
         assert!(codex_cmd.contains("codex-manage-workers-loop.sh"));
-        assert_eq!(manager_bootstrap_cmd(&AgentType::Codex), None);
     }
 
     #[test]
@@ -2496,11 +2229,8 @@ mod tests {
             generic_worker_bootstrap_cmd(&AgentType::Gemini),
             Some("/fix-loop".to_string())
         );
-        assert_eq!(generic_worker_bootstrap_cmd(&AgentType::Codex), None);
-        assert_eq!(
-            generic_worker_bootstrap_cmd(&AgentType::Codex),
-            Some(AgentType::Codex.worker_loop_cmd().to_string())
-        );
+        // Codex uses prompt-based bootstrap, returns Some
+        assert!(generic_worker_bootstrap_cmd(&AgentType::Codex).is_some());
         assert_eq!(
             generic_worker_bootstrap_cmd(&AgentType::Droid),
             Some("/fix-loop".to_string())
@@ -2944,6 +2674,9 @@ exit 0
                 current_issue: None,
                 current_issue_title: None,
                 waiting_for_input: false,
+                resurrection_attempts: 0,
+                completed_issue_count: 0,
+                health: crate::model::swarm::WorkerHealth::default(),
             },
             workers: vec![
                 AgentInfo {
@@ -2958,6 +2691,9 @@ exit 0
                     current_issue: None,
                     current_issue_title: None,
                     waiting_for_input: false,
+                    resurrection_attempts: 0,
+                    completed_issue_count: 0,
+                    health: crate::model::swarm::WorkerHealth::default(),
                 },
                 AgentInfo {
                     id: "demo/worker-2".to_string(),
@@ -2971,6 +2707,9 @@ exit 0
                     current_issue: None,
                     current_issue_title: None,
                     waiting_for_input: false,
+                    resurrection_attempts: 0,
+                    completed_issue_count: 0,
+                    health: crate::model::swarm::WorkerHealth::default(),
                 },
             ],
             issue_cache: IssueCache::default(),

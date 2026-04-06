@@ -92,6 +92,18 @@ pub fn render_help_overlay(
     f.render_widget(table, popup_area);
 }
 
+/// Context-specific help entries for the Issues panel.
+pub const ISSUES_PANEL_CONTEXT: &[(&str, &str)] = &[
+    ("Issues Panel", ""),
+    ("j/↓", "next issue"),
+    ("k/↑", "prev issue"),
+    ("Enter", "view issue"),
+    ("d/Space", "dispatch to worker"),
+    ("f", "cycle filter"),
+    ("/", "search"),
+    ("r/F5", "refresh"),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;

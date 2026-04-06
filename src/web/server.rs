@@ -9,6 +9,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::net::SocketAddr;
+use std::path::PathBuf;
 
 use super::SharedWebState;
 
@@ -18,12 +19,20 @@ const INDEX_HTML: &str = include_str!("ui.html");
 /// Default port for the web server.
 pub const DEFAULT_PORT: u16 = 7878;
 
+/// Combined state for the web server: swarm snapshots + agents dir for launching.
+#[derive(Clone)]
+pub struct WebServerState {
+    pub swarms: SharedWebState,
+    pub agents_dir: PathBuf,
+}
+
 async fn index_handler() -> Html<&'static str> {
     Html(INDEX_HTML)
 }
 
-async fn api_swarms_handler(State(state): State<SharedWebState>) -> Json<Value> {
+async fn api_swarms_handler(State(state): State<WebServerState>) -> Json<Value> {
     let swarms = state
+        .swarms
         .read()
         .map_err(|e| tracing::warn!("Web state lock poisoned: {e}"))
         .ok()
@@ -36,9 +45,10 @@ async fn api_swarms_handler(State(state): State<SharedWebState>) -> Json<Value> 
 /// `GET /api/swarms/:project/agents/:role/pane`
 async fn api_pane_handler(
     Path((project, role)): Path<(String, String)>,
-    State(state): State<SharedWebState>,
+    State(state): State<WebServerState>,
 ) -> Result<Json<Value>, StatusCode> {
     let guard = state
+        .swarms
         .read()
         .map_err(|e| {
             tracing::warn!("Web state lock poisoned: {e}");
@@ -71,12 +81,13 @@ pub struct SendInputBody {
 /// `POST /api/swarms/:project/agents/:role/input`
 async fn api_input_handler(
     Path((project, role)): Path<(String, String)>,
-    State(state): State<SharedWebState>,
+    State(state): State<WebServerState>,
     Json(body): Json<SendInputBody>,
 ) -> Result<Json<Value>, StatusCode> {
     // Look up the tmux target while holding only a read lock.
     let tmux_target = {
         let guard = state
+            .swarms
             .read()
             .map_err(|e| {
                 tracing::warn!("Web state lock poisoned: {e}");
@@ -114,6 +125,121 @@ async fn api_input_handler(
     Ok(Json(json!({ "ok": true })))
 }
 
+/// Returns a list of available git repositories discovered from common directories.
+/// `GET /api/repos`
+async fn api_repos_handler() -> Json<Value> {
+    let mut repos = Vec::new();
+
+    // Directories to scan for git repos
+    let mut scan_dirs: Vec<PathBuf> = Vec::new();
+
+    if let Some(home) = dirs::home_dir() {
+        scan_dirs.push(home.join("src"));
+        scan_dirs.push(home.join("projects"));
+        scan_dirs.push(home.join("code"));
+    }
+
+    // Also scan the parent of the current working directory
+    if let Ok(cwd) = std::env::current_dir() {
+        if let Some(parent) = cwd.parent() {
+            scan_dirs.push(parent.to_path_buf());
+        }
+    }
+
+    for dir in scan_dirs {
+        if !dir.exists() {
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() && path.join(".git").exists() {
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                if !name.is_empty() {
+                    repos.push(json!({
+                        "name": name,
+                        "path": path.to_string_lossy(),
+                    }));
+                }
+            }
+        }
+    }
+
+    // Deduplicate by path
+    repos.dedup_by(|a, b| a["path"] == b["path"]);
+
+    Json(json!({ "repos": repos }))
+}
+
+/// Returns the list of supported agent types.
+/// `GET /api/agent-types`
+async fn api_agent_types_handler() -> Json<Value> {
+    Json(json!({
+        "agent_types": ["Claude", "Codex", "Droid", "Gemini"]
+    }))
+}
+
+/// Body for the launch-swarm endpoint.
+#[derive(Debug, Deserialize)]
+pub struct LaunchSwarmBody {
+    pub repo_path: String,
+    pub agent_type: String,
+    pub num_workers: u32,
+}
+
+/// Launch a new swarm.
+/// `POST /api/swarms`
+/// Returns 202 Accepted immediately; the swarm launches in a background task.
+async fn api_launch_swarm_handler(
+    State(state): State<WebServerState>,
+    Json(body): Json<LaunchSwarmBody>,
+) -> Result<Json<Value>, StatusCode> {
+    use crate::adapter::claude::ClaudeAdapter;
+    use crate::adapter::traits::SwarmConfig;
+    use crate::model::swarm::AgentType;
+    use crate::transport::ServerTransport;
+
+    let repo_path = PathBuf::from(&body.repo_path);
+    if !repo_path.exists() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let agent_type: AgentType = match body.agent_type.as_str() {
+        "Claude" => AgentType::Claude,
+        "Codex"  => AgentType::Codex,
+        "Droid"  => AgentType::Droid,
+        "Gemini" => AgentType::Gemini,
+        _ => return Err(StatusCode::BAD_REQUEST),
+    };
+
+    let project_name = repo_path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let config = SwarmConfig {
+        repo_path,
+        agent_type: agent_type.clone(),
+        num_workers: body.num_workers,
+        agents_dir: state.agents_dir.clone(),
+    };
+
+    tokio::spawn(async move {
+        let adapter = ClaudeAdapter::new(agent_type, ServerTransport::new(None));
+        match adapter.launch_with_progress(&config, |msg| tracing::info!("{msg}")).await {
+            Ok(_swarm) => tracing::info!("Swarm launched for {}", config.repo_path.display()),
+            Err(e) => tracing::error!("Failed to launch swarm for {}: {e:#}", config.repo_path.display()),
+        }
+    });
+
+    Ok(Json(json!({ "ok": true, "project_name": project_name })))
+}
+
 /// Find an agent (manager or worker) by role within a swarm snapshot.
 fn find_agent<'a>(
     swarm: &'a super::SwarmSnapshot,
@@ -127,10 +253,12 @@ fn find_agent<'a>(
 
 /// Start the web server on the given port, sharing `state` with the TUI app.
 /// This function runs until the server shuts down or an error occurs.
-pub async fn run(port: u16, state: SharedWebState) -> Result<()> {
+pub async fn run(port: u16, state: WebServerState) -> Result<()> {
     let app = Router::new()
         .route("/", get(index_handler))
-        .route("/api/swarms", get(api_swarms_handler))
+        .route("/api/swarms", get(api_swarms_handler).post(api_launch_swarm_handler))
+        .route("/api/repos", get(api_repos_handler))
+        .route("/api/agent-types", get(api_agent_types_handler))
         .route(
             "/api/swarms/{project}/agents/{role}/pane",
             get(api_pane_handler),
@@ -158,10 +286,19 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use tower::util::ServiceExt; // for .oneshot()
 
-    fn make_app(state: SharedWebState) -> Router {
+    fn make_web_state(shared: SharedWebState) -> WebServerState {
+        WebServerState {
+            swarms: shared,
+            agents_dir: PathBuf::from("/tmp/test-agents"),
+        }
+    }
+
+    fn make_app(state: WebServerState) -> Router {
         Router::new()
             .route("/", get(index_handler))
-            .route("/api/swarms", get(api_swarms_handler))
+            .route("/api/swarms", get(api_swarms_handler).post(api_launch_swarm_handler))
+            .route("/api/repos", get(api_repos_handler))
+            .route("/api/agent-types", get(api_agent_types_handler))
             .route(
                 "/api/swarms/{project}/agents/{role}/pane",
                 get(api_pane_handler),
@@ -205,7 +342,7 @@ mod tests {
 
     #[tokio::test]
     async fn index_returns_html() {
-        let state = new_shared_state();
+        let state = make_web_state(new_shared_state());
         let app = make_app(state);
         let req = Request::builder()
             .uri("/")
@@ -220,7 +357,7 @@ mod tests {
 
     #[tokio::test]
     async fn api_swarms_empty_when_no_swarms() {
-        let state = new_shared_state();
+        let state = make_web_state(new_shared_state());
         let app = make_app(state);
         let req = Request::builder()
             .uri("/api/swarms")
@@ -238,12 +375,13 @@ mod tests {
 
     #[tokio::test]
     async fn api_swarms_returns_populated_state() {
-        let state = new_shared_state();
+        let shared = new_shared_state();
         {
-            let mut guard = state.write().unwrap();
+            let mut guard = shared.write().unwrap();
             guard.push(sample_swarm("my-project"));
         }
 
+        let state = make_web_state(shared);
         let app = make_app(state);
         let req = Request::builder()
             .uri("/api/swarms")
@@ -265,12 +403,13 @@ mod tests {
 
     #[tokio::test]
     async fn api_pane_returns_agent_content() {
-        let state = new_shared_state();
+        let shared = new_shared_state();
         {
-            let mut guard = state.write().unwrap();
+            let mut guard = shared.write().unwrap();
             guard.push(sample_swarm("test-proj"));
         }
 
+        let state = make_web_state(shared);
         let app = make_app(state);
         let req = Request::builder()
             .uri("/api/swarms/test-proj/agents/manager/pane")
@@ -289,12 +428,13 @@ mod tests {
 
     #[tokio::test]
     async fn api_pane_returns_worker_content() {
-        let state = new_shared_state();
+        let shared = new_shared_state();
         {
-            let mut guard = state.write().unwrap();
+            let mut guard = shared.write().unwrap();
             guard.push(sample_swarm("test-proj"));
         }
 
+        let state = make_web_state(shared);
         let app = make_app(state);
         let req = Request::builder()
             .uri("/api/swarms/test-proj/agents/worker-1/pane")
@@ -312,7 +452,7 @@ mod tests {
 
     #[tokio::test]
     async fn api_pane_returns_404_for_unknown_swarm() {
-        let state = new_shared_state();
+        let state = make_web_state(new_shared_state());
         let app = make_app(state);
         let req = Request::builder()
             .uri("/api/swarms/ghost-project/agents/manager/pane")
@@ -324,11 +464,12 @@ mod tests {
 
     #[tokio::test]
     async fn api_pane_returns_404_for_unknown_agent() {
-        let state = new_shared_state();
+        let shared = new_shared_state();
         {
-            let mut guard = state.write().unwrap();
+            let mut guard = shared.write().unwrap();
             guard.push(sample_swarm("test-proj"));
         }
+        let state = make_web_state(shared);
         let app = make_app(state);
         let req = Request::builder()
             .uri("/api/swarms/test-proj/agents/tester/pane")
@@ -340,11 +481,12 @@ mod tests {
 
     #[tokio::test]
     async fn api_input_rejects_empty_text() {
-        let state = new_shared_state();
+        let shared = new_shared_state();
         {
-            let mut guard = state.write().unwrap();
+            let mut guard = shared.write().unwrap();
             guard.push(sample_swarm("test-proj"));
         }
+        let state = make_web_state(shared);
         let app = make_app(state);
         let req = Request::builder()
             .method("POST")
@@ -369,5 +511,71 @@ mod tests {
         let body = INDEX_HTML;
         assert!(body.contains("/pane"));
         assert!(body.contains("/input"));
+    }
+
+    #[tokio::test]
+    async fn api_agent_types_returns_list() {
+        let state = make_web_state(new_shared_state());
+        let app = make_app(state);
+        let req = Request::builder()
+            .uri("/api/agent-types")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let types = json["agent_types"].as_array().unwrap();
+        assert!(types.iter().any(|t| t == "Claude"));
+        assert!(types.iter().any(|t| t == "Codex"));
+    }
+
+    #[tokio::test]
+    async fn api_repos_returns_json() {
+        let state = make_web_state(new_shared_state());
+        let app = make_app(state);
+        let req = Request::builder()
+            .uri("/api/repos")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json["repos"].is_array());
+    }
+
+    #[tokio::test]
+    async fn api_launch_swarm_rejects_missing_path() {
+        let state = make_web_state(new_shared_state());
+        let app = make_app(state);
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/swarms")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"repo_path":"/nonexistent/path/xyz","agent_type":"Claude","num_workers":3}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn api_launch_swarm_rejects_invalid_agent_type() {
+        let state = make_web_state(new_shared_state());
+        let app = make_app(state);
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/swarms")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"repo_path":"/tmp","agent_type":"InvalidAgent","num_workers":3}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 }

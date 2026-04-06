@@ -161,6 +161,9 @@ impl AgentType {
             AgentType::Claude => "/autocoder:monitor-workers",
             AgentType::Gemini => "/monitor-workers",
             AgentType::Codex | AgentType::Droid => "",
+        }
+    }
+
     /// The tmux send-keys key sequence to gracefully exit this agent (returns to shell).
     /// Returns ("key", literal) where literal=true means use -l flag (send as text).
     pub fn exit_key(&self) -> (&str, bool) {
@@ -478,6 +481,9 @@ mod tests {
             current_issue: None,
             current_issue_title: None,
             waiting_for_input: false,
+            resurrection_attempts: 0,
+            completed_issue_count: 0,
+            health: WorkerHealth::default(),
         }
     }
 
@@ -826,6 +832,9 @@ mod tests {
     #[test]
     fn waiting_not_detected_for_empty_string() {
         assert!(!detect_waiting_for_input(""));
+    }
+
+    #[test]
     fn worker_health_default_is_healthy() {
         let h = WorkerHealth::default();
         assert_eq!(h.status(), HealthStatus::Healthy);
@@ -869,7 +878,7 @@ mod tests {
         assert_eq!(h.status(), HealthStatus::Restarting);
     }
 
-    fn make_agent(id: &str, role: &str, is_manager: bool) -> AgentInfo {
+    fn make_agent_simple(id: &str, role: &str, is_manager: bool) -> AgentInfo {
         AgentInfo {
             id: id.to_string(),
             role: role.to_string(),
@@ -882,6 +891,8 @@ mod tests {
             current_issue: None,
             current_issue_title: None,
             waiting_for_input: false,
+            resurrection_attempts: 0,
+            completed_issue_count: 0,
             health: WorkerHealth::default(),
         }
     }
@@ -896,6 +907,7 @@ mod tests {
             manager,
             workers,
             issue_cache: IssueCache::default(),
+            stopped: false,
         }
     }
 
@@ -915,10 +927,10 @@ mod tests {
 
     #[test]
     fn idle_count_counts_idle_agents() {
-        let manager = make_agent("mgr", "manager", true);
-        let mut w1 = make_agent("w1", "worker1", false);
-        let mut w2 = make_agent("w2", "worker2", false);
-        let mut w3 = make_agent("w3", "worker3", false);
+        let manager = make_agent_simple("mgr", "manager", true);
+        let mut w1 = make_agent_simple("w1", "worker1", false);
+        let mut w2 = make_agent_simple("w2", "worker2", false);
+        let mut w3 = make_agent_simple("w3", "worker3", false);
         w1.status.state = super::super::status::AgentState::Idle;
         w2.status.state = super::super::status::AgentState::Working { issue: Some(1) };
         w3.status.state = super::super::status::AgentState::Idle;
@@ -930,9 +942,9 @@ mod tests {
 
     #[test]
     fn waiting_count_counts_waiting_agents() {
-        let mut manager = make_agent("mgr", "manager", true);
-        let mut w1 = make_agent("w1", "worker1", false);
-        let w2 = make_agent("w2", "worker2", false);
+        let mut manager = make_agent_simple("mgr", "manager", true);
+        let mut w1 = make_agent_simple("w1", "worker1", false);
+        let w2 = make_agent_simple("w2", "worker2", false);
         manager.waiting_for_input = true;
         w1.waiting_for_input = true;
         let swarm = make_swarm_with_agents(manager, vec![w1, w2]);
@@ -941,17 +953,17 @@ mod tests {
 
     #[test]
     fn waiting_count_zero_when_none_waiting() {
-        let manager = make_agent("mgr", "manager", true);
-        let w1 = make_agent("w1", "worker1", false);
+        let manager = make_agent_simple("mgr", "manager", true);
+        let w1 = make_agent_simple("w1", "worker1", false);
         let swarm = make_swarm_with_agents(manager, vec![w1]);
         assert_eq!(swarm.waiting_count(), 0);
     }
 
     #[test]
     fn all_agents_includes_manager_and_workers() {
-        let manager = make_agent("mgr", "manager", true);
-        let w1 = make_agent("w1", "worker1", false);
-        let w2 = make_agent("w2", "worker2", false);
+        let manager = make_agent_simple("mgr", "manager", true);
+        let w1 = make_agent_simple("w1", "worker1", false);
+        let w2 = make_agent_simple("w2", "worker2", false);
         let swarm = make_swarm_with_agents(manager, vec![w1, w2]);
         let all = swarm.all_agents();
         assert_eq!(all.len(), 3);
@@ -962,8 +974,8 @@ mod tests {
 
     #[test]
     fn next_waiting_agent_finds_first_when_none_specified() {
-        let manager = make_agent("mgr", "manager", true);
-        let mut w1 = make_agent("w1", "worker1", false);
+        let manager = make_agent_simple("mgr", "manager", true);
+        let mut w1 = make_agent_simple("w1", "worker1", false);
         w1.waiting_for_input = true;
         let swarm = make_swarm_with_agents(manager, vec![w1]);
         let found = swarm.next_waiting_agent(None);
@@ -973,9 +985,9 @@ mod tests {
 
     #[test]
     fn next_waiting_agent_cycles_past_current_and_wraps() {
-        let manager = make_agent("mgr", "manager", true);
-        let mut w1 = make_agent("w1", "worker1", false);
-        let mut w2 = make_agent("w2", "worker2", false);
+        let manager = make_agent_simple("mgr", "manager", true);
+        let mut w1 = make_agent_simple("w1", "worker1", false);
+        let mut w2 = make_agent_simple("w2", "worker2", false);
         w1.waiting_for_input = true;
         w2.waiting_for_input = true;
         let swarm = make_swarm_with_agents(manager, vec![w1, w2]);

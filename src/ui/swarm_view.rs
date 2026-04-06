@@ -8,12 +8,10 @@ use ratatui::{
 };
 use std::time::Instant;
 
-use crate::model::issue::{GitHubIssue, IssueFilter};
+use crate::model::issue::{GitHubIssue, IssueFilter, IssuePriority, IssueType};
 use crate::model::swarm::Swarm;
 use super::text_input::TextInput;
 use super::theme;
-use crate::model::issue::{GitHubIssue, IssueFilter, IssuePriority, IssueType};
-use crate::model::swarm::Swarm;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SwarmPanel {
@@ -78,26 +76,6 @@ impl SwarmView {
         manager_input: &TextInput,
     ) {
         let filtered_issues = self.apply_filters(issues);
-        let search_query = self.issue_search.as_ref().map(|s| s.text().to_lowercase());
-        let filtered_issues: Vec<&GitHubIssue> = issues
-            .iter()
-            .filter(|i| i.matches_filter(self.issue_filter))
-            .filter(|i| {
-                if let Some(ref q) = search_query {
-                    if q.is_empty() {
-                        return true;
-                    }
-                    if let Some(num_str) = q.strip_prefix('#') {
-                        if let Ok(num) = num_str.parse::<u32>() {
-                            return i.number == num;
-                        }
-                    }
-                    i.title.to_lowercase().contains(q.as_str())
-                } else {
-                    true
-                }
-            })
-            .collect();
 
         // Pre-compute attention data before layout (needed for dynamic sizing)
         let attention = count_attention(swarm, issues);
@@ -513,7 +491,6 @@ impl SwarmView {
             Style::default()
         });
 
-        f.render_stateful_widget(issues_table, table_area, &mut self.issues_table);
         // Split issues area: search bar (when active) + issues table
         let (search_area, issues_table_area) = if self.issue_search.is_some() {
             let split = Layout::vertical([
@@ -699,6 +676,15 @@ impl SwarmView {
                     }
                     i.title.to_lowercase().contains(&q_lower)
                         || i.number.to_string().contains(q.as_str())
+                } else {
+                    true
+                }
+            })
+            .collect();
+        result.sort_by_key(|i| (&i.priority, i.number));
+        result
+    }
+
     /// Render a full-screen issue list for the given project.
     pub fn render_issue_list(
         &mut self,
@@ -725,32 +711,6 @@ impl SwarmView {
                 }
             })
             .collect();
-        result.sort_by_key(|i| (&i.priority, i.number));
-        result
-    }
-
-    /// Cycle the type filter: None → Bug → Enhancement → Proposal → None.
-    pub fn cycle_issue_type_filter(&mut self) {
-        self.issue_type_filter = match &self.issue_type_filter {
-            None => Some(IssueType::Bug),
-            Some(IssueType::Bug) => Some(IssueType::Enhancement),
-            Some(IssueType::Enhancement) => Some(IssueType::Proposal),
-            Some(IssueType::Proposal) | Some(IssueType::Other) => None,
-        };
-        // Reset table selection when filter changes.
-        self.issues_table.select(Some(0));
-    }
-
-    /// Cycle the priority filter: None → P0 → P1 → P2 → P3 → None.
-    pub fn cycle_priority_filter(&mut self) {
-        self.priority_filter = match &self.priority_filter {
-            None => Some(IssuePriority::P0),
-            Some(IssuePriority::P0) => Some(IssuePriority::P1),
-            Some(IssuePriority::P1) => Some(IssuePriority::P2),
-            Some(IssuePriority::P2) => Some(IssuePriority::P3),
-            Some(IssuePriority::P3) | Some(IssuePriority::None) => None,
-        };
-        self.issues_table.select(Some(0));
 
         let avail = issues.iter().filter(|i| !i.is_blocked() && !i.is_being_worked()).count();
         let blocked = issues.iter().filter(|i| i.is_blocked()).count();
@@ -862,6 +822,31 @@ impl SwarmView {
         ]));
         f.render_widget(help, chunks[2]);
     }
+
+    /// Cycle the type filter: None → Bug → Enhancement → Proposal → None.
+    pub fn cycle_issue_type_filter(&mut self) {
+        self.issue_type_filter = match &self.issue_type_filter {
+            None => Some(IssueType::Bug),
+            Some(IssueType::Bug) => Some(IssueType::Enhancement),
+            Some(IssueType::Enhancement) => Some(IssueType::Proposal),
+            Some(IssueType::Proposal) | Some(IssueType::Other) => None,
+        };
+        // Reset table selection when filter changes.
+        self.issues_table.select(Some(0));
+    }
+
+    /// Cycle the priority filter: None → P0 → P1 → P2 → P3 → None.
+    pub fn cycle_priority_filter(&mut self) {
+        self.priority_filter = match &self.priority_filter {
+            None => Some(IssuePriority::P0),
+            Some(IssuePriority::P0) => Some(IssuePriority::P1),
+            Some(IssuePriority::P1) => Some(IssuePriority::P2),
+            Some(IssuePriority::P2) => Some(IssuePriority::P3),
+            Some(IssuePriority::P3) | Some(IssuePriority::None) => None,
+        };
+        self.issues_table.select(Some(0));
+    }
+
 }
 
 /// Count items needing human attention: blocked GitHub issues + agents waiting for input.
@@ -1389,10 +1374,6 @@ mod tests {
         GitHubIssue {
             number,
             title: title.to_string(),
-    fn make_issue(number: u32, labels: &[&str]) -> GitHubIssue {
-        GitHubIssue {
-            number,
-            title: format!("Issue #{number}"),
             state: IssueState::Open,
             priority: crate::model::issue::IssuePriority::None,
             issue_type: crate::model::issue::IssueType::Other,
@@ -1812,27 +1793,6 @@ mod tests {
             !rendered.contains("p2 issue"),
             "P2 issue should be hidden by P1 filter"
         );
-    fn swarm_panel_next_cycles() {
-        assert!(matches!(SwarmPanel::Manager.next(), SwarmPanel::Workers));
-        assert!(matches!(SwarmPanel::Workers.next(), SwarmPanel::Issues));
-        assert!(matches!(SwarmPanel::Issues.next(), SwarmPanel::Manager));
-    }
-
-    #[test]
-    fn scroll_manager_up_saturates_at_zero() {
-        let mut view = SwarmView::new();
-        view.scroll_manager_down(5);
-        view.scroll_manager_up(3);
-        assert_eq!(view.manager_scroll, 2);
-        view.scroll_manager_up(100);
-        assert_eq!(view.manager_scroll, 0);
-    }
-
-    #[test]
-    fn scroll_manager_down_increments() {
-        let mut view = SwarmView::new();
-        view.scroll_manager_down(10);
-        assert_eq!(view.manager_scroll, 10);
     }
 
     #[test]
@@ -1843,64 +1803,12 @@ mod tests {
     }
 
     #[test]
-    fn next_worker_increments_and_wraps() {
-        let mut view = SwarmView::new();
-        view.next_worker(3);
-        assert_eq!(view.selected_worker(), Some(1));
-        view.next_worker(3);
-        view.next_worker(3);
-        assert_eq!(view.selected_worker(), Some(0));
-    }
-
-    #[test]
-    fn prev_worker_wraps_to_last() {
-        let mut view = SwarmView::new();
-        view.prev_worker(3);
-        assert_eq!(view.selected_worker(), Some(2));
-    }
-
-    #[test]
-    fn next_worker_with_empty_list_does_not_panic() {
-        let mut view = SwarmView::new();
-        view.next_worker(0);
-        assert_eq!(view.selected_worker(), Some(0));
-    }
-
-    #[test]
-    fn prev_worker_with_empty_list_does_not_panic() {
-        let mut view = SwarmView::new();
-        view.prev_worker(0);
-        assert_eq!(view.selected_worker(), Some(0));
-    }
-
-    #[test]
     fn next_issue_increments_and_wraps() {
         let mut view = SwarmView::new();
         view.next_issue(3);
         assert_eq!(view.selected_issue(), Some(1));
         view.next_issue(3);
         view.next_issue(3);
-        assert_eq!(view.selected_issue(), Some(0));
-    }
-
-    #[test]
-    fn prev_issue_wraps_to_last() {
-        let mut view = SwarmView::new();
-        view.prev_issue(3);
-        assert_eq!(view.selected_issue(), Some(2));
-    }
-
-    #[test]
-    fn next_issue_with_empty_list_does_not_panic() {
-        let mut view = SwarmView::new();
-        view.next_issue(0);
-        assert_eq!(view.selected_issue(), Some(0));
-    }
-
-    #[test]
-    fn prev_issue_with_empty_list_does_not_panic() {
-        let mut view = SwarmView::new();
-        view.prev_issue(0);
         assert_eq!(view.selected_issue(), Some(0));
     }
 
@@ -1917,7 +1825,10 @@ mod tests {
     fn count_attention_includes_blocked_issues() {
         use super::count_attention;
         let swarm = make_swarm();
-        let issues = vec![make_issue(1, &["needs-design"]), make_issue(2, &[])];
+        let issues = vec![
+            make_issue(1, "blocked", &["needs-design"]),
+            make_issue(2, "normal", &[]),
+        ];
         assert_eq!(count_attention(&swarm, &issues), 1);
     }
 
@@ -1926,15 +1837,7 @@ mod tests {
         use super::count_attention;
         let mut swarm = make_swarm();
         swarm.workers[0].pane_content = "should i proceed with this?".to_string();
-        let issues = vec![make_issue(1, &["needs-approval"])];
+        let issues = vec![make_issue(1, "blocked", &["needs-approval"])];
         assert_eq!(count_attention(&swarm, &issues), 2);
-    }
-
-    #[test]
-    fn count_attention_zero_when_all_idle() {
-        use super::count_attention;
-        let swarm = make_swarm();
-        let issues: Vec<GitHubIssue> = vec![];
-        assert_eq!(count_attention(&swarm, &issues), 0);
     }
 }

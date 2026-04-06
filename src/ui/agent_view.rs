@@ -16,6 +16,8 @@ pub struct AgentView {
     pub visible_height: u16,
     /// Whether the view should auto-follow new content (true when at bottom).
     pub following: bool,
+    /// Inline command input bar.
+    pub input: super::text_input::TextInput,
 }
 
 impl AgentView {
@@ -24,6 +26,7 @@ impl AgentView {
             scroll_offset: 0,
             visible_height: 20,
             following: true,
+            input: super::text_input::TextInput::new(),
         }
     }
 

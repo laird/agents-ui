@@ -143,7 +143,8 @@ mod tests {
         let result = find_script("test-script.sh");
         unsafe { std::env::remove_var("AGENTS_DIR"); }
 
-        assert_eq!(result, Some(script_file));
+        let canonical_script = script_file.canonicalize().ok();
+        assert_eq!(result, canonical_script);
 
         fs::remove_dir_all(&tmp).ok();
     }

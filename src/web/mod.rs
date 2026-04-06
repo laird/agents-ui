@@ -1,3 +1,4 @@
+pub mod discovery;
 pub mod server;
 
 use serde::{Deserialize, Serialize};
@@ -104,6 +105,9 @@ mod tests {
             current_issue: None,
             current_issue_title: None,
             waiting_for_input: false,
+            resurrection_attempts: 0,
+            completed_issue_count: 0,
+            health: crate::model::swarm::WorkerHealth::default(),
         }
     }
 

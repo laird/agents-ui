@@ -178,12 +178,25 @@ async fn main() -> Result<()> {
     // Start web server if requested
     let web_state = cli.web_port.map(|port| {
         let shared = web::new_shared_state();
-        let state_clone = shared.clone();
+
+        // Discovery poller: populates web state from tmux independently of the TUI
+        let discovery_state = shared.clone();
         tokio::spawn(async move {
-            if let Err(e) = web::server::run(port, state_clone).await {
+            web::discovery::run(discovery_state).await;
+        });
+
+        // HTTP server
+        let agents_dir = crate::scripts::launcher::resolve_agents_dir();
+        let web_server_state = web::server::WebServerState {
+            swarms: shared.clone(),
+            agents_dir,
+        };
+        tokio::spawn(async move {
+            if let Err(e) = web::server::run(port, web_server_state).await {
                 tracing::error!("Web server exited with error: {e:#}");
             }
         });
+
         shared
     });
 
