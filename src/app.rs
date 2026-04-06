@@ -1878,6 +1878,9 @@ impl App {
         }
         self.agent_view = AgentView::new();
         self.agent_view.scroll_to_bottom();
+        // Dismiss any open overlays so they don't consume keypresses in passthrough mode.
+        self.show_shortcuts_viewer = false;
+        self.show_help = false;
         self.screen = Screen::AgentView {
             swarm_idx,
             agent_id,
@@ -2409,14 +2412,14 @@ impl App {
             return Ok(());
         }
 
-        // L: open full-screen issue list
-        if key.code == KeyCode::Char('L') {
+        // L: open full-screen issue list (not when manager has focus — L goes to tmux)
+        if key.code == KeyCode::Char('L') && self.swarm_focus != SwarmPanel::Manager {
             self.screen = Screen::IssueList { swarm_idx };
             return Ok(());
         }
 
-        // S: open switch-agent dialog
-        if key.code == KeyCode::Char('S') {
+        // S: open switch-agent dialog (not when manager has focus — S goes to tmux)
+        if key.code == KeyCode::Char('S') && self.swarm_focus != SwarmPanel::Manager {
             let current = self.swarms.get(swarm_idx).map(|s| &s.agent_type);
             let selected = current
                 .and_then(|a| crate::model::swarm::ALL_AGENT_TYPES.iter().position(|t| t == a))
@@ -7069,6 +7072,61 @@ mod tests {
             "view".to_string(),
         ]));
     }
+    /// Regression test for #307: `S` must NOT open the switch-agent dialog when
+    /// the manager panel has focus in RepoView (key should be forwarded to tmux).
+    #[tokio::test]
+    async fn s_key_does_not_open_switch_agent_when_manager_focused() {
+        use crate::ui::swarm_view::SwarmPanel;
+        let mut app = App::new(None, false, None, None, None, None)
+            .await
+            .expect("App::new failed");
+        app.screen = Screen::RepoView { swarm_idx: 0 };
+        app.swarm_focus = SwarmPanel::Manager;
+
+        let key = KeyEvent::new(KeyCode::Char('S'), KeyModifiers::NONE);
+        let _ = app.handle_key(key).await;
+
+        // Screen should remain RepoView, not switch to SwitchAgent
+        assert!(
+            matches!(app.screen, Screen::RepoView { .. }),
+            "S key must not open switch-agent dialog when manager has focus"
+        );
+    }
+
+    /// Regression test for #307: `S` SHOULD open the switch-agent dialog when
+    /// the worker panel has focus in RepoView.
+    #[tokio::test]
+    async fn s_key_opens_switch_agent_when_workers_focused() {
+        use crate::ui::swarm_view::SwarmPanel;
+        let mut app = App::new(None, false, None, None, None, None)
+            .await
+            .expect("App::new failed");
+        app.screen = Screen::RepoView { swarm_idx: 0 };
+        app.swarm_focus = SwarmPanel::Workers;
+
+        let key = KeyEvent::new(KeyCode::Char('S'), KeyModifiers::NONE);
+        let _ = app.handle_key(key).await;
+
+        assert!(
+            matches!(app.screen, Screen::SwitchAgent { .. }),
+            "S key must open switch-agent dialog when workers panel has focus"
+        );
+    }
+
+    /// Regression test for #307: entering agent view must clear overlays so
+    /// no interceptor consumes keys in passthrough mode.
+    #[tokio::test]
+    async fn enter_agent_view_clears_overlays() {
+        let mut app = App::new(None, false, None, None, None, None)
+            .await
+            .expect("App::new failed");
+        app.show_shortcuts_viewer = true;
+        app.show_help = true;
+        app.enter_agent_view(0, "manager".to_string()).await;
+        assert!(!app.show_shortcuts_viewer, "shortcuts viewer must be dismissed when entering agent view");
+        assert!(!app.show_help, "help overlay must be dismissed when entering agent view");
+    }
+
     /// Regression test for #278: `?` must NOT open the shortcuts viewer when
     /// the current screen is `AgentView` (the key should pass through to tmux).
     #[tokio::test]
