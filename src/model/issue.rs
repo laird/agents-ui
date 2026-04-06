@@ -508,6 +508,72 @@ mod tests {
         assert_eq!(issue.status_label(), "closed");
     }
 
+    // ── priority_num ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn priority_num_p0_label_returns_some_0() {
+        assert_eq!(make_issue(1, &["P0", "bug"]).priority_num(), Some(0));
+    }
+
+    #[test]
+    fn priority_num_p3_label_returns_some_3() {
+        assert_eq!(make_issue(1, &["P3"]).priority_num(), Some(3));
+    }
+
+    #[test]
+    fn priority_num_no_priority_label_returns_none() {
+        assert_eq!(make_issue(1, &["bug", "enhancement"]).priority_num(), None);
+    }
+
+    #[test]
+    fn priority_num_non_priority_p_label_ignored() {
+        // "Pxyz" doesn't parse as u8, so should return None
+        assert_eq!(make_issue(1, &["Pxyz"]).priority_num(), None);
+    }
+
+    // ── priority_label ────────────────────────────────────────────────────────
+
+    #[test]
+    fn priority_label_with_p2_returns_p2_string() {
+        assert_eq!(make_issue(1, &["P2"]).priority_label(), "P2");
+    }
+
+    #[test]
+    fn priority_label_no_priority_returns_dash() {
+        assert_eq!(make_issue(1, &["bug"]).priority_label(), "—");
+    }
+
+    // ── IssueCache::priority_counts ───────────────────────────────────────────
+
+    #[test]
+    fn priority_counts_empty_cache_returns_zeros() {
+        let cache = IssueCache::default();
+        assert_eq!(cache.priority_counts(), (0, 0, 0, 0));
+    }
+
+    // ── IssueCache::filtered ──────────────────────────────────────────────────
+
+    #[test]
+    fn filtered_none_returns_all_issues() {
+        let mut cache = IssueCache::default();
+        cache.issues.push(make_issue(1, &["P0"]));
+        cache.issues.push(make_issue(2, &["P1"]));
+        cache.issues.push(make_issue(3, &["P3"]));
+        assert_eq!(cache.filtered(None).len(), 3);
+    }
+
+    #[test]
+    fn filtered_by_p1_returns_only_p1_issues() {
+        let mut cache = IssueCache::default();
+        cache.issues.push(make_issue(1, &["P0"]));
+        cache.issues.push(make_issue(2, &["P1"]));
+        cache.issues.push(make_issue(3, &["P1"]));
+        cache.issues.push(make_issue(4, &["P2"]));
+        let result = cache.filtered(Some(&IssuePriority::P1));
+        assert_eq!(result.len(), 2);
+        assert!(result.iter().all(|i| i.priority == IssuePriority::P1));
+    }
+
     // ── blocking_guidance ─────────────────────────────────────────────────────
 
     #[test]
