@@ -115,6 +115,57 @@ impl ShortcutsConfig {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expand_command_substitutes_issue() {
+        let result = ShortcutsConfig::expand_command("/fix {issue}", Some(42), None, None);
+        assert_eq!(result, "/fix 42");
+    }
+
+    #[test]
+    fn expand_command_substitutes_worker() {
+        let result = ShortcutsConfig::expand_command("send to {worker}", None, Some("claude-myrepo:0.1"), None);
+        assert_eq!(result, "send to claude-myrepo:0.1");
+    }
+
+    #[test]
+    fn expand_command_substitutes_project() {
+        let result = ShortcutsConfig::expand_command("project={project}", None, None, Some("myrepo"));
+        assert_eq!(result, "project=myrepo");
+    }
+
+    #[test]
+    fn expand_command_substitutes_all_three() {
+        let result = ShortcutsConfig::expand_command(
+            "/fix {issue} in {project} via {worker}",
+            Some(7),
+            Some("claude-proj:0.2"),
+            Some("proj"),
+        );
+        assert_eq!(result, "/fix 7 in proj via claude-proj:0.2");
+    }
+
+    #[test]
+    fn expand_command_leaves_template_unchanged_when_none() {
+        let result = ShortcutsConfig::expand_command(
+            "/fix {issue} via {worker} in {project}",
+            None,
+            None,
+            None,
+        );
+        assert_eq!(result, "/fix {issue} via {worker} in {project}");
+    }
+
+    #[test]
+    fn expand_command_no_placeholders() {
+        let result = ShortcutsConfig::expand_command("/status", Some(1), Some("w"), Some("p"));
+        assert_eq!(result, "/status");
+    }
+}
+
 const DEFAULT_CONFIG: &str = r#"# agents-ui keyboard shortcuts
 # Edit this file to customize shortcuts. Changes take effect on restart.
 #
