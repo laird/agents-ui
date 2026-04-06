@@ -1834,6 +1834,14 @@ mod tests {
             worker_dispatch_cmd(&AgentType::Codex, 42),
             Some("use autocoder to fix 42".to_string())
         );
+        assert_eq!(
+            worker_dispatch_cmd(&AgentType::Gemini, 42),
+            Some("/fix 42".to_string())
+        );
+        assert_eq!(
+            worker_dispatch_cmd(&AgentType::Droid, 42),
+            Some("/fix 42".to_string())
+        );
     }
 
     #[test]
@@ -1843,6 +1851,14 @@ mod tests {
             Some("/autocoder:monitor-loop".to_string())
         );
         assert_eq!(manager_bootstrap_cmd(&AgentType::Codex), None);
+        assert_eq!(
+            manager_bootstrap_cmd(&AgentType::Gemini),
+            Some("/manage-loop".to_string())
+        );
+        assert_eq!(
+            manager_bootstrap_cmd(&AgentType::Droid),
+            Some("/manage-loop".to_string())
+        );
     }
 
     #[test]
