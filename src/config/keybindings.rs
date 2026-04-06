@@ -315,6 +315,35 @@ mod tests {
         };
         assert_eq!(alt_f.to_string(), "alt+f");
     }
+
+    #[test]
+    fn keybind_new_has_no_modifiers() {
+        let kb = KeyBind::new("x");
+        assert_eq!(kb.key, "x");
+        assert!(kb.modifiers.is_empty());
+    }
+
+    #[test]
+    fn keybind_ctrl_has_ctrl_modifier() {
+        let kb = KeyBind::ctrl("c");
+        assert_eq!(kb.key, "c");
+        assert_eq!(kb.modifiers, vec!["ctrl"]);
+    }
+
+    #[test]
+    fn keybind_display_no_modifiers_is_just_key() {
+        assert_eq!(KeyBind::new("enter").to_string(), "enter");
+        assert_eq!(KeyBind::new("esc").to_string(), "esc");
+    }
+
+    #[test]
+    fn keybind_display_multiple_modifiers_ordered() {
+        let kb = KeyBind {
+            key: "x".to_string(),
+            modifiers: vec!["ctrl".to_string(), "alt".to_string()],
+        };
+        assert_eq!(kb.to_string(), "ctrl+alt+x");
+    }
 }
 
 /// Path to the keybindings config file.

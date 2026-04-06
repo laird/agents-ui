@@ -173,6 +173,48 @@ mod tests {
 
         std::fs::remove_dir_all(&tmp).ok();
     }
+
+    #[test]
+    fn expand_command_substitutes_issue() {
+        let result = ShortcutsConfig::expand_command("/fix {issue}", Some(42), None, None);
+        assert_eq!(result, "/fix 42");
+    }
+
+    #[test]
+    fn expand_command_substitutes_worker() {
+        let result = ShortcutsConfig::expand_command("cmd {worker}", None, Some("worker-1"), None);
+        assert_eq!(result, "cmd worker-1");
+    }
+
+    #[test]
+    fn expand_command_substitutes_project() {
+        let result =
+            ShortcutsConfig::expand_command("echo {project}", None, None, Some("my-repo"));
+        assert_eq!(result, "echo my-repo");
+    }
+
+    #[test]
+    fn expand_command_substitutes_all_variables() {
+        let result = ShortcutsConfig::expand_command(
+            "/fix {issue} {worker} {project}",
+            Some(7),
+            Some("worker-2"),
+            Some("agents-ui"),
+        );
+        assert_eq!(result, "/fix 7 worker-2 agents-ui");
+    }
+
+    #[test]
+    fn expand_command_none_issue_leaves_placeholder() {
+        let result = ShortcutsConfig::expand_command("/fix {issue}", None, None, None);
+        assert_eq!(result, "/fix {issue}");
+    }
+
+    #[test]
+    fn expand_command_no_variables_returns_unchanged() {
+        let result = ShortcutsConfig::expand_command("/status", Some(1), Some("w"), Some("p"));
+        assert_eq!(result, "/status");
+    }
 }
 
 const DEFAULT_CONFIG: &str = r#"# agents-ui keyboard shortcuts
