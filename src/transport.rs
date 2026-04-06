@@ -105,7 +105,7 @@ fn shell_quote(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{ServerTransport, build_shell_command};
+    use super::{ServerTransport, build_shell_command, shell_quote};
     use std::path::Path;
 
     #[test]
@@ -130,5 +130,39 @@ mod tests {
     fn detects_remote_transport() {
         assert!(ServerTransport::new(Some("buildbox".to_string())).is_remote());
         assert!(!ServerTransport::new(None).is_remote());
+    }
+
+    #[test]
+    fn shell_quote_simple_string() {
+        assert_eq!(shell_quote("hello"), "'hello'");
+    }
+
+    #[test]
+    fn shell_quote_single_quote_inside() {
+        // it's → 'it'"'"'s'
+        assert_eq!(shell_quote("it's"), "'it'\"'\"'s'");
+    }
+
+    #[test]
+    fn shell_quote_starts_and_ends_with_single_quote() {
+        assert_eq!(shell_quote("'hi'"), "''\"'\"'hi'\"'\"''");
+    }
+
+    #[test]
+    fn shell_quote_empty_string() {
+        assert_eq!(shell_quote(""), "''");
+    }
+
+    #[test]
+    fn shell_quote_special_shell_characters() {
+        // $, backtick, and newline are safe inside single quotes
+        assert_eq!(shell_quote("$var"), "'$var'");
+        assert_eq!(shell_quote("`cmd`"), "'`cmd`'");
+        assert_eq!(shell_quote("a\nb"), "'a\nb'");
+    }
+
+    #[test]
+    fn shell_quote_consecutive_single_quotes() {
+        assert_eq!(shell_quote("''"), "''\"'\"''\"'\"''");
     }
 }
