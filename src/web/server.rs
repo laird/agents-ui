@@ -562,6 +562,15 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn index_html_contains_ansi_renderer() {
+        // Verify the ANSI-to-HTML converter is present and wired up
+        let body = INDEX_HTML;
+        assert!(body.contains("ansiToHtml"), "ansiToHtml function must be defined");
+        assert!(body.contains("ansiPalette") || body.contains("const pal"), "ANSI palette must be present");
+        assert!(!body.contains("t.textContent = state.session.paneContent"), "pane must not use textContent");
+    }
+
+    #[tokio::test]
     async fn api_agent_types_returns_list() {
         let state = make_web_state(new_shared_state());
         let app = make_app(state);

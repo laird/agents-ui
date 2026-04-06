@@ -678,6 +678,94 @@
         .replace(/'/g,  '&#39;');
     }
 
+    // Convert ANSI escape sequences to HTML spans with inline styles.
+    // Non-color CSI sequences (cursor movement, erase, etc.) are stripped.
+    function ansiToHtml(raw) {
+      if (!raw) return '';
+
+      // Standard 16-color palette (dark + bright)
+      const pal = [
+        '#000000','#cc0000','#00cc00','#cccc00',
+        '#0000ee','#cc00cc','#00cccc','#cccccc',
+        '#555555','#ff5555','#55ff55','#ffff55',
+        '#5555ff','#ff55ff','#55ffff','#ffffff',
+      ];
+
+      function idx256(n) {
+        n = Math.max(0, Math.min(255, n));
+        if (n < 16) return pal[n];
+        if (n >= 232) {
+          const v = Math.round(((n - 232) / 23) * 255).toString(16).padStart(2, '0');
+          return '#' + v + v + v;
+        }
+        n -= 16;
+        const b = n % 6, g = Math.floor(n / 6) % 6, r = Math.floor(n / 36);
+        const ch = v => (v === 0 ? '00' : (v * 40 + 55).toString(16).padStart(2, '0'));
+        return '#' + ch(r) + ch(g) + ch(b);
+      }
+
+      let fg = null, bg = null, bold = false, italic = false, underline = false;
+      let out = '', spanOpen = false;
+
+      function closeSpan() { if (spanOpen) { out += '</span>'; spanOpen = false; } }
+
+      function flushText(t) {
+        if (!t) return;
+        if (!spanOpen && (fg || bg || bold || italic || underline)) {
+          const s = [];
+          if (fg) s.push('color:' + fg);
+          if (bg) s.push('background:' + bg);
+          if (bold) s.push('font-weight:bold');
+          if (italic) s.push('font-style:italic');
+          if (underline) s.push('text-decoration:underline');
+          out += '<span style="' + s.join(';') + '">';
+          spanOpen = true;
+        }
+        out += t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      }
+
+      // Match CSI sequences (ESC [ params letter) or bare ESC + one char
+      const re = /\x1b(?:\[([0-9;?]*)([A-Za-z@])|[^\[]|$)/g;
+      let pos = 0;
+      for (const m of raw.matchAll(re)) {
+        flushText(raw.slice(pos, m.index));
+        pos = m.index + m[0].length;
+        if (m[2] !== 'm') continue;  // non-SGR: discard
+        closeSpan();
+        const codes = m[1] ? m[1].split(';').map(Number) : [0];
+        let i = 0;
+        while (i < codes.length) {
+          const c = codes[i];
+          if (c === 0) { fg = null; bg = null; bold = italic = underline = false; }
+          else if (c === 1) bold = true;
+          else if (c === 3) italic = true;
+          else if (c === 4) underline = true;
+          else if (c === 22) bold = false;
+          else if (c === 23) italic = false;
+          else if (c === 24) underline = false;
+          else if (c >= 30 && c <= 37) fg = pal[c - 30];
+          else if (c === 39) fg = null;
+          else if (c >= 40 && c <= 47) bg = pal[c - 40];
+          else if (c === 49) bg = null;
+          else if (c >= 90 && c <= 97) fg = pal[c - 90 + 8];
+          else if (c >= 100 && c <= 107) bg = pal[c - 100 + 8];
+          else if ((c === 38 || c === 48) && codes[i+1] === 5 && i + 2 < codes.length) {
+            if (c === 38) fg = idx256(codes[i+2]); else bg = idx256(codes[i+2]);
+            i += 2;
+          } else if ((c === 38 || c === 48) && codes[i+1] === 2 && i + 4 < codes.length) {
+            const col = '#' + [codes[i+2], codes[i+3], codes[i+4]]
+              .map(n => n.toString(16).padStart(2, '0')).join('');
+            if (c === 38) fg = col; else bg = col;
+            i += 4;
+          }
+          i++;
+        }
+      }
+      flushText(raw.slice(pos));
+      closeSpan();
+      return out;
+    }
+
     function statusClass(stateStr) {
       if (!stateStr) return 'unknown';
       const lower = stateStr.toLowerCase();
@@ -946,7 +1034,7 @@
             '<span>pane output</span>' +
             '<button onclick="refreshSessionPane()" aria-label="Refresh pane">↺ Refresh</button>' +
           '</div>' +
-          '<div class="terminal-output" id="terminal-output">' + esc(s.paneContent) + '</div>' +
+          '<div class="terminal-output" id="terminal-output">' + ansiToHtml(s.paneContent) + '</div>' +
         '</div>' +
 
         '<div class="input-row">' +
@@ -1114,7 +1202,7 @@
         const t = document.getElementById('terminal-output');
         if (t) {
           const wasAtBottom = t.scrollHeight - t.scrollTop <= t.clientHeight + 20;
-          t.textContent = state.session.paneContent;
+          t.innerHTML = ansiToHtml(state.session.paneContent);
           if (wasAtBottom) t.scrollTop = t.scrollHeight;
         }
         // Update status in session header if visible
@@ -1138,8 +1226,8 @@
       // Suppress noisy errors when navigating away; only log in session context
       if (state.agent) {
         const t = document.getElementById('terminal-output');
-        if (t && t.textContent === 'Loading…') {
-          t.textContent = 'Could not load pane: ' + err.message;
+        if (t && t.innerHTML === 'Loading…') {
+          t.innerHTML = esc('Could not load pane: ' + err.message);
         }
       }
     }
