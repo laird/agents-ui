@@ -6373,4 +6373,65 @@ mod tests {
             "view".to_string(),
         ]));
     }
+
+    #[test]
+    fn parse_monitor_workers_output_basic_row() {
+        let input = "| wt-2 | 2.0 | **dispatched** | #100 (P2 issue) |";
+        let results = parse_monitor_workers_output(input);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, "wt-2");
+        assert_eq!(results[0].1, Some(100));
+        assert_eq!(results[0].2, "dispatched");
+    }
+
+    #[test]
+    fn parse_monitor_workers_output_header_row_skipped() {
+        let input = "| Worker | CPU | Status | Issue |";
+        let results = parse_monitor_workers_output(input);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn parse_monitor_workers_output_separator_row_skipped() {
+        let input = "|--|--|--|--|";
+        let results = parse_monitor_workers_output(input);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn parse_monitor_workers_output_missing_issue_cell() {
+        let input = "| wt-3 | 1.5 | idle |";
+        let results = parse_monitor_workers_output(input);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, "wt-3");
+        assert_eq!(results[0].1, None);
+        assert_eq!(results[0].2, "idle");
+    }
+
+    #[test]
+    fn parse_monitor_workers_output_multiple_rows() {
+        let input = "| wt-1 | 1.0 | **working** | #10 (fix) |\n| wt-2 | 2.0 | idle |";
+        let results = parse_monitor_workers_output(input);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].0, "wt-1");
+        assert_eq!(results[0].1, Some(10));
+        assert_eq!(results[1].0, "wt-2");
+        assert_eq!(results[1].1, None);
+    }
+
+    #[test]
+    fn parse_monitor_workers_output_empty_input() {
+        let results = parse_monitor_workers_output("");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn parse_monitor_workers_output_non_table_lines_ignored() {
+        let input = "Some preamble text\n| wt-1 | 1.0 | **running** | #42 |\nTrailing text";
+        let results = parse_monitor_workers_output(input);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, "wt-1");
+        assert_eq!(results[0].1, Some(42));
+        assert_eq!(results[0].2, "running");
+    }
 }
