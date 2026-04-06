@@ -2430,7 +2430,7 @@ exit 0
         target: &str,
         markers: &[&str],
     ) -> String {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(45);
         let mut last = String::new();
         while std::time::Instant::now() < deadline {
             last = adapter.capture_output(target).await.unwrap_or_default();
