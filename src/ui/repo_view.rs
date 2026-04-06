@@ -921,4 +921,72 @@ mod tests {
         }
         assert_eq!(v.banners.len(), 0);
     }
+
+    fn view() -> RepoView {
+        RepoView::new()
+    }
+
+    #[test]
+    fn next_worker_is_noop_for_empty_list() {
+        let mut rv = view();
+        rv.worker_list_state.select(Some(0));
+        rv.next_worker(0);
+        assert_eq!(rv.selected_worker(), Some(0));
+    }
+
+    #[test]
+    fn previous_worker_returns_true_for_empty_list() {
+        let mut rv = view();
+        let at_top = rv.previous_worker(0);
+        assert!(at_top);
+    }
+
+    #[test]
+    fn next_issue_is_noop_for_empty_list() {
+        let mut rv = view();
+        rv.issue_list_state.select(Some(0));
+        rv.next_issue(0);
+        assert_eq!(rv.issue_list_state.selected(), Some(0));
+    }
+
+    #[test]
+    fn previous_issue_moves_up() {
+        let mut rv = view();
+        rv.issue_list_state.select(Some(2));
+        let at_top = rv.previous_issue();
+        assert!(!at_top);
+        assert_eq!(rv.issue_list_state.selected(), Some(1));
+    }
+
+    #[test]
+    fn previous_issue_returns_true_at_header_row() {
+        let mut rv = view();
+        rv.issue_list_state.select(Some(1)); // first real issue
+        let at_top = rv.previous_issue();
+        assert!(at_top);
+    }
+
+    #[test]
+    fn previous_issue_returns_true_at_zero() {
+        let mut rv = view();
+        rv.issue_list_state.select(Some(0));
+        let at_top = rv.previous_issue();
+        assert!(at_top);
+    }
+
+    #[test]
+    fn selected_issue_idx_accounts_for_header_offset() {
+        let mut rv = view();
+        rv.issue_list_state.select(Some(1));
+        assert_eq!(rv.selected_issue_idx(), Some(0));
+        rv.issue_list_state.select(Some(3));
+        assert_eq!(rv.selected_issue_idx(), Some(2));
+    }
+
+    #[test]
+    fn selected_issue_idx_returns_none_for_header_row() {
+        let mut rv = view();
+        rv.issue_list_state.select(Some(0));
+        assert_eq!(rv.selected_issue_idx(), None);
+    }
 }
