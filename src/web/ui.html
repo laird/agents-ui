@@ -661,6 +661,91 @@
         .replace(/'/g,  '&#39;');
     }
 
+    // Convert ANSI escape sequences to HTML spans with inline styles.
+    // Handles SGR attributes: reset, bold, dim, italic, underline, strikethrough,
+    // standard 8/16 colors (30-37, 40-47, 90-97, 100-107), 256-color (38;5;n),
+    // and truecolor (38;2;r;g;b). Non-SGR sequences are stripped silently.
+    function ansiToHtml(text) {
+      if (!text) return '';
+      const ANSI16 = [
+        '#1a1a1a','#cc4444','#44cc44','#cccc44','#4444cc','#cc44cc','#44cccc','#cccccc',
+        '#888888','#ff6666','#66ff66','#ffff66','#6666ff','#ff66ff','#66ffff','#ffffff'
+      ];
+      function color256(n) {
+        if (n < 16) return ANSI16[n];
+        if (n < 232) {
+          const i = n - 16;
+          const b = i % 6, g = Math.floor(i / 6) % 6, r = Math.floor(i / 36);
+          return '#' + [r,g,b].map(v => (v ? v*40+55 : 0).toString(16).padStart(2,'0')).join('');
+        }
+        const v = (n - 232) * 10 + 8;
+        const h = v.toString(16).padStart(2,'0');
+        return '#' + h + h + h;
+      }
+      let fg = null, bg = null, bold = false, dim = false, italic = false, ul = false, strike = false;
+      function style() {
+        const p = [];
+        if (fg) p.push('color:' + fg);
+        if (bg) p.push('background:' + bg);
+        if (bold) p.push('font-weight:bold');
+        if (dim)  p.push('opacity:0.6');
+        if (italic) p.push('font-style:italic');
+        if (ul) p.push('text-decoration:underline');
+        if (strike) p.push('text-decoration:line-through');
+        return p.join(';');
+      }
+      function hasStyle() { return fg||bg||bold||dim||italic||ul||strike; }
+      function htmlEsc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+      const ESC_RE = /\x1b\[([0-9;]*)m|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]|\x1b[^\[]/g;
+      let out = '', last = 0, m;
+      while ((m = ESC_RE.exec(text)) !== null) {
+        if (m.index > last) {
+          const chunk = htmlEsc(text.slice(last, m.index));
+          out += hasStyle() ? '<span style="' + style() + '">' + chunk + '</span>' : chunk;
+        }
+        last = m.index + m[0].length;
+        if (m[1] !== undefined) {
+          const codes = m[1] ? m[1].split(';').map(Number) : [0];
+          let i = 0;
+          while (i < codes.length) {
+            const c = codes[i++];
+            if (c === 0)  { fg=null;bg=null;bold=dim=italic=ul=strike=false; }
+            else if (c===1) bold=true;
+            else if (c===2) dim=true;
+            else if (c===3) italic=true;
+            else if (c===4) ul=true;
+            else if (c===9) strike=true;
+            else if (c===22) { bold=dim=false; }
+            else if (c===23) italic=false;
+            else if (c===24) ul=false;
+            else if (c===29) strike=false;
+            else if (c===39) fg=null;
+            else if (c===49) bg=null;
+            else if (c>=30&&c<=37) fg=ANSI16[c-30];
+            else if (c>=40&&c<=47) bg=ANSI16[c-40];
+            else if (c>=90&&c<=97) fg=ANSI16[c-82];
+            else if (c>=100&&c<=107) bg=ANSI16[c-92];
+            else if (c===38||c===48) {
+              const target = c===38?'fg':'bg';
+              if (codes[i]===5 && i+1<codes.length) {
+                const col = color256(codes[i+1]); i+=2;
+                if (target==='fg') fg=col; else bg=col;
+              } else if (codes[i]===2 && i+3<codes.length) {
+                const col='rgb('+codes[i+1]+','+codes[i+2]+','+codes[i+3]+')'; i+=4;
+                if (target==='fg') fg=col; else bg=col;
+              }
+            }
+          }
+        }
+      }
+      if (last < text.length) {
+        const chunk = htmlEsc(text.slice(last));
+        out += hasStyle() ? '<span style="' + style() + '">' + chunk + '</span>' : chunk;
+      }
+      return out;
+    }
+
     function statusClass(stateStr) {
       if (!stateStr) return 'unknown';
       const lower = stateStr.toLowerCase();
@@ -924,7 +1009,7 @@
             '<span>pane output</span>' +
             '<button onclick="refreshSessionPane()" aria-label="Refresh pane">↺ Refresh</button>' +
           '</div>' +
-          '<div class="terminal-output" id="terminal-output">' + esc(s.paneContent) + '</div>' +
+          '<div class="terminal-output" id="terminal-output">' + ansiToHtml(s.paneContent) + '</div>' +
         '</div>' +
 
         '<div class="input-row">' +
@@ -1077,7 +1162,7 @@
         const t = document.getElementById('terminal-output');
         if (t) {
           const wasAtBottom = t.scrollHeight - t.scrollTop <= t.clientHeight + 20;
-          t.textContent = state.session.paneContent;
+          t.innerHTML = ansiToHtml(state.session.paneContent);
           if (wasAtBottom) t.scrollTop = t.scrollHeight;
         }
         // Update status in session header if visible
