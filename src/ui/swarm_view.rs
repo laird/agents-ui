@@ -28,6 +28,14 @@ impl SwarmPanel {
             SwarmPanel::Issues => SwarmPanel::Manager,
         }
     }
+
+    pub fn prev(self) -> Self {
+        match self {
+            SwarmPanel::Manager => SwarmPanel::Issues,
+            SwarmPanel::Workers => SwarmPanel::Manager,
+            SwarmPanel::Issues => SwarmPanel::Workers,
+        }
+    }
 }
 
 pub struct SwarmView {
