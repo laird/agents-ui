@@ -10,6 +10,7 @@ mod tmux;
 mod transport;
 mod tui;
 mod ui;
+mod web;
 
 use anyhow::Result;
 use model::swarm::AgentType;
