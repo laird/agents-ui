@@ -828,4 +828,71 @@ mod tests {
 
         std::fs::remove_dir_all(dir).ok();
     }
+
+    #[test]
+    fn classify_pane_activity_empty_content_is_unknown() {
+        assert_eq!(classify_pane_activity(""), PaneActivity::Unknown);
+        assert_eq!(classify_pane_activity("   \n  \n  "), PaneActivity::Unknown);
+    }
+
+    #[test]
+    fn classify_pane_activity_agent_name_without_busy_is_idle() {
+        assert_eq!(
+            classify_pane_activity("claude 3.5 sonnet ready\n"),
+            PaneActivity::AgentIdle
+        );
+        assert_eq!(
+            classify_pane_activity("gemini 2.0\n"),
+            PaneActivity::AgentIdle
+        );
+        assert_eq!(
+            classify_pane_activity("codex initialized\n"),
+            PaneActivity::AgentIdle
+        );
+    }
+
+    #[test]
+    fn classify_pane_activity_needs_launch_on_restart_message() {
+        // Messages without agent names reach the restart check successfully
+        assert_eq!(
+            classify_pane_activity("restart to apply\n"),
+            PaneActivity::NeedsLaunch
+        );
+        assert_eq!(
+            classify_pane_activity("update ran successfully\n"),
+            PaneActivity::NeedsLaunch
+        );
+    }
+
+    #[test]
+    fn classify_pane_activity_needs_launch_on_bare_shell_prompt() {
+        assert_eq!(
+            classify_pane_activity("user@host ~/repo $"),
+            PaneActivity::NeedsLaunch
+        );
+        assert_eq!(
+            classify_pane_activity("user@host ~/repo %"),
+            PaneActivity::NeedsLaunch
+        );
+        assert_eq!(
+            classify_pane_activity("root@host ~#"),
+            PaneActivity::NeedsLaunch
+        );
+    }
+
+    #[test]
+    fn classify_pane_activity_thinking_is_busy() {
+        assert_eq!(
+            classify_pane_activity("thinking...\n"),
+            PaneActivity::AgentBusy
+        );
+        assert_eq!(
+            classify_pane_activity("analyzing the codebase\n"),
+            PaneActivity::AgentBusy
+        );
+        assert_eq!(
+            classify_pane_activity("writing tests\n"),
+            PaneActivity::AgentBusy
+        );
+    }
 }
