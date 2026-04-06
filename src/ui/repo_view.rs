@@ -302,6 +302,8 @@ impl RepoView {
                     ("⟳ ", attention_style)
                 } else if w.resurrection_attempts > 0 {
                     ("⟳ ", reviving_style)
+                } else if w.status.is_stale(300) {
+                    ("⚠ ", ratatui::style::Style::default().fg(ratatui::style::Color::Yellow))
                 } else {
                     match &w.status.state {
                         crate::model::status::AgentState::Working { .. } => {
