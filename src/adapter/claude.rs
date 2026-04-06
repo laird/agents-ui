@@ -857,6 +857,7 @@ impl ClaudeAdapter {
             current_issue: None,
             current_issue_title: None,
             waiting_for_input: false,
+            resurrection_attempts: 0,
         };
 
         let mut workers = Vec::new();
@@ -898,6 +899,7 @@ impl ClaudeAdapter {
                     current_issue: None,
                     current_issue_title: None,
                     waiting_for_input: false,
+            resurrection_attempts: 0,
                 });
                 worker_num += 1;
             }
@@ -1314,6 +1316,7 @@ impl AgentRuntime for ClaudeAdapter {
             current_issue: None,
             current_issue_title: None,
             waiting_for_input: false,
+            resurrection_attempts: 0,
         })
     }
 

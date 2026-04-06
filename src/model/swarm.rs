@@ -193,6 +193,8 @@ pub struct AgentInfo {
     pub current_issue_title: Option<String>,
     /// Whether the agent is waiting for user input (detected from pane content)
     pub waiting_for_input: bool,
+    /// Number of times the TUI has attempted to revive this agent in the current session.
+    pub resurrection_attempts: u32,
 }
 
 /// Detect if pane content indicates the session is waiting for user input.
@@ -448,6 +450,7 @@ mod tests {
             current_issue: None,
             current_issue_title: None,
             waiting_for_input: false,
+            resurrection_attempts: 0,
         };
         let mut cache = IssueCache::default();
         cache.issues = issues;
