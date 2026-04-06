@@ -11,7 +11,6 @@ use super::theme;
 use crate::model::swarm::AgentInfo;
 
 pub struct AgentView {
-    pub input: TextInput,
     pub scroll_offset: u16,
     /// Height of the visible pane area (updated each render).
     pub visible_height: u16,
@@ -22,7 +21,6 @@ pub struct AgentView {
 impl AgentView {
     pub fn new() -> Self {
         Self {
-            input: TextInput::new(),
             scroll_offset: 0,
             visible_height: 20,
             following: true,

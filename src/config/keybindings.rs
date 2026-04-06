@@ -217,6 +217,106 @@ impl KeyBindings {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_bindings_cover_all_actions() {
+        let kb = KeyBindings::default();
+        let actions = [
+            Action::Quit,
+            Action::ForceQuit,
+            Action::Back,
+            Action::ShowHelp,
+            Action::MoveUp,
+            Action::MoveDown,
+            Action::Select,
+            Action::NewSwarm,
+            Action::Refresh,
+            Action::Fullscreen,
+            Action::FocusManager,
+            Action::ScrollUp,
+            Action::ScrollDown,
+            Action::FileFeedback,
+        ];
+        for action in &actions {
+            assert!(
+                kb.bindings.contains_key(action),
+                "Missing binding for {action:?}"
+            );
+            assert!(
+                !kb.bindings[action].is_empty(),
+                "Empty binding list for {action:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn display_returns_correct_strings() {
+        let kb = KeyBindings::default();
+        assert_eq!(kb.display(Action::Quit), "q");
+        assert_eq!(kb.display(Action::ForceQuit), "ctrl+c");
+        assert_eq!(kb.display(Action::Back), "esc");
+        assert_eq!(kb.display(Action::MoveUp), "up/k");
+        assert_eq!(kb.display(Action::MoveDown), "down/j");
+        assert_eq!(kb.display(Action::Fullscreen), "f/F");
+        assert_eq!(kb.display(Action::FileFeedback), "alt+f");
+    }
+
+    #[test]
+    fn display_returns_unbound_for_missing_action() {
+        let kb = KeyBindings { bindings: std::collections::HashMap::new() };
+        assert_eq!(kb.display(Action::Quit), "unbound");
+    }
+
+    #[test]
+    fn help_entries_contains_all_actions() {
+        let kb = KeyBindings::default();
+        let entries = kb.help_entries();
+        assert_eq!(entries.len(), 14, "Expected 14 help entries");
+        // First entry should be ForceQuit per the fixed ordering
+        assert_eq!(entries[0].0, "Force Quit");
+        // All entries should have non-empty key display
+        for (name, keys) in &entries {
+            assert!(!name.is_empty(), "Entry name should not be empty");
+            assert!(!keys.is_empty(), "Key display should not be empty for {name}");
+        }
+    }
+
+    #[test]
+    fn toml_round_trip() {
+        let kb = KeyBindings::default();
+        let serialized = toml::to_string_pretty(&kb).expect("serialize");
+        let deserialized: KeyBindings = toml::from_str(&serialized).expect("deserialize");
+
+        // Verify a few representative bindings survived the round-trip
+        assert_eq!(
+            deserialized.display(Action::Quit),
+            kb.display(Action::Quit)
+        );
+        assert_eq!(
+            deserialized.display(Action::MoveUp),
+            kb.display(Action::MoveUp)
+        );
+        assert_eq!(
+            deserialized.display(Action::FileFeedback),
+            kb.display(Action::FileFeedback)
+        );
+    }
+
+    #[test]
+    fn keybind_display_formats_correctly() {
+        assert_eq!(KeyBind::new("q").to_string(), "q");
+        assert_eq!(KeyBind::ctrl("c").to_string(), "ctrl+c");
+        let alt_f = KeyBind {
+            key: "f".to_string(),
+            modifiers: vec!["alt".to_string()],
+        };
+        assert_eq!(alt_f.to_string(), "alt+f");
+    }
+}
+
 /// Path to the keybindings config file.
 fn config_path() -> PathBuf {
     crate::config::persistence::config_dir().join("keybindings.toml")

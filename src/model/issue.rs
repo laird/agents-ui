@@ -1,5 +1,8 @@
 use serde::Deserialize;
 use std::time::Instant;
+use std::path::Path;
+use tokio::process::Command;
+use crate::project_management::ProjectManagementClient;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum IssueState {
@@ -305,6 +308,63 @@ impl From<GhIssueJson> for GitHubIssue {
     }
 }
 
+/// Fetch open issues from GitHub using `gh` CLI.
+pub async fn fetch_issues(repo_path: &Path) -> anyhow::Result<Vec<GitHubIssue>> {
+    let pm = ProjectManagementClient::from_env();
+    let cmd = pm.list_open_issues("number,title,labels", 100);
+    let output = Command::new(cmd.program)
+        .args(cmd.args)
+        .current_dir(repo_path)
+        .output()
+        .await?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "gh issue list failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    let mut issues = Vec::new();
+
+    if let Some(arr) = json.as_array() {
+        for item in arr {
+            let number = item["number"].as_u64().unwrap_or(0) as u32;
+            let title = item["title"].as_str().unwrap_or("").to_string();
+
+            let labels: Vec<String> = item["labels"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|l| l["name"].as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let priority = labels_to_priority(&labels);
+            let issue_type = labels_to_type(&labels);
+            let is_working = labels.iter().any(|l| l == "working");
+
+            issues.push(GitHubIssue {
+                number,
+                title,
+                state: IssueState::Open,
+                priority,
+                issue_type,
+                labels,
+                is_working,
+                assigned_worker: None,
+                updated_at: None,
+            });
+        }
+    }
+
+    // Sort by priority then number
+    issues.sort_by(|a, b| a.priority.cmp(&b.priority).then(a.number.cmp(&b.number)));
+
+    Ok(issues)
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -463,5 +523,53 @@ mod tests {
         assert_eq!(p1, 2);
         assert_eq!(p2, 1);
         assert_eq!(p3, 0);
+    }
+
+    #[test]
+    fn priority_label_returns_correct_strings() {
+        assert_eq!(make_issue(1, &["P0"]).priority_label(), "P0");
+        assert_eq!(make_issue(2, &["P1"]).priority_label(), "P1");
+        assert_eq!(make_issue(3, &["P2"]).priority_label(), "P2");
+        assert_eq!(make_issue(4, &["P3"]).priority_label(), "P3");
+        assert_eq!(make_issue(5, &["bug"]).priority_label(), "\u{2014}");
+    }
+
+    #[test]
+    fn priority_num_returns_correct_values() {
+        assert_eq!(make_issue(1, &["P0"]).priority_num(), Some(0));
+        assert_eq!(make_issue(2, &["P1"]).priority_num(), Some(1));
+        assert_eq!(make_issue(3, &["P2"]).priority_num(), Some(2));
+        assert_eq!(make_issue(4, &["P3"]).priority_num(), Some(3));
+        assert_eq!(make_issue(5, &["bug"]).priority_num(), None);
+    }
+
+    #[test]
+    fn issue_filter_label_covers_all_variants() {
+        assert!(!IssueFilter::All.label().is_empty());
+        assert!(!IssueFilter::Open.label().is_empty());
+        assert!(!IssueFilter::Blocked.label().is_empty());
+    }
+
+    #[test]
+    fn labels_to_type_maps_correctly() {
+        assert_eq!(make_issue(1, &["bug"]).issue_type, IssueType::Bug);
+        assert_eq!(make_issue(2, &["enhancement"]).issue_type, IssueType::Enhancement);
+        assert_eq!(make_issue(3, &["proposal"]).issue_type, IssueType::Proposal);
+        assert_eq!(make_issue(4, &[]).issue_type, IssueType::Other);
+    }
+
+    #[test]
+    fn issue_cache_filtered_by_priority() {
+        let mut cache = IssueCache::default();
+        cache.issues.push(make_issue(1, &["P1", "bug"]));
+        cache.issues.push(make_issue(2, &["P2", "bug"]));
+        cache.issues.push(make_issue(3, &["P1", "enhancement"]));
+
+        let p1_issues = cache.filtered(Some(&IssuePriority::P1));
+        assert_eq!(p1_issues.len(), 2);
+        assert!(p1_issues.iter().all(|i| i.priority == IssuePriority::P1));
+
+        let all_issues = cache.filtered(None);
+        assert_eq!(all_issues.len(), 3);
     }
 }

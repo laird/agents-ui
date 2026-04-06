@@ -115,12 +115,32 @@ mod tests {
     }
 
     #[test]
+    fn new_sets_issue_number() {
+        let v = IssueView::new(99);
+        assert_eq!(v.issue_number, 99);
+    }
+
+    #[test]
+    fn new_scroll_starts_at_zero() {
+        let v = IssueView::new(1);
+        assert_eq!(v.scroll_offset, 0);
+    }
+
+    #[test]
+    fn new_body_is_loading() {
+        let v = IssueView::new(1);
+        assert_eq!(v.body, "Loading\u{2026}");
+    }
+
+    #[test]
     fn scroll_down_increments_offset() {
         let mut v = IssueView::new(1);
         v.scroll_down(3);
         assert_eq!(v.scroll_offset, 3);
         v.scroll_down(2);
         assert_eq!(v.scroll_offset, 5);
+        v.scroll_down(3);
+        assert_eq!(v.scroll_offset, 8);
     }
 
     #[test]
@@ -134,7 +154,7 @@ mod tests {
     #[test]
     fn scroll_up_saturates_at_zero() {
         let mut v = IssueView::new(1);
-        v.scroll_up(5);
+        v.scroll_up(10);
         assert_eq!(v.scroll_offset, 0);
     }
 
