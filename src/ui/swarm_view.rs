@@ -28,6 +28,14 @@ impl SwarmPanel {
             SwarmPanel::Issues => SwarmPanel::Manager,
         }
     }
+
+    pub fn prev(self) -> Self {
+        match self {
+            SwarmPanel::Manager => SwarmPanel::Issues,
+            SwarmPanel::Workers => SwarmPanel::Manager,
+            SwarmPanel::Issues => SwarmPanel::Workers,
+        }
+    }
 }
 
 pub struct SwarmView {
@@ -794,6 +802,23 @@ mod tests {
         assert!(matches!(SwarmPanel::Manager.next(), SwarmPanel::Workers));
         assert!(matches!(SwarmPanel::Workers.next(), SwarmPanel::Issues));
         assert!(matches!(SwarmPanel::Issues.next(), SwarmPanel::Manager));
+    }
+
+    #[test]
+    fn swarm_panel_prev_cycles_backwards() {
+        assert!(matches!(SwarmPanel::Manager.prev(), SwarmPanel::Issues));
+        assert!(matches!(SwarmPanel::Workers.prev(), SwarmPanel::Manager));
+        assert!(matches!(SwarmPanel::Issues.prev(), SwarmPanel::Workers));
+    }
+
+    #[test]
+    fn swarm_panel_prev_is_inverse_of_next() {
+        // prev(next(x)) == x and next(prev(x)) == x
+        let panels = [SwarmPanel::Manager, SwarmPanel::Workers, SwarmPanel::Issues];
+        for p in panels {
+            assert!(matches!(p.next().prev(), q if std::mem::discriminant(&q) == std::mem::discriminant(&p)));
+            assert!(matches!(p.prev().next(), q if std::mem::discriminant(&q) == std::mem::discriminant(&p)));
+        }
     }
 
     #[test]

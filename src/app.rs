@@ -1396,10 +1396,10 @@ impl App {
 
     async fn handle_install_scope_key(&mut self, key: KeyEvent) -> Result<()> {
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => {
+            KeyCode::Up | KeyCode::Char('k') | KeyCode::BackTab => {
                 self.install_scope = InstallScope::User;
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            KeyCode::Down | KeyCode::Char('j') | KeyCode::Tab => {
                 self.install_scope = InstallScope::Repo;
             }
             KeyCode::Char('u') => {
@@ -1981,21 +1981,26 @@ impl App {
                     self.dialog_input.backspace();
                 }
                 KeyCode::Tab => {
-                    // Simple tab completion: try to complete the path
+                    // First try path completion; if no completion found, advance to next field
                     if let Some(completed) = tab_complete_path(self.dialog_input.text()) {
                         self.dialog_input.set_text(completed);
+                    } else {
+                        self.new_swarm_repo = self.dialog_input.text().to_string();
+                        self.screen = Screen::NewSwarm {
+                            field: NewSwarmField::AgentRuntime,
+                        };
                     }
                 }
                 _ => {}
             },
             NewSwarmField::AgentRuntime => match key.code {
-                KeyCode::Esc => {
+                KeyCode::Esc | KeyCode::BackTab => {
                     self.screen = Screen::NewSwarm {
                         field: NewSwarmField::RepoPath,
                     };
                     self.dialog_input.set_text(self.new_swarm_repo.clone());
                 }
-                KeyCode::Enter => {
+                KeyCode::Enter | KeyCode::Tab => {
                     self.dialog_input.set_text("2".to_string()); // Default 2 workers
                     self.screen = Screen::NewSwarm {
                         field: NewSwarmField::RuntimeSelection,
@@ -2024,12 +2029,12 @@ impl App {
                 _ => {}
             },
             NewSwarmField::RuntimeSelection => match key.code {
-                KeyCode::Esc => {
+                KeyCode::Esc | KeyCode::BackTab => {
                     self.screen = Screen::NewSwarm {
                         field: NewSwarmField::AgentRuntime,
                     };
                 }
-                KeyCode::Enter => {
+                KeyCode::Enter | KeyCode::Tab => {
                     self.dialog_input.set_text("2".to_string()); // Default 2 workers
                     self.screen = Screen::NewSwarm {
                         field: NewSwarmField::NumWorkers,
@@ -2058,7 +2063,7 @@ impl App {
                 _ => {}
             },
             NewSwarmField::NumWorkers => match key.code {
-                KeyCode::Esc => {
+                KeyCode::Esc | KeyCode::BackTab => {
                     self.screen = Screen::NewSwarm {
                         field: NewSwarmField::RuntimeSelection,
                     };
@@ -2296,10 +2301,16 @@ impl App {
             return Ok(());
         }
 
-        // Tab cycles focus: Manager → Workers → Issues → Manager
+        // Tab cycles focus forward: Manager → Workers → Issues → Manager
+        // BackTab cycles focus backward: Manager → Issues → Workers → Manager
         if key.code == KeyCode::Tab {
             self.swarm_view.search_query = None;
             self.swarm_focus = self.swarm_focus.next();
+            return Ok(());
+        }
+        if key.code == KeyCode::BackTab {
+            self.swarm_view.search_query = None;
+            self.swarm_focus = self.swarm_focus.prev();
             return Ok(());
         }
 
