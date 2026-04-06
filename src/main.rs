@@ -11,6 +11,7 @@ mod tmux;
 mod transport;
 mod tui;
 mod ui;
+mod web;
 
 use anyhow::Result;
 use model::swarm::AgentType;
@@ -21,6 +22,7 @@ use transport::ServerTransport;
 struct CliOptions {
     agent_type: Option<AgentType>,
     server: Option<String>,
+    web_port: Option<u16>,
 }
 
 fn parse_cli_options<I, S>(args: I) -> Result<CliOptions>
@@ -33,6 +35,7 @@ where
     let mut has_droid = false;
     let mut has_gemini = false;
     let mut server = None;
+    let mut web_port: Option<u16> = None;
 
     let mut iter = args.into_iter().skip(1);
     while let Some(arg) = iter.next() {
@@ -41,6 +44,11 @@ where
             "--codex" => has_codex = true,
             "--droid" => has_droid = true,
             "--gemini" => has_gemini = true,
+            "--web" => {
+                if web_port.is_none() {
+                    web_port = Some(web::server::DEFAULT_PORT);
+                }
+            }
             "--server" => {
                 let Some(value) = iter.next() else {
                     anyhow::bail!("--server requires a hostname");
@@ -53,6 +61,23 @@ where
                     anyhow::bail!("--server requires a hostname");
                 }
                 server = Some(host.to_string());
+            }
+            "--web-port" => {
+                let Some(value) = iter.next() else {
+                    anyhow::bail!("--web-port requires a port number");
+                };
+                let raw = value.as_ref();
+                let port: u16 = raw.parse().map_err(|_| {
+                    anyhow::anyhow!("--web-port value '{raw}' is not a valid port number")
+                })?;
+                web_port = Some(port);
+            }
+            value if value.starts_with("--web-port=") => {
+                let raw = value.trim_start_matches("--web-port=");
+                let port: u16 = raw.parse().map_err(|_| {
+                    anyhow::anyhow!("--web-port value '{raw}' is not a valid port number")
+                })?;
+                web_port = Some(port);
             }
             _ => {}
         }
@@ -78,7 +103,7 @@ where
         None
     };
 
-    Ok(CliOptions { agent_type, server })
+    Ok(CliOptions { agent_type, server, web_port })
 }
 
 fn select_initial_agent_type(
@@ -149,12 +174,26 @@ async fn main() -> Result<()> {
         .init();
 
     let mut terminal = tui::init()?;
+
+    // Start web server if requested
+    let web_state = cli.web_port.map(|port| {
+        let shared = web::new_shared_state();
+        let state_clone = shared.clone();
+        tokio::spawn(async move {
+            if let Err(e) = web::server::run(port, state_clone).await {
+                tracing::error!("Web server exited with error: {e:#}");
+            }
+        });
+        shared
+    });
+
     let mut app = app::App::new(
         initial_agent_type,
         cli.agent_type.is_some(),
         repo_root,
         cli.server,
         startup_warning,
+        web_state,
     )
     .await?;
     let result = app.run(&mut terminal).await;
@@ -194,6 +233,7 @@ mod tests {
             CliOptions {
                 agent_type: None,
                 server: None,
+                web_port: None,
             }
         );
     }
@@ -248,6 +288,7 @@ mod tests {
             CliOptions {
                 agent_type: Some(AgentType::Codex),
                 server: Some("builder".to_string()),
+                web_port: None,
             }
         );
 
@@ -257,6 +298,7 @@ mod tests {
             CliOptions {
                 agent_type: None,
                 server: Some("builder".to_string()),
+                web_port: None,
             }
         );
     }
@@ -271,5 +313,42 @@ mod tests {
         assert_eq!(selected, Some(AgentType::Droid));
 
         std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn web_flag_sets_default_port() {
+        let args = vec!["agents-tui", "--web"];
+        let opts = parse_cli_options(args).unwrap();
+        assert_eq!(
+            opts.web_port,
+            Some(crate::web::server::DEFAULT_PORT)
+        );
+    }
+
+    #[test]
+    fn web_port_flag_space_separated() {
+        let args = vec!["agents-tui", "--web-port", "9000"];
+        let opts = parse_cli_options(args).unwrap();
+        assert_eq!(opts.web_port, Some(9000u16));
+    }
+
+    #[test]
+    fn web_port_flag_equals_separated() {
+        let args = vec!["agents-tui", "--web-port=8080"];
+        let opts = parse_cli_options(args).unwrap();
+        assert_eq!(opts.web_port, Some(8080u16));
+    }
+
+    #[test]
+    fn web_port_flag_rejects_invalid_port() {
+        let args = vec!["agents-tui", "--web-port", "notaport"];
+        assert!(parse_cli_options(args).is_err());
+    }
+
+    #[test]
+    fn no_web_flags_gives_none_port() {
+        let args = vec!["agents-tui", "--claude"];
+        let opts = parse_cli_options(args).unwrap();
+        assert_eq!(opts.web_port, None);
     }
 }
