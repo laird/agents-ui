@@ -1,0 +1,1205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agents UI</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --card: #21262d;
+      --border: #30363d;
+      --accent: #58a6ff;
+      --text: #e6edf3;
+      --text-dim: #8b949e;
+      --success: #3fb950;
+      --warning: #d29922;
+      --error: #f85149;
+      --working: #58a6ff;
+      --idle: #8b949e;
+      --radius: 6px;
+      --shadow: 0 1px 3px rgba(0,0,0,0.4);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+
+    /* ---- Header ---- */
+    header {
+      background: var(--surface);
+      padding: 0.75rem 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .header-title {
+      font-size: 1rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .header-title svg { flex-shrink: 0; }
+
+    .refresh-indicator {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+    }
+
+    /* ---- Main content ---- */
+    main {
+      padding: 1.25rem;
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+
+    /* ---- Breadcrumb ---- */
+    .breadcrumb {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 1.25rem;
+      font-size: 0.875rem;
+      color: var(--text-dim);
+    }
+
+    .breadcrumb .crumb-link {
+      color: var(--accent);
+      cursor: pointer;
+      text-decoration: none;
+      background: none;
+      border: none;
+      font: inherit;
+      padding: 0;
+    }
+
+    .breadcrumb .crumb-link:hover { text-decoration: underline; }
+    .breadcrumb .crumb-sep { color: var(--border); }
+    .breadcrumb .crumb-current { color: var(--text); }
+
+    /* ---- Section heading ---- */
+    .section-heading {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-dim);
+      margin-bottom: 0.75rem;
+    }
+
+    /* ---- Swarms grid ---- */
+    .swarms-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0.75rem;
+    }
+
+    @media (min-width: 540px) {
+      .swarms-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    @media (min-width: 900px) {
+      .swarms-grid { grid-template-columns: repeat(3, 1fr); }
+    }
+
+    @media (min-width: 1200px) {
+      .swarms-grid { grid-template-columns: repeat(4, 1fr); }
+    }
+
+    /* ---- Swarm card ---- */
+    .swarm-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+
+    .swarm-card:hover {
+      border-color: var(--accent);
+      background: #2d333b;
+    }
+
+    .swarm-card:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .swarm-card.stopped { opacity: 0.55; }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 0.5rem;
+      gap: 0.5rem;
+    }
+
+    .project-name {
+      font-weight: 600;
+      font-size: 0.9375rem;
+      word-break: break-word;
+    }
+
+    .badge {
+      flex-shrink: 0;
+      font-size: 0.6875rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: 2em;
+      background: rgba(88,166,255,0.12);
+      color: var(--accent);
+      border: 1px solid rgba(88,166,255,0.25);
+    }
+
+    .card-path {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      margin-bottom: 0.75rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .card-stats {
+      display: flex;
+      gap: 1rem;
+    }
+
+    .stat {
+      display: flex;
+      flex-direction: column;
+      gap: 0.1rem;
+    }
+
+    .stat-value {
+      font-size: 1.25rem;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .stat-label {
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-dim);
+    }
+
+    /* ---- Status dot ---- */
+    .status-dot {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .s-working  { background: var(--working); }
+    .s-idle     { background: var(--idle); }
+    .s-stopped  { background: var(--error); }
+    .s-starting { background: var(--warning); animation: pulse 1s ease-in-out infinite; }
+    .s-unknown  { background: var(--text-dim); }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.35; }
+    }
+
+    /* ---- Detail view ---- */
+    .detail-title {
+      font-size: 1.375rem;
+      font-weight: 700;
+      margin-bottom: 0.35rem;
+    }
+
+    .detail-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.625rem;
+      font-size: 0.8125rem;
+      color: var(--text-dim);
+      margin-bottom: 1.25rem;
+    }
+
+    .detail-meta .meta-item {
+      display: flex;
+      align-items: center;
+      gap: 0.3rem;
+    }
+
+    .detail-layout {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0.75rem;
+    }
+
+    @media (min-width: 640px) {
+      .detail-layout { grid-template-columns: 1fr 1fr; }
+    }
+
+    @media (min-width: 1024px) {
+      .detail-layout { grid-template-columns: 320px 1fr; }
+    }
+
+    /* ---- Panel ---- */
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .panel-header {
+      padding: 0.5rem 0.875rem;
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--text-dim);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .panel-count {
+      background: rgba(255,255,255,0.08);
+      padding: 0.1rem 0.4rem;
+      border-radius: 2em;
+      font-size: 0.6875rem;
+    }
+
+    .agent-list { padding: 0.25rem; }
+
+    .agent-row {
+      display: flex;
+      align-items: center;
+      gap: 0.625rem;
+      padding: 0.625rem 0.625rem;
+      border-radius: calc(var(--radius) - 1px);
+      cursor: pointer;
+    }
+
+    .agent-row:hover { background: rgba(255,255,255,0.06); }
+
+    .agent-row:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: -2px;
+    }
+
+    .agent-row-arrow {
+      color: var(--text-dim);
+      font-size: 0.75rem;
+      flex-shrink: 0;
+    }
+
+    .agent-info { flex: 1; min-width: 0; }
+
+    .agent-role {
+      font-size: 0.875rem;
+      font-weight: 500;
+    }
+
+    .agent-state-text {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .agent-state-text .needs-input {
+      color: var(--warning);
+    }
+
+    /* ---- Session view ---- */
+    .session-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.875rem;
+    }
+
+    .session-title {
+      font-size: 1.125rem;
+      font-weight: 700;
+    }
+
+    .session-target {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      font-family: monospace;
+    }
+
+    .terminal-wrap {
+      background: #0a0c10;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin-bottom: 0.75rem;
+    }
+
+    .terminal-toolbar {
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      padding: 0.4rem 0.75rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.7rem;
+      color: var(--text-dim);
+    }
+
+    .terminal-toolbar button {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      font: inherit;
+      font-size: 0.7rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+
+    .terminal-toolbar button:hover {
+      background: rgba(255,255,255,0.06);
+      color: var(--text);
+    }
+
+    .terminal-output {
+      font-family: 'SFMono-Regular', 'Cascadia Code', Consolas, 'Liberation Mono', monospace;
+      font-size: 0.8125rem;
+      line-height: 1.45;
+      color: #c9d1d9;
+      white-space: pre-wrap;
+      word-break: break-all;
+      padding: 0.75rem 1rem;
+      min-height: 200px;
+      max-height: 55vh;
+      overflow-y: auto;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 0.5rem;
+      align-items: stretch;
+    }
+
+    .session-input {
+      flex: 1;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: 'SFMono-Regular', Consolas, monospace;
+      font-size: 0.875rem;
+      padding: 0.5rem 0.75rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .session-input:focus {
+      border-color: var(--accent);
+    }
+
+    .session-input::placeholder {
+      color: var(--text-dim);
+    }
+
+    .send-btn {
+      background: var(--accent);
+      border: none;
+      border-radius: var(--radius);
+      color: #0d1117;
+      font-weight: 600;
+      font-size: 0.875rem;
+      padding: 0.5rem 1rem;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: opacity 0.15s;
+    }
+
+    .send-btn:hover   { opacity: 0.85; }
+    .send-btn:active  { opacity: 0.7;  }
+    .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .send-feedback {
+      font-size: 0.75rem;
+      margin-top: 0.4rem;
+      min-height: 1rem;
+    }
+
+    .send-feedback.ok    { color: var(--success); }
+    .send-feedback.error { color: var(--error); }
+
+    /* ---- Empty / loading states ---- */
+    .empty-state {
+      padding: 2.5rem 1.5rem;
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 0.875rem;
+    }
+
+    .loading-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 5rem 1.5rem;
+      gap: 1rem;
+      color: var(--text-dim);
+    }
+
+    .spinner {
+      width: 20px;
+      height: 20px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ---- Error banner ---- */
+    .error-banner {
+      background: rgba(248,81,73,0.12);
+      border: 1px solid rgba(248,81,73,0.3);
+      color: var(--error);
+      border-radius: var(--radius);
+      padding: 0.75rem 1rem;
+      font-size: 0.875rem;
+      margin-bottom: 1rem;
+    }
+
+    /* ---- Stopped badge (detail title) ---- */
+    .stopped-badge {
+      color: var(--error);
+      font-size: 0.75rem;
+    }
+
+    /* ---- Stop swarm button ---- */
+    .btn-stop-swarm {
+      background: transparent;
+      border: 1px solid var(--error);
+      color: var(--error);
+      border-radius: var(--radius);
+      padding: 0.25rem 0.75rem;
+      font-size: 0.8125rem;
+      cursor: pointer;
+      margin-left: auto;
+      transition: background 0.15s, color 0.15s;
+    }
+    .btn-stop-swarm:hover {
+      background: var(--error);
+      color: #fff;
+    }
+
+    /* ---- Empty-state hint line ---- */
+    .empty-hint {
+      margin-top: 0.5rem;
+      font-size: 0.8125rem;
+    }
+
+    /* ---- Launch panel ---- */
+    .launch-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 1.25rem;
+      overflow: hidden;
+    }
+
+    .launch-panel-header {
+      padding: 0.5rem 0.875rem;
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--text-dim);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .launch-panel-header:hover { color: var(--text); }
+
+    .launch-toggle-icon {
+      font-size: 0.875rem;
+      transition: transform 0.2s;
+    }
+
+    .launch-toggle-icon.open { transform: rotate(180deg); }
+
+    .launch-form {
+      padding: 1rem;
+      display: none;
+    }
+
+    .launch-form.visible { display: block; }
+
+    .launch-form-row {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0.75rem;
+      margin-bottom: 0.875rem;
+    }
+
+    @media (min-width: 640px) {
+      .launch-form-row { grid-template-columns: 1fr 1fr 1fr; }
+    }
+
+    .form-field { display: flex; flex-direction: column; gap: 0.3rem; }
+
+    .form-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-dim);
+    }
+
+    .form-input, .form-select {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: inherit;
+      font-size: 0.875rem;
+      padding: 0.45rem 0.75rem;
+      outline: none;
+      transition: border-color 0.15s;
+      width: 100%;
+    }
+
+    .form-input:focus, .form-select:focus { border-color: var(--accent); }
+    .form-input::placeholder { color: var(--text-dim); }
+
+    .form-select option { background: var(--card); color: var(--text); }
+
+    .launch-btn {
+      background: var(--accent);
+      border: none;
+      border-radius: var(--radius);
+      color: #0d1117;
+      font-weight: 600;
+      font-size: 0.875rem;
+      padding: 0.5rem 1.25rem;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+
+    .launch-btn:hover   { opacity: 0.85; }
+    .launch-btn:active  { opacity: 0.7;  }
+    .launch-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .launch-status {
+      font-size: 0.8125rem;
+      margin-top: 0.5rem;
+      min-height: 1.25rem;
+    }
+
+    .launch-status.ok    { color: var(--success); }
+    .launch-status.error { color: var(--error); }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-title">
+      <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+        <path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Zm4.879-2.773 4.264 2.559a.25.25 0 0 1 0 .428l-4.264 2.559A.25.25 0 0 1 6 10.559V5.442a.25.25 0 0 1 .379-.215Z"/>
+      </svg>
+      Agents UI
+    </div>
+    <span class="refresh-indicator" id="refresh-indicator" aria-live="polite">Connecting…</span>
+  </header>
+
+  <main id="app" role="main">
+    <div class="loading-state">
+      <div class="spinner" role="status" aria-label="Loading"></div>
+      <span>Loading swarm data…</span>
+    </div>
+  </main>
+
+  <script>
+    'use strict';
+
+    // ── State ──────────────────────────────────────────────────────────────────
+    const state = {
+      swarms:  [],
+      project: null,   // selected project_name (Level 2)
+      agent:   null,   // selected agent role (Level 3)
+      error:   null,
+      // session view state
+      session: {
+        paneContent:  '',
+        tmuxTarget:   '',
+        agentState:   '',
+        sending:      false,
+        lastFeedback: null,  // { ok, msg }
+        refreshTimer: null,
+      },
+      // launch form state
+      launch: {
+        open:       false,
+        repos:      [],
+        launching:  false,
+        status:     null,  // { ok, msg }
+      },
+    };
+
+    // ── Helpers ────────────────────────────────────────────────────────────────
+    function esc(v) {
+      if (v == null) return '';
+      return String(v)
+        .replace(/&/g,  '&amp;')
+        .replace(/</g,  '&lt;')
+        .replace(/>/g,  '&gt;')
+        .replace(/"/g,  '&quot;')
+        .replace(/'/g,  '&#39;');
+    }
+
+    function statusClass(stateStr) {
+      if (!stateStr) return 'unknown';
+      const lower = stateStr.toLowerCase();
+      if (lower.startsWith('working'))  return 'working';
+      if (lower === 'idle')             return 'idle';
+      if (lower === 'stopped')          return 'stopped';
+      if (lower === 'starting')         return 'starting';
+      return 'unknown';
+    }
+
+    // ── Launch panel ──────────────────────────────────────────────────────────
+    function renderLaunchPanel() {
+      const L = state.launch;
+      const iconClass = 'launch-toggle-icon' + (L.open ? ' open' : '');
+      const repoOptions = L.repos.map(r =>
+        '<option value="' + esc(r.path) + '">' + esc(r.name) + ' — ' + esc(r.path) + '</option>'
+      ).join('');
+
+      const statusHtml = L.status
+        ? '<div class="launch-status ' + (L.status.ok ? 'ok' : 'error') + '">' + esc(L.status.msg) + '</div>'
+        : '<div class="launch-status"></div>';
+
+      return (
+        '<div class="launch-panel" id="launch-panel">' +
+          '<div class="launch-panel-header" onclick="toggleLaunchPanel()" role="button" tabindex="0" ' +
+               'aria-expanded="' + L.open + '" aria-controls="launch-form" ' +
+               'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();toggleLaunchPanel()}">' +
+            '+ Launch New Swarm' +
+            '<span class="' + iconClass + '" aria-hidden="true">▾</span>' +
+          '</div>' +
+          '<div class="launch-form' + (L.open ? ' visible' : '') + '" id="launch-form">' +
+            '<div class="launch-form-row">' +
+              '<div class="form-field" style="grid-column:1/-1">' +
+                '<label class="form-label" for="launch-repo">Repository path</label>' +
+                '<input class="form-input" id="launch-repo" type="text" list="repo-datalist" ' +
+                       'placeholder="/path/to/your/repo" autocomplete="off" />' +
+                '<datalist id="repo-datalist">' + repoOptions + '</datalist>' +
+              '</div>' +
+            '</div>' +
+            '<div class="launch-form-row">' +
+              '<div class="form-field">' +
+                '<label class="form-label" for="launch-agent-type">Agent type</label>' +
+                '<select class="form-select" id="launch-agent-type">' +
+                  '<option value="Claude">Claude</option>' +
+                  '<option value="Codex">Codex</option>' +
+                  '<option value="Droid">Droid</option>' +
+                  '<option value="Gemini">Gemini</option>' +
+                '</select>' +
+              '</div>' +
+              '<div class="form-field">' +
+                '<label class="form-label" for="launch-workers">Workers</label>' +
+                '<input class="form-input" id="launch-workers" type="number" min="1" max="20" value="3" />' +
+              '</div>' +
+              '<div class="form-field" style="justify-content:flex-end;padding-top:1.35rem">' +
+                '<button class="launch-btn" id="launch-btn" onclick="submitLaunchSwarm()"' +
+                  (L.launching ? ' disabled' : '') + '>' +
+                  (L.launching ? 'Launching…' : 'Launch') +
+                '</button>' +
+              '</div>' +
+            '</div>' +
+            statusHtml +
+          '</div>' +
+        '</div>'
+      );
+    }
+
+    function toggleLaunchPanel() {
+      state.launch.open = !state.launch.open;
+      if (state.launch.open && state.launch.repos.length === 0) {
+        fetchRepos().then(repos => {
+          state.launch.repos = repos;
+          refreshLaunchPanel();
+        }).catch(() => {});
+      }
+      refreshLaunchPanel();
+    }
+
+    function refreshLaunchPanel() {
+      const container = document.getElementById('launch-panel-container');
+      if (container) {
+        container.innerHTML = renderLaunchPanel();
+      }
+    }
+
+    async function fetchRepos() {
+      const r = await fetch('/api/repos');
+      if (!r.ok) return [];
+      const data = await r.json();
+      return Array.isArray(data.repos) ? data.repos : [];
+    }
+
+    async function submitLaunchSwarm() {
+      const repoEl    = document.getElementById('launch-repo');
+      const typeEl    = document.getElementById('launch-agent-type');
+      const workersEl = document.getElementById('launch-workers');
+
+      if (!repoEl || !typeEl || !workersEl) return;
+
+      const repoPath   = repoEl.value.trim();
+      const agentType  = typeEl.value;
+      const numWorkers = parseInt(workersEl.value, 10) || 3;
+
+      if (!repoPath) {
+        state.launch.status = { ok: false, msg: 'Please enter a repository path.' };
+        refreshLaunchPanel();
+        return;
+      }
+
+      state.launch.launching = true;
+      state.launch.status    = null;
+      refreshLaunchPanel();
+
+      try {
+        const r = await fetch('/api/swarms', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ repo_path: repoPath, agent_type: agentType, num_workers: numWorkers }),
+        });
+        const data = await r.json();
+        if (r.ok && data.ok) {
+          state.launch.status = { ok: true, msg: 'Swarm launching for ' + (data.project_name || repoPath) + '! Refresh in a few seconds.' };
+          // Refresh swarms after a short delay to pick up the new swarm
+          setTimeout(() => { refresh(); }, 4000);
+        } else {
+          state.launch.status = { ok: false, msg: 'Launch failed (HTTP ' + r.status + ')' };
+        }
+      } catch (err) {
+        state.launch.status = { ok: false, msg: 'Error: ' + err.message };
+      } finally {
+        state.launch.launching = false;
+        refreshLaunchPanel();
+      }
+    }
+
+    // ── API ────────────────────────────────────────────────────────────────────
+    async function fetchSwarms() {
+      const r = await fetch('/api/swarms');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      return Array.isArray(data.swarms) ? data.swarms : [];
+    }
+
+    async function fetchPane(project, role) {
+      const r = await fetch('/api/swarms/' + encodeURIComponent(project) + '/agents/' + encodeURIComponent(role) + '/pane');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }
+
+    async function sendInput(project, role, text) {
+      const r = await fetch(
+        '/api/swarms/' + encodeURIComponent(project) + '/agents/' + encodeURIComponent(role) + '/input',
+        {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ text }),
+        }
+      );
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }
+
+    // ── Renderers ──────────────────────────────────────────────────────────────
+    function formatIssueInfo(agent) {
+      if (!agent.current_issue) return '';
+      return ' · #' + agent.current_issue +
+        (agent.current_issue_title ? ' ' + agent.current_issue_title : '');
+    }
+
+    function renderAgentRow(agent, project) {
+      const cls      = statusClass(agent.state);
+      const issueText = formatIssueInfo(agent);
+      const waitText  = agent.waiting_for_input
+        ? '<span class="needs-input"> · ⚠ Needs input</span>'
+        : '';
+      const proj = project || '';
+      return (
+        '<div class="agent-row" ' +
+             'role="button" tabindex="0" ' +
+             'aria-label="Open session for ' + esc(agent.role) + '" ' +
+             'onclick="openSession(\'' + esc(proj) + '\',\'' + esc(agent.role) + '\')" ' +
+             'onkeydown="if(event.key===\'Enter\'||(event.key===\' \'&&(event.preventDefault(),true))){openSession(\'' + esc(proj) + '\',\'' + esc(agent.role) + '\')}">' +
+          '<span class="status-dot s-' + cls + '" aria-hidden="true"></span>' +
+          '<div class="agent-info">' +
+            '<div class="agent-role">' + esc(agent.role) + '</div>' +
+            '<div class="agent-state-text">' +
+              esc(agent.state) + esc(issueText) + waitText +
+            '</div>' +
+          '</div>' +
+          '<span class="agent-row-arrow" aria-hidden="true">›</span>' +
+        '</div>'
+      );
+    }
+
+    function renderDetailView(swarm) {
+      const workers    = swarm.workers || [];
+      const workerRows = workers.length
+        ? workers.map(a => renderAgentRow(a, swarm.project_name)).join('')
+        : '<div class="empty-state">No workers</div>';
+
+      const stoppedBadge = swarm.stopped
+        ? ' <span class="stopped-badge">(stopped)</span>'
+        : '';
+
+      return (
+        '<nav class="breadcrumb" aria-label="Breadcrumb">' +
+          '<button class="crumb-link" onclick="navigate(null)">Repos</button>' +
+          '<span class="crumb-sep" aria-hidden="true">›</span>' +
+          '<span class="crumb-current">' + esc(swarm.project_name) + '</span>' +
+        '</nav>' +
+
+        '<div style="display:flex;align-items:center;gap:0.75rem">' +
+          '<div class="detail-title">' + esc(swarm.project_name) + stoppedBadge + '</div>' +
+          (!swarm.stopped
+            ? '<button class="btn-stop-swarm" onclick="stopSwarm(' + JSON.stringify(swarm.project_name) + ')">Stop</button>'
+            : '') +
+        '</div>' +
+        '<div class="detail-meta">' +
+          '<span class="meta-item">' + esc(swarm.agent_type) + '</span>' +
+          (swarm.workflow ? '<span class="meta-item">' + esc(swarm.workflow) + '</span>' : '') +
+          '<span class="meta-item" style="font-family:monospace;font-size:0.75rem">' + esc(swarm.tmux_session) + '</span>' +
+          '<span class="meta-item" style="opacity:0.7">' + esc(swarm.repo_path) + '</span>' +
+        '</div>' +
+
+        '<div class="detail-layout">' +
+          '<div class="panel">' +
+            '<div class="panel-header">Manager</div>' +
+            '<div class="agent-list">' + renderAgentRow(swarm.manager, swarm.project_name) + '</div>' +
+          '</div>' +
+          '<div class="panel">' +
+            '<div class="panel-header">' +
+              'Workers' +
+              '<span class="panel-count">' + workers.length + '</span>' +
+            '</div>' +
+            '<div class="agent-list">' + workerRows + '</div>' +
+          '</div>' +
+        '</div>'
+      );
+    }
+
+    function renderSessionView(project, role) {
+      const s    = state.session;
+      const cls  = statusClass(s.agentState);
+      const feedbackHtml = s.lastFeedback
+        ? '<p class="send-feedback ' + (s.lastFeedback.ok ? 'ok' : 'error') + '">' +
+            esc(s.lastFeedback.msg) + '</p>'
+        : '<p class="send-feedback"></p>';
+
+      return (
+        '<nav class="breadcrumb" aria-label="Breadcrumb">' +
+          '<button class="crumb-link" onclick="navigate(null)">Repos</button>' +
+          '<span class="crumb-sep" aria-hidden="true">›</span>' +
+          '<button class="crumb-link" onclick="navigate(\'' + esc(project) + '\')">' + esc(project) + '</button>' +
+          '<span class="crumb-sep" aria-hidden="true">›</span>' +
+          '<span class="crumb-current">' + esc(role) + '</span>' +
+        '</nav>' +
+
+        '<div class="session-header">' +
+          '<span class="status-dot s-' + cls + '" aria-hidden="true"></span>' +
+          '<span class="session-title">' + esc(role) + '</span>' +
+          '<span class="session-target">' + esc(s.tmuxTarget) + '</span>' +
+          '<span style="font-size:0.8125rem;color:var(--text-dim);margin-left:auto">' + esc(s.agentState) + '</span>' +
+        '</div>' +
+
+        '<div class="terminal-wrap">' +
+          '<div class="terminal-toolbar">' +
+            '<span>pane output</span>' +
+            '<button onclick="refreshSessionPane()" aria-label="Refresh pane">↺ Refresh</button>' +
+          '</div>' +
+          '<div class="terminal-output" id="terminal-output">' + esc(s.paneContent) + '</div>' +
+        '</div>' +
+
+        '<div class="input-row">' +
+          '<input class="session-input" id="session-input" type="text" ' +
+                 'placeholder="Type a command and press Enter or Send…" ' +
+                 'onkeydown="if(event.key===\'Enter\'){event.preventDefault();submitSessionInput()}" ' +
+                 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />' +
+          '<button class="send-btn" id="send-btn" onclick="submitSessionInput()" ' +
+                  (s.sending ? 'disabled' : '') + '>' +
+            (s.sending ? '…' : 'Send') +
+          '</button>' +
+        '</div>' +
+        feedbackHtml
+      );
+    }
+
+    function renderSwarmCard(swarm) {
+      const busy  = swarm.busy_count       || 0;
+      const idle  = swarm.idle_count       || 0;
+      const attn  = swarm.attention_count  || 0;
+      const stoppedClass = swarm.stopped ? ' stopped' : '';
+      const attnColor    = attn > 0 ? 'var(--error)' : 'var(--text-dim)';
+
+      return (
+        '<div class="swarm-card' + stoppedClass + '" ' +
+             'role="button" tabindex="0" ' +
+             'aria-label="View swarm ' + esc(swarm.project_name) + '" ' +
+             'onclick="navigate(\'' + esc(swarm.project_name) + '\')" ' +
+             'onkeydown="if(event.key===\'Enter\'||(event.key===\' \'&&(event.preventDefault(),true))){navigate(\'' + esc(swarm.project_name) + '\')}">' +
+          '<div class="card-header">' +
+            '<div class="project-name">' + esc(swarm.project_name) + '</div>' +
+            '<span class="badge">' + esc(swarm.agent_type) + '</span>' +
+          '</div>' +
+          '<div class="card-path">' + esc(swarm.repo_path) + '</div>' +
+          '<div class="card-stats">' +
+            '<div class="stat">' +
+              '<span class="stat-value" style="color:var(--working)">' + busy + '</span>' +
+              '<span class="stat-label">Busy</span>' +
+            '</div>' +
+            '<div class="stat">' +
+              '<span class="stat-value" style="color:var(--idle)">' + idle + '</span>' +
+              '<span class="stat-label">Idle</span>' +
+            '</div>' +
+            '<div class="stat">' +
+              '<span class="stat-value" style="color:' + attnColor + '">' + attn + '</span>' +
+              '<span class="stat-label">Attention</span>' +
+            '</div>' +
+          '</div>' +
+        '</div>'
+      );
+    }
+
+    function renderReposList() {
+      const swarms = state.swarms;
+      const launchHtml = '<div id="launch-panel-container">' + renderLaunchPanel() + '</div>';
+      if (!swarms.length) {
+        return (
+          launchHtml +
+          '<div class="empty-state">' +
+            '<p>No active swarms.</p>' +
+            '<p class="empty-hint">Launch a swarm using the panel above, or start <code>agents-tui</code>.</p>' +
+          '</div>'
+        );
+      }
+      return (
+        launchHtml +
+        '<p class="section-heading">' + swarms.length + ' Swarm' + (swarms.length !== 1 ? 's' : '') + '</p>' +
+        '<div class="swarms-grid">' + swarms.map(renderSwarmCard).join('') + '</div>'
+      );
+    }
+
+    // ── Render dispatcher ──────────────────────────────────────────────────────
+    function render() {
+      const app = document.getElementById('app');
+      if (state.error && !state.swarms.length) {
+        app.innerHTML =
+          '<div class="error-banner">Could not reach API: ' + esc(state.error) + '</div>' +
+          renderReposList();
+        return;
+      }
+
+      if (state.agent && state.project) {
+        app.innerHTML = renderSessionView(state.project, state.agent);
+        // Scroll terminal to bottom
+        const t = document.getElementById('terminal-output');
+        if (t) t.scrollTop = t.scrollHeight;
+        // Focus the input
+        const inp = document.getElementById('session-input');
+        if (inp && document.activeElement !== inp) inp.focus();
+        return;
+      }
+
+      if (state.project) {
+        const swarm = state.swarms.find(s => s.project_name === state.project);
+        if (swarm) {
+          app.innerHTML = renderDetailView(swarm);
+          return;
+        }
+        state.project = null;
+      }
+
+      app.innerHTML = renderReposList();
+    }
+
+    // ── Navigation ─────────────────────────────────────────────────────────────
+    function navigate(projectName) {
+      // Stop any session pane-refresh timer before leaving
+      stopSessionRefresh();
+      state.project = projectName;
+      state.agent   = null;
+      render();
+      window.scrollTo(0, 0);
+    }
+
+    function openSession(project, role) {
+      stopSessionRefresh();
+      state.project = project;
+      state.agent   = role;
+      state.session = {
+        paneContent:  'Loading…',
+        tmuxTarget:   '',
+        agentState:   '',
+        sending:      false,
+        lastFeedback: null,
+        refreshTimer: null,
+      };
+      render();
+      window.scrollTo(0, 0);
+      // Load initial pane content then start refresh loop
+      refreshSessionPane();
+    }
+
+    // ── Session pane refresh ───────────────────────────────────────────────────
+    async function stopSwarm(project) {
+      if (!confirm('Stop swarm "' + project + '"? This will kill the tmux session.')) return;
+      try {
+        const resp = await fetch('/api/swarms/' + encodeURIComponent(project), { method: 'DELETE' });
+        if (!resp.ok) {
+          alert('Failed to stop swarm: ' + resp.status);
+          return;
+        }
+        navigate(null);
+        await fetchSwarms();
+      } catch (err) {
+        alert('Error stopping swarm: ' + err.message);
+      }
+    }
+
+    function stopSessionRefresh() {
+      if (state.session.refreshTimer !== null) {
+        clearInterval(state.session.refreshTimer);
+        state.session.refreshTimer = null;
+      }
+    }
+
+    async function refreshSessionPane() {
+      if (!state.project || !state.agent) return;
+      try {
+        const data = await fetchPane(state.project, state.agent);
+        state.session.paneContent = data.pane_content || '';
+        state.session.tmuxTarget  = data.tmux_target  || '';
+        state.session.agentState  = data.state        || '';
+        // Update DOM directly to avoid re-rendering the whole view (which would
+        // clear the input field and reset focus).
+        const t = document.getElementById('terminal-output');
+        if (t) {
+          const wasAtBottom = t.scrollHeight - t.scrollTop <= t.clientHeight + 20;
+          t.textContent = state.session.paneContent;
+          if (wasAtBottom) t.scrollTop = t.scrollHeight;
+        }
+        // Update status in session header if visible
+        const hdr = document.querySelector('.session-header .s-' + statusClass(state.session.agentState));
+        // Update the target label & state text without full re-render
+        const targetEl = document.querySelector('.session-target');
+        if (targetEl) targetEl.textContent = state.session.tmuxTarget;
+        const stateEl = document.querySelector('.session-header span:last-child');
+        if (stateEl) stateEl.textContent = state.session.agentState;
+      } catch (err) {
+        // Non-fatal; just leave stale content
+        traceSessionError(err);
+      }
+      // Start periodic refresh if not already running
+      if (state.session.refreshTimer === null && state.agent) {
+        state.session.refreshTimer = setInterval(refreshSessionPane, 2000);
+      }
+    }
+
+    function traceSessionError(err) {
+      // Suppress noisy errors when navigating away; only log in session context
+      if (state.agent) {
+        const t = document.getElementById('terminal-output');
+        if (t && t.textContent === 'Loading…') {
+          t.textContent = 'Could not load pane: ' + err.message;
+        }
+      }
+    }
+
+    // ── Send input ─────────────────────────────────────────────────────────────
+    async function submitSessionInput() {
+      const inp = document.getElementById('session-input');
+      if (!inp) return;
+      const text = inp.value.trim();
+      if (!text) return;
+
+      state.session.sending      = true;
+      state.session.lastFeedback = null;
+      const btn = document.getElementById('send-btn');
+      if (btn) { btn.disabled = true; btn.textContent = '…'; }
+
+      try {
+        await sendInput(state.project, state.agent, text);
+        inp.value = '';
+        state.session.lastFeedback = { ok: true, msg: 'Sent ✓' };
+        // Refresh pane immediately after sending
+        await refreshSessionPane();
+      } catch (err) {
+        state.session.lastFeedback = { ok: false, msg: 'Error: ' + err.message };
+      } finally {
+        state.session.sending = false;
+        if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
+        // Update feedback display without full re-render
+        const fb = document.querySelector('.send-feedback');
+        if (fb && state.session.lastFeedback) {
+          fb.className = 'send-feedback ' + (state.session.lastFeedback.ok ? 'ok' : 'error');
+          fb.textContent = state.session.lastFeedback.msg;
+          setTimeout(() => {
+            if (fb) { fb.className = 'send-feedback'; fb.textContent = ''; }
+          }, 3000);
+        }
+        inp.focus();
+      }
+    }
+
+    // ── Swarms refresh loop ────────────────────────────────────────────────────
+    async function refresh() {
+      const ind = document.getElementById('refresh-indicator');
+      try {
+        state.swarms = await fetchSwarms();
+        state.error  = null;
+        const t = new Date();
+        ind.textContent = 'Updated ' + t.toLocaleTimeString();
+      } catch (err) {
+        state.error = err.message;
+        ind.textContent = 'Error: ' + err.message;
+      }
+      // Only re-render repos/detail levels; session view does its own live updates
+      if (!state.agent) {
+        render();
+      }
+    }
+
+    refresh();
+    setInterval(refresh, 5000);
+  </script>
+</body>
+</html>
