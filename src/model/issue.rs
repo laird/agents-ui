@@ -464,4 +464,47 @@ mod tests {
         assert_eq!(p2, 1);
         assert_eq!(p3, 0);
     }
+
+    #[test]
+    fn status_label_shows_assigned_worker_name() {
+        let mut issue = make_issue(1, &["working"]);
+        issue.assigned_worker = Some("worker-1".to_string());
+        assert_eq!(issue.status_label(), "🔨 worker-1");
+    }
+
+    #[test]
+    fn issue_priority_display_formats_correctly() {
+        assert_eq!(IssuePriority::P0.to_string(), "P0");
+        assert_eq!(IssuePriority::P1.to_string(), "P1");
+        assert_eq!(IssuePriority::P2.to_string(), "P2");
+        assert_eq!(IssuePriority::P3.to_string(), "P3");
+        assert_eq!(IssuePriority::None.to_string(), "—");
+    }
+
+    #[test]
+    fn issue_type_display_formats_correctly() {
+        assert_eq!(IssueType::Bug.to_string(), "bug");
+        assert_eq!(IssueType::Enhancement.to_string(), "enhancement");
+        assert_eq!(IssueType::Proposal.to_string(), "proposal");
+        assert_eq!(IssueType::Other.to_string(), "");
+    }
+
+    #[test]
+    fn gh_issue_json_converts_closed_state_correctly() {
+        let raw = GhIssueJson {
+            number: 42,
+            title: "A closed bug".to_string(),
+            state: "CLOSED".to_string(),
+            labels: vec![
+                GhLabelJson { name: "bug".to_string() },
+                GhLabelJson { name: "P1".to_string() },
+            ],
+            updated_at: None,
+        };
+        let issue = GitHubIssue::from(raw);
+        assert_eq!(issue.state, IssueState::Closed);
+        assert_eq!(issue.issue_type, IssueType::Bug);
+        assert_eq!(issue.priority, IssuePriority::P1);
+        assert_eq!(issue.status_label(), "closed");
+    }
 }
