@@ -710,4 +710,60 @@ mod tests {
         assert_eq!(all[1].id, "w-0");
         assert_eq!(all[2].id, "w-1");
     }
+
+    // ── detect_waiting_for_input ──────────────────────────────────────────────
+
+    #[test]
+    fn detects_bypass_permissions_prompt() {
+        let content = "some output\nDo you want to bypass permissions on this action? [shift+tab]\n";
+        assert!(detect_waiting_for_input(content));
+    }
+
+    #[test]
+    fn detects_allow_prompt() {
+        let content = "some output\nAllow?\n";
+        assert!(detect_waiting_for_input(content));
+    }
+
+    #[test]
+    fn detects_yn_prompts() {
+        assert!(detect_waiting_for_input("Continue (y/n)"));
+        assert!(detect_waiting_for_input("Continue [Y/n]"));
+        assert!(detect_waiting_for_input("Continue [y/N]"));
+    }
+
+    #[test]
+    fn detects_claude_do_instead_prompt() {
+        let content = "Error occurred.\nWhat should Claude do instead?\n";
+        assert!(detect_waiting_for_input(content));
+    }
+
+    #[test]
+    fn detects_gemini_do_instead_prompt() {
+        let content = "Error occurred.\nWhat should Gemini do instead?\n";
+        assert!(detect_waiting_for_input(content));
+    }
+
+    #[test]
+    fn detects_interrupted_with_prompt() {
+        let content = "Working...\nInterrupted\n❯ ";
+        assert!(detect_waiting_for_input(content));
+    }
+
+    #[test]
+    fn ignores_non_prompt_content() {
+        let content = "Running tests...\nAll tests passed.\nBuild complete.\n";
+        assert!(!detect_waiting_for_input(content));
+    }
+
+    #[test]
+    fn only_checks_last_15_lines() {
+        // Prompt buried more than 15 lines from the end → not detected
+        let mut lines: Vec<&str> = vec!["Allow?"];
+        for _ in 0..16 {
+            lines.push("normal output line");
+        }
+        let content = lines.join("\n");
+        assert!(!detect_waiting_for_input(&content));
+    }
 }
