@@ -603,6 +603,40 @@
 
     .launch-status.ok    { color: var(--success); }
     .launch-status.error { color: var(--error); }
+
+    /* ---- Swarm action bar (Stop / Add Worker / Start) ---- */
+    .swarm-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.625rem;
+      margin-bottom: 1rem;
+    }
+
+    .action-btn {
+      border: none;
+      border-radius: var(--radius);
+      font-weight: 600;
+      font-size: 0.8125rem;
+      padding: 0.375rem 1rem;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+
+    .action-btn:hover   { opacity: 0.85; }
+    .action-btn:active  { opacity: 0.7; }
+    .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .action-btn.stop    { background: var(--error);   color: #fff; }
+    .action-btn.start   { background: var(--success); color: #0d1117; }
+    .action-btn.add     { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+
+    .action-feedback {
+      font-size: 0.8rem;
+      margin-left: 0.5rem;
+    }
+
+    .action-feedback.ok    { color: var(--success); }
+    .action-feedback.error { color: var(--error); }
   </style>
 </head>
 <body>
@@ -795,6 +829,76 @@
       }
     }
 
+    // ── Swarm actions ─────────────────────────────────────────────────────────
+
+    async function stopSwarm(projectName) {
+      const btn = document.getElementById('swarm-stop-btn');
+      if (btn) { btn.disabled = true; btn.textContent = 'Stopping…'; }
+      setActionFeedback('');
+      try {
+        const r = await fetch('/api/swarms/' + encodeURIComponent(projectName), { method: 'DELETE' });
+        if (r.ok) {
+          setActionFeedback('Swarm stopped.', true);
+          setTimeout(() => { refresh(); }, 1500);
+        } else {
+          setActionFeedback('Stop failed (HTTP ' + r.status + ').', false);
+          if (btn) { btn.disabled = false; btn.textContent = 'Stop'; }
+        }
+      } catch (err) {
+        setActionFeedback('Error: ' + err.message, false);
+        if (btn) { btn.disabled = false; btn.textContent = 'Stop'; }
+      }
+    }
+
+    async function addWorker(projectName) {
+      const btn = document.getElementById('swarm-addworker-btn');
+      if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
+      setActionFeedback('');
+      try {
+        const r = await fetch('/api/swarms/' + encodeURIComponent(projectName) + '/workers', { method: 'POST' });
+        if (r.ok) {
+          setActionFeedback('Worker launching…', true);
+          setTimeout(() => { refresh(); }, 5000);
+        } else {
+          setActionFeedback('Add worker failed (HTTP ' + r.status + ').', false);
+        }
+      } catch (err) {
+        setActionFeedback('Error: ' + err.message, false);
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '+ Add Worker'; }
+      }
+    }
+
+    async function startSwarm(projectName, repoPath, agentType) {
+      const btn = document.getElementById('swarm-start-btn');
+      if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
+      setActionFeedback('');
+      try {
+        const r = await fetch('/api/swarms', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ repo_path: repoPath, agent_type: agentType, num_workers: 1 }),
+        });
+        if (r.ok) {
+          setActionFeedback('Swarm starting…', true);
+          setTimeout(() => { refresh(); }, 4000);
+        } else {
+          setActionFeedback('Start failed (HTTP ' + r.status + ').', false);
+          if (btn) { btn.disabled = false; btn.textContent = 'Start'; }
+        }
+      } catch (err) {
+        setActionFeedback('Error: ' + err.message, false);
+        if (btn) { btn.disabled = false; btn.textContent = 'Start'; }
+      }
+    }
+
+    function setActionFeedback(msg, ok) {
+      const el = document.getElementById('swarm-action-feedback');
+      if (!el) return;
+      el.textContent = msg;
+      el.className = 'action-feedback' + (msg ? (ok ? ' ok' : ' error') : '');
+    }
+
     // ── API ────────────────────────────────────────────────────────────────────
     async function fetchSwarms() {
       const r = await fetch('/api/swarms');
@@ -854,6 +958,36 @@
       );
     }
 
+    function renderSwarmActions(swarm) {
+      const p = esc(swarm.project_name);
+      const r = esc(swarm.repo_path);
+      const t = esc(swarm.agent_type);
+      if (swarm.stopped) {
+        return (
+          '<div class="swarm-actions">' +
+            '<button class="action-btn start" id="swarm-start-btn" ' +
+              'onclick="startSwarm(\'' + p + '\',\'' + r + '\',\'' + t + '\')">' +
+              'Start' +
+            '</button>' +
+            '<span id="swarm-action-feedback" class="action-feedback"></span>' +
+          '</div>'
+        );
+      }
+      return (
+        '<div class="swarm-actions">' +
+          '<button class="action-btn stop" id="swarm-stop-btn" ' +
+            'onclick="stopSwarm(\'' + p + '\')">' +
+            'Stop' +
+          '</button>' +
+          '<button class="action-btn add" id="swarm-addworker-btn" ' +
+            'onclick="addWorker(\'' + p + '\')">' +
+            '+ Add Worker' +
+          '</button>' +
+          '<span id="swarm-action-feedback" class="action-feedback"></span>' +
+        '</div>'
+      );
+    }
+
     function renderDetailView(swarm) {
       const workers    = swarm.workers || [];
       const workerRows = workers.length
@@ -878,6 +1012,8 @@
           '<span class="meta-item" style="font-family:monospace;font-size:0.75rem">' + esc(swarm.tmux_session) + '</span>' +
           '<span class="meta-item" style="opacity:0.7">' + esc(swarm.repo_path) + '</span>' +
         '</div>' +
+
+        renderSwarmActions(swarm) +
 
         '<div class="detail-layout">' +
           '<div class="panel">' +
