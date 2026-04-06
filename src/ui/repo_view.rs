@@ -379,6 +379,11 @@ impl RepoView {
                     ratatui::style::Style::default()
                 };
 
+                let done_label = if w.completed_issue_count > 0 {
+                    format!(" ({} done)", w.completed_issue_count)
+                } else {
+                    String::new()
+                };
                 let line1 = Line::from(vec![
                     Span::styled(key_label, theme::help_style()),
                     Span::styled(
@@ -397,6 +402,7 @@ impl RepoView {
                             theme::title_style()
                         },
                     ),
+                    Span::styled(done_label, theme::help_style()),
                 ]);
                 let dispatch_label = match w.dispatched_issue {
                     Some(n) => match &w.status.state {

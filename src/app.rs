@@ -1668,6 +1668,7 @@ impl App {
                 current_issue_title: None,
                 waiting_for_input: false,
             resurrection_attempts: 0,
+            completed_issue_count: 0,
             },
             workers: Vec::new(),
             issue_cache: crate::model::issue::IssueCache::default(),
@@ -4932,7 +4933,9 @@ impl App {
                                 crate::model::status::AgentState::Idle
                                     | crate::model::status::AgentState::Stopped
                             ) {
-                                agent.dispatched_issue = None;
+                                if agent.dispatched_issue.take().is_some() {
+                                    agent.completed_issue_count += 1;
+                                }
                             }
                             // Reset resurrection counter when agent returns to healthy state
                             if matches!(new_status.state,
