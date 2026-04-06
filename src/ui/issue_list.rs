@@ -228,6 +228,20 @@ mod tests {
         }
     }
 
+    fn make_closed_issue(number: u32, priority: IssuePriority) -> GitHubIssue {
+        GitHubIssue {
+            number,
+            title: format!("Closed #{number}"),
+            state: IssueState::Closed,
+            labels: vec![format!("{priority}")],
+            priority,
+            issue_type: IssueType::Bug,
+            is_working: false,
+            assigned_worker: None,
+            updated_at: None,
+        }
+    }
+
     #[test]
     fn sorted_open_puts_blocked_last() {
         let issues = vec![
@@ -242,6 +256,42 @@ mod tests {
     }
 
     #[test]
+    fn sorted_open_excludes_closed_issues() {
+        let issues = vec![
+            make_issue(1, IssuePriority::P0, false),
+            make_closed_issue(2, IssuePriority::P0),
+        ];
+        let sorted = IssueListView::sorted_open(&issues);
+        assert_eq!(sorted.len(), 1);
+        assert_eq!(sorted[0].number, 1);
+    }
+
+    #[test]
+    fn sorted_open_tiebreak_by_number() {
+        let issues = vec![
+            make_issue(10, IssuePriority::P2, false),
+            make_issue(5, IssuePriority::P2, false),
+            make_issue(7, IssuePriority::P2, false),
+        ];
+        let sorted = IssueListView::sorted_open(&issues);
+        assert_eq!(sorted[0].number, 5);
+        assert_eq!(sorted[1].number, 7);
+        assert_eq!(sorted[2].number, 10);
+    }
+
+    #[test]
+    fn sorted_open_blocked_sink_below_lower_priority_unblocked() {
+        // Blocked P0 should come after unblocked P3
+        let issues = vec![
+            make_issue(1, IssuePriority::P0, true),
+            make_issue(2, IssuePriority::P3, false),
+        ];
+        let sorted = IssueListView::sorted_open(&issues);
+        assert_eq!(sorted[0].number, 2); // unblocked P3 before blocked P0
+        assert_eq!(sorted[1].number, 1);
+    }
+
+    #[test]
     fn navigation_wraps() {
         let mut view = IssueListView::new();
         view.next(3);
@@ -251,5 +301,25 @@ mod tests {
         assert_eq!(view.selected(), Some(0)); // wrapped
         view.previous(3);
         assert_eq!(view.selected(), Some(2)); // wrapped backward
+    }
+
+    #[test]
+    fn navigation_empty_list_is_noop() {
+        let mut view = IssueListView::new();
+        // Force selected to None to test empty-list no-op
+        view.table_state.select(None);
+        view.next(0);
+        assert_eq!(view.selected(), None);
+        view.previous(0);
+        assert_eq!(view.selected(), None);
+    }
+
+    #[test]
+    fn navigation_previous_decrements() {
+        let mut view = IssueListView::new();
+        // Start at 2, previous should go to 1
+        view.table_state.select(Some(2));
+        view.previous(5);
+        assert_eq!(view.selected(), Some(1));
     }
 }
