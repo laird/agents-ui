@@ -113,7 +113,7 @@ fn shell_quote(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_shell_command, ServerTransport};
+    use super::{build_shell_command, shell_quote, ServerTransport};
     use std::path::Path;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -123,6 +123,39 @@ mod tests {
             .map(|d| d.as_nanos())
             .unwrap_or(0);
         std::env::temp_dir().join(format!("agents-ui-{name}-{}-{nanos}", std::process::id()))
+    }
+
+    #[test]
+    fn shell_quote_simple_string() {
+        assert_eq!(shell_quote("hello"), "'hello'");
+    }
+
+    #[test]
+    fn shell_quote_single_quote_inside() {
+        assert_eq!(shell_quote("it's"), "'it'\"'\"'s'");
+    }
+
+    #[test]
+    fn shell_quote_starts_and_ends_with_single_quote() {
+        assert_eq!(shell_quote("'wrapped'"), "''\"'\"'wrapped'\"'\"''");
+    }
+
+    #[test]
+    fn shell_quote_empty_string() {
+        assert_eq!(shell_quote(""), "''");
+    }
+
+    #[test]
+    fn shell_quote_special_shell_characters() {
+        // $, backtick, newline are all safe inside single quotes
+        assert_eq!(shell_quote("$var"), "'$var'");
+        assert_eq!(shell_quote("`cmd`"), "'`cmd`'");
+        assert_eq!(shell_quote("line1\nline2"), "'line1\nline2'");
+    }
+
+    #[test]
+    fn shell_quote_consecutive_single_quotes() {
+        assert_eq!(shell_quote("''"), "''\"'\"''\"'\"''");
     }
 
     #[test]
