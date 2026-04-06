@@ -125,6 +125,101 @@ async fn api_input_handler(
     Ok(Json(json!({ "ok": true })))
 }
 
+/// Add a worker to a running swarm.
+/// `POST /api/swarms/:project/workers`
+async fn api_add_worker_handler(
+    Path(project): Path<String>,
+    State(state): State<WebServerState>,
+) -> Result<Json<Value>, StatusCode> {
+    use crate::adapter::claude::ClaudeAdapter;
+    use crate::adapter::traits::AgentRuntime;
+    use crate::model::issue::IssueCache;
+    use crate::model::status::{AgentState, AgentStatus};
+    use crate::model::swarm::{AgentInfo, AgentType, Swarm};
+    use crate::transport::ServerTransport;
+
+    let (repo_path, agent_type_str, tmux_session, worker_count) = {
+        let guard = state
+            .swarms
+            .read()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let snap = guard
+            .iter()
+            .find(|s| s.project_name == project)
+            .ok_or(StatusCode::NOT_FOUND)?;
+        if snap.stopped {
+            return Err(StatusCode::CONFLICT);
+        }
+        (
+            std::path::PathBuf::from(&snap.repo_path),
+            snap.agent_type.clone(),
+            snap.tmux_session.clone(),
+            snap.workers.len(),
+        )
+    };
+
+    let agent_type: AgentType = match agent_type_str.as_str() {
+        "Claude" => AgentType::Claude,
+        "Codex"  => AgentType::Codex,
+        "Droid"  => AgentType::Droid,
+        "Gemini" => AgentType::Gemini,
+        _ => return Err(StatusCode::BAD_REQUEST),
+    };
+
+    // Build a minimal Swarm — add_worker only needs workers.len(), project_name,
+    // repo_path, tmux_session, and agent_type from this struct.
+    let idle_status = AgentStatus { timestamp: None, state: AgentState::Idle };
+    let make_agent = |role: &str, is_manager: bool| AgentInfo {
+        id: format!("{project}/{role}"),
+        role: role.to_string(),
+        worktree_path: repo_path.clone(),
+        tmux_target: String::new(),
+        status: idle_status.clone(),
+        is_manager,
+        pane_content: String::new(),
+        dispatched_issue: None,
+        current_issue: None,
+        current_issue_title: None,
+        waiting_for_input: false,
+    };
+    // Build agents while the closure still holds a reference to repo_path, then
+    // let the closure drop so we can move repo_path into Swarm below.
+    let manager_agent = make_agent("manager", true);
+    let worker_agents: Vec<AgentInfo> = (1..=worker_count)
+        .map(|n| make_agent(&format!("worker-{n}"), false))
+        .collect();
+    drop(make_agent);
+
+    let swarm = Swarm {
+        repo_path,
+        project_name: project.clone(),
+        agent_type: agent_type.clone(),
+        workflow: None,
+        tmux_session,
+        manager: manager_agent,
+        workers: worker_agents,
+        issue_cache: IssueCache::default(),
+        stopped: false,
+    };
+
+    tokio::spawn(async move {
+        let adapter = ClaudeAdapter::new(agent_type, ServerTransport::new(None));
+        match adapter.add_worker(&swarm).await {
+            Ok(agent) => tracing::info!(
+                "Added worker {} to swarm {}",
+                agent.role,
+                swarm.project_name
+            ),
+            Err(e) => tracing::error!(
+                "Failed to add worker to {}: {e:#}",
+                swarm.project_name
+            ),
+        }
+    });
+
+    Ok(Json(json!({ "ok": true })))
+}
+
 /// Stop a running swarm by killing its tmux session.
 /// `DELETE /api/swarms/:project`
 async fn api_stop_swarm_handler(
@@ -306,6 +401,7 @@ pub async fn run(port: u16, state: WebServerState) -> Result<()> {
         .route("/api/repos", get(api_repos_handler))
         .route("/api/agent-types", get(api_agent_types_handler))
         .route("/api/swarms/{project}", delete(api_stop_swarm_handler))
+        .route("/api/swarms/{project}/workers", post(api_add_worker_handler))
         .route(
             "/api/swarms/{project}/agents/{role}/pane",
             get(api_pane_handler),
@@ -347,6 +443,7 @@ mod tests {
             .route("/api/repos", get(api_repos_handler))
             .route("/api/agent-types", get(api_agent_types_handler))
             .route("/api/swarms/{project}", delete(api_stop_swarm_handler))
+            .route("/api/swarms/{project}/workers", post(api_add_worker_handler))
             .route(
                 "/api/swarms/{project}/agents/{role}/pane",
                 get(api_pane_handler),
@@ -673,5 +770,72 @@ mod tests {
         let resp = app.oneshot(req).await.unwrap();
         // The swarm was found (not 404); tmux may or may not be available.
         assert_ne!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    // ── POST /api/swarms/:project/workers ──────────────────────────────────────
+
+    #[tokio::test]
+    async fn api_add_worker_returns_404_for_unknown_swarm() {
+        let state = make_web_state(new_shared_state());
+        let app = make_app(state);
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/swarms/nonexistent/workers")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn api_add_worker_returns_conflict_for_stopped_swarm() {
+        let shared = new_shared_state();
+        {
+            let mut guard = shared.write().unwrap();
+            let mut swarm = sample_swarm("my-project");
+            swarm.stopped = true;
+            guard.push(swarm);
+        }
+        let state = make_web_state(shared);
+        let app = make_app(state);
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/swarms/my-project/workers")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn api_add_worker_found_swarm_accepts_request() {
+        // When the swarm exists and is running, the handler spawns a background
+        // task and returns 200. The actual tmux call will fail in tests (no tmux),
+        // but the HTTP layer should return ok (worker launch is fire-and-forget).
+        let shared = new_shared_state();
+        {
+            let mut guard = shared.write().unwrap();
+            guard.push(sample_swarm("my-project"));
+        }
+        let state = make_web_state(shared);
+        let app = make_app(state);
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/swarms/my-project/workers")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    // ── UI HTML action button presence ─────────────────────────────────────────
+
+    #[tokio::test]
+    async fn index_html_contains_add_worker_and_start_buttons() {
+        let body = INDEX_HTML;
+        assert!(body.contains("addWorker"), "addWorker function must be present");
+        assert!(body.contains("startSwarm"), "startSwarm function must be present");
+        assert!(body.contains("btn-add-worker"), "Add Worker button CSS must be present");
+        assert!(body.contains("btn-start-swarm"), "Start button CSS must be present");
     }
 }

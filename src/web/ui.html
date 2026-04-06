@@ -493,7 +493,7 @@
       font-size: 0.75rem;
     }
 
-    /* ---- Stop swarm button ---- */
+    /* ---- Swarm action buttons (Stop / Start / Add Worker) ---- */
     .btn-stop-swarm {
       background: transparent;
       border: 1px solid var(--error);
@@ -502,12 +502,45 @@
       padding: 0.25rem 0.75rem;
       font-size: 0.8125rem;
       cursor: pointer;
-      margin-left: auto;
       transition: background 0.15s, color 0.15s;
     }
     .btn-stop-swarm:hover {
       background: var(--error);
       color: #fff;
+    }
+    .btn-start-swarm {
+      background: transparent;
+      border: 1px solid var(--success);
+      color: var(--success);
+      border-radius: var(--radius);
+      padding: 0.25rem 0.75rem;
+      font-size: 0.8125rem;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .btn-start-swarm:hover {
+      background: var(--success);
+      color: #fff;
+    }
+    .btn-add-worker {
+      background: transparent;
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      border-radius: var(--radius);
+      padding: 0.25rem 0.75rem;
+      font-size: 0.8125rem;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .btn-add-worker:hover {
+      background: var(--accent);
+      color: #fff;
+    }
+    .swarm-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-left: auto;
     }
 
     /* ---- Empty-state hint line ---- */
@@ -978,9 +1011,16 @@
 
         '<div style="display:flex;align-items:center;gap:0.75rem">' +
           '<div class="detail-title">' + esc(swarm.project_name) + stoppedBadge + '</div>' +
-          (!swarm.stopped
-            ? '<button class="btn-stop-swarm" onclick="stopSwarm(' + JSON.stringify(swarm.project_name) + ')">Stop</button>'
-            : '') +
+          '<div class="swarm-actions">' +
+          (swarm.stopped
+            ? '<button class="btn-start-swarm" onclick="startSwarm(' +
+                JSON.stringify(swarm.repo_path) + ',' +
+                JSON.stringify(swarm.agent_type) + ',' +
+                JSON.stringify(swarm.workers.length || 2) + ')">Start</button>'
+            : '<button class="btn-add-worker" onclick="addWorker(' + JSON.stringify(swarm.project_name) + ')">+ Worker</button>' +
+              '<button class="btn-stop-swarm" onclick="stopSwarm(' + JSON.stringify(swarm.project_name) + ')">Stop</button>'
+          ) +
+          '</div>' +
         '</div>' +
         '<div class="detail-meta">' +
           '<span class="meta-item">' + esc(swarm.agent_type) + '</span>' +
@@ -1180,6 +1220,39 @@
         await fetchSwarms();
       } catch (err) {
         alert('Error stopping swarm: ' + err.message);
+      }
+    }
+
+    async function startSwarm(repoPath, agentType, numWorkers) {
+      try {
+        const resp = await fetch('/api/swarms', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ repo_path: repoPath, agent_type: agentType, num_workers: numWorkers }),
+        });
+        if (!resp.ok) {
+          alert('Failed to start swarm: ' + resp.status);
+          return;
+        }
+        navigate(null);
+        setTimeout(fetchSwarms, 1500); // give it a moment to appear
+      } catch (err) {
+        alert('Error starting swarm: ' + err.message);
+      }
+    }
+
+    async function addWorker(project) {
+      try {
+        const resp = await fetch('/api/swarms/' + encodeURIComponent(project) + '/workers', {
+          method: 'POST',
+        });
+        if (!resp.ok) {
+          alert('Failed to add worker: ' + resp.status);
+          return;
+        }
+        await fetchSwarms();
+      } catch (err) {
+        alert('Error adding worker: ' + err.message);
       }
     }
 
