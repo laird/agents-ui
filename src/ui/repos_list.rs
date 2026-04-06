@@ -320,6 +320,9 @@ mod tests {
             current_issue: None,
             current_issue_title: None,
             waiting_for_input: false,
+            resurrection_attempts: 0,
+            completed_issue_count: 0,
+            health: crate::model::swarm::WorkerHealth::default(),
         }
     }
 
@@ -378,6 +381,7 @@ mod tests {
     fn next_with_empty_list_does_not_panic() {
         let mut view = ReposListView::new();
         view.next(0);
+        // no panic; selection unchanged
         assert_eq!(view.selected(), Some(0));
     }
 
@@ -385,6 +389,7 @@ mod tests {
     fn previous_with_empty_list_does_not_panic() {
         let mut view = ReposListView::new();
         view.previous(0);
+        // no panic; selection unchanged
         assert_eq!(view.selected(), Some(0));
     }
 

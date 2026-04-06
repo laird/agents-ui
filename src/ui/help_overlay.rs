@@ -92,6 +92,18 @@ pub fn render_help_overlay(
     f.render_widget(table, popup_area);
 }
 
+/// Context-specific help entries for the Issues panel.
+pub const ISSUES_PANEL_CONTEXT: &[(&str, &str)] = &[
+    ("Issues Panel", ""),
+    ("j/↓", "next issue"),
+    ("k/↑", "prev issue"),
+    ("Enter", "view issue"),
+    ("d/Space", "dispatch to worker"),
+    ("f", "cycle filter"),
+    ("/", "search"),
+    ("r/F5", "refresh"),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -136,21 +148,3 @@ mod tests {
         assert!(rendered.contains("Issues Panel"));
     }
 }
-
-/// Issue panel context entries for the help overlay.
-pub const ISSUES_PANEL_CONTEXT: &[(&str, &str)] = &[
-    ("cycle status filter", "f"),
-    ("cycle type filter", "t"),
-    ("cycle priority filter", "P"),
-    ("clear all filters", "c"),
-    ("search issues", "/"),
-    ("add new issue", "a"),
-    ("dispatch to agent", "d / Space"),
-    ("approve issue", "p"),
-    ("next blocked issue", "b"),
-    ("refresh issues", "r"),
-    ("review-blocked", "R"),
-    ("open in browser", "g"),
-    ("release working label", "u"),
-    ("view issue detail", "Enter"),
-];

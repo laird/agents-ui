@@ -801,6 +801,61 @@ impl ClaudeAdapter {
     }
 
     /// Poll a tmux pane until the agent prompt indicator appears, or timeout.
+    async fn codex_agent_needs_relaunch(&self, agent: &AgentInfo, pane_content: &str) -> bool {
+        let lower = pane_content.to_lowercase();
+        if agent.is_manager {
+            return !(lower.contains("starting codex monitor loop")
+                || lower.contains("codex worker monitor")
+                || lower.contains("codex monitor loop"));
+        }
+
+        let status_file = agent
+            .worktree_path
+            .join(AgentType::Codex.status_dir())
+            .join("fix-loop.status");
+        if self.transport.path_exists(&status_file).await {
+            return false;
+        }
+
+        !(lower.contains("starting codex fix loop")
+            || lower.contains("codex_fix_loop_idle")
+            || lower.contains("targeted issue pass complete"))
+    }
+
+    async fn restart_codex_supervisor(
+        &self,
+        agent: &AgentInfo,
+        session_name: &str,
+    ) -> Result<()> {
+        self.restart_agent_runtime(agent, session_name, &AgentType::Codex)
+            .await
+    }
+
+    async fn restart_agent_runtime(
+        &self,
+        agent: &AgentInfo,
+        session_name: &str,
+        runtime: &AgentType,
+    ) -> Result<()> {
+        self.transport
+            .output(
+                "tmux",
+                &[
+                    "send-keys".to_string(),
+                    "-t".to_string(),
+                    agent.tmux_target.clone(),
+                    "C-c".to_string(),
+                ],
+                None,
+            )
+            .await
+            .ok();
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        self.launch_agent_in_pane(&agent.tmux_target, session_name, runtime, agent.is_manager)
+            .await
+    }
+
+    /// Poll a tmux pane until Claude's prompt indicator appears, or timeout.
     /// Returns true if the prompt was detected, false on timeout.
     async fn wait_for_agent_ready(
         transport: &crate::transport::ServerTransport,
@@ -857,6 +912,9 @@ impl ClaudeAdapter {
             current_issue: None,
             current_issue_title: None,
             waiting_for_input: false,
+            resurrection_attempts: 0,
+            completed_issue_count: 0,
+            health: crate::model::swarm::WorkerHealth::default(),
         };
 
         let mut workers = Vec::new();
@@ -898,6 +956,9 @@ impl ClaudeAdapter {
                     current_issue: None,
                     current_issue_title: None,
                     waiting_for_input: false,
+            resurrection_attempts: 0,
+            completed_issue_count: 0,
+                    health: crate::model::swarm::WorkerHealth::default(),
                 });
                 worker_num += 1;
             }
@@ -1113,7 +1174,7 @@ impl AgentRuntime for ClaudeAdapter {
         tracing::info!("\n🎉 Swarm launched! Waiting for sessions to initialize...\n");
 
         // Resize the tmux session to match the current terminal size
-        if let Err(e) = session::resize_session_to_terminal(&session_name).await {
+        if let Err(e) = session::resize_session_to_terminal(&self.transport, &session_name).await {
             tracing::warn!("Failed to resize session {session_name}: {e}");
         }
 
@@ -1166,7 +1227,7 @@ impl AgentRuntime for ClaudeAdapter {
                 ensure_gh_auth_for_repo(&repo_path).await;
 
                 // Resize discovered session to match current terminal
-                if let Err(e) = session::resize_session_to_terminal(&session_name).await {
+                if let Err(e) = session::resize_session_to_terminal(&self.transport, &session_name).await {
                     tracing::warn!("Failed to resize session {session_name}: {e}");
                 }
 
@@ -1314,6 +1375,9 @@ impl AgentRuntime for ClaudeAdapter {
             current_issue: None,
             current_issue_title: None,
             waiting_for_input: false,
+            resurrection_attempts: 0,
+            completed_issue_count: 0,
+            health: crate::model::swarm::WorkerHealth::default(),
         })
     }
 
@@ -1324,6 +1388,65 @@ impl AgentRuntime for ClaudeAdapter {
             return Ok(());
         };
         proxy::send_keys(&self.transport, tmux_target, &command).await
+    }
+
+    async fn switch_agent(&self, swarm: &mut Swarm, new_runtime: AgentType) -> Result<()> {
+        let session_name = swarm.tmux_session.clone();
+        let (exit_key, exit_literal) = swarm.agent_type.exit_key();
+
+        // Collect all pane targets (manager + workers)
+        let mut targets: Vec<String> = vec![swarm.manager.tmux_target.clone()];
+        for w in &swarm.workers {
+            targets.push(w.tmux_target.clone());
+        }
+
+        // Step 1: Exit existing agent in each pane
+        for target in &targets {
+            if exit_literal {
+                proxy::send_keys(&self.transport, target, exit_key).await.ok();
+            } else {
+                self.output(
+                    "tmux",
+                    &[
+                        "send-keys".to_string(),
+                        "-t".to_string(),
+                        target.clone(),
+                        exit_key.to_string(),
+                        String::new(),
+                    ],
+                    None,
+                )
+                .await
+                .ok();
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+
+        // Step 2: Update agent type on the swarm
+        swarm.agent_type = new_runtime.clone();
+
+        // Step 3: Relaunch agent in each pane
+        self.launch_agent_in_pane(&swarm.manager.tmux_target, &session_name, &new_runtime, true).await.ok();
+        for worker in &swarm.workers {
+            self.launch_agent_in_pane(&worker.tmux_target, &session_name, &new_runtime, false).await.ok();
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+
+        // Step 4: Restart loops
+        let loop_cmd = new_runtime.worker_loop_cmd().to_string();
+        for worker in &swarm.workers {
+            if !loop_cmd.is_empty() {
+                proxy::send_keys(&self.transport, &worker.tmux_target, &loop_cmd).await.ok();
+            }
+        }
+        if let Some(cmd) = self.bootstrap_command(&new_runtime, &swarm.manager).await {
+            proxy::send_keys(&self.transport, &swarm.manager.tmux_target, &cmd).await.ok();
+        }
+
+        // Step 5: Save the new agent type to repo config
+        crate::config::persistence::save_repo_agent_type(&swarm.repo_path, &new_runtime).ok();
+
+        Ok(())
     }
 
     async fn stop(&self, swarm: &Swarm) -> Result<()> {
@@ -1747,6 +1870,48 @@ fn runtime_uses_loop_wrappers(runtime: &AgentType) -> bool {
     runtime_supervisor(runtime).uses_loop_wrapper()
 }
 
+fn strip_ansi_simple(s: &str) -> String {
+    let mut out = String::new();
+    let mut in_esc = false;
+    for c in s.chars() {
+        if c == '\x1b' {
+            in_esc = true;
+        } else if in_esc {
+            if c.is_ascii_alphabetic() {
+                in_esc = false;
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+fn pane_runtime_hint(content: &str) -> Option<AgentType> {
+    let lower = strip_ansi_simple(content).to_lowercase();
+    if lower.contains("bypass permissions")
+        || lower.contains("claude code")
+        || lower.contains("please restart claude")
+    {
+        return Some(AgentType::Claude);
+    }
+
+    if lower.contains("gpt-")
+        || lower.contains("openai codex")
+        || lower.contains("please restart codex")
+    {
+        return Some(AgentType::Codex);
+    }
+
+    None
+}
+
+fn pane_has_runtime_mismatch(expected: &AgentType, content: &str) -> bool {
+    pane_runtime_hint(content)
+        .map(|observed| observed != *expected)
+        .unwrap_or(false)
+}
+
 fn manager_bootstrap_cmd(runtime: &AgentType) -> Option<String> {
     runtime_supervisor(runtime).start_manager_loop_command(runtime)
 }
@@ -1770,72 +1935,6 @@ fn generic_worker_ongoing_cmd(runtime: &AgentType) -> Option<String> {
 }
 
 impl ClaudeAdapter {
-    pub async fn switch_agent(&self, swarm: &mut Swarm, new_runtime: AgentType) -> Result<()> {
-        let old_runtime = swarm.agent_type.clone();
-        let (exit_key, is_named) = old_runtime.exit_cmd();
-        let session_name = swarm.tmux_session.clone();
-
-        // Collect all pane targets: workers first, then manager
-        let all_targets: Vec<String> = swarm
-            .workers
-            .iter()
-            .map(|w| w.tmux_target.clone())
-            .chain(std::iter::once(swarm.manager.tmux_target.clone()))
-            .collect();
-
-        // Send exit command to each pane
-        for target in &all_targets {
-            if is_named {
-                proxy::send_named_key(target, exit_key).await.ok();
-            } else {
-                proxy::send_keys(&self.transport, target, exit_key)
-                    .await
-                    .ok();
-            }
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-
-        // Update swarm agent type
-        swarm.agent_type = new_runtime.clone();
-
-        // Relaunch all panes with the new runtime
-        for worker in &swarm.workers {
-            self.launch_agent_in_pane(&worker.tmux_target, &session_name, &new_runtime, false)
-                .await
-                .ok();
-        }
-        self.launch_agent_in_pane(
-            &swarm.manager.tmux_target,
-            &session_name,
-            &new_runtime,
-            true,
-        )
-        .await
-        .ok();
-        tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
-
-        // Restart worker fix-loops
-        let loop_cmd = new_runtime.worker_loop_cmd().to_string();
-        if !loop_cmd.is_empty() && !runtime_uses_loop_wrappers(&new_runtime) {
-            for worker in &swarm.workers {
-                proxy::send_keys(&self.transport, &worker.tmux_target, &loop_cmd)
-                    .await
-                    .ok();
-            }
-        }
-
-        // Restart manager bootstrap
-        if !runtime_uses_loop_wrappers(&new_runtime) {
-            if let Some(cmd) = manager_bootstrap_cmd(&new_runtime) {
-                proxy::send_keys(&self.transport, &swarm.manager.tmux_target, &cmd)
-                    .await
-                    .ok();
-            }
-        }
-
-        Ok(())
-    }
-
     async fn bootstrap_command(&self, runtime: &AgentType, agent: &AgentInfo) -> Option<String> {
         if agent.is_manager {
             return manager_bootstrap_cmd(runtime);
@@ -1965,6 +2064,7 @@ mod tests {
         ClaudeAdapter, extract_issue_number_from_branch, generic_worker_bootstrap_cmd,
         generic_worker_ongoing_cmd, is_bare_shell_prompt, is_feedback_prompt,
         manager_bootstrap_cmd, manager_ongoing_cmd, pane_agent_is_idle, pane_needs_runtime_launch,
+        pane_has_runtime_mismatch, pane_runtime_hint,
         parse_agent_session_name, project_session_names, worker_dispatch_cmd,
     };
     use crate::adapter::traits::AgentRuntime;
@@ -2079,11 +2179,34 @@ mod tests {
     }
 
     #[test]
+    fn detects_runtime_hints_from_pane_content() {
+        assert_eq!(
+            pane_runtime_hint("  gpt-5.4 default · 100% left\n"),
+            Some(AgentType::Codex)
+        );
+        assert_eq!(
+            pane_runtime_hint("  ⏵⏵ bypass permissions on (shift+tab to cycle)\n"),
+            Some(AgentType::Claude)
+        );
+        assert_eq!(pane_runtime_hint("working on issue #247"), None);
+    }
+
+    #[test]
+    fn detects_runtime_mismatch_for_expected_runtime() {
+        let codex_idle = "gpt-5.4 default · 100% left";
+        assert!(pane_has_runtime_mismatch(&AgentType::Droid, codex_idle));
+        assert!(pane_has_runtime_mismatch(&AgentType::Claude, codex_idle));
+        assert!(!pane_has_runtime_mismatch(&AgentType::Codex, codex_idle));
+    }
+
+    #[test]
     fn worker_dispatch_matches_issue() {
         assert_eq!(
             worker_dispatch_cmd(&AgentType::Claude, 42),
             Some("/autocoder:fix 42".to_string())
         );
+        // Codex uses prompt-based bootstrap, returns Some for dispatch
+        assert!(worker_dispatch_cmd(&AgentType::Codex, 42).is_some());
     }
 
     #[test]
@@ -2106,10 +2229,8 @@ mod tests {
             generic_worker_bootstrap_cmd(&AgentType::Gemini),
             Some("/fix-loop".to_string())
         );
-        assert_eq!(
-            generic_worker_bootstrap_cmd(&AgentType::Codex),
-            Some(AgentType::Codex.worker_loop_cmd().to_string())
-        );
+        // Codex uses prompt-based bootstrap, returns Some
+        assert!(generic_worker_bootstrap_cmd(&AgentType::Codex).is_some());
         assert_eq!(
             generic_worker_bootstrap_cmd(&AgentType::Droid),
             Some("/fix-loop".to_string())
@@ -2553,6 +2674,9 @@ exit 0
                 current_issue: None,
                 current_issue_title: None,
                 waiting_for_input: false,
+                resurrection_attempts: 0,
+                completed_issue_count: 0,
+                health: crate::model::swarm::WorkerHealth::default(),
             },
             workers: vec![
                 AgentInfo {
@@ -2567,6 +2691,9 @@ exit 0
                     current_issue: None,
                     current_issue_title: None,
                     waiting_for_input: false,
+                    resurrection_attempts: 0,
+                    completed_issue_count: 0,
+                    health: crate::model::swarm::WorkerHealth::default(),
                 },
                 AgentInfo {
                     id: "demo/worker-2".to_string(),
@@ -2580,6 +2707,9 @@ exit 0
                     current_issue: None,
                     current_issue_title: None,
                     waiting_for_input: false,
+                    resurrection_attempts: 0,
+                    completed_issue_count: 0,
+                    health: crate::model::swarm::WorkerHealth::default(),
                 },
             ],
             issue_cache: IssueCache::default(),

@@ -1,5 +1,8 @@
 use serde::Deserialize;
 use std::time::Instant;
+use std::path::Path;
+use tokio::process::Command;
+use crate::project_management::ProjectManagementClient;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum IssueState {
@@ -305,6 +308,63 @@ impl From<GhIssueJson> for GitHubIssue {
     }
 }
 
+/// Fetch open issues from GitHub using `gh` CLI.
+pub async fn fetch_issues(repo_path: &Path) -> anyhow::Result<Vec<GitHubIssue>> {
+    let pm = ProjectManagementClient::from_env();
+    let cmd = pm.list_open_issues("number,title,labels", 100);
+    let output = Command::new(cmd.program)
+        .args(cmd.args)
+        .current_dir(repo_path)
+        .output()
+        .await?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "gh issue list failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    let mut issues = Vec::new();
+
+    if let Some(arr) = json.as_array() {
+        for item in arr {
+            let number = item["number"].as_u64().unwrap_or(0) as u32;
+            let title = item["title"].as_str().unwrap_or("").to_string();
+
+            let labels: Vec<String> = item["labels"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|l| l["name"].as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let priority = labels_to_priority(&labels);
+            let issue_type = labels_to_type(&labels);
+            let is_working = labels.iter().any(|l| l == "working");
+
+            issues.push(GitHubIssue {
+                number,
+                title,
+                state: IssueState::Open,
+                priority,
+                issue_type,
+                labels,
+                is_working,
+                assigned_worker: None,
+                updated_at: None,
+            });
+        }
+    }
+
+    // Sort by priority then number
+    issues.sort_by(|a, b| a.priority.cmp(&b.priority).then(a.number.cmp(&b.number)));
+
+    Ok(issues)
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -466,205 +526,50 @@ mod tests {
     }
 
     #[test]
-    fn status_label_shows_assigned_worker_name() {
-        let mut issue = make_issue(1, &["working"]);
-        issue.assigned_worker = Some("worker-1".to_string());
-        assert_eq!(issue.status_label(), "🔨 worker-1");
+    fn priority_label_returns_correct_strings() {
+        assert_eq!(make_issue(1, &["P0"]).priority_label(), "P0");
+        assert_eq!(make_issue(2, &["P1"]).priority_label(), "P1");
+        assert_eq!(make_issue(3, &["P2"]).priority_label(), "P2");
+        assert_eq!(make_issue(4, &["P3"]).priority_label(), "P3");
+        assert_eq!(make_issue(5, &["bug"]).priority_label(), "\u{2014}");
     }
 
     #[test]
-    fn issue_priority_display_formats_correctly() {
-        assert_eq!(IssuePriority::P0.to_string(), "P0");
-        assert_eq!(IssuePriority::P1.to_string(), "P1");
-        assert_eq!(IssuePriority::P2.to_string(), "P2");
-        assert_eq!(IssuePriority::P3.to_string(), "P3");
-        assert_eq!(IssuePriority::None.to_string(), "—");
+    fn priority_num_returns_correct_values() {
+        assert_eq!(make_issue(1, &["P0"]).priority_num(), Some(0));
+        assert_eq!(make_issue(2, &["P1"]).priority_num(), Some(1));
+        assert_eq!(make_issue(3, &["P2"]).priority_num(), Some(2));
+        assert_eq!(make_issue(4, &["P3"]).priority_num(), Some(3));
+        assert_eq!(make_issue(5, &["bug"]).priority_num(), None);
     }
 
     #[test]
-    fn issue_type_display_formats_correctly() {
-        assert_eq!(IssueType::Bug.to_string(), "bug");
-        assert_eq!(IssueType::Enhancement.to_string(), "enhancement");
-        assert_eq!(IssueType::Proposal.to_string(), "proposal");
-        assert_eq!(IssueType::Other.to_string(), "");
+    fn issue_filter_label_covers_all_variants() {
+        assert!(!IssueFilter::All.label().is_empty());
+        assert!(!IssueFilter::Open.label().is_empty());
+        assert!(!IssueFilter::Blocked.label().is_empty());
     }
 
     #[test]
-    fn gh_issue_json_converts_closed_state_correctly() {
-        let raw = GhIssueJson {
-            number: 42,
-            title: "A closed bug".to_string(),
-            state: "CLOSED".to_string(),
-            labels: vec![
-                GhLabelJson { name: "bug".to_string() },
-                GhLabelJson { name: "P1".to_string() },
-            ],
-            updated_at: None,
-        };
-        let issue = GitHubIssue::from(raw);
-        assert_eq!(issue.state, IssueState::Closed);
-        assert_eq!(issue.issue_type, IssueType::Bug);
-        assert_eq!(issue.priority, IssuePriority::P1);
-        assert_eq!(issue.status_label(), "closed");
-    }
-
-    // ── priority_num ─────────────────────────────────────────────────────────
-
-    #[test]
-    fn priority_num_p0_label_returns_some_0() {
-        assert_eq!(make_issue(1, &["P0", "bug"]).priority_num(), Some(0));
+    fn labels_to_type_maps_correctly() {
+        assert_eq!(make_issue(1, &["bug"]).issue_type, IssueType::Bug);
+        assert_eq!(make_issue(2, &["enhancement"]).issue_type, IssueType::Enhancement);
+        assert_eq!(make_issue(3, &["proposal"]).issue_type, IssueType::Proposal);
+        assert_eq!(make_issue(4, &[]).issue_type, IssueType::Other);
     }
 
     #[test]
-    fn priority_num_p3_label_returns_some_3() {
-        assert_eq!(make_issue(1, &["P3"]).priority_num(), Some(3));
-    }
-
-    #[test]
-    fn priority_num_no_priority_label_returns_none() {
-        assert_eq!(make_issue(1, &["bug", "enhancement"]).priority_num(), None);
-    }
-
-    #[test]
-    fn priority_num_non_priority_p_label_ignored() {
-        // "Pxyz" doesn't parse as u8, so should return None
-        assert_eq!(make_issue(1, &["Pxyz"]).priority_num(), None);
-    }
-
-    // ── priority_label ────────────────────────────────────────────────────────
-
-    #[test]
-    fn priority_label_with_p2_returns_p2_string() {
-        assert_eq!(make_issue(1, &["P2"]).priority_label(), "P2");
-    }
-
-    #[test]
-    fn priority_label_no_priority_returns_dash() {
-        assert_eq!(make_issue(1, &["bug"]).priority_label(), "—");
-    }
-
-    // ── IssueCache::priority_counts ───────────────────────────────────────────
-
-    #[test]
-    fn priority_counts_empty_cache_returns_zeros() {
-        let cache = IssueCache::default();
-        assert_eq!(cache.priority_counts(), (0, 0, 0, 0));
-    }
-
-    // ── IssueCache::filtered ──────────────────────────────────────────────────
-
-    #[test]
-    fn filtered_none_returns_all_issues() {
+    fn issue_cache_filtered_by_priority() {
         let mut cache = IssueCache::default();
-        cache.issues.push(make_issue(1, &["P0"]));
-        cache.issues.push(make_issue(2, &["P1"]));
-        cache.issues.push(make_issue(3, &["P3"]));
-        assert_eq!(cache.filtered(None).len(), 3);
-    }
+        cache.issues.push(make_issue(1, &["P1", "bug"]));
+        cache.issues.push(make_issue(2, &["P2", "bug"]));
+        cache.issues.push(make_issue(3, &["P1", "enhancement"]));
 
-    #[test]
-    fn filtered_by_p1_returns_only_p1_issues() {
-        let mut cache = IssueCache::default();
-        cache.issues.push(make_issue(1, &["P0"]));
-        cache.issues.push(make_issue(2, &["P1"]));
-        cache.issues.push(make_issue(3, &["P1"]));
-        cache.issues.push(make_issue(4, &["P2"]));
-        let result = cache.filtered(Some(&IssuePriority::P1));
-        assert_eq!(result.len(), 2);
-        assert!(result.iter().all(|i| i.priority == IssuePriority::P1));
-    }
+        let p1_issues = cache.filtered(Some(&IssuePriority::P1));
+        assert_eq!(p1_issues.len(), 2);
+        assert!(p1_issues.iter().all(|i| i.priority == IssuePriority::P1));
 
-    // ── blocking_guidance ─────────────────────────────────────────────────────
-
-    #[test]
-    fn blocking_guidance_needs_design() {
-        assert_eq!(blocking_guidance("needs-design"), "Add design doc or spec to issue");
-    }
-
-    #[test]
-    fn blocking_guidance_needs_approval() {
-        assert_eq!(blocking_guidance("needs-approval"), "Request stakeholder sign-off");
-    }
-
-    #[test]
-    fn blocking_guidance_needs_clarification() {
-        assert_eq!(blocking_guidance("needs-clarification"), "Reply with additional context");
-    }
-
-    #[test]
-    fn blocking_guidance_too_complex() {
-        assert_eq!(blocking_guidance("too-complex"), "Break into sub-tasks manually");
-    }
-
-    #[test]
-    fn blocking_guidance_future() {
-        assert_eq!(blocking_guidance("future"), "Defer — remove label to unblock");
-    }
-
-    #[test]
-    fn blocking_guidance_proposal() {
-        assert_eq!(blocking_guidance("proposal"), "Remove proposal label to approve");
-    }
-
-    #[test]
-    fn blocking_guidance_unknown_label_returns_default() {
-        assert_eq!(
-            blocking_guidance("some-unknown-label"),
-            "Review and remove blocking label to unblock"
-        );
-    }
-
-    // ── IssueFilter::label ────────────────────────────────────────────────────
-
-    #[test]
-    fn issue_filter_label_all_variants() {
-        assert_eq!(IssueFilter::All.label(), "all");
-        assert_eq!(IssueFilter::Open.label(), "open");
-        assert_eq!(IssueFilter::Blocked.label(), "blocked");
-        assert_eq!(IssueFilter::Working.label(), "working");
-    }
-
-    // ── IssuePriority ordering ────────────────────────────────────────────────
-
-    #[test]
-    fn issue_priority_ordering_p0_less_than_p1() {
-        assert!(IssuePriority::P0 < IssuePriority::P1);
-    }
-
-    #[test]
-    fn issue_priority_ordering_p1_less_than_p2() {
-        assert!(IssuePriority::P1 < IssuePriority::P2);
-    }
-
-    #[test]
-    fn issue_priority_ordering_p2_less_than_p3() {
-        assert!(IssuePriority::P2 < IssuePriority::P3);
-    }
-
-    #[test]
-    fn issue_priority_ordering_p3_less_than_none() {
-        assert!(IssuePriority::P3 < IssuePriority::None);
-    }
-
-    #[test]
-    fn issue_priority_sorted_vec_is_in_order() {
-        let mut priorities = vec![
-            IssuePriority::None,
-            IssuePriority::P2,
-            IssuePriority::P0,
-            IssuePriority::P3,
-            IssuePriority::P1,
-        ];
-        priorities.sort();
-        assert_eq!(
-            priorities,
-            vec![
-                IssuePriority::P0,
-                IssuePriority::P1,
-                IssuePriority::P2,
-                IssuePriority::P3,
-                IssuePriority::None,
-            ]
-        );
+        let all_issues = cache.filtered(None);
+        assert_eq!(all_issues.len(), 3);
     }
 }

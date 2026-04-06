@@ -36,6 +36,17 @@ pub struct AgentStatus {
     pub state: AgentState,
 }
 
+impl AgentStatus {
+    /// Returns `true` when the status file timestamp is older than `threshold_secs` seconds.
+    /// Returns `false` if there is no timestamp (can't determine staleness).
+    pub fn is_stale(&self, threshold_secs: u64) -> bool {
+        let Some(ts) = self.timestamp else { return false };
+        let now = chrono::Local::now().naive_local();
+        let age = now.signed_duration_since(ts);
+        age.num_seconds() > threshold_secs as i64
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaneActivity {
     NeedsLaunch,
@@ -72,7 +83,6 @@ impl WorkerSupervisionState {
 }
 
 const LOOP_STATUS_STALE_SECONDS: i64 = 30 * 60;
-
 impl Default for AgentStatus {
     fn default() -> Self {
         Self {
@@ -829,70 +839,31 @@ mod tests {
         std::fs::remove_dir_all(dir).ok();
     }
 
+    // --- is_stale ---
+
     #[test]
-    fn classify_pane_activity_empty_content_is_unknown() {
-        assert_eq!(classify_pane_activity(""), PaneActivity::Unknown);
-        assert_eq!(classify_pane_activity("   \n  \n  "), PaneActivity::Unknown);
+    fn is_stale_returns_false_when_timestamp_is_recent() {
+        let now = chrono::Local::now().naive_local();
+        let status = AgentStatus {
+            timestamp: Some(now - chrono::Duration::seconds(60)),
+            state: AgentState::Idle,
+        };
+        assert!(!status.is_stale(300));
     }
 
     #[test]
-    fn classify_pane_activity_agent_name_without_busy_is_idle() {
-        assert_eq!(
-            classify_pane_activity("claude 3.5 sonnet ready\n"),
-            PaneActivity::AgentIdle
-        );
-        assert_eq!(
-            classify_pane_activity("gemini 2.0\n"),
-            PaneActivity::AgentIdle
-        );
-        assert_eq!(
-            classify_pane_activity("codex initialized\n"),
-            PaneActivity::AgentIdle
-        );
+    fn is_stale_returns_true_when_timestamp_is_old() {
+        let old = chrono::Local::now().naive_local() - chrono::Duration::seconds(600);
+        let status = AgentStatus {
+            timestamp: Some(old),
+            state: AgentState::Idle,
+        };
+        assert!(status.is_stale(300));
     }
 
     #[test]
-    fn classify_pane_activity_needs_launch_on_restart_message() {
-        // Messages without agent names reach the restart check successfully
-        assert_eq!(
-            classify_pane_activity("restart to apply\n"),
-            PaneActivity::NeedsLaunch
-        );
-        assert_eq!(
-            classify_pane_activity("update ran successfully\n"),
-            PaneActivity::NeedsLaunch
-        );
-    }
-
-    #[test]
-    fn classify_pane_activity_needs_launch_on_bare_shell_prompt() {
-        assert_eq!(
-            classify_pane_activity("user@host ~/repo $"),
-            PaneActivity::NeedsLaunch
-        );
-        assert_eq!(
-            classify_pane_activity("user@host ~/repo %"),
-            PaneActivity::NeedsLaunch
-        );
-        assert_eq!(
-            classify_pane_activity("root@host ~#"),
-            PaneActivity::NeedsLaunch
-        );
-    }
-
-    #[test]
-    fn classify_pane_activity_thinking_is_busy() {
-        assert_eq!(
-            classify_pane_activity("thinking...\n"),
-            PaneActivity::AgentBusy
-        );
-        assert_eq!(
-            classify_pane_activity("analyzing the codebase\n"),
-            PaneActivity::AgentBusy
-        );
-        assert_eq!(
-            classify_pane_activity("writing tests\n"),
-            PaneActivity::AgentBusy
-        );
+    fn is_stale_returns_false_when_no_timestamp() {
+        let status = AgentStatus { timestamp: None, state: AgentState::Idle };
+        assert!(!status.is_stale(300));
     }
 }

@@ -228,6 +228,7 @@ pub fn render_feedback_dialog(f: &mut Frame, area: Rect, state: &FeedbackState) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn feedback_type_label_returns_human_readable_string() {
@@ -262,6 +263,79 @@ mod tests {
         assert!(state.body.is_empty());
         assert_eq!(state.type_index, 0);
         assert_eq!(state.feedback_type, FeedbackType::Bug);
+    }
+
+    #[test]
+    fn label_covers_all_variants() {
+        for ft in FeedbackType::all() {
+            assert!(!ft.label().is_empty(), "{ft:?}.label() should be non-empty");
+        }
+    }
+
+    #[test]
+    fn github_label_covers_all_variants() {
+        for ft in FeedbackType::all() {
+            assert!(
+                !ft.github_label().is_empty(),
+                "{ft:?}.github_label() should be non-empty"
+            );
+        }
+    }
+
+    #[test]
+    fn github_label_is_lowercase_slug() {
+        for ft in FeedbackType::all() {
+            let label = ft.github_label();
+            assert_eq!(
+                label,
+                label.to_lowercase(),
+                "{ft:?}.github_label() should be lowercase"
+            );
+            assert!(
+                !label.contains(' '),
+                "{ft:?}.github_label() should not contain spaces"
+            );
+        }
+    }
+
+    #[test]
+    fn all_includes_every_variant() {
+        assert_eq!(
+            FeedbackType::all().len(),
+            3,
+            "FeedbackType::all() should include every variant (Bug, Enhancement, FeatureRequest)"
+        );
+    }
+
+    #[test]
+    fn all_contains_bug_enhancement_feature_request() {
+        let all = FeedbackType::all();
+        assert!(all.contains(&FeedbackType::Bug));
+        assert!(all.contains(&FeedbackType::Enhancement));
+        assert!(all.contains(&FeedbackType::FeatureRequest));
+    }
+
+    #[test]
+    fn new_sets_first_selection() {
+        let state = FeedbackState::new("myrepo".to_string(), PathBuf::from("/tmp/myrepo"));
+        assert_eq!(state.type_index, 0, "type_index should default to 0");
+        assert_eq!(state.feedback_type, FeedbackType::Bug, "default type should be Bug");
+    }
+
+    #[test]
+    fn new_input_is_empty() {
+        let state = FeedbackState::new("myrepo".to_string(), PathBuf::from("/tmp/myrepo"));
+        assert!(state.title.is_empty(), "title should start empty");
+        assert!(state.body.is_empty(), "body should start empty");
+    }
+
+    #[test]
+    fn new_preserves_repo_fields() {
+        let name = "agents-ui".to_string();
+        let path = PathBuf::from("/home/user/agents-ui");
+        let state = FeedbackState::new(name.clone(), path.clone());
+        assert_eq!(state.repo_name, name);
+        assert_eq!(state.repo_path, path);
     }
 }
 

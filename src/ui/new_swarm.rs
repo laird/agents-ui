@@ -765,6 +765,23 @@ mod tests {
         });
         assert!(rendered.contains("Switch agent runtime for demo"));
         assert!(rendered.contains("Codex"));
+        let rendered = rendered_text(|terminal| {
+            terminal
+                .draw(|f| {
+                    render_switch_agent_dialog(
+                        f,
+                        f.area(),
+                        "demo",
+                        &AgentType::Codex,
+                        &options,
+                        0,
+                    )
+                })
+                .unwrap();
+        });
+
+        assert!(rendered.contains("Switch agent runtime for demo"));
+        assert!(rendered.contains("Codex (current)"));
         assert!(rendered.contains("Claude"));
     }
 }
