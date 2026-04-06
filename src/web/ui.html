@@ -241,6 +241,27 @@
       gap: 0.3rem;
     }
 
+    .action-bar {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      margin-bottom: 0.75rem;
+    }
+    .action-btn {
+      padding: 0.35rem 0.85rem;
+      border-radius: 6px;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: opacity 0.15s;
+    }
+    .action-btn:hover { opacity: 0.8; }
+    .action-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .stop-btn { background: var(--error); color: #fff; }
+    .start-btn { background: var(--accent); color: #fff; }
+    .add-worker-btn { background: var(--surface); color: var(--text); border-color: var(--border); }
+
     .detail-layout {
       display: grid;
       grid-template-columns: 1fr;
@@ -880,6 +901,50 @@
       }
     }
 
+    async function stopSwarm(project) {
+      if (!confirm('Stop all workers in ' + project + '?')) return;
+      try {
+        const r = await fetch('/api/swarms/' + encodeURIComponent(project), { method: 'DELETE' });
+        if (r.ok) {
+          setTimeout(() => { refresh(); }, 1500);
+        } else {
+          alert('Stop failed (HTTP ' + r.status + ')');
+        }
+      } catch (err) {
+        alert('Error: ' + err.message);
+      }
+    }
+
+    async function addWorker(project) {
+      try {
+        const r = await fetch('/api/swarms/' + encodeURIComponent(project) + '/workers', { method: 'POST' });
+        if (r.ok) {
+          setTimeout(() => { refresh(); }, 4000);
+        } else {
+          alert('Add worker failed (HTTP ' + r.status + ')');
+        }
+      } catch (err) {
+        alert('Error: ' + err.message);
+      }
+    }
+
+    async function startSwarm(repoPath, agentType, numWorkers) {
+      try {
+        const r = await fetch('/api/swarms', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ repo_path: repoPath, agent_type: agentType, num_workers: numWorkers || 2 }),
+        });
+        if (r.ok) {
+          setTimeout(() => { refresh(); }, 4000);
+        } else {
+          alert('Start failed (HTTP ' + r.status + ')');
+        }
+      } catch (err) {
+        alert('Error: ' + err.message);
+      }
+    }
+
     // ── API ────────────────────────────────────────────────────────────────────
     async function fetchSwarms() {
       const r = await fetch('/api/swarms');
@@ -962,6 +1027,13 @@
           (swarm.workflow ? '<span class="meta-item">' + esc(swarm.workflow) + '</span>' : '') +
           '<span class="meta-item" style="font-family:monospace;font-size:0.75rem">' + esc(swarm.tmux_session) + '</span>' +
           '<span class="meta-item" style="opacity:0.7">' + esc(swarm.repo_path) + '</span>' +
+        '</div>' +
+        '<div class="action-bar">' +
+          (swarm.stopped
+            ? '<button class="action-btn start-btn" onclick="startSwarm(' + JSON.stringify(swarm.repo_path) + ',' + JSON.stringify(swarm.agent_type) + ',' + swarm.workers.length + ')">▶ Start</button>'
+            : '<button class="action-btn stop-btn" onclick="stopSwarm(' + JSON.stringify(swarm.project_name) + ')">■ Stop</button>' +
+              '<button class="action-btn add-worker-btn" onclick="addWorker(' + JSON.stringify(swarm.project_name) + ')">+ Add Worker</button>'
+          ) +
         '</div>' +
 
         '<div class="detail-layout">' +

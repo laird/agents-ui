@@ -4,7 +4,7 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::Html,
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -240,6 +240,133 @@ async fn api_launch_swarm_handler(
     Ok(Json(json!({ "ok": true, "project_name": project_name })))
 }
 
+/// Stop all workers in a swarm.
+/// `DELETE /api/swarms/:project`
+/// Sends Ctrl+C to every worker pane. Returns 404 if the project is not found.
+async fn api_stop_swarm_handler(
+    Path(project): Path<String>,
+    State(state): State<WebServerState>,
+) -> Result<Json<Value>, StatusCode> {
+    let targets: Vec<String> = {
+        let guard = state
+            .swarms
+            .read()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let swarm = guard
+            .iter()
+            .find(|s| s.project_name == project)
+            .ok_or(StatusCode::NOT_FOUND)?;
+        // Collect all worker tmux targets (not the manager)
+        swarm.workers.iter().map(|w| w.tmux_target.clone()).collect()
+    };
+
+    let transport = crate::transport::ServerTransport::new(None);
+    for target in &targets {
+        crate::tmux::proxy::send_keys_no_enter(&transport, target, "C-c")
+            .await
+            .ok();
+    }
+
+    Ok(Json(json!({ "ok": true, "stopped": targets.len() })))
+}
+
+/// Add one worker to a running swarm.
+/// `POST /api/swarms/:project/workers`
+/// Returns 404 if the project is not found, 202 Accepted on success.
+async fn api_add_worker_handler(
+    Path(project): Path<String>,
+    State(state): State<WebServerState>,
+) -> Result<Json<Value>, StatusCode> {
+    use crate::adapter::claude::ClaudeAdapter;
+    use crate::adapter::traits::AgentRuntime;
+    use crate::model::issue::IssueCache;
+    use crate::model::status::{AgentState, AgentStatus};
+    use crate::model::swarm::{AgentInfo, AgentType, Swarm, WorkerHealth};
+    use crate::transport::ServerTransport;
+
+    let snapshot = {
+        let guard = state
+            .swarms
+            .read()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        guard
+            .iter()
+            .find(|s| s.project_name == project)
+            .cloned()
+            .ok_or(StatusCode::NOT_FOUND)?
+    };
+
+    let agent_type: AgentType = match snapshot.agent_type.as_str() {
+        "Claude" => AgentType::Claude,
+        "Codex"  => AgentType::Codex,
+        "Droid"  => AgentType::Droid,
+        "Gemini" => AgentType::Gemini,
+        _ => AgentType::Claude,
+    };
+
+    // Build a minimal Swarm from the snapshot so we can call add_worker.
+    let repo_path = std::path::PathBuf::from(&snapshot.repo_path);
+    let idle_status = AgentStatus { timestamp: None, state: AgentState::Idle };
+    let manager_info = AgentInfo {
+        id: format!("{}/manager", snapshot.project_name),
+        role: "manager".to_string(),
+        worktree_path: repo_path.clone(),
+        tmux_target: snapshot.manager.tmux_target.clone(),
+        status: idle_status.clone(),
+        is_manager: true,
+        pane_content: String::new(),
+        dispatched_issue: None,
+        current_issue: None,
+        current_issue_title: None,
+        waiting_for_input: false,
+        resurrection_attempts: 0,
+        completed_issue_count: 0,
+        health: WorkerHealth::default(),
+    };
+    let workers: Vec<AgentInfo> = snapshot
+        .workers
+        .iter()
+        .map(|w| AgentInfo {
+            id: format!("{}/{}", snapshot.project_name, w.role),
+            role: w.role.clone(),
+            worktree_path: repo_path.clone(),
+            tmux_target: w.tmux_target.clone(),
+            status: idle_status.clone(),
+            is_manager: false,
+            pane_content: String::new(),
+            dispatched_issue: None,
+            current_issue: None,
+            current_issue_title: None,
+            waiting_for_input: false,
+            resurrection_attempts: 0,
+            completed_issue_count: 0,
+            health: WorkerHealth::default(),
+        })
+        .collect();
+
+    let swarm = Swarm {
+        repo_path,
+        project_name: snapshot.project_name.clone(),
+        agent_type: agent_type.clone(),
+        workflow: None,
+        tmux_session: snapshot.tmux_session.clone(),
+        manager: manager_info,
+        workers,
+        issue_cache: IssueCache::default(),
+        stopped: false,
+    };
+
+    tokio::spawn(async move {
+        let adapter = ClaudeAdapter::new(agent_type, ServerTransport::new(None));
+        match adapter.add_worker(&swarm).await {
+            Ok(info) => tracing::info!("Added worker {} to {}", info.role, swarm.project_name),
+            Err(e) => tracing::error!("add_worker failed for {}: {e:#}", swarm.project_name),
+        }
+    });
+
+    Ok(Json(json!({ "ok": true })))
+}
+
 /// Find an agent (manager or worker) by role within a swarm snapshot.
 fn find_agent<'a>(
     swarm: &'a super::SwarmSnapshot,
@@ -259,6 +386,14 @@ pub async fn run(port: u16, state: WebServerState) -> Result<()> {
         .route("/api/swarms", get(api_swarms_handler).post(api_launch_swarm_handler))
         .route("/api/repos", get(api_repos_handler))
         .route("/api/agent-types", get(api_agent_types_handler))
+        .route(
+            "/api/swarms/{project}",
+            delete(api_stop_swarm_handler),
+        )
+        .route(
+            "/api/swarms/{project}/workers",
+            post(api_add_worker_handler),
+        )
         .route(
             "/api/swarms/{project}/agents/{role}/pane",
             get(api_pane_handler),
@@ -299,6 +434,8 @@ mod tests {
             .route("/api/swarms", get(api_swarms_handler).post(api_launch_swarm_handler))
             .route("/api/repos", get(api_repos_handler))
             .route("/api/agent-types", get(api_agent_types_handler))
+            .route("/api/swarms/{project}", delete(api_stop_swarm_handler))
+            .route("/api/swarms/{project}/workers", post(api_add_worker_handler))
             .route(
                 "/api/swarms/{project}/agents/{role}/pane",
                 get(api_pane_handler),
@@ -577,5 +714,50 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn api_stop_swarm_returns_ok_for_known_project() {
+        let shared = new_shared_state();
+        {
+            let mut guard = shared.write().unwrap();
+            guard.push(sample_swarm("my-proj"));
+        }
+        let app = make_app(make_web_state(shared));
+        let req = Request::builder()
+            .method("DELETE")
+            .uri("/api/swarms/my-proj")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&axum::body::to_bytes(resp.into_body(), 1024).await.unwrap())
+                .unwrap();
+        assert_eq!(body["ok"], true);
+    }
+
+    #[tokio::test]
+    async fn api_stop_swarm_returns_404_for_unknown_project() {
+        let app = make_app(make_web_state(new_shared_state()));
+        let req = Request::builder()
+            .method("DELETE")
+            .uri("/api/swarms/ghost")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn api_add_worker_returns_404_for_unknown_project() {
+        let app = make_app(make_web_state(new_shared_state()));
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/swarms/ghost/workers")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 }
