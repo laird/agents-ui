@@ -613,4 +613,58 @@ mod tests {
             "Review and remove blocking label to unblock"
         );
     }
+
+    // ── IssueFilter::label ────────────────────────────────────────────────────
+
+    #[test]
+    fn issue_filter_label_all_variants() {
+        assert_eq!(IssueFilter::All.label(), "all");
+        assert_eq!(IssueFilter::Open.label(), "open");
+        assert_eq!(IssueFilter::Blocked.label(), "blocked");
+        assert_eq!(IssueFilter::Working.label(), "working");
+    }
+
+    // ── IssuePriority ordering ────────────────────────────────────────────────
+
+    #[test]
+    fn issue_priority_ordering_p0_less_than_p1() {
+        assert!(IssuePriority::P0 < IssuePriority::P1);
+    }
+
+    #[test]
+    fn issue_priority_ordering_p1_less_than_p2() {
+        assert!(IssuePriority::P1 < IssuePriority::P2);
+    }
+
+    #[test]
+    fn issue_priority_ordering_p2_less_than_p3() {
+        assert!(IssuePriority::P2 < IssuePriority::P3);
+    }
+
+    #[test]
+    fn issue_priority_ordering_p3_less_than_none() {
+        assert!(IssuePriority::P3 < IssuePriority::None);
+    }
+
+    #[test]
+    fn issue_priority_sorted_vec_is_in_order() {
+        let mut priorities = vec![
+            IssuePriority::None,
+            IssuePriority::P2,
+            IssuePriority::P0,
+            IssuePriority::P3,
+            IssuePriority::P1,
+        ];
+        priorities.sort();
+        assert_eq!(
+            priorities,
+            vec![
+                IssuePriority::P0,
+                IssuePriority::P1,
+                IssuePriority::P2,
+                IssuePriority::P3,
+                IssuePriority::None,
+            ]
+        );
+    }
 }
