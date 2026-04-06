@@ -6434,4 +6434,124 @@ mod tests {
         assert_eq!(results[0].1, Some(42));
         assert_eq!(results[0].2, "running");
     }
+
+    // ── normalize_whitespace ──────────────────────────────────────────────────
+
+    #[test]
+    fn normalize_whitespace_preserves_single_space() {
+        assert_eq!(normalize_whitespace("a b"), "a b");
+    }
+
+    #[test]
+    fn normalize_whitespace_trims_leading_and_trailing() {
+        assert_eq!(normalize_whitespace("  hello  "), "hello");
+        assert_eq!(normalize_whitespace("\thello\n"), "hello");
+    }
+
+    #[test]
+    fn normalize_whitespace_collapses_multiple_spaces() {
+        assert_eq!(normalize_whitespace("a   b   c"), "a b c");
+    }
+
+    #[test]
+    fn normalize_whitespace_collapses_mixed_whitespace() {
+        assert_eq!(normalize_whitespace("a\t\nb"), "a b");
+    }
+
+    #[test]
+    fn normalize_whitespace_empty_string() {
+        assert_eq!(normalize_whitespace(""), "");
+        assert_eq!(normalize_whitespace("   "), "");
+    }
+
+    // ── truncate_chars ────────────────────────────────────────────────────────
+
+    #[test]
+    fn truncate_chars_short_string_unchanged() {
+        assert_eq!(truncate_chars("hello", 10), "hello");
+    }
+
+    #[test]
+    fn truncate_chars_exactly_at_limit_no_ellipsis() {
+        assert_eq!(truncate_chars("hello", 5), "hello");
+    }
+
+    #[test]
+    fn truncate_chars_over_limit_appends_ellipsis() {
+        assert_eq!(truncate_chars("hello world", 5), "hello…");
+    }
+
+    #[test]
+    fn truncate_chars_counts_unicode_chars_not_bytes() {
+        // "café" is 4 chars, 5 bytes (é is 2 bytes)
+        assert_eq!(truncate_chars("café", 4), "café");
+        assert_eq!(truncate_chars("café!", 4), "café…");
+    }
+
+    #[test]
+    fn truncate_chars_zero_limit() {
+        assert_eq!(truncate_chars("hello", 0), "…");
+    }
+
+    // ── extract_error_message ─────────────────────────────────────────────────
+
+    #[test]
+    fn extract_error_message_with_space_delimited_error() {
+        assert_eq!(
+            extract_error_message("2024-01-01T00:00:00 ERROR failed to connect"),
+            Some("failed to connect".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_error_message_with_error_prefix() {
+        assert_eq!(
+            extract_error_message("ERROR timeout reached"),
+            Some("timeout reached".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_error_message_no_error_marker_returns_none() {
+        assert_eq!(extract_error_message("INFO everything is fine"), None);
+        assert_eq!(extract_error_message(""), None);
+    }
+
+    #[test]
+    fn extract_error_message_trims_extra_whitespace() {
+        assert_eq!(
+            extract_error_message("ERROR   padded message  "),
+            Some("padded message".to_string())
+        );
+    }
+
+    // ── log_error_fingerprint ─────────────────────────────────────────────────
+
+    #[test]
+    fn log_error_fingerprint_is_deterministic() {
+        let a = log_error_fingerprint("failed to connect");
+        let b = log_error_fingerprint("failed to connect");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn log_error_fingerprint_different_inputs_differ() {
+        let a = log_error_fingerprint("failed to connect");
+        let b = log_error_fingerprint("timeout reached");
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn log_error_fingerprint_output_is_16_char_hex() {
+        let fp = log_error_fingerprint("some error message");
+        assert_eq!(fp.len(), 16);
+        assert!(fp.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn log_error_fingerprint_empty_string_is_valid() {
+        let fp = log_error_fingerprint("");
+        assert_eq!(fp.len(), 16);
+        assert!(fp.chars().all(|c| c.is_ascii_hexdigit()));
+    }
 }
