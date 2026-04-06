@@ -507,4 +507,44 @@ mod tests {
         assert_eq!(issue.priority, IssuePriority::P1);
         assert_eq!(issue.status_label(), "closed");
     }
+
+    // ── blocking_guidance ─────────────────────────────────────────────────────
+
+    #[test]
+    fn blocking_guidance_needs_design() {
+        assert_eq!(blocking_guidance("needs-design"), "Add design doc or spec to issue");
+    }
+
+    #[test]
+    fn blocking_guidance_needs_approval() {
+        assert_eq!(blocking_guidance("needs-approval"), "Request stakeholder sign-off");
+    }
+
+    #[test]
+    fn blocking_guidance_needs_clarification() {
+        assert_eq!(blocking_guidance("needs-clarification"), "Reply with additional context");
+    }
+
+    #[test]
+    fn blocking_guidance_too_complex() {
+        assert_eq!(blocking_guidance("too-complex"), "Break into sub-tasks manually");
+    }
+
+    #[test]
+    fn blocking_guidance_future() {
+        assert_eq!(blocking_guidance("future"), "Defer — remove label to unblock");
+    }
+
+    #[test]
+    fn blocking_guidance_proposal() {
+        assert_eq!(blocking_guidance("proposal"), "Remove proposal label to approve");
+    }
+
+    #[test]
+    fn blocking_guidance_unknown_label_returns_default() {
+        assert_eq!(
+            blocking_guidance("some-unknown-label"),
+            "Review and remove blocking label to unblock"
+        );
+    }
 }
