@@ -1,4 +1,5 @@
 pub mod discovery;
+pub mod server;
 
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
@@ -37,3 +38,8 @@ pub struct SwarmSnapshot {
 
 /// Shared state between the web server and background discovery task.
 pub type SharedWebState = Arc<RwLock<Vec<SwarmSnapshot>>>;
+
+/// Create a new empty shared web state.
+pub fn new_shared_state() -> SharedWebState {
+    Arc::new(RwLock::new(Vec::new()))
+}
