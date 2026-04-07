@@ -718,7 +718,7 @@
       function hasStyle() { return fg||bg||bold||dim||italic||ul||strike; }
       function htmlEsc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-      const ESC_RE = /\x1b\[([0-9;]*)m|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]|\x1b[^\[]/g;
+      const ESC_RE = /\x1b\[([0-9;]*)m|\x1b\[[\x20-\x3f]*[\x40-\x7e]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]|\x1b[^\[]/g;
       let out = '', last = 0, m;
       while ((m = ESC_RE.exec(text)) !== null) {
         if (m.index > last) {
