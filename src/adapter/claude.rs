@@ -2452,7 +2452,11 @@ exit 0
             .await;
     }
 
+    // Integration test: spawns real tmux sessions and mutates global PATH.
+    // Must not run in parallel with other tests.
+    // Run with: cargo test -- --ignored launches_manager --test-threads=1
     #[tokio::test]
+    #[ignore]
     async fn launches_manager_and_worker_loops_for_all_runtimes() {
         if !command_available("tmux") || !command_available("git") {
             return;

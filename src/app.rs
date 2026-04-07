@@ -6199,6 +6199,20 @@ async fn codex_user_assets_present(transport: &ServerTransport) -> bool {
     codex_skill_present(transport).await && codex_parallel_binary_present(transport).await
 }
 
+/// Test-only variant that accepts an explicit home directory, avoiding global HOME mutation.
+#[cfg(test)]
+async fn codex_user_assets_present_in_home(
+    home: &std::path::Path,
+    transport: &ServerTransport,
+) -> bool {
+    transport
+        .path_exists(&home.join(".codex/skills/autocoder/SKILL.md"))
+        .await
+        && transport
+            .path_exists(&home.join(".local/bin/codex-start-parallel"))
+            .await
+}
+
 async fn codex_runtime_assets_present(
     transport: &ServerTransport,
     repo_path: &std::path::Path,
@@ -6624,23 +6638,18 @@ mod tests {
         let bin = home.join(".local/bin");
         std::fs::create_dir_all(&skills).unwrap();
         std::fs::create_dir_all(&bin).unwrap();
-        let original_home = std::env::var_os("HOME");
-        unsafe { std::env::set_var("HOME", &home) };
+        // Use the explicit-home variant to avoid mutating the global HOME env var,
+        // which would corrupt config_dir() in concurrently running tests.
         let transport = ServerTransport::default();
 
-        assert!(!codex_user_assets_present(&transport).await);
+        assert!(!codex_user_assets_present_in_home(&home, &transport).await);
 
         std::fs::write(skills.join("SKILL.md"), "name: autocoder\n").unwrap();
-        assert!(!codex_user_assets_present(&transport).await);
+        assert!(!codex_user_assets_present_in_home(&home, &transport).await);
 
         std::fs::write(bin.join("codex-start-parallel"), "#!/bin/bash\n").unwrap();
-        assert!(codex_user_assets_present(&transport).await);
+        assert!(codex_user_assets_present_in_home(&home, &transport).await);
 
-        if let Some(value) = original_home {
-            unsafe { std::env::set_var("HOME", value) };
-        } else {
-            unsafe { std::env::remove_var("HOME") };
-        }
         std::fs::remove_dir_all(home).ok();
     }
 
