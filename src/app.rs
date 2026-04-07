@@ -4003,6 +4003,7 @@ impl App {
                     && !key.modifiers.contains(KeyModifiers::ALT) =>
             {
                 self.agent_view.input.insert_char(c);
+                return Ok(());
             }
             KeyCode::Up => {
                 self.agent_view.scroll_up(1);

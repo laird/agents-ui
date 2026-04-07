@@ -298,4 +298,166 @@ mod tests {
         assert!(for_runtime(&AgentType::Droid).uses_loop_wrapper());
         assert!(for_runtime(&AgentType::Gemini).uses_loop_wrapper());
     }
+
+    // --- shell_quote ---
+
+    #[test]
+    fn shell_quote_simple_string() {
+        assert_eq!(shell_quote("/path/to/script.sh"), "'/path/to/script.sh'");
+    }
+
+    #[test]
+    fn shell_quote_escapes_single_quotes() {
+        assert_eq!(shell_quote("it's"), "'it'\"'\"'s'");
+    }
+
+    #[test]
+    fn shell_quote_empty_string() {
+        assert_eq!(shell_quote(""), "''");
+    }
+
+    // --- ClaudeSupervisor bootstrap_command ---
+
+    #[test]
+    fn claude_bootstrap_manager_returns_monitor_loop() {
+        let sup = ClaudeSupervisor;
+        assert_eq!(
+            sup.bootstrap_command(&AgentType::Claude, true, None),
+            Some("/autocoder:monitor-loop".to_string())
+        );
+    }
+
+    #[test]
+    fn claude_bootstrap_worker_no_issue_returns_fix_loop() {
+        let sup = ClaudeSupervisor;
+        assert_eq!(
+            sup.bootstrap_command(&AgentType::Claude, false, None),
+            Some("/autocoder:fix-loop".to_string())
+        );
+    }
+
+    #[test]
+    fn claude_bootstrap_worker_with_issue_returns_fix_issue() {
+        let sup = ClaudeSupervisor;
+        assert_eq!(
+            sup.bootstrap_command(&AgentType::Claude, false, Some(42)),
+            Some("/autocoder:fix 42".to_string())
+        );
+    }
+
+    // --- ClaudeSupervisor ongoing_command ---
+
+    #[test]
+    fn claude_ongoing_manager_returns_monitor_workers() {
+        let sup = ClaudeSupervisor;
+        assert_eq!(
+            sup.ongoing_command(&AgentType::Claude, true, None),
+            Some("/autocoder:monitor-workers".to_string())
+        );
+    }
+
+    #[test]
+    fn claude_ongoing_worker_no_issue_returns_fix() {
+        let sup = ClaudeSupervisor;
+        assert_eq!(
+            sup.ongoing_command(&AgentType::Claude, false, None),
+            Some("/autocoder:fix".to_string())
+        );
+    }
+
+    #[test]
+    fn claude_ongoing_worker_with_issue_returns_fix_issue() {
+        let sup = ClaudeSupervisor;
+        assert_eq!(
+            sup.ongoing_command(&AgentType::Claude, false, Some(7)),
+            Some("/autocoder:fix 7".to_string())
+        );
+    }
+
+    // --- ClaudeSupervisor launch_command ---
+
+    #[test]
+    fn claude_launch_command_returns_expected_invocation() {
+        let sup = ClaudeSupervisor;
+        let cmd = sup.launch_command(&AgentType::Claude, "claude-myrepo", false);
+        assert_eq!(cmd, "claude code --dangerously-skip-permissions .");
+    }
+
+    // --- start_manager_loop_command via trait (Claude: no wrapper) ---
+
+    #[test]
+    fn claude_start_manager_loop_uses_bootstrap_not_wrapper() {
+        let sup = ClaudeSupervisor;
+        // Claude does not use loop wrapper, so start_manager_loop_command delegates to bootstrap
+        assert_eq!(
+            sup.start_manager_loop_command(&AgentType::Claude),
+            Some("/autocoder:monitor-loop".to_string())
+        );
+    }
+
+    // --- GeminiSupervisor/DroidSupervisor bootstrap and ongoing (no filesystem deps) ---
+
+    #[test]
+    fn gemini_bootstrap_manager_returns_monitor_loop() {
+        let sup = GeminiSupervisor;
+        assert_eq!(
+            sup.bootstrap_command(&AgentType::Gemini, true, None),
+            Some("/monitor-loop".to_string())
+        );
+    }
+
+    #[test]
+    fn gemini_bootstrap_worker_with_issue() {
+        let sup = GeminiSupervisor;
+        assert_eq!(
+            sup.bootstrap_command(&AgentType::Gemini, false, Some(99)),
+            Some("/fix 99".to_string())
+        );
+    }
+
+    #[test]
+    fn gemini_ongoing_manager_returns_monitor_workers() {
+        let sup = GeminiSupervisor;
+        assert_eq!(
+            sup.ongoing_command(&AgentType::Gemini, true, None),
+            Some("/monitor-workers".to_string())
+        );
+    }
+
+    #[test]
+    fn droid_bootstrap_worker_no_issue_returns_fix_loop() {
+        let sup = DroidSupervisor;
+        assert_eq!(
+            sup.bootstrap_command(&AgentType::Droid, false, None),
+            Some("/fix-loop".to_string())
+        );
+    }
+
+    #[test]
+    fn droid_ongoing_worker_with_issue() {
+        let sup = DroidSupervisor;
+        assert_eq!(
+            sup.ongoing_command(&AgentType::Droid, false, Some(5)),
+            Some("/fix 5".to_string())
+        );
+    }
+
+    // --- CodexSupervisor bootstrap (pure string returns, no filesystem) ---
+
+    #[test]
+    fn codex_bootstrap_manager_returns_prose_instruction() {
+        let sup = CodexSupervisor;
+        let cmd = sup.bootstrap_command(&AgentType::Codex, true, None);
+        assert!(cmd.is_some());
+        let cmd = cmd.unwrap();
+        assert!(cmd.contains("monitor") || cmd.contains("manager"));
+    }
+
+    #[test]
+    fn codex_bootstrap_worker_with_issue_contains_issue_number() {
+        let sup = CodexSupervisor;
+        let cmd = sup.bootstrap_command(&AgentType::Codex, false, Some(123));
+        assert!(cmd.is_some());
+        assert!(cmd.unwrap().contains("123"));
+    }
 }
