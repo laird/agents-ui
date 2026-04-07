@@ -274,6 +274,11 @@ mod tests {
 
     #[test]
     fn list_saved_swarms_returns_saved_names() {
+        // Use unique names per run to avoid parallel test interference, and clean up afterward.
+        let suffix = temp_path("list").file_name().unwrap().to_string_lossy().into_owned();
+        let alpha = format!("list-test-alpha-{suffix}");
+        let beta  = format!("list-test-beta-{suffix}");
+
         let state = SwarmState {
             repo_path: "/tmp/r".to_string(),
             agent_type: "claude".to_string(),
@@ -281,12 +286,17 @@ mod tests {
             workflow: None,
             num_workers: 1,
         };
-        save_swarm_state("list-test-alpha", &state).unwrap();
-        save_swarm_state("list-test-beta", &state).unwrap();
+        save_swarm_state(&alpha, &state).unwrap();
+        save_swarm_state(&beta, &state).unwrap();
 
         let names = list_saved_swarms().unwrap();
-        assert!(names.contains(&"list-test-alpha".to_string()), "should contain list-test-alpha");
-        assert!(names.contains(&"list-test-beta".to_string()), "should contain list-test-beta");
+        assert!(names.contains(&alpha), "should contain {alpha}");
+        assert!(names.contains(&beta),  "should contain {beta}");
+
+        // Cleanup to avoid polluting the shared config dir across runs.
+        let dir = super::config_dir().join("swarms");
+        std::fs::remove_dir_all(dir.join(&alpha)).ok();
+        std::fs::remove_dir_all(dir.join(&beta)).ok();
     }
 
     #[test]
