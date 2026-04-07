@@ -1064,11 +1064,26 @@
       }
     }
 
-    function switchAgentType(project, type) {
+    async function switchAgentType(project, type) {
       swarmAgentTypeOverride[project] = type;
-      // Re-render the detail view so the switcher shows the new selection.
+      // Re-render immediately for visual feedback.
       const swarm = state.swarms.find(s => s.project_name === project);
       if (swarm) render();
+      // Also call the API to persist the change.
+      try {
+        const r = await fetch('/api/swarms/' + encodeURIComponent(project), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agent_type: type }),
+        });
+        if (!r.ok) {
+          alert('Switch agent failed (HTTP ' + r.status + ')');
+        } else {
+          setTimeout(() => { refresh(); }, 5000);
+        }
+      } catch (err) {
+        alert('Error: ' + err.message);
+      }
     }
 
     async function startSwarm(repoPath, agentType, numWorkers) {

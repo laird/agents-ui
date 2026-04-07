@@ -4,7 +4,7 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::Html,
-    routing::{delete, get, post},
+    routing::{delete, get, patch, post},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -397,6 +397,116 @@ async fn api_add_worker_handler(
     Ok(Json(json!({ "ok": true })))
 }
 
+/// Switch the agent runtime for a running swarm.
+/// `PATCH /api/swarms/:project`  body: `{"agent_type": "Gemini"}`
+async fn api_switch_agent_handler(
+    Path(project): Path<String>,
+    State(state): State<WebServerState>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<Value>, StatusCode> {
+    use crate::adapter::claude::ClaudeAdapter;
+    use crate::adapter::traits::AgentRuntime;
+    use crate::model::issue::IssueCache;
+    use crate::model::status::{AgentState, AgentStatus};
+    use crate::model::swarm::{AgentInfo, AgentType, Swarm, WorkerHealth};
+    use crate::transport::ServerTransport;
+
+    let new_type_str = body
+        .get("agent_type")
+        .and_then(|v| v.as_str())
+        .ok_or(StatusCode::BAD_REQUEST)?
+        .to_string();
+
+    let new_runtime: AgentType = match new_type_str.as_str() {
+        "Claude" => AgentType::Claude,
+        "Codex"  => AgentType::Codex,
+        "Droid"  => AgentType::Droid,
+        "Gemini" => AgentType::Gemini,
+        _ => return Err(StatusCode::BAD_REQUEST),
+    };
+
+    let snapshot = {
+        let guard = state
+            .swarms
+            .read()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        guard
+            .iter()
+            .find(|s| s.project_name == project)
+            .cloned()
+            .ok_or(StatusCode::NOT_FOUND)?
+    };
+
+    let current_runtime: AgentType = match snapshot.agent_type.as_str() {
+        "Claude" => AgentType::Claude,
+        "Codex"  => AgentType::Codex,
+        "Droid"  => AgentType::Droid,
+        "Gemini" => AgentType::Gemini,
+        _ => AgentType::Claude,
+    };
+
+    let repo_path = std::path::PathBuf::from(&snapshot.repo_path);
+    let idle_status = AgentStatus { timestamp: None, state: AgentState::Idle };
+    let manager_info = AgentInfo {
+        id: format!("{}/manager", snapshot.project_name),
+        role: "manager".to_string(),
+        worktree_path: repo_path.clone(),
+        tmux_target: snapshot.manager.tmux_target.clone(),
+        status: idle_status.clone(),
+        is_manager: true,
+        pane_content: String::new(),
+        dispatched_issue: None,
+        current_issue: None,
+        current_issue_title: None,
+        waiting_for_input: false,
+        resurrection_attempts: 0,
+        completed_issue_count: 0,
+        health: WorkerHealth::default(),
+    };
+    let workers: Vec<AgentInfo> = snapshot
+        .workers
+        .iter()
+        .map(|w| AgentInfo {
+            id: format!("{}/{}", snapshot.project_name, w.role),
+            role: w.role.clone(),
+            worktree_path: repo_path.clone(),
+            tmux_target: w.tmux_target.clone(),
+            status: idle_status.clone(),
+            is_manager: false,
+            pane_content: String::new(),
+            dispatched_issue: None,
+            current_issue: None,
+            current_issue_title: None,
+            waiting_for_input: false,
+            resurrection_attempts: 0,
+            completed_issue_count: 0,
+            health: WorkerHealth::default(),
+        })
+        .collect();
+
+    let mut swarm = Swarm {
+        repo_path,
+        project_name: snapshot.project_name.clone(),
+        agent_type: current_runtime.clone(),
+        workflow: None,
+        tmux_session: snapshot.tmux_session.clone(),
+        manager: manager_info,
+        workers,
+        issue_cache: IssueCache::default(),
+        stopped: false,
+    };
+
+    tokio::spawn(async move {
+        let adapter = ClaudeAdapter::new(current_runtime, ServerTransport::new(None));
+        match adapter.switch_agent(&mut swarm, new_runtime).await {
+            Ok(()) => tracing::info!("Switched {} to {new_type_str}", swarm.project_name),
+            Err(e) => tracing::error!("switch_agent failed for {}: {e:#}", swarm.project_name),
+        }
+    });
+
+    Ok(Json(json!({ "ok": true })))
+}
+
 /// Find an agent (manager or worker) by role within a swarm snapshot.
 fn find_agent<'a>(
     swarm: &'a super::SwarmSnapshot,
@@ -418,7 +528,7 @@ pub async fn run(port: u16, state: WebServerState) -> Result<()> {
         .route("/api/agent-types", get(api_agent_types_handler))
         .route(
             "/api/swarms/{project}",
-            delete(api_stop_swarm_handler),
+            delete(api_stop_swarm_handler).patch(api_switch_agent_handler),
         )
         .route(
             "/api/swarms/{project}/workers",
