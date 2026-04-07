@@ -131,6 +131,7 @@ async fn build_swarm_snapshot(
         attention_count,
         manager,
         workers,
+        issues: Vec::new(), // populated by TUI path; standalone discovery doesn't fetch issues
     }))
 }
 

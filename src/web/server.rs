@@ -496,6 +496,7 @@ mod tests {
             attention_count: 0,
             manager: sample_agent("manager", true),
             workers: vec![sample_agent("worker-1", false)],
+            issues: Vec::new(),
         }
     }
 

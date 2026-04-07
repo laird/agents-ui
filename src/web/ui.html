@@ -353,6 +353,28 @@
 
     .agent-list { padding: 0.25rem; }
 
+    .issues-panel { margin-top: 1rem; }
+    .issues-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8125rem;
+    }
+    .issues-table th {
+      text-align: left;
+      color: var(--text-dim);
+      font-weight: 500;
+      padding: 0.25rem 0.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .issues-table td { padding: 0.3rem 0.5rem; }
+    .issues-table tr:hover td { background: rgba(255,255,255,0.04); }
+    .issue-num a { color: var(--accent); text-decoration: none; }
+    .issue-num a:hover { text-decoration: underline; }
+    .issue-pri { color: var(--text-dim); white-space: nowrap; }
+    .issue-title { max-width: 32rem; }
+    .issue-blocked td { color: var(--warning); }
+    .issue-working .issue-title, .issue-working .issue-status { color: #6699ff; }
+
     .agent-row {
       display: flex;
       align-items: center;
@@ -1169,6 +1191,52 @@
             '</div>' +
             '<div class="agent-list">' + workerRows + '</div>' +
           '</div>' +
+        '</div>' +
+
+        renderIssuesPanel(swarm.issues || [])
+      );
+    }
+
+    function renderIssuesPanel(issues) {
+      if (!issues || issues.length === 0) return '';
+
+      // Sort: blocked last, then by priority (lower number = higher priority), then by number
+      const sorted = issues.slice().sort((a, b) => {
+        const aBlocked = a.is_blocked ? 1 : 0;
+        const bBlocked = b.is_blocked ? 1 : 0;
+        if (aBlocked !== bBlocked) return aBlocked - bBlocked;
+        const aPri = a.priority === '—' ? 9 : parseInt(a.priority.slice(1)) || 9;
+        const bPri = b.priority === '—' ? 9 : parseInt(b.priority.slice(1)) || 9;
+        if (aPri !== bPri) return aPri - bPri;
+        return a.number - b.number;
+      });
+
+      const rows = sorted.map(issue => {
+        const rowCls = issue.is_blocked ? 'issue-row issue-blocked'
+                     : issue.is_working ? 'issue-row issue-working'
+                     : 'issue-row';
+        const statusText = issue.is_blocked ? '⚠ blocked'
+                         : issue.is_working ? ('🔨 ' + (issue.assigned_worker || 'working'))
+                         : '—';
+        return (
+          '<tr class="' + rowCls + '">' +
+            '<td class="issue-num"><a href="' + esc(issue.url) + '" target="_blank" rel="noopener">#' + issue.number + '</a></td>' +
+            '<td class="issue-title">' + esc(issue.title) + '</td>' +
+            '<td class="issue-pri">' + esc(issue.priority) + '</td>' +
+            '<td class="issue-status">' + esc(statusText) + '</td>' +
+          '</tr>'
+        );
+      }).join('');
+
+      return (
+        '<div class="panel issues-panel">' +
+          '<div class="panel-header">Open Issues <span class="panel-count">' + issues.length + '</span></div>' +
+          '<table class="issues-table">' +
+            '<thead><tr>' +
+              '<th>#</th><th>Title</th><th>Priority</th><th>Status</th>' +
+            '</tr></thead>' +
+            '<tbody>' + rows + '</tbody>' +
+          '</table>' +
         '</div>'
       );
     }

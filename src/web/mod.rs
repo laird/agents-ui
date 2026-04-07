@@ -28,6 +28,21 @@ pub struct AgentSnapshot {
     pub status_timestamp: Option<String>,
 }
 
+/// A single GitHub issue suitable for JSON serialization.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct IssueSnapshot {
+    pub number: u32,
+    pub title: String,
+    pub state: String,
+    pub priority: String,
+    pub labels: Vec<String>,
+    pub is_blocked: bool,
+    pub is_working: bool,
+    pub assigned_worker: Option<String>,
+    /// GitHub URL for linking.
+    pub url: String,
+}
+
 /// Snapshot of a full swarm suitable for JSON serialization.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SwarmSnapshot {
@@ -42,6 +57,8 @@ pub struct SwarmSnapshot {
     pub attention_count: usize,
     pub manager: AgentSnapshot,
     pub workers: Vec<AgentSnapshot>,
+    /// Open GitHub issues for this swarm's repository.
+    pub issues: Vec<IssueSnapshot>,
 }
 
 /// Thread-safe shared state between the TUI app and the web server.
@@ -84,6 +101,13 @@ impl AgentSnapshot {
 
 impl SwarmSnapshot {
     pub fn from_swarm(swarm: &crate::model::swarm::Swarm) -> Self {
+        let issues = swarm
+            .issue_cache
+            .issues
+            .iter()
+            .filter(|i| i.state == crate::model::issue::IssueState::Open)
+            .map(|i| IssueSnapshot::from_issue(i, &swarm.project_name))
+            .collect();
         Self {
             project_name: swarm.project_name.clone(),
             repo_path: swarm.repo_path.to_string_lossy().into_owned(),
@@ -100,6 +124,30 @@ impl SwarmSnapshot {
                 .iter()
                 .map(AgentSnapshot::from_agent_info)
                 .collect(),
+            issues,
+        }
+    }
+}
+
+impl IssueSnapshot {
+    pub fn from_issue(issue: &crate::model::issue::GitHubIssue, project_name: &str) -> Self {
+        // Derive GitHub URL from project name (owner/repo format expected in project_name or
+        // use a best-effort URL; the actual repo URL is in the gh remote).
+        let url = format!("https://github.com/{project_name}/issues/{}", issue.number);
+        let state = match issue.state {
+            crate::model::issue::IssueState::Open => "open",
+            crate::model::issue::IssueState::Closed => "closed",
+        };
+        Self {
+            number: issue.number,
+            title: issue.title.clone(),
+            state: state.to_string(),
+            priority: issue.priority_label(),
+            labels: issue.labels.clone(),
+            is_blocked: issue.is_blocked(),
+            is_working: issue.is_being_worked(),
+            assigned_worker: issue.assigned_worker.clone(),
+            url,
         }
     }
 }
