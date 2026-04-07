@@ -187,9 +187,11 @@ async fn main() -> Result<()> {
 
         // HTTP server
         let agents_dir = crate::scripts::launcher::resolve_agents_dir();
+        let transport = crate::transport::ServerTransport::new(cli.server.clone());
         let web_server_state = web::server::WebServerState {
             swarms: shared.clone(),
             agents_dir,
+            transport,
         };
         tokio::spawn(async move {
             if let Err(e) = web::server::run(port, web_server_state).await {

@@ -12,6 +12,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use super::SharedWebState;
+use crate::transport::ServerTransport;
 
 /// The embedded single-page web UI.
 const INDEX_HTML: &str = include_str!("ui.html");
@@ -24,6 +25,8 @@ pub const DEFAULT_PORT: u16 = 7878;
 pub struct WebServerState {
     pub swarms: SharedWebState,
     pub agents_dir: PathBuf,
+    /// Transport used for live tmux pane captures in the pane endpoint.
+    pub transport: ServerTransport,
 }
 
 async fn index_handler() -> Html<&'static str> {
@@ -41,32 +44,46 @@ async fn api_swarms_handler(State(state): State<WebServerState>) -> Json<Value> 
     Json(json!({ "swarms": swarms }))
 }
 
-/// Returns the pane content for a specific agent.
+/// Returns the pane content for a specific agent, captured live from tmux.
 /// `GET /api/swarms/:project/agents/:role/pane`
 async fn api_pane_handler(
     Path((project, role)): Path<(String, String)>,
     State(state): State<WebServerState>,
 ) -> Result<Json<Value>, StatusCode> {
-    let guard = state
-        .swarms
-        .read()
-        .map_err(|e| {
-            tracing::warn!("Web state lock poisoned: {e}");
-        })
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // Look up the agent in the shared state to get its tmux target and cached data.
+    let (tmux_target, cached_state, cached_content) = {
+        let guard = state
+            .swarms
+            .read()
+            .map_err(|e| {
+                tracing::warn!("Web state lock poisoned: {e}");
+            })
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let swarm = guard
-        .iter()
-        .find(|s| s.project_name == project)
-        .ok_or(StatusCode::NOT_FOUND)?;
+        let swarm = guard
+            .iter()
+            .find(|s| s.project_name == project)
+            .ok_or(StatusCode::NOT_FOUND)?;
 
-    let agent = find_agent(swarm, &role).ok_or(StatusCode::NOT_FOUND)?;
+        let agent = find_agent(swarm, &role).ok_or(StatusCode::NOT_FOUND)?;
+        (agent.tmux_target.clone(), agent.state.clone(), agent.pane_content.clone())
+    };
+
+    // Do a live capture from tmux with ANSI escape codes (-e flag) to ensure
+    // colors and styling are preserved in the web UI.
+    let pane_content = match crate::tmux::proxy::capture_pane(&state.transport, &tmux_target, 500).await {
+        Ok(content) => content,
+        Err(e) => {
+            tracing::warn!("Live pane capture failed for {tmux_target}: {e}, using cached content");
+            cached_content
+        }
+    };
 
     Ok(Json(json!({
-        "role": agent.role,
-        "tmux_target": agent.tmux_target,
-        "state": agent.state,
-        "pane_content": agent.pane_content,
+        "role": role,
+        "tmux_target": tmux_target,
+        "state": cached_state,
+        "pane_content": pane_content,
     })))
 }
 
@@ -425,6 +442,7 @@ mod tests {
         WebServerState {
             swarms: shared,
             agents_dir: PathBuf::from("/tmp/test-agents"),
+            transport: ServerTransport::default(),
         }
     }
 
