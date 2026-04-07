@@ -290,9 +290,18 @@ async fn api_stop_swarm_handler(
 /// Add one worker to a running swarm.
 /// `POST /api/swarms/:project/workers`
 /// Returns 404 if the project is not found, 202 Accepted on success.
+/// Optional body for the add-worker endpoint to override the agent type.
+#[derive(Debug, Deserialize, Default)]
+pub struct AddWorkerBody {
+    /// Agent type override (e.g. "Claude", "Codex", "Droid", "Gemini").
+    /// If omitted, the swarm's current agent type is used.
+    pub agent_type: Option<String>,
+}
+
 async fn api_add_worker_handler(
     Path(project): Path<String>,
     State(state): State<WebServerState>,
+    body: Option<Json<AddWorkerBody>>,
 ) -> Result<Json<Value>, StatusCode> {
     use crate::adapter::claude::ClaudeAdapter;
     use crate::adapter::traits::AgentRuntime;
@@ -313,7 +322,11 @@ async fn api_add_worker_handler(
             .ok_or(StatusCode::NOT_FOUND)?
     };
 
-    let agent_type: AgentType = match snapshot.agent_type.as_str() {
+    // Use the body's agent_type override if provided, otherwise fall back to the swarm's type.
+    let type_str = body
+        .and_then(|b| b.0.agent_type)
+        .unwrap_or_else(|| snapshot.agent_type.clone());
+    let agent_type: AgentType = match type_str.as_str() {
         "Claude" => AgentType::Claude,
         "Codex"  => AgentType::Codex,
         "Droid"  => AgentType::Droid,

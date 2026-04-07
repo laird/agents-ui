@@ -262,6 +262,11 @@
     .start-btn { background: var(--accent); color: #fff; }
     .add-worker-btn { background: var(--surface); color: var(--text); border-color: var(--border); }
     .new-issue-btn  { background: var(--surface); color: var(--text); border-color: var(--border); margin-left: auto; }
+    .agent-type-select {
+      background: var(--surface); color: var(--text);
+      border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 0.3rem 0.5rem; font-size: 0.8rem; cursor: pointer;
+    }
 
     /* ---- Issue creation modal ---- */
     .modal-overlay {
@@ -1039,9 +1044,16 @@
       }
     }
 
+    // Per-swarm agent type override (set by the agent-type switcher, null = use swarm default).
+    const swarmAgentTypeOverride = {};
+
     async function addWorker(project) {
       try {
-        const r = await fetch('/api/swarms/' + encodeURIComponent(project) + '/workers', { method: 'POST' });
+        const override = swarmAgentTypeOverride[project];
+        const fetchOpts = override
+          ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agent_type: override }) }
+          : { method: 'POST' };
+        const r = await fetch('/api/swarms/' + encodeURIComponent(project) + '/workers', fetchOpts);
         if (r.ok) {
           setTimeout(() => { refresh(); }, 4000);
         } else {
@@ -1050,6 +1062,13 @@
       } catch (err) {
         alert('Error: ' + err.message);
       }
+    }
+
+    function switchAgentType(project, type) {
+      swarmAgentTypeOverride[project] = type;
+      // Re-render the detail view so the switcher shows the new selection.
+      const swarm = state.swarms.find(s => s.project_name === project);
+      if (swarm) render();
     }
 
     async function startSwarm(repoPath, agentType, numWorkers) {
@@ -1170,14 +1189,26 @@
           '<span class="meta-item" style="font-family:monospace;font-size:0.75rem">' + esc(swarm.tmux_session) + '</span>' +
           '<span class="meta-item" style="opacity:0.7">' + esc(swarm.repo_path) + '</span>' +
         '</div>' +
-        '<div class="action-bar">' +
-          (swarm.stopped
-            ? '<button class="action-btn start-btn" onclick="startSwarm(' + JSON.stringify(swarm.repo_path) + ',' + JSON.stringify(swarm.agent_type) + ',' + swarm.workers.length + ')">▶ Start</button>'
-            : '<button class="action-btn stop-btn" onclick="stopSwarm(' + JSON.stringify(swarm.project_name) + ')">■ Stop</button>' +
-              '<button class="action-btn add-worker-btn" onclick="addWorker(' + JSON.stringify(swarm.project_name) + ')">+ Add Worker</button>'
-          ) +
-          '<button class="action-btn new-issue-btn" onclick="openNewIssueModal(' + JSON.stringify(swarm.project_name) + ')">+ New Issue</button>' +
-        '</div>' +
+        (function() {
+          const proj = swarm.project_name;
+          const activeType = swarmAgentTypeOverride[proj] || swarm.agent_type;
+          const agentTypeSelector = '<select class="agent-type-select" ' +
+            'aria-label="Agent type for next worker" ' +
+            'onchange="switchAgentType(' + JSON.stringify(proj) + ',this.value)">' +
+            ['Claude','Codex','Droid','Gemini'].map(t =>
+              '<option value="' + t + '"' + (t === activeType ? ' selected' : '') + '>' + t + '</option>'
+            ).join('') +
+            '</select>';
+          return '<div class="action-bar">' +
+            (swarm.stopped
+              ? '<button class="action-btn start-btn" onclick="startSwarm(' + JSON.stringify(swarm.repo_path) + ',' + JSON.stringify(swarm.agent_type) + ',' + swarm.workers.length + ')">▶ Start</button>'
+              : '<button class="action-btn stop-btn" onclick="stopSwarm(' + JSON.stringify(proj) + ')">■ Stop</button>' +
+                agentTypeSelector +
+                '<button class="action-btn add-worker-btn" onclick="addWorker(' + JSON.stringify(proj) + ')">+ Add Worker</button>'
+            ) +
+            '<button class="action-btn new-issue-btn" onclick="openNewIssueModal(' + JSON.stringify(proj) + ')">+ New Issue</button>' +
+          '</div>';
+        })() +
 
         '<div class="detail-layout">' +
           '<div class="panel">' +
