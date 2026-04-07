@@ -972,7 +972,14 @@ impl ClaudeAdapter {
                 .unwrap_or(0)
         });
 
-        let stopped = crate::config::persistence::is_swarm_stopped(&project_name);
+        let mut stopped = crate::config::persistence::is_swarm_stopped(&project_name);
+        // If the tombstone says stopped but active workers are present, the swarm was restarted
+        // externally (e.g., via start-parallel-agents.sh). Clear the stale tombstone so the UI
+        // shows the correct running state and exposes stop/add-worker actions.
+        if stopped && !workers.is_empty() {
+            crate::config::persistence::clear_swarm_stopped(&project_name);
+            stopped = false;
+        }
         Ok(Swarm {
             repo_path,
             project_name,
