@@ -347,6 +347,13 @@
     .agent-state-text .needs-input {
       color: var(--warning);
     }
+    .health-icon { font-size: 0.8rem; font-weight: bold; }
+    .health-ok      { color: #44cc44; }
+    .health-warn    { color: #cccc44; }
+    .health-restart { color: #44cccc; }
+    .health-dead    { color: #cc4444; }
+    .agent-completed { color: var(--text-dim); font-size: 0.75rem; }
+    .agent-restarts  { color: var(--warning); font-size: 0.75rem; }
 
     /* ---- Session view ---- */
     .session-header {
@@ -979,6 +986,16 @@
         (agent.current_issue_title ? ' ' + agent.current_issue_title : '');
     }
 
+    function healthIcon(h) {
+      switch (h) {
+        case 'Healthy':    return '<span class="health-icon health-ok" title="Healthy">✓</span>';
+        case 'Stalled':    return '<span class="health-icon health-warn" title="Stalled">⚠</span>';
+        case 'Restarting': return '<span class="health-icon health-restart" title="Restarting">↺</span>';
+        case 'Dead':       return '<span class="health-icon health-dead" title="Dead">✗</span>';
+        default:           return '';
+      }
+    }
+
     function renderAgentRow(agent, project) {
       const cls      = statusClass(agent.state);
       const issueText = formatIssueInfo(agent);
@@ -986,6 +1003,14 @@
         ? '<span class="needs-input"> · ⚠ Needs input</span>'
         : '';
       const proj = project || '';
+      // Health + stats only shown for workers (managers don't have health tracking)
+      const healthHtml = !agent.is_manager ? healthIcon(agent.health || 'Healthy') : '';
+      const completedHtml = (!agent.is_manager && agent.completed_issue_count > 0)
+        ? '<span class="agent-completed" title="Issues completed this session"> · ✔' + agent.completed_issue_count + '</span>'
+        : '';
+      const restartHtml = (!agent.is_manager && agent.resurrection_attempts > 0)
+        ? '<span class="agent-restarts" title="Auto-restart count"> · ↺' + agent.resurrection_attempts + '</span>'
+        : '';
       return (
         '<div class="agent-row" ' +
              'role="button" tabindex="0" ' +
@@ -994,9 +1019,9 @@
              'onkeydown="if(event.key===\'Enter\'||(event.key===\' \'&&(event.preventDefault(),true))){openSession(\'' + esc(proj) + '\',\'' + esc(agent.role) + '\')}">' +
           '<span class="status-dot s-' + cls + '" aria-hidden="true"></span>' +
           '<div class="agent-info">' +
-            '<div class="agent-role">' + esc(agent.role) + '</div>' +
+            '<div class="agent-role">' + healthHtml + ' ' + esc(agent.role) + '</div>' +
             '<div class="agent-state-text">' +
-              esc(agent.state) + esc(issueText) + waitText +
+              esc(agent.state) + esc(issueText) + waitText + completedHtml + restartHtml +
             '</div>' +
           '</div>' +
           '<span class="agent-row-arrow" aria-hidden="true">›</span>' +

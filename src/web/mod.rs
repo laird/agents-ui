@@ -18,6 +18,14 @@ pub struct AgentSnapshot {
     pub pane_content: String,
     /// tmux pane target (e.g., "claude-myrepo:0.0") used to send input.
     pub tmux_target: String,
+    /// Health status: "Healthy", "Stalled", "Restarting", or "Dead".
+    pub health: String,
+    /// Number of completed issues this session.
+    pub completed_issue_count: u32,
+    /// Number of times this agent has been auto-restarted this session.
+    pub resurrection_attempts: u32,
+    /// ISO-8601 timestamp of last status update, if available.
+    pub status_timestamp: Option<String>,
 }
 
 /// Snapshot of a full swarm suitable for JSON serialization.
@@ -46,6 +54,16 @@ pub fn new_shared_state() -> SharedWebState {
 
 impl AgentSnapshot {
     pub fn from_agent_info(info: &crate::model::swarm::AgentInfo) -> Self {
+        use crate::model::swarm::HealthStatus;
+        let health = match info.health.status() {
+            HealthStatus::Healthy    => "Healthy",
+            HealthStatus::Stalled    => "Stalled",
+            HealthStatus::Restarting => "Restarting",
+            HealthStatus::Dead       => "Dead",
+        };
+        let status_timestamp = info.status.timestamp.map(|ts| {
+            ts.format("%Y-%m-%dT%H:%M:%SZ").to_string()
+        });
         Self {
             id: info.id.clone(),
             role: info.role.clone(),
@@ -56,6 +74,10 @@ impl AgentSnapshot {
             current_issue_title: info.current_issue_title.clone(),
             pane_content: info.pane_content.clone(),
             tmux_target: info.tmux_target.clone(),
+            health: health.to_string(),
+            completed_issue_count: info.completed_issue_count,
+            resurrection_attempts: info.resurrection_attempts,
+            status_timestamp,
         }
     }
 }

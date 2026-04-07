@@ -206,6 +206,10 @@ async fn build_agent_snapshot(
         current_issue_title: None,
         pane_content,
         tmux_target: target.to_string(),
+        health: "Healthy".to_string(),
+        completed_issue_count: 0,
+        resurrection_attempts: 0,
+        status_timestamp: None,
     }
 }
 

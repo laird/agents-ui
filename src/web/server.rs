@@ -476,6 +476,10 @@ mod tests {
             current_issue_title: None,
             pane_content: format!("Pane output for {role}"),
             tmux_target: format!("claude-test:0.{}", if is_manager { 0 } else { 1 }),
+            health: "Healthy".to_string(),
+            completed_issue_count: 0,
+            resurrection_attempts: 0,
+            status_timestamp: None,
         }
     }
 
