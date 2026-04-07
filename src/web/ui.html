@@ -261,6 +261,52 @@
     .stop-btn { background: var(--error); color: #fff; }
     .start-btn { background: var(--accent); color: #fff; }
     .add-worker-btn { background: var(--surface); color: var(--text); border-color: var(--border); }
+    .new-issue-btn  { background: var(--surface); color: var(--text); border-color: var(--border); margin-left: auto; }
+
+    /* ---- Issue creation modal ---- */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.6);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 999;
+    }
+    .modal {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem;
+      width: min(480px, 92vw);
+      display: flex; flex-direction: column; gap: 0.75rem;
+    }
+    .modal-title { font-size: 1rem; font-weight: 600; }
+    .modal-row { display: flex; flex-direction: column; gap: 0.25rem; }
+    .modal-label { font-size: 0.75rem; color: var(--text-dim); }
+    .modal-input, .modal-textarea, .modal-select {
+      background: var(--surface); color: var(--text);
+      border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 0.4rem 0.6rem; font-size: 0.875rem; font-family: inherit;
+    }
+    .modal-textarea { resize: vertical; min-height: 80px; }
+    .modal-select { cursor: pointer; }
+    .modal-row-inline { display: flex; gap: 0.5rem; }
+    .modal-row-inline .modal-row { flex: 1; }
+    .modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.25rem; }
+    .modal-cancel { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.4rem 0.9rem; cursor: pointer; font-size: 0.875rem; }
+    .modal-cancel:hover { opacity: 0.8; }
+    .modal-submit { background: var(--accent); color: #fff; border: none; border-radius: var(--radius); padding: 0.4rem 0.9rem; cursor: pointer; font-size: 0.875rem; font-weight: 600; }
+    .modal-submit:hover { opacity: 0.85; }
+    .modal-submit:disabled { opacity: 0.45; cursor: not-allowed; }
+    .modal-status { font-size: 0.8rem; min-height: 1.2em; }
+    .modal-status.ok    { color: var(--success); }
+    .modal-status.error { color: var(--error); }
+    .modal-labels { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+    .label-toggle {
+      font-size: 0.7rem; padding: 0.15rem 0.45rem;
+      border: 1px solid var(--border); border-radius: 2em;
+      cursor: pointer; background: var(--surface); color: var(--text-dim);
+      user-select: none;
+    }
+    .label-toggle.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 
     .detail-layout {
       display: grid;
@@ -650,6 +696,55 @@
       <span>Loading swarm data…</span>
     </div>
   </main>
+
+  <!-- Issue creation modal (hidden by default) -->
+  <div id="new-issue-overlay" class="modal-overlay" style="display:none" role="dialog" aria-modal="true" aria-labelledby="new-issue-title">
+    <div class="modal">
+      <div class="modal-title" id="new-issue-title">Create GitHub Issue</div>
+      <div class="modal-row">
+        <label class="modal-label" for="ni-title">Title</label>
+        <input class="modal-input" id="ni-title" type="text" placeholder="Brief summary of the issue" autocomplete="off" />
+      </div>
+      <div class="modal-row">
+        <label class="modal-label" for="ni-body">Description (optional)</label>
+        <textarea class="modal-textarea" id="ni-body" placeholder="Steps to reproduce, expected vs actual behavior…"></textarea>
+      </div>
+      <div class="modal-row-inline">
+        <div class="modal-row">
+          <label class="modal-label" for="ni-priority">Priority</label>
+          <select class="modal-select" id="ni-priority">
+            <option value="P2">P2 — Medium</option>
+            <option value="P0">P0 — Critical</option>
+            <option value="P1">P1 — High</option>
+            <option value="P3">P3 — Low</option>
+          </select>
+        </div>
+        <div class="modal-row">
+          <label class="modal-label" for="ni-type">Type</label>
+          <select class="modal-select" id="ni-type">
+            <option value="bug">Bug</option>
+            <option value="enhancement">Enhancement</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-row">
+        <div class="modal-label">Extra labels (optional)</div>
+        <div class="modal-labels" id="ni-extra-labels">
+          <span class="label-toggle" data-label="needs-design" onclick="toggleLabel(this)">needs-design</span>
+          <span class="label-toggle" data-label="needs-clarification" onclick="toggleLabel(this)">needs-clarification</span>
+          <span class="label-toggle" data-label="needs-approval" onclick="toggleLabel(this)">needs-approval</span>
+          <span class="label-toggle" data-label="too-complex" onclick="toggleLabel(this)">too-complex</span>
+          <span class="label-toggle" data-label="proposal" onclick="toggleLabel(this)">proposal</span>
+          <span class="label-toggle" data-label="future" onclick="toggleLabel(this)">future</span>
+        </div>
+      </div>
+      <div class="modal-status" id="ni-status"></div>
+      <div class="modal-actions">
+        <button class="modal-cancel" onclick="closeNewIssueModal()">Cancel</button>
+        <button class="modal-submit" id="ni-submit" onclick="submitNewIssue()">Create Issue</button>
+      </div>
+    </div>
+  </div>
 
   <script>
     'use strict';
@@ -1059,6 +1154,7 @@
             : '<button class="action-btn stop-btn" onclick="stopSwarm(' + JSON.stringify(swarm.project_name) + ')">■ Stop</button>' +
               '<button class="action-btn add-worker-btn" onclick="addWorker(' + JSON.stringify(swarm.project_name) + ')">+ Add Worker</button>'
           ) +
+          '<button class="action-btn new-issue-btn" onclick="openNewIssueModal(' + JSON.stringify(swarm.project_name) + ')">+ New Issue</button>' +
         '</div>' +
 
         '<div class="detail-layout">' +
@@ -1342,6 +1438,97 @@
         render();
       }
     }
+
+    // ── Issue creation modal ──────────────────────────────────────────────────
+    let newIssueProject = null;
+
+    function openNewIssueModal(project) {
+      newIssueProject = project;
+      document.getElementById('ni-title').value = '';
+      document.getElementById('ni-body').value = '';
+      document.getElementById('ni-priority').value = 'P2';
+      document.getElementById('ni-type').value = 'bug';
+      document.querySelectorAll('#ni-extra-labels .label-toggle').forEach(t => t.classList.remove('active'));
+      document.getElementById('ni-status').textContent = '';
+      document.getElementById('ni-status').className = 'modal-status';
+      document.getElementById('ni-submit').disabled = false;
+      document.getElementById('new-issue-overlay').style.display = 'flex';
+      setTimeout(() => document.getElementById('ni-title').focus(), 50);
+    }
+
+    function closeNewIssueModal() {
+      document.getElementById('new-issue-overlay').style.display = 'none';
+      newIssueProject = null;
+    }
+
+    function toggleLabel(el) {
+      el.classList.toggle('active');
+    }
+
+    async function submitNewIssue() {
+      const title    = document.getElementById('ni-title').value.trim();
+      const body     = document.getElementById('ni-body').value.trim();
+      const priority = document.getElementById('ni-priority').value;
+      const type     = document.getElementById('ni-type').value;
+      const extraLabels = Array.from(document.querySelectorAll('#ni-extra-labels .label-toggle.active'))
+                              .map(t => t.dataset.label);
+
+      if (!title) {
+        const st = document.getElementById('ni-status');
+        st.textContent = 'Title is required.';
+        st.className = 'modal-status error';
+        return;
+      }
+
+      const labels = [priority, type, ...extraLabels].join(',');
+      // Escape single quotes in title/body for shell safety
+      const safeTitle = title.replace(/'/g, "'\\''");
+      const safeBody  = body  ? body.replace(/'/g, "'\\''") : '';
+      const cmd = safeBody
+        ? `gh issue create --title '${safeTitle}' --body '${safeBody}' --label '${labels}'`
+        : `gh issue create --title '${safeTitle}' --label '${labels}'`;
+
+      const submitBtn = document.getElementById('ni-submit');
+      const st = document.getElementById('ni-status');
+      submitBtn.disabled = true;
+      st.textContent = 'Creating issue…';
+      st.className = 'modal-status';
+
+      try {
+        const r = await fetch(
+          '/api/swarms/' + encodeURIComponent(newIssueProject) + '/agents/manager/input',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: cmd }),
+          }
+        );
+        if (!r.ok) {
+          st.textContent = 'Failed to send command (HTTP ' + r.status + ')';
+          st.className = 'modal-status error';
+          submitBtn.disabled = false;
+          return;
+        }
+        st.textContent = '✓ Command sent to manager. Check the session pane for the result.';
+        st.className = 'modal-status ok';
+        setTimeout(closeNewIssueModal, 2000);
+      } catch (e) {
+        st.textContent = 'Error: ' + e.message;
+        st.className = 'modal-status error';
+        submitBtn.disabled = false;
+      }
+    }
+
+    // Close modal on overlay click
+    document.getElementById('new-issue-overlay').addEventListener('click', function(e) {
+      if (e.target === this) closeNewIssueModal();
+    });
+    // Close modal on Escape
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && document.getElementById('new-issue-overlay').style.display !== 'none') {
+        closeNewIssueModal();
+      }
+    });
 
     refresh();
     setInterval(refresh, 5000);
