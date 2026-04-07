@@ -53,7 +53,7 @@ pub fn find_script(name: &str) -> Option<PathBuf> {
     for dir in search_paths {
         let candidate = dir.join(name);
         if candidate.exists() {
-            return Some(candidate);
+            return Some(std::fs::canonicalize(&candidate).unwrap_or(candidate));
         }
     }
     None
@@ -143,7 +143,8 @@ mod tests {
         let result = find_script("test-script.sh");
         unsafe { std::env::remove_var("AGENTS_DIR"); }
 
-        assert_eq!(result, Some(script_file));
+        let canonical_script = script_file.canonicalize().ok();
+        assert_eq!(result, canonical_script);
 
         fs::remove_dir_all(&tmp).ok();
     }

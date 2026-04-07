@@ -1,6 +1,6 @@
-use std::path::PathBuf;
 use super::issue::IssueCache;
 use super::status::AgentStatus;
+use std::path::PathBuf;
 
 /// Health status of a worker agent.
 #[derive(Debug, Clone, PartialEq)]
@@ -112,6 +112,7 @@ impl AgentType {
     }
 
     /// The shell command to launch this agent with autonomous permissions.
+    #[cfg(test)]
     pub fn launch_cmd(&self) -> &str {
         match self {
             AgentType::Claude => "claude code --dangerously-skip-permissions .",
@@ -121,12 +122,45 @@ impl AgentType {
         }
     }
 
-    /// The slash command to start the worker fix-loop.
+    /// Returns the exit command for this agent type.
+    /// `(key, is_named)` — if `is_named` is true, send as a tmux named key (e.g. "C-c");
+    /// otherwise send as literal text followed by Enter.
+    pub fn exit_cmd(&self) -> (&str, bool) {
+        match self {
+            AgentType::Claude | AgentType::Gemini => ("q", false),
+            AgentType::Codex | AgentType::Droid => ("C-c", true),
+        }
+    }
+
+    /// The command to start the worker fix-loop (sent once on first launch).
     pub fn worker_loop_cmd(&self) -> &str {
         match self {
             AgentType::Claude => "/autocoder:fix-loop",
-            AgentType::Codex | AgentType::Droid => "",
+            AgentType::Codex => {
+                "Use the autocoder skill to start the fix loop for this worker in the current repository."
+            }
+            AgentType::Droid => "/fix-loop",
             AgentType::Gemini => "/fix-loop",
+        }
+    }
+
+    /// The command to dispatch work to an already-running idle worker (ongoing cycles).
+    #[allow(dead_code)]
+    pub fn worker_cmd(&self) -> &str {
+        match self {
+            AgentType::Claude => "/autocoder:fix",
+            AgentType::Gemini => "/fix",
+            AgentType::Codex | AgentType::Droid => "",
+        }
+    }
+
+    /// The command to send to an already-running idle manager (ongoing cycles).
+    #[allow(dead_code)]
+    pub fn manager_cmd(&self) -> &str {
+        match self {
+            AgentType::Claude => "/autocoder:monitor-workers",
+            AgentType::Gemini => "/monitor-workers",
+            AgentType::Codex | AgentType::Droid => "",
         }
     }
 
@@ -145,6 +179,14 @@ impl AgentType {
             AgentType::Claude | AgentType::Codex | AgentType::Gemini => ".codex/loops",
             AgentType::Droid => ".factory/loops",
         }
+    }
+
+    /// Whether this runtime is supervised by an outer shell loop wrapper.
+    pub fn uses_loop_wrapper(&self) -> bool {
+        matches!(
+            self,
+            AgentType::Codex | AgentType::Droid | AgentType::Gemini
+        )
     }
 
     pub fn from_name(value: &str) -> Option<Self> {
@@ -208,6 +250,10 @@ pub struct AgentInfo {
     pub current_issue_title: Option<String>,
     /// Whether the agent is waiting for user input (detected from pane content)
     pub waiting_for_input: bool,
+    /// Number of times the TUI has attempted to revive this agent in the current session.
+    pub resurrection_attempts: u32,
+    /// Number of issues completed (dispatched → cleared) in this session.
+    pub completed_issue_count: u32,
     /// Health tracking for auto-recovery
     pub health: WorkerHealth,
 }
@@ -230,7 +276,10 @@ pub fn detect_waiting_for_input(content: &str) -> bool {
     }
 
     // Interrupted state
-    if tail_text.contains("What should Claude do instead?") {
+    if tail_text.contains("What should Claude do instead?")
+        || tail_text.contains("What should Gemini do instead?")
+        || tail_text.contains("What should the agent do instead?")
+    {
         return true;
     }
 
@@ -259,6 +308,35 @@ pub fn detect_waiting_for_input(content: &str) -> bool {
     false
 }
 
+impl AgentInfo {
+    /// Check if this agent appears to need human attention based on pane content.
+    #[allow(dead_code)]
+    pub fn needs_attention(&self) -> bool {
+        let content = &self.pane_content;
+        // Check last 20 lines for attention patterns
+        for line in content.lines().rev().take(20) {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let lower = trimmed.to_lowercase();
+            if lower.contains("interrupted")
+                || lower.contains("what should claude do")
+                || lower.contains("what should gemini do")
+                || lower.contains("what should the agent do")
+                || lower.contains("do you want to")
+                || lower.contains("waiting for your")
+                || lower.contains("permission denied")
+                || lower.contains("? (y/n)")
+            {
+                return true;
+            }
+        }
+        // Also flag idle agents as needing attention
+        matches!(self.status.state, super::status::AgentState::Idle)
+    }
+}
+
 /// A swarm of agents working on one repo.
 #[derive(Debug, Clone)]
 pub struct Swarm {
@@ -278,6 +356,9 @@ pub struct Swarm {
     pub workers: Vec<AgentInfo>,
     /// Cached GitHub issues
     pub issue_cache: IssueCache,
+    /// Set to true when the swarm was intentionally stopped via the TUI.
+    /// Prevents automatic respawning by heal_workers and revive_agents.
+    pub stopped: bool,
 }
 
 #[allow(dead_code)] // Utility methods for future UI enhancements
@@ -362,7 +443,9 @@ impl Swarm {
         if self.manager.role == role || self.manager.id == role {
             Some(&mut self.manager)
         } else {
-            self.workers.iter_mut().find(|w| w.role == role || w.id == role)
+            self.workers
+                .iter_mut()
+                .find(|w| w.role == role || w.id == role)
         }
     }
 
@@ -379,8 +462,44 @@ impl Swarm {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::issue::{GitHubIssue, IssueCache, IssueState, IssuePriority, IssueType};
-    use crate::model::status::AgentStatus;
+    use crate::model::issue::{GitHubIssue, IssueCache, IssuePriority, IssueState, IssueType};
+    use crate::model::status::{AgentState, AgentStatus};
+
+    fn make_agent(id: &str, state: AgentState, pane_content: &str) -> AgentInfo {
+        AgentInfo {
+            id: id.to_string(),
+            role: id.to_string(),
+            worktree_path: PathBuf::from("/tmp/test"),
+            tmux_target: "test:0.0".to_string(),
+            status: AgentStatus {
+                timestamp: None,
+                state,
+            },
+            is_manager: id == "manager",
+            pane_content: pane_content.to_string(),
+            dispatched_issue: None,
+            current_issue: None,
+            current_issue_title: None,
+            waiting_for_input: false,
+            resurrection_attempts: 0,
+            completed_issue_count: 0,
+            health: WorkerHealth::default(),
+        }
+    }
+
+    fn make_swarm(workers: Vec<AgentInfo>) -> Swarm {
+        Swarm {
+            repo_path: PathBuf::from("/tmp/repo"),
+            project_name: "test".to_string(),
+            agent_type: AgentType::Claude,
+            workflow: Some(Workflow::Autocoder),
+            tmux_session: "claude-test".to_string(),
+            manager: make_agent("manager", AgentState::Working { issue: None }, ""),
+            workers,
+            issue_cache: IssueCache::default(),
+            stopped: false,
+        }
+    }
 
     fn make_swarm_with_issues(issues: Vec<GitHubIssue>) -> Swarm {
         let manager = AgentInfo {
@@ -395,6 +514,8 @@ mod tests {
             current_issue: None,
             current_issue_title: None,
             waiting_for_input: false,
+            resurrection_attempts: 0,
+            completed_issue_count: 0,
             health: WorkerHealth::default(),
         };
         let mut cache = IssueCache::default();
@@ -408,6 +529,7 @@ mod tests {
             manager,
             workers: Vec::new(),
             issue_cache: cache,
+            stopped: false,
         }
     }
 
@@ -421,6 +543,7 @@ mod tests {
             labels: vec!["needs-design".to_string()],
             is_working: false,
             assigned_worker: None,
+            updated_at: None,
         }
     }
 
@@ -434,16 +557,13 @@ mod tests {
             labels: vec!["bug".to_string()],
             is_working: false,
             assigned_worker: None,
+            updated_at: None,
         }
     }
 
     #[test]
     fn attention_count_returns_blocked_issue_count() {
-        let swarm = make_swarm_with_issues(vec![
-            blocked_issue(1),
-            open_issue(2),
-            blocked_issue(3),
-        ]);
+        let swarm = make_swarm_with_issues(vec![blocked_issue(1), open_issue(2), blocked_issue(3)]);
         assert_eq!(swarm.attention_count(), 2);
     }
 
@@ -475,8 +595,11 @@ mod tests {
     fn worker_loop_commands_match_runtime_model() {
         assert_eq!(AgentType::Claude.worker_loop_cmd(), "/autocoder:fix-loop");
         assert_eq!(AgentType::Gemini.worker_loop_cmd(), "/fix-loop");
-        assert_eq!(AgentType::Codex.worker_loop_cmd(), "");
-        assert_eq!(AgentType::Droid.worker_loop_cmd(), "");
+        assert_eq!(
+            AgentType::Codex.worker_loop_cmd(),
+            "Use the autocoder skill to start the fix loop for this worker in the current repository."
+        );
+        assert_eq!(AgentType::Droid.worker_loop_cmd(), "/fix-loop");
     }
 
     #[test]
@@ -484,6 +607,231 @@ mod tests {
         assert_eq!(AgentType::Codex.status_dir(), ".codex/loops");
         assert_eq!(AgentType::Claude.status_dir(), ".codex/loops");
         assert_eq!(AgentType::Droid.status_dir(), ".factory/loops");
+    }
+
+    #[test]
+    fn loop_wrappers_match_runtime_requirements() {
+        assert!(AgentType::Codex.uses_loop_wrapper());
+        assert!(AgentType::Droid.uses_loop_wrapper());
+        assert!(!AgentType::Claude.uses_loop_wrapper());
+        assert!(AgentType::Gemini.uses_loop_wrapper());
+    }
+
+    #[test]
+    fn agent_type_display() {
+        assert_eq!(AgentType::Claude.to_string(), "Claude");
+        assert_eq!(AgentType::Codex.to_string(), "Codex");
+        assert_eq!(AgentType::Droid.to_string(), "Droid");
+        assert_eq!(AgentType::Gemini.to_string(), "Gemini");
+    }
+
+    #[test]
+    fn agent_type_script_flag() {
+        assert_eq!(AgentType::Claude.script_flag(), "claude");
+        assert_eq!(AgentType::Codex.script_flag(), "codex");
+        assert_eq!(AgentType::Droid.script_flag(), "droid");
+        assert_eq!(AgentType::Gemini.script_flag(), "gemini");
+    }
+
+    #[test]
+    fn agent_type_session_prefix() {
+        assert_eq!(AgentType::Claude.session_prefix(), "claude");
+        assert_eq!(AgentType::Droid.session_prefix(), "droid");
+    }
+
+    #[test]
+    fn workflow_display() {
+        assert_eq!(Workflow::Autocoder.to_string(), "Autocoder");
+        assert_eq!(Workflow::Modernize.to_string(), "Modernize");
+    }
+
+    #[test]
+    fn needs_attention_idle_agent() {
+        let agent = make_agent("w-0", AgentState::Idle, "some output");
+        assert!(agent.needs_attention());
+    }
+
+    #[test]
+    fn needs_attention_working_agent() {
+        let agent = make_agent(
+            "w-0",
+            AgentState::Working { issue: Some(42) },
+            "doing stuff",
+        );
+        assert!(!agent.needs_attention());
+    }
+
+    #[test]
+    fn needs_attention_permission_prompt() {
+        let agent = make_agent(
+            "w-0",
+            AgentState::Working { issue: None },
+            "some output\nWhat should Claude do? (y/n)\n",
+        );
+        assert!(agent.needs_attention());
+    }
+
+    #[test]
+    fn needs_attention_interrupted() {
+        let agent = make_agent(
+            "w-0",
+            AgentState::Working { issue: None },
+            "output\nProcess was interrupted\n",
+        );
+        assert!(agent.needs_attention());
+    }
+
+    #[test]
+    fn needs_attention_permission_denied() {
+        let agent = make_agent(
+            "w-0",
+            AgentState::Working { issue: None },
+            "trying stuff\npermission denied for file\n",
+        );
+        assert!(agent.needs_attention());
+    }
+
+    #[test]
+    fn needs_attention_do_you_want() {
+        let agent = make_agent(
+            "w-0",
+            AgentState::Working { issue: None },
+            "stuff\nDo you want to continue?\n",
+        );
+        assert!(agent.needs_attention());
+    }
+
+    #[test]
+    fn needs_attention_empty_pane() {
+        let agent = make_agent("w-0", AgentState::Working { issue: None }, "");
+        assert!(!agent.needs_attention());
+    }
+
+    #[test]
+    fn swarm_all_agent_count() {
+        let swarm = make_swarm(vec![
+            make_agent("w-0", AgentState::Idle, ""),
+            make_agent("w-1", AgentState::Working { issue: None }, ""),
+        ]);
+        assert_eq!(swarm.all_agents().len(), 3); // manager + 2 workers
+    }
+
+    #[test]
+    fn swarm_busy_count() {
+        let swarm = make_swarm(vec![
+            make_agent("w-0", AgentState::Idle, ""),
+            make_agent("w-1", AgentState::Working { issue: Some(1) }, ""),
+            make_agent("w-2", AgentState::Starting, ""),
+            make_agent("w-3", AgentState::Stopped, ""),
+        ]);
+        assert_eq!(swarm.busy_count(), 2); // Working + Starting
+    }
+
+    #[test]
+    fn swarm_busy_count_none_busy() {
+        let swarm = make_swarm(vec![
+            make_agent("w-0", AgentState::Idle, ""),
+            make_agent("w-1", AgentState::Stopped, ""),
+        ]);
+        assert_eq!(swarm.busy_count(), 0);
+    }
+
+    #[test]
+    fn swarm_agent_lookup_manager() {
+        let swarm = make_swarm(vec![make_agent("w-0", AgentState::Idle, "")]);
+        let agent = swarm.agent("manager");
+        assert!(agent.is_some());
+        assert!(agent.unwrap().is_manager);
+    }
+
+    #[test]
+    fn swarm_agent_lookup_worker() {
+        let swarm = make_swarm(vec![make_agent("w-0", AgentState::Idle, "")]);
+        let agent = swarm.agent("w-0");
+        assert!(agent.is_some());
+        assert_eq!(agent.unwrap().id, "w-0");
+    }
+
+    #[test]
+    fn swarm_agent_lookup_missing() {
+        let swarm = make_swarm(vec![]);
+        assert!(swarm.agent("nonexistent").is_none());
+    }
+
+    #[test]
+    fn swarm_agent_mut_worker() {
+        let mut swarm = make_swarm(vec![make_agent("w-0", AgentState::Idle, "")]);
+        let agent = swarm.agent_mut("w-0");
+        assert!(agent.is_some());
+        agent.unwrap().pane_content = "updated".to_string();
+        assert_eq!(swarm.agent("w-0").unwrap().pane_content, "updated");
+    }
+
+    #[test]
+    fn swarm_all_agents() {
+        let swarm = make_swarm(vec![
+            make_agent("w-0", AgentState::Idle, ""),
+            make_agent("w-1", AgentState::Working { issue: None }, ""),
+        ]);
+        let all = swarm.all_agents();
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[0].id, "manager");
+        assert_eq!(all[1].id, "w-0");
+        assert_eq!(all[2].id, "w-1");
+    }
+
+    // --- detect_waiting_for_input ---
+
+    #[test]
+    fn waiting_detected_for_bypass_permissions_prompt() {
+        assert!(detect_waiting_for_input("bypass permissions\nsome output"));
+    }
+
+    #[test]
+    fn waiting_detected_for_allow_prompt() {
+        assert!(detect_waiting_for_input("Running tool...\nAllow?"));
+    }
+
+    #[test]
+    fn waiting_detected_for_allow_this_action() {
+        assert!(detect_waiting_for_input("allow this action (y/n)"));
+    }
+
+    #[test]
+    fn waiting_detected_for_yn_brackets() {
+        assert!(detect_waiting_for_input("Continue? [Y/n]"));
+        assert!(detect_waiting_for_input("Continue? [y/N]"));
+    }
+
+    #[test]
+    fn waiting_detected_for_interrupted_state() {
+        assert!(detect_waiting_for_input(
+            "Some output\nWhat should Claude do instead?\nmore"
+        ));
+    }
+
+    #[test]
+    fn waiting_detected_for_interrupted_with_prompt_indicator() {
+        assert!(detect_waiting_for_input("Interrupted\nSome context\n❯"));
+    }
+
+    #[test]
+    fn waiting_detected_for_shift_tab_bypass_line() {
+        assert!(detect_waiting_for_input(
+            "bypass permissions on /some/file (shift+tab to allow)"
+        ));
+    }
+
+    #[test]
+    fn waiting_not_detected_for_normal_output() {
+        assert!(!detect_waiting_for_input(
+            "Running cargo build...\nCompiling foo v1.0\nFinished"
+        ));
+    }
+
+    #[test]
+    fn waiting_not_detected_for_empty_string() {
+        assert!(!detect_waiting_for_input(""));
     }
 
     #[test]
@@ -530,7 +878,7 @@ mod tests {
         assert_eq!(h.status(), HealthStatus::Restarting);
     }
 
-    fn make_agent(id: &str, role: &str, is_manager: bool) -> AgentInfo {
+    fn make_agent_simple(id: &str, role: &str, is_manager: bool) -> AgentInfo {
         AgentInfo {
             id: id.to_string(),
             role: role.to_string(),
@@ -543,6 +891,8 @@ mod tests {
             current_issue: None,
             current_issue_title: None,
             waiting_for_input: false,
+            resurrection_attempts: 0,
+            completed_issue_count: 0,
             health: WorkerHealth::default(),
         }
     }
@@ -557,6 +907,7 @@ mod tests {
             manager,
             workers,
             issue_cache: IssueCache::default(),
+            stopped: false,
         }
     }
 
@@ -576,10 +927,10 @@ mod tests {
 
     #[test]
     fn idle_count_counts_idle_agents() {
-        let manager = make_agent("mgr", "manager", true);
-        let mut w1 = make_agent("w1", "worker1", false);
-        let mut w2 = make_agent("w2", "worker2", false);
-        let mut w3 = make_agent("w3", "worker3", false);
+        let manager = make_agent_simple("mgr", "manager", true);
+        let mut w1 = make_agent_simple("w1", "worker1", false);
+        let mut w2 = make_agent_simple("w2", "worker2", false);
+        let mut w3 = make_agent_simple("w3", "worker3", false);
         w1.status.state = super::super::status::AgentState::Idle;
         w2.status.state = super::super::status::AgentState::Working { issue: Some(1) };
         w3.status.state = super::super::status::AgentState::Idle;
@@ -591,9 +942,9 @@ mod tests {
 
     #[test]
     fn waiting_count_counts_waiting_agents() {
-        let mut manager = make_agent("mgr", "manager", true);
-        let mut w1 = make_agent("w1", "worker1", false);
-        let w2 = make_agent("w2", "worker2", false);
+        let mut manager = make_agent_simple("mgr", "manager", true);
+        let mut w1 = make_agent_simple("w1", "worker1", false);
+        let w2 = make_agent_simple("w2", "worker2", false);
         manager.waiting_for_input = true;
         w1.waiting_for_input = true;
         let swarm = make_swarm_with_agents(manager, vec![w1, w2]);
@@ -602,17 +953,17 @@ mod tests {
 
     #[test]
     fn waiting_count_zero_when_none_waiting() {
-        let manager = make_agent("mgr", "manager", true);
-        let w1 = make_agent("w1", "worker1", false);
+        let manager = make_agent_simple("mgr", "manager", true);
+        let w1 = make_agent_simple("w1", "worker1", false);
         let swarm = make_swarm_with_agents(manager, vec![w1]);
         assert_eq!(swarm.waiting_count(), 0);
     }
 
     #[test]
     fn all_agents_includes_manager_and_workers() {
-        let manager = make_agent("mgr", "manager", true);
-        let w1 = make_agent("w1", "worker1", false);
-        let w2 = make_agent("w2", "worker2", false);
+        let manager = make_agent_simple("mgr", "manager", true);
+        let w1 = make_agent_simple("w1", "worker1", false);
+        let w2 = make_agent_simple("w2", "worker2", false);
         let swarm = make_swarm_with_agents(manager, vec![w1, w2]);
         let all = swarm.all_agents();
         assert_eq!(all.len(), 3);
@@ -623,8 +974,8 @@ mod tests {
 
     #[test]
     fn next_waiting_agent_finds_first_when_none_specified() {
-        let manager = make_agent("mgr", "manager", true);
-        let mut w1 = make_agent("w1", "worker1", false);
+        let manager = make_agent_simple("mgr", "manager", true);
+        let mut w1 = make_agent_simple("w1", "worker1", false);
         w1.waiting_for_input = true;
         let swarm = make_swarm_with_agents(manager, vec![w1]);
         let found = swarm.next_waiting_agent(None);
@@ -634,9 +985,9 @@ mod tests {
 
     #[test]
     fn next_waiting_agent_cycles_past_current_and_wraps() {
-        let manager = make_agent("mgr", "manager", true);
-        let mut w1 = make_agent("w1", "worker1", false);
-        let mut w2 = make_agent("w2", "worker2", false);
+        let manager = make_agent_simple("mgr", "manager", true);
+        let mut w1 = make_agent_simple("w1", "worker1", false);
+        let mut w2 = make_agent_simple("w2", "worker2", false);
         w1.waiting_for_input = true;
         w2.waiting_for_input = true;
         let swarm = make_swarm_with_agents(manager, vec![w1, w2]);

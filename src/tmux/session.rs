@@ -150,6 +150,12 @@ pub async fn resize_session(
                 )
                 .await;
         }
+    } else {
+        tracing::warn!(
+            "Failed to list tmux windows for {}: {}",
+            name,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
     }
 
     Ok(())
@@ -167,7 +173,11 @@ pub async fn has_session(transport: &ServerTransport, name: &str) -> bool {
     transport
         .output(
             "tmux",
-            &["has-session".to_string(), "-t".to_string(), name.to_string()],
+            &[
+                "has-session".to_string(),
+                "-t".to_string(),
+                name.to_string(),
+            ],
             None,
         )
         .await
@@ -258,10 +268,7 @@ mod tests {
 
     #[test]
     fn ignores_malformed_tmux_lines() {
-        let parsed = parse_list_panes_output(
-            "codex-demo",
-            "broken-line\n2\tworker-2\t0\n",
-        );
+        let parsed = parse_list_panes_output("codex-demo", "broken-line\n2\tworker-2\t0\n");
 
         assert_eq!(parsed.windows.len(), 1);
         assert_eq!(parsed.windows[0].index, 2);

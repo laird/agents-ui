@@ -1,13 +1,13 @@
 use ratatui::{
+    Frame,
     layout::{Constraint, Layout, Rect},
     style::Style,
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Wrap},
-    Frame,
 };
 
-use crate::model::issue::GitHubIssue;
 use super::theme;
+use crate::model::issue::GitHubIssue;
 
 pub struct IssueView {
     pub scroll_offset: u16,
@@ -28,7 +28,7 @@ impl IssueView {
 
     pub fn render(&mut self, f: &mut Frame, area: Rect, issue: Option<&GitHubIssue>) {
         let chunks = Layout::vertical([
-            Constraint::Length(3),  // Title
+            Constraint::Length(3), // Title
             Constraint::Min(5),    // Body
             Constraint::Length(3), // Help
         ])
@@ -42,19 +42,23 @@ impl IssueView {
             vec![
                 Span::styled(format!("  #{} ", issue.number), theme::title_style()),
                 Span::styled(format!("[{}] ", pri), theme::help_style()),
-                Span::styled(&issue.title, Style::default().fg(ratatui::style::Color::White)),
+                Span::styled(
+                    &issue.title,
+                    Style::default().fg(ratatui::style::Color::White),
+                ),
                 Span::styled(format!("  {status}"), theme::help_style()),
             ]
         } else {
-            vec![
-                Span::styled(format!("  #{} ", self.issue_number), theme::title_style()),
-            ]
+            vec![Span::styled(
+                format!("  #{} ", self.issue_number),
+                theme::title_style(),
+            )]
         };
         let left_len: usize = title_text.iter().map(|s| s.content.len()).sum();
         title_text.push(theme::hostname_right_span(left_len, width));
 
-        let title = Paragraph::new(Line::from(title_text))
-            .block(Block::default().borders(Borders::BOTTOM));
+        let title =
+            Paragraph::new(Line::from(title_text)).block(Block::default().borders(Borders::BOTTOM));
         f.render_widget(title, chunks[0]);
 
         // Body
@@ -103,6 +107,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn new_sets_initial_state() {
+        let v = IssueView::new(7);
+        assert_eq!(v.issue_number, 7);
+        assert_eq!(v.scroll_offset, 0);
+        assert_eq!(v.body, "Loading…");
+    }
+
+    #[test]
     fn new_sets_issue_number() {
         let v = IssueView::new(99);
         assert_eq!(v.issue_number, 99);
@@ -123,7 +135,9 @@ mod tests {
     #[test]
     fn scroll_down_increments_offset() {
         let mut v = IssueView::new(1);
-        v.scroll_down(5);
+        v.scroll_down(3);
+        assert_eq!(v.scroll_offset, 3);
+        v.scroll_down(2);
         assert_eq!(v.scroll_offset, 5);
         v.scroll_down(3);
         assert_eq!(v.scroll_offset, 8);
@@ -150,5 +164,13 @@ mod tests {
         v.scroll_offset = u16::MAX;
         v.scroll_down(1);
         assert_eq!(v.scroll_offset, u16::MAX);
+    }
+
+    #[test]
+    fn scroll_roundtrip_returns_to_zero() {
+        let mut v = IssueView::new(1);
+        v.scroll_down(20);
+        v.scroll_up(20);
+        assert_eq!(v.scroll_offset, 0);
     }
 }

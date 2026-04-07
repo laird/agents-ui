@@ -7,7 +7,8 @@ use std::path::PathBuf;
 pub struct Shortcut {
     /// Display label shown in help bar and viewer.
     pub label: String,
-    /// Command template to send. Supports {issue}, {worker}, {project} variables.
+    /// Command template to execute. Supports {issue}, {worker}, {project} variables.
+    /// Commands starting with `gh ` run directly in the repo; other commands go to tmux.
     pub command: String,
 }
 
@@ -83,6 +84,25 @@ impl ShortcutsConfig {
         }
     }
 
+    /// Expand template variables in a command string.
+    pub fn expand_command(
+        template: &str,
+        issue: Option<u32>,
+        worker: Option<&str>,
+        project: Option<&str>,
+    ) -> String {
+        let mut cmd = template.to_string();
+        if let Some(n) = issue {
+            cmd = cmd.replace("{issue}", &n.to_string());
+        }
+        if let Some(w) = worker {
+            cmd = cmd.replace("{worker}", w);
+        }
+        if let Some(p) = project {
+            cmd = cmd.replace("{project}", p);
+        }
+        cmd
+    }
 }
 
 #[cfg(test)]
@@ -92,10 +112,8 @@ mod tests {
     #[test]
     fn defaults_parses_successfully() {
         let config = ShortcutsConfig::defaults();
-        // All four panels should have entries (catches embedded TOML regressions)
         assert!(!config.issues.is_empty(), "issues panel should have shortcuts");
         assert!(!config.workers.is_empty(), "workers panel should have shortcuts");
-        // global and manager may be empty per DEFAULT_CONFIG, but they must not panic
         let _ = &config.global;
         let _ = &config.manager;
     }
@@ -104,13 +122,11 @@ mod tests {
     fn defaults_has_expected_shortcuts() {
         let config = ShortcutsConfig::defaults();
 
-        // Issues panel: x=fix, b=brainstorm (a is hardcoded to "new issue" in the TUI)
         assert!(config.issues.contains_key("x"), "issues should have 'x' shortcut");
         assert_eq!(config.issues["x"].label, "fix");
         assert!(config.issues.contains_key("b"), "issues should have 'b' shortcut");
         assert_eq!(config.issues["b"].label, "brainstorm");
 
-        // Workers panel: f=fix-loop
         assert!(config.workers.contains_key("f"), "workers should have 'f' shortcut");
         assert_eq!(config.workers["f"].label, "fix-loop");
     }
@@ -119,20 +135,17 @@ mod tests {
     fn for_panel_returns_correct_section() {
         let config = ShortcutsConfig::defaults();
 
-        // Each named panel returns its own map
         assert!(std::ptr::eq(config.for_panel("issues"), &config.issues));
         assert!(std::ptr::eq(config.for_panel("workers"), &config.workers));
         assert!(std::ptr::eq(config.for_panel("manager"), &config.manager));
         assert!(std::ptr::eq(config.for_panel("global"), &config.global));
 
-        // Unknown panel falls back to global
         assert!(std::ptr::eq(config.for_panel("unknown"), &config.global));
         assert!(std::ptr::eq(config.for_panel(""), &config.global));
     }
 
     #[test]
     fn toml_round_trip() {
-        // Parse DEFAULT_CONFIG twice and verify key counts match
         let first: ShortcutsConfig = toml::from_str(DEFAULT_CONFIG).expect("first parse");
         let second: ShortcutsConfig = toml::from_str(DEFAULT_CONFIG).expect("second parse");
 
@@ -149,7 +162,6 @@ mod tests {
         let test_path = tmp.join("shortcuts.toml");
         std::fs::create_dir_all(&tmp).expect("create temp dir");
 
-        // Simulate what ensure_defaults_written does: write if absent, parse result
         if !test_path.exists() {
             std::fs::write(&test_path, DEFAULT_CONFIG).expect("write default config");
         }
@@ -161,6 +173,48 @@ mod tests {
 
         std::fs::remove_dir_all(&tmp).ok();
     }
+
+    #[test]
+    fn expand_command_substitutes_issue() {
+        let result = ShortcutsConfig::expand_command("/fix {issue}", Some(42), None, None);
+        assert_eq!(result, "/fix 42");
+    }
+
+    #[test]
+    fn expand_command_substitutes_worker() {
+        let result = ShortcutsConfig::expand_command("cmd {worker}", None, Some("worker-1"), None);
+        assert_eq!(result, "cmd worker-1");
+    }
+
+    #[test]
+    fn expand_command_substitutes_project() {
+        let result =
+            ShortcutsConfig::expand_command("echo {project}", None, None, Some("my-repo"));
+        assert_eq!(result, "echo my-repo");
+    }
+
+    #[test]
+    fn expand_command_substitutes_all_variables() {
+        let result = ShortcutsConfig::expand_command(
+            "/fix {issue} {worker} {project}",
+            Some(7),
+            Some("worker-2"),
+            Some("agents-ui"),
+        );
+        assert_eq!(result, "/fix 7 worker-2 agents-ui");
+    }
+
+    #[test]
+    fn expand_command_none_issue_leaves_placeholder() {
+        let result = ShortcutsConfig::expand_command("/fix {issue}", None, None, None);
+        assert_eq!(result, "/fix {issue}");
+    }
+
+    #[test]
+    fn expand_command_no_variables_returns_unchanged() {
+        let result = ShortcutsConfig::expand_command("/status", Some(1), Some("w"), Some("p"));
+        assert_eq!(result, "/status");
+    }
 }
 
 const DEFAULT_CONFIG: &str = r#"# agents-ui keyboard shortcuts
@@ -170,6 +224,7 @@ const DEFAULT_CONFIG: &str = r#"# agents-ui keyboard shortcuts
 # Fields: label (display name), command (template)
 # Variables: {issue} = selected issue number, {worker} = worker tmux target, {project} = project name
 #
+# Note: keys explicitly bound in the TUI (j/k/enter/esc/p/r/d/space) take priority over shortcuts.
 # Issue panel keys: x=fix (sends /fix {issue} to manager), b=brainstorm, p=approve, a=new issue
 
 [issues]

@@ -1,9 +1,9 @@
 use ratatui::{
+    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
-    Frame,
 };
 
 use super::theme;
@@ -83,11 +83,7 @@ impl FeedbackState {
     }
 }
 
-pub fn render_feedback_dialog(
-    f: &mut Frame,
-    area: Rect,
-    state: &FeedbackState,
-) {
+pub fn render_feedback_dialog(f: &mut Frame, area: Rect, state: &FeedbackState) {
     let dialog_area = centered_rect(70, 16, area);
     f.render_widget(Clear, dialog_area);
 
@@ -116,7 +112,9 @@ pub fn render_feedback_dialog(
         .flat_map(|(i, t)| {
             let selected = i == state.type_index;
             let style = if selected {
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 theme::help_style()
             };
@@ -232,7 +230,40 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    // --- FeedbackType::label ---
+    #[test]
+    fn feedback_type_label_returns_human_readable_string() {
+        assert_eq!(FeedbackType::Bug.label(), "bug");
+        assert_eq!(FeedbackType::Enhancement.label(), "enhancement");
+        assert_eq!(FeedbackType::FeatureRequest.label(), "feature request");
+    }
+
+    #[test]
+    fn feedback_type_github_label_maps_feature_request_to_enhancement() {
+        assert_eq!(FeedbackType::Bug.github_label(), "bug");
+        assert_eq!(FeedbackType::Enhancement.github_label(), "enhancement");
+        assert_eq!(FeedbackType::FeatureRequest.github_label(), "enhancement");
+    }
+
+    #[test]
+    fn feedback_type_all_returns_three_variants() {
+        let all = FeedbackType::all();
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[0], FeedbackType::Bug);
+        assert_eq!(all[1], FeedbackType::Enhancement);
+        assert_eq!(all[2], FeedbackType::FeatureRequest);
+    }
+
+    #[test]
+    fn feedback_state_new_sets_defaults() {
+        let state =
+            FeedbackState::new("myrepo".to_string(), std::path::PathBuf::from("/repo/path"));
+        assert_eq!(state.repo_name, "myrepo");
+        assert_eq!(state.repo_path, std::path::PathBuf::from("/repo/path"));
+        assert!(state.title.is_empty());
+        assert!(state.body.is_empty());
+        assert_eq!(state.type_index, 0);
+        assert_eq!(state.feedback_type, FeedbackType::Bug);
+    }
 
     #[test]
     fn label_covers_all_variants() {
@@ -240,8 +271,6 @@ mod tests {
             assert!(!ft.label().is_empty(), "{ft:?}.label() should be non-empty");
         }
     }
-
-    // --- FeedbackType::github_label ---
 
     #[test]
     fn github_label_covers_all_variants() {
@@ -269,12 +298,8 @@ mod tests {
         }
     }
 
-    // --- FeedbackType::all ---
-
     #[test]
     fn all_includes_every_variant() {
-        // If a new variant is added without updating `all()`, this count will be wrong.
-        // Update this number whenever a new variant is added.
         assert_eq!(
             FeedbackType::all().len(),
             3,
@@ -289,8 +314,6 @@ mod tests {
         assert!(all.contains(&FeedbackType::Enhancement));
         assert!(all.contains(&FeedbackType::FeatureRequest));
     }
-
-    // --- FeedbackState::new ---
 
     #[test]
     fn new_sets_first_selection() {

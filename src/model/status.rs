@@ -2,6 +2,8 @@ use chrono::NaiveDateTime;
 use std::collections::HashMap;
 use std::path::Path;
 
+use super::swarm::AgentType;
+
 /// The state of an individual agent.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentState {
@@ -30,11 +32,57 @@ impl std::fmt::Display for AgentState {
 /// Parsed status of an agent from its status file.
 #[derive(Debug, Clone)]
 pub struct AgentStatus {
-    #[allow(dead_code)] // Parsed for future use in status age display
     pub timestamp: Option<NaiveDateTime>,
     pub state: AgentState,
 }
 
+impl AgentStatus {
+    /// Returns `true` when the status file timestamp is older than `threshold_secs` seconds.
+    /// Returns `false` if there is no timestamp (can't determine staleness).
+    pub fn is_stale(&self, threshold_secs: u64) -> bool {
+        let Some(ts) = self.timestamp else { return false };
+        let now = chrono::Local::now().naive_local();
+        let age = now.signed_duration_since(ts);
+        age.num_seconds() > threshold_secs as i64
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaneActivity {
+    NeedsLaunch,
+    AgentBusy,
+    AgentIdle,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkerSupervisionState {
+    Healthy,
+    DeadShellPrompt,
+    DeadIdleOutsideLoop,
+    DeadMissingStatus,
+    DeadStaleStatus,
+    DeadStopped,
+}
+
+impl WorkerSupervisionState {
+    pub fn is_dead(self) -> bool {
+        !matches!(self, WorkerSupervisionState::Healthy)
+    }
+
+    pub fn detail(self) -> &'static str {
+        match self {
+            WorkerSupervisionState::Healthy => "healthy",
+            WorkerSupervisionState::DeadShellPrompt => "dead: shell prompt",
+            WorkerSupervisionState::DeadIdleOutsideLoop => "dead: idle outside loop",
+            WorkerSupervisionState::DeadMissingStatus => "dead: missing loop status",
+            WorkerSupervisionState::DeadStaleStatus => "dead: stale loop heartbeat",
+            WorkerSupervisionState::DeadStopped => "dead: stopped loop",
+        }
+    }
+}
+
+const LOOP_STATUS_STALE_SECONDS: i64 = 30 * 60;
 impl Default for AgentStatus {
     fn default() -> Self {
         Self {
@@ -117,6 +165,217 @@ pub fn read_status_file(path: &Path) -> AgentStatus {
     }
 }
 
+pub fn classify_pane_activity(content: &str) -> PaneActivity {
+    let stripped = strip_ansi(content);
+    let non_empty_lines: Vec<&str> = stripped
+        .lines()
+        .rev()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+
+    if non_empty_lines.is_empty() {
+        return PaneActivity::Unknown;
+    }
+
+    let mut saw_agent_indicator = false;
+    let mut saw_idle_prompt = false;
+    let mut saw_busy_indicator = false;
+
+    for line in non_empty_lines.iter().take(8) {
+        let lower = line.trim().to_lowercase();
+
+        if lower.contains("thinking")
+            || lower.contains("working")
+            || lower.contains("reading")
+            || lower.contains("writing")
+            || lower.contains("analyzing")
+            || lower.contains("esc to interrupt")
+        {
+            saw_busy_indicator = true;
+        }
+
+        if lower.contains("bypass permissions")
+            || lower.contains("permissions on")
+            || lower.contains("permissions off")
+            || lower.contains("gpt-")
+            || lower.contains("codex")
+            || lower.contains("claude")
+            || lower.contains("gemini")
+            || lower.contains("droid")
+            || lower.starts_with('\u{23f5}')
+        {
+            saw_agent_indicator = true;
+        }
+
+        if lower.contains("how can i help") || lower.contains("what would you like") {
+            saw_idle_prompt = true;
+        } else if lower.starts_with('>')
+            || lower.starts_with('\u{276f}')
+            || lower.starts_with('\u{203a}')
+        {
+            let after_prompt = lower
+                .trim_start_matches(|c: char| c == '>' || c == '\u{276f}' || c == '\u{203a}')
+                .trim();
+            if after_prompt.is_empty() {
+                saw_idle_prompt = true;
+            } else {
+                saw_busy_indicator = true;
+            }
+        }
+    }
+
+    if saw_busy_indicator {
+        return PaneActivity::AgentBusy;
+    }
+    if saw_idle_prompt || (saw_agent_indicator && !saw_busy_indicator) {
+        return PaneActivity::AgentIdle;
+    }
+
+    for line in non_empty_lines.iter().take(5) {
+        let lower = line.trim().to_lowercase();
+        if lower.contains("please restart codex")
+            || lower.contains("update ran successfully")
+            || lower.contains("please restart claude")
+            || lower.contains("please restart gemini")
+            || lower.contains("restart to apply")
+        {
+            return PaneActivity::NeedsLaunch;
+        }
+    }
+
+    if let Some(last_line) = non_empty_lines.first() {
+        let trimmed = last_line.trim();
+        if trimmed.ends_with('%') || trimmed.ends_with('$') || trimmed.ends_with('#') {
+            return PaneActivity::NeedsLaunch;
+        }
+    }
+
+    PaneActivity::Unknown
+}
+
+pub fn worker_supervision_state(
+    runtime: &AgentType,
+    worktree_path: &Path,
+    pane_content: &str,
+) -> WorkerSupervisionState {
+    if !runtime.uses_loop_wrapper() {
+        return WorkerSupervisionState::Healthy;
+    }
+
+    let pane_state = classify_pane_activity(pane_content);
+    if pane_state == PaneActivity::NeedsLaunch {
+        return WorkerSupervisionState::DeadShellPrompt;
+    }
+
+    let status_path = worktree_path
+        .join(runtime.status_dir())
+        .join("fix-loop.status");
+    if pane_state == PaneActivity::AgentIdle {
+        if matches!(runtime, AgentType::Droid) && status_path.exists() {
+            let status = read_status_file(&status_path);
+            if matches!(status.state, AgentState::Stopped) {
+                return WorkerSupervisionState::DeadStopped;
+            }
+            if matches!(status.state, AgentState::Unknown(_)) {
+                return WorkerSupervisionState::DeadMissingStatus;
+            }
+            if status_timestamp_is_stale(status.timestamp) {
+                return WorkerSupervisionState::DeadStaleStatus;
+            }
+            return WorkerSupervisionState::Healthy;
+        }
+        return WorkerSupervisionState::DeadIdleOutsideLoop;
+    }
+
+    if !status_path.exists() {
+        return if pane_state == PaneActivity::AgentBusy {
+            WorkerSupervisionState::Healthy
+        } else {
+            WorkerSupervisionState::DeadMissingStatus
+        };
+    }
+
+    let status = read_status_file(&status_path);
+    if matches!(status.state, AgentState::Stopped) {
+        return WorkerSupervisionState::DeadStopped;
+    }
+    if matches!(status.state, AgentState::Unknown(_)) && pane_state != PaneActivity::AgentBusy {
+        return WorkerSupervisionState::DeadMissingStatus;
+    }
+    if status_timestamp_is_stale(status.timestamp) && pane_state != PaneActivity::AgentBusy {
+        return WorkerSupervisionState::DeadStaleStatus;
+    }
+
+    WorkerSupervisionState::Healthy
+}
+
+pub fn dead_worker_status(
+    runtime: &AgentType,
+    worktree_path: &Path,
+    pane_content: &str,
+) -> Option<AgentStatus> {
+    let status_path = worktree_path
+        .join(runtime.status_dir())
+        .join("fix-loop.status");
+    let current = if status_path.exists() {
+        read_status_file(&status_path)
+    } else {
+        AgentStatus::default()
+    };
+
+    let supervision = worker_supervision_state(runtime, worktree_path, pane_content);
+    if !supervision.is_dead() {
+        return None;
+    }
+
+    Some(AgentStatus {
+        timestamp: current.timestamp,
+        state: AgentState::Unknown(supervision.detail().to_string()),
+    })
+}
+
+/// Returns a compact elapsed-time string for a status timestamp.
+/// Returns `""` if no timestamp. Examples: `"2m"`, `"45m"`, `"2h"`.
+pub fn elapsed_display(ts: Option<NaiveDateTime>) -> String {
+    let ts = match ts {
+        Some(t) => t,
+        None => return String::new(),
+    };
+    let now = chrono::Local::now().naive_local();
+    let secs = (now - ts).num_seconds().max(0);
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3600 {
+        format!("{}m", secs / 60)
+    } else {
+        format!("{}h", secs / 3600)
+    }
+}
+
+fn status_timestamp_is_stale(timestamp: Option<NaiveDateTime>) -> bool {
+    let Some(timestamp) = timestamp else {
+        return true;
+    };
+    let now = chrono::Local::now().naive_local();
+    (now - timestamp).num_seconds() > LOOP_STATUS_STALE_SECONDS
+}
+
+fn strip_ansi(content: &str) -> String {
+    content
+        .chars()
+        .fold((String::new(), false), |(mut s, in_esc), c| {
+            if c == '\x1b' {
+                (s, true)
+            } else if in_esc {
+                (s, c != 'm' && !c.is_ascii_uppercase())
+            } else {
+                s.push(c);
+                (s, false)
+            }
+        })
+        .0
+}
+
 #[derive(Debug, Clone)]
 pub struct JsonAgentStatus {
     pub status: String,
@@ -151,12 +410,32 @@ pub fn read_json_status_files() -> HashMap<String, JsonAgentStatus> {
                     // Check if this is a monitor summary with a "workers" array
                     if let Some(workers) = val.get("workers").and_then(|v| v.as_array()) {
                         for w in workers {
-                            let pane = w.get("pane").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                            if pane.is_empty() { continue; }
-                            let status = w.get("status").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+                            let pane = w
+                                .get("pane")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            if pane.is_empty() {
+                                continue;
+                            }
+                            let status = w
+                                .get("status")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("unknown")
+                                .to_string();
                             let issue = w.get("issue").and_then(|v| v.as_u64()).map(|n| n as u32);
-                            let title = w.get("title").and_then(|v| v.as_str()).map(|s| s.to_string());
-                            result.insert(pane, JsonAgentStatus { status, issue, title });
+                            let title = w
+                                .get("title")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string());
+                            result.insert(
+                                pane,
+                                JsonAgentStatus {
+                                    status,
+                                    issue,
+                                    title,
+                                },
+                            );
                         }
                     } else {
                         // Per-worker status file (written by /fix)
@@ -170,7 +449,14 @@ pub fn read_json_status_files() -> HashMap<String, JsonAgentStatus> {
                             .get("title")
                             .and_then(|v| v.as_str())
                             .map(|s| s.to_string());
-                        result.insert(key, JsonAgentStatus { status, issue, title });
+                        result.insert(
+                            key,
+                            JsonAgentStatus {
+                                status,
+                                issue,
+                                title,
+                            },
+                        );
                     }
                 }
             }
@@ -189,14 +475,47 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        std::env::temp_dir().join(format!("agents-ui-status-{name}-{}-{nanos}", std::process::id()))
+        std::env::temp_dir().join(format!(
+            "agents-ui-status-{name}-{}-{nanos}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn elapsed_display_none_returns_empty() {
+        assert_eq!(elapsed_display(None), "");
+    }
+
+    #[test]
+    fn elapsed_display_seconds() {
+        let ts = chrono::Local::now().naive_local() - chrono::Duration::seconds(30);
+        let result = elapsed_display(Some(ts));
+        assert!(
+            result.ends_with('s'),
+            "Expected seconds format, got {result}"
+        );
+    }
+
+    #[test]
+    fn elapsed_display_minutes() {
+        let ts = chrono::Local::now().naive_local() - chrono::Duration::minutes(45);
+        assert_eq!(elapsed_display(Some(ts)), "45m");
+    }
+
+    #[test]
+    fn elapsed_display_hours() {
+        let ts = chrono::Local::now().naive_local() - chrono::Duration::hours(2);
+        assert_eq!(elapsed_display(Some(ts)), "2h");
     }
 
     #[test]
     fn parses_working_issue_and_timestamp() {
         let status = parse_status_line("2024-01-15 10:30:00\tworking issue #42");
         assert!(status.timestamp.is_some());
-        assert!(matches!(status.state, AgentState::Working { issue: Some(42) }));
+        assert!(matches!(
+            status.state,
+            AgentState::Working { issue: Some(42) }
+        ));
     }
 
     #[test]
@@ -222,17 +541,17 @@ mod tests {
         .unwrap();
 
         let status = read_status_file(&path);
-        assert!(matches!(status.state, AgentState::Working { issue: Some(77) }));
+        assert!(matches!(
+            status.state,
+            AgentState::Working { issue: Some(77) }
+        ));
 
         std::fs::remove_file(path).ok();
     }
 
     #[test]
     fn reads_json_status_files_from_tmp() {
-        let dir = std::env::temp_dir().join(format!(
-            "agents-ui-json-test-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("agents-ui-json-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
 
         // Write a working status file
@@ -243,11 +562,7 @@ mod tests {
         .unwrap();
 
         // Write an idle status file
-        std::fs::write(
-            dir.join("claude-test:2.0.json"),
-            r#"{"status": "idle"}"#,
-        )
-        .unwrap();
+        std::fs::write(dir.join("claude-test:2.0.json"), r#"{"status": "idle"}"#).unwrap();
 
         // Write a non-json file (should be ignored)
         std::fs::write(dir.join("readme.txt"), "not json").unwrap();
@@ -259,13 +574,31 @@ mod tests {
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
-            let key = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+            let key = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string();
             if let Ok(content) = std::fs::read_to_string(&path) {
                 if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
-                    let status = val.get("status").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+                    let status = val
+                        .get("status")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string();
                     let issue = val.get("issue").and_then(|v| v.as_u64()).map(|n| n as u32);
-                    let title = val.get("title").and_then(|v| v.as_str()).map(|s| s.to_string());
-                    result.insert(key, super::JsonAgentStatus { status, issue, title });
+                    let title = val
+                        .get("title")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    result.insert(
+                        key,
+                        super::JsonAgentStatus {
+                            status,
+                            issue,
+                            title,
+                        },
+                    );
                 }
             }
         }
@@ -296,10 +629,7 @@ mod tests {
 
     #[test]
     fn parse_state_working_no_issue() {
-        assert_eq!(
-            parse_state("Working"),
-            AgentState::Working { issue: None }
-        );
+        assert_eq!(parse_state("Working"), AgentState::Working { issue: None });
     }
 
     #[test]
@@ -380,10 +710,7 @@ mod tests {
     fn parse_status_line_with_timestamp() {
         let status = parse_status_line("2024-01-15 10:30:00\tworking issue #42");
         assert!(status.timestamp.is_some());
-        assert_eq!(
-            status.state,
-            AgentState::Working { issue: Some(42) }
-        );
+        assert_eq!(status.state, AgentState::Working { issue: Some(42) });
     }
 
     #[test]
@@ -425,10 +752,7 @@ mod tests {
             AgentState::Working { issue: Some(5) }.to_string(),
             "Working #5"
         );
-        assert_eq!(
-            AgentState::Working { issue: None }.to_string(),
-            "Working"
-        );
+        assert_eq!(AgentState::Working { issue: None }.to_string(), "Working");
         assert_eq!(AgentState::Idle.to_string(), "Idle");
         assert_eq!(
             AgentState::Completed {
@@ -438,5 +762,108 @@ mod tests {
             "Done: done"
         );
         assert_eq!(AgentState::Stopped.to_string(), "Stopped");
+    }
+
+    #[test]
+    fn classify_pane_activity_detects_shell_idle_and_busy() {
+        assert_eq!(
+            classify_pane_activity("user@host repo %"),
+            PaneActivity::NeedsLaunch
+        );
+        assert_eq!(classify_pane_activity("> \n"), PaneActivity::AgentIdle);
+        assert_eq!(
+            classify_pane_activity("reading src/main.rs\n"),
+            PaneActivity::AgentBusy
+        );
+    }
+
+    #[test]
+    fn wrapper_worker_missing_status_is_dead_when_not_busy() {
+        let dir = temp_status_path("dead-worker");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        assert_eq!(
+            worker_supervision_state(&AgentType::Codex, &dir, ""),
+            WorkerSupervisionState::DeadMissingStatus
+        );
+        assert_eq!(
+            worker_supervision_state(&AgentType::Codex, &dir, "> \n"),
+            WorkerSupervisionState::DeadIdleOutsideLoop
+        );
+        assert_eq!(
+            worker_supervision_state(&AgentType::Codex, &dir, "reading src/main.rs\n"),
+            WorkerSupervisionState::Healthy
+        );
+
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn wrapper_worker_stale_status_is_dead_when_not_busy() {
+        let dir = temp_status_path("stale-worker");
+        let loops = dir.join(".codex/loops");
+        std::fs::create_dir_all(&loops).unwrap();
+        std::fs::write(loops.join("fix-loop.status"), "2024-01-15 10:00:00\tidle\n").unwrap();
+
+        assert_eq!(
+            worker_supervision_state(&AgentType::Codex, &dir, ""),
+            WorkerSupervisionState::DeadStaleStatus
+        );
+        assert_eq!(
+            dead_worker_status(&AgentType::Codex, &dir, "")
+                .unwrap()
+                .state
+                .to_string(),
+            "dead: stale loop heartbeat"
+        );
+
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn droid_wrapper_idle_with_fresh_status_is_healthy() {
+        let dir = temp_status_path("droid-idle-healthy");
+        let loops = dir.join(".factory/loops");
+        std::fs::create_dir_all(&loops).unwrap();
+        let now = chrono::Local::now()
+            .naive_local()
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string();
+        std::fs::write(loops.join("fix-loop.status"), format!("{now}\tidle\n")).unwrap();
+
+        assert_eq!(
+            worker_supervision_state(&AgentType::Droid, &dir, "DROID_FIX_LOOP_IDLE\n"),
+            WorkerSupervisionState::Healthy
+        );
+
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    // --- is_stale ---
+
+    #[test]
+    fn is_stale_returns_false_when_timestamp_is_recent() {
+        let now = chrono::Local::now().naive_local();
+        let status = AgentStatus {
+            timestamp: Some(now - chrono::Duration::seconds(60)),
+            state: AgentState::Idle,
+        };
+        assert!(!status.is_stale(300));
+    }
+
+    #[test]
+    fn is_stale_returns_true_when_timestamp_is_old() {
+        let old = chrono::Local::now().naive_local() - chrono::Duration::seconds(600);
+        let status = AgentStatus {
+            timestamp: Some(old),
+            state: AgentState::Idle,
+        };
+        assert!(status.is_stale(300));
+    }
+
+    #[test]
+    fn is_stale_returns_false_when_no_timestamp() {
+        let status = AgentStatus { timestamp: None, state: AgentState::Idle };
+        assert!(!status.is_stale(300));
     }
 }

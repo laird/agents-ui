@@ -1,4 +1,5 @@
 use anyhow::Result;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
@@ -88,6 +89,42 @@ impl KeyBind {
         }
     }
 
+    /// Returns true if the given crossterm KeyEvent matches this binding.
+    pub fn matches(&self, event: &KeyEvent) -> bool {
+        // Check modifiers
+        let want_ctrl = self.modifiers.iter().any(|m| m == "ctrl");
+        let want_alt = self.modifiers.iter().any(|m| m == "alt");
+        let want_shift = self.modifiers.iter().any(|m| m == "shift");
+        let has_ctrl = event.modifiers.contains(KeyModifiers::CONTROL);
+        let has_alt = event.modifiers.contains(KeyModifiers::ALT);
+        let has_shift = event.modifiers.contains(KeyModifiers::SHIFT);
+        if want_ctrl != has_ctrl || want_alt != has_alt || want_shift != has_shift {
+            return false;
+        }
+
+        // Check key code
+        let expected_code = match self.key.to_lowercase().as_str() {
+            "enter" => KeyCode::Enter,
+            "esc" | "escape" => KeyCode::Esc,
+            "backspace" => KeyCode::Backspace,
+            "delete" => KeyCode::Delete,
+            "up" => KeyCode::Up,
+            "down" => KeyCode::Down,
+            "left" => KeyCode::Left,
+            "right" => KeyCode::Right,
+            "pageup" => KeyCode::PageUp,
+            "pagedown" => KeyCode::PageDown,
+            "home" => KeyCode::Home,
+            "end" => KeyCode::End,
+            "tab" => KeyCode::Tab,
+            "space" => KeyCode::Char(' '),
+            s if s.len() == 1 => {
+                KeyCode::Char(s.chars().next().unwrap())
+            }
+            _ => return false,
+        };
+        event.code == expected_code
+    }
 }
 
 /// The full keybindings configuration.
@@ -107,10 +144,7 @@ impl Default for KeyBindings {
         bindings.insert(Action::ShowHelp, vec![KeyBind::new("?")]);
 
         // Navigation
-        bindings.insert(
-            Action::MoveUp,
-            vec![KeyBind::new("up"), KeyBind::new("k")],
-        );
+        bindings.insert(Action::MoveUp, vec![KeyBind::new("up"), KeyBind::new("k")]);
         bindings.insert(
             Action::MoveDown,
             vec![KeyBind::new("down"), KeyBind::new("j")],
@@ -133,10 +167,13 @@ impl Default for KeyBindings {
         bindings.insert(Action::ScrollDown, vec![KeyBind::new("pagedown")]);
 
         // Feedback
-        bindings.insert(Action::FileFeedback, vec![KeyBind {
-            key: "f".to_string(),
-            modifiers: vec!["alt".to_string()],
-        }]);
+        bindings.insert(
+            Action::FileFeedback,
+            vec![KeyBind {
+                key: "f".to_string(),
+                modifiers: vec!["alt".to_string()],
+            }],
+        );
 
         Self { bindings }
     }
@@ -316,10 +353,122 @@ mod tests {
         };
         assert_eq!(alt_f.to_string(), "alt+f");
     }
+
+    #[test]
+    fn keybind_new_has_no_modifiers() {
+        let kb = KeyBind::new("x");
+        assert_eq!(kb.key, "x");
+        assert!(kb.modifiers.is_empty());
+    }
+
+    #[test]
+    fn keybind_ctrl_has_ctrl_modifier() {
+        let kb = KeyBind::ctrl("c");
+        assert_eq!(kb.key, "c");
+        assert_eq!(kb.modifiers, vec!["ctrl"]);
+    }
+
+    #[test]
+    fn keybind_display_no_modifiers_is_just_key() {
+        assert_eq!(KeyBind::new("enter").to_string(), "enter");
+        assert_eq!(KeyBind::new("esc").to_string(), "esc");
+    }
+
+    #[test]
+    fn keybind_display_multiple_modifiers_ordered() {
+        let kb = KeyBind {
+            key: "x".to_string(),
+            modifiers: vec!["ctrl".to_string(), "alt".to_string()],
+        };
+        assert_eq!(kb.to_string(), "ctrl+alt+x");
+    }
+
+    #[test]
+    fn keybind_matches_char_key() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+        fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+            KeyEvent { code, modifiers, kind: KeyEventKind::Press, state: KeyEventState::NONE }
+        }
+        let bind = KeyBind::new("q");
+        assert!(bind.matches(&key(KeyCode::Char('q'), KeyModifiers::NONE)));
+    }
+
+    #[test]
+    fn keybind_does_not_match_different_char() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+        fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+            KeyEvent { code, modifiers, kind: KeyEventKind::Press, state: KeyEventState::NONE }
+        }
+        let bind = KeyBind::new("q");
+        assert!(!bind.matches(&key(KeyCode::Char('w'), KeyModifiers::NONE)));
+    }
+
+    #[test]
+    fn keybind_matches_ctrl_modifier() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+        fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+            KeyEvent { code, modifiers, kind: KeyEventKind::Press, state: KeyEventState::NONE }
+        }
+        let bind = KeyBind::ctrl("c");
+        assert!(bind.matches(&key(KeyCode::Char('c'), KeyModifiers::CONTROL)));
+    }
+
+    #[test]
+    fn keybind_rejects_ctrl_when_not_required() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+        fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+            KeyEvent { code, modifiers, kind: KeyEventKind::Press, state: KeyEventState::NONE }
+        }
+        let bind = KeyBind::new("c");
+        assert!(!bind.matches(&key(KeyCode::Char('c'), KeyModifiers::CONTROL)));
+    }
+
+    #[test]
+    fn keybind_rejects_plain_when_ctrl_required() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+        fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+            KeyEvent { code, modifiers, kind: KeyEventKind::Press, state: KeyEventState::NONE }
+        }
+        let bind = KeyBind::ctrl("c");
+        assert!(!bind.matches(&key(KeyCode::Char('c'), KeyModifiers::NONE)));
+    }
+
+    #[test]
+    fn keybind_matches_special_keys() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+        fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+            KeyEvent { code, modifiers, kind: KeyEventKind::Press, state: KeyEventState::NONE }
+        }
+        let cases = [
+            ("enter", KeyCode::Enter),
+            ("esc", KeyCode::Esc),
+            ("up", KeyCode::Up),
+            ("down", KeyCode::Down),
+            ("pageup", KeyCode::PageUp),
+            ("pagedown", KeyCode::PageDown),
+        ];
+        for (name, code) in &cases {
+            let bind = KeyBind::new(name);
+            assert!(bind.matches(&key(*code, KeyModifiers::NONE)), "failed for key: {name}");
+        }
+    }
+
+    #[test]
+    fn keybind_matches_alt_modifier() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+        fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+            KeyEvent { code, modifiers, kind: KeyEventKind::Press, state: KeyEventState::NONE }
+        }
+        let bind = KeyBind {
+            key: "f".to_string(),
+            modifiers: vec!["alt".to_string()],
+        };
+        assert!(bind.matches(&key(KeyCode::Char('f'), KeyModifiers::ALT)));
+        assert!(!bind.matches(&key(KeyCode::Char('f'), KeyModifiers::NONE)));
+    }
 }
 
 /// Path to the keybindings config file.
 fn config_path() -> PathBuf {
-    crate::config::persistence::config_dir()
-        .join("keybindings.toml")
+    crate::config::persistence::config_dir().join("keybindings.toml")
 }

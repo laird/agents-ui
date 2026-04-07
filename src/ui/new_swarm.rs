@@ -1,20 +1,18 @@
 use ratatui::{
+    Frame,
     layout::{Constraint, Layout, Rect},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
-    Frame,
 };
 
-use crate::app::{CreateIssueField, CreateIssueForm, InstallScope, NewSwarmField, BLOCKING_LABELS};
-use crate::model::swarm::{AgentType, ALL_AGENT_TYPES};
 use super::text_input::TextInput;
 use super::theme;
+use crate::app::{
+    BLOCKING_LABELS, CreateIssueField, CreateIssueForm, InstallScope, NewSwarmField, RuntimeOption,
+};
+use crate::model::swarm::{ALL_AGENT_TYPES, AgentType};
 
-pub fn render_runtime_dialog(
-    f: &mut Frame,
-    area: Rect,
-    selected: AgentType,
-) {
+pub fn render_runtime_dialog(f: &mut Frame, area: Rect, selected: AgentType) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" Select Runtime ")
@@ -25,6 +23,7 @@ pub fn render_runtime_dialog(
     f.render_widget(block, area);
 
     let chunks = Layout::vertical([
+        Constraint::Length(2),
         Constraint::Length(2),
         Constraint::Length(2),
         Constraint::Length(2),
@@ -55,6 +54,11 @@ pub fn render_runtime_dialog(
     } else {
         theme::help_style()
     };
+    let gemini_style = if selected == AgentType::Gemini {
+        theme::input_style()
+    } else {
+        theme::help_style()
+    };
 
     let claude = Paragraph::new(Line::from(Span::styled(
         " > Claude Code (autocoder plugin from ../agents)",
@@ -74,6 +78,12 @@ pub fn render_runtime_dialog(
     )));
     f.render_widget(droid, chunks[3]);
 
+    let gemini = Paragraph::new(Line::from(Span::styled(
+        " > Gemini (laird/agents skills + .agent scripts)",
+        gemini_style,
+    )));
+    f.render_widget(gemini, chunks[4]);
+
     let help = Paragraph::new(Line::from(vec![
         Span::styled(" ↑/↓", theme::title_style()),
         Span::styled(" choose  ", theme::help_style()),
@@ -83,61 +93,88 @@ pub fn render_runtime_dialog(
         Span::styled(" codex  ", theme::help_style()),
         Span::styled("d", theme::title_style()),
         Span::styled(" droid  ", theme::help_style()),
+        Span::styled("g", theme::title_style()),
+        Span::styled(" gemini  ", theme::help_style()),
         Span::styled("Enter", theme::title_style()),
         Span::styled(" confirm", theme::help_style()),
     ]));
-    f.render_widget(help, chunks[4]);
+    f.render_widget(help, chunks[5]);
 }
 
-/// Render the switch-agent overlay: lets user pick a new runtime for a running swarm.
+/// Render the "switch agent runtime" overlay for a running swarm.
+/// `selected_idx` is an index into `ALL_AGENT_TYPES`.
 pub fn render_switch_agent_dialog(
     f: &mut Frame,
     area: Rect,
     project_name: &str,
     current: &AgentType,
+    options: &[RuntimeOption],
     selected_idx: usize,
 ) {
+    use super::theme;
+    let title = format!(" Switch agent runtime for {project_name}: ");
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(format!(" Switch agent runtime for {} ", project_name))
-        .border_style(crate::ui::theme::title_style());
+        .title(title.as_str())
+        .border_style(theme::title_style());
 
     let inner = block.inner(area);
     f.render_widget(Clear, area);
     f.render_widget(block, area);
 
-    // One row per agent + help row
-    let mut constraints: Vec<Constraint> = ALL_AGENT_TYPES.iter().map(|_| Constraint::Length(2)).collect();
+    // One row per agent type + instruction row + help row
+    let n = options.len();
+    let mut constraints: Vec<Constraint> = vec![Constraint::Length(2)]; // instructions
+    for _ in 0..n {
+        constraints.push(Constraint::Length(2));
+    }
     constraints.push(Constraint::Min(0));
-    constraints.push(Constraint::Length(2));
+    constraints.push(Constraint::Length(2)); // help
+
     let chunks = Layout::vertical(constraints).split(inner);
 
-    for (i, agent_type) in ALL_AGENT_TYPES.iter().enumerate() {
+    let instructions = Paragraph::new(Line::from(Span::styled(
+        " Choose new agent runtime:",
+        theme::help_style(),
+    )));
+    f.render_widget(instructions, chunks[0]);
+
+    for (i, option) in options.iter().enumerate() {
         let is_selected = i == selected_idx;
-        let is_current = agent_type == current;
-        let label = if is_current {
-            format!(" > {} (current)", agent_type)
-        } else {
-            format!(" > {}", agent_type)
-        };
+        let is_current = &option.agent_type == current;
         let style = if is_selected {
-            crate::ui::theme::input_style()
+            theme::input_style()
+        } else if option.available {
+            theme::help_style()
         } else {
-            crate::ui::theme::help_style()
+            theme::attention_style()
         };
-        f.render_widget(Paragraph::new(Line::from(Span::styled(label, style))), chunks[i]);
+        let suffix = if is_current { " (current)" } else { "" };
+        let detail = if option.detail.is_empty() {
+            String::new()
+        } else {
+            format!(" [{}]", option.detail)
+        };
+        let label = format!(
+            " {} {}{suffix}{detail}",
+            if is_selected { "\u{25b6}" } else { " " },
+            option.agent_type
+        );
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(label, style))),
+            chunks[1 + i],
+        );
     }
 
-    let help_idx = ALL_AGENT_TYPES.len() + 1;
     let help = Paragraph::new(Line::from(vec![
-        Span::styled(" ↑/↓", crate::ui::theme::title_style()),
-        Span::styled(" choose  ", crate::ui::theme::help_style()),
-        Span::styled("Enter", crate::ui::theme::title_style()),
-        Span::styled(" switch  ", crate::ui::theme::help_style()),
-        Span::styled("Esc", crate::ui::theme::title_style()),
-        Span::styled(" cancel", crate::ui::theme::help_style()),
+        Span::styled(" \u{2191}/\u{2193}", theme::title_style()),
+        Span::styled(" choose  ", theme::help_style()),
+        Span::styled("Enter", theme::title_style()),
+        Span::styled(" switch  ", theme::help_style()),
+        Span::styled("Esc", theme::title_style()),
+        Span::styled(" cancel", theme::help_style()),
     ]));
-    f.render_widget(help, chunks[help_idx]);
+    f.render_widget(help, chunks[1 + n + 1]);
 }
 
 pub fn render_install_scope_dialog(
@@ -155,6 +192,10 @@ pub fn render_install_scope_dialog(
         AgentType::Codex => (
             " Install Codex Agents ",
             " Codex runtime assets are not installed for this repo.",
+        ),
+        AgentType::Gemini => (
+            " Install Gemini Agents ",
+            " Gemini needs `.agent` installed from the shared `../agents` checkout.",
         ),
         _ => (
             " Install Runtime Assets ",
@@ -181,10 +222,7 @@ pub fn render_install_scope_dialog(
     ])
     .split(inner);
 
-    let title = Paragraph::new(Line::from(Span::styled(
-        message_text,
-        theme::help_style(),
-    )));
+    let title = Paragraph::new(Line::from(Span::styled(message_text, theme::help_style())));
     f.render_widget(title, chunks[0]);
 
     let repo = Paragraph::new(Line::from(Span::styled(
@@ -205,13 +243,19 @@ pub fn render_install_scope_dialog(
     };
 
     let user_option = Paragraph::new(Line::from(Span::styled(
-        " > Install for user (--scope user)",
+        match agent_type {
+            AgentType::Gemini => " > Symlink shared assets into repo",
+            _ => " > Install for user (--scope user)",
+        },
         user_style,
     )));
     f.render_widget(user_option, chunks[2]);
 
     let repo_option = Paragraph::new(Line::from(Span::styled(
-        " > Install for repo (--scope project)",
+        match agent_type {
+            AgentType::Gemini => " > Copy assets into repo",
+            _ => " > Install for repo (--scope project)",
+        },
         repo_style,
     )));
     f.render_widget(repo_option, chunks[3]);
@@ -279,10 +323,8 @@ pub fn render_new_swarm_dialog(
         }
         NewSwarmField::RuntimeSelection => {
             let repo_display = format!(" Repo: {repo_path}");
-            let repo_line = Paragraph::new(Line::from(Span::styled(
-                repo_display,
-                theme::help_style(),
-            )));
+            let repo_line =
+                Paragraph::new(Line::from(Span::styled(repo_display, theme::help_style())));
             f.render_widget(repo_line, chunks[0]);
 
             let prompt = Paragraph::new(Line::from(Span::styled(
@@ -328,10 +370,8 @@ pub fn render_new_swarm_dialog(
         }
         NewSwarmField::AgentRuntime => {
             let repo_display = format!(" Repo: {repo_path}");
-            let repo_line = Paragraph::new(Line::from(Span::styled(
-                repo_display,
-                theme::help_style(),
-            )));
+            let repo_line =
+                Paragraph::new(Line::from(Span::styled(repo_display, theme::help_style())));
             f.render_widget(repo_line, chunks[0]);
 
             let runtime_display = format!(" Runtime: {agent_type}");
@@ -353,15 +393,9 @@ pub fn render_new_swarm_dialog(
                 .flat_map(|t| {
                     let label = format!(" {} ", t);
                     if *t == *agent_type {
-                        vec![Span::styled(
-                            format!("[{label}]"),
-                            theme::selected_style(),
-                        )]
+                        vec![Span::styled(format!("[{label}]"), theme::selected_style())]
                     } else {
-                        vec![Span::styled(
-                            format!(" {label} "),
-                            theme::help_style(),
-                        )]
+                        vec![Span::styled(format!(" {label} "), theme::help_style())]
                     }
                 })
                 .collect();
@@ -380,11 +414,8 @@ pub fn render_new_swarm_dialog(
         }
         NewSwarmField::NumWorkers => {
             let repo_display = format!(" Repo: {repo_path}");
-            let repo_line = Paragraph::new(Span::styled(
-                repo_display,
-                theme::help_style(),
-            ))
-            .wrap(Wrap { trim: false });
+            let repo_line = Paragraph::new(Span::styled(repo_display, theme::help_style()))
+                .wrap(Wrap { trim: false });
             f.render_widget(repo_line, chunks[0]);
 
             let runtime_display = format!(" Runtime: {agent_type}");
@@ -417,11 +448,7 @@ pub fn render_new_swarm_dialog(
     }
 }
 
-pub fn render_create_issue_dialog(
-    f: &mut Frame,
-    area: Rect,
-    form: &CreateIssueForm,
-) {
+pub fn render_create_issue_dialog(f: &mut Frame, area: Rect, form: &CreateIssueForm) {
     use ratatui::style::{Modifier, Style};
 
     let block = Block::default()
@@ -436,29 +463,76 @@ pub fn render_create_issue_dialog(
     let chunks = Layout::vertical([
         Constraint::Length(1), // Title label
         Constraint::Length(1), // Title input
+        Constraint::Length(1), // Body label
+        Constraint::Length(1), // Body input
         Constraint::Length(1), // Priority label + selector
         Constraint::Length(1), // Type label + selector
         Constraint::Length(1), // Labels label
         Constraint::Length(1), // Labels row 1
         Constraint::Length(1), // Labels row 2
-        Constraint::Min(0),   // spacer
+        Constraint::Min(0),    // spacer
         Constraint::Length(1), // help
     ])
     .split(inner);
 
-    let focused_style = Style::default().fg(ratatui::style::Color::Cyan).add_modifier(Modifier::BOLD);
+    let focused_style = Style::default()
+        .fg(ratatui::style::Color::Cyan)
+        .add_modifier(Modifier::BOLD);
     let normal_label = theme::help_style();
 
     // -- Title field --
-    let title_label_style = if form.field == CreateIssueField::Title { focused_style } else { normal_label };
-    f.render_widget(Paragraph::new(Line::from(Span::styled(" Title:", title_label_style))), chunks[0]);
+    let title_label_style = if form.field == CreateIssueField::Title {
+        focused_style
+    } else {
+        normal_label
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(" Title:", title_label_style))),
+        chunks[0],
+    );
 
-    let cursor = if form.field == CreateIssueField::Title { "█" } else { "" };
+    let cursor = if form.field == CreateIssueField::Title {
+        "█"
+    } else {
+        ""
+    };
     let input_display = format!(" > {}{}", form.title, cursor);
-    f.render_widget(Paragraph::new(Line::from(Span::styled(input_display, theme::input_style()))), chunks[1]);
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            input_display,
+            theme::input_style(),
+        ))),
+        chunks[1],
+    );
+
+    // -- Body field --
+    let body_label_style = if form.field == CreateIssueField::Body {
+        focused_style
+    } else {
+        normal_label
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(" Body:", body_label_style))),
+        chunks[2],
+    );
+
+    let body_cursor = if form.field == CreateIssueField::Body {
+        "█"
+    } else {
+        ""
+    };
+    let body_display = format!(" > {}{}", form.body, body_cursor);
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(body_display, theme::input_style()))),
+        chunks[3],
+    );
 
     // -- Priority field --
-    let pri_label_style = if form.field == CreateIssueField::Priority { focused_style } else { normal_label };
+    let pri_label_style = if form.field == CreateIssueField::Priority {
+        focused_style
+    } else {
+        normal_label
+    };
     let priorities = [
         crate::app::IssuePriority::P0,
         crate::app::IssuePriority::P1,
@@ -471,33 +545,48 @@ pub fn render_create_issue_dialog(
         let marker = if selected { "(●) " } else { "( ) " };
         let label = format!("{}{} ", marker, p.desc());
         let style = if selected {
-            Style::default().fg(ratatui::style::Color::White).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(ratatui::style::Color::White)
+                .add_modifier(Modifier::BOLD)
         } else {
             normal_label
         };
         pri_spans.push(Span::styled(label, style));
     }
-    f.render_widget(Paragraph::new(Line::from(pri_spans)), chunks[2]);
+    f.render_widget(Paragraph::new(Line::from(pri_spans)), chunks[4]);
 
     // -- Type field --
-    let type_label_style = if form.field == CreateIssueField::IssueType { focused_style } else { normal_label };
+    let type_label_style = if form.field == CreateIssueField::IssueType {
+        focused_style
+    } else {
+        normal_label
+    };
     let bug_sel = form.issue_type == crate::app::IssueType::Bug;
     let mut type_spans = vec![Span::styled(" Type:     ", type_label_style)];
     for (is_sel, label) in [(bug_sel, "bug"), (!bug_sel, "enhancement")] {
         let marker = if is_sel { "(●) " } else { "( ) " };
         let text = format!("{}{} ", marker, label);
         let style = if is_sel {
-            Style::default().fg(ratatui::style::Color::White).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(ratatui::style::Color::White)
+                .add_modifier(Modifier::BOLD)
         } else {
             normal_label
         };
         type_spans.push(Span::styled(text, style));
     }
-    f.render_widget(Paragraph::new(Line::from(type_spans)), chunks[3]);
+    f.render_widget(Paragraph::new(Line::from(type_spans)), chunks[5]);
 
     // -- Labels field --
-    let lbl_label_style = if form.field == CreateIssueField::Labels { focused_style } else { normal_label };
-    f.render_widget(Paragraph::new(Line::from(Span::styled(" Labels:", lbl_label_style))), chunks[4]);
+    let lbl_label_style = if form.field == CreateIssueField::Labels {
+        focused_style
+    } else {
+        normal_label
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(" Labels:", lbl_label_style))),
+        chunks[6],
+    );
 
     // Render blocking labels in two rows of 3
     for row in 0..2 {
@@ -505,11 +594,17 @@ pub fn render_create_issue_dialog(
         let end = (start + 3).min(BLOCKING_LABELS.len());
         let mut spans = vec![Span::styled(" ", normal_label)];
         for i in start..end {
-            let checked = if form.label_toggles[i] { "[x] " } else { "[ ] " };
+            let checked = if form.label_toggles[i] {
+                "[x] "
+            } else {
+                "[ ] "
+            };
             let text = format!("{}{}", checked, BLOCKING_LABELS[i]);
             let is_cursor = form.field == CreateIssueField::Labels && form.label_cursor == i;
             let style = if is_cursor {
-                Style::default().fg(ratatui::style::Color::White).add_modifier(Modifier::UNDERLINED)
+                Style::default()
+                    .fg(ratatui::style::Color::White)
+                    .add_modifier(Modifier::UNDERLINED)
             } else if form.label_toggles[i] {
                 Style::default().fg(ratatui::style::Color::Yellow)
             } else {
@@ -518,7 +613,7 @@ pub fn render_create_issue_dialog(
             spans.push(Span::styled(text, style));
             spans.push(Span::styled("  ", normal_label));
         }
-        f.render_widget(Paragraph::new(Line::from(spans)), chunks[5 + row]);
+        f.render_widget(Paragraph::new(Line::from(spans)), chunks[7 + row]);
     }
 
     // -- Help bar --
@@ -536,7 +631,7 @@ pub fn render_create_issue_dialog(
         Span::styled("Esc", theme::title_style()),
         Span::styled(" cancel", theme::help_style()),
     ]));
-    f.render_widget(help, chunks[8]);
+    f.render_widget(help, chunks[10]);
 }
 
 #[cfg(test)]
@@ -545,10 +640,10 @@ mod tests {
         render_create_issue_dialog, render_install_scope_dialog, render_new_swarm_dialog,
         render_runtime_dialog, render_switch_agent_dialog,
     };
-    use crate::app::{CreateIssueForm, InstallScope, NewSwarmField};
+    use crate::app::{CreateIssueForm, InstallScope, NewSwarmField, RuntimeOption};
     use crate::model::swarm::AgentType;
     use crate::ui::text_input::TextInput;
-    use ratatui::{backend::TestBackend, Terminal};
+    use ratatui::{Terminal, backend::TestBackend};
 
     fn rendered_text<F>(draw_fn: F) -> String
     where
@@ -649,6 +744,27 @@ mod tests {
 
     #[test]
     fn switch_agent_dialog_shows_project_and_runtimes() {
+        let options = vec![
+            RuntimeOption {
+                agent_type: AgentType::Codex,
+                available: true,
+                detail: "(current)".to_string(),
+            },
+            RuntimeOption {
+                agent_type: AgentType::Claude,
+                available: true,
+                detail: String::new(),
+            },
+        ];
+        let rendered = rendered_text(|terminal| {
+            terminal
+                .draw(|f| {
+                    render_switch_agent_dialog(f, f.area(), "demo", &AgentType::Codex, &options, 0)
+                })
+                .unwrap();
+        });
+        assert!(rendered.contains("Switch agent runtime for demo"));
+        assert!(rendered.contains("Codex"));
         let rendered = rendered_text(|terminal| {
             terminal
                 .draw(|f| {
@@ -657,6 +773,7 @@ mod tests {
                         f.area(),
                         "demo",
                         &AgentType::Codex,
+                        &options,
                         0,
                     )
                 })

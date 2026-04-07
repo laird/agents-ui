@@ -1,12 +1,12 @@
 use ratatui::{
+    Frame,
     layout::Rect,
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
-    Frame,
 };
 
-use crate::config::shortcuts::ShortcutsConfig;
 use super::theme;
+use crate::config::shortcuts::ShortcutsConfig;
 
 /// Render the shortcuts viewer as a centered overlay.
 pub fn render_shortcuts_viewer(
@@ -45,7 +45,10 @@ pub fn render_shortcuts_viewer(
         for (key, shortcut) in panel_shortcuts {
             lines.push(Line::from(vec![
                 Span::styled(format!("    {:<8}", key), theme::title_style()),
-                Span::styled(&shortcut.label, ratatui::style::Style::default().fg(ratatui::style::Color::White)),
+                Span::styled(
+                    &shortcut.label,
+                    ratatui::style::Style::default().fg(ratatui::style::Color::White),
+                ),
                 Span::styled(format!("  → {}", shortcut.command), theme::help_style()),
             ]));
         }
@@ -61,7 +64,10 @@ pub fn render_shortcuts_viewer(
         for (key, shortcut) in &config.global {
             lines.push(Line::from(vec![
                 Span::styled(format!("    {:<8}", key), theme::title_style()),
-                Span::styled(&shortcut.label, ratatui::style::Style::default().fg(ratatui::style::Color::White)),
+                Span::styled(
+                    &shortcut.label,
+                    ratatui::style::Style::default().fg(ratatui::style::Color::White),
+                ),
                 Span::styled(format!("  → {}", shortcut.command), theme::help_style()),
             ]));
         }
@@ -86,7 +92,7 @@ pub fn render_shortcuts_viewer(
 mod tests {
     use super::*;
     use crate::config::shortcuts::ShortcutsConfig;
-    use ratatui::{backend::TestBackend, Terminal};
+    use ratatui::{Terminal, backend::TestBackend};
 
     #[test]
     fn render_shortcuts_viewer_smoke() {
@@ -96,7 +102,6 @@ mod tests {
         terminal
             .draw(|f| render_shortcuts_viewer(f, f.area(), &config, "agents"))
             .unwrap();
-
         let rendered: String = terminal
             .backend()
             .buffer()
@@ -104,7 +109,24 @@ mod tests {
             .iter()
             .map(|cell| cell.symbol())
             .collect();
-
         assert!(rendered.contains("Shortcuts"));
+    }
+
+    #[test]
+    fn render_shortcuts_viewer_shows_active_panel() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let config = ShortcutsConfig::defaults();
+        terminal
+            .draw(|f| render_shortcuts_viewer(f, f.area(), &config, "repos"))
+            .unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(rendered.contains("repos"));
     }
 }

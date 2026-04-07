@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
+use std::time::Duration;
 use tokio::process::Command;
 use tokio::sync::mpsc;
-use std::time::Duration;
 
 use crate::tmux::session::pane_exists;
 use crate::transport::ServerTransport;
@@ -126,7 +126,12 @@ pub async fn send_named_key(target: &str, key: &str) -> Result<()> {
 }
 
 /// Resize a tmux pane to given dimensions.
-pub async fn resize_pane(transport: &ServerTransport, target: &str, width: u16, height: u16) -> Result<()> {
+pub async fn resize_pane(
+    transport: &ServerTransport,
+    target: &str,
+    width: u16,
+    height: u16,
+) -> Result<()> {
     let output = transport
         .output(
             "tmux",
@@ -157,7 +162,7 @@ pub async fn resize_pane(transport: &ServerTransport, target: &str, width: u16, 
 /// Send Ctrl+C followed by kill to a tmux pane to shut down the session.
 pub async fn kill_pane(transport: &ServerTransport, target: &str) -> Result<()> {
     // Send Ctrl+C to interrupt any running process
-    let _ = transport
+    if let Err(e) = transport
         .output(
             "tmux",
             &[
@@ -169,12 +174,15 @@ pub async fn kill_pane(transport: &ServerTransport, target: &str) -> Result<()> 
             ],
             None,
         )
-        .await;
+        .await
+    {
+        tracing::warn!("Failed sending Ctrl+C to pane {target}: {e}");
+    }
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     // Send "exit" to close the shell
-    let _ = transport
+    if let Err(e) = transport
         .output(
             "tmux",
             &[
@@ -186,7 +194,10 @@ pub async fn kill_pane(transport: &ServerTransport, target: &str) -> Result<()> 
             ],
             None,
         )
-        .await;
+        .await
+    {
+        tracing::warn!("Failed sending exit to pane {target}: {e}");
+    }
 
     Ok(())
 }

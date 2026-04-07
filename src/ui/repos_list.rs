@@ -1,17 +1,17 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
 use ratatui::{
+    Frame,
     layout::{Constraint, Layout, Rect},
     style::Style,
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
-    Frame,
 };
+use std::collections::HashMap;
+use std::path::PathBuf;
 
+use super::theme;
 use crate::model::issue::IssueCache;
 use crate::model::swarm::Swarm;
 use crate::ui::swarm_view::count_attention;
-use super::theme;
 
 pub struct ReposListView {
     pub table_state: TableState,
@@ -46,10 +46,21 @@ impl ReposListView {
         // Title
         let active_count = swarms.len();
         let avail_count = available.len();
+        let total_workers: usize = swarms.iter().map(|s| s.workers.len()).sum();
+        let idle_workers: usize = swarms.iter().map(|s| s.idle_count()).sum();
+        let worker_part = if total_workers > 0 {
+            if idle_workers == total_workers {
+                format!(" · all {total_workers} idle")
+            } else {
+                format!(" · {idle_workers}/{total_workers} idle")
+            }
+        } else {
+            String::new()
+        };
         let title_info = if active_count > 0 && avail_count > 0 {
-            format!("  ({active_count} active, {avail_count} available)")
+            format!("  ({active_count} active{worker_part}, {avail_count} available)")
         } else if active_count > 0 {
-            format!("  ({active_count} active)")
+            format!("  ({active_count} active{worker_part})")
         } else if avail_count > 0 {
             format!("  ({avail_count} repos found)")
         } else {
@@ -58,7 +69,6 @@ impl ReposListView {
         let version = env!("CARGO_PKG_VERSION");
         let left_text = format!("  Agents UI{title_info}");
         let version_span = format!("v{version} ");
-        let _version_len = version_span.len();
         let width = chunks[0].width as usize;
         // hostname + version right-aligned: build hostname span with padding, then version
         let hn = theme::hostname();
@@ -119,34 +129,45 @@ impl ReposListView {
                 let waiting = count_attention(s, swarm_issues) - blocked_issues;
 
                 // Build issue priority summary from cache
-                let issue_summary = if let Some(cache) = issue_caches.get(&s.project_name) {
-                    let open_issues: Vec<_> = cache.issues.iter()
-                        .filter(|i| i.state == crate::model::issue::IssueState::Open)
-                        .collect();
-                    if open_issues.is_empty() {
-                        "—".to_string()
-                    } else {
-                        let mut counts = [0u32; 4]; // P0, P1, P2, P3
-                        for issue in &open_issues {
-                            if let Some(p) = issue.priority_num() {
-                                if (p as usize) < 4 {
-                                    counts[p as usize] += 1;
+                let (issue_summary, issue_cell_style) =
+                    if let Some(cache) = issue_caches.get(&s.project_name) {
+                        let open_issues: Vec<_> = cache
+                            .issues
+                            .iter()
+                            .filter(|i| i.state == crate::model::issue::IssueState::Open)
+                            .collect();
+                        if open_issues.is_empty() {
+                            ("—".to_string(), theme::help_style())
+                        } else {
+                            let mut counts = [0u32; 4]; // P0, P1, P2, P3
+                            for issue in &open_issues {
+                                if let Some(p) = issue.priority_num() {
+                                    if (p as usize) < 4 {
+                                        counts[p as usize] += 1;
+                                    }
                                 }
                             }
+                            let parts: Vec<String> = counts
+                                .iter()
+                                .enumerate()
+                                .filter(|&(_, c)| *c > 0)
+                                .map(|(i, c)| format!("P{i}:{c}"))
+                                .collect();
+                            let text = if parts.is_empty() {
+                                format!("{} open", open_issues.len())
+                            } else {
+                                parts.join(" ")
+                            };
+                            let style = match counts.iter().position(|&c| c > 0) {
+                                Some(0) => theme::attention_style(),
+                                Some(1) => Style::default().fg(ratatui::style::Color::Yellow),
+                                _ => Style::default(),
+                            };
+                            (text, style)
                         }
-                        let parts: Vec<String> = counts.iter().enumerate()
-                            .filter(|&(_, c)| *c > 0)
-                            .map(|(i, c)| format!("P{i}:{c}"))
-                            .collect();
-                        if parts.is_empty() {
-                            format!("{} open", open_issues.len())
-                        } else {
-                            parts.join(" ")
-                        }
-                    }
-                } else {
-                    "—".to_string()
-                };
+                    } else {
+                        ("—".to_string(), theme::help_style())
+                    };
 
                 rows.push(Row::new(vec![
                     Cell::from(format!("{row_num}")).style(theme::title_style()),
@@ -162,16 +183,24 @@ impl ReposListView {
                     Cell::from(format!("{busy}/{total} working")),
                     Cell::from({
                         let mut parts = Vec::new();
-                        if waiting > 0 { parts.push(format!("{waiting} input")); }
-                        if blocked_issues > 0 { parts.push(format!("{blocked_issues} blocked")); }
-                        if parts.is_empty() { "—".to_string() } else { parts.join(", ") }
+                        if waiting > 0 {
+                            parts.push(format!("{waiting} input"));
+                        }
+                        if blocked_issues > 0 {
+                            parts.push(format!("{blocked_issues} blocked"));
+                        }
+                        if parts.is_empty() {
+                            "—".to_string()
+                        } else {
+                            parts.join(", ")
+                        }
                     })
                     .style(if waiting > 0 || blocked_issues > 0 {
                         theme::attention_style()
                     } else {
                         theme::help_style()
                     }),
-                    Cell::from(issue_summary),
+                    Cell::from(issue_summary).style(issue_cell_style),
                 ]));
                 row_num += 1;
             }
@@ -236,6 +265,8 @@ impl ReposListView {
             Span::styled(" teardown  ", theme::help_style()),
             Span::styled("r", theme::title_style()),
             Span::styled(" refresh  ", theme::help_style()),
+            Span::styled("F1", theme::title_style()),
+            Span::styled(" attention  ", theme::help_style()),
             Span::styled("q", theme::title_style()),
             Span::styled(" quit", theme::help_style()),
         ]))
@@ -270,7 +301,7 @@ mod tests {
     use super::ReposListView;
     use crate::model::status::{AgentState, AgentStatus};
     use crate::model::swarm::{AgentInfo, AgentType, Swarm};
-    use ratatui::{backend::TestBackend, Terminal};
+    use ratatui::{Terminal, backend::TestBackend};
     use std::path::PathBuf;
 
     fn make_agent(id: &str, is_manager: bool) -> AgentInfo {
@@ -289,6 +320,8 @@ mod tests {
             current_issue: None,
             current_issue_title: None,
             waiting_for_input: false,
+            resurrection_attempts: 0,
+            completed_issue_count: 0,
             health: crate::model::swarm::WorkerHealth::default(),
         }
     }
@@ -303,6 +336,7 @@ mod tests {
             manager: make_agent("manager", true),
             workers: vec![make_agent("worker-1", false)],
             issue_cache: crate::model::issue::IssueCache::default(),
+            stopped: false,
         }
     }
 

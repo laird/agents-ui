@@ -16,10 +16,7 @@ pub enum Event {
     /// Periodic tick for UI refresh
     Tick,
     /// Updated pane content from tmux
-    PaneOutput {
-        agent_id: String,
-        content: String,
-    },
+    PaneOutput { agent_id: String, content: String },
     /// GitHub issues updated for a project
     IssuesUpdated {
         project_name: String,
@@ -38,10 +35,7 @@ pub enum Event {
         message: String,
     },
     /// Fetched issue body text for display in IssueView
-    IssueFetched {
-        issue_number: u32,
-        body: String,
-    },
+    IssueFetched { issue_number: u32, body: String },
     /// GitHub issues refreshed for a swarm
     IssuesRefreshed {
         swarm_idx: usize,
@@ -73,16 +67,28 @@ impl EventHandler {
                         // Only handle key press events, not release/repeat
                         if key.kind == KeyEventKind::Press {
                             if event_tx.send(Event::Key(key)).is_err() {
+                                tracing::debug!("Event channel closed while sending key event");
                                 break;
                             }
                         }
                     }
                     Some(Ok(CrosstermEvent::Resize(width, height))) => {
-                        if event_tx.send(Event::TerminalResize { width, height }).is_err() {
+                        if event_tx
+                            .send(Event::TerminalResize { width, height })
+                            .is_err()
+                        {
+                            tracing::debug!("Event channel closed while sending resize event");
                             break;
                         }
                     }
-                    Some(Err(_)) | None => break,
+                    Some(Err(e)) => {
+                        tracing::warn!("Crossterm event stream error: {e}");
+                        break;
+                    }
+                    None => {
+                        tracing::warn!("Crossterm event stream closed");
+                        break;
+                    }
                     _ => {}
                 }
             }
@@ -95,6 +101,7 @@ impl EventHandler {
             loop {
                 interval.tick().await;
                 if tick_tx.send(Event::Tick).is_err() {
+                    tracing::debug!("Event channel closed while sending tick");
                     break;
                 }
             }

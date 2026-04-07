@@ -1,13 +1,14 @@
 use ansi_to_tui::IntoText;
 use ratatui::{
+    Frame,
     layout::{Constraint, Layout, Rect},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Wrap},
-    Frame,
 };
 
-use crate::model::swarm::AgentInfo;
+use super::text_input::TextInput;
 use super::theme;
+use crate::model::swarm::AgentInfo;
 
 pub struct AgentView {
     pub scroll_offset: u16,
@@ -15,6 +16,8 @@ pub struct AgentView {
     pub visible_height: u16,
     /// Whether the view should auto-follow new content (true when at bottom).
     pub following: bool,
+    /// Inline command input bar.
+    pub input: super::text_input::TextInput,
 }
 
 impl AgentView {
@@ -23,6 +26,7 @@ impl AgentView {
             scroll_offset: 0,
             visible_height: 20,
             following: true,
+            input: super::text_input::TextInput::new(),
         }
     }
 
@@ -30,6 +34,7 @@ impl AgentView {
         let chunks = Layout::vertical([
             Constraint::Length(3),
             Constraint::Min(5),
+            Constraint::Length(2),
             Constraint::Length(3),
         ])
         .split(area);
@@ -60,10 +65,7 @@ impl AgentView {
                     "Working ",
                     theme::status_style(&agent.status.state),
                 ));
-                title_spans.push(Span::styled(
-                    format!("#{n}"),
-                    theme::title_style(),
-                ));
+                title_spans.push(Span::styled(format!("#{n}"), theme::title_style()));
             }
             state => {
                 title_spans.push(Span::styled(
@@ -75,14 +77,29 @@ impl AgentView {
         if agent.waiting_for_input {
             title_spans.push(Span::styled(" NEEDS INPUT", theme::waiting_style()));
         }
+        if agent.status.is_stale(300) {
+            title_spans.push(Span::styled(
+                " (stale)",
+                ratatui::style::Style::default().fg(ratatui::style::Color::Yellow),
+            ));
+        }
         title_spans.push(Span::styled(path_label, theme::help_style()));
-        let left_len = id_len + role_len + path_len
-            + if agent.waiting_for_input { " NEEDS INPUT".len() } else { 0 }
+        let left_len = id_len
+            + role_len
+            + path_len
+            + if agent.waiting_for_input {
+                " NEEDS INPUT".len()
+            } else {
+                0
+            }
             + 10; // approximate state label
-        title_spans.push(theme::hostname_right_span(left_len, chunks[0].width as usize));
+        title_spans.push(theme::hostname_right_span(
+            left_len,
+            chunks[0].width as usize,
+        ));
 
         let title = Paragraph::new(Line::from(title_spans))
-        .block(Block::default().borders(Borders::BOTTOM));
+            .block(Block::default().borders(Borders::BOTTOM));
         f.render_widget(title, chunks[0]);
 
         // Pane output — parse ANSI escape codes for colors
@@ -91,7 +108,8 @@ impl AgentView {
             .as_bytes()
             .into_text()
             .unwrap_or_else(|_| Text::raw(content.clone()));
-        let total_lines = text.lines.len() as u16;
+        let content_width = chunks[1].width.saturating_sub(2).max(1);
+        let total_lines = wrapped_line_count(&text, content_width);
 
         let visible_height = chunks[1].height.saturating_sub(2);
         self.visible_height = visible_height;
@@ -121,10 +139,18 @@ impl AgentView {
             format!(" Session — {} ", agent.tmux_target)
         };
         let pane_output = Paragraph::new(text)
-            .block(Block::default().borders(Borders::ALL).title(scroll_indicator))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(scroll_indicator),
+            )
             .wrap(Wrap { trim: false })
             .scroll((self.scroll_offset, 0));
         f.render_widget(pane_output, chunks[1]);
+
+        let input = Paragraph::new(self.input.render_line("> "))
+            .block(Block::default().borders(Borders::TOP));
+        f.render_widget(input, chunks[2]);
 
         // Help bar with key shortcuts
         let help = Paragraph::new(Line::from(vec![
@@ -141,7 +167,7 @@ impl AgentView {
             Span::styled(" next waiting", theme::help_style()),
         ]))
         .block(Block::default().borders(Borders::TOP));
-        f.render_widget(help, chunks[2]);
+        f.render_widget(help, chunks[3]);
     }
 
     pub fn scroll_up(&mut self, amount: u16) {
@@ -173,6 +199,23 @@ impl AgentView {
         self.scroll_offset = u16::MAX;
         self.following = true;
     }
+}
+
+fn wrapped_line_count(text: &Text<'_>, content_width: u16) -> u16 {
+    let width = content_width.max(1) as usize;
+    let total: usize = text
+        .lines
+        .iter()
+        .map(|line| {
+            let line_width = line.width();
+            if line_width == 0 {
+                1
+            } else {
+                line_width.div_ceil(width)
+            }
+        })
+        .sum();
+    total.min(u16::MAX as usize) as u16
 }
 
 #[cfg(test)]
