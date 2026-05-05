@@ -3507,12 +3507,8 @@ impl App {
     fn worker_dispatch_cmd(&self, agent_type: &AgentType, issue_number: u32) -> Option<String> {
         match agent_type {
             AgentType::Claude => Some(format!("/autocoder:fix {issue_number}")),
-            AgentType::Gemini => Some(format!("/fix {issue_number}")),
-            AgentType::Codex => Some(format!(
-                "Use the autocoder skill to fix issue #{issue_number} in this repository."
-            )),
+            AgentType::Gemini | AgentType::Droid => Some(format!("/fix {issue_number}")),
             AgentType::Codex => None,
-            AgentType::Droid => Some(format!("/fix {issue_number}")),
         }
     }
 
@@ -3527,24 +3523,16 @@ impl App {
     fn review_blocked_cmd(&self, agent_type: &AgentType) -> Option<String> {
         match agent_type {
             AgentType::Claude => Some("/autocoder:review-blocked".to_string()),
-            AgentType::Gemini => Some("/review-blocked".to_string()),
-            AgentType::Codex => Some(
-                "Use the autocoder skill to review blocked issues in this repository and recommend the next human actions.".to_string()
-            ),
+            AgentType::Gemini | AgentType::Droid => Some("/review-blocked".to_string()),
             AgentType::Codex => None,
-            AgentType::Droid => Some("/review-blocked".to_string()),
         }
     }
 
     fn monitor_workers_cmd(&self, agent_type: &AgentType) -> Option<String> {
         match agent_type {
             AgentType::Claude => Some("/autocoder:monitor-workers".to_string()),
-            AgentType::Gemini => Some("/monitor-workers".to_string()),
-            AgentType::Codex => Some(
-                "Use the autocoder skill to monitor workers for this repository in this manager session.".to_string()
-            ),
+            AgentType::Gemini | AgentType::Droid => Some("/monitor-workers".to_string()),
             AgentType::Codex => None,
-            AgentType::Droid => Some("/monitor-workers".to_string()),
         }
     }
 

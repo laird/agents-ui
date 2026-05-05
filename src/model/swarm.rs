@@ -136,9 +136,7 @@ impl AgentType {
     pub fn worker_loop_cmd(&self) -> &str {
         match self {
             AgentType::Claude => "/autocoder:fix-loop",
-            AgentType::Codex => {
-                "Use the autocoder skill to start the fix loop for this worker in the current repository."
-            }
+            AgentType::Codex => "/goal Work the issue queue: pull the next available GitHub issue, fix it, open a PR, and repeat until the queue is empty or you are paused.",
             AgentType::Droid => "/fix-loop",
             AgentType::Gemini => "/fix-loop",
         }
@@ -160,7 +158,8 @@ impl AgentType {
         match self {
             AgentType::Claude => "/autocoder:monitor-workers",
             AgentType::Gemini => "/monitor-workers",
-            AgentType::Codex | AgentType::Droid => "",
+            AgentType::Codex => "/goal Monitor and coordinate workers: check worker status, unblock stuck agents, merge completed PRs, triage new issues, and repeat indefinitely.",
+            AgentType::Droid => "",
         }
     }
 
@@ -183,10 +182,7 @@ impl AgentType {
 
     /// Whether this runtime is supervised by an outer shell loop wrapper.
     pub fn uses_loop_wrapper(&self) -> bool {
-        matches!(
-            self,
-            AgentType::Codex | AgentType::Droid | AgentType::Gemini
-        )
+        matches!(self, AgentType::Droid | AgentType::Gemini)
     }
 
     pub fn from_name(value: &str) -> Option<Self> {
@@ -597,7 +593,7 @@ mod tests {
         assert_eq!(AgentType::Gemini.worker_loop_cmd(), "/fix-loop");
         assert_eq!(
             AgentType::Codex.worker_loop_cmd(),
-            "Use the autocoder skill to start the fix loop for this worker in the current repository."
+            "/goal Work the issue queue: pull the next available GitHub issue, fix it, open a PR, and repeat until the queue is empty or you are paused."
         );
         assert_eq!(AgentType::Droid.worker_loop_cmd(), "/fix-loop");
     }
@@ -611,7 +607,7 @@ mod tests {
 
     #[test]
     fn loop_wrappers_match_runtime_requirements() {
-        assert!(AgentType::Codex.uses_loop_wrapper());
+        assert!(!AgentType::Codex.uses_loop_wrapper());
         assert!(AgentType::Droid.uses_loop_wrapper());
         assert!(!AgentType::Claude.uses_loop_wrapper());
         assert!(AgentType::Gemini.uses_loop_wrapper());
