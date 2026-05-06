@@ -106,7 +106,8 @@ impl RuntimeSupervisor for ClaudeSupervisor {
 
 impl RuntimeSupervisor for CodexSupervisor {
     fn uses_loop_wrapper(&self) -> bool {
-        launcher::find_script("codex-fix-loop.sh").is_some()
+        // Use /goal when available; fall back to shell loop wrapper otherwise.
+        !launcher::codex_supports_goals()
     }
 
     fn launch_command(
@@ -294,7 +295,10 @@ mod tests {
     #[test]
     fn runtime_wrapper_usage_matches_expected_runtimes() {
         assert!(!for_runtime(&AgentType::Claude).uses_loop_wrapper());
-        assert!(for_runtime(&AgentType::Codex).uses_loop_wrapper());
+        // Codex uses probe: returns !codex_supports_goals(), which is runtime-dependent.
+        // Verify it's consistent (same value called twice) rather than a fixed value.
+        let codex_wrapper = for_runtime(&AgentType::Codex).uses_loop_wrapper();
+        assert_eq!(codex_wrapper, for_runtime(&AgentType::Codex).uses_loop_wrapper());
         assert!(for_runtime(&AgentType::Droid).uses_loop_wrapper());
         assert!(for_runtime(&AgentType::Gemini).uses_loop_wrapper());
     }

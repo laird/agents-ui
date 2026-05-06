@@ -782,16 +782,17 @@ mod tests {
         let dir = temp_status_path("dead-worker");
         std::fs::create_dir_all(&dir).unwrap();
 
+        // Gemini uses a shell loop wrapper (.codex/loops status dir)
         assert_eq!(
-            worker_supervision_state(&AgentType::Codex, &dir, ""),
+            worker_supervision_state(&AgentType::Gemini, &dir, ""),
             WorkerSupervisionState::DeadMissingStatus
         );
         assert_eq!(
-            worker_supervision_state(&AgentType::Codex, &dir, "> \n"),
+            worker_supervision_state(&AgentType::Gemini, &dir, "> \n"),
             WorkerSupervisionState::DeadIdleOutsideLoop
         );
         assert_eq!(
-            worker_supervision_state(&AgentType::Codex, &dir, "reading src/main.rs\n"),
+            worker_supervision_state(&AgentType::Gemini, &dir, "reading src/main.rs\n"),
             WorkerSupervisionState::Healthy
         );
 
@@ -805,12 +806,13 @@ mod tests {
         std::fs::create_dir_all(&loops).unwrap();
         std::fs::write(loops.join("fix-loop.status"), "2024-01-15 10:00:00\tidle\n").unwrap();
 
+        // Gemini uses a shell loop wrapper (.codex/loops status dir)
         assert_eq!(
-            worker_supervision_state(&AgentType::Codex, &dir, ""),
+            worker_supervision_state(&AgentType::Gemini, &dir, ""),
             WorkerSupervisionState::DeadStaleStatus
         );
         assert_eq!(
-            dead_worker_status(&AgentType::Codex, &dir, "")
+            dead_worker_status(&AgentType::Gemini, &dir, "")
                 .unwrap()
                 .state
                 .to_string(),

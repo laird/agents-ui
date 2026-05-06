@@ -1,4 +1,28 @@
 use std::path::PathBuf;
+use std::sync::OnceLock;
+
+static CODEX_GOALS_SUPPORTED: OnceLock<bool> = OnceLock::new();
+
+/// Returns true if the installed Codex CLI has the `goals` feature enabled.
+/// Result is cached for the lifetime of the process.
+pub fn codex_supports_goals() -> bool {
+    *CODEX_GOALS_SUPPORTED.get_or_init(|| {
+        let output = std::process::Command::new("codex")
+            .args(["features", "list"])
+            .output();
+        match output {
+            Ok(out) => parse_goals_feature(&String::from_utf8_lossy(&out.stdout)),
+            Err(_) => false,
+        }
+    })
+}
+
+fn parse_goals_feature(output: &str) -> bool {
+    output.lines().any(|line| {
+        let mut parts = line.split_whitespace();
+        parts.next() == Some("goals") && parts.last() == Some("true")
+    })
+}
 
 /// Resolve the agents plugin scripts directory.
 /// Checks installed plugin locations first, then falls back to relative paths.
@@ -158,5 +182,36 @@ mod tests {
                 "Should include ~/.claude/plugins/autocoder/scripts"
             );
         }
+    }
+
+    #[test]
+    fn codex_supports_goals_returns_bool_without_panic() {
+        let _ = codex_supports_goals();
+    }
+
+    #[test]
+    fn parse_goals_line_detects_true() {
+        assert!(parse_goals_feature(
+            "goals                               under development  true\n"
+        ));
+    }
+
+    #[test]
+    fn parse_goals_line_detects_false() {
+        assert!(!parse_goals_feature(
+            "goals                               under development  false\n"
+        ));
+    }
+
+    #[test]
+    fn parse_goals_line_returns_false_for_missing() {
+        assert!(!parse_goals_feature(""));
+    }
+
+    #[test]
+    fn parse_goals_line_does_not_match_substrings() {
+        assert!(!parse_goals_feature(
+            "multi_agent_goals                   under development  true\n"
+        ));
     }
 }

@@ -2222,8 +2222,12 @@ mod tests {
             manager_bootstrap_cmd(&AgentType::Claude),
             Some("/autocoder:monitor-loop".to_string())
         );
+        // Codex uses either native /goal prose (when goals feature enabled) or shell loop wrapper
         let codex_cmd = manager_bootstrap_cmd(&AgentType::Codex).unwrap();
-        assert!(codex_cmd.contains("codex-manage-workers-loop.sh"));
+        assert!(
+            codex_cmd.contains("monitor") || codex_cmd.contains("manage-workers-loop.sh"),
+            "Unexpected Codex manager command: {codex_cmd}"
+        );
     }
 
     #[test]
