@@ -152,8 +152,7 @@ impl AgentType {
         }
     }
 
-    /// The command to send to an already-running idle manager (ongoing cycles).
-    #[allow(dead_code)]
+    /// The command to send to a manager to start (or restart) the monitor loop.
     pub fn manager_cmd(&self) -> &str {
         match self {
             AgentType::Claude => "/autocoder:monitor-workers",

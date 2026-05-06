@@ -132,19 +132,25 @@ impl RuntimeSupervisor for CodexSupervisor {
 
     fn bootstrap_command(
         &self,
-        _runtime: &AgentType,
+        runtime: &AgentType,
         is_manager: bool,
         issue: Option<u32>,
     ) -> Option<String> {
         if is_manager {
-            Some(
-                "Use the autocoder skill to start the monitor loop for this repository in this manager session."
-                    .to_string(),
-            )
+            if launcher::codex_supports_goals() {
+                Some(runtime.manager_cmd().to_string())
+            } else {
+                Some(
+                    "Use the autocoder skill to start the monitor loop for this repository in this manager session."
+                        .to_string(),
+                )
+            }
         } else if let Some(issue_number) = issue {
             Some(format!(
                 "Use the autocoder skill to fix issue #{issue_number} in this repository."
             ))
+        } else if launcher::codex_supports_goals() {
+            Some(runtime.worker_loop_cmd().to_string())
         } else {
             Some(
                 "Use the autocoder skill to start the fix loop for this worker in the current repository."
@@ -160,10 +166,14 @@ impl RuntimeSupervisor for CodexSupervisor {
         issue: Option<u32>,
     ) -> Option<String> {
         if is_manager {
-            Some(
-                "Use the autocoder skill to monitor workers for this repository in this manager session."
-                    .to_string(),
-            )
+            if launcher::codex_supports_goals() {
+                Some(runtime.manager_cmd().to_string())
+            } else {
+                Some(
+                    "Use the autocoder skill to monitor workers for this repository in this manager session."
+                        .to_string(),
+                )
+            }
         } else if let Some(issue_number) = issue {
             self.bootstrap_command(runtime, false, Some(issue_number))
         } else {
@@ -449,12 +459,13 @@ mod tests {
     // --- CodexSupervisor bootstrap (pure string returns, no filesystem) ---
 
     #[test]
-    fn codex_bootstrap_manager_returns_prose_instruction() {
+    fn codex_bootstrap_manager_returns_monitor_command() {
         let sup = CodexSupervisor;
         let cmd = sup.bootstrap_command(&AgentType::Codex, true, None);
         assert!(cmd.is_some());
         let cmd = cmd.unwrap();
-        assert!(cmd.contains("monitor") || cmd.contains("manager"));
+        let lower = cmd.to_lowercase();
+        assert!(lower.contains("monitor") || lower.contains("manager"));
     }
 
     #[test]

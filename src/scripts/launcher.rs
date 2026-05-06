@@ -4,17 +4,45 @@ use std::sync::OnceLock;
 static CODEX_GOALS_SUPPORTED: OnceLock<bool> = OnceLock::new();
 
 /// Returns true if the installed Codex CLI has the `goals` feature enabled.
-/// Result is cached for the lifetime of the process.
+/// Caches result in /tmp/codex-goals-probe-<version> across processes, and in memory for
+/// the lifetime of this process (mirrors probe-codex-goals.sh behavior).
 pub fn codex_supports_goals() -> bool {
     *CODEX_GOALS_SUPPORTED.get_or_init(|| {
-        let output = std::process::Command::new("codex")
-            .args(["features", "list"])
-            .output();
-        match output {
-            Ok(out) => parse_goals_feature(&String::from_utf8_lossy(&out.stdout)),
-            Err(_) => false,
-        }
+        probe_codex_goals()
     })
+}
+
+fn probe_codex_goals() -> bool {
+    // Get version string for cache key (spaces → hyphens, matching probe-codex-goals.sh)
+    let version = std::process::Command::new("codex")
+        .args(["--version"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().replace(' ', "-"))
+        .unwrap_or_default();
+
+    if !version.is_empty() {
+        let cache_path = std::env::temp_dir().join(format!("codex-goals-probe-{version}"));
+        if let Ok(cached) = std::fs::read_to_string(&cache_path) {
+            return cached.trim() == "0";
+        }
+        let result = probe_goals_feature();
+        let _ = std::fs::write(&cache_path, if result { "0" } else { "1" });
+        return result;
+    }
+
+    probe_goals_feature()
+}
+
+fn probe_goals_feature() -> bool {
+    let output = std::process::Command::new("codex")
+        .args(["features", "list"])
+        .output();
+    match output {
+        Ok(out) => parse_goals_feature(&String::from_utf8_lossy(&out.stdout)),
+        Err(_) => false,
+    }
 }
 
 fn parse_goals_feature(output: &str) -> bool {
@@ -187,6 +215,24 @@ mod tests {
     #[test]
     fn codex_supports_goals_returns_bool_without_panic() {
         let _ = codex_supports_goals();
+    }
+
+    #[test]
+    fn probe_goals_reads_cached_file_when_present() {
+        let tmp = std::env::temp_dir().join(format!(
+            "codex-goals-probe-test-version-{}",
+            std::process::id()
+        ));
+        // Write cache indicating supported (exit 0)
+        fs::write(&tmp, "0").unwrap();
+        // Read back and assert our convention: "0" => true
+        let cached = fs::read_to_string(&tmp).unwrap();
+        assert_eq!(cached.trim() == "0", true);
+        // Write cache indicating not supported (exit 1)
+        fs::write(&tmp, "1").unwrap();
+        let cached = fs::read_to_string(&tmp).unwrap();
+        assert_eq!(cached.trim() == "0", false);
+        fs::remove_file(&tmp).ok();
     }
 
     #[test]

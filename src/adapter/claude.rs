@@ -2222,10 +2222,11 @@ mod tests {
             manager_bootstrap_cmd(&AgentType::Claude),
             Some("/autocoder:monitor-loop".to_string())
         );
-        // Codex uses either native /goal prose (when goals feature enabled) or shell loop wrapper
+        // Codex: /goal command when goals available, prose fallback otherwise
         let codex_cmd = manager_bootstrap_cmd(&AgentType::Codex).unwrap();
+        let lower = codex_cmd.to_lowercase();
         assert!(
-            codex_cmd.contains("monitor") || codex_cmd.contains("manage-workers-loop.sh"),
+            lower.contains("monitor") || lower.contains("manage-workers-loop.sh"),
             "Unexpected Codex manager command: {codex_cmd}"
         );
     }
@@ -2258,9 +2259,12 @@ mod tests {
             manager_ongoing_cmd(&AgentType::Gemini),
             Some("/monitor-workers".to_string())
         );
-        assert_eq!(
-            manager_ongoing_cmd(&AgentType::Codex),
-            Some(super::codex_monitor_once_prompt())
+        // Codex: /goal command when goals available, prose fallback otherwise
+        let codex_cmd = manager_ongoing_cmd(&AgentType::Codex).unwrap();
+        let lower = codex_cmd.to_lowercase();
+        assert!(
+            lower.contains("monitor") || lower.contains("manage-workers-loop.sh"),
+            "Unexpected Codex manager ongoing command: {codex_cmd}"
         );
     }
 
