@@ -2167,6 +2167,17 @@ impl App {
                             }
                         }
                     }
+                    KeyCode::Char('B') => {
+                        // Send deploy command to manager session
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            let target = swarm.manager.tmux_target.clone();
+                            if let Err(e) = self.adapter.send_input(&target, "deploy").await {
+                                self.set_status(format!("Deploy failed: {e}"));
+                            } else {
+                                self.set_status("Sent deploy to manager".to_string());
+                            }
+                        }
+                    }
                     KeyCode::Char(c @ '1'..='9') => {
                         let worker_idx = (c as usize) - ('1' as usize);
                         if let Some(swarm) = self.swarms.get(swarm_idx) {

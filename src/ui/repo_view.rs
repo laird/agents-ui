@@ -583,6 +583,8 @@ impl RepoView {
                 Span::styled(" stop all  ", theme::help_style()),
                 Span::styled("T", theme::title_style()),
                 Span::styled(" teardown  ", theme::help_style()),
+                Span::styled("B", theme::title_style()),
+                Span::styled(" deploy  ", theme::help_style()),
                 Span::styled("Esc", theme::title_style()),
                 Span::styled(" back", theme::help_style()),
             ])),
