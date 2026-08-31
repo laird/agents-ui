@@ -335,11 +335,9 @@ impl RepoView {
                             crate::model::status::AgentState::Working { issue: Some(_) },
                             Some(title),
                         ) => {
-                            let truncated = if title.len() > 40 {
-                                format!("{}…", &title[..40])
-                            } else {
-                                title.clone()
-                            };
+                            // Characters, not bytes -- a byte slice at 40 panics
+                            // whenever it lands inside a multi-byte character.
+                            let truncated = truncate_str(title, 41);
                             format!("{base}: {truncated}")
                         }
                         _ => base,
@@ -792,16 +790,44 @@ impl RepoView {
     }
 }
 
+/// Truncate to `max_len` characters, appending an ellipsis when anything is cut.
+///
+/// Characters, not bytes: `s.len()` counts bytes, and a byte slice panics when
+/// the cut lands inside a multi-byte character -- an issue title is exactly the
+/// kind of text that carries one.
 fn truncate_str(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}…", &s[..max_len - 1])
+    if s.chars().count() <= max_len {
+        return s.to_string();
     }
+    if max_len == 0 {
+        return String::new();
+    }
+    let mut out: String = s.chars().take(max_len - 1).collect();
+    out.push('…');
+    out
 }
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn truncate_str_does_not_split_a_multibyte_character() {
+        let title = "Fix ↔ resize handle in the split view";
+        for max in 0..=title.chars().count() + 2 {
+            let out = truncate_str(title, max);
+            assert!(
+                out.chars().count() <= max.max(1),
+                "truncate_str({title:?}, {max}) returned {out:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn truncate_str_counts_characters_not_bytes() {
+        let s = "↔↔↔↔↔↔↔↔↔↔";
+        assert_eq!(truncate_str(s, 10), s);
+        assert_eq!(truncate_str(s, 4), "↔↔↔…");
+    }
     use super::*;
 
     fn make_view() -> RepoView {

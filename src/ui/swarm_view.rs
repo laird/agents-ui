@@ -917,12 +917,22 @@ fn strip_ansi(s: &str) -> String {
         .0
 }
 
+/// Truncate to `max` characters, appending an ellipsis when anything is cut.
+///
+/// Counts characters, not bytes. `s.len()` is a byte count, so the byte slice
+/// this used to do both measured the wrong thing and panicked outright when
+/// `max - 1` landed inside a multi-byte character: one `↔` in a pane title was
+/// enough to take the whole TUI down.
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}…", &s[..max - 1])
+    if s.chars().count() <= max {
+        return s.to_string();
     }
+    if max == 0 {
+        return String::new();
+    }
+    let mut out: String = s.chars().take(max - 1).collect();
+    out.push('…');
+    out
 }
 
 fn wrapped_line_count(text: &Text<'_>, content_width: u16) -> u16 {
@@ -944,7 +954,30 @@ fn wrapped_line_count(text: &Text<'_>, content_width: u16) -> u16 {
 
 #[cfg(test)]
 mod tests {
-    use super::{SwarmPanel, SwarmView, agent_needs_input};
+
+    /// The crash that motivated char-based truncation: a pane line containing
+    /// `↔` panicked with "byte index N is not a char boundary".
+    #[test]
+    fn truncate_does_not_split_a_multibyte_character() {
+        let s = "worker-1 ↔ manager sync in progress";
+        for max in 0..=s.chars().count() + 2 {
+            let out = truncate(s, max);
+            assert!(
+                out.chars().count() <= max.max(1),
+                "truncate({s:?}, {max}) returned {out:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn truncate_counts_characters_not_bytes() {
+        // Ten characters, thirty bytes: a byte-based check would truncate this
+        // even though it fits.
+        let s = "↔↔↔↔↔↔↔↔↔↔";
+        assert_eq!(truncate(s, 10), s);
+        assert_eq!(truncate(s, 4), "↔↔↔…");
+    }
+    use super::{SwarmPanel, SwarmView, agent_needs_input, truncate};
     use crate::model::issue::{GitHubIssue, IssueFilter, IssueState};
     use crate::model::status::{AgentState, AgentStatus};
     use crate::model::swarm::{AgentInfo, AgentType, Swarm};

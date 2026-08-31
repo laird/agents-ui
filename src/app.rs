@@ -6538,14 +6538,20 @@ async fn send_raw_key(transport: &ServerTransport, target: &str, tmux_key: &str)
     Ok(())
 }
 
+/// Longest common prefix, counted in characters.
+///
+/// This used to mix units: `len` started as a byte count (`first.len()`) but
+/// was then clamped to `i`, a character index from `enumerate`, and finally
+/// used to slice bytes. For ASCII the two agree; for anything else the result
+/// was wrong where it did not panic outright on a split character.
 fn longest_common_prefix(strings: &[String]) -> String {
     if strings.is_empty() {
         return String::new();
     }
     let first = &strings[0];
-    let mut len = first.len();
+    let mut len = first.chars().count();
     for s in &strings[1..] {
-        len = len.min(s.len());
+        len = len.min(s.chars().count());
         for (i, (a, b)) in first.chars().zip(s.chars()).enumerate() {
             if a != b {
                 len = len.min(i);
@@ -6553,7 +6559,7 @@ fn longest_common_prefix(strings: &[String]) -> String {
             }
         }
     }
-    first[..len].to_string()
+    first.chars().take(len).collect()
 }
 
 #[cfg(test)]
@@ -7172,6 +7178,23 @@ mod tests {
     fn truncate_chars_over_limit_gets_ellipsis() {
         let result = super::truncate_chars("hello world", 5);
         assert_eq!(result, "hello…");
+    }
+
+    #[test]
+    fn longest_common_prefix_handles_multibyte_characters() {
+        // Byte length and character count disagree here; the old code mixed
+        // them and sliced bytes, which panics on a split character.
+        let strings = vec![
+            "issue-↔-alpha".to_string(),
+            "issue-↔-beta".to_string(),
+        ];
+        assert_eq!(longest_common_prefix(&strings), "issue-↔-");
+    }
+
+    #[test]
+    fn longest_common_prefix_stops_at_a_differing_multibyte_character() {
+        let strings = vec!["↔abc".to_string(), "↕abc".to_string()];
+        assert_eq!(longest_common_prefix(&strings), "");
     }
 
     #[test]
