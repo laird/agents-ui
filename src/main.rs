@@ -23,6 +23,10 @@ struct CliOptions {
     agent_type: Option<AgentType>,
     server: Option<String>,
     web_port: Option<u16>,
+    /// Serve the web UI without taking over the terminal, so the dashboard can
+    /// run as a background service. The discovery poller reads tmux directly,
+    /// so no TUI is needed to keep the swarm view live.
+    headless: bool,
 }
 
 fn parse_cli_options<I, S>(args: I) -> Result<CliOptions>
@@ -36,6 +40,7 @@ where
     let mut has_gemini = false;
     let mut server = None;
     let mut web_port: Option<u16> = None;
+    let mut headless = false;
 
     let mut iter = args.into_iter().skip(1);
     while let Some(arg) = iter.next() {
@@ -45,6 +50,12 @@ where
             "--droid" => has_droid = true,
             "--gemini" => has_gemini = true,
             "--web" => {
+                if web_port.is_none() {
+                    web_port = Some(web::server::DEFAULT_PORT);
+                }
+            }
+            "--headless" => {
+                headless = true;
                 if web_port.is_none() {
                     web_port = Some(web::server::DEFAULT_PORT);
                 }
@@ -103,7 +114,7 @@ where
         None
     };
 
-    Ok(CliOptions { agent_type, server, web_port })
+    Ok(CliOptions { agent_type, server, web_port, headless })
 }
 
 fn select_initial_agent_type(
@@ -123,6 +134,10 @@ fn select_initial_agent_type(
 async fn main() -> Result<()> {
     let cli = parse_cli_options(std::env::args())?;
     let transport = ServerTransport::new(cli.server.clone());
+
+    if cli.headless {
+        return run_headless(&cli).await;
+    }
 
     let cwd = std::env::current_dir().ok();
     let repo_root = cwd
@@ -222,6 +237,41 @@ async fn main() -> Result<()> {
     result
 }
 
+/// Run the web dashboard with no TUI, blocking until the server stops.
+///
+/// This is the mode a service manager wants. `--web` on its own still builds a
+/// terminal and runs the interactive event loop, which means it dies with the
+/// terminal that launched it; under systemd it has no tty to initialize at all.
+/// Discovery already reads tmux directly (`web::discovery`), so the swarm view
+/// stays live with nothing attached.
+///
+/// Logs go to stderr here rather than to the log file, so `journalctl --user`
+/// shows them. Nothing owns the terminal in this mode, so stderr is free.
+async fn run_headless(cli: &CliOptions) -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_ansi(false)
+        .init();
+
+    let port = cli.web_port.unwrap_or(web::server::DEFAULT_PORT);
+    let shared = web::new_shared_state();
+
+    let discovery_state = shared.clone();
+    tokio::spawn(async move {
+        web::discovery::run(discovery_state).await;
+    });
+
+    let state = web::server::WebServerState {
+        swarms: shared,
+        agents_dir: crate::scripts::launcher::resolve_agents_dir(),
+        transport: ServerTransport::new(cli.server.clone()),
+    };
+
+    // Unlike the TUI path, this awaits the server instead of detaching it --
+    // the process has nothing else to keep it alive.
+    web::server::run(port, state).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::{CliOptions, parse_cli_options, select_initial_agent_type};
@@ -249,6 +299,7 @@ mod tests {
                 agent_type: None,
                 server: None,
                 web_port: None,
+                headless: false,
             }
         );
     }
@@ -304,6 +355,7 @@ mod tests {
                 agent_type: Some(AgentType::Codex),
                 server: Some("builder".to_string()),
                 web_port: None,
+                headless: false,
             }
         );
 
@@ -314,6 +366,7 @@ mod tests {
                 agent_type: None,
                 server: Some("builder".to_string()),
                 web_port: None,
+                headless: false,
             }
         );
     }
@@ -338,6 +391,27 @@ mod tests {
             opts.web_port,
             Some(crate::web::server::DEFAULT_PORT)
         );
+    }
+
+    #[test]
+    fn headless_flag_implies_web_on_default_port() {
+        let opts = parse_cli_options(vec!["agents-tui", "--headless"]).unwrap();
+        assert!(opts.headless);
+        assert_eq!(opts.web_port, Some(crate::web::server::DEFAULT_PORT));
+    }
+
+    #[test]
+    fn headless_flag_respects_explicit_port() {
+        let opts =
+            parse_cli_options(vec!["agents-tui", "--headless", "--web-port=9100"]).unwrap();
+        assert!(opts.headless);
+        assert_eq!(opts.web_port, Some(9100u16));
+    }
+
+    #[test]
+    fn web_flag_alone_is_not_headless() {
+        let opts = parse_cli_options(vec!["agents-tui", "--web"]).unwrap();
+        assert!(!opts.headless);
     }
 
     #[test]

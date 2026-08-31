@@ -1,0 +1,68 @@
+#!/bin/bash
+# Toggle the agents-tui swarm dashboard on a Hyprland special workspace.
+#
+# On a single 1280x720 logical display there is no room to keep a dashboard
+# tiled beside real work, and no room to tile many agent panes at all. A
+# special workspace is the shape that fits: the dashboard lives full-screen on
+# a layer of its own, one key brings it up over whatever is in front, and the
+# same key dismisses it. It costs zero screen area while hidden.
+#
+# Idempotent: the second invocation toggles the existing window rather than
+# launching a duplicate browser.
+
+set -euo pipefail
+
+PORT="${AGENTS_UI_PORT:-7878}"
+URL="http://127.0.0.1:${PORT}/"
+WORKSPACE="agents"
+APP_ID="agents-dashboard"
+
+die() { echo "omarchy-agents-dashboard: $*" >&2; exit 1; }
+
+command -v hyprctl >/dev/null || die "hyprctl not found; this expects Hyprland"
+
+# The dashboard is useless without the daemon behind it, and the failure is
+# otherwise a blank browser tab with no explanation.
+if ! curl -sf --max-time 2 "http://127.0.0.1:${PORT}/api/swarms" >/dev/null; then
+  if systemctl --user is-enabled agents-ui.service >/dev/null 2>&1; then
+    systemctl --user start agents-ui.service || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      curl -sf --max-time 1 "http://127.0.0.1:${PORT}/api/swarms" >/dev/null && break
+      sleep 0.3
+    done
+  fi
+  curl -sf --max-time 2 "http://127.0.0.1:${PORT}/api/swarms" >/dev/null \
+    || die "no dashboard on port ${PORT}. Start it with: systemctl --user start agents-ui.service"
+fi
+
+# Already open? Just toggle the workspace.
+if hyprctl clients -j | grep -q "\"class\": \"$APP_ID\""; then
+  exec hyprctl dispatch togglespecialworkspace "$WORKSPACE"
+fi
+
+# Launch into the special workspace. The rule is applied by class, which the
+# browser sets from --app / --class, so the window lands there without a
+# race against the workspace dispatch.
+if command -v chromium >/dev/null; then
+  BROWSER_CMD=(chromium --app="$URL" --class="$APP_ID")
+elif command -v google-chrome-stable >/dev/null; then
+  BROWSER_CMD=(google-chrome-stable --app="$URL" --class="$APP_ID")
+elif command -v brave >/dev/null; then
+  BROWSER_CMD=(brave --app="$URL" --class="$APP_ID")
+elif command -v firefox >/dev/null; then
+  # Firefox dropped --app; a named profile window is the closest equivalent.
+  BROWSER_CMD=(firefox --new-window "$URL" --class="$APP_ID")
+else
+  die "no supported browser found (chromium, chrome, brave, or firefox)"
+fi
+
+hyprctl dispatch exec "[workspace special:$WORKSPACE silent] ${BROWSER_CMD[*]}"
+
+# Give the window a moment to map before pulling the workspace forward,
+# otherwise the toggle races the client and shows an empty overlay.
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+  hyprctl clients -j | grep -q "\"class\": \"$APP_ID\"" && break
+  sleep 0.2
+done
+
+hyprctl dispatch togglespecialworkspace "$WORKSPACE"

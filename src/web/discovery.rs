@@ -84,25 +84,48 @@ async fn build_swarm_snapshot(
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_default();
 
-    // Collect agent snapshots from all panes
+    // Collect agent snapshots from all panes.
+    //
+    // Roles are decided by WINDOW NAME, never by index. The launcher builds
+    // `-n agents` for workers and `-n review` for the manager
+    // (start-parallel-agents.sh), and addresses both by window id precisely
+    // because indices are not dependable. Keying on `window.index == 0 &&
+    // pane.index == 0` here was worse than fragile: under `base-index 1` /
+    // `pane-base-index 1` -- a common tmux setting -- no window or pane has
+    // index 0 at all, so no pane was ever the manager, and every swarm was
+    // dropped by the `None` arm below. The dashboard reported zero swarms on
+    // any such machine.
+    //
+    // Worker ordinals are positional (1-based) for the same reason: raw
+    // `pane_index` yields `worker-2..worker-4` under pane-base-index 1, and
+    // looks up `<project>-wt-0` under pane-base-index 0. Position is right
+    // under both.
     let mut manager: Option<AgentSnapshot> = None;
     let mut workers: Vec<AgentSnapshot> = Vec::new();
+    let mut ordinal: u32 = 0;
 
     for window in &session_info.windows {
+        let is_manager_window = window.name.eq_ignore_ascii_case("review");
         for pane in &window.panes {
+            // Only the first pane of the review window is the manager; if it
+            // were ever split, the rest are still workers.
+            let is_manager = is_manager_window && manager.is_none();
+            if !is_manager {
+                ordinal += 1;
+            }
+
             let snap = build_agent_snapshot(
                 transport,
                 &pane.target,
-                window.index,
-                pane.index,
+                is_manager,
+                ordinal,
                 &project_name,
                 repo_path.as_deref(),
                 &agent_type,
             )
             .await;
 
-            // Window 0 pane 0 = manager, everything else = workers
-            if window.index == 0 && pane.index == 0 {
+            if is_manager {
                 manager = Some(snap);
             } else {
                 workers.push(snap);
@@ -110,9 +133,25 @@ async fn build_swarm_snapshot(
         }
     }
 
+    // A session with workers but no review window is a real, running swarm --
+    // it just has no manager attached. Returning None here made it vanish from
+    // the dashboard with no explanation anywhere. Report it instead, with a
+    // placeholder manager that says what is missing.
     let manager = match manager {
         Some(m) => m,
-        None => return Ok(None),
+        None => {
+            if workers.is_empty() {
+                tracing::warn!(
+                    "Session {session_name} has no panes to report; skipping"
+                );
+                return Ok(None);
+            }
+            tracing::warn!(
+                "Session {session_name} has no 'review' window; reporting {} worker(s) with no manager",
+                workers.len()
+            );
+            missing_manager_snapshot(&project_name)
+        }
     };
 
     let busy_count = workers.iter().filter(|w| is_busy(&w.state)).count();
@@ -136,16 +175,45 @@ async fn build_swarm_snapshot(
 }
 
 /// Build a single agent snapshot from a tmux pane.
+/// Build one agent's snapshot.
+///
+/// `is_manager` and `ordinal` are decided by the caller from window names and
+/// pane position. They are deliberately not derived from tmux indices here --
+/// see the note in `build_swarm_snapshot`. `ordinal` is 1-based and ignored
+/// when `is_manager` is true.
+/// Stand-in manager for a session that has workers but no `review` window.
+///
+/// It carries no tmux target, so the input and pane endpoints cannot be
+/// pointed at a pane that does not exist.
+fn missing_manager_snapshot(project_name: &str) -> AgentSnapshot {
+    AgentSnapshot {
+        id: format!("{project_name}/manager"),
+        role: "manager".to_string(),
+        state: "Missing".to_string(),
+        is_manager: true,
+        waiting_for_input: false,
+        current_issue: None,
+        current_issue_title: None,
+        pane_content: "No 'review' window in this tmux session -- \
+this swarm is running without a manager."
+            .to_string(),
+        tmux_target: String::new(),
+        health: "Unknown".to_string(),
+        completed_issue_count: 0,
+        resurrection_attempts: 0,
+        status_timestamp: None,
+    }
+}
+
 async fn build_agent_snapshot(
     transport: &ServerTransport,
     target: &str,
-    window_index: u32,
-    pane_index: u32,
+    is_manager: bool,
+    ordinal: u32,
     project_name: &str,
     repo_path: Option<&std::path::Path>,
     agent_type: &AgentType,
 ) -> AgentSnapshot {
-    let is_manager = window_index == 0 && pane_index == 0;
 
     // Capture pane content
     let pane_content = capture_pane(transport, target, SCROLLBACK_LINES)
@@ -156,7 +224,7 @@ async fn build_agent_snapshot(
     let role = if is_manager {
         "manager".to_string()
     } else {
-        format!("worker-{}", pane_index + 1)
+        format!("worker-{ordinal}")
     };
 
     // Derive worktree path for status file lookup
@@ -166,7 +234,7 @@ async fn build_agent_snapshot(
         } else {
             // Workers live in <parent>/<project>-wt-<N>
             let parent = base.parent()?;
-            let wt_name = format!("{}-wt-{}", project_name, pane_index);
+            let wt_name = format!("{project_name}-wt-{ordinal}");
             let p = parent.join(&wt_name);
             if p.exists() { Some(p) } else { None }
         }

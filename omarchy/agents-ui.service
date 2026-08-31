@@ -1,0 +1,35 @@
+[Unit]
+Description=agents-tui swarm dashboard (headless web UI)
+Documentation=https://github.com/laird/agents-ui
+# Deliberately not tied to graphical-session.target: the dashboard only reads
+# tmux, so it should survive logging out of Hyprland and be up before the bar
+# widget first polls it.
+
+[Service]
+Type=simple
+ExecStart=%h/.cargo/bin/agents-tui --headless --web-port 7878
+
+# tmux is at /usr/bin/tmux, but git/gh/claude/codex commonly live under the
+# user's own bin directories, which a systemd user unit does not inherit.
+Environment=PATH=%h/.cargo/bin:%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin
+Environment=RUST_LOG=info
+
+# A systemd service has no meaningful working directory, so agents-tui's
+# `../agents` fallbacks resolve against `/` and never match. Without this the
+# daemon silently falls back to whatever is installed under
+# ~/.claude/plugins/autocoder -- or to a path that does not exist at all.
+# install.sh rewrites this line to the checkout it was run from.
+Environment=AGENTS_DIR=%h/src/agents
+WorkingDirectory=%h
+
+# The discovery poller shells out to tmux every 3s and tolerates a missing
+# server, so a restart loop here is cheap and self-healing.
+Restart=on-failure
+RestartSec=5
+
+# Read-only observer of tmux plus a loopback listener; it needs no more.
+NoNewPrivileges=true
+PrivateTmp=false
+
+[Install]
+WantedBy=default.target

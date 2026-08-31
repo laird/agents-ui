@@ -53,9 +53,37 @@ fn parse_goals_feature(output: &str) -> bool {
 }
 
 /// Resolve the agents plugin scripts directory.
-/// Checks installed plugin locations first, then falls back to relative paths.
+///
+/// `AGENTS_DIR` is consulted first, before any auto-detection. It used to be
+/// checked fourth, which made it dead weight: an installed
+/// `~/.claude/plugins/autocoder` always won, so the one knob available for
+/// saying "use this checkout, not the installed copy" could not say it. That
+/// silently ran stale scripts against a current repo.
+///
+/// The order also matters to anything without a meaningful working directory.
+/// The `../agents` fallbacks resolve against the process cwd, which is `/` for
+/// a systemd service, so `--headless` cannot rely on them at all -- it needs
+/// `AGENTS_DIR` set, and needs it to win.
 pub fn resolve_agents_dir() -> PathBuf {
-    // 1. User's global Claude plugin install (primary)
+    // 1. Explicit override always wins.
+    if let Ok(dir) = std::env::var("AGENTS_DIR") {
+        let path = PathBuf::from(&dir);
+        // An AGENTS_DIR pointing at a repo root is the common way to write it;
+        // accept that as well as a direct path to the plugin directory.
+        let nested = path.join("plugins/autocoder");
+        if nested.exists() {
+            return std::fs::canonicalize(&nested).unwrap_or(nested);
+        }
+        if path.exists() {
+            return std::fs::canonicalize(&path).unwrap_or(path);
+        }
+        tracing::warn!(
+            "AGENTS_DIR is set to {} but that path does not exist; falling back to auto-detection",
+            path.display()
+        );
+    }
+
+    // 2. User's global Claude plugin install
     if let Some(home) = dirs::home_dir() {
         let installed = home.join(".claude/plugins/autocoder");
         if installed.exists() {
@@ -69,24 +97,16 @@ pub fn resolve_agents_dir() -> PathBuf {
         }
     }
 
-    // 2. Relative to the project (../agents/plugins/autocoder/)
+    // 3. Relative to the project (../agents/plugins/autocoder/)
     let relative = PathBuf::from("../agents/plugins/autocoder");
     if relative.exists() {
         return std::fs::canonicalize(&relative).unwrap_or(relative);
     }
 
-    // 3. Broader ../agents/ directory
+    // 4. Broader ../agents/ directory
     let agents = PathBuf::from("../agents");
     if agents.exists() {
         return std::fs::canonicalize(&agents).unwrap_or(agents);
-    }
-
-    // 4. Environment variable override
-    if let Ok(dir) = std::env::var("AGENTS_DIR") {
-        let path = PathBuf::from(&dir);
-        if path.exists() {
-            return path;
-        }
     }
 
     // Fall back
@@ -113,8 +133,25 @@ pub fn find_script(name: &str) -> Option<PathBuf> {
 
 #[allow(dead_code)]
 /// All directories where scripts might live, in priority order.
+/// Directories searched for a named script, in order.
+///
+/// `AGENTS_DIR` comes first for the same reason it does in `resolve_agents_dir`:
+/// searched last, an explicit override is shadowed by any installed
+/// `~/.claude/plugins/autocoder/scripts`, so pointing this at a checkout could
+/// not actually override anything.
+///
+/// Both layouts are searched under each root. The autocoder plugin ships some
+/// scripts under `plugins/autocoder/scripts/`, but the per-runtime loop scripts
+/// (`codex-fix-loop.sh`, `droid-fix-loop.sh`, ...) live in the repo's top-level
+/// `scripts/`. Dropping either root silently breaks one runtime's launch path.
 fn script_search_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
+
+    // Explicit override first.
+    if let Ok(dir) = std::env::var("AGENTS_DIR") {
+        paths.push(PathBuf::from(&dir).join("plugins/autocoder/scripts"));
+        paths.push(PathBuf::from(&dir).join("scripts"));
+    }
 
     if let Some(home) = dirs::home_dir() {
         // Installed plugin scripts
@@ -122,15 +159,10 @@ fn script_search_paths() -> Vec<PathBuf> {
         paths.push(home.join(".config/claude-code/plugins/autocoder/scripts"));
     }
 
-    // Relative to project
+    // Relative to project. These resolve against the process cwd, so they find
+    // nothing for a service started by systemd -- see resolve_agents_dir.
     paths.push(PathBuf::from("../agents/plugins/autocoder/scripts"));
     paths.push(PathBuf::from("../agents/scripts"));
-
-    // Environment override
-    if let Ok(dir) = std::env::var("AGENTS_DIR") {
-        paths.push(PathBuf::from(&dir).join("plugins/autocoder/scripts"));
-        paths.push(PathBuf::from(&dir).join("scripts"));
-    }
 
     paths
 }
@@ -154,11 +186,17 @@ mod tests {
             .join(format!("agents-launcher-test-{}", std::process::id()));
         fs::create_dir_all(&tmp).expect("create temp dir");
 
-        // AGENTS_DIR only affects resolve_agents_dir if NO earlier path exists.
-        // We can confirm it's in the search paths by checking script_search_paths.
+        // AGENTS_DIR now outranks every auto-detected location. It used to be
+        // consulted last, which meant an installed ~/.claude/plugins/autocoder
+        // -- or merely running from a directory with an ../agents sibling --
+        // shadowed the override entirely.
+        let nested = tmp.join("plugins/autocoder");
+        fs::create_dir_all(&nested).expect("create nested plugin dir");
+
         // SAFETY: test-only, single-threaded context; no other threads read AGENTS_DIR here.
         unsafe { std::env::set_var("AGENTS_DIR", tmp.to_str().unwrap()); }
         let paths = script_search_paths();
+        let resolved = resolve_agents_dir();
         unsafe { std::env::remove_var("AGENTS_DIR"); }
 
         let expected_scripts = tmp.join("plugins/autocoder/scripts");
@@ -170,6 +208,21 @@ mod tests {
         assert!(
             paths.contains(&expected_plain),
             "Expected {expected_plain:?} in search paths"
+        );
+
+        // Precedence, not just membership: the override must come before the
+        // installed-plugin and cwd-relative candidates.
+        assert_eq!(
+            paths.first(),
+            Some(&expected_scripts),
+            "AGENTS_DIR must be searched first, got {paths:?}"
+        );
+
+        // resolve_agents_dir canonicalizes, so compare canonical forms.
+        assert_eq!(
+            resolved,
+            fs::canonicalize(&nested).unwrap_or(nested),
+            "AGENTS_DIR should win over auto-detection"
         );
 
         fs::remove_dir_all(&tmp).ok();
