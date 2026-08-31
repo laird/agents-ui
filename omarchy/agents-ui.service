@@ -14,12 +14,14 @@ ExecStart=%h/.cargo/bin/agents-tui --headless --web-port 7878
 Environment=PATH=%h/.cargo/bin:%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin
 Environment=RUST_LOG=info
 
-# A systemd service has no meaningful working directory, so agents-tui's
-# `../agents` fallbacks resolve against `/` and never match. Without this the
-# daemon silently falls back to whatever is installed under
-# ~/.claude/plugins/autocoder -- or to a path that does not exist at all.
-# install.sh rewrites this line to the checkout it was run from.
-Environment=AGENTS_DIR=%h/src/agents
+# AGENTS_DIR is deliberately unset: the daemon resolves the autocoder plugin
+# from Claude Code's own installed_plugins.json, which is an absolute path and
+# so works fine with no meaningful working directory. (agents-tui's `../agents`
+# fallbacks do NOT -- they resolve against `/` here and never match.)
+#
+# Uncomment to force a checkout instead of the installed plugin, e.g. when
+# developing the scripts themselves:
+# Environment=AGENTS_DIR=%h/src/agents
 WorkingDirectory=%h
 
 # The discovery poller shells out to tmux every 3s and tolerates a missing

@@ -49,22 +49,17 @@ esac
 step "Installing systemd user service"
 mkdir -p "$UNIT_DIR"
 
-# Pin AGENTS_DIR to the agents checkout sitting beside this repo. The service
-# has no useful cwd, so agents-tui's relative `../agents` lookups cannot fire;
-# leaving this unset means silently running whatever stale copy is installed
-# under ~/.claude/plugins/autocoder.
-AGENTS_REPO="$(cd "$HERE/../../agents" 2>/dev/null && pwd || true)"
-if [ -z "$AGENTS_REPO" ] || [ ! -d "$AGENTS_REPO/plugins/autocoder" ]; then
-  warn "No agents checkout found at $HERE/../../agents"
-  warn "Edit AGENTS_DIR in $UNIT_DIR/agents-ui.service by hand."
-  AGENTS_REPO="\$HOME/src/agents"
-else
-  ok "AGENTS_DIR -> $AGENTS_REPO"
-fi
+# The unit ships with no AGENTS_DIR: agents-tui reads the autocoder plugin from
+# Claude Code's installed_plugins.json, an absolute path that works with no
+# meaningful cwd. Pointing it at a checkout is a per-machine choice, so it stays
+# a commented line in the unit rather than something this installer guesses at.
+install -m 0644 "$HERE/agents-ui.service" "$UNIT_DIR/agents-ui.service"
 
-sed "s|^Environment=AGENTS_DIR=.*|Environment=AGENTS_DIR=${AGENTS_REPO}|" \
-  "$HERE/agents-ui.service" > "$UNIT_DIR/agents-ui.service"
-chmod 0644 "$UNIT_DIR/agents-ui.service"
+if ! claude plugin list 2>/dev/null | grep -q autocoder; then
+  warn "The autocoder plugin is not installed; the daemon will fall back to an"
+  warn "../agents checkout, which a systemd service cannot resolve."
+  warn "Install it with: claude plugin install autocoder"
+fi
 systemctl --user daemon-reload
 ok "$UNIT_DIR/agents-ui.service"
 
