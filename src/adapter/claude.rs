@@ -287,7 +287,9 @@ impl ClaudeAdapter {
         for (i, _wt) in worktree_paths.iter().enumerate() {
             let n = i + 1; // 1-indexed to match worktree naming (wt-1, wt-2, ...)
             progress(&format!("⏳ Starting worker-{n}...\n"));
-            let target = format!("{session_name}:worker-{n}.0");
+            let target = self
+                .window_pane_target(&session_name, &format!("worker-{n}"))
+                .await;
             if let Err(e) = self
                 .launch_agent_in_pane(&target, &session_name, runtime, false)
                 .await
@@ -300,7 +302,7 @@ impl ClaudeAdapter {
         }
 
         progress("⏳ Starting manager...\n");
-        let manager_target = format!("{session_name}:review.0");
+        let manager_target = self.window_pane_target(&session_name, "review").await;
         if let Err(e) = self
             .launch_agent_in_pane(&manager_target, &session_name, runtime, true)
             .await
@@ -574,6 +576,47 @@ impl ClaudeAdapter {
         .ok();
 
         Ok(())
+    }
+
+    /// Resolve `session:window` to a concrete `session:window.pane` target.
+    ///
+    /// Pane indexes do not always start at 0. `pane-base-index 1` is a common
+    /// tmux setting, and under it every `-t sess:win.0` target fails with
+    /// "can't find pane: 0". The launch then silently no-ops -- the pane keeps
+    /// its shell prompt, while the swarm model, which is built from
+    /// `list-panes` and so uses the real index, points at that same pane and
+    /// reports an agent that never started.
+    async fn window_pane_target(&self, session_name: &str, window_name: &str) -> String {
+        let window = format!("{session_name}:{window_name}");
+        let index = self
+            .output(
+                "tmux",
+                &[
+                    "list-panes".to_string(),
+                    "-t".to_string(),
+                    window.clone(),
+                    "-F".to_string(),
+                    "#{pane_index}".to_string(),
+                ],
+                None,
+            )
+            .await
+            .ok()
+            .filter(|out| out.status.success())
+            .and_then(|out| {
+                String::from_utf8_lossy(&out.stdout)
+                    .lines()
+                    .next()
+                    .map(|line| line.trim().to_string())
+                    .filter(|line| !line.is_empty())
+            });
+
+        match index {
+            Some(index) => format!("{window}.{index}"),
+            // Only reachable if the window is gone; keep the historical target
+            // so the caller surfaces tmux's own error.
+            None => format!("{window}.0"),
+        }
     }
 
     /// Launch runtime agent in a specific tmux pane.
@@ -1139,7 +1182,9 @@ impl AgentRuntime for ClaudeAdapter {
         for i in 0..worktree_paths.len() {
             let n = i + 1;
             tracing::info!("Starting worker-{n}");
-            let target = format!("{session_name}:worker-{n}.0");
+            let target = self
+                .window_pane_target(&session_name, &format!("worker-{n}"))
+                .await;
             if let Err(e) = self
                 .launch_agent_in_pane(&target, &session_name, runtime, false)
                 .await
@@ -1154,7 +1199,7 @@ impl AgentRuntime for ClaudeAdapter {
 
         // 4. Launch claude in manager pane
         tracing::info!("⏳ Starting manager...\n");
-        let manager_target = format!("{session_name}:review.0");
+        let manager_target = self.window_pane_target(&session_name, "review").await;
         if let Err(e) = self
             .launch_agent_in_pane(&manager_target, &session_name, runtime, true)
             .await
@@ -1364,7 +1409,7 @@ impl AgentRuntime for ClaudeAdapter {
             );
         }
 
-        let tmux_target = format!("{session_name}:{window_name}.0");
+        let tmux_target = self.window_pane_target(session_name, &window_name).await;
 
         self.launch_agent_in_pane(&tmux_target, session_name, &swarm.agent_type, false)
             .await?;
@@ -2592,6 +2637,63 @@ exit 0
             unsafe { std::env::remove_var("PATH") };
         }
         std::fs::remove_dir_all(root).ok();
+    }
+
+    /// Regression test for launches that silently no-op under
+    /// `pane-base-index 1`: the launch path used to hardcode pane `.0`, which
+    /// does not exist on such a server, so `send-keys` failed and the pane kept
+    /// its shell prompt.
+    #[tokio::test]
+    async fn window_pane_target_resolves_a_pane_that_accepts_input() {
+        if !command_available("tmux") {
+            return;
+        }
+
+        let session = format!("agents-ui-pane-target-{}", std::process::id());
+        cleanup_tmux_session(&session).await;
+        let created = std::process::Command::new("tmux")
+            .args(["new-session", "-d", "-s", &session, "-n", "review"])
+            .status()
+            .unwrap();
+        assert!(created.success());
+
+        // tmux is the authority on the index; the point is that we ask rather
+        // than assume, so the expectation comes from tmux too.
+        let listed = std::process::Command::new("tmux")
+            .args([
+                "list-panes",
+                "-t",
+                &format!("{session}:review"),
+                "-F",
+                "#{pane_index}",
+            ])
+            .output()
+            .unwrap();
+        let index = String::from_utf8_lossy(&listed.stdout)
+            .lines()
+            .next()
+            .unwrap()
+            .trim()
+            .to_string();
+
+        let adapter =
+            ClaudeAdapter::new(AgentType::Claude, crate::transport::ServerTransport::default());
+        let target = adapter.window_pane_target(&session, "review").await;
+        assert_eq!(target, format!("{session}:review.{index}"));
+
+        // The resolved target must be addressable -- this is what the old
+        // hardcoded `.0` got wrong.
+        let sent = std::process::Command::new("tmux")
+            .args(["send-keys", "-t", &target, "true", "Enter"])
+            .output()
+            .unwrap();
+        assert!(
+            sent.status.success(),
+            "send-keys to {target} failed: {}",
+            String::from_utf8_lossy(&sent.stderr)
+        );
+
+        cleanup_tmux_session(&session).await;
     }
 
     #[test]
