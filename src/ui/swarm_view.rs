@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::Style,
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState, Wrap},
+    widgets::{Block, Borders, Cell, Padding, Paragraph, Row, Table, TableState, Wrap},
 };
 use std::time::Instant;
 
@@ -111,14 +111,17 @@ impl SwarmView {
         ])
         .split(area);
 
-        // Size bottom panel to fit the longer of workers or issues (+3 for borders+header row)
-        // but never more than 50% of the body area so the manager always has room
-        let max_bottom = chunks[1].height / 2;
-        let bottom_rows =
-            ((swarm.workers.len().max(filtered_issues.len()) + 3) as u16).min(max_bottom);
+        // Body is three stacked panels, in the same order as the web dashboard:
+        // Manager, then Workers, then Issues. Workers is sized to fit its rows (+3
+        // for borders+header row), capped so it can't crowd out the other two.
+        // Manager and Issues then share whatever space remains, with Manager kept
+        // to at least a usable minimum since it hosts the live tmux session.
+        let max_workers_height = (chunks[1].height / 3).max(3);
+        let workers_height = ((swarm.workers.len() + 3) as u16).min(max_workers_height);
         let body_chunks = Layout::vertical([
-            Constraint::Min(4),              // Manager gets all remaining space
-            Constraint::Length(bottom_rows), // Workers/Issues: sized to fit content
+            Constraint::Min(6),                 // Manager: primary content
+            Constraint::Length(workers_height), // Workers: sized to fit content
+            Constraint::Min(4),                 // Issues: gets remaining space
         ])
         .split(chunks[1]);
 
@@ -247,11 +250,6 @@ impl SwarmView {
         );
         f.render_widget(manager_input, manager_rows[1]);
 
-        // --- Bottom split: Workers (left) | Issues (right) ---
-        let bottom_cols =
-            Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)])
-                .split(body_chunks[1]);
-
         // Workers table
         let worker_header = Row::new(vec![
             Cell::from("#"),
@@ -330,18 +328,19 @@ impl SwarmView {
                 if total == 0 {
                     " Workers (0) ".to_string()
                 } else if busy == 0 {
-                    format!(" Workers ({total} idle) ")
+                    format!(" Workers ({total}: {idle} idle) ")
                 } else if idle == 0 {
-                    format!(" Workers ({busy} busy) ")
+                    format!(" Workers ({total}: {busy} busy) ")
                 } else {
-                    format!(" Workers ({busy} busy, {idle} idle) ")
+                    format!(" Workers ({total}: {busy} busy, {idle} idle) ")
                 }
             })
             .border_style(if focus == SwarmPanel::Workers {
                 theme::title_style()
             } else {
                 Style::default()
-            });
+            })
+            .padding(Padding::horizontal(1));
 
         let workers_table = Table::new(
             worker_rows,
@@ -363,7 +362,7 @@ impl SwarmView {
             Style::default()
         });
 
-        f.render_stateful_widget(workers_table, bottom_cols[0], &mut self.workers_table);
+        f.render_stateful_widget(workers_table, body_chunks[1], &mut self.workers_table);
 
         // Issues table
         let filter_label = self.issue_filter.label();
@@ -384,7 +383,7 @@ impl SwarmView {
 
         // Split issues area: optional 1-line search bar + table
         let is_searching = self.search_query.is_some();
-        let issues_col = bottom_cols[1];
+        let issues_col = body_chunks[2];
         let (search_area, table_area) = if is_searching {
             let parts =
                 Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(issues_col);
@@ -479,7 +478,8 @@ impl SwarmView {
                 theme::title_style()
             } else {
                 Style::default()
-            });
+            })
+            .padding(Padding::horizontal(1));
 
         let issues_table = Table::new(
             issue_rows,
@@ -505,10 +505,10 @@ impl SwarmView {
                 Constraint::Length(3),
                 Constraint::Min(3),
             ])
-            .split(bottom_cols[1]);
+            .split(body_chunks[2]);
             (Some(split[0]), split[1])
         } else {
-            (None, bottom_cols[1])
+            (None, body_chunks[2])
         };
 
         if let (Some(area), Some(search)) = (search_area, &self.issue_search) {
@@ -1380,7 +1380,7 @@ mod tests {
             .collect::<String>();
 
         assert!(rendered.contains("Manager"));
-        assert!(rendered.contains("Workers (1 busy)"));
+        assert!(rendered.contains("Workers (1: 1 busy)"));
         assert!(rendered.contains("Issues (all: 1)"));
         assert!(rendered.contains("demo"));
         assert!(rendered.contains("#12"));
