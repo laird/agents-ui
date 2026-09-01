@@ -574,6 +574,27 @@
       min-height: 1rem;
     }
 
+    /* Alert panels keep their reserved height when empty so the layout does
+       not jump as messages come and go; the row only lays out when there is
+       something to dismiss. */
+    .alert-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.5rem;
+    }
+    .alert-row > :first-child { flex: 1; }
+    .alert-close {
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      cursor: pointer;
+      font-size: 1rem;
+      line-height: 1;
+      padding: 0 0.25rem;
+      border-radius: var(--radius);
+    }
+    .alert-close:hover { color: var(--text); background: var(--surface); }
+
     .send-feedback.ok    { color: var(--success); }
     .send-feedback.error { color: var(--error); }
 
@@ -949,7 +970,13 @@
       ).join('');
 
       const statusHtml = L.status
-        ? '<div class="launch-status ' + (L.status.ok ? 'ok' : 'error') + '">' + esc(L.status.msg) + '</div>'
+        ? '<div class="alert-row">' +
+            '<div class="launch-status ' + (L.status.ok ? 'ok' : 'error') + '" role="status">' +
+              esc(L.status.msg) +
+            '</div>' +
+            '<button class="alert-close" onclick="dismissLaunchStatus()" ' +
+                    'aria-label="Dismiss message" title="Dismiss">\u00d7</button>' +
+          '</div>'
         : '<div class="launch-status"></div>';
 
       return (
@@ -1032,6 +1059,16 @@
       if (start != null && restored.setSelectionRange) {
         try { restored.setSelectionRange(start, end); } catch (e) {}
       }
+    }
+
+    function dismissLaunchStatus() {
+      state.launch.status = null;
+      refreshLaunchPanel();
+    }
+
+    function dismissSessionFeedback() {
+      state.session.lastFeedback = null;
+      render();
     }
 
     function refreshLaunchPanel() {
@@ -1457,8 +1494,13 @@
       const s    = state.session;
       const cls  = statusClass(s.agentState);
       const feedbackHtml = s.lastFeedback
-        ? '<p class="send-feedback ' + (s.lastFeedback.ok ? 'ok' : 'error') + '">' +
-            esc(s.lastFeedback.msg) + '</p>'
+        ? '<div class="alert-row">' +
+            '<p class="send-feedback ' + (s.lastFeedback.ok ? 'ok' : 'error') + '" role="status">' +
+              esc(s.lastFeedback.msg) +
+            '</p>' +
+            '<button class="alert-close" onclick="dismissSessionFeedback()" ' +
+                    'aria-label="Dismiss message" title="Dismiss">\u00d7</button>' +
+          '</div>'
         : '<p class="send-feedback"></p>';
 
       return (
