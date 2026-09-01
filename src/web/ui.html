@@ -1737,6 +1737,7 @@
       state.agent   = null;
       render();
       window.scrollTo(0, 0);
+      setHash(routeFor(projectName, null));
     }
 
     function openSession(project, role) {
@@ -1755,6 +1756,58 @@
       window.scrollTo(0, 0);
       // Load initial pane content then start refresh loop
       refreshSessionPane();
+      setHash(routeFor(project, role));
+    }
+
+    // ── Hash routing ───────────────────────────────────────────────────────────
+    // #/                                  → repos list
+    // #/swarm/<project>                   → swarm detail view
+    // #/swarm/<project>/agent/<role>      → agent session view
+    //
+    // navigate()/openSession() are the only places view state changes, so
+    // keeping the hash in sync there (rather than duplicating the view switch
+    // here) is what makes deep links shareable and reload-safe for free.
+    function routeFor(project, role) {
+      if (!project) return '#/';
+      if (!role) return '#/swarm/' + encodeURIComponent(project);
+      return '#/swarm/' + encodeURIComponent(project) + '/agent/' + encodeURIComponent(role);
+    }
+
+    function setHash(newHash) {
+      if (location.hash !== newHash) location.hash = newHash;
+    }
+
+    function findAgentByRole(swarm, role) {
+      if (!swarm) return null;
+      if (swarm.manager && swarm.manager.role === role) return swarm.manager;
+      return (swarm.workers || []).find(function(w) { return w.role === role; }) || null;
+    }
+
+    // Parses location.hash and applies it to view state, degrading a stale
+    // target (swarm stopped, agent gone) to the nearest parent that still
+    // exists rather than rendering blank — an alert is inherently a little
+    // stale by the time it is clicked.
+    function applyRoute() {
+      const hash = location.hash || '#/';
+      const m = hash.match(/^#\/swarm\/([^/]+)(?:\/agent\/([^/]+))?\/?$/);
+      let project = null, role = null;
+      if (m) {
+        project = decodeURIComponent(m[1]);
+        role    = m[2] ? decodeURIComponent(m[2]) : null;
+      }
+
+      const swarm = project ? state.swarms.find(s => s.project_name === project) : null;
+      if (project && !swarm) { project = null; role = null; }
+      if (swarm && role && !findAgentByRole(swarm, role)) { role = null; }
+
+      // Already there — most hashchange events are our own navigate()/
+      // openSession() setting the hash, so this avoids re-running their
+      // side effects (resetting the session pane, restarting its timer).
+      if (state.project === project && state.agent === role) return;
+
+      if (project && role)      openSession(project, role);
+      else if (project)         navigate(project);
+      else                      navigate(null);
     }
 
     // ── Session pane refresh ───────────────────────────────────────────────────
@@ -1952,7 +2005,11 @@
       }
     });
 
-    refresh();
+    // Apply the initial route only after the first swarm fetch resolves —
+    // validating a deep link (swarm/agent still exists) needs state.swarms
+    // populated, otherwise every target looks stale and falls back to '#/'.
+    window.addEventListener('hashchange', applyRoute);
+    refresh().then(applyRoute);
     setInterval(refresh, 5000);
   </script>
 </body>

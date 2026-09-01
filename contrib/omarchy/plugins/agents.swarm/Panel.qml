@@ -80,8 +80,46 @@ BarWidget {
   // notification every tick.
   property int lastAttention: 0
 
-  // [{ name, count }] for swarms with at least one blocked agent.
+  // [{ name, count, role? }] for swarms with at least one blocked agent.
+  // `role` is set only when `count` is 1 — the role of that swarm's single
+  // blocked agent, needed to route a click straight to its session.
   property var blockedSwarms: []
+
+  // The role of the single blocked agent in a swarm with exactly one
+  // blocked agent. Manager and workers carry `waiting_for_input` in the
+  // same snapshot this widget already polls, so no extra request is needed.
+  function blockedAgentRole(swarm) {
+    var manager = swarm.manager
+    if (manager && manager.waiting_for_input === true) return String(manager.role || "")
+    var workers = Array.isArray(swarm.workers) ? swarm.workers : []
+    for (var i = 0; i < workers.length; i++) {
+      if (workers[i] && workers[i].waiting_for_input === true) return String(workers[i].role || "")
+    }
+    return ""
+  }
+
+  // Deepest screen that still shows everything that needs attention:
+  //   1 blocked agent, 1 swarm  -> that agent's session view
+  //   >1 blocked agent, 1 swarm -> that swarm's detail screen
+  //   blocked agents in >1 swarm -> top-level repos list (no route)
+  function blockedRoute(blocked) {
+    if (!blocked || blocked.length !== 1) return ""
+    var only = blocked[0]
+    if (only.count === 1 && only.role) {
+      return "/swarm/" + encodeURIComponent(only.name) + "/agent/" + encodeURIComponent(only.role)
+    }
+    return "/swarm/" + encodeURIComponent(only.name)
+  }
+
+  // Builds the click-through command for the alert, routed to the deepest
+  // screen that still covers every blocked agent it describes. Returned as
+  // separate argv words: omarchy-notification-send's --exec runs them
+  // as-is and explicitly rejects a single pre-quoted string (it reads as an
+  // attempt to smuggle a whole command through one argument).
+  function dashboardExecArgs(blocked) {
+    var route = blockedRoute(blocked)
+    return route === "" ? ["omarchy-agents-dashboard"] : ["omarchy-agents-dashboard", route]
+  }
 
   // Name the swarm in the alert. Which repo is blocked is the thing that
   // decides where to go next, and with several swarms running a bare count
@@ -130,8 +168,17 @@ BarWidget {
       var swarmAttention = Number(swarm.attention_count || 0)
       attention += swarmAttention
       if (swarmAttention > 0) {
-        blocked.push({ name: String(swarm.project_name || "unknown"),
-                       count: swarmAttention })
+        var entry = { name: String(swarm.project_name || "unknown"),
+                      count: swarmAttention }
+        // Only meaningful (and only needed) when this swarm is the sole
+        // blocked one and has exactly one blocked agent: that is the one
+        // case dense enough to deep-link straight to the agent's session
+        // instead of stopping at the swarm or repos list.
+        if (swarmAttention === 1) {
+          var role = blockedAgentRole(swarm)
+          if (role) entry.role = role
+        }
+        blocked.push(entry)
       }
     }
 
@@ -142,7 +189,7 @@ BarWidget {
     blockedSwarms = blocked
 
     if (notifyOnAttention && attention > lastAttention) {
-      requestNotification(attentionHeadline(attention, blocked))
+      requestNotification(attentionHeadline(attention, blocked), blocked)
     }
     // The id is kept even when nothing is blocked: the next alert then
     // updates that same toast instead of adding a second one.
@@ -163,7 +210,7 @@ BarWidget {
   // never cleared and re-sent.
   property int notifyId: 0
 
-  function requestNotification(headline) {
+  function requestNotification(headline, blocked) {
     var cmd = ["omarchy-notification-send",
                "--app-name", "Agent Swarm",
                "-u", "critical",
@@ -173,7 +220,7 @@ BarWidget {
     if (notifyId > 0) cmd = cmd.concat(["-r", String(notifyId)])
     notify.command = cmd.concat([headline,
                                  "Click to open the swarm dashboard.",
-                                 "--exec", "omarchy-agents-dashboard"])
+                                 "--exec"], dashboardExecArgs(blocked))
     notify.running = true
   }
 

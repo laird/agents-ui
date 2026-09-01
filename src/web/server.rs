@@ -1023,6 +1023,14 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn index_html_contains_hash_routing() {
+        let body = INDEX_HTML;
+        assert!(body.contains("hashchange"));
+        assert!(body.contains("applyRoute"));
+        assert!(body.contains("location.hash"));
+    }
+
+    #[tokio::test]
     async fn api_agent_types_returns_list() {
         let state = make_web_state(new_shared_state());
         let app = make_app(state);
