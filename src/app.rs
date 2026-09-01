@@ -2288,11 +2288,35 @@ impl App {
                         for worker in &swarm.workers {
                             crate::adapter::claude::mark_agent_stopped(&worker.worktree_path);
                         }
-                        if let Err(e) = self.adapter.stop(&swarm).await {
+
+                        // Handoffs first: teardown kills the panes, and with
+                        // them the only record of what each agent was doing
+                        // and what it left uncommitted in its worktree.
+                        self.set_status(format!("Writing handoffs for {project}..."));
+                        let branch = crate::handoff::integration_branch(
+                            &self.transport,
+                            &swarm.repo_path,
+                        )
+                        .await;
+                        let written =
+                            crate::handoff::write_all(&self.transport, &swarm, &branch).await;
+                        for line in &written {
+                            tracing::info!("handoff {line}");
+                        }
+
+                        // teardown, not stop: stop only sends C-c to the
+                        // worker panes, which interrupts an agent's current
+                        // turn rather than exiting it, never touches the
+                        // manager, and leaves the tmux session running. The
+                        // swarm stayed up and the user was told it had stopped.
+                        if let Err(e) = self.adapter.teardown(&swarm).await {
                             self.set_status(format!("Stop error: {e}"));
                         } else {
                             self.swarms[idx].stopped = true;
-                            self.set_status(format!("Stopped all workers in {project}"));
+                            self.set_status(format!(
+                                "Stopped {project}: {} handoffs written, sessions closed",
+                                written.len()
+                            ));
                         }
                     }
                     self.confirm_stop = None;

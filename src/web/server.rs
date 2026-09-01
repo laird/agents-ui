@@ -402,27 +402,96 @@ async fn api_stop_swarm_handler(
     Path(project): Path<String>,
     State(state): State<WebServerState>,
 ) -> Result<Json<Value>, StatusCode> {
-    let targets: Vec<String> = {
+    use crate::adapter::claude::ClaudeAdapter;
+    use crate::adapter::traits::AgentRuntime;
+    use crate::model::issue::IssueCache;
+    use crate::model::status::{AgentState, AgentStatus};
+    use crate::model::swarm::{AgentInfo, AgentType, Swarm, WorkerHealth};
+    use crate::transport::ServerTransport;
+
+    let snapshot = {
         let guard = state
             .swarms
             .read()
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let swarm = guard
+        guard
             .iter()
             .find(|s| s.project_name == project)
-            .ok_or(StatusCode::NOT_FOUND)?;
-        // Collect all worker tmux targets (not the manager)
-        swarm.workers.iter().map(|w| w.tmux_target.clone()).collect()
+            .cloned()
+            .ok_or(StatusCode::NOT_FOUND)?
     };
 
-    let transport = crate::transport::ServerTransport::new(None);
-    for target in &targets {
-        crate::tmux::proxy::send_keys_no_enter(&transport, target, "C-c")
-            .await
-            .ok();
-    }
+    let agent_type: AgentType = match snapshot.agent_type.as_str() {
+        "Codex" => AgentType::Codex,
+        "Droid" => AgentType::Droid,
+        "Gemini" => AgentType::Gemini,
+        _ => AgentType::Claude,
+    };
 
-    Ok(Json(json!({ "ok": true, "stopped": targets.len() })))
+    let repo_path = std::path::PathBuf::from(&snapshot.repo_path);
+
+    // Rebuild enough of the Swarm to write handoffs and tear it down. Unlike
+    // the add-worker path this keeps each agent's real worktree and pane
+    // content: the handoff is largely made of them.
+    let to_info = |a: &crate::web::AgentSnapshot| AgentInfo {
+        id: format!("{}/{}", snapshot.project_name, a.role),
+        role: a.role.clone(),
+        worktree_path: if a.worktree_path.is_empty() {
+            repo_path.clone()
+        } else {
+            std::path::PathBuf::from(&a.worktree_path)
+        },
+        tmux_target: a.tmux_target.clone(),
+        status: AgentStatus { timestamp: None, state: AgentState::Unknown(a.state.clone()) },
+        is_manager: a.is_manager,
+        pane_content: a.pane_content.clone(),
+        dispatched_issue: None,
+        current_issue: a.current_issue,
+        current_issue_title: a.current_issue_title.clone(),
+        waiting_for_input: a.waiting_for_input,
+        resurrection_attempts: a.resurrection_attempts,
+        completed_issue_count: a.completed_issue_count,
+        health: WorkerHealth::default(),
+    };
+
+    let swarm = Swarm {
+        repo_path: repo_path.clone(),
+        project_name: snapshot.project_name.clone(),
+        agent_type: agent_type.clone(),
+        workflow: None,
+        tmux_session: snapshot.tmux_session.clone(),
+        manager: to_info(&snapshot.manager),
+        workers: snapshot.workers.iter().map(to_info).collect(),
+        issue_cache: IssueCache::default(),
+        stopped: false,
+    };
+
+    let agent_count = swarm.workers.len() + 1;
+
+    // Handoffs then teardown, off the request: writing a handoff per agent
+    // runs git and gh in each worktree, which is far too slow to hold an HTTP
+    // response open for.
+    //
+    // This previously sent C-c to the worker panes and returned. Ctrl-C
+    // interrupts an agent's current turn rather than exiting it, the manager
+    // was never signalled at all, and nothing marked the swarm stopped -- so
+    // heal_workers would respawn whatever did die. The swarm stayed up.
+    tokio::spawn(async move {
+        let transport = ServerTransport::new(None);
+        let branch = crate::handoff::integration_branch(&transport, &swarm.repo_path).await;
+
+        for line in crate::handoff::write_all(&transport, &swarm, &branch).await {
+            tracing::info!("handoff {}", line);
+        }
+
+        let adapter = ClaudeAdapter::new(agent_type, ServerTransport::new(None));
+        match adapter.teardown(&swarm).await {
+            Ok(()) => tracing::info!("Stopped swarm {}", swarm.project_name),
+            Err(e) => tracing::error!("teardown failed for {}: {e:#}", swarm.project_name),
+        }
+    });
+
+    Ok(Json(json!({ "ok": true, "stopping": agent_count })))
 }
 
 /// Add one worker to a running swarm.
