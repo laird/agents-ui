@@ -1542,15 +1542,29 @@ impl AgentRuntime for ClaudeAdapter {
         } else {
             None
         };
-        let agents_window = existing_panes.as_ref().and_then(|info| {
-            info.windows
-                .iter()
-                .find(|w| w.name == "agents" || w.index == 0)
-        });
-        let agents_window_exists = agents_window.is_some();
-        let agents_window_panes: Vec<String> = agents_window
-            .map(|w| w.panes.iter().map(|p| p.target.clone()).collect())
+        // Which windows hold workers. Matching `index == 0` was wrong twice
+        // over: `create_tmux_session` names worker windows `worker-N`, and
+        // under `base-index 1` no window has index 0 at all. Both misses read
+        // as "the workers window is gone", so healing manufactured a new
+        // window per worker -- unnamed, uprooted, and running nothing.
+        let worker_windows: Vec<_> = existing_panes
+            .as_ref()
+            .map(|info| {
+                info.windows
+                    .iter()
+                    .filter(|w| w.name.starts_with("worker-") || w.name == "agents")
+                    .collect::<Vec<_>>()
+            })
             .unwrap_or_default();
+        let agents_window_exists = !worker_windows.is_empty();
+        let agents_window_panes: Vec<String> = worker_windows
+            .iter()
+            .flat_map(|w| w.panes.iter().map(|p| p.target.clone()))
+            .collect();
+        // Where a split should land when only one pane went missing.
+        let agents_window_target: Option<String> = worker_windows
+            .first()
+            .map(|w| format!("{session_name}:{}", w.index));
 
         for worker in &mut swarm.workers {
             let wt_path = &worker.worktree_path;
@@ -1632,66 +1646,113 @@ impl AgentRuntime for ClaudeAdapter {
                     agents_window_exists
                 );
 
-                let pane_created = if !session_exists {
-                    // Session completely gone — recreate it with a new window
-                    let output = Command::new("tmux")
-                        .args(["new-session", "-d", "-s", session_name, "-n", "agents"])
-                        .output()
-                        .await;
-                    output.map(|o| o.status.success()).unwrap_or(false)
+                // Ask tmux for the address of what it just created, rather
+                // than reconstructing one. The old code re-listed
+                // "<session>:0" afterwards -- a window that does not exist
+                // under `base-index 1` -- so the target silently became
+                // "<session>:0.0" and every send-keys after it failed. The
+                // healed window kept a bare shell in whatever directory the
+                // process happened to be in, and read back as a free worker.
+                const TARGET_FMT: &str = "#{session_name}:#{window_index}.#{pane_index}";
+                let window_name = worker.role.clone();
+                let worktree = wt_path.to_string_lossy().to_string();
+
+                let created_target: Option<String> = if !session_exists {
+                    // Session completely gone -- recreate it around this worker.
+                    self.output(
+                        "tmux",
+                        &[
+                            "new-session".to_string(),
+                            "-d".to_string(),
+                            "-s".to_string(),
+                            session_name.to_string(),
+                            "-n".to_string(),
+                            window_name.clone(),
+                            "-c".to_string(),
+                            worktree.clone(),
+                            "-P".to_string(),
+                            "-F".to_string(),
+                            TARGET_FMT.to_string(),
+                        ],
+                        None,
+                    )
+                    .await
+                    .ok()
+                    .filter(|out| out.status.success())
+                    .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
                 } else if !agents_window_exists {
-                    // Session exists but agents window is gone — create a new window
-                    let output = Command::new("tmux")
-                        .args(["new-window", "-t", session_name, "-n", "agents"])
-                        .output()
-                        .await;
-                    output.map(|o| o.status.success()).unwrap_or(false)
+                    // Session exists but this worker has no window. `-c` is not
+                    // optional: without it the window inherits the launching
+                    // process's directory, which is how three "workers" ended up
+                    // sitting in an unrelated repo.
+                    self.output(
+                        "tmux",
+                        &[
+                            "new-window".to_string(),
+                            "-t".to_string(),
+                            session_name.to_string(),
+                            "-n".to_string(),
+                            window_name.clone(),
+                            "-c".to_string(),
+                            worktree.clone(),
+                            "-P".to_string(),
+                            "-F".to_string(),
+                            TARGET_FMT.to_string(),
+                        ],
+                        None,
+                    )
+                    .await
+                    .ok()
+                    .filter(|out| out.status.success())
+                    .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
                 } else {
-                    // Window exists but this pane is missing — split to add a pane
-                    let output = Command::new("tmux")
-                        .args(["split-window", "-h", "-t", &format!("{session_name}:0")])
-                        .output()
-                        .await;
-                    if let Ok(ref o) = output {
-                        if o.status.success() {
-                            // Rebalance panes
-                            let _ = Command::new("tmux")
-                                .args([
-                                    "select-layout",
-                                    "-t",
-                                    &format!("{session_name}:0"),
-                                    "even-horizontal",
-                                ])
-                                .output()
-                                .await;
-                        }
+                    // The window is there and only this pane is gone: split it.
+                    let window_target = agents_window_target
+                        .clone()
+                        .unwrap_or_else(|| format!("{session_name}:{window_name}"));
+                    let split = self
+                        .output(
+                            "tmux",
+                            &[
+                                "split-window".to_string(),
+                                "-h".to_string(),
+                                "-t".to_string(),
+                                window_target.clone(),
+                                "-c".to_string(),
+                                worktree.clone(),
+                                "-P".to_string(),
+                                "-F".to_string(),
+                                TARGET_FMT.to_string(),
+                            ],
+                            None,
+                        )
+                        .await
+                        .ok()
+                        .filter(|out| out.status.success())
+                        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string());
+                    if split.is_some() {
+                        self.output(
+                            "tmux",
+                            &[
+                                "select-layout".to_string(),
+                                "-t".to_string(),
+                                window_target,
+                                "even-horizontal".to_string(),
+                            ],
+                            None,
+                        )
+                        .await
+                        .ok();
                     }
-                    output.map(|o| o.status.success()).unwrap_or(false)
+                    split
                 };
 
-                if pane_created {
-                    // Get the new pane's target
-                    let pane_output = Command::new("tmux")
-                        .args([
-                            "list-panes",
-                            "-t",
-                            &format!("{session_name}:0"),
-                            "-F",
-                            "#{pane_index}",
-                        ])
-                        .output()
-                        .await;
+                if let Some(target) = created_target.filter(|t| !t.is_empty()) {
+                    worker.tmux_target = target;
 
-                    if let Ok(po) = pane_output {
-                        let max_idx: u32 = String::from_utf8_lossy(&po.stdout)
-                            .lines()
-                            .filter_map(|l| l.parse().ok())
-                            .max()
-                            .unwrap_or(0);
-                        worker.tmux_target = format!("{session_name}:0.{max_idx}");
-                    }
-
-                    // cd to worktree
+                    // The window was opened with -c, so no cd is needed; send one
+                    // only when the worktree was recreated under a pane that
+                    // predates it.
                     if wt_path.exists() {
                         let _ = proxy::send_keys(
                             &self.transport,
@@ -2698,6 +2759,100 @@ exit 0
         );
 
         cleanup_tmux_session(&session).await;
+    }
+
+    /// Healing must not manufacture phantom workers.
+    ///
+    /// The live failure: a session whose worker windows are named `worker-N`
+    /// (and, under `pane-base-index 1`, start at index 1) matched neither
+    /// `name == "agents"` nor `index == 0`, so every worker looked homeless.
+    /// Healing then opened one window per worker with no name, no `-c`, and a
+    /// target of `<session>:0.0` that does not exist -- leaving three bare
+    /// shells sitting in whatever directory the process started in, which read
+    /// back as three idle workers.
+    #[tokio::test]
+    async fn healing_finds_worker_windows_by_name_not_index() {
+        if !command_available("tmux") {
+            return;
+        }
+
+        let session = format!("agents-ui-heal-test-{}", std::process::id());
+        cleanup_tmux_session(&session).await;
+        assert!(
+            std::process::Command::new("tmux")
+                .args(["new-session", "-d", "-s", &session, "-n", "review"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        for n in 1..=2 {
+            assert!(
+                std::process::Command::new("tmux")
+                    .args(["new-window", "-t", &session, "-n", &format!("worker-{n}")])
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+
+        let transport = crate::transport::ServerTransport::default();
+        let info = crate::tmux::session::list_panes(&transport, &session)
+            .await
+            .expect("list panes");
+
+        let worker_windows: Vec<_> = info
+            .windows
+            .iter()
+            .filter(|w| w.name.starts_with("worker-") || w.name == "agents")
+            .collect();
+        assert_eq!(
+            worker_windows.len(),
+            2,
+            "worker windows must be found by name; got {:?}",
+            info.windows.iter().map(|w| &w.name).collect::<Vec<_>>()
+        );
+
+        // No window has index 0 under base-index 1, which is exactly what the
+        // old `index == 0` match relied on.
+        let panes: Vec<String> = worker_windows
+            .iter()
+            .flat_map(|w| w.panes.iter().map(|p| p.target.clone()))
+            .collect();
+        assert!(
+            panes.iter().all(|t| !t.ends_with(":0.0")),
+            "pane targets must come from tmux, got {panes:?}"
+        );
+        assert_eq!(panes.len(), 2, "each worker window contributes its pane");
+
+        cleanup_tmux_session(&session).await;
+    }
+
+    /// A healed window must be created with `-c`, or it inherits the launching
+    /// process's directory -- the reason three "workers" appeared in an
+    /// unrelated repo.
+    #[test]
+    fn healing_creates_windows_rooted_in_the_worktree() {
+        let source = include_str!("claude.rs");
+        let heal = source
+            .split("async fn heal_workers")
+            .nth(1)
+            .expect("heal_workers exists");
+        let create = heal
+            .split("// 3. Check pane state")
+            .next()
+            .expect("pane-creation section");
+
+        assert!(
+            !create.contains("{session_name}:0"),
+            "healing must not address window 0; it does not exist under base-index 1"
+        );
+        for verb in ["new-window", "split-window", "new-session"] {
+            let after = create.split(verb).nth(1).unwrap_or("");
+            assert!(
+                after.contains("\"-c\".to_string()"),
+                "{verb} must pass -c so the pane starts in the worktree"
+            );
+        }
     }
 
     #[test]
