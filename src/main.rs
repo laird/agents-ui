@@ -3,6 +3,7 @@ mod app;
 mod config;
 mod event;
 mod github;
+mod handoff;
 mod model;
 mod project_management;
 mod runtime;

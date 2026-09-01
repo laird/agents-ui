@@ -24,6 +24,10 @@ pub struct TmuxPaneInfo {
     pub index: u32,
     /// Full target string, e.g., "claude-myrepo:0.0"
     pub target: String,
+    /// Working directory of the pane's process, from `#{pane_current_path}`.
+    /// This is the authoritative source for which worktree an agent is in:
+    /// the session environment does not carry PWD, so it cannot be asked.
+    pub current_path: Option<String>,
 }
 
 /// Check if tmux is available.
@@ -196,7 +200,8 @@ pub async fn list_panes(transport: &ServerTransport, session: &str) -> Result<Tm
                 "-t".to_string(),
                 session.to_string(),
                 "-F".to_string(),
-                "#{window_index}\t#{window_name}\t#{pane_index}".to_string(),
+                "#{window_index}\t#{window_name}\t#{pane_index}\t#{pane_current_path}"
+                    .to_string(),
             ],
             None,
         )
@@ -218,18 +223,26 @@ fn parse_list_panes_output(session: &str, stdout: &str) -> TmuxSessionInfo {
     let mut windows: Vec<TmuxWindowInfo> = Vec::new();
 
     for line in stdout.lines() {
-        let parts: Vec<&str> = line.splitn(3, '\t').collect();
+        // The path field is optional so that output captured from an older
+        // format string (and the existing fixtures) still parses.
+        let parts: Vec<&str> = line.splitn(4, '\t').collect();
         if parts.len() < 3 {
             continue;
         }
         let win_idx: u32 = parts[0].parse().unwrap_or(0);
         let win_name = parts[1].to_string();
         let pane_idx: u32 = parts[2].parse().unwrap_or(0);
+        let current_path = parts
+            .get(3)
+            .map(|p| p.trim())
+            .filter(|p| !p.is_empty())
+            .map(|p| p.to_string());
 
         let target = format!("{session}:{win_idx}.{pane_idx}");
         let pane = TmuxPaneInfo {
             index: pane_idx,
             target,
+            current_path,
         };
 
         if let Some(window) = windows.iter_mut().find(|w| w.index == win_idx) {
@@ -264,6 +277,31 @@ mod tests {
         assert_eq!(parsed.windows[0].name, "review");
         assert_eq!(parsed.windows[1].panes.len(), 2);
         assert_eq!(parsed.windows[1].panes[1].target, "codex-demo:1.1");
+    }
+
+    #[test]
+    fn captures_pane_current_path_when_present() {
+        let parsed = parse_list_panes_output(
+            "claude-kink-party",
+            "1\treview\t1\t/home/laird/src/kink-party\n\
+             2\tagents\t1\t/home/laird/src/kink-party-wt-1\n",
+        );
+
+        assert_eq!(
+            parsed.windows[0].panes[0].current_path.as_deref(),
+            Some("/home/laird/src/kink-party")
+        );
+        assert_eq!(
+            parsed.windows[1].panes[0].current_path.as_deref(),
+            Some("/home/laird/src/kink-party-wt-1")
+        );
+    }
+
+    #[test]
+    fn tolerates_output_without_a_path_field() {
+        // Older format string, and the shape the other fixtures use.
+        let parsed = parse_list_panes_output("codex-demo", "0\treview\t0\n");
+        assert_eq!(parsed.windows[0].panes[0].current_path, None);
     }
 
     #[test]

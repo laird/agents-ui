@@ -427,6 +427,8 @@
     .health-dead    { color: #cc4444; }
     .agent-completed { color: var(--text-dim); font-size: 0.75rem; }
     .agent-restarts  { color: var(--warning); font-size: 0.75rem; }
+    .agent-worktree  { color: var(--text-dim); font-size: 0.75rem; }
+    .agent-branch    { color: var(--accent); font-size: 0.75rem; }
 
     /* ---- Session view ---- */
     .session-header {
@@ -501,6 +503,33 @@
       align-items: stretch;
     }
 
+    .key-row {
+      display: flex;
+      gap: 0.35rem;
+      flex-wrap: wrap;
+      margin-bottom: 0.5rem;
+      align-items: center;
+    }
+    .key-btn {
+      background: var(--card);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.3rem 0.6rem;
+      font-size: 0.8125rem;
+      font-family: inherit;
+      cursor: pointer;
+      min-width: 2.2rem;
+    }
+    .key-btn:hover  { background: var(--surface); border-color: var(--accent); }
+    .key-btn:active { background: var(--accent); color: var(--bg); }
+    .key-row-label  { color: var(--text-dim); font-size: 0.75rem; margin-right: 0.15rem; }
+    .key-hint       { color: var(--text-dim); font-size: 0.75rem; margin-left: auto; }
+    .terminal-output:focus {
+      outline: 2px solid var(--accent);
+      outline-offset: -2px;
+    }
+
     .session-input {
       flex: 1;
       background: var(--card);
@@ -544,6 +573,27 @@
       margin-top: 0.4rem;
       min-height: 1rem;
     }
+
+    /* Alert panels keep their reserved height when empty so the layout does
+       not jump as messages come and go; the row only lays out when there is
+       something to dismiss. */
+    .alert-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.5rem;
+    }
+    .alert-row > :first-child { flex: 1; }
+    .alert-close {
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      cursor: pointer;
+      font-size: 1rem;
+      line-height: 1;
+      padding: 0 0.25rem;
+      border-radius: var(--radius);
+    }
+    .alert-close:hover { color: var(--text); background: var(--surface); }
 
     .send-feedback.ok    { color: var(--success); }
     .send-feedback.error { color: var(--error); }
@@ -920,7 +970,13 @@
       ).join('');
 
       const statusHtml = L.status
-        ? '<div class="launch-status ' + (L.status.ok ? 'ok' : 'error') + '">' + esc(L.status.msg) + '</div>'
+        ? '<div class="alert-row">' +
+            '<div class="launch-status ' + (L.status.ok ? 'ok' : 'error') + '" role="status">' +
+              esc(L.status.msg) +
+            '</div>' +
+            '<button class="alert-close" onclick="dismissLaunchStatus()" ' +
+                    'aria-label="Dismiss message" title="Dismiss">\u00d7</button>' +
+          '</div>'
         : '<div class="launch-status"></div>';
 
       return (
@@ -1003,6 +1059,16 @@
       if (start != null && restored.setSelectionRange) {
         try { restored.setSelectionRange(start, end); } catch (e) {}
       }
+    }
+
+    function dismissLaunchStatus() {
+      state.launch.status = null;
+      refreshLaunchPanel();
+    }
+
+    function dismissSessionFeedback() {
+      state.session.lastFeedback = null;
+      render();
     }
 
     function refreshLaunchPanel() {
@@ -1152,17 +1218,106 @@
       return r.json();
     }
 
-    async function sendInput(project, role, text) {
+    async function sendInput(project, role, text, enter) {
       const r = await fetch(
         '/api/swarms/' + encodeURIComponent(project) + '/agents/' + encodeURIComponent(role) + '/input',
         {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ text }),
+          body:    JSON.stringify({ text, enter: enter !== false }),
         }
       );
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
+    }
+
+    // Send one raw key, with no Enter appended.
+    //
+    // The /input endpoint always appends Enter, which cannot drive an
+    // interactive picker: an agent sitting on an arrow-key menu (/model,
+    // /plugin, a numbered prompt) could not be answered from here at all.
+    async function sendKey(project, role, key) {
+      const r = await fetch(
+        '/api/swarms/' + encodeURIComponent(project) + '/agents/' + encodeURIComponent(role) + '/key',
+        {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ key }),
+        }
+      );
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }
+
+    async function pressKey(key) {
+      if (!state.project || !state.agent) return;
+      try {
+        await sendKey(state.project, state.agent, key);
+        // Give the agent a moment to redraw before re-reading the pane.
+        setTimeout(refreshSessionPane, 150);
+      } catch (err) {
+        state.session.lastFeedback = { ok: false, msg: 'Key failed: ' + err.message };
+        render();
+      }
+    }
+
+    // Map a browser KeyboardEvent to a tmux key name. Returns null for keys
+    // that should be left to the browser.
+    function browserKeyToTmux(e) {
+      if (e.ctrlKey && /^[a-z]$/i.test(e.key)) return 'C-' + e.key.toLowerCase();
+      switch (e.key) {
+        case 'ArrowUp':    return 'Up';
+        case 'ArrowDown':  return 'Down';
+        case 'ArrowLeft':  return 'Left';
+        case 'ArrowRight': return 'Right';
+        case 'Enter':      return 'Enter';
+        case 'Escape':     return 'Escape';
+        case 'Tab':        return e.shiftKey ? 'BTab' : 'Tab';
+        case 'Backspace':  return 'BSpace';
+        case 'PageUp':     return 'PageUp';
+        case 'PageDown':   return 'PageDown';
+        case 'Home':       return 'Home';
+        case 'End':        return 'End';
+        default:           return null;
+      }
+    }
+
+    // Send one character as literal text, with no Enter.
+    //
+    // Streaming characters is what makes the agent's own completions work:
+    // typing "/autocoder:" only offers skill names if the agent sees the
+    // keystrokes arrive one at a time. Reproducing that menu in this page
+    // would mean duplicating a list that lives in the agent and goes stale.
+    async function typeLiteral(ch) {
+      if (!state.project || !state.agent) return;
+      try {
+        await sendInput(state.project, state.agent, ch, false);
+        setTimeout(refreshSessionPane, 120);
+      } catch (err) {
+        state.session.lastFeedback = { ok: false, msg: 'Send failed: ' + err.message };
+        render();
+      }
+    }
+
+    // Keys pressed while the pane itself has focus go to the agent, so the
+    // pane behaves like a terminal. The text box keeps normal editing
+    // behaviour -- arrows there move the caret.
+    function onTerminalKeyDown(e) {
+      // Leave browser/OS shortcuts alone.
+      if (e.metaKey) return;
+
+      const key = browserKeyToTmux(e);
+      if (key) {
+        e.preventDefault();
+        pressKey(key);
+        return;
+      }
+
+      // Printable characters, including '/' and ':'.
+      if (!e.ctrlKey && !e.altKey && e.key.length === 1) {
+        e.preventDefault();
+        typeLiteral(e.key);
+      }
     }
 
     // ── Renderers ──────────────────────────────────────────────────────────────
@@ -1197,6 +1352,18 @@
       const restartHtml = (!agent.is_manager && agent.resurrection_attempts > 0)
         ? '<span class="agent-restarts" title="Auto-restart count"> · ↺' + agent.resurrection_attempts + '</span>'
         : '';
+      // Worktree shown as its final path component: the absolute path is
+      // identical across agents up to the suffix, so the full form only pushes
+      // the useful part off the row. The full path stays available on hover.
+      const wtName = agent.worktree_path
+        ? agent.worktree_path.split('/').filter(Boolean).pop()
+        : '';
+      const worktreeHtml = wtName
+        ? '<span class="agent-worktree" title="' + esc(agent.worktree_path) + '"> · ' + esc(wtName) + '</span>'
+        : '';
+      const branchHtml = agent.branch
+        ? '<span class="agent-branch" title="Checked-out branch"> · ⎇ ' + esc(agent.branch) + '</span>'
+        : '';
       return (
         '<div class="agent-row" ' +
              'role="button" tabindex="0" ' +
@@ -1207,7 +1374,8 @@
           '<div class="agent-info">' +
             '<div class="agent-role">' + healthHtml + ' ' + esc(agent.role) + '</div>' +
             '<div class="agent-state-text">' +
-              esc(agent.state) + esc(issueText) + waitText + completedHtml + restartHtml +
+              esc(agent.state) + esc(issueText) + worktreeHtml + branchHtml +
+              waitText + completedHtml + restartHtml +
             '</div>' +
           '</div>' +
           '<span class="agent-row-arrow" aria-hidden="true">›</span>' +
@@ -1326,8 +1494,13 @@
       const s    = state.session;
       const cls  = statusClass(s.agentState);
       const feedbackHtml = s.lastFeedback
-        ? '<p class="send-feedback ' + (s.lastFeedback.ok ? 'ok' : 'error') + '">' +
-            esc(s.lastFeedback.msg) + '</p>'
+        ? '<div class="alert-row">' +
+            '<p class="send-feedback ' + (s.lastFeedback.ok ? 'ok' : 'error') + '" role="status">' +
+              esc(s.lastFeedback.msg) +
+            '</p>' +
+            '<button class="alert-close" onclick="dismissSessionFeedback()" ' +
+                    'aria-label="Dismiss message" title="Dismiss">\u00d7</button>' +
+          '</div>'
         : '<p class="send-feedback"></p>';
 
       return (
@@ -1351,7 +1524,20 @@
             '<span>pane output</span>' +
             '<button onclick="refreshSessionPane()" aria-label="Refresh pane">↺ Refresh</button>' +
           '</div>' +
-          '<div class="terminal-output" id="terminal-output">' + ansiToHtml(s.paneContent) + '</div>' +
+          '<div class="terminal-output" id="terminal-output" tabindex="0" ' +
+               'role="application" aria-label="Agent pane. Focus here to send keys directly." ' +
+               'onkeydown="onTerminalKeyDown(event)">' + ansiToHtml(s.paneContent) + '</div>' +
+        '</div>' +
+
+        '<div class="key-row">' +
+          '<span class="key-row-label">Keys</span>' +
+          [['Up','\u2191'], ['Down','\u2193'], ['Left','\u2190'], ['Right','\u2192'],
+           ['Enter','Enter'], ['Escape','Esc'], ['Tab','Tab'], ['C-c','Ctrl-C']]
+            .map(([key, label]) =>
+              '<button class="key-btn" onclick="pressKey(\'' + key + '\')" ' +
+                      'aria-label="Send ' + key + '">' + label + '</button>'
+            ).join('') +
+          '<span class="key-hint">or click the pane and type \u2014 completions work there</span>' +
         '</div>' +
 
         '<div class="input-row">' +
