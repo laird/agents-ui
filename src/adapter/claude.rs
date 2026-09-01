@@ -2344,6 +2344,12 @@ mod tests {
 
     #[test]
     fn manager_bootstrap_uses_monitor_loop() {
+        let _guard = lock_env();
+        let _scripts = ScriptFixture::new(&[
+            "codex-manage-workers-loop.sh",
+            "droid-manage-workers-loop.sh",
+            "gemini-manage-workers-loop.sh",
+        ]);
         assert_eq!(
             manager_bootstrap_cmd(&AgentType::Claude),
             Some("/autocoder:monitor-loop".to_string())
@@ -2428,6 +2434,57 @@ mod tests {
     fn test_lock() -> &'static std::sync::Mutex<()> {
         static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
         LOCK.get_or_init(|| std::sync::Mutex::new(()))
+    }
+
+    /// Take the shared env lock, tolerating poisoning.
+    ///
+    /// A failing test that held this mutex used to turn every other test that
+    /// wanted it into a PoisonError, burying the one real failure under a pile
+    /// of unrelated ones. The lock guards environment variables, not data whose
+    /// invariants a panic could break.
+    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+        test_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// An AGENTS_DIR whose `scripts/` holds the named loop scripts.
+    ///
+    /// Several behaviours are script-presence-driven by design: Droid and
+    /// Gemini use a shell wrapper only when their fix-loop script can be
+    /// found. Asserting those without providing the scripts asserts the
+    /// developer's machine -- it passed here, where an ../agents checkout and
+    /// an installed plugin both exist, and failed on CI where neither does.
+    struct ScriptFixture {
+        dir: PathBuf,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl ScriptFixture {
+        fn new(names: &[&str]) -> Self {
+            let dir = temp_path("agents-dir");
+            std::fs::create_dir_all(dir.join("scripts")).expect("create scripts dir");
+            for name in names {
+                write_executable(dir.join("scripts").join(name).as_path(), "#!/bin/sh\nexit 0\n");
+            }
+            let previous = std::env::var_os("AGENTS_DIR");
+            // SAFETY: test-only; callers hold lock_env().
+            unsafe { std::env::set_var("AGENTS_DIR", &dir) };
+            ScriptFixture { dir, previous }
+        }
+    }
+
+    impl Drop for ScriptFixture {
+        fn drop(&mut self) {
+            // SAFETY: test-only; callers hold lock_env().
+            unsafe {
+                match self.previous.take() {
+                    Some(value) => std::env::set_var("AGENTS_DIR", value),
+                    None => std::env::remove_var("AGENTS_DIR"),
+                }
+            }
+            std::fs::remove_dir_all(&self.dir).ok();
+        }
     }
 
     fn write_executable(path: &std::path::Path, contents: &str) {
@@ -2599,11 +2656,45 @@ exit 0
             return;
         }
 
-        let _guard = test_lock().lock().unwrap();
+        let _guard = lock_env();
         let original_path = std::env::var_os("PATH");
+        let original_agents_dir = std::env::var_os("AGENTS_DIR");
         let root = temp_path("runtime-launch");
         let bin_dir = root.join("bin");
+        let scripts_dir = root.join("scripts");
         std::fs::create_dir_all(&bin_dir).unwrap();
+        std::fs::create_dir_all(&scripts_dir).unwrap();
+
+        // The shell-loop runtimes launch a script, not a binary, and the script
+        // is found through AGENTS_DIR. Leaving it unset made this test assert
+        // the developer's machine: it passed here, where an ../agents checkout
+        // and an installed plugin both supply the real scripts, and failed on a
+        // CI runner that has neither -- the manager pane simply ran nothing and
+        // the marker never appeared.
+        for (name, banner) in [
+            ("codex-manage-workers-loop.sh", "Starting Codex monitor loop\n== Codex Worker Monitor =="),
+            ("droid-manage-workers-loop.sh", "Starting Droid monitor loop\n== Droid Worker Monitor =="),
+            ("gemini-manage-workers-loop.sh", "Starting Gemini monitor loop"),
+            ("pi-manage-workers-loop.sh", "Starting Pi monitor loop\n== Pi Worker Monitor =="),
+        ] {
+            write_executable(
+                scripts_dir.join(name).as_path(),
+                &format!("#!/bin/sh\nprintf '%s\\n' \"{banner}\"\nsleep 600\n"),
+            );
+        }
+        for name in [
+            "codex-fix-loop.sh",
+            "droid-fix-loop.sh",
+            "gemini-fix-loop.sh",
+            "pi-fix-loop.sh",
+        ] {
+            write_executable(
+                scripts_dir.join(name).as_path(),
+                "#!/bin/sh\necho FIX_LOOP_STARTED\nsleep 600\n",
+            );
+        }
+        // SAFETY: test-only, serialized by lock_env.
+        unsafe { std::env::set_var("AGENTS_DIR", &root) };
 
         write_executable(bin_dir.join("gh").as_path(), fake_gh_script());
         write_executable(
@@ -2643,6 +2734,7 @@ exit 0
             AgentType::Codex,
             AgentType::Droid,
             AgentType::Gemini,
+            AgentType::Pi,
         ] {
             let repo_path = root.join(format!("repo-{}", runtime.script_flag()));
             let session_name =
@@ -2672,13 +2764,11 @@ exit 0
                 // there is no marker to wait for -- the assertion here is that
                 // the launch completes and builds a swarm at all.
                 AgentType::Droid | AgentType::Pi => (&[], &[]),
-                // Gemini's fake runtime is flaky in tmux worker panes and can drop back to a
-                // shell prompt before the historical test marker is observed. The wrapper-launch
-                // regression in #243 is specific to Codex, so keep this smoke-level for Gemini.
-                AgentType::Gemini => (
-                    &["What can I help", "MANAGER_LOOP_STARTED"],
-                    &[] as &[&str],
-                ),
+                // Gemini launches through its shell wrapper whenever
+                // gemini-fix-loop.sh is findable -- which, now that AGENTS_DIR
+                // is supplied, it always is. The banner comes from the wrapper,
+                // not from the agent TUI.
+                AgentType::Gemini => (&["Starting Gemini monitor loop"], &[] as &[&str]),
                 AgentType::Claude => (
                     &["What can I help", "MANAGER_LOOP_STARTED"],
                     &["What can I help", "FIX_LOOP_STARTED"],
@@ -2686,7 +2776,9 @@ exit 0
             };
             let manager_output =
                 wait_for_pane_markers(&adapter, &swarm.manager.tmux_target, manager_markers).await;
-            if matches!(runtime, AgentType::Claude | AgentType::Gemini) {
+            // Only the interactive runtimes print the fake agent's banner; the
+            // wrapper runtimes never start the binary at all.
+            if matches!(runtime, AgentType::Claude) {
                 assert!(manager_output.contains(&format!(
                     "FAKE_{}_READY",
                     runtime.script_flag().to_uppercase()
@@ -2696,9 +2788,7 @@ exit 0
             let worker_output =
                 wait_for_pane_markers(&adapter, &swarm.workers[0].tmux_target, worker_markers)
                     .await;
-            if matches!(runtime, AgentType::Claude | AgentType::Gemini)
-                && !worker_markers.is_empty()
-            {
+            if matches!(runtime, AgentType::Claude) && !worker_markers.is_empty() {
                 assert!(worker_output.contains(&format!(
                     "FAKE_{}_READY",
                     runtime.script_flag().to_uppercase()
@@ -2720,6 +2810,12 @@ exit 0
             unsafe { std::env::set_var("PATH", path) };
         } else {
             unsafe { std::env::remove_var("PATH") };
+        }
+        unsafe {
+            match original_agents_dir {
+                Some(dir) => std::env::set_var("AGENTS_DIR", dir),
+                None => std::env::remove_var("AGENTS_DIR"),
+            }
         }
         std::fs::remove_dir_all(root).ok();
     }
@@ -3000,7 +3096,7 @@ exit 0
                 "shim failed to apply base-index {base_index}"
             );
 
-            let _guard = test_lock().lock().unwrap();
+            let _guard = lock_env();
             let original = std::env::var_os("PATH");
             // SAFETY: test-only, serialized by test_lock.
             unsafe { std::env::set_var("PATH", layout.path_env()) };
@@ -3060,7 +3156,7 @@ exit 0
             let session = format!("pane-target-{base_index}");
             layout.tmux(&["new-session", "-d", "-s", &session, "-n", "review"]);
 
-            let _guard = test_lock().lock().unwrap();
+            let _guard = lock_env();
             let original = std::env::var_os("PATH");
             // SAFETY: test-only, serialized by test_lock.
             unsafe { std::env::set_var("PATH", layout.path_env()) };

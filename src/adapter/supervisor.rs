@@ -305,8 +305,25 @@ fn shell_quote(value: &str) -> String {
 mod tests {
     use super::*;
 
+    /// Wrapper usage is script-presence-driven by design: Droid and Gemini
+    /// wrap only when their fix-loop script can be found. Asserting that
+    /// without supplying the scripts asserts the developer's machine -- this
+    /// passed locally, where an ../agents checkout and an installed plugin both
+    /// exist, and failed on CI where neither does.
     #[test]
     fn runtime_wrapper_usage_matches_expected_runtimes() {
+        let dir = std::env::temp_dir().join(format!(
+            "agents-ui-supervisor-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(dir.join("scripts")).expect("scripts dir");
+        for name in ["droid-fix-loop.sh", "gemini-fix-loop.sh"] {
+            std::fs::write(dir.join("scripts").join(name), "#!/bin/sh\nexit 0\n").expect("write");
+        }
+        // SAFETY: test-only, single-threaded context.
+        unsafe { std::env::set_var("AGENTS_DIR", &dir) };
+
         assert!(!for_runtime(&AgentType::Claude).uses_loop_wrapper());
         // Codex uses probe: returns !codex_supports_goals(), which is runtime-dependent.
         // Verify it's consistent (same value called twice) rather than a fixed value.
@@ -314,6 +331,10 @@ mod tests {
         assert_eq!(codex_wrapper, for_runtime(&AgentType::Codex).uses_loop_wrapper());
         assert!(for_runtime(&AgentType::Droid).uses_loop_wrapper());
         assert!(for_runtime(&AgentType::Gemini).uses_loop_wrapper());
+
+        // SAFETY: test-only, single-threaded context.
+        unsafe { std::env::remove_var("AGENTS_DIR") };
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     // --- shell_quote ---
