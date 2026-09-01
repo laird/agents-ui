@@ -427,6 +427,38 @@
     .health-dead    { color: #cc4444; }
     .agent-completed { color: var(--text-dim); font-size: 0.75rem; }
     .agent-restarts  { color: var(--warning); font-size: 0.75rem; }
+    /* One dot per agent on the swarm card: the shape of the swarm at a glance,
+       without opening it. */
+    .agent-dots {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin: 0.85rem 0 0.35rem;
+      align-items: center;
+      min-height: 0.85rem;
+    }
+    .agent-dot {
+      width: 0.85rem;
+      height: 0.85rem;
+      border-radius: 50%;
+      flex: none;
+      background: var(--idle);
+    }
+    .agent-dots-empty {
+      color: var(--text-dim);
+      font-size: 0.75rem;
+    }
+    /* The manager carries the swarm, so it reads as a ring rather than
+       another interchangeable worker dot. */
+    .agent-dot.is-manager {
+      box-shadow: 0 0 0 2px var(--card), 0 0 0 3px currentColor;
+      color: var(--text-dim);
+    }
+    .dot-active  { background: var(--success); }
+    .dot-idle    { background: var(--idle); }
+    .dot-waiting { background: var(--warning); }
+    .dot-stuck   { background: var(--error); }
+
     .agent-worktree  { color: var(--text-dim); font-size: 0.75rem; }
     .agent-branch    { color: var(--accent); font-size: 0.75rem; }
 
@@ -1554,12 +1586,53 @@
       );
     }
 
+    // One agent -> one dot colour. Ordered by what the viewer needs to act on:
+    // a dead agent outranks a blocked one, and a blocked one outranks whatever
+    // its state field claims, because an agent waiting at a prompt still
+    // reports itself as Working.
+    function agentDotClass(agent) {
+      const health = agent.health || 'Healthy';
+      if (health === 'Dead' || health === 'Stalled') return 'dot-stuck';
+      if (agent.waiting_for_input)                   return 'dot-waiting';
+
+      const state = String(agent.state || '').toLowerCase();
+      if (state.startsWith('working') || state === 'starting') return 'dot-active';
+      if (state === 'stopped' || state.startsWith('missing'))  return 'dot-stuck';
+      return 'dot-idle';
+    }
+
+    function agentDotTitle(agent) {
+      const bits = [agent.role, agent.state];
+      if (agent.waiting_for_input) bits.push('needs input');
+      if (agent.health && agent.health !== 'Healthy') bits.push(agent.health);
+      if (agent.current_issue) bits.push('#' + agent.current_issue);
+      return bits.filter(Boolean).join(' · ');
+    }
+
+    function renderAgentDots(swarm) {
+      const agents = [swarm.manager].concat(swarm.workers || []).filter(Boolean);
+      if (!agents.length) {
+        return '<div class="agent-dots"><span class="agent-dots-empty">No agents</span></div>';
+      }
+
+      const dots = agents.map(a =>
+        '<span class="agent-dot ' + agentDotClass(a) +
+               (a.is_manager ? ' is-manager' : '') + '" ' +
+              'title="' + esc(agentDotTitle(a)) + '"></span>'
+      ).join('');
+
+      return '<div class="agent-dots" role="img" ' +
+                  'aria-label="' + esc(agents.length + ' agents: ' +
+                    agents.map(agentDotTitle).join('; ')) + '">' +
+               dots +
+             '</div>';
+    }
+
     function renderSwarmCard(swarm) {
-      const busy  = swarm.busy_count       || 0;
-      const idle  = swarm.idle_count       || 0;
-      const attn  = swarm.attention_count  || 0;
+      // One dot per agent replaces the busy/idle/attention counters: the dots
+      // carry the same totals, but also say which agent is in which state, and
+      // stay readable at a glance as the worker count grows.
       const stoppedClass = swarm.stopped ? ' stopped' : '';
-      const attnColor    = attn > 0 ? 'var(--error)' : 'var(--text-dim)';
 
       return (
         '<div class="swarm-card' + stoppedClass + '" ' +
@@ -1572,20 +1645,7 @@
             '<span class="badge">' + esc(swarm.agent_type) + '</span>' +
           '</div>' +
           '<div class="card-path">' + esc(swarm.repo_path) + '</div>' +
-          '<div class="card-stats">' +
-            '<div class="stat">' +
-              '<span class="stat-value" style="color:var(--working)">' + busy + '</span>' +
-              '<span class="stat-label">Busy</span>' +
-            '</div>' +
-            '<div class="stat">' +
-              '<span class="stat-value" style="color:var(--idle)">' + idle + '</span>' +
-              '<span class="stat-label">Idle</span>' +
-            '</div>' +
-            '<div class="stat">' +
-              '<span class="stat-value" style="color:' + attnColor + '">' + attn + '</span>' +
-              '<span class="stat-label">Attention</span>' +
-            '</div>' +
-          '</div>' +
+          renderAgentDots(swarm) +
         '</div>'
       );
     }
