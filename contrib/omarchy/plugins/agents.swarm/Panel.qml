@@ -30,6 +30,14 @@ BarWidget {
   property int busyCount: 0
   property int idleCount: 0
   property int attentionCount: 0
+  property int stuckCount: 0
+
+  // The theme carries one attention colour (`urgent`, red) and no amber, but
+  // red has to mean broken: an agent waiting at a prompt is doing the right
+  // thing and needs a keystroke, not a diagnosis. So amber is defined here and
+  // `urgent` is kept for genuine failure. Chosen to stay legible on both light
+  // and dark bar backgrounds, since the theme cannot supply it.
+  readonly property color attentionColor: "#d29922"
   property int swarmCount: 0
   property bool reachable: false
 
@@ -72,6 +80,7 @@ BarWidget {
     busyCount = 0
     idleCount = 0
     attentionCount = 0
+    stuckCount = 0
     lastAttention = 0
     blockedSwarms = []
   }
@@ -118,6 +127,9 @@ BarWidget {
 
     var swarms = parsed && Array.isArray(parsed.swarms) ? parsed.swarms : []
     var busy = 0, idle = 0, attention = 0, live = 0
+    // Dead and stalled agents are a different problem from blocked ones, and
+    // the bar has to be able to say which without changing its one glyph slot.
+    var stuck = 0
     // Which projects are actually blocked. With more than one swarm running,
     // "1 agent needs input" does not say where to look.
     var blocked = []
@@ -130,6 +142,12 @@ BarWidget {
       idle += Number(swarm.idle_count || 0)
       var swarmAttention = Number(swarm.attention_count || 0)
       attention += swarmAttention
+
+      var agents = [swarm.manager].concat(swarm.workers || [])
+      for (var a = 0; a < agents.length; a++) {
+        var health = agents[a] ? String(agents[a].health || "Healthy") : "Healthy"
+        if (health === "Dead" || health === "Stalled") stuck++
+      }
       if (swarmAttention > 0) {
         blocked.push({ name: String(swarm.project_name || "unknown"),
                        count: swarmAttention })
@@ -137,6 +155,7 @@ BarWidget {
     }
 
     reachable = true
+    stuckCount = stuck
     swarmCount = live
     busyCount = busy
     idleCount = idle
@@ -227,16 +246,24 @@ BarWidget {
     // state that actually wants the user's eyes. Nerd Font glyphs rather than
     // ⚙/⚠ emoji, so the weight and baseline match the rest of the bar
     // instead of falling back to the symbol font.
-    text: root.attentionCount > 0
-            ? "󰀪 " + root.attentionCount
-            : root.hasSwarm
+    text: root.stuckCount > 0
+            ? "󰀨 " + root.stuckCount
+            : root.attentionCount > 0
+              ? "󰀪 " + root.attentionCount
+              : root.hasSwarm
               ? "󰛡 " + root.busyCount + "/" + (root.busyCount + root.idleCount)
               : "󰛡"
 
     dimmed: !root.hasSwarm
-    active: root.attentionCount > 0
+    active: root.stuckCount > 0 || root.attentionCount > 0
+    // Red only for broken; amber for waiting.
+    activeColor: root.stuckCount > 0
+                   ? (root.bar ? root.bar.urgent : root.attentionColor)
+                   : root.attentionColor
 
-    tooltipText: root.attentionCount > 0
+    tooltipText: root.stuckCount > 0
+                   ? root.stuckCount + (root.stuckCount === 1 ? " agent is stuck or dead" : " agents are stuck or dead")
+                   : root.attentionCount > 0
                    ? root.attentionHeadline(root.attentionCount, root.blockedSwarms)
                    : root.hasSwarm
                      ? root.busyCount + " busy, " + root.idleCount + " idle"
