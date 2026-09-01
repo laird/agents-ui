@@ -18,6 +18,10 @@ pub struct AgentSnapshot {
     pub pane_content: String,
     /// tmux pane target (e.g., "claude-myrepo:0.0") used to send input.
     pub tmux_target: String,
+    /// Path to the agent's worktree (base repo for manager), if known.
+    pub worktree_path: String,
+    /// Git branch checked out in the agent's worktree, if resolvable.
+    pub branch: Option<String>,
     /// Health status: "Healthy", "Stalled", "Restarting", or "Dead".
     pub health: String,
     /// Number of completed issues this session.
@@ -91,6 +95,8 @@ impl AgentSnapshot {
             current_issue_title: info.current_issue_title.clone(),
             pane_content: info.pane_content.clone(),
             tmux_target: info.tmux_target.clone(),
+            worktree_path: info.worktree_path.to_string_lossy().into_owned(),
+            branch: info.branch.clone(),
             health: health.to_string(),
             completed_issue_count: info.completed_issue_count,
             resurrection_attempts: info.resurrection_attempts,
@@ -164,6 +170,7 @@ mod tests {
             id: format!("test-repo/{role}"),
             role: role.to_string(),
             worktree_path: PathBuf::from("/tmp/test"),
+            branch: None,
             tmux_target: "test:0.0".to_string(),
             status: AgentStatus {
                 timestamp: None,

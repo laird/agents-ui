@@ -1,5 +1,6 @@
 use super::issue::IssueCache;
 use super::status::AgentStatus;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Health status of a worker agent.
@@ -244,6 +245,8 @@ pub struct AgentInfo {
     pub role: String,
     /// Path to the worktree (base repo for manager)
     pub worktree_path: PathBuf,
+    /// Git branch checked out in this agent's worktree, if resolvable.
+    pub branch: Option<String>,
     /// tmux pane target (e.g., "claude-myrepo:0.0")
     pub tmux_target: String,
     /// Current status from status file
@@ -316,6 +319,37 @@ pub fn detect_waiting_for_input(content: &str) -> bool {
     }
 
     false
+}
+
+/// Parse `git worktree list --porcelain` output into a map from each
+/// worktree's path (as reported by git) to its checked-out branch name.
+/// Detached-HEAD and bare entries map to `None`.
+pub fn parse_worktree_branches(porcelain: &str) -> HashMap<PathBuf, Option<String>> {
+    let mut map = HashMap::new();
+    let mut current_path: Option<PathBuf> = None;
+    let mut current_branch: Option<String> = None;
+
+    for line in porcelain.lines() {
+        if line.is_empty() {
+            if let Some(path) = current_path.take() {
+                map.insert(path, current_branch.take());
+            }
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("worktree ") {
+            if let Some(path) = current_path.take() {
+                map.insert(path, current_branch.take());
+            }
+            current_path = Some(PathBuf::from(rest));
+        } else if let Some(rest) = line.strip_prefix("branch ") {
+            let branch = rest.strip_prefix("refs/heads/").unwrap_or(rest);
+            current_branch = Some(branch.to_string());
+        }
+    }
+    if let Some(path) = current_path.take() {
+        map.insert(path, current_branch.take());
+    }
+    map
 }
 
 impl AgentInfo {
@@ -480,6 +514,7 @@ mod tests {
             id: id.to_string(),
             role: id.to_string(),
             worktree_path: PathBuf::from("/tmp/test"),
+            branch: None,
             tmux_target: "test:0.0".to_string(),
             status: AgentStatus {
                 timestamp: None,
@@ -516,6 +551,7 @@ mod tests {
             id: "test/manager".to_string(),
             role: "manager".to_string(),
             worktree_path: PathBuf::from("/tmp/test"),
+            branch: None,
             tmux_target: "test:0.0".to_string(),
             status: AgentStatus::default(),
             is_manager: true,
@@ -893,6 +929,7 @@ mod tests {
             id: id.to_string(),
             role: role.to_string(),
             worktree_path: PathBuf::from("/tmp/test"),
+            branch: None,
             tmux_target: format!("test:0.{}", if is_manager { 0 } else { 1 }),
             status: AgentStatus::default(),
             is_manager,
@@ -1007,5 +1044,57 @@ mod tests {
         // After w2 (last), should wrap to w1
         let wrapped = swarm.next_waiting_agent(Some("w2"));
         assert_eq!(wrapped.unwrap().id, "w1");
+    }
+
+    #[test]
+    fn parse_worktree_branches_normal_branch() {
+        let porcelain = "worktree /home/laird/src/kink-party\nHEAD 9f2c3a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f\nbranch refs/heads/main\n";
+        let map = parse_worktree_branches(porcelain);
+        assert_eq!(
+            map.get(&PathBuf::from("/home/laird/src/kink-party")),
+            Some(&Some("main".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_worktree_branches_detached_head() {
+        let porcelain = "worktree /home/laird/src/kink-party-wt-3\nHEAD 1234abcd1234abcd1234abcd1234abcd1234abcd\ndetached\n";
+        let map = parse_worktree_branches(porcelain);
+        assert_eq!(
+            map.get(&PathBuf::from("/home/laird/src/kink-party-wt-3")),
+            Some(&None)
+        );
+    }
+
+    #[test]
+    fn parse_worktree_branches_bare() {
+        let porcelain = "worktree /home/laird/src/kink-party.git\nbare\n";
+        let map = parse_worktree_branches(porcelain);
+        assert_eq!(
+            map.get(&PathBuf::from("/home/laird/src/kink-party.git")),
+            Some(&None)
+        );
+    }
+
+    #[test]
+    fn parse_worktree_branches_multiple_entries_with_trailing_blank_lines() {
+        let porcelain = "worktree /repo\nHEAD aaaa\nbranch refs/heads/main\n\nworktree /repo-wt-1\nHEAD bbbb\nbranch refs/heads/worker-1\n\nworktree /repo-wt-2\nHEAD cccc\ndetached\n\n\n";
+        let map = parse_worktree_branches(porcelain);
+        assert_eq!(map.len(), 3);
+        assert_eq!(
+            map.get(&PathBuf::from("/repo")),
+            Some(&Some("main".to_string()))
+        );
+        assert_eq!(
+            map.get(&PathBuf::from("/repo-wt-1")),
+            Some(&Some("worker-1".to_string()))
+        );
+        assert_eq!(map.get(&PathBuf::from("/repo-wt-2")), Some(&None));
+    }
+
+    #[test]
+    fn parse_worktree_branches_empty_input() {
+        let map = parse_worktree_branches("");
+        assert!(map.is_empty());
     }
 }

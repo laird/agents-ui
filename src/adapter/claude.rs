@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
 
@@ -930,6 +931,37 @@ impl ClaudeAdapter {
         false
     }
 
+    /// Run `git worktree list --porcelain` once for the repo and map each
+    /// worktree's canonicalised path to its checked-out branch. Used to
+    /// populate `AgentInfo::branch` without a subprocess per agent.
+    async fn worktree_branches(&self, repo_path: &Path) -> HashMap<PathBuf, Option<String>> {
+        let output = self
+            .output(
+                "git",
+                &[
+                    "worktree".to_string(),
+                    "list".to_string(),
+                    "--porcelain".to_string(),
+                ],
+                Some(repo_path),
+            )
+            .await;
+        let Ok(output) = output else {
+            return HashMap::new();
+        };
+        if !output.status.success() {
+            return HashMap::new();
+        }
+        let porcelain = String::from_utf8_lossy(&output.stdout);
+        crate::model::swarm::parse_worktree_branches(&porcelain)
+            .into_iter()
+            .map(|(path, branch)| {
+                let canon = std::fs::canonicalize(&path).unwrap_or(path);
+                (canon, branch)
+            })
+            .collect()
+    }
+
     /// Build a Swarm model from an existing tmux session.
     async fn build_swarm_from_session(
         &self,
@@ -939,6 +971,15 @@ impl ClaudeAdapter {
     ) -> Result<Swarm> {
         let project_name = Self::project_name(&repo_path);
         let session_info = session::list_panes(&self.transport, session_name).await?;
+
+        // One `git worktree list` for the whole swarm refresh, not one per
+        // agent -- see `worktree_branches`. Covers both a swarm just spawned
+        // and one rediscovered from an existing tmux session.
+        let branch_map = self.worktree_branches(&repo_path).await;
+        let branch_for = |path: &Path| -> Option<String> {
+            let canon = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+            branch_map.get(&canon).cloned().flatten()
+        };
 
         // Convention, by NAME rather than index: the "review" window holds the
         // manager, "worker-N" windows hold one worker each. Window and pane
@@ -950,6 +991,7 @@ impl ClaudeAdapter {
             id: format!("{project_name}/manager"),
             role: "manager".to_string(),
             worktree_path: repo_path.clone(),
+            branch: branch_for(&repo_path),
             // Replaced below by a real pane target. Addressing the window by
             // name means this placeholder is never a plausible-looking lie
             // like "<session>:0.0", which under base-index 1 points at nothing.
@@ -998,10 +1040,12 @@ impl ClaudeAdapter {
                     .join(format!("{}-wt-{}", project_name, worker_num));
 
                 let role = format!("worker-{worker_num}");
+                let branch = branch_for(&worktree_path);
                 workers.push(AgentInfo {
                     id: format!("{project_name}/{role}"),
                     role,
                     worktree_path,
+                    branch,
                     tmux_target: pane.target.clone(),
                     status: AgentStatus::default(),
                     is_manager: false,
@@ -1430,6 +1474,7 @@ impl AgentRuntime for ClaudeAdapter {
             id: format!("{}/{role}", swarm.project_name),
             role,
             worktree_path,
+            branch: Some(worktree_branch),
             tmux_target,
             status: AgentStatus::default(),
             is_manager: false,
@@ -3336,6 +3381,7 @@ exit 0
                 id: "demo/manager".to_string(),
                 role: "manager".to_string(),
                 worktree_path: PathBuf::from("/tmp/repo"),
+                branch: None,
                 tmux_target: "codex-demo:review.0".to_string(),
                 status: AgentStatus::default(),
                 is_manager: true,
@@ -3353,6 +3399,7 @@ exit 0
                     id: "demo/worker-1".to_string(),
                     role: "worker-1".to_string(),
                     worktree_path: PathBuf::from("/tmp/repo-wt-1"),
+                    branch: None,
                     tmux_target: "codex-demo:worker-1.0".to_string(),
                     status: AgentStatus::default(),
                     is_manager: false,
@@ -3369,6 +3416,7 @@ exit 0
                     id: "demo/worker-2".to_string(),
                     role: "worker-2".to_string(),
                     worktree_path: PathBuf::from("/tmp/repo-wt-2"),
+                    branch: None,
                     tmux_target: "codex-demo:worker-2.0".to_string(),
                     status: AgentStatus::default(),
                     is_manager: false,

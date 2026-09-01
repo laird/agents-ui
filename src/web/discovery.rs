@@ -84,6 +84,12 @@ async fn build_swarm_snapshot(
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_default();
 
+    // One `git worktree list` for the whole swarm, not one per agent.
+    let branch_map = match repo_path.as_deref() {
+        Some(base) => worktree_branches(transport, base).await,
+        None => std::collections::HashMap::new(),
+    };
+
     // Collect agent snapshots from all panes.
     //
     // Roles are decided by WINDOW NAME, never by index. The launcher builds
@@ -122,6 +128,7 @@ async fn build_swarm_snapshot(
                 &project_name,
                 repo_path.as_deref(),
                 &agent_type,
+                &branch_map,
             )
             .await;
 
@@ -206,11 +213,47 @@ fn missing_manager_snapshot(project_name: &str) -> AgentSnapshot {
 this swarm is running without a manager."
             .to_string(),
         tmux_target: String::new(),
+        worktree_path: String::new(),
+        branch: None,
         health: "Unknown".to_string(),
         completed_issue_count: 0,
         resurrection_attempts: 0,
         status_timestamp: None,
     }
+}
+
+/// Run `git worktree list --porcelain` once and map each worktree's
+/// canonicalised path to its checked-out branch. `None` for detached or
+/// unresolvable entries.
+async fn worktree_branches(
+    transport: &ServerTransport,
+    repo_path: &std::path::Path,
+) -> std::collections::HashMap<PathBuf, Option<String>> {
+    let output = transport
+        .output(
+            "git",
+            &[
+                "worktree".to_string(),
+                "list".to_string(),
+                "--porcelain".to_string(),
+            ],
+            Some(repo_path),
+        )
+        .await;
+    let Ok(output) = output else {
+        return std::collections::HashMap::new();
+    };
+    if !output.status.success() {
+        return std::collections::HashMap::new();
+    }
+    let porcelain = String::from_utf8_lossy(&output.stdout);
+    crate::model::swarm::parse_worktree_branches(&porcelain)
+        .into_iter()
+        .map(|(path, branch)| {
+            let canon = std::fs::canonicalize(&path).unwrap_or(path);
+            (canon, branch)
+        })
+        .collect()
 }
 
 async fn build_agent_snapshot(
@@ -221,6 +264,7 @@ async fn build_agent_snapshot(
     project_name: &str,
     repo_path: Option<&std::path::Path>,
     agent_type: &AgentType,
+    branch_map: &std::collections::HashMap<PathBuf, Option<String>>,
 ) -> AgentSnapshot {
 
     // Capture pane content
@@ -273,6 +317,15 @@ async fn build_agent_snapshot(
     // renders, whose last line reads "Enter to select · ↑/↓ to navigate".
     let waiting_for_input = crate::model::status::agent_needs_input(&pane_content);
 
+    let branch = worktree_path.as_deref().and_then(|wt| {
+        let canon = std::fs::canonicalize(wt).unwrap_or_else(|_| wt.to_path_buf());
+        branch_map.get(&canon).cloned().flatten()
+    });
+    let worktree_path_str = worktree_path
+        .as_ref()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
+
     AgentSnapshot {
         id: format!("{project_name}/{role}"),
         role,
@@ -283,6 +336,8 @@ async fn build_agent_snapshot(
         current_issue_title: None,
         pane_content,
         tmux_target: target.to_string(),
+        worktree_path: worktree_path_str,
+        branch,
         health: "Healthy".to_string(),
         completed_issue_count: 0,
         resurrection_attempts: 0,

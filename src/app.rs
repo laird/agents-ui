@@ -1747,6 +1747,7 @@ impl App {
                 id: manager_id.clone(),
                 role: "manager".to_string(),
                 worktree_path: repo_path.clone(),
+                branch: None,
                 tmux_target: "startup".to_string(),
                 status: crate::model::status::AgentStatus::default(),
                 is_manager: true,
