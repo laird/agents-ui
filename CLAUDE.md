@@ -100,3 +100,15 @@ cargo build
 **Test Reports**:
 - Location: `docs/test/regression-reports/`
 
+
+### Merge Mode
+```
+pr
+```
+Options: `merge` (auto-merge to parent branch and push) or `pr` (push feature branch and create a pull request, then stop).
+
+### Integration Branch
+```
+master
+```
+The shared branch all completed work is merged into.
