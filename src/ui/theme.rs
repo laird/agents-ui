@@ -99,8 +99,37 @@ pub fn active_filter_style() -> Style {
 }
 
 /// Returns the system hostname, or empty string if unavailable.
+///
+/// `/proc/sys/kernel/hostname` is Linux-only -- on macOS there is no /proc at
+/// all, so reading it alone leaves the header's hostname permanently blank.
+/// Try the portable sources in order and take the first that answers.
 pub fn hostname() -> String {
-    std::fs::read_to_string("/proc/sys/kernel/hostname")
+    if let Ok(name) = std::fs::read_to_string("/proc/sys/kernel/hostname") {
+        let name = name.trim();
+        if !name.is_empty() {
+            return name.to_string();
+        }
+    }
+
+    if let Ok(output) = std::process::Command::new("hostname").output() {
+        if output.status.success() {
+            let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !name.is_empty() {
+                // macOS reports the full Bonjour name ("mac.local"); the header
+                // has room for a short label, and the suffix carries nothing.
+                return name
+                    .strip_suffix(".local")
+                    .unwrap_or(&name)
+                    .split('.')
+                    .next()
+                    .unwrap_or(&name)
+                    .to_string();
+            }
+        }
+    }
+
+    std::env::var("HOSTNAME")
+        .or_else(|_| std::env::var("HOST"))
         .unwrap_or_default()
         .trim()
         .to_string()

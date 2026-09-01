@@ -1,0 +1,43 @@
+name: test
+
+# The TUI drives tmux, and tmux is where the platform differences live: macOS
+# has no system tmux at all (Homebrew's is what people run), and index numbering
+# differs per config. The suite exercises both `base-index 0` and `base-index 1`
+# against a private tmux server, so running it on both operating systems is what
+# actually proves the thing works on a machine that is not this developer's.
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      # One OS failing must not cancel the other: which platform broke is the
+      # information worth having.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Without tmux the tmux-dependent tests return early and pass vacuously,
+      # which is the failure mode this job exists to prevent.
+      - name: Install tmux (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Install tmux (macOS)
+        if: runner.os == 'macOS'
+        run: brew install tmux
+
+      - name: Assert tmux is present
+        run: tmux -V
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        run: cargo build --locked
+
+      - name: Test
+        run: cargo test --locked

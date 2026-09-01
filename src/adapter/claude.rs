@@ -940,14 +940,20 @@ impl ClaudeAdapter {
         let project_name = Self::project_name(&repo_path);
         let session_info = session::list_panes(&self.transport, session_name).await?;
 
-        // Convention:
-        // Window 0 ("review"): manager in base repo
-        // Windows 1..N ("worker-N"): one worker per window, each full-width
+        // Convention, by NAME rather than index: the "review" window holds the
+        // manager, "worker-N" windows hold one worker each. Window and pane
+        // indexes start wherever `base-index` / `pane-base-index` say they do
+        // -- 0 on a default tmux, 1 on the many configs that set it -- so any
+        // rule written in terms of index 0 is right on one machine and quietly
+        // wrong on the next.
         let mut manager = AgentInfo {
             id: format!("{project_name}/manager"),
             role: "manager".to_string(),
             worktree_path: repo_path.clone(),
-            tmux_target: format!("{session_name}:0.0"),
+            // Replaced below by a real pane target. Addressing the window by
+            // name means this placeholder is never a plausible-looking lie
+            // like "<session>:0.0", which under base-index 1 points at nothing.
+            tmux_target: format!("{session_name}:review"),
             status: AgentStatus::default(),
             is_manager: true,
             pane_content: String::new(),
@@ -962,23 +968,28 @@ impl ClaudeAdapter {
 
         let mut workers = Vec::new();
 
-        // First pass: identify the manager pane (window named "review" or index 0)
-        for window in &session_info.windows {
-            if window.name == "review" || window.index == 0 {
-                if let Some(pane) = window.panes.first() {
-                    manager.tmux_target = pane.target.clone();
-                }
-            }
+        // First pass: the manager is the "review" window. Failing that, the
+        // first window that is not holding workers -- a session laid out by an
+        // older launcher, or renamed by hand, still has a manager somewhere.
+        let manager_window = session_info
+            .windows
+            .iter()
+            .find(|w| w.name == "review")
+            .or_else(|| {
+                session_info
+                    .windows
+                    .iter()
+                    .find(|w| !is_worker_window(&w.name) && w.name != "tester")
+            });
+        if let Some(pane) = manager_window.and_then(|w| w.panes.first()) {
+            manager.tmux_target = pane.target.clone();
         }
 
-        // Second pass: all windows NOT named "review" or "tester" are workers
+        // Second pass: worker windows, in the order tmux reports them.
         let mut worker_num = 1usize; // 1-indexed to match worktree naming
         for window in &session_info.windows {
-            if window.name == "review"
-                || window.name == "tester"
-                || (window.index == 0 && !window.name.starts_with("worker-"))
-            {
-                continue; // Skip non-worker windows
+            if !is_worker_window(&window.name) {
+                continue; // review, tester, or a window someone else opened
             }
             for pane in &window.panes {
                 let worktree_path = repo_path
@@ -1552,7 +1563,7 @@ impl AgentRuntime for ClaudeAdapter {
             .map(|info| {
                 info.windows
                     .iter()
-                    .filter(|w| w.name.starts_with("worker-") || w.name == "agents")
+                    .filter(|w| is_worker_window(&w.name))
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
@@ -2023,6 +2034,15 @@ fn pane_has_runtime_mismatch(expected: &AgentType, content: &str) -> bool {
     pane_runtime_hint(content)
         .map(|observed| observed != *expected)
         .unwrap_or(false)
+}
+
+/// Windows that hold workers.
+///
+/// `worker-N` is what `create_tmux_session` produces; `agents` is the legacy
+/// single-window layout where every worker is a pane. Neither is identified by
+/// index, because index 0 exists only on a tmux without `base-index 1`.
+fn is_worker_window(name: &str) -> bool {
+    name.starts_with("worker-") || name == "agents"
 }
 
 fn manager_bootstrap_cmd(runtime: &AgentType) -> Option<String> {
@@ -2851,6 +2871,217 @@ exit 0
             assert!(
                 after.contains("\"-c\".to_string()"),
                 "{verb} must pass -c so the pane starts in the worktree"
+            );
+        }
+    }
+
+    /// Run a closure against a PRIVATE tmux server with the given index
+    /// settings, by putting a `tmux` shim on PATH that injects `-L <socket>`.
+    ///
+    /// The alternative -- `set-option -g base-index` -- would rewrite the
+    /// developer's own running tmux, and a session-scoped set does not affect
+    /// windows created later (verified: it does not take). A separate server
+    /// with its own config file is the only way to exercise both layouts
+    /// honestly, and both must be exercised: omarchy ships `base-index 1`,
+    /// a stock Linux or macOS tmux is 0, and code that assumes either is
+    /// silently broken on the other half of the machines.
+    struct TmuxLayout {
+        dir: std::path::PathBuf,
+        socket: String,
+    }
+
+    impl TmuxLayout {
+        fn new(base_index: u32) -> Option<Self> {
+            if !command_available("tmux") {
+                return None;
+            }
+            let dir = temp_path(&format!("tmux-layout-{base_index}"));
+            std::fs::create_dir_all(dir.join("bin")).ok()?;
+            let socket = format!(
+                "agents-ui-test-{}-{}-{base_index}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0)
+            );
+            let conf = dir.join("tmux.conf");
+            std::fs::write(
+                &conf,
+                format!("set -g base-index {base_index}\nsetw -g pane-base-index {base_index}\n"),
+            )
+            .ok()?;
+
+            let real = std::process::Command::new("sh")
+                .args(["-lc", "command -v tmux"])
+                .output()
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())?;
+
+            write_executable(
+                dir.join("bin/tmux").as_path(),
+                &format!(
+                    "#!/bin/sh\nexec {real} -L {socket} -f {} \"$@\"\n",
+                    conf.display()
+                ),
+            );
+            Some(TmuxLayout { dir, socket })
+        }
+
+        fn path_env(&self) -> std::ffi::OsString {
+            let mut value = std::ffi::OsString::from(self.dir.join("bin").as_os_str());
+            if let Some(existing) = std::env::var_os("PATH") {
+                value.push(":");
+                value.push(existing);
+            }
+            value
+        }
+
+        fn tmux(&self, args: &[&str]) -> std::process::Output {
+            // Quote every argument. A tmux format like `#{window_index}` is a
+            // comment to the shell the moment it is unquoted, which silently
+            // drops the -F and returns tmux's default listing instead.
+            let quoted: Vec<String> = args
+                .iter()
+                .map(|a| format!("'{}'", a.replace('\'', "'\\''")))
+                .collect();
+            std::process::Command::new("sh")
+                .arg("-lc")
+                .arg(format!(
+                    "PATH={} tmux {}",
+                    self.path_env().to_string_lossy(),
+                    quoted.join(" ")
+                ))
+                .output()
+                .expect("tmux")
+        }
+    }
+
+    impl Drop for TmuxLayout {
+        fn drop(&mut self) {
+            let _ = std::process::Command::new("sh")
+                .arg("-lc")
+                .arg(format!("tmux -L {} kill-server 2>/dev/null", self.socket))
+                .status();
+            std::fs::remove_dir_all(&self.dir).ok();
+        }
+    }
+
+    /// A swarm session must be reconstructed identically whether tmux numbers
+    /// from 0 (stock Linux/macOS) or from 1 (omarchy and many dotfiles).
+    #[tokio::test]
+    async fn swarm_reconstruction_is_independent_of_tmux_base_index() {
+        for base_index in [0, 1] {
+            let Some(layout) = TmuxLayout::new(base_index) else {
+                return;
+            };
+            let session = format!("claude-layout{base_index}");
+
+            layout.tmux(&["new-session", "-d", "-s", &session, "-n", "review"]);
+            for n in 1..=2 {
+                layout.tmux(&[
+                    "new-window",
+                    "-t",
+                    &session,
+                    "-n",
+                    &format!("worker-{n}"),
+                ]);
+            }
+
+            // Sanity: the shim really did change the numbering.
+            let listed = layout.tmux(&["list-windows", "-t", &session, "-F", "#{window_index}"]);
+            let first: u32 = String::from_utf8_lossy(&listed.stdout)
+                .lines()
+                .next()
+                .and_then(|l| l.trim().parse().ok())
+                .unwrap_or(99);
+            assert_eq!(
+                first, base_index,
+                "shim failed to apply base-index {base_index}"
+            );
+
+            let _guard = test_lock().lock().unwrap();
+            let original = std::env::var_os("PATH");
+            // SAFETY: test-only, serialized by test_lock.
+            unsafe { std::env::set_var("PATH", layout.path_env()) };
+
+            let adapter = ClaudeAdapter::new(
+                AgentType::Claude,
+                crate::transport::ServerTransport::default(),
+            );
+            let swarm = adapter
+                .build_swarm_from_session(&session, PathBuf::from("/tmp/layout-repo"), AgentType::Claude)
+                .await
+                .expect("build swarm");
+
+            unsafe {
+                match original {
+                    Some(path) => std::env::set_var("PATH", path),
+                    None => std::env::remove_var("PATH"),
+                }
+            }
+
+            assert_eq!(
+                swarm.workers.len(),
+                2,
+                "base-index {base_index}: expected 2 workers, got {:?}",
+                swarm.workers.iter().map(|w| &w.tmux_target).collect::<Vec<_>>()
+            );
+            assert!(
+                swarm.manager.tmux_target.contains(&session),
+                "base-index {base_index}: manager target {:?} is not in this session",
+                swarm.manager.tmux_target
+            );
+            // The manager must resolve to the review window's real pane, not a
+            // reconstructed "<session>:0.0".
+            assert!(
+                !swarm.manager.tmux_target.ends_with(":0.0") || base_index == 0,
+                "base-index {base_index}: manager target looks reconstructed: {:?}",
+                swarm.manager.tmux_target
+            );
+            for worker in &swarm.workers {
+                let suffix = format!(".{base_index}");
+                assert!(
+                    worker.tmux_target.ends_with(&suffix),
+                    "base-index {base_index}: worker target {:?} should end with {suffix}",
+                    worker.tmux_target
+                );
+            }
+        }
+    }
+
+    /// Pane targets must be resolved from tmux under either numbering.
+    #[tokio::test]
+    async fn window_pane_target_matches_the_servers_numbering() {
+        for base_index in [0, 1] {
+            let Some(layout) = TmuxLayout::new(base_index) else {
+                return;
+            };
+            let session = format!("pane-target-{base_index}");
+            layout.tmux(&["new-session", "-d", "-s", &session, "-n", "review"]);
+
+            let _guard = test_lock().lock().unwrap();
+            let original = std::env::var_os("PATH");
+            // SAFETY: test-only, serialized by test_lock.
+            unsafe { std::env::set_var("PATH", layout.path_env()) };
+
+            let adapter = ClaudeAdapter::new(
+                AgentType::Claude,
+                crate::transport::ServerTransport::default(),
+            );
+            let target = adapter.window_pane_target(&session, "review").await;
+
+            unsafe {
+                match original {
+                    Some(path) => std::env::set_var("PATH", path),
+                    None => std::env::remove_var("PATH"),
+                }
+            }
+
+            assert_eq!(
+                target,
+                format!("{session}:review.{base_index}"),
+                "base-index {base_index}: wrong pane target"
             );
         }
     }
