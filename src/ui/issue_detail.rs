@@ -24,7 +24,10 @@ pub fn render_markdown_line(line: &str) -> Line<'static> {
     if trimmed.starts_with("- [x]") || trimmed.starts_with("- [X]") {
         let text = trimmed[5..].trim().to_string();
         return Line::from(vec![
-            Span::styled("✓ ", Style::default().fg(Color::Green)),
+            Span::styled(
+                format!("{} ", theme::CHECKED_BOX_SYMBOL),
+                Style::default().fg(Color::Green),
+            ),
             Span::styled(text, Style::default().fg(Color::DarkGray)),
         ]);
     }
@@ -391,7 +394,10 @@ impl IssueDetailView {
                         Style::default().fg(ratatui::style::Color::DarkGray)
                     };
                     spans.push(Span::raw("  "));
-                    spans.push(Span::styled(format!("{}/{} ✓", checked, total), task_style));
+                    spans.push(Span::styled(
+                        format!("{}/{} {}", checked, total, theme::CHECKED_BOX_SYMBOL),
+                        task_style,
+                    ));
                 }
                 Line::from(spans)
             },
@@ -593,7 +599,7 @@ mod tests {
     #[test]
     fn render_markdown_line_checked_checkbox() {
         let line = render_markdown_line("- [x] done task");
-        assert!(line.spans[0].content.contains('✓'));
+        assert!(line.spans[0].content.contains(theme::CHECKED_BOX_SYMBOL));
         assert!(line.spans[1].content.contains("done task"));
     }
 
