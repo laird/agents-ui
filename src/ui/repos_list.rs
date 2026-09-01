@@ -308,6 +308,7 @@ mod tests {
         AgentInfo {
             id: format!("test/{id}"),
             role: id.to_string(),
+            branch: None,
             worktree_path: PathBuf::new(),
             tmux_target: String::new(),
             status: AgentStatus {

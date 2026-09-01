@@ -1746,6 +1746,7 @@ impl App {
             manager: crate::model::swarm::AgentInfo {
                 id: manager_id.clone(),
                 role: "manager".to_string(),
+                branch: None,
                 worktree_path: repo_path.clone(),
                 tmux_target: "startup".to_string(),
                 status: crate::model::status::AgentStatus::default(),

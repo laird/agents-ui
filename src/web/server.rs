@@ -436,6 +436,7 @@ async fn api_stop_swarm_handler(
     let to_info = |a: &crate::web::AgentSnapshot| AgentInfo {
         id: format!("{}/{}", snapshot.project_name, a.role),
         role: a.role.clone(),
+        branch: a.branch.clone(),
         worktree_path: if a.worktree_path.is_empty() {
             repo_path.clone()
         } else {
@@ -547,6 +548,7 @@ async fn api_add_worker_handler(
     let manager_info = AgentInfo {
         id: format!("{}/manager", snapshot.project_name),
         role: "manager".to_string(),
+        branch: snapshot.manager.branch.clone(),
         worktree_path: repo_path.clone(),
         tmux_target: snapshot.manager.tmux_target.clone(),
         status: idle_status.clone(),
@@ -566,6 +568,7 @@ async fn api_add_worker_handler(
         .map(|w| AgentInfo {
             id: format!("{}/{}", snapshot.project_name, w.role),
             role: w.role.clone(),
+            branch: w.branch.clone(),
             worktree_path: repo_path.clone(),
             tmux_target: w.tmux_target.clone(),
             status: idle_status.clone(),
@@ -657,6 +660,7 @@ async fn api_switch_agent_handler(
     let manager_info = AgentInfo {
         id: format!("{}/manager", snapshot.project_name),
         role: "manager".to_string(),
+        branch: snapshot.manager.branch.clone(),
         worktree_path: repo_path.clone(),
         tmux_target: snapshot.manager.tmux_target.clone(),
         status: idle_status.clone(),
@@ -676,6 +680,7 @@ async fn api_switch_agent_handler(
         .map(|w| AgentInfo {
             id: format!("{}/{}", snapshot.project_name, w.role),
             role: w.role.clone(),
+            branch: w.branch.clone(),
             worktree_path: repo_path.clone(),
             tmux_target: w.tmux_target.clone(),
             status: idle_status.clone(),

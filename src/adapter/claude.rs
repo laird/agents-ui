@@ -930,6 +930,35 @@ impl ClaudeAdapter {
         false
     }
 
+    /// Map each of a repo's worktrees to the branch checked out in it, via a
+    /// single `git worktree list --porcelain` call rather than one `git` call
+    /// per agent.
+    async fn worktree_branches(
+        &self,
+        repo_root: &Path,
+    ) -> std::collections::HashMap<PathBuf, String> {
+        let Ok(output) = self
+            .output(
+                "git",
+                &[
+                    "worktree".to_string(),
+                    "list".to_string(),
+                    "--porcelain".to_string(),
+                ],
+                Some(repo_root),
+            )
+            .await
+        else {
+            return std::collections::HashMap::new();
+        };
+
+        if !output.status.success() {
+            return std::collections::HashMap::new();
+        }
+
+        crate::model::swarm::parse_worktree_porcelain(&String::from_utf8_lossy(&output.stdout))
+    }
+
     /// Build a Swarm model from an existing tmux session.
     async fn build_swarm_from_session(
         &self,
@@ -939,6 +968,13 @@ impl ClaudeAdapter {
     ) -> Result<Swarm> {
         let project_name = Self::project_name(&repo_path);
         let session_info = session::list_panes(&self.transport, session_name).await?;
+        let branches = self.worktree_branches(&repo_path).await;
+        let lookup_branch = |path: &Path| {
+            std::fs::canonicalize(path)
+                .ok()
+                .and_then(|c| branches.get(&c).cloned())
+                .or_else(|| branches.get(path).cloned())
+        };
 
         // Convention, by NAME rather than index: the "review" window holds the
         // manager, "worker-N" windows hold one worker each. Window and pane
@@ -949,6 +985,7 @@ impl ClaudeAdapter {
         let mut manager = AgentInfo {
             id: format!("{project_name}/manager"),
             role: "manager".to_string(),
+            branch: lookup_branch(&repo_path),
             worktree_path: repo_path.clone(),
             // Replaced below by a real pane target. Addressing the window by
             // name means this placeholder is never a plausible-looking lie
@@ -1001,6 +1038,7 @@ impl ClaudeAdapter {
                 workers.push(AgentInfo {
                     id: format!("{project_name}/{role}"),
                     role,
+                    branch: lookup_branch(&worktree_path),
                     worktree_path,
                     tmux_target: pane.target.clone(),
                     status: AgentStatus::default(),
@@ -1429,6 +1467,7 @@ impl AgentRuntime for ClaudeAdapter {
         Ok(AgentInfo {
             id: format!("{}/{role}", swarm.project_name),
             role,
+            branch: Some(worktree_branch),
             worktree_path,
             tmux_target,
             status: AgentStatus::default(),
@@ -3212,6 +3251,90 @@ exit 0
         }
     }
 
+    /// #328: the manager and every worker must report the git branch checked
+    /// out in their worktree, resolved via a real `git worktree list`, with a
+    /// detached HEAD yielding `None` rather than an invented branch name.
+    #[tokio::test]
+    async fn build_swarm_from_session_resolves_branches_for_manager_and_workers() {
+        crate::testutil::reap_stale_artifacts();
+        if !command_available("tmux") || !command_available("git") {
+            return;
+        }
+
+        let root = temp_path("branch-resolution");
+        let project_name = format!("{}-branchrepo", crate::testutil::ARTIFACT_PREFIX);
+        let repo_path = root.join(&project_name);
+        init_git_repo(&repo_path);
+
+        // Worker 1: a real feature branch.
+        let wt1 = root.join(format!("{project_name}-wt-1"));
+        let status = std::process::Command::new("git")
+            .args(["worktree", "add", "-b", "worker-1", &wt1.to_string_lossy()])
+            .current_dir(&repo_path)
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        // Worker 2: a detached HEAD -- must yield `branch: None`, not an
+        // invented name.
+        let wt2 = root.join(format!("{project_name}-wt-2"));
+        let status = std::process::Command::new("git")
+            .args(["worktree", "add", "--detach", &wt2.to_string_lossy()])
+            .current_dir(&repo_path)
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let session_name = format!("claude-{project_name}");
+        cleanup_tmux_session(&session_name).await;
+        let status = std::process::Command::new("tmux")
+            .args(["new-session", "-d", "-s", &session_name, "-n", "review"])
+            .status()
+            .unwrap();
+        assert!(status.success());
+        for name in ["worker-1", "worker-2"] {
+            let status = std::process::Command::new("tmux")
+                .args(["new-window", "-t", &session_name, "-n", name])
+                .status()
+                .unwrap();
+            assert!(status.success());
+        }
+
+        let adapter = ClaudeAdapter::new(
+            AgentType::Claude,
+            crate::transport::ServerTransport::default(),
+        );
+        let result = adapter
+            .build_swarm_from_session(&session_name, repo_path.clone(), AgentType::Claude)
+            .await;
+
+        cleanup_tmux_session(&session_name).await;
+        let _ = std::fs::remove_dir_all(&root);
+
+        let swarm = result.expect("build swarm");
+        assert_eq!(
+            swarm.manager.branch.as_deref(),
+            Some("main"),
+            "manager should report the base repo's branch"
+        );
+        assert_eq!(swarm.workers.len(), 2);
+        let w1 = swarm
+            .workers
+            .iter()
+            .find(|w| w.role == "worker-1")
+            .expect("worker-1 present");
+        assert_eq!(w1.branch.as_deref(), Some("worker-1"));
+        let w2 = swarm
+            .workers
+            .iter()
+            .find(|w| w.role == "worker-2")
+            .expect("worker-2 present");
+        assert_eq!(
+            w2.branch, None,
+            "detached HEAD worktree must not invent a branch name"
+        );
+    }
+
     /// Pane targets must be resolved from tmux under either numbering.
     #[tokio::test]
     async fn window_pane_target_matches_the_servers_numbering() {
@@ -3335,6 +3458,7 @@ exit 0
             manager: AgentInfo {
                 id: "demo/manager".to_string(),
                 role: "manager".to_string(),
+                branch: None,
                 worktree_path: PathBuf::from("/tmp/repo"),
                 tmux_target: "codex-demo:review.0".to_string(),
                 status: AgentStatus::default(),
@@ -3352,6 +3476,7 @@ exit 0
                 AgentInfo {
                     id: "demo/worker-1".to_string(),
                     role: "worker-1".to_string(),
+                    branch: None,
                     worktree_path: PathBuf::from("/tmp/repo-wt-1"),
                     tmux_target: "codex-demo:worker-1.0".to_string(),
                     status: AgentStatus::default(),
@@ -3368,6 +3493,7 @@ exit 0
                 AgentInfo {
                     id: "demo/worker-2".to_string(),
                     role: "worker-2".to_string(),
+                    branch: None,
                     worktree_path: PathBuf::from("/tmp/repo-wt-2"),
                     tmux_target: "codex-demo:worker-2.0".to_string(),
                     status: AgentStatus::default(),

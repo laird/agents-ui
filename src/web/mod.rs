@@ -102,9 +102,7 @@ impl AgentSnapshot {
             resurrection_attempts: info.resurrection_attempts,
             status_timestamp,
             worktree_path: info.worktree_path.to_string_lossy().into_owned(),
-            // The TUI-owned AgentInfo does not track a branch yet (see #328);
-            // the discovery path fills this in for the headless dashboard.
-            branch: None,
+            branch: info.branch.clone(),
         }
     }
 }
@@ -173,6 +171,7 @@ mod tests {
         AgentInfo {
             id: format!("test-repo/{role}"),
             role: role.to_string(),
+            branch: None,
             worktree_path: PathBuf::from("/tmp/test"),
             tmux_target: "test:0.0".to_string(),
             status: AgentStatus {

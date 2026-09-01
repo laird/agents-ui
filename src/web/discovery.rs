@@ -356,17 +356,6 @@ async fn build_agent_snapshot(
 /// One `git worktree list` per swarm refresh rather than a `git` call per
 /// agent. Paths are canonicalised so lookups match regardless of symlinks in
 /// either the git output or the pane's reported directory.
-///
-/// `git worktree list --porcelain` emits stanzas separated by blank lines:
-///
-/// ```text
-/// worktree /home/laird/src/kink-party
-/// HEAD 9f2c...
-/// branch refs/heads/master
-/// ```
-///
-/// A detached worktree has a `detached` line and no `branch` line, and is
-/// simply absent from the map.
 async fn worktree_branches(
     transport: &ServerTransport,
     repo_root: &std::path::Path,
@@ -390,33 +379,7 @@ async fn worktree_branches(
         return std::collections::HashMap::new();
     }
 
-    parse_worktree_porcelain(&String::from_utf8_lossy(&output.stdout))
-}
-
-fn parse_worktree_porcelain(stdout: &str) -> std::collections::HashMap<PathBuf, String> {
-    let mut map = std::collections::HashMap::new();
-    let mut current: Option<PathBuf> = None;
-
-    for line in stdout.lines() {
-        if let Some(path) = line.strip_prefix("worktree ") {
-            let p = PathBuf::from(path.trim());
-            // Canonicalise so a symlinked worktree still matches the pane path.
-            current = Some(std::fs::canonicalize(&p).unwrap_or(p));
-        } else if let Some(reference) = line.strip_prefix("branch ") {
-            if let Some(path) = current.take() {
-                let name = reference
-                    .trim()
-                    .strip_prefix("refs/heads/")
-                    .unwrap_or(reference.trim())
-                    .to_string();
-                map.insert(path, name);
-            }
-        } else if line.trim().is_empty() {
-            current = None;
-        }
-    }
-
-    map
+    crate::model::swarm::parse_worktree_porcelain(&String::from_utf8_lossy(&output.stdout))
 }
 
 /// Infer agent state from pane content when no status file is available.
@@ -540,68 +503,3 @@ fn strip_worktree_suffix(path: &std::path::Path, project_name: &str) -> PathBuf 
     path.to_path_buf()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::parse_worktree_porcelain;
-    use std::path::PathBuf;
-
-    #[test]
-    fn maps_worktrees_to_branch_names() {
-        // Paths that do not exist stay as written: canonicalize falls back to
-        // the original, which is what keeps this test hermetic.
-        let out = "\
-worktree /nonexistent/kink-party
-HEAD 9f2c1a
-branch refs/heads/master
-
-worktree /nonexistent/kink-party-wt-1
-HEAD 3b4d2e
-branch refs/heads/worker-1
-";
-        let map = parse_worktree_porcelain(out);
-
-        assert_eq!(map.len(), 2);
-        assert_eq!(
-            map.get(&PathBuf::from("/nonexistent/kink-party")).map(String::as_str),
-            Some("master")
-        );
-        assert_eq!(
-            map.get(&PathBuf::from("/nonexistent/kink-party-wt-1")).map(String::as_str),
-            Some("worker-1")
-        );
-    }
-
-    #[test]
-    fn omits_detached_worktrees_rather_than_inventing_a_branch() {
-        let out = "\
-worktree /nonexistent/base
-HEAD 9f2c1a
-branch refs/heads/main
-
-worktree /nonexistent/detached
-HEAD 3b4d2e
-detached
-";
-        let map = parse_worktree_porcelain(out);
-
-        assert_eq!(map.len(), 1);
-        assert!(!map.contains_key(&PathBuf::from("/nonexistent/detached")));
-    }
-
-    #[test]
-    fn handles_empty_and_malformed_output() {
-        assert!(parse_worktree_porcelain("").is_empty());
-        assert!(parse_worktree_porcelain("garbage\nmore garbage\n").is_empty());
-        // A branch line with no preceding worktree line must not panic.
-        assert!(parse_worktree_porcelain("branch refs/heads/orphan\n").is_empty());
-    }
-
-    #[test]
-    fn keeps_refs_that_are_not_under_refs_heads() {
-        let map = parse_worktree_porcelain("worktree /nonexistent/x\nbranch odd-ref\n");
-        assert_eq!(
-            map.get(&PathBuf::from("/nonexistent/x")).map(String::as_str),
-            Some("odd-ref")
-        );
-    }
-}
