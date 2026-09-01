@@ -77,8 +77,26 @@ async fn build_swarm_snapshot(
         return Ok(None);
     }
 
-    // Try to find the repo path from the tmux environment
-    let repo_path = find_repo_path(transport, session_name, &project_name).await;
+    // The manager pane is always started with `-c <repo_path>` (see
+    // `create_tmux_session`), so its actual cwd IS the repo root. That is a
+    // far more reliable source than `find_repo_path`'s session-environment
+    // PWD, which reflects whatever shell ran `tmux new-session`, not any
+    // pane's cwd -- and is frequently unset or wrong for a session this
+    // process did not launch itself.
+    let manager_pane_target = session_info
+        .windows
+        .iter()
+        .find(|w| w.name.eq_ignore_ascii_case("review"))
+        .and_then(|w| w.panes.first())
+        .map(|p| p.target.clone());
+
+    let repo_path = match &manager_pane_target {
+        Some(target) => match pane_current_path(transport, target).await {
+            Some(path) => Some(path),
+            None => find_repo_path(transport, session_name, &project_name).await,
+        },
+        None => find_repo_path(transport, session_name, &project_name).await,
+    };
     let repo_path_str = repo_path
         .as_ref()
         .map(|p| p.to_string_lossy().into_owned())
@@ -346,6 +364,33 @@ fn parse_session_name(name: &str) -> Option<(AgentType, String)> {
     }
 }
 
+/// Ask tmux for a pane's actual current working directory.
+async fn pane_current_path(transport: &ServerTransport, target: &str) -> Option<PathBuf> {
+    let output = transport
+        .output(
+            "tmux",
+            &[
+                "display-message".to_string(),
+                "-p".to_string(),
+                "-t".to_string(),
+                target.to_string(),
+                "#{pane_current_path}".to_string(),
+            ],
+            None,
+        )
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if path_str.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(path_str);
+    path.exists().then_some(path)
+}
+
 /// Find the repo path for a session via tmux environment or filesystem heuristics.
 async fn find_repo_path(
     transport: &ServerTransport,
@@ -409,4 +454,70 @@ fn strip_worktree_suffix(path: &std::path::Path, project_name: &str) -> PathBuf 
         }
     }
     path.to_path_buf()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil::{artifact_name, TempTree};
+
+    fn command_available(name: &str) -> bool {
+        std::process::Command::new("sh")
+            .args(["-lc", &format!("command -v {name} >/dev/null 2>&1")])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
+    async fn cleanup_tmux_session(session_name: &str) {
+        let _ = tokio::process::Command::new("tmux")
+            .args(["kill-session", "-t", session_name])
+            .output()
+            .await;
+    }
+
+    // Regression test for issue #329: the discovery path (a session this
+    // process did not launch) used to read the session's PWD environment
+    // variable for repo_path -- the cwd of whatever shell ran `tmux
+    // new-session`, not any pane's cwd -- and reported "" when that variable
+    // wasn't set. The launch path (`SwarmSnapshot::from_swarm`) never hit this
+    // because it already carries a known repo path, so only the discovery
+    // path needs coverage here.
+    #[tokio::test]
+    async fn discovered_swarm_reports_manager_pane_cwd_as_repo_path() {
+        crate::testutil::reap_stale_artifacts();
+        if !command_available("tmux") {
+            return;
+        }
+
+        let repo = TempTree::new("discovery-repo");
+        let session_name = format!("claude-{}", artifact_name("discovery"));
+
+        let status = tokio::process::Command::new("tmux")
+            .args(["new-session", "-d", "-s", &session_name, "-n", "review", "-c"])
+            .arg(repo.path())
+            .status()
+            .await
+            .expect("start tmux session");
+        assert!(status.success(), "failed to create tmux session");
+
+        let transport = ServerTransport::default();
+        let result = build_swarm_snapshot(&transport, &session_name).await;
+
+        cleanup_tmux_session(&session_name).await;
+
+        let snapshot = result
+            .expect("build_swarm_snapshot should succeed")
+            .expect("session should be recognized as a swarm");
+
+        assert!(
+            !snapshot.repo_path.is_empty(),
+            "repo_path should not be empty for a discovered swarm"
+        );
+        let expected = repo.path().canonicalize().expect("canonicalize expected repo path");
+        let actual = std::path::PathBuf::from(&snapshot.repo_path)
+            .canonicalize()
+            .expect("canonicalize reported repo path");
+        assert_eq!(actual, expected);
+    }
 }
