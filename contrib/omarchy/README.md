@@ -56,7 +56,8 @@ settings panel:
 | `port` | `7878` | Port `agents-tui --headless` listens on |
 | `refreshIntervalSec` | `5` | The dashboard polls tmux every 3s; polling faster gains nothing |
 | `notifyOnAttention` | `true` | Desktop notification when a worker starts waiting |
-| `openCommand` | `""` | Command run on click; empty uses `omarchy-agents-dashboard` |
+| `openWith` | `Web dashboard` | What a click or an alert opens: the browser dashboard, or `agents-tui` in a terminal |
+| `openCommand` | `""` | Overrides `openWith` when set; applies to both the click and the alert |
 
 ## Notes for Hyprland 0.56 / Omarchy 4
 

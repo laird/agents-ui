@@ -6,7 +6,9 @@
   "author": "laird",
   "license": "MIT",
   "description": "Live worker counts for agents-tui swarms, and one click to the dashboard.",
-  "kinds": ["bar-widget"],
+  "kinds": [
+    "bar-widget"
+  ],
   "activation": "on-demand",
   "entryPoints": {
     "barWidget": "Panel.qml"
@@ -15,19 +17,63 @@
     "displayName": "Agent Swarm",
     "description": "Busy, idle, and needs-attention worker counts read from the agents-tui headless dashboard. Hides itself when no swarm is running.",
     "category": "AI",
-    "aliases": ["swarm", "agents-tui"],
+    "aliases": [
+      "swarm",
+      "agents-tui"
+    ],
     "allowMultiple": false,
     "defaults": {
       "port": 7878,
       "refreshIntervalSec": 5,
       "notifyOnAttention": true,
-      "openCommand": ""
+      "openCommand": "",
+      "openWith": "Web dashboard"
     },
     "schema": [
-      { "key": "port", "type": "integer", "label": "Dashboard port", "min": 1, "max": 65535, "defaultValue": 7878, "description": "Port agents-tui --headless listens on." },
-      { "key": "refreshIntervalSec", "type": "integer", "label": "Refresh interval (seconds)", "min": 1, "max": 120, "step": 1, "defaultValue": 5, "description": "The dashboard itself polls tmux every 3s; polling faster than that gains nothing." },
-      { "key": "notifyOnAttention", "type": "boolean", "label": "Notify when a worker needs input", "defaultValue": true, "description": "Fire a desktop notification when a worker starts waiting, so the bar does not have to be watched." },
-      { "key": "openCommand", "type": "string", "label": "Open command", "defaultValue": "", "description": "Command run on click. Empty uses omarchy-agents-dashboard." }
+      {
+        "key": "port",
+        "type": "integer",
+        "label": "Dashboard port",
+        "min": 1,
+        "max": 65535,
+        "defaultValue": 7878,
+        "description": "Port agents-tui --headless listens on."
+      },
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 1,
+        "max": 120,
+        "step": 1,
+        "defaultValue": 5,
+        "description": "The dashboard itself polls tmux every 3s; polling faster than that gains nothing."
+      },
+      {
+        "key": "notifyOnAttention",
+        "type": "boolean",
+        "label": "Notify when a worker needs input",
+        "defaultValue": true,
+        "description": "Fire a desktop notification when a worker starts waiting, so the bar does not have to be watched."
+      },
+      {
+        "key": "openWith",
+        "type": "enum",
+        "label": "Open with",
+        "options": [
+          "Web dashboard",
+          "Terminal UI"
+        ],
+        "defaultValue": "Web dashboard",
+        "description": "What a click on the widget or on a needs-input alert opens. Web dashboard opens the browser view; Terminal UI opens agents-tui in a terminal."
+      },
+      {
+        "key": "openCommand",
+        "type": "string",
+        "label": "Open command",
+        "defaultValue": "",
+        "description": "Overrides 'Open with' when set. Run on click and on an alert. Empty uses the 'Open with' choice."
+      }
     ]
   }
 }

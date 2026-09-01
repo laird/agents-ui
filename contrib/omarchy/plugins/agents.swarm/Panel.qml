@@ -24,6 +24,7 @@ BarWidget {
   readonly property int port: Number(setting("port", 7878))
   readonly property int refreshIntervalSec: Math.max(1, Number(setting("refreshIntervalSec", 5)))
   readonly property bool notifyOnAttention: setting("notifyOnAttention", true) !== false
+  readonly property string openWith: String(setting("openWith", "Web dashboard"))
   readonly property string openCommand: String(setting("openCommand", "")).trim()
 
   property int busyCount: 0
@@ -172,8 +173,10 @@ BarWidget {
                "-p"]
     if (notifyId > 0) cmd = cmd.concat(["-r", String(notifyId)])
     notify.command = cmd.concat([headline,
-                                 "Click to open the swarm dashboard.",
-                                 "--exec", "omarchy-agents-dashboard"])
+                                 openWith === "Terminal UI"
+                                   ? "Click to open the swarm in a terminal."
+                                   : "Click to open the swarm dashboard.",
+                                 "--exec"]).concat(openArgv())
     notify.running = true
   }
 
@@ -191,8 +194,25 @@ BarWidget {
 
   Process { id: opener; running: false }
 
+  // What a click opens, resolved in one place so the widget and the alert can
+  // never disagree -- they did: the click honoured openCommand while the
+  // notification always ran the dashboard, so setting it changed one of the two.
+  function resolveOpenCommand() {
+    if (openCommand !== "") return openCommand
+    return openWith === "Terminal UI"
+      ? "xdg-terminal-exec --app-id=org.omarchy.agents-tui -e agents-tui"
+      : "omarchy-agents-dashboard"
+  }
+
+  // Wrapped in `bash -lc` rather than split on spaces: the command can come from
+  // a user-set openCommand with quoting and arguments in it, and
+  // omarchy-notification-send takes --exec as separate argv words.
+  function openArgv() {
+    return ["bash", "-lc", resolveOpenCommand()]
+  }
+
   function openDashboard() {
-    var cmd = root.openCommand !== "" ? root.openCommand : "omarchy-agents-dashboard"
+    var cmd = root.resolveOpenCommand()
     if (root.bar) root.bar.run(cmd)
     else { opener.command = ["bash", "-lc", cmd]; opener.running = true }
   }
