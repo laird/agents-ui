@@ -427,6 +427,9 @@
     .health-dead    { color: #cc4444; }
     .agent-completed { color: var(--text-dim); font-size: 0.75rem; }
     .agent-restarts  { color: var(--warning); font-size: 0.75rem; }
+    .agent-age            { color: var(--text-dim); }
+    .agent-age.stale      { color: var(--warning); }
+    .agent-age.very-stale { color: var(--error); }
     /* One dot per agent on the swarm card: the shape of the swarm at a glance,
        without opening it. */
     .agent-dots {
@@ -1359,6 +1362,29 @@
         (agent.current_issue_title ? ' ' + agent.current_issue_title : '');
     }
 
+    // Converts an ISO-8601 timestamp into a compact relative duration, e.g.
+    // "just now", "3m", "1h 5m". Mirrors the TUI's own age formatting.
+    function relativeTime(isoStr) {
+      const then = Date.parse(isoStr);
+      if (Number.isNaN(then)) return '';
+      const secs = Math.max(0, Math.floor((Date.now() - then) / 1000));
+      if (secs < 60) return 'just now';
+      const mins = Math.floor(secs / 60);
+      if (mins < 60) return mins + 'm';
+      const hours = Math.floor(mins / 60);
+      const remMins = mins % 60;
+      return remMins > 0 ? hours + 'h ' + remMins + 'm' : hours + 'h';
+    }
+
+    function formatAge(agent) {
+      if (!agent.status_timestamp) return '';
+      const then = Date.parse(agent.status_timestamp);
+      if (Number.isNaN(then)) return '';
+      const mins = Math.max(0, Date.now() - then) / 60000;
+      const tier = mins > 30 ? ' very-stale' : mins >= 5 ? ' stale' : '';
+      return '<span class="agent-age' + tier + '"> · ' + esc(relativeTime(agent.status_timestamp)) + '</span>';
+    }
+
     function healthIcon(h) {
       switch (h) {
         case 'Healthy':    return '<span class="health-icon health-ok" title="Healthy">✓</span>';
@@ -1396,6 +1422,7 @@
       const branchHtml = agent.branch
         ? '<span class="agent-branch" title="Checked-out branch"> · ⎇ ' + esc(agent.branch) + '</span>'
         : '';
+      const ageHtml = formatAge(agent);
       return (
         '<div class="agent-row" ' +
              'role="button" tabindex="0" ' +
@@ -1407,7 +1434,7 @@
             '<div class="agent-role">' + healthHtml + ' ' + esc(agent.role) + '</div>' +
             '<div class="agent-state-text">' +
               esc(agent.state) + esc(issueText) + worktreeHtml + branchHtml +
-              waitText + completedHtml + restartHtml +
+              ageHtml + waitText + completedHtml + restartHtml +
             '</div>' +
           '</div>' +
           '<span class="agent-row-arrow" aria-hidden="true">›</span>' +
