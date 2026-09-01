@@ -2,6 +2,7 @@ use ratatui::style::{Color, Modifier, Style};
 
 use crate::model::issue::{IssuePriority, IssueType};
 use crate::model::status::AgentState;
+use crate::model::swarm::HealthStatus;
 
 pub fn title_style() -> Style {
     Style::default()
@@ -32,6 +33,59 @@ pub fn status_style(state: &AgentState) -> Style {
         AgentState::Unknown(_) => Style::default().fg(Color::DarkGray),
     }
 }
+
+/// Single-glyph symbol for an agent state. Paired with [`status_style`] for
+/// colour, this is the one place every TUI view should get state vocabulary
+/// from, so a state renders identically wherever it appears.
+pub fn state_symbol(state: &AgentState) -> &'static str {
+    match state {
+        AgentState::Working { .. } => "●",
+        AgentState::Starting => "◐",
+        AgentState::Idle => "○",
+        AgentState::Completed { .. } => COMPLETED_SYMBOL,
+        AgentState::Stopped => "◌",
+        AgentState::Unknown(_) => "?",
+    }
+}
+
+/// Health glyph, matching the web UI's `healthIcon` exactly
+/// (`src/web/ui.html`): ✓ healthy, ⚠ stalled, ↺ restarting, ✗ dead.
+pub fn health_symbol(status: HealthStatus) -> &'static str {
+    match status {
+        HealthStatus::Healthy => "✓",
+        HealthStatus::Stalled => "⚠",
+        HealthStatus::Restarting => "↺",
+        HealthStatus::Dead => "✗",
+    }
+}
+
+/// Health colour, matching the web UI's `.health-ok`/`.health-warn`/
+/// `.health-restart`/`.health-dead` CSS classes.
+pub fn health_style(status: HealthStatus) -> Style {
+    match status {
+        HealthStatus::Healthy => Style::default().fg(Color::Green),
+        HealthStatus::Stalled => Style::default().fg(Color::Yellow),
+        HealthStatus::Restarting => Style::default().fg(Color::Cyan),
+        HealthStatus::Dead => Style::default().fg(Color::Red),
+    }
+}
+
+/// Generic "needs attention" marker (stale pane, waiting-for-input, blocked
+/// issues) — shares the [`HealthStatus::Stalled`] glyph so the app has one
+/// warning symbol, not several.
+pub const ATTENTION_SYMBOL: &str = "⚠";
+
+/// Generic restart/retry counter marker — shares the
+/// [`HealthStatus::Restarting`] glyph for the same reason.
+pub const RESTART_SYMBOL: &str = "↺";
+
+/// Checked markdown checkbox glyph (`- [x]`) — shares the
+/// [`HealthStatus::Healthy`] glyph so the app has one checkmark, not two.
+pub const CHECKED_BOX_SYMBOL: &str = "✓";
+
+/// "Completed" marker — used both for [`AgentState::Completed`] and for a
+/// completed-issue-count badge, so the app has one completion glyph.
+pub const COMPLETED_SYMBOL: &str = "✔";
 
 pub fn help_style() -> Style {
     Style::default().fg(Color::DarkGray)
@@ -196,6 +250,46 @@ mod tests {
                 Some(expected_fg),
                 "status_style({state:?}) should be {expected_fg:?}"
             );
+        }
+    }
+
+    #[test]
+    fn state_symbol_covers_all_variants_and_is_non_empty() {
+        let cases = [
+            AgentState::Working { issue: None },
+            AgentState::Working { issue: Some(1) },
+            AgentState::Starting,
+            AgentState::Idle,
+            AgentState::Completed { detail: "done".into() },
+            AgentState::Stopped,
+            AgentState::Unknown("?".into()),
+        ];
+        for state in cases {
+            assert!(
+                !state_symbol(&state).is_empty(),
+                "state_symbol({state:?}) should be non-empty"
+            );
+        }
+    }
+
+    #[test]
+    fn health_symbol_matches_web_glyphs() {
+        assert_eq!(health_symbol(HealthStatus::Healthy), "✓");
+        assert_eq!(health_symbol(HealthStatus::Stalled), "⚠");
+        assert_eq!(health_symbol(HealthStatus::Restarting), "↺");
+        assert_eq!(health_symbol(HealthStatus::Dead), "✗");
+    }
+
+    #[test]
+    fn health_style_covers_all_variants() {
+        let cases = [
+            (HealthStatus::Healthy, Color::Green),
+            (HealthStatus::Stalled, Color::Yellow),
+            (HealthStatus::Restarting, Color::Cyan),
+            (HealthStatus::Dead, Color::Red),
+        ];
+        for (status, expected_fg) in cases {
+            assert_eq!(health_style(status).fg, Some(expected_fg));
         }
     }
 

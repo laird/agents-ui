@@ -149,7 +149,17 @@ impl SwarmView {
         ];
         if stalled > 0 || dead > 0 || restarting > 0 {
             header_spans.push(Span::styled(
-                format!("Health: ✓{} ⚠{} ↺{} ✗{}  ", healthy, stalled, restarting, dead),
+                format!(
+                    "Health: {}{} {}{} {}{} {}{}  ",
+                    theme::health_symbol(HealthStatus::Healthy),
+                    healthy,
+                    theme::health_symbol(HealthStatus::Stalled),
+                    stalled,
+                    theme::health_symbol(HealthStatus::Restarting),
+                    restarting,
+                    theme::health_symbol(HealthStatus::Dead),
+                    dead
+                ),
                 if dead > 0 {
                     Style::default().fg(ratatui::style::Color::Red)
                 } else {
@@ -159,7 +169,10 @@ impl SwarmView {
         }
         if attention > 0 {
             let style = theme::attention_blink_style(blink);
-            header_spans.push(Span::styled(format!("⚠ {attention} need attention"), style));
+            header_spans.push(Span::styled(
+                format!("{} {attention} need attention", theme::ATTENTION_SYMBOL),
+                style,
+            ));
         }
         let left_len: usize = header_spans.iter().map(|s| s.content.len()).sum();
         header_spans.push(theme::hostname_right_span(
@@ -170,7 +183,10 @@ impl SwarmView {
         // Build header lines: status line + optional inline attention row
         let mut header_lines = vec![Line::from(header_spans)];
         if blocked_count > 0 {
-            let mut attn_spans = vec![Span::styled(" ⚠ ", theme::attention_style())];
+            let mut attn_spans = vec![Span::styled(
+                format!(" {} ", theme::ATTENTION_SYMBOL),
+                theme::attention_style(),
+            )];
             let show_n = blocked_count.min(3);
             for (idx, issue) in blocked_issues.iter().take(show_n).enumerate() {
                 if idx > 0 {
@@ -270,16 +286,17 @@ impl SwarmView {
                 } else {
                     theme::status_style(&w.status.state)
                 };
-                let (health_sym, health_style) = match w.health.status() {
-                    HealthStatus::Healthy => ("✓", Style::default().fg(ratatui::style::Color::Green)),
-                    HealthStatus::Stalled => ("⚠", Style::default().fg(ratatui::style::Color::Yellow)),
-                    HealthStatus::Restarting => ("↺", Style::default().fg(ratatui::style::Color::Cyan)),
-                    HealthStatus::Dead => ("✗", Style::default().fg(ratatui::style::Color::Red)),
-                };
+                let health_status = w.health.status();
 
-                let mut identity_spans = vec![Span::styled("● ", dot_style)];
+                let mut identity_spans = vec![Span::styled(
+                    format!("{} ", theme::state_symbol(&w.status.state)),
+                    dot_style,
+                )];
                 if !w.is_manager {
-                    identity_spans.push(Span::styled(format!("{health_sym} "), health_style));
+                    identity_spans.push(Span::styled(
+                        format!("{} ", theme::health_symbol(health_status)),
+                        theme::health_style(health_status),
+                    ));
                 }
                 identity_spans.push(Span::styled(w.role.clone(), theme::title_style()));
                 let identity = Line::from(identity_spans);
@@ -905,15 +922,15 @@ fn build_detail_line(agent: &AgentInfo, max_title_chars: usize) -> String {
     }
 
     if agent.waiting_for_input {
-        parts.push("⚠ Needs input".to_string());
+        parts.push(format!("{} Needs input", theme::ATTENTION_SYMBOL));
     }
 
     if !agent.is_manager && agent.completed_issue_count > 0 {
-        parts.push(format!("✔{}", agent.completed_issue_count));
+        parts.push(format!("{}{}", theme::COMPLETED_SYMBOL, agent.completed_issue_count));
     }
 
     if !agent.is_manager && agent.resurrection_attempts > 0 {
-        parts.push(format!("↺{}", agent.resurrection_attempts));
+        parts.push(format!("{}{}", theme::RESTART_SYMBOL, agent.resurrection_attempts));
     }
 
     parts.join(" · ")
@@ -961,7 +978,7 @@ mod tests {
         assert_eq!(truncate(s, 10), s);
         assert_eq!(truncate(s, 4), "↔↔↔…");
     }
-    use super::{SwarmPanel, SwarmView, agent_needs_input, build_detail_line, truncate};
+    use super::{SwarmPanel, SwarmView, agent_needs_input, build_detail_line, theme, truncate};
     use crate::model::issue::{GitHubIssue, IssueFilter, IssueState};
     use crate::model::status::{AgentState, AgentStatus};
     use crate::model::swarm::{AgentInfo, AgentType, Swarm};
@@ -1050,7 +1067,10 @@ mod tests {
     fn detail_line_shows_needs_input() {
         let mut agent = make_agent("worker-1", false, "", AgentState::Idle);
         agent.waiting_for_input = true;
-        assert_eq!(build_detail_line(&agent, 40), "Idle · ⚠ Needs input");
+        assert_eq!(
+            build_detail_line(&agent, 40),
+            format!("Idle · {} Needs input", theme::ATTENTION_SYMBOL)
+        );
     }
 
     #[test]
@@ -1066,7 +1086,10 @@ mod tests {
         let mut agent = make_agent("worker-1", false, "", AgentState::Idle);
         agent.completed_issue_count = 2;
         agent.resurrection_attempts = 1;
-        assert_eq!(build_detail_line(&agent, 40), "Idle · ✔2 · ↺1");
+        assert_eq!(
+            build_detail_line(&agent, 40),
+            format!("Idle · {}2 · {}1", theme::COMPLETED_SYMBOL, theme::RESTART_SYMBOL)
+        );
 
         let mut manager = make_agent("manager", true, "", AgentState::Idle);
         manager.completed_issue_count = 2;
@@ -1103,7 +1126,12 @@ mod tests {
         agent.resurrection_attempts = 1;
         assert_eq!(
             build_detail_line(&agent, 40),
-            "Working #2948 · #2948 Fix the flaky pane test · kink-party-wt-2 · ⚠ Needs input · ✔2 · ↺1"
+            format!(
+                "Working #2948 · #2948 Fix the flaky pane test · kink-party-wt-2 · {} Needs input · {}2 · {}1",
+                theme::ATTENTION_SYMBOL,
+                theme::COMPLETED_SYMBOL,
+                theme::RESTART_SYMBOL
+            )
         );
         assert!(!build_detail_line(&agent, 40).contains(" ·  · "));
         assert!(!build_detail_line(&agent, 40).contains("None"));
