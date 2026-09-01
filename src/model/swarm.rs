@@ -1,6 +1,6 @@
 use super::issue::IssueCache;
 use super::status::AgentStatus;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Health status of a worker agent.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -400,6 +400,27 @@ pub fn parse_worktree_porcelain(stdout: &str) -> std::collections::HashMap<PathB
     }
 
     map
+}
+
+/// Highest worker ordinal `N` among `<project_name>-wt-N` entries in a
+/// `git worktree list --porcelain` listing.
+///
+/// The worktree list is the durable record of how many workers a swarm had:
+/// unlike an in-memory `Swarm`, it survives the swarm being stopped and
+/// survives a daemon restart. Ordinal, not count — a worker whose worktree was
+/// individually removed from the middle of the roster must not renumber or
+/// hide the workers after it, so the caller can still recreate it in place.
+pub fn highest_worker_ordinal(worktree_list_porcelain: &str, project_name: &str) -> u32 {
+    let prefix = format!("{project_name}-wt-");
+    worktree_list_porcelain
+        .lines()
+        .filter_map(|line| line.strip_prefix("worktree "))
+        .filter_map(|path| {
+            let name = Path::new(path.trim()).file_name()?.to_str()?.to_string();
+            name.strip_prefix(&prefix)?.parse::<u32>().ok()
+        })
+        .max()
+        .unwrap_or(0)
 }
 
 /// A swarm of agents working on one repo.
@@ -1125,5 +1146,34 @@ detached
             map.get(&PathBuf::from("/nonexistent/x")).map(String::as_str),
             Some("odd-ref")
         );
+    }
+
+    #[test]
+    fn highest_worker_ordinal_takes_the_max_not_the_count() {
+        let listing = "worktree /src/proj\nbranch refs/heads/master\n\n\
+             worktree /src/proj-wt-1\nbranch refs/heads/worker-1\n\n\
+             worktree /src/proj-wt-3\nbranch refs/heads/worker-3\n\n";
+        // Only 2 worker entries present, but the highest ordinal is 3 -- a
+        // caller recreating the roster must restore worker-2 too, not just
+        // launch 2 workers.
+        assert_eq!(highest_worker_ordinal(listing, "proj"), 3);
+    }
+
+    #[test]
+    fn highest_worker_ordinal_ignores_other_projects_and_the_base_repo() {
+        let listing = "worktree /src/proj\nbranch refs/heads/master\n\n\
+             worktree /src/other-wt-9\nbranch refs/heads/worker-9\n\n";
+        assert_eq!(highest_worker_ordinal(listing, "proj"), 0);
+    }
+
+    #[test]
+    fn highest_worker_ordinal_ignores_non_numeric_suffixes() {
+        let listing = "worktree /src/proj-wt-abc\nbranch refs/heads/worker-abc\n\n";
+        assert_eq!(highest_worker_ordinal(listing, "proj"), 0);
+    }
+
+    #[test]
+    fn highest_worker_ordinal_is_zero_for_empty_output() {
+        assert_eq!(highest_worker_ordinal("", "proj"), 0);
     }
 }

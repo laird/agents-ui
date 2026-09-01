@@ -1,6 +1,7 @@
 use crate::model::swarm::{AgentType, Swarm};
 use anyhow::Result;
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 /// Configuration for launching a new swarm.
 pub struct SwarmConfig {
@@ -9,6 +10,11 @@ pub struct SwarmConfig {
     pub num_workers: u32,
     #[allow(dead_code)]
     pub agents_dir: PathBuf,
+    /// First input to send each agent, keyed by role (`"manager"`,
+    /// `"worker-1"`, ...), sent once the agent's pane is ready and before its
+    /// normal bootstrap/loop command. Only set by [`AgentRuntime::resume`];
+    /// a fresh launch has nothing to seed agents with.
+    pub resume_seeds: Option<HashMap<String, String>>,
 }
 
 /// Trait abstracting over different agent runtimes.
@@ -16,6 +22,16 @@ pub struct SwarmConfig {
 pub trait AgentRuntime {
     /// Launch a new swarm (manager + workers).
     async fn launch(&self, config: &SwarmConfig) -> Result<Swarm>;
+
+    /// Resume a stopped swarm: reattach to its existing worktrees (found by
+    /// name via `git worktree list`, not from any in-memory state) and seed
+    /// each agent with its own last handoff. Rejects a swarm that is not
+    /// actually stopped rather than double-launching agents into live panes.
+    ///
+    /// Returns the resumed swarm plus one human-readable note per agent
+    /// (handoff found, no handoff found, worktree recreated, etc.) for the
+    /// caller to show the user.
+    async fn resume(&self, repo_path: &Path, agent_type: &AgentType) -> Result<(Swarm, Vec<String>)>;
 
     /// Discover existing swarms from running tmux sessions.
     async fn discover(&self, agents_dir: &std::path::Path) -> Result<Vec<Swarm>>;

@@ -69,7 +69,84 @@ async fn collect_swarms(
             }
         }
     }
+
+    // A stopped swarm has no tmux session, so it is invisible above no matter
+    // what. Add back anything persisted at stop time and still marked
+    // stopped, so it still shows as a card (with a Resume button) rather than
+    // silently disappearing from the dashboard.
+    for snap in stopped_swarm_snapshots() {
+        if !swarms.iter().any(|s| s.project_name == snap.project_name) {
+            swarms.push(snap);
+        }
+    }
+
     Ok(swarms)
+}
+
+/// Synthetic snapshots for every persisted swarm still marked stopped.
+///
+/// There are no live panes to inspect, so agent state is a placeholder --
+/// enough for the dashboard to render a card and offer Resume, not a claim
+/// about what any agent is actually doing.
+fn stopped_swarm_snapshots() -> Vec<SwarmSnapshot> {
+    use crate::config::persistence::{is_swarm_stopped, list_saved_swarms, load_swarm_state};
+
+    let Ok(names) = list_saved_swarms() else {
+        return Vec::new();
+    };
+
+    names
+        .into_iter()
+        .filter(|name| is_swarm_stopped(name))
+        .filter_map(|name| {
+            let state = load_swarm_state(&name).ok().flatten()?;
+            Some(stopped_swarm_snapshot(&name, &state))
+        })
+        .collect()
+}
+
+fn stopped_placeholder_agent(project_name: &str, role: &str, is_manager: bool) -> AgentSnapshot {
+    AgentSnapshot {
+        id: format!("{project_name}/{role}"),
+        role: role.to_string(),
+        state: "Stopped".to_string(),
+        is_manager,
+        waiting_for_input: false,
+        current_issue: None,
+        current_issue_title: None,
+        pane_content: String::new(),
+        tmux_target: String::new(),
+        health: "Unknown".to_string(),
+        completed_issue_count: 0,
+        resurrection_attempts: 0,
+        status_timestamp: None,
+        worktree_path: String::new(),
+        branch: None,
+    }
+}
+
+fn stopped_swarm_snapshot(
+    project_name: &str,
+    state: &crate::config::persistence::SwarmState,
+) -> SwarmSnapshot {
+    let workers = (1..=state.num_workers)
+        .map(|i| stopped_placeholder_agent(project_name, &format!("worker-{i}"), false))
+        .collect();
+
+    SwarmSnapshot {
+        project_name: project_name.to_string(),
+        repo_path: state.repo_path.clone(),
+        agent_type: state.agent_type.clone(),
+        workflow: state.workflow.clone(),
+        tmux_session: state.tmux_session.clone(),
+        stopped: true,
+        busy_count: 0,
+        idle_count: 0,
+        attention_count: 0,
+        manager: stopped_placeholder_agent(project_name, "manager", true),
+        workers,
+        issues: Vec::new(),
+    }
 }
 
 /// Build a `SwarmSnapshot` for a single tmux session.

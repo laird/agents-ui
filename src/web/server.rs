@@ -382,6 +382,7 @@ async fn api_launch_swarm_handler(
         agent_type: agent_type.clone(),
         num_workers: body.num_workers,
         agents_dir: state.agents_dir.clone(),
+        resume_seeds: None,
     };
 
     tokio::spawn(async move {
@@ -468,6 +469,19 @@ async fn api_stop_swarm_handler(
     };
 
     let agent_count = swarm.workers.len() + 1;
+
+    // Persist enough to resume later even with nothing in memory — e.g. this
+    // process restarting before anyone resumes it.
+    let _ = crate::config::persistence::save_swarm_state(
+        &swarm.project_name,
+        &crate::config::persistence::SwarmState {
+            repo_path: swarm.repo_path.to_string_lossy().into_owned(),
+            agent_type: swarm.agent_type.to_string(),
+            tmux_session: swarm.tmux_session.clone(),
+            workflow: swarm.workflow.as_ref().map(|w| w.to_string()),
+            num_workers: swarm.workers.len() as u32,
+        },
+    );
 
     // Handoffs then teardown, off the request: writing a handoff per agent
     // runs git and gh in each worktree, which is far too slow to hold an HTTP
@@ -719,6 +733,68 @@ async fn api_switch_agent_handler(
     Ok(Json(json!({ "ok": true })))
 }
 
+/// Resume a stopped swarm.
+/// `POST /api/swarms/:project/resume`
+/// Returns immediately; the swarm resumes in a background task (worktree/tmux
+/// setup and handoff seeding are too slow to hold a response open for).
+/// Returns 404 if the project is not known to this process at all — neither
+/// live nor previously stopped-and-persisted.
+async fn api_resume_swarm_handler(
+    Path(project): Path<String>,
+    State(state): State<WebServerState>,
+) -> Result<Json<Value>, StatusCode> {
+    use crate::adapter::claude::ClaudeAdapter;
+    use crate::adapter::traits::AgentRuntime;
+    use crate::model::swarm::AgentType;
+    use crate::transport::ServerTransport;
+
+    // Prefer the live snapshot (this process saw the swarm before it was
+    // stopped); otherwise fall back to what was persisted at stop time, so
+    // this also works with nothing in memory, e.g. after this process itself
+    // restarted.
+    let live = state
+        .swarms
+        .read()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .iter()
+        .find(|s| s.project_name == project)
+        .map(|s| (s.repo_path.clone(), s.agent_type.clone()));
+
+    let (repo_path, agent_type_name) = match live {
+        Some(found) => found,
+        None => {
+            let saved = crate::config::persistence::load_swarm_state(&project)
+                .ok()
+                .flatten()
+                .ok_or(StatusCode::NOT_FOUND)?;
+            (saved.repo_path, saved.agent_type)
+        }
+    };
+
+    let agent_type: AgentType = match agent_type_name.as_str() {
+        "Codex" => AgentType::Codex,
+        "Droid" => AgentType::Droid,
+        "Gemini" => AgentType::Gemini,
+        _ => AgentType::Claude,
+    };
+    let repo_path = std::path::PathBuf::from(repo_path);
+    if !repo_path.exists() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    tokio::spawn(async move {
+        let adapter = ClaudeAdapter::new(agent_type.clone(), ServerTransport::new(None));
+        match adapter.resume(&repo_path, &agent_type).await {
+            Ok((_swarm, notes)) => {
+                tracing::info!("Resumed swarm {project}: {}", notes.join("; "));
+            }
+            Err(e) => tracing::error!("Failed to resume swarm {project}: {e:#}"),
+        }
+    });
+
+    Ok(Json(json!({ "ok": true })))
+}
+
 /// Find an agent (manager or worker) by role within a swarm snapshot.
 fn find_agent<'a>(
     swarm: &'a super::SwarmSnapshot,
@@ -741,6 +817,10 @@ pub async fn run(port: u16, state: WebServerState) -> Result<()> {
         .route(
             "/api/swarms/{project}",
             delete(api_stop_swarm_handler).patch(api_switch_agent_handler),
+        )
+        .route(
+            "/api/swarms/{project}/resume",
+            post(api_resume_swarm_handler),
         )
         .route(
             "/api/swarms/{project}/workers",
@@ -792,6 +872,10 @@ mod tests {
             .route("/api/repos", get(api_repos_handler))
             .route("/api/agent-types", get(api_agent_types_handler))
             .route("/api/swarms/{project}", delete(api_stop_swarm_handler))
+            .route(
+                "/api/swarms/{project}/resume",
+                post(api_resume_swarm_handler),
+            )
             .route("/api/swarms/{project}/workers", post(api_add_worker_handler))
             .route(
                 "/api/swarms/{project}/agents/{role}/pane",
@@ -1119,6 +1203,56 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn api_resume_swarm_returns_404_for_unknown_project() {
+        let app = make_app(make_web_state(new_shared_state()));
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/swarms/ghost/resume")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn api_resume_swarm_returns_ok_for_a_project_known_from_persisted_state() {
+        // Nothing live in memory -- only a `swarm.toml` from a previous stop,
+        // as would be the case after this process itself restarted. A unique
+        // project name keeps this independent of other tests touching the
+        // shared config dir.
+        let project = format!("resume-endpoint-test-{}", std::process::id());
+        let repo_path = std::env::temp_dir().join(format!("agents-ui-{project}-repo"));
+        std::fs::create_dir_all(&repo_path).unwrap();
+
+        crate::config::persistence::save_swarm_state(
+            &project,
+            &crate::config::persistence::SwarmState {
+                repo_path: repo_path.to_string_lossy().into_owned(),
+                agent_type: "Claude".to_string(),
+                tmux_session: format!("claude-{project}"),
+                workflow: None,
+                num_workers: 1,
+            },
+        )
+        .unwrap();
+
+        let app = make_app(make_web_state(new_shared_state()));
+        let req = Request::builder()
+            .method("POST")
+            .uri(format!("/api/swarms/{project}/resume"))
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let dir = crate::config::persistence::config_dir()
+            .join("swarms")
+            .join(&project);
+        std::fs::remove_dir_all(dir).ok();
+        std::fs::remove_dir_all(repo_path).ok();
     }
 
     #[tokio::test]

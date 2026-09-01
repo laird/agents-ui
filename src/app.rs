@@ -449,6 +449,8 @@ pub struct App {
     pub confirm_teardown: Option<usize>,
     /// Pending swarm stop-all confirmation (swarm index).
     pub confirm_stop: Option<usize>,
+    /// Pending swarm resume confirmation (swarm index).
+    pub confirm_resume: Option<usize>,
     /// Default runtime for launched/discovered swarms.
     pub default_agent_type: AgentType,
     /// True when runtime was explicitly pinned via CLI flag.
@@ -568,6 +570,7 @@ impl App {
             create_issue_form: None,
             confirm_teardown: None,
             confirm_stop: None,
+            confirm_resume: None,
             default_agent_type,
             runtime_locked_from_cli,
             runtime_pref_repo_root,
@@ -1787,6 +1790,7 @@ impl App {
             agent_type: agent_type.clone(),
             num_workers,
             agents_dir: self.agents_dir.clone(),
+            resume_seeds: None,
         };
         let tx = self.events.tx();
         let pname = project_name.clone();
@@ -2290,6 +2294,20 @@ impl App {
                             crate::adapter::claude::mark_agent_stopped(&worker.worktree_path);
                         }
 
+                        // Persist enough to resume later even with nothing in
+                        // memory — e.g. this process restarting before anyone
+                        // resumes it.
+                        let _ = crate::config::persistence::save_swarm_state(
+                            &project,
+                            &crate::config::persistence::SwarmState {
+                                repo_path: swarm.repo_path.to_string_lossy().into_owned(),
+                                agent_type: swarm.agent_type.to_string(),
+                                tmux_session: swarm.tmux_session.clone(),
+                                workflow: swarm.workflow.as_ref().map(|w| w.to_string()),
+                                num_workers: swarm.workers.len() as u32,
+                            },
+                        );
+
                         // Handoffs first: teardown kills the panes, and with
                         // them the only record of what each agent was doing
                         // and what it left uncommitted in its worktree.
@@ -2325,6 +2343,43 @@ impl App {
                 _ => {
                     self.confirm_stop = None;
                     self.set_status("Stop cancelled".to_string());
+                }
+            }
+            return Ok(());
+        }
+
+        // Handle resume confirmation from Repo View
+        if let Some(idx) = self.confirm_resume {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    if idx < self.swarms.len() {
+                        let repo_path = self.swarms[idx].repo_path.clone();
+                        let agent_type = self.swarms[idx].agent_type.clone();
+                        let project = self.swarms[idx].project_name.clone();
+                        self.set_status(format!("Resuming {project}..."));
+                        match self.adapter.resume(&repo_path, &agent_type).await {
+                            Ok((swarm, notes)) => {
+                                self.swarms[idx] = swarm;
+                                self.start_all_pane_watchers();
+                                self.set_status(format!(
+                                    "Resumed {project}: {}",
+                                    if notes.is_empty() {
+                                        "no agents to seed".to_string()
+                                    } else {
+                                        notes.join("; ")
+                                    }
+                                ));
+                            }
+                            Err(e) => {
+                                self.set_status(format!("Resume failed: {e:#}"));
+                            }
+                        }
+                    }
+                    self.confirm_resume = None;
+                }
+                _ => {
+                    self.confirm_resume = None;
+                    self.set_status("Resume cancelled".to_string());
                 }
             }
             return Ok(());
@@ -2686,6 +2741,18 @@ impl App {
                             let project = self.swarms[swarm_idx].project_name.clone();
                             self.confirm_stop = Some(swarm_idx);
                             self.set_status(format!("Stop all workers in {project}? (y to confirm, any other key to cancel)"));
+                        }
+                    }
+                    KeyCode::Char('U') => {
+                        // Resume a stopped swarm (with confirmation)
+                        if let Some(swarm) = self.swarms.get(swarm_idx) {
+                            if swarm.stopped {
+                                let project = swarm.project_name.clone();
+                                self.confirm_resume = Some(swarm_idx);
+                                self.set_status(format!("Resume {project}? (y to confirm, any other key to cancel)"));
+                            } else {
+                                self.set_status("Swarm is not stopped".to_string());
+                            }
                         }
                     }
                     KeyCode::Char('T') => {

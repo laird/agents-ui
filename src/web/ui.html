@@ -1177,6 +1177,20 @@
       }
     }
 
+    async function resumeSwarm(project) {
+      if (!confirm('Resume ' + project + '? Each agent will be seeded with its last handoff.')) return;
+      try {
+        const r = await fetch('/api/swarms/' + encodeURIComponent(project) + '/resume', { method: 'POST' });
+        if (r.ok) {
+          setTimeout(() => { refresh(); }, 4000);
+        } else {
+          alert('Resume failed (HTTP ' + r.status + ')');
+        }
+      } catch (err) {
+        alert('Error: ' + err.message);
+      }
+    }
+
     // Per-swarm agent type override (set by the agent-type switcher, null = use swarm default).
     const swarmAgentTypeOverride = {};
 
@@ -1213,23 +1227,6 @@
           alert('Switch agent failed (HTTP ' + r.status + ')');
         } else {
           setTimeout(() => { refresh(); }, 5000);
-        }
-      } catch (err) {
-        alert('Error: ' + err.message);
-      }
-    }
-
-    async function startSwarm(repoPath, agentType, numWorkers) {
-      try {
-        const r = await fetch('/api/swarms', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ repo_path: repoPath, agent_type: agentType, num_workers: numWorkers || 2 }),
-        });
-        if (r.ok) {
-          setTimeout(() => { refresh(); }, 4000);
-        } else {
-          alert('Start failed (HTTP ' + r.status + ')');
         }
       } catch (err) {
         alert('Error: ' + err.message);
@@ -1451,7 +1448,7 @@
             '</select>';
           return '<div class="action-bar">' +
             (swarm.stopped
-              ? '<button class="action-btn start-btn" onclick="startSwarm(' + JSON.stringify(swarm.repo_path) + ',' + JSON.stringify(swarm.agent_type) + ',' + swarm.workers.length + ')">▶ Start</button>'
+              ? '<button class="action-btn start-btn" onclick="resumeSwarm(' + JSON.stringify(proj) + ')">⏵ Resume</button>'
               : '<button class="action-btn stop-btn" onclick="stopSwarm(' + JSON.stringify(proj) + ')">■ Stop</button>' +
                 agentTypeSelector +
                 '<button class="action-btn add-worker-btn" onclick="addWorker(' + JSON.stringify(proj) + ')">+ Add Worker</button>'

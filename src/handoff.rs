@@ -139,18 +139,56 @@ pub fn render(h: &Handoff, timestamp: &str) -> String {
     out
 }
 
+/// Replace anything that is not alphanumeric (plus `-`, for `role`) with `-`,
+/// so the result is always a safe single path component.
+fn sanitize_component(value: &str, keep_dash: bool) -> String {
+    value
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || (keep_dash && c == '-') {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
 /// Filename for the worktree copy. Timestamped so stopping twice does not
 /// overwrite the earlier record.
 pub fn file_name(role: &str, timestamp: &str) -> String {
-    let safe_role: String = role
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
-        .collect();
-    let safe_ts: String = timestamp
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect();
+    let safe_role = sanitize_component(role, true);
+    let safe_ts = sanitize_component(timestamp, false);
     format!("handoff-{safe_role}-{safe_ts}.md")
+}
+
+/// Directory a role's handoffs are written to, inside its worktree.
+fn handoffs_dir(worktree: &Path) -> PathBuf {
+    worktree.join(".agents-ui").join("handoffs")
+}
+
+/// Newest handoff written for `role` in this worktree, if any.
+///
+/// Files are named `handoff-<role>-<timestamp>.md` (see [`file_name`]) with an
+/// ISO-8601 timestamp whose non-alphanumeric characters have been replaced, so
+/// lexical order of matching filenames is chronological order — no need to
+/// parse the timestamp back out. Returns the file's path and its raw contents;
+/// the body is handed to the resuming agent verbatim, not parsed back into a
+/// [`Handoff`].
+pub fn latest_for_role(worktree: &Path, role: &str) -> Option<(PathBuf, String)> {
+    let dir = handoffs_dir(worktree);
+    let prefix = format!("handoff-{}-", sanitize_component(role, true));
+
+    let newest_name = std::fs::read_dir(&dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|name| name.starts_with(&prefix) && name.ends_with(".md"))
+        .max()?;
+
+    let path = dir.join(newest_name);
+    let body = std::fs::read_to_string(&path).ok()?;
+    Some((path, body))
 }
 
 /// Collect the git half of a handoff. Best-effort: a worktree that is gone, or
@@ -214,7 +252,7 @@ pub async fn collect_git_state(
 
 /// Write the handoff into the agent's worktree. Returns the path written.
 pub fn write_to_worktree(h: &Handoff, body: &str, timestamp: &str) -> anyhow::Result<PathBuf> {
-    let dir = h.worktree.join(".agents-ui").join("handoffs");
+    let dir = handoffs_dir(&h.worktree);
     std::fs::create_dir_all(&dir)?;
     let path = dir.join(file_name(&h.role, timestamp));
     std::fs::write(&path, body)?;
@@ -359,6 +397,73 @@ mod tests {
         assert!(!n.contains(':'), "must be portable: {n}");
         assert!(n.starts_with("handoff-worker-3-"));
         assert!(n.ends_with(".md"));
+    }
+
+    fn temp_worktree(name: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        std::env::temp_dir().join(format!("agents-ui-handoff-{name}-{}-{nanos}", std::process::id()))
+    }
+
+    fn write_handoff(worktree: &Path, role: &str, timestamp: &str, body: &str) {
+        std::fs::create_dir_all(handoffs_dir(worktree)).unwrap();
+        std::fs::write(handoffs_dir(worktree).join(file_name(role, timestamp)), body).unwrap();
+    }
+
+    #[test]
+    fn latest_for_role_picks_the_newest_of_several_timestamps() {
+        let wt = temp_worktree("newest");
+        write_handoff(&wt, "worker-3", "2026-09-01T10-00-00Z", "old");
+        write_handoff(&wt, "worker-3", "2026-09-01T18-00-00Z", "newest");
+        write_handoff(&wt, "worker-3", "2026-09-01T14-00-00Z", "middle");
+
+        let (path, body) = latest_for_role(&wt, "worker-3").expect("expected a handoff");
+        assert_eq!(body, "newest");
+        assert!(path.to_string_lossy().contains("18-00-00Z"));
+
+        std::fs::remove_dir_all(&wt).ok();
+    }
+
+    #[test]
+    fn latest_for_role_ignores_other_roles() {
+        let wt = temp_worktree("other-roles");
+        write_handoff(&wt, "worker-1", "2026-09-01T10-00-00Z", "worker-1 body");
+        write_handoff(&wt, "worker-10", "2026-09-01T12-00-00Z", "worker-10 body");
+        write_handoff(&wt, "manager", "2026-09-01T11-00-00Z", "manager body");
+
+        let (_, body) = latest_for_role(&wt, "worker-1").expect("expected a handoff");
+        assert_eq!(body, "worker-1 body", "must not match worker-10's file");
+
+        std::fs::remove_dir_all(&wt).ok();
+    }
+
+    #[test]
+    fn latest_for_role_returns_none_when_no_files_exist() {
+        let wt = temp_worktree("no-files");
+        assert!(latest_for_role(&wt, "worker-1").is_none());
+
+        std::fs::create_dir_all(handoffs_dir(&wt)).unwrap();
+        assert!(
+            latest_for_role(&wt, "worker-1").is_none(),
+            "empty handoffs dir should also yield None"
+        );
+
+        std::fs::remove_dir_all(&wt).ok();
+    }
+
+    #[test]
+    fn latest_for_role_does_not_panic_on_a_malformed_name() {
+        let wt = temp_worktree("malformed");
+        std::fs::create_dir_all(handoffs_dir(&wt)).unwrap();
+        // Matches the prefix and suffix but has no usable timestamp — must not panic.
+        std::fs::write(handoffs_dir(&wt).join("handoff-worker-1-.md"), "body").unwrap();
+
+        let result = latest_for_role(&wt, "worker-1");
+        assert!(result.is_some());
+
+        std::fs::remove_dir_all(&wt).ok();
     }
 }
 
