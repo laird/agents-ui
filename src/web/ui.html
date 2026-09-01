@@ -797,6 +797,11 @@
         repos:      [],
         launching:  false,
         status:     null,  // { ok, msg }
+        // The 5s refresh loop rebuilds this panel's DOM, so anything typed
+        // into it has to live in state or it is wiped on the next tick.
+        repoPath:   '',
+        agentType:  'Claude',
+        numWorkers: 3,
       },
     };
 
@@ -931,6 +936,8 @@
               '<div class="form-field" style="grid-column:1/-1">' +
                 '<label class="form-label" for="launch-repo">Repository path</label>' +
                 '<input class="form-input" id="launch-repo" type="text" list="repo-datalist" ' +
+                       'value="' + esc(L.repoPath) + '" ' +
+                       'oninput="state.launch.repoPath = this.value" ' +
                        'placeholder="/path/to/your/repo" autocomplete="off" />' +
                 '<datalist id="repo-datalist">' + repoOptions + '</datalist>' +
               '</div>' +
@@ -938,16 +945,19 @@
             '<div class="launch-form-row">' +
               '<div class="form-field">' +
                 '<label class="form-label" for="launch-agent-type">Agent type</label>' +
-                '<select class="form-select" id="launch-agent-type">' +
-                  '<option value="Claude">Claude</option>' +
-                  '<option value="Codex">Codex</option>' +
-                  '<option value="Droid">Droid</option>' +
-                  '<option value="Gemini">Gemini</option>' +
+                '<select class="form-select" id="launch-agent-type" ' +
+                        'onchange="state.launch.agentType = this.value">' +
+                  ['Claude', 'Codex', 'Droid', 'Gemini'].map(t =>
+                    '<option value="' + t + '"' +
+                    (t === L.agentType ? ' selected' : '') + '>' + t + '</option>'
+                  ).join('') +
                 '</select>' +
               '</div>' +
               '<div class="form-field">' +
                 '<label class="form-label" for="launch-workers">Workers</label>' +
-                '<input class="form-input" id="launch-workers" type="number" min="1" max="20" value="3" />' +
+                '<input class="form-input" id="launch-workers" type="number" min="1" max="20" ' +
+                       'value="' + L.numWorkers + '" ' +
+                       'oninput="state.launch.numWorkers = parseInt(this.value, 10) || 1" />' +
               '</div>' +
               '<div class="form-field" style="justify-content:flex-end;padding-top:1.35rem">' +
                 '<button class="launch-btn" id="launch-btn" onclick="submitLaunchSwarm()"' +
@@ -973,10 +983,32 @@
       refreshLaunchPanel();
     }
 
+    // Replacing innerHTML destroys whatever element had focus. Without this the
+    // 5s refresh loop pulls the caret out of the launch form mid-typing and
+    // closes the datalist dropdown, which reads as the field refusing input.
+    function preservingFocus(mutate) {
+      const active = document.activeElement;
+      const id = active && active.id;
+      let start = null, end = null;
+      // selectionStart throws on input types that do not support selection
+      // (number, and some browsers' date inputs), so probing has to be guarded.
+      try { start = active.selectionStart; end = active.selectionEnd; } catch (e) {}
+
+      mutate();
+
+      if (!id) return;
+      const restored = document.getElementById(id);
+      if (!restored || restored === document.activeElement) return;
+      restored.focus();
+      if (start != null && restored.setSelectionRange) {
+        try { restored.setSelectionRange(start, end); } catch (e) {}
+      }
+    }
+
     function refreshLaunchPanel() {
       const container = document.getElementById('launch-panel-container');
       if (container) {
-        container.innerHTML = renderLaunchPanel();
+        preservingFocus(() => { container.innerHTML = renderLaunchPanel(); });
       }
     }
 
@@ -994,9 +1026,11 @@
 
       if (!repoEl || !typeEl || !workersEl) return;
 
-      const repoPath   = repoEl.value.trim();
-      const agentType  = typeEl.value;
-      const numWorkers = parseInt(workersEl.value, 10) || 3;
+      // Read through state: the refresh loop can rebuild these elements between
+      // the click and this handler running, and state is the durable copy.
+      const repoPath   = (state.launch.repoPath || repoEl.value).trim();
+      const agentType  = state.launch.agentType || typeEl.value;
+      const numWorkers = state.launch.numWorkers || parseInt(workersEl.value, 10) || 3;
 
       if (!repoPath) {
         state.launch.status = { ok: false, msg: 'Please enter a repository path.' };
@@ -1017,6 +1051,7 @@
         const data = await r.json();
         if (r.ok && data.ok) {
           state.launch.status = { ok: true, msg: 'Swarm launching for ' + (data.project_name || repoPath) + '! Refresh in a few seconds.' };
+          state.launch.repoPath = '';
           // Refresh swarms after a short delay to pick up the new swarm
           setTimeout(() => { refresh(); }, 4000);
         } else {
@@ -1418,7 +1453,7 @@
         state.project = null;
       }
 
-      app.innerHTML = renderReposList();
+      preservingFocus(() => { app.innerHTML = renderReposList(); });
     }
 
     // ── Navigation ─────────────────────────────────────────────────────────────

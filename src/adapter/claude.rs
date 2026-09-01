@@ -2643,6 +2643,24 @@ exit 0
         );
     }
 
+    /// Wait until the pane shows ANY of `markers`; returns the output, or an
+    /// empty string on timeout.
+    async fn wait_for_any_marker(
+        adapter: &ClaudeAdapter,
+        target: &str,
+        markers: &[&str],
+    ) -> String {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while std::time::Instant::now() < deadline {
+            let output = adapter.capture_output(target).await.unwrap_or_default();
+            if markers.iter().any(|marker| output.contains(marker)) {
+                return output;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+        String::new()
+    }
+
     async fn cleanup_tmux_session(session_name: &str) {
         let _ = tokio::process::Command::new("tmux")
             .args(["kill-session", "-t", session_name])
@@ -2755,21 +2773,10 @@ exit 0
 
             let swarm = adapter.launch_with_progress(&config, |_| {}).await.unwrap();
             let (manager_markers, worker_markers): (&[&str], &[&str]) = match runtime {
-                // Codex takes one of two correct paths depending on whether
-                // the installed CLI has /goal, and `codex_supports_goals()` is
-                // a process-wide OnceLock -- whichever test probes first fixes
-                // it for the whole binary. Assert whichever path was actually
-                // taken instead of pinning the one this machine happens to use.
-                AgentType::Codex => {
-                    if super::runtime_uses_loop_wrappers(&AgentType::Codex) {
-                        (
-                            &["Starting Codex monitor loop", "== Codex Worker Monitor =="],
-                            &[] as &[&str],
-                        )
-                    } else {
-                        (&["What can I help"], &[] as &[&str])
-                    }
-                }
+                // Codex is asserted separately, below: it has two correct
+                // launch paths and which one runs is not predictable from
+                // here. See the `either_marker` check after this match.
+                AgentType::Codex => (&[] as &[&str], &[] as &[&str]),
                 // Pi, like Droid, launches both roles as shell loops whose
                 // scripts do not exist under the test's temp agents dir, so
                 // there is no marker to wait for -- the assertion here is that
@@ -2787,6 +2794,25 @@ exit 0
             };
             let manager_output =
                 wait_for_pane_markers(&adapter, &swarm.manager.tmux_target, manager_markers).await;
+
+            // Codex launches interactively when the CLI has /goal and through a
+            // shell wrapper when it does not -- and the wrapper is also chosen
+            // whenever its script is findable. Both are correct, the choice is
+            // made from two independent inputs (a process-wide probe cache and
+            // script presence), so assert that SOMETHING started rather than
+            // predicting which.
+            if matches!(runtime, AgentType::Codex) {
+                let output = wait_for_any_marker(
+                    &adapter,
+                    &swarm.manager.tmux_target,
+                    &["Starting Codex monitor loop", "What can I help"],
+                )
+                .await;
+                assert!(
+                    !output.is_empty(),
+                    "Codex manager started neither its wrapper nor its REPL"
+                );
+            }
             // Only the interactive runtimes print the fake agent's banner; the
             // wrapper runtimes never start the binary at all.
             if matches!(runtime, AgentType::Claude) {
