@@ -100,3 +100,15 @@ cargo build
 **Test Reports**:
 - Location: `docs/test/regression-reports/`
 
+
+### Merge Mode
+```
+merge
+```
+Options: `merge` (auto-merge to parent branch and push) or `pr` (push feature branch and create a pull request, then stop).
+
+### Integration Branch
+```
+master
+```
+The shared branch all completed work is merged into. In a parallel-worktree swarm this MUST be the real shared branch (e.g. `main`), never a per-worktree branch — otherwise fixes strand on `main-wt-N` and never converge.
