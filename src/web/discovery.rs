@@ -77,12 +77,43 @@ async fn build_swarm_snapshot(
         return Ok(None);
     }
 
-    // Try to find the repo path from the tmux environment
-    let repo_path = find_repo_path(transport, session_name, &project_name).await;
+    // Resolve the repo from the manager pane's working directory.
+    //
+    // The previous approach asked tmux for the session's PWD, but a tmux
+    // session environment does not carry PWD -- the server answers "unknown
+    // variable: PWD" -- so that lookup always failed and fell through to a
+    // cwd-relative guess that is meaningless for a headless daemon. The
+    // result was an empty repo_path, which in turn left every worker's
+    // worktree unresolved and every status file unread, so the dashboard
+    // reported no issue for agents that were plainly working on one.
+    //
+    // The panes already know where they are. Ask them.
+    let manager_pane_path = session_info
+        .windows
+        .iter()
+        .find(|w| w.name.eq_ignore_ascii_case("review"))
+        .and_then(|w| w.panes.first())
+        .and_then(|p| p.current_path.as_deref());
+
+    let repo_path = match manager_pane_path {
+        Some(path) => Some(strip_worktree_suffix(
+            std::path::Path::new(path),
+            &project_name,
+        )),
+        // Kept as a fallback for sessions whose manager window is missing or
+        // whose panes report no path.
+        None => find_repo_path(transport, session_name, &project_name).await,
+    };
     let repo_path_str = repo_path
         .as_ref()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_default();
+
+    // One `git worktree list` per swarm refresh, not one `git` call per agent.
+    let branches = match repo_path.as_deref() {
+        Some(root) => worktree_branches(transport, root).await,
+        None => std::collections::HashMap::new(),
+    };
 
     // Collect agent snapshots from all panes.
     //
@@ -121,6 +152,8 @@ async fn build_swarm_snapshot(
                 ordinal,
                 &project_name,
                 repo_path.as_deref(),
+                pane.current_path.as_deref(),
+                &branches,
                 &agent_type,
             )
             .await;
@@ -210,6 +243,8 @@ this swarm is running without a manager."
         completed_issue_count: 0,
         resurrection_attempts: 0,
         status_timestamp: None,
+        worktree_path: String::new(),
+        branch: None,
     }
 }
 
@@ -220,6 +255,8 @@ async fn build_agent_snapshot(
     ordinal: u32,
     project_name: &str,
     repo_path: Option<&std::path::Path>,
+    pane_path: Option<&str>,
+    branches: &std::collections::HashMap<PathBuf, String>,
     agent_type: &AgentType,
 ) -> AgentSnapshot {
 
@@ -235,18 +272,37 @@ async fn build_agent_snapshot(
         format!("worker-{ordinal}")
     };
 
-    // Derive worktree path for status file lookup
-    let worktree_path: Option<PathBuf> = repo_path.and_then(|base| {
-        if is_manager {
-            Some(base.to_path_buf())
-        } else {
-            // Workers live in <parent>/<project>-wt-<N>
-            let parent = base.parent()?;
-            let wt_name = format!("{project_name}-wt-{ordinal}");
-            let p = parent.join(&wt_name);
-            if p.exists() { Some(p) } else { None }
-        }
-    });
+    // Worktree for status-file lookup. The pane's own working directory is
+    // authoritative -- it is where the agent actually is. The <project>-wt-<N>
+    // construction below is only a fallback for panes that report no path, and
+    // it silently yields None whenever the swarm uses any other naming.
+    let worktree_path: Option<PathBuf> = pane_path
+        .map(PathBuf::from)
+        .filter(|p| p.exists())
+        .or_else(|| {
+            repo_path.and_then(|base| {
+                if is_manager {
+                    Some(base.to_path_buf())
+                } else {
+                    // Workers live in <parent>/<project>-wt-<N>
+                    let parent = base.parent()?;
+                    let wt_name = format!("{project_name}-wt-{ordinal}");
+                    let p = parent.join(&wt_name);
+                    if p.exists() { Some(p) } else { None }
+                }
+            })
+        });
+
+    // Branch for this worktree, if git reported one. A detached HEAD has no
+    // branch and is left as None rather than invented.
+    let branch = worktree_path
+        .as_ref()
+        .and_then(|wt| {
+            std::fs::canonicalize(wt)
+                .ok()
+                .and_then(|c| branches.get(&c).cloned())
+                .or_else(|| branches.get(wt).cloned())
+        });
 
     // Read status file if available
     let (state_str, current_issue) = if let Some(ref wt) = worktree_path {
@@ -287,7 +343,80 @@ async fn build_agent_snapshot(
         completed_issue_count: 0,
         resurrection_attempts: 0,
         status_timestamp: None,
+        worktree_path: worktree_path
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        branch,
     }
+}
+
+/// Map each of a repo's worktrees to the branch checked out in it.
+///
+/// One `git worktree list` per swarm refresh rather than a `git` call per
+/// agent. Paths are canonicalised so lookups match regardless of symlinks in
+/// either the git output or the pane's reported directory.
+///
+/// `git worktree list --porcelain` emits stanzas separated by blank lines:
+///
+/// ```text
+/// worktree /home/laird/src/kink-party
+/// HEAD 9f2c...
+/// branch refs/heads/master
+/// ```
+///
+/// A detached worktree has a `detached` line and no `branch` line, and is
+/// simply absent from the map.
+async fn worktree_branches(
+    transport: &ServerTransport,
+    repo_root: &std::path::Path,
+) -> std::collections::HashMap<PathBuf, String> {
+    let Ok(output) = transport
+        .output(
+            "git",
+            &[
+                "worktree".to_string(),
+                "list".to_string(),
+                "--porcelain".to_string(),
+            ],
+            Some(repo_root),
+        )
+        .await
+    else {
+        return std::collections::HashMap::new();
+    };
+
+    if !output.status.success() {
+        return std::collections::HashMap::new();
+    }
+
+    parse_worktree_porcelain(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn parse_worktree_porcelain(stdout: &str) -> std::collections::HashMap<PathBuf, String> {
+    let mut map = std::collections::HashMap::new();
+    let mut current: Option<PathBuf> = None;
+
+    for line in stdout.lines() {
+        if let Some(path) = line.strip_prefix("worktree ") {
+            let p = PathBuf::from(path.trim());
+            // Canonicalise so a symlinked worktree still matches the pane path.
+            current = Some(std::fs::canonicalize(&p).unwrap_or(p));
+        } else if let Some(reference) = line.strip_prefix("branch ") {
+            if let Some(path) = current.take() {
+                let name = reference
+                    .trim()
+                    .strip_prefix("refs/heads/")
+                    .unwrap_or(reference.trim())
+                    .to_string();
+                map.insert(path, name);
+            }
+        } else if line.trim().is_empty() {
+            current = None;
+        }
+    }
+
+    map
 }
 
 /// Infer agent state from pane content when no status file is available.
@@ -409,4 +538,70 @@ fn strip_worktree_suffix(path: &std::path::Path, project_name: &str) -> PathBuf 
         }
     }
     path.to_path_buf()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_worktree_porcelain;
+    use std::path::PathBuf;
+
+    #[test]
+    fn maps_worktrees_to_branch_names() {
+        // Paths that do not exist stay as written: canonicalize falls back to
+        // the original, which is what keeps this test hermetic.
+        let out = "\
+worktree /nonexistent/kink-party
+HEAD 9f2c1a
+branch refs/heads/master
+
+worktree /nonexistent/kink-party-wt-1
+HEAD 3b4d2e
+branch refs/heads/worker-1
+";
+        let map = parse_worktree_porcelain(out);
+
+        assert_eq!(map.len(), 2);
+        assert_eq!(
+            map.get(&PathBuf::from("/nonexistent/kink-party")).map(String::as_str),
+            Some("master")
+        );
+        assert_eq!(
+            map.get(&PathBuf::from("/nonexistent/kink-party-wt-1")).map(String::as_str),
+            Some("worker-1")
+        );
+    }
+
+    #[test]
+    fn omits_detached_worktrees_rather_than_inventing_a_branch() {
+        let out = "\
+worktree /nonexistent/base
+HEAD 9f2c1a
+branch refs/heads/main
+
+worktree /nonexistent/detached
+HEAD 3b4d2e
+detached
+";
+        let map = parse_worktree_porcelain(out);
+
+        assert_eq!(map.len(), 1);
+        assert!(!map.contains_key(&PathBuf::from("/nonexistent/detached")));
+    }
+
+    #[test]
+    fn handles_empty_and_malformed_output() {
+        assert!(parse_worktree_porcelain("").is_empty());
+        assert!(parse_worktree_porcelain("garbage\nmore garbage\n").is_empty());
+        // A branch line with no preceding worktree line must not panic.
+        assert!(parse_worktree_porcelain("branch refs/heads/orphan\n").is_empty());
+    }
+
+    #[test]
+    fn keeps_refs_that_are_not_under_refs_heads() {
+        let map = parse_worktree_porcelain("worktree /nonexistent/x\nbranch odd-ref\n");
+        assert_eq!(
+            map.get(&PathBuf::from("/nonexistent/x")).map(String::as_str),
+            Some("odd-ref")
+        );
+    }
 }

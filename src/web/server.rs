@@ -749,6 +749,12 @@ mod tests {
             completed_issue_count: 0,
             resurrection_attempts: 0,
             status_timestamp: None,
+            worktree_path: if is_manager {
+                "/repos/test".to_string()
+            } else {
+                format!("/repos/test-wt-1")
+            },
+            branch: Some(if is_manager { "master".to_string() } else { role.to_string() }),
         }
     }
 

@@ -427,6 +427,8 @@
     .health-dead    { color: #cc4444; }
     .agent-completed { color: var(--text-dim); font-size: 0.75rem; }
     .agent-restarts  { color: var(--warning); font-size: 0.75rem; }
+    .agent-worktree  { color: var(--text-dim); font-size: 0.75rem; }
+    .agent-branch    { color: var(--accent); font-size: 0.75rem; }
 
     /* ---- Session view ---- */
     .session-header {
@@ -1313,6 +1315,18 @@
       const restartHtml = (!agent.is_manager && agent.resurrection_attempts > 0)
         ? '<span class="agent-restarts" title="Auto-restart count"> · ↺' + agent.resurrection_attempts + '</span>'
         : '';
+      // Worktree shown as its final path component: the absolute path is
+      // identical across agents up to the suffix, so the full form only pushes
+      // the useful part off the row. The full path stays available on hover.
+      const wtName = agent.worktree_path
+        ? agent.worktree_path.split('/').filter(Boolean).pop()
+        : '';
+      const worktreeHtml = wtName
+        ? '<span class="agent-worktree" title="' + esc(agent.worktree_path) + '"> · ' + esc(wtName) + '</span>'
+        : '';
+      const branchHtml = agent.branch
+        ? '<span class="agent-branch" title="Checked-out branch"> · ⎇ ' + esc(agent.branch) + '</span>'
+        : '';
       return (
         '<div class="agent-row" ' +
              'role="button" tabindex="0" ' +
@@ -1323,7 +1337,8 @@
           '<div class="agent-info">' +
             '<div class="agent-role">' + healthHtml + ' ' + esc(agent.role) + '</div>' +
             '<div class="agent-state-text">' +
-              esc(agent.state) + esc(issueText) + waitText + completedHtml + restartHtml +
+              esc(agent.state) + esc(issueText) + worktreeHtml + branchHtml +
+              waitText + completedHtml + restartHtml +
             '</div>' +
           '</div>' +
           '<span class="agent-row-arrow" aria-hidden="true">›</span>' +
