@@ -3,7 +3,7 @@ use super::status::AgentStatus;
 use std::path::PathBuf;
 
 /// Health status of a worker agent.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HealthStatus {
     Healthy,
     Stalled,

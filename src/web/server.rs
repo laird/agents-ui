@@ -90,8 +90,139 @@ async fn api_pane_handler(
 /// Body for the send-input endpoint.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SendInputBody {
-    /// Text to send to the agent (Enter appended).
+    /// Text to send to the agent.
     pub text: String,
+    /// Whether to append Enter. Defaults to true, so existing callers that
+    /// send a whole line are unchanged.
+    ///
+    /// The session view sets this false to stream characters as they are
+    /// typed. That is what makes the agent's own completion menu work: typing
+    /// `/autocoder:` only offers completions if the agent receives the
+    /// keystrokes one at a time, the way a terminal delivers them. Sending the
+    /// finished line with Enter appended gives it no chance to offer anything.
+    #[serde(default = "default_append_enter")]
+    pub enter: bool,
+}
+
+fn default_append_enter() -> bool {
+    true
+}
+
+/// Body for the send-key endpoint.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct SendKeyBody {
+    /// A tmux key name, e.g. "Up", "Enter", "Escape", "C-c".
+    pub key: String,
+}
+
+/// Translate a requested key into the tmux key name to send, rejecting
+/// anything not on the list.
+///
+/// The transport shell-quotes its arguments, so this is not guarding against
+/// injection. It guards against a public endpoint being able to drive a tmux
+/// pane with arbitrary key sequences: only keys a person could press while
+/// looking at the pane are accepted.
+pub fn tmux_key_name(requested: &str) -> Option<String> {
+    // Navigation and editing keys, spelled the way tmux spells them.
+    const NAMED: &[(&str, &str)] = &[
+        ("up", "Up"),
+        ("down", "Down"),
+        ("left", "Left"),
+        ("right", "Right"),
+        ("enter", "Enter"),
+        ("return", "Enter"),
+        ("escape", "Escape"),
+        ("esc", "Escape"),
+        ("tab", "Tab"),
+        ("backtab", "BTab"),
+        ("shift-tab", "BTab"),
+        ("backspace", "BSpace"),
+        ("space", "Space"),
+        ("home", "Home"),
+        ("end", "End"),
+        ("pageup", "PageUp"),
+        ("pagedown", "PageDown"),
+        ("delete", "DC"),
+    ];
+
+    let lower = requested.trim().to_ascii_lowercase();
+
+    if let Some((_, tmux)) = NAMED.iter().find(|(name, _)| *name == lower) {
+        return Some((*tmux).to_string());
+    }
+
+    // Ctrl chords: C-a through C-z only. Ctrl-c is the reason this endpoint
+    // exists at all -- interrupting a wedged agent from the dashboard.
+    if let Some(rest) = lower.strip_prefix("c-") {
+        let mut chars = rest.chars();
+        if let (Some(c), None) = (chars.next(), chars.next()) {
+            if c.is_ascii_lowercase() {
+                return Some(format!("C-{c}"));
+            }
+        }
+        return None;
+    }
+
+    // Function keys F1-F12.
+    if let Some(rest) = lower.strip_prefix('f') {
+        if let Ok(n) = rest.parse::<u8>() {
+            if (1..=12).contains(&n) {
+                return Some(format!("F{n}"));
+            }
+        }
+    }
+
+    None
+}
+
+/// Send a single raw key to an agent's tmux pane, without appending Enter.
+/// `POST /api/swarms/:project/agents/:role/key`
+///
+/// The text endpoint always appends Enter, which cannot drive an interactive
+/// selection menu -- an agent sitting on an arrow-key picker (`/model`,
+/// `/plugin`, a numbered prompt) could not be answered from the dashboard at
+/// all.
+async fn api_key_handler(
+    Path((project, role)): Path<(String, String)>,
+    State(state): State<WebServerState>,
+    Json(body): Json<SendKeyBody>,
+) -> Result<Json<Value>, StatusCode> {
+    let Some(tmux_key) = tmux_key_name(&body.key) else {
+        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+    };
+
+    let tmux_target = {
+        let guard = state
+            .swarms
+            .read()
+            .map_err(|e| {
+                tracing::warn!("Web state lock poisoned: {e}");
+            })
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        let swarm = guard
+            .iter()
+            .find(|s| s.project_name == project)
+            .ok_or(StatusCode::NOT_FOUND)?;
+
+        find_agent(swarm, &role)
+            .ok_or(StatusCode::NOT_FOUND)?
+            .tmux_target
+            .clone()
+    };
+
+    crate::tmux::proxy::send_keys_no_enter(
+        &crate::transport::ServerTransport::new(None),
+        &tmux_target,
+        &tmux_key,
+    )
+    .await
+    .map_err(|e| {
+        tracing::warn!("tmux send-keys failed for {tmux_target}: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(Json(serde_json::json!({ "ok": true, "key": tmux_key })))
 }
 
 /// Send a line of input to an agent's tmux pane.
@@ -127,13 +258,20 @@ async fn api_input_handler(
         return Err(StatusCode::UNPROCESSABLE_ENTITY);
     }
 
-    // Send the text via tmux send-keys (text + Enter).
-    crate::tmux::proxy::send_keys(
-        &crate::transport::ServerTransport::new(None),
-        &tmux_target,
-        &body.text,
-    )
-    .await
+    if body.enter {
+        crate::tmux::proxy::send_keys(
+            &crate::transport::ServerTransport::new(None),
+            &tmux_target,
+            &body.text,
+        )
+        .await
+    } else {
+        // -l, so the text is taken literally. Without it tmux resolves an
+        // argument that happens to match a key name -- a lone "Up", "Space"
+        // or "Enter" typed by the user -- as that key instead of those
+        // characters.
+        crate::tmux::proxy::send_literal(&tmux_target, &body.text).await
+    }
     .map_err(|e| {
         tracing::warn!("tmux send-keys failed for {tmux_target}: {e}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -264,27 +402,96 @@ async fn api_stop_swarm_handler(
     Path(project): Path<String>,
     State(state): State<WebServerState>,
 ) -> Result<Json<Value>, StatusCode> {
-    let targets: Vec<String> = {
+    use crate::adapter::claude::ClaudeAdapter;
+    use crate::adapter::traits::AgentRuntime;
+    use crate::model::issue::IssueCache;
+    use crate::model::status::{AgentState, AgentStatus};
+    use crate::model::swarm::{AgentInfo, AgentType, Swarm, WorkerHealth};
+    use crate::transport::ServerTransport;
+
+    let snapshot = {
         let guard = state
             .swarms
             .read()
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let swarm = guard
+        guard
             .iter()
             .find(|s| s.project_name == project)
-            .ok_or(StatusCode::NOT_FOUND)?;
-        // Collect all worker tmux targets (not the manager)
-        swarm.workers.iter().map(|w| w.tmux_target.clone()).collect()
+            .cloned()
+            .ok_or(StatusCode::NOT_FOUND)?
     };
 
-    let transport = crate::transport::ServerTransport::new(None);
-    for target in &targets {
-        crate::tmux::proxy::send_keys_no_enter(&transport, target, "C-c")
-            .await
-            .ok();
-    }
+    let agent_type: AgentType = match snapshot.agent_type.as_str() {
+        "Codex" => AgentType::Codex,
+        "Droid" => AgentType::Droid,
+        "Gemini" => AgentType::Gemini,
+        _ => AgentType::Claude,
+    };
 
-    Ok(Json(json!({ "ok": true, "stopped": targets.len() })))
+    let repo_path = std::path::PathBuf::from(&snapshot.repo_path);
+
+    // Rebuild enough of the Swarm to write handoffs and tear it down. Unlike
+    // the add-worker path this keeps each agent's real worktree and pane
+    // content: the handoff is largely made of them.
+    let to_info = |a: &crate::web::AgentSnapshot| AgentInfo {
+        id: format!("{}/{}", snapshot.project_name, a.role),
+        role: a.role.clone(),
+        worktree_path: if a.worktree_path.is_empty() {
+            repo_path.clone()
+        } else {
+            std::path::PathBuf::from(&a.worktree_path)
+        },
+        tmux_target: a.tmux_target.clone(),
+        status: AgentStatus { timestamp: None, state: AgentState::Unknown(a.state.clone()) },
+        is_manager: a.is_manager,
+        pane_content: a.pane_content.clone(),
+        dispatched_issue: None,
+        current_issue: a.current_issue,
+        current_issue_title: a.current_issue_title.clone(),
+        waiting_for_input: a.waiting_for_input,
+        resurrection_attempts: a.resurrection_attempts,
+        completed_issue_count: a.completed_issue_count,
+        health: WorkerHealth::default(),
+    };
+
+    let swarm = Swarm {
+        repo_path: repo_path.clone(),
+        project_name: snapshot.project_name.clone(),
+        agent_type: agent_type.clone(),
+        workflow: None,
+        tmux_session: snapshot.tmux_session.clone(),
+        manager: to_info(&snapshot.manager),
+        workers: snapshot.workers.iter().map(to_info).collect(),
+        issue_cache: IssueCache::default(),
+        stopped: false,
+    };
+
+    let agent_count = swarm.workers.len() + 1;
+
+    // Handoffs then teardown, off the request: writing a handoff per agent
+    // runs git and gh in each worktree, which is far too slow to hold an HTTP
+    // response open for.
+    //
+    // This previously sent C-c to the worker panes and returned. Ctrl-C
+    // interrupts an agent's current turn rather than exiting it, the manager
+    // was never signalled at all, and nothing marked the swarm stopped -- so
+    // heal_workers would respawn whatever did die. The swarm stayed up.
+    tokio::spawn(async move {
+        let transport = ServerTransport::new(None);
+        let branch = crate::handoff::integration_branch(&transport, &swarm.repo_path).await;
+
+        for line in crate::handoff::write_all(&transport, &swarm, &branch).await {
+            tracing::info!("handoff {}", line);
+        }
+
+        let adapter = ClaudeAdapter::new(agent_type, ServerTransport::new(None));
+        match adapter.teardown(&swarm).await {
+            Ok(()) => tracing::info!("Stopped swarm {}", swarm.project_name),
+            Err(e) => tracing::error!("teardown failed for {}: {e:#}", swarm.project_name),
+        }
+    });
+
+    Ok(Json(json!({ "ok": true, "stopping": agent_count })))
 }
 
 /// Add one worker to a running swarm.
@@ -542,6 +749,10 @@ pub async fn run(port: u16, state: WebServerState) -> Result<()> {
             "/api/swarms/{project}/agents/{role}/input",
             post(api_input_handler),
         )
+        .route(
+            "/api/swarms/{project}/agents/{role}/key",
+            post(api_key_handler),
+        )
         .with_state(state);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
@@ -585,6 +796,10 @@ mod tests {
                 "/api/swarms/{project}/agents/{role}/input",
                 post(api_input_handler),
             )
+            .route(
+                "/api/swarms/{project}/agents/{role}/key",
+                post(api_key_handler),
+            )
             .with_state(state)
     }
 
@@ -603,6 +818,12 @@ mod tests {
             completed_issue_count: 0,
             resurrection_attempts: 0,
             status_timestamp: None,
+            worktree_path: if is_manager {
+                "/repos/test".to_string()
+            } else {
+                format!("/repos/test-wt-1")
+            },
+            branch: Some(if is_manager { "master".to_string() } else { role.to_string() }),
         }
     }
 
@@ -902,6 +1123,96 @@ mod tests {
             .method("POST")
             .uri("/api/swarms/ghost/workers")
             .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn tmux_key_name_accepts_navigation_keys() {
+        for (input, expected) in [
+            ("Up", "Up"),
+            ("down", "Down"),
+            ("Enter", "Enter"),
+            ("return", "Enter"),
+            ("Escape", "Escape"),
+            ("esc", "Escape"),
+            ("shift-tab", "BTab"),
+            ("backspace", "BSpace"),
+            ("delete", "DC"),
+            ("pagedown", "PageDown"),
+        ] {
+            assert_eq!(
+                super::tmux_key_name(input).as_deref(),
+                Some(expected),
+                "key {input}"
+            );
+        }
+    }
+
+    #[test]
+    fn tmux_key_name_accepts_ctrl_chords_and_function_keys() {
+        assert_eq!(super::tmux_key_name("C-c").as_deref(), Some("C-c"));
+        assert_eq!(super::tmux_key_name("c-a").as_deref(), Some("C-a"));
+        assert_eq!(super::tmux_key_name("F5").as_deref(), Some("F5"));
+        assert_eq!(super::tmux_key_name("f12").as_deref(), Some("F12"));
+    }
+
+    #[test]
+    fn tmux_key_name_rejects_anything_off_the_list() {
+        for bad in [
+            "",
+            "   ",
+            "C-",           // no chord letter
+            "C-cc",         // more than one letter
+            "C-1",          // not a lowercase letter
+            "F0",           // out of range
+            "F13",          // out of range
+            "kill-session", // a tmux command, not a key
+            "Up Enter",     // no multi-key sequences
+            "send-keys",
+        ] {
+            assert!(
+                super::tmux_key_name(bad).is_none(),
+                "should have rejected {bad:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn key_endpoint_rejects_a_key_that_is_not_allowed() {
+        let shared = new_shared_state();
+        {
+            let mut guard = shared.write().unwrap();
+            guard.push(sample_swarm("test-proj"));
+        }
+
+        let app = make_app(make_web_state(shared));
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/swarms/test-proj/agents/manager/key")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"key":"kill-session"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        // Rejected before any agent lookup or tmux call.
+        assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[tokio::test]
+    async fn key_endpoint_404s_for_an_unknown_agent() {
+        let shared = new_shared_state();
+        {
+            let mut guard = shared.write().unwrap();
+            guard.push(sample_swarm("test-proj"));
+        }
+
+        let app = make_app(make_web_state(shared));
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/swarms/test-proj/agents/worker-99/key")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"key":"Up"}"#))
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);

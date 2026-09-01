@@ -100,3 +100,33 @@ cargo build
 **Test Reports**:
 - Location: `docs/test/regression-reports/`
 
+
+## Landing work
+
+### Merge Mode
+```
+merge
+```
+Options: `merge` (merge to the integration branch and push) or `pr` (push a
+feature branch and open a pull request, then stop).
+
+**Do not open pull requests in this repository.** Merge completed, tested work
+straight to the integration branch and push. A PR here is not review latency
+that buys safety — it is a window in which another worker picks up the same
+issue and writes the fix a second time, because the issue is still open and the
+work is invisible on the integration branch. That has already happened: #329
+was fixed twice, on two branches, by two workers.
+
+Before merging: the full suite must pass (`cargo test`), and the merge must be
+conflict-free. If it conflicts, rebase onto the integration branch and re-run
+the tests rather than merging with conflicts resolved blindly.
+
+### Integration Branch
+```
+master
+```
+The shared branch all completed work is merged into. In a parallel-worktree
+swarm this MUST be the real shared branch, never a per-worktree branch —
+otherwise fixes strand on `master-wt-N` and never converge.
+
+Note this repository's default branch is `master`, not `main`.

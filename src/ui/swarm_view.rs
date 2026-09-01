@@ -4,12 +4,15 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::Style,
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Cell, Padding, Paragraph, Row, Table, TableState, Wrap},
+    widgets::{
+        Block, Borders, Cell, List, ListItem, ListState, Padding, Paragraph, Row, Table,
+        TableState, Wrap,
+    },
 };
 use std::time::Instant;
 
 use crate::model::issue::{GitHubIssue, IssueFilter, IssuePriority, IssueType};
-use crate::model::swarm::Swarm;
+use crate::model::swarm::{AgentInfo, HealthStatus, Swarm};
 use super::text_input::TextInput;
 use super::theme;
 
@@ -40,7 +43,7 @@ impl SwarmPanel {
 
 pub struct SwarmView {
     pub manager_scroll: u16,
-    pub workers_table: TableState,
+    pub workers_table: ListState,
     pub issues_table: TableState,
     pub issue_filter: IssueFilter,
     /// Active type filter: None = all types, Some(t) = only issues of that type.
@@ -55,7 +58,7 @@ pub struct SwarmView {
 
 impl SwarmView {
     pub fn new() -> Self {
-        let mut workers_table = TableState::default();
+        let mut workers_table = ListState::default();
         workers_table.select(Some(0));
         let mut issues_table = TableState::default();
         issues_table.select(Some(0));
@@ -112,12 +115,13 @@ impl SwarmView {
         .split(area);
 
         // Body is three stacked panels, in the same order as the web dashboard:
-        // Manager, then Workers, then Issues. Workers is sized to fit its rows (+3
-        // for borders+header row), capped so it can't crowd out the other two.
+        // Manager, then Workers, then Issues. Workers is sized to fit its two-line
+        // rows (identity + dimmed detail line per worker, +2 for borders — the
+        // List has no header row), capped so it can't crowd out the other two.
         // Manager and Issues then share whatever space remains, with Manager kept
         // to at least a usable minimum since it hosts the live tmux session.
-        let max_workers_height = (chunks[1].height / 3).max(3);
-        let workers_height = ((swarm.workers.len() + 3) as u16).min(max_workers_height);
+        let max_workers_height = (chunks[1].height / 3).max(4);
+        let workers_height = ((swarm.workers.len() * 2 + 2) as u16).min(max_workers_height);
         let body_chunks = Layout::vertical([
             Constraint::Min(6),                 // Manager: primary content
             Constraint::Length(workers_height), // Workers: sized to fit content
@@ -125,7 +129,6 @@ impl SwarmView {
         ])
         .split(chunks[1]);
 
-        use crate::model::swarm::HealthStatus;
         let healthy = swarm.workers.iter().filter(|w| w.health.status() == HealthStatus::Healthy).count();
         let stalled = swarm.workers.iter().filter(|w| w.health.status() == HealthStatus::Stalled).count();
         let dead = swarm.workers.iter().filter(|w| w.health.status() == HealthStatus::Dead).count();
@@ -148,7 +151,17 @@ impl SwarmView {
         ];
         if stalled > 0 || dead > 0 || restarting > 0 {
             header_spans.push(Span::styled(
-                format!("Health: ✓{} ⚠{} ↺{} ✗{}  ", healthy, stalled, restarting, dead),
+                format!(
+                    "Health: {}{} {}{} {}{} {}{}  ",
+                    theme::health_symbol(HealthStatus::Healthy),
+                    healthy,
+                    theme::health_symbol(HealthStatus::Stalled),
+                    stalled,
+                    theme::health_symbol(HealthStatus::Restarting),
+                    restarting,
+                    theme::health_symbol(HealthStatus::Dead),
+                    dead
+                ),
                 if dead > 0 {
                     Style::default().fg(ratatui::style::Color::Red)
                 } else {
@@ -158,7 +171,10 @@ impl SwarmView {
         }
         if attention > 0 {
             let style = theme::attention_blink_style(blink);
-            header_spans.push(Span::styled(format!("⚠ {attention} need attention"), style));
+            header_spans.push(Span::styled(
+                format!("{} {attention} need attention", theme::ATTENTION_SYMBOL),
+                style,
+            ));
         }
         let left_len: usize = header_spans.iter().map(|s| s.content.len()).sum();
         header_spans.push(theme::hostname_right_span(
@@ -169,7 +185,10 @@ impl SwarmView {
         // Build header lines: status line + optional inline attention row
         let mut header_lines = vec![Line::from(header_spans)];
         if blocked_count > 0 {
-            let mut attn_spans = vec![Span::styled(" ⚠ ", theme::attention_style())];
+            let mut attn_spans = vec![Span::styled(
+                format!(" {} ", theme::ATTENTION_SYMBOL),
+                theme::attention_style(),
+            )];
             let show_n = blocked_count.min(3);
             for (idx, issue) in blocked_issues.iter().take(show_n).enumerate() {
                 if idx > 0 {
@@ -252,72 +271,39 @@ impl SwarmView {
         );
         f.render_widget(manager_input, manager_rows[1]);
 
-        // Workers table
-        let worker_header = Row::new(vec![
-            Cell::from("#"),
-            Cell::from("H"),
-            Cell::from("Status"),
-            Cell::from("Task"),
-            Cell::from("Age"),
-        ])
-        .style(theme::header_style());
+        // Workers list: each agent as a two-line row (identity, then a dimmed
+        // detail line), mirroring the web's renderAgentRow.
+        let max_title_chars = (body_chunks[1].width as usize).saturating_sub(12).max(10);
 
-        let worker_rows: Vec<Row> = swarm
+        let worker_items: Vec<ListItem> = swarm
             .workers
             .iter()
-            .enumerate()
-            .map(|(i, w)| {
-                let needs_input = agent_needs_input(&w.pane_content);
-                let status_str = if needs_input {
-                    "⚠ input".to_string()
-                } else {
-                    w.status.state.to_string()
-                };
-                let status_style = if needs_input {
+            .map(|w| {
+                let needs_input = agent_needs_input(&w.pane_content) || w.waiting_for_input;
+                let dot_style = if needs_input {
                     theme::attention_blink_style(blink)
                 } else {
                     theme::status_style(&w.status.state)
                 };
-                let task = if let Some(issue_num) = w.current_issue {
-                    let title = w.current_issue_title.as_deref().unwrap_or("");
-                    if title.is_empty() {
-                        format!("#{issue_num}")
-                    } else {
-                        format!("#{issue_num} {}", truncate(title, 25))
-                    }
-                } else {
-                    match &w.status.state {
-                        crate::model::status::AgentState::Working { issue: Some(n) } => {
-                            format!("#{n}")
-                        }
-                        _ => "\u{2014}".to_string(),
-                    }
-                };
-                let task = match w.dispatched_issue {
-                    Some(n) if !task.contains(&format!("#{n}")) => {
-                        if task == "\u{2014}" {
-                            format!("→#{n}")
-                        } else {
-                            format!("{task} →#{n}")
-                        }
-                    }
-                    _ => task,
-                };
-                let age = crate::model::status::elapsed_display(w.status.timestamp);
-                use crate::model::swarm::HealthStatus;
-                let (health_sym, health_style) = match w.health.status() {
-                    HealthStatus::Healthy => ("✓", Style::default().fg(ratatui::style::Color::Green)),
-                    HealthStatus::Stalled => ("⚠", Style::default().fg(ratatui::style::Color::Yellow)),
-                    HealthStatus::Restarting => ("↺", Style::default().fg(ratatui::style::Color::Cyan)),
-                    HealthStatus::Dead => ("✗", Style::default().fg(ratatui::style::Color::Red)),
-                };
-                Row::new(vec![
-                    Cell::from(format!("{}", i + 1)),
-                    Cell::from(health_sym).style(health_style),
-                    Cell::from(status_str).style(status_style),
-                    Cell::from(task),
-                    Cell::from(age).style(Style::default().fg(ratatui::style::Color::DarkGray)),
-                ])
+                let health_status = w.health.status();
+
+                let mut identity_spans = vec![Span::styled(
+                    format!("{} ", theme::state_symbol(&w.status.state)),
+                    dot_style,
+                )];
+                if !w.is_manager {
+                    identity_spans.push(Span::styled(
+                        format!("{} ", theme::health_symbol(health_status)),
+                        theme::health_style(health_status),
+                    ));
+                }
+                identity_spans.push(Span::styled(w.role.clone(), theme::title_style()));
+                let identity = Line::from(identity_spans);
+
+                let detail = build_detail_line(w, max_title_chars);
+                let detail = Line::from(Span::styled(format!("  {detail}"), theme::help_style()));
+
+                ListItem::new(vec![identity, detail])
             })
             .collect();
 
@@ -345,27 +331,15 @@ impl SwarmView {
             })
             .padding(Padding::horizontal(1));
 
-        let workers_table = Table::new(
-            worker_rows,
-            [
-                Constraint::Length(3),
-                Constraint::Percentage(35),
-                Constraint::Percentage(45),
-                Constraint::Length(5),
-                Constraint::Length(2),
-                Constraint::Percentage(40),
-                Constraint::Percentage(50),
-            ],
-        )
-        .header(worker_header)
-        .block(workers_block)
-        .row_highlight_style(if focus == SwarmPanel::Workers {
-            theme::selected_style()
-        } else {
-            Style::default()
-        });
+        let workers_list = List::new(worker_items)
+            .block(workers_block)
+            .highlight_style(if focus == SwarmPanel::Workers {
+                theme::selected_style()
+            } else {
+                Style::default()
+            });
 
-        f.render_stateful_widget(workers_table, body_chunks[1], &mut self.workers_table);
+        f.render_stateful_widget(workers_list, body_chunks[1], &mut self.workers_table);
 
         // Issues table
         let filter_label = self.issue_filter.label();
@@ -915,6 +889,57 @@ fn truncate(s: &str, max: usize) -> String {
     out
 }
 
+/// Build the dimmed detail line of a two-line agent row: state, then each
+/// other field `" · "`-joined, in the order state/issue/worktree/needs
+/// input/completed/restarts. Fields that don't apply are omitted entirely --
+/// never a dangling separator or a literal "None". Mirrors the web's
+/// `renderAgentRow` (`src/web/ui.html`), plus the worktree basename it
+/// doesn't yet show.
+///
+/// Branch (also new, from issue #328) isn't included yet: `AgentInfo` has no
+/// branch field until #328 lands.
+///
+/// Health icon and the completed/restart counters are a worker-only concept
+/// (managers have no health tracking), so they're omitted for `is_manager`
+/// agents.
+///
+/// `max_title_chars` bounds the issue title so one long or multi-byte title
+/// can't blow past the row width; uses the same char-safe `truncate` as the
+/// rest of this module (see "Fix panics from slicing strings on byte
+/// indexes", commit 1e099c2) so a title ending mid-character can't panic.
+fn build_detail_line(agent: &AgentInfo, max_title_chars: usize) -> String {
+    let mut parts = vec![agent.status.state.to_string()];
+
+    if let Some(n) = agent.current_issue {
+        match agent
+            .current_issue_title
+            .as_deref()
+            .filter(|t| !t.is_empty())
+        {
+            Some(title) => parts.push(format!("#{n} {}", truncate(title, max_title_chars))),
+            None => parts.push(format!("#{n}")),
+        }
+    }
+
+    if let Some(name) = agent.worktree_path.file_name().and_then(|n| n.to_str()) {
+        parts.push(name.to_string());
+    }
+
+    if agent.waiting_for_input {
+        parts.push(format!("{} Needs input", theme::ATTENTION_SYMBOL));
+    }
+
+    if !agent.is_manager && agent.completed_issue_count > 0 {
+        parts.push(format!("{}{}", theme::COMPLETED_SYMBOL, agent.completed_issue_count));
+    }
+
+    if !agent.is_manager && agent.resurrection_attempts > 0 {
+        parts.push(format!("{}{}", theme::RESTART_SYMBOL, agent.resurrection_attempts));
+    }
+
+    parts.join(" · ")
+}
+
 fn wrapped_line_count(text: &Text<'_>, content_width: u16) -> u16 {
     let width = content_width.max(1) as usize;
     let total: usize = text
@@ -957,7 +982,7 @@ mod tests {
         assert_eq!(truncate(s, 10), s);
         assert_eq!(truncate(s, 4), "↔↔↔…");
     }
-    use super::{SwarmPanel, SwarmView, agent_needs_input, truncate};
+    use super::{SwarmPanel, SwarmView, agent_needs_input, build_detail_line, theme, truncate};
     use crate::model::issue::{GitHubIssue, IssueFilter, IssueState};
     use crate::model::status::{AgentState, AgentStatus};
     use crate::model::swarm::{AgentInfo, AgentType, Swarm};
@@ -1004,6 +1029,116 @@ mod tests {
             issue_cache: crate::model::issue::IssueCache::default(),
             stopped: false,
         }
+    }
+
+    #[test]
+    fn detail_line_with_no_issue_shows_only_state() {
+        let agent = make_agent("worker-1", false, "", AgentState::Idle);
+        assert_eq!(build_detail_line(&agent, 40), "Idle");
+    }
+
+    #[test]
+    fn detail_line_with_issue_but_no_title() {
+        let mut agent = make_agent(
+            "worker-1",
+            false,
+            "",
+            AgentState::Working { issue: Some(12) },
+        );
+        agent.current_issue = Some(12);
+        assert_eq!(build_detail_line(&agent, 40), "Working #12 · #12");
+    }
+
+    #[test]
+    fn detail_line_with_issue_and_title() {
+        let mut agent = make_agent("worker-1", false, "", AgentState::Idle);
+        agent.current_issue = Some(2948);
+        agent.current_issue_title = Some("Fix the flaky pane test".to_string());
+        assert_eq!(
+            build_detail_line(&agent, 40),
+            "Idle · #2948 Fix the flaky pane test"
+        );
+    }
+
+    #[test]
+    fn detail_line_shows_worktree_basename_not_full_path() {
+        let mut agent = make_agent("worker-3", false, "", AgentState::Idle);
+        agent.worktree_path = PathBuf::from("/home/user/repos/kink-party-wt-3");
+        assert_eq!(build_detail_line(&agent, 40), "Idle · kink-party-wt-3");
+    }
+
+    #[test]
+    fn detail_line_shows_needs_input() {
+        let mut agent = make_agent("worker-1", false, "", AgentState::Idle);
+        agent.waiting_for_input = true;
+        assert_eq!(
+            build_detail_line(&agent, 40),
+            format!("Idle · {} Needs input", theme::ATTENTION_SYMBOL)
+        );
+    }
+
+    #[test]
+    fn detail_line_omits_zero_counters() {
+        let mut agent = make_agent("worker-1", false, "", AgentState::Idle);
+        agent.completed_issue_count = 0;
+        agent.resurrection_attempts = 0;
+        assert_eq!(build_detail_line(&agent, 40), "Idle");
+    }
+
+    #[test]
+    fn detail_line_shows_nonzero_counters_for_workers_only() {
+        let mut agent = make_agent("worker-1", false, "", AgentState::Idle);
+        agent.completed_issue_count = 2;
+        agent.resurrection_attempts = 1;
+        assert_eq!(
+            build_detail_line(&agent, 40),
+            format!("Idle · {}2 · {}1", theme::COMPLETED_SYMBOL, theme::RESTART_SYMBOL)
+        );
+
+        let mut manager = make_agent("manager", true, "", AgentState::Idle);
+        manager.completed_issue_count = 2;
+        manager.resurrection_attempts = 1;
+        assert_eq!(build_detail_line(&manager, 40), "Idle");
+    }
+
+    #[test]
+    fn detail_line_truncates_a_long_multibyte_title_on_a_char_boundary() {
+        let mut agent = make_agent("worker-1", false, "", AgentState::Idle);
+        agent.current_issue = Some(7);
+        agent.current_issue_title = Some("↔".repeat(50));
+        // Must not panic, and must respect the char budget passed in.
+        let line = build_detail_line(&agent, 10);
+        assert!(line.starts_with("Idle · #7 "));
+        let title_part = line.strip_prefix("Idle · #7 ").unwrap();
+        assert!(title_part.chars().count() <= 10);
+        assert!(title_part.ends_with('…'));
+    }
+
+    #[test]
+    fn detail_line_joins_all_fields_with_no_dangling_separators() {
+        let mut agent = make_agent(
+            "worker-2",
+            false,
+            "",
+            AgentState::Working { issue: Some(2948) },
+        );
+        agent.current_issue = Some(2948);
+        agent.current_issue_title = Some("Fix the flaky pane test".to_string());
+        agent.worktree_path = PathBuf::from("/repos/kink-party-wt-2");
+        agent.waiting_for_input = true;
+        agent.completed_issue_count = 2;
+        agent.resurrection_attempts = 1;
+        assert_eq!(
+            build_detail_line(&agent, 40),
+            format!(
+                "Working #2948 · #2948 Fix the flaky pane test · kink-party-wt-2 · {} Needs input · {}2 · {}1",
+                theme::ATTENTION_SYMBOL,
+                theme::COMPLETED_SYMBOL,
+                theme::RESTART_SYMBOL
+            )
+        );
+        assert!(!build_detail_line(&agent, 40).contains(" ·  · "));
+        assert!(!build_detail_line(&agent, 40).contains("None"));
     }
 
     #[test]
@@ -1468,6 +1603,52 @@ mod tests {
         assert!(rendered.contains("Manager"));
         assert!(rendered.contains("Workers"));
         assert!(rendered.contains("Issues"));
+    }
+
+    #[test]
+    fn render_fits_every_worker_as_a_two_line_row() {
+        // Each worker row is now two lines (identity + detail) instead of
+        // one table row, so the bottom-panel sizing must budget 2 lines per
+        // worker, not 1 -- otherwise later workers get clipped out of view
+        // even though the panel has room.
+        let backend = TestBackend::new(100, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut view = SwarmView::new();
+        let manager_input = TextInput::new();
+        let mut swarm = make_swarm();
+        swarm.workers.push(make_agent(
+            "worker-2",
+            false,
+            "",
+            AgentState::Idle,
+        ));
+        let issues = vec![];
+
+        terminal
+            .draw(|f| {
+                view.render(
+                    f,
+                    f.area(),
+                    &swarm,
+                    &issues,
+                    SwarmPanel::Workers,
+                    false,
+                    false,
+                    None,
+                    &manager_input,
+                );
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let rendered = buffer
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("worker-1"));
+        assert!(rendered.contains("worker-2"));
     }
 
     fn make_issue(number: u32, title: &str, labels: &[&str]) -> GitHubIssue {

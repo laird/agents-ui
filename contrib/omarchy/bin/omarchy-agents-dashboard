@@ -1,0 +1,101 @@
+#!/bin/bash
+# Toggle the agents-tui swarm dashboard on a Hyprland special workspace.
+#
+# On a single 1280x720 logical display there is no room to keep a dashboard
+# tiled beside real work, and no room to tile many agent panes at all. A
+# special workspace is the shape that fits: the dashboard lives full-screen on
+# a layer of its own, one key brings it up over whatever is in front, and the
+# same key dismisses it. It costs zero screen area while hidden.
+#
+# Idempotent: the second invocation toggles the existing window rather than
+# launching a duplicate browser.
+
+set -euo pipefail
+
+PORT="${AGENTS_UI_PORT:-7878}"
+URL="http://127.0.0.1:${PORT}/"
+WORKSPACE="agents"
+APP_ID="agents-dashboard"
+
+# Chromium ignores --class when --app is used and derives the Wayland app_id
+# from the URL instead (the port is dropped), so the class we ask for is not
+# the class we get. Firefox does honour --class. Matching the page title as
+# well covers both without hardcoding one browser's naming scheme.
+WINDOW_TITLE="Agents UI"
+
+die() {
+  echo "omarchy-agents-dashboard: $*" >&2
+  # The bar icon is always clickable now, including when no swarm is up, and a
+  # click has no terminal attached to read stderr. Without this the failure is
+  # a click that does nothing at all.
+  if [[ ! -t 2 ]]; then
+    omarchy-notification-send --app-name "Agent Swarm" -u critical \
+      "Swarm dashboard unavailable" "$*" >/dev/null 2>&1 || true
+  fi
+  exit 1
+}
+
+# Hyprland 0.56 (Omarchy 4) parses `hyprctl dispatch` arguments as Lua and
+# expects an hl.dsp.* dispatcher object. The old bare-word forms --
+# `dispatch exec "[rules] cmd"` and `dispatch togglespecialworkspace name` --
+# are now Lua syntax errors, and under `set -e` they abort the script before
+# the workspace is ever shown.
+hypr_exec() { hyprctl dispatch "hl.dsp.exec_cmd(\"$1\")" >/dev/null; }
+hypr_toggle_special() { hyprctl dispatch "hl.dsp.workspace.toggle_special(\"$1\")" >/dev/null; }
+
+dashboard_open() {
+  hyprctl clients -j | jq -e --arg c "$APP_ID" --arg t "$WINDOW_TITLE" \
+    'any(.[]; .class == $c or .title == $t)' >/dev/null 2>&1
+}
+
+command -v hyprctl >/dev/null || die "hyprctl not found; this expects Hyprland"
+
+# The dashboard is useless without the daemon behind it, and the failure is
+# otherwise a blank browser tab with no explanation.
+if ! curl -sf --max-time 2 "http://127.0.0.1:${PORT}/api/swarms" >/dev/null; then
+  if systemctl --user is-enabled agents-ui.service >/dev/null 2>&1; then
+    systemctl --user start agents-ui.service || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      curl -sf --max-time 1 "http://127.0.0.1:${PORT}/api/swarms" >/dev/null && break
+      sleep 0.3
+    done
+  fi
+  curl -sf --max-time 2 "http://127.0.0.1:${PORT}/api/swarms" >/dev/null \
+    || die "no dashboard on port ${PORT}. Start it with: systemctl --user start agents-ui.service"
+fi
+
+# Already open? Just toggle the workspace.
+if dashboard_open; then
+  hypr_toggle_special "$WORKSPACE"
+  exit 0
+fi
+
+# Pick a browser. --class is set for the browsers that honour it; chromium
+# does not when --app is used, which is what WINDOW_TITLE is for.
+if command -v chromium >/dev/null; then
+  BROWSER_CMD=(chromium --app="$URL" --class="$APP_ID")
+elif command -v google-chrome-stable >/dev/null; then
+  BROWSER_CMD=(google-chrome-stable --app="$URL" --class="$APP_ID")
+elif command -v brave >/dev/null; then
+  BROWSER_CMD=(brave --app="$URL" --class="$APP_ID")
+elif command -v firefox >/dev/null; then
+  # Firefox dropped --app; a named profile window is the closest equivalent.
+  BROWSER_CMD=(firefox --new-window "$URL" --class="$APP_ID")
+else
+  die "no supported browser found (chromium, chrome, brave, or firefox)"
+fi
+
+# No [workspace] exec rule here: when the browser is already running, the new
+# invocation only signals the existing process, so the window is mapped by a
+# PID Hyprland never associated with this exec and the rule silently misses.
+# Placement is done by the class/title window rule in hyprland.lua instead.
+hypr_exec "${BROWSER_CMD[*]}"
+
+# Give the window a moment to map before pulling the workspace forward,
+# otherwise the toggle races the client and shows an empty overlay.
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+  dashboard_open && break
+  sleep 0.2
+done
+
+hypr_toggle_special "$WORKSPACE"

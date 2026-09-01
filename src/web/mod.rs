@@ -26,6 +26,12 @@ pub struct AgentSnapshot {
     pub resurrection_attempts: u32,
     /// ISO-8601 timestamp of last status update, if available.
     pub status_timestamp: Option<String>,
+    /// Absolute path of the worktree this agent is working in.
+    #[serde(default)]
+    pub worktree_path: String,
+    /// Git branch checked out in that worktree. `None` for a detached HEAD.
+    #[serde(default)]
+    pub branch: Option<String>,
 }
 
 /// A single GitHub issue suitable for JSON serialization.
@@ -95,6 +101,10 @@ impl AgentSnapshot {
             completed_issue_count: info.completed_issue_count,
             resurrection_attempts: info.resurrection_attempts,
             status_timestamp,
+            worktree_path: info.worktree_path.to_string_lossy().into_owned(),
+            // The TUI-owned AgentInfo does not track a branch yet (see #328);
+            // the discovery path fills this in for the headless dashboard.
+            branch: None,
         }
     }
 }

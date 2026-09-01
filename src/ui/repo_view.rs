@@ -296,30 +296,22 @@ impl RepoView {
                 let attention_style = ratatui::style::Style::default()
                     .fg(ratatui::style::Color::Red)
                     .add_modifier(ratatui::style::Modifier::BOLD);
-                let (dot, dot_style) = if w.waiting_for_input {
-                    ("⚠ ", theme::waiting_style())
+                let (dot, dot_style): (String, ratatui::style::Style) = if w.waiting_for_input {
+                    (format!("{} ", theme::ATTENTION_SYMBOL), theme::waiting_style())
                 } else if w.resurrection_attempts >= 3 {
-                    ("⟳ ", attention_style)
+                    ("⟳ ".to_string(), attention_style)
                 } else if w.resurrection_attempts > 0 {
-                    ("⟳ ", reviving_style)
+                    ("⟳ ".to_string(), reviving_style)
                 } else if w.status.is_stale(300) {
-                    ("⚠ ", ratatui::style::Style::default().fg(ratatui::style::Color::Yellow))
+                    (
+                        format!("{} ", theme::ATTENTION_SYMBOL),
+                        ratatui::style::Style::default().fg(ratatui::style::Color::Yellow),
+                    )
                 } else {
-                    match &w.status.state {
-                        crate::model::status::AgentState::Working { .. } => {
-                            ("● ", theme::status_style(&w.status.state))
-                        }
-                        crate::model::status::AgentState::Starting => {
-                            ("◐ ", theme::status_style(&w.status.state))
-                        }
-                        crate::model::status::AgentState::Idle => {
-                            ("○ ", theme::status_style(&w.status.state))
-                        }
-                        crate::model::status::AgentState::Stopped => {
-                            ("◌ ", theme::status_style(&w.status.state))
-                        }
-                        _ => ("  ", theme::help_style()),
-                    }
+                    (
+                        format!("{} ", theme::state_symbol(&w.status.state)),
+                        theme::status_style(&w.status.state),
+                    )
                 };
 
                 let status_text = if w.waiting_for_input {
