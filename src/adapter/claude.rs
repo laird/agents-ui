@@ -371,6 +371,126 @@ impl ClaudeAdapter {
         format!("{}-{project}", agent_type.session_prefix())
     }
 
+    /// Bring a stopped swarm back up in the worktrees it was already using.
+    ///
+    /// Deliberately not `launch`: launch numbers workers from a requested
+    /// count and would create worktrees that do not exist. Resume takes the
+    /// worktrees on disk as the source of truth, so a worker added mid-session
+    /// comes back too, and `worker-N` returns to `<project>-wt-N` -- which is
+    /// what makes "its own handoff" mean anything.
+    ///
+    /// Refuses when the session is already running. Relaunching agents into
+    /// live panes would put two agents on one worktree.
+    pub async fn resume_with_progress<F: Fn(&str)>(
+        &self,
+        repo_path: &Path,
+        progress: F,
+    ) -> Result<Swarm> {
+        let runtime = self.runtime.clone();
+        let project_name = Self::project_name(repo_path);
+        let session_name = Self::session_name(&runtime, &project_name);
+
+        if session::has_session(&self.transport, &session_name).await {
+            anyhow::bail!(
+                "Swarm {project_name} is already running in tmux session {session_name}; \
+stop it before resuming"
+            );
+        }
+
+        progress("⏳ Looking for existing worktrees...\n");
+        let worktrees =
+            crate::handoff::discover_worktrees(&self.transport, repo_path, &project_name).await;
+
+        if worktrees.is_empty() {
+            anyhow::bail!(
+                "No worktrees named {project_name}-wt-<N> under {}; nothing to resume",
+                repo_path.parent().unwrap_or(repo_path).display()
+            );
+        }
+        progress(&format!("✅ Found {} worktrees\n", worktrees.len()));
+
+        // Clear the tombstones, or heal_workers and revive_agents will keep
+        // treating this swarm as intentionally stopped and skip it.
+        crate::config::persistence::clear_swarm_stopped(&project_name);
+        for (_, wt) in &worktrees {
+            clear_agent_stopped(wt);
+        }
+
+        let worktree_paths: Vec<PathBuf> = worktrees.iter().map(|(_, p)| p.clone()).collect();
+
+        progress("⏳ Creating tmux session...\n");
+        self.create_tmux_session(&session_name, repo_path, &worktree_paths)
+            .await?;
+
+        for (n, _wt) in &worktrees {
+            progress(&format!("⏳ Starting worker-{n}...\n"));
+            let target = self
+                .window_pane_target(&session_name, &format!("worker-{n}"))
+                .await;
+            if let Err(e) = self
+                .launch_agent_in_pane(&target, &session_name, &runtime, false)
+                .await
+            {
+                progress(&format!("⚠️  worker-{n} failed: {e}\n"));
+            }
+        }
+
+        progress("⏳ Starting manager...\n");
+        let manager_target = self.window_pane_target(&session_name, "review").await;
+        if let Err(e) = self
+            .launch_agent_in_pane(&manager_target, &session_name, &runtime, true)
+            .await
+        {
+            progress(&format!("⚠️  Manager failed: {e}\n"));
+        }
+
+        let swarm = self
+            .build_swarm_from_session(&session_name, repo_path.to_path_buf(), runtime.clone())
+            .await?;
+
+        // Seed each agent with its own handoff, read from the worktree it just
+        // resumed into. Best-effort: an agent with no handoff simply starts
+        // clean rather than blocking the whole resume.
+        let mut seeded = 0usize;
+        for agent in std::iter::once(&swarm.manager).chain(swarm.workers.iter()) {
+            let Some((path, _body)) =
+                crate::handoff::latest_for_role(&agent.worktree_path, &agent.role)
+            else {
+                progress(&format!("•  {} resumed without a handoff\n", agent.role));
+                continue;
+            };
+
+            if !Self::wait_for_agent_ready(&self.transport, &agent.tmux_target).await {
+                progress(&format!(
+                    "⚠️  {} not ready in time; handoff not sent\n",
+                    agent.role
+                ));
+                continue;
+            }
+
+            if let Err(e) = proxy::send_keys(
+                &self.transport,
+                &agent.tmux_target,
+                &crate::handoff::resume_prompt(&path),
+            )
+            .await
+            {
+                progress(&format!("⚠️  {} handoff not sent: {e}\n", agent.role));
+                continue;
+            }
+
+            seeded += 1;
+            tracing::info!("resume: seeded {} from {}", agent.role, path.display());
+        }
+
+        progress(&format!(
+            "\n🎉 Resumed {project_name}: {} agents, {seeded} with handoffs\n",
+            swarm.workers.len() + 1
+        ));
+
+        Ok(swarm)
+    }
+
     /// Create git worktrees for workers.
     async fn create_worktrees(
         &self,

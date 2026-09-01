@@ -494,6 +494,75 @@ async fn api_stop_swarm_handler(
     Ok(Json(json!({ "ok": true, "stopping": agent_count })))
 }
 
+/// Body for the resume endpoint.
+#[derive(Debug, Deserialize, Default)]
+pub struct ResumeBody {
+    /// Repo to resume. Required when the swarm is stopped, because a stopped
+    /// swarm has no tmux session and so does not appear in discovery at all --
+    /// there is nothing in state to look its path up from.
+    pub repo_path: Option<String>,
+}
+
+/// Bring a stopped swarm back up in the worktrees it was using.
+/// `POST /api/swarms/:project/resume`
+async fn api_resume_swarm_handler(
+    Path(project): Path<String>,
+    State(state): State<WebServerState>,
+    body: Option<Json<ResumeBody>>,
+) -> Result<Json<Value>, StatusCode> {
+    use crate::adapter::claude::ClaudeAdapter;
+    use crate::model::swarm::AgentType;
+    use crate::transport::ServerTransport;
+
+    let requested = body.and_then(|b| b.0.repo_path);
+
+    // Prefer an explicit path; otherwise fall back to a swarm still in state
+    // (stopped-but-visible, e.g. stopped in this process).
+    let (repo_path, agent_type) = {
+        let guard = state
+            .swarms
+            .read()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let found = guard.iter().find(|s| s.project_name == project);
+
+        let path = requested
+            .or_else(|| found.map(|s| s.repo_path.clone()))
+            .filter(|p| !p.is_empty())
+            .ok_or(StatusCode::BAD_REQUEST)?;
+
+        let t = found.map(|s| s.agent_type.clone()).unwrap_or_default();
+        (std::path::PathBuf::from(path), t)
+    };
+
+    if !repo_path.exists() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let agent_type: AgentType = match agent_type.as_str() {
+        "Codex" => AgentType::Codex,
+        "Droid" => AgentType::Droid,
+        "Gemini" => AgentType::Gemini,
+        _ => AgentType::Claude,
+    };
+
+    // Off-request: resuming relaunches every agent and waits for each to be
+    // ready before handing it its handoff, which is far longer than an HTTP
+    // response should be held open.
+    tokio::spawn(async move {
+        let adapter = ClaudeAdapter::new(agent_type, ServerTransport::new(None));
+        match adapter.resume_with_progress(&repo_path, |m| tracing::info!("resume: {}", m.trim())).await {
+            Ok(sw) => tracing::info!(
+                "Resumed {} with {} workers",
+                sw.project_name,
+                sw.workers.len()
+            ),
+            Err(e) => tracing::error!("resume failed for {project}: {e:#}"),
+        }
+    });
+
+    Ok(Json(json!({ "ok": true, "resuming": true })))
+}
+
 /// Add one worker to a running swarm.
 /// `POST /api/swarms/:project/workers`
 /// Returns 404 if the project is not found, 202 Accepted on success.
@@ -753,6 +822,10 @@ pub async fn run(port: u16, state: WebServerState) -> Result<()> {
             "/api/swarms/{project}/agents/{role}/key",
             post(api_key_handler),
         )
+        .route(
+            "/api/swarms/{project}/resume",
+            post(api_resume_swarm_handler),
+        )
         .with_state(state);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
@@ -799,6 +872,10 @@ mod tests {
             .route(
                 "/api/swarms/{project}/agents/{role}/key",
                 post(api_key_handler),
+            )
+            .route(
+                "/api/swarms/{project}/resume",
+                post(api_resume_swarm_handler),
             )
             .with_state(state)
     }

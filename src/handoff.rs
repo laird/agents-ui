@@ -360,6 +360,127 @@ mod tests {
         assert!(n.starts_with("handoff-worker-3-"));
         assert!(n.ends_with(".md"));
     }
+
+    /// Unique temp dir that removes itself, so a failing assertion cannot
+    /// leave a tree behind in /tmp. `tempfile` is not a dependency of this
+    /// crate, and one test module is not a reason to add one.
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new(tag: &str) -> Self {
+            use std::sync::atomic::{AtomicU32, Ordering};
+            static COUNTER: AtomicU32 = AtomicU32::new(0);
+            let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir()
+                .join(format!("agents-ui-handoff-{}-{}-{}", std::process::id(), tag, n));
+            std::fs::create_dir_all(&path).unwrap();
+            TempDir(path)
+        }
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn parse_worktree_ordinals_finds_only_this_projects_numbered_worktrees() {
+        let out = "\
+worktree /src/kink-party
+branch refs/heads/main
+
+worktree /src/kink-party-wt-2
+branch refs/heads/worker-2
+
+worktree /src/kink-party-wt-10
+branch refs/heads/worker-10
+
+worktree /src/kink-party-wt-1
+branch refs/heads/worker-1
+
+worktree /src/other-project-wt-1
+branch refs/heads/worker-1
+
+worktree /src/kink-party-wt-2-old
+branch refs/heads/scratch
+";
+        let got = parse_worktree_ordinals(out, "kink-party");
+
+        // Sorted by ordinal, numerically -- wt-10 must not sort before wt-2.
+        assert_eq!(
+            got,
+            vec![
+                (1, PathBuf::from("/src/kink-party-wt-1")),
+                (2, PathBuf::from("/src/kink-party-wt-2")),
+                (10, PathBuf::from("/src/kink-party-wt-10")),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_worktree_ordinals_ignores_the_base_repo_and_junk() {
+        assert!(parse_worktree_ordinals("", "p").is_empty());
+        assert!(parse_worktree_ordinals("worktree /src/p\n", "p").is_empty());
+        // A suffix that is not a bare number is somebody's copy, not a worker.
+        assert!(parse_worktree_ordinals("worktree /src/p-wt-abc\n", "p").is_empty());
+        assert!(parse_worktree_ordinals("garbage\n", "p").is_empty());
+    }
+
+    #[test]
+    fn latest_for_role_picks_the_newest_and_ignores_other_roles() {
+        let tmp = TempDir::new("t");
+        let dir = tmp.path().join(".agents-ui").join("handoffs");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        std::fs::write(dir.join("handoff-worker-1-2026-09-01T10-00-00Z.md"), "older").unwrap();
+        std::fs::write(dir.join("handoff-worker-1-2026-09-01T17-00-00Z.md"), "newest").unwrap();
+        std::fs::write(dir.join("handoff-worker-2-2026-09-01T18-00-00Z.md"), "other role").unwrap();
+        std::fs::write(dir.join("notes.md"), "not a handoff").unwrap();
+
+        let (path, body) = latest_for_role(tmp.path(), "worker-1").unwrap();
+        assert_eq!(body, "newest");
+        assert!(path.to_string_lossy().contains("17-00-00"));
+    }
+
+    #[test]
+    fn latest_for_role_is_none_when_there_is_nothing_to_resume_from() {
+        let tmp = TempDir::new("t");
+        assert!(latest_for_role(tmp.path(), "worker-1").is_none());
+
+        let dir = tmp.path().join(".agents-ui").join("handoffs");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("handoff-manager-t.md"), "x").unwrap();
+        assert!(latest_for_role(tmp.path(), "worker-1").is_none());
+    }
+
+    #[test]
+    fn latest_for_role_matches_the_sanitising_file_name_applies() {
+        let tmp = TempDir::new("t");
+        let dir = tmp.path().join(".agents-ui").join("handoffs");
+        std::fs::create_dir_all(&dir).unwrap();
+        // file_name("worker/1", ..) writes "worker-1"; the reader must agree.
+        std::fs::write(dir.join(file_name("worker/1", "t")), "body").unwrap();
+
+        assert!(latest_for_role(tmp.path(), "worker/1").is_some());
+    }
+
+    #[test]
+    fn resume_prompt_is_one_line_that_points_at_the_file() {
+        let prompt = resume_prompt(Path::new("/wt/.agents-ui/handoffs/handoff-worker-3-t.md"));
+
+        assert!(prompt.contains("handoff-worker-3-t.md"));
+        assert!(prompt.to_lowercase().contains("resuming"));
+        // Newlines are Enter presses to tmux send-keys. A multi-line prompt
+        // types itself into whatever menu the agent happens to be showing.
+        assert!(
+            !prompt.contains('\n'),
+            "resume prompt must never contain a newline: {prompt:?}"
+        );
+    }
 }
 
 /// Branch checked out in a worktree, or `None` when detached or not a repo.
@@ -507,4 +628,128 @@ pub async fn integration_branch(transport: &ServerTransport, repo_path: &Path) -
     }
 
     "master".to_string()
+}
+
+/// The newest handoff written for `role` in this worktree, if any.
+///
+/// `file_name` stamps an ISO-8601 timestamp with non-alphanumerics replaced,
+/// so the names sort chronologically as plain strings and the last one is the
+/// most recent. Returns the path alongside the body so a caller can say where
+/// the context came from.
+pub fn latest_for_role(worktree: &Path, role: &str) -> Option<(PathBuf, String)> {
+    let dir = worktree.join(".agents-ui").join("handoffs");
+    let prefix = {
+        // Same sanitising as file_name, so a role like "worker/1" matches the
+        // file it actually wrote.
+        let safe: String = role
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
+            .collect();
+        format!("handoff-{safe}-")
+    };
+
+    let mut candidates: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.starts_with(&prefix) && n.ends_with(".md"))
+                .unwrap_or(false)
+        })
+        .collect();
+
+    candidates.sort();
+    let newest = candidates.pop()?;
+    let body = std::fs::read_to_string(&newest).ok()?;
+    Some((newest, body))
+}
+
+/// The prompt a resumed agent receives.
+///
+/// A single line that points at the handoff file, never the handoff itself.
+///
+/// The body is Markdown with many newlines, and tmux `send-keys` turns every
+/// newline into Enter. Sending it verbatim types the document into whatever
+/// the agent is showing -- during live testing that was Claude Code's
+/// trust-this-folder prompt, where the stray Enters drove the menu and
+/// selected "No, exit", killing the agent it was meant to resume. In a real
+/// repo those keystrokes would have hit whatever menu happened to be open.
+///
+/// One line has no newlines to misfire, and the agent can read the file
+/// itself -- which it is better at than having a document typed at it.
+pub fn resume_prompt(handoff_path: &Path) -> String {
+    format!(
+        "You are resuming after this swarm was stopped. Read {} for your handoff: \
+it records the issue you were on, your branch, your uncommitted changes and \
+what you were doing. Your worktree is unchanged. Verify the current state on \
+disk before trusting it, then continue.",
+        handoff_path.display()
+    )
+}
+
+/// Worktrees belonging to a project, found by the naming `create_worktrees`
+/// uses, returned as `(ordinal, path)` sorted by ordinal.
+///
+/// Resume cannot ask the running state for these: a stopped swarm has no tmux
+/// session, so discovery never sees it, and after a daemon restart there is
+/// nothing in memory to resume from. The worktrees on disk are the durable
+/// record.
+///
+/// `git worktree list` rather than a directory glob, because a glob happily
+/// matches a stale directory that git no longer tracks as a worktree.
+pub async fn discover_worktrees(
+    transport: &ServerTransport,
+    repo_path: &Path,
+    project_name: &str,
+) -> Vec<(u32, PathBuf)> {
+    let Ok(out) = transport
+        .output(
+            "git",
+            &[
+                "worktree".to_string(),
+                "list".to_string(),
+                "--porcelain".to_string(),
+            ],
+            Some(repo_path),
+        )
+        .await
+    else {
+        return Vec::new();
+    };
+    if !out.status.success() {
+        return Vec::new();
+    }
+
+    parse_worktree_ordinals(&String::from_utf8_lossy(&out.stdout), project_name)
+}
+
+/// Pull `(ordinal, path)` out of `git worktree list --porcelain` for the
+/// worktrees named `<project>-wt-<N>`. Split out so it is testable without git.
+pub fn parse_worktree_ordinals(stdout: &str, project_name: &str) -> Vec<(u32, PathBuf)> {
+    let prefix = format!("{project_name}-wt-");
+    let mut found: Vec<(u32, PathBuf)> = Vec::new();
+
+    for line in stdout.lines() {
+        let Some(path) = line.strip_prefix("worktree ") else {
+            continue;
+        };
+        let path = PathBuf::from(path.trim());
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let Some(rest) = name.strip_prefix(&prefix) else {
+            continue;
+        };
+        // Only a bare number: "<project>-wt-2" counts, "<project>-wt-2-old"
+        // is somebody's copy and must not be resumed into.
+        if let Ok(n) = rest.parse::<u32>() {
+            found.push((n, path));
+        }
+    }
+
+    found.sort_by_key(|(n, _)| *n);
+    found.dedup_by_key(|(n, _)| *n);
+    found
 }
