@@ -11,6 +11,18 @@ pub enum HealthStatus {
     Dead,
 }
 
+impl HealthStatus {
+    /// The vocabulary shared with API/JSON consumers (e.g. `AgentSnapshot::health`).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            HealthStatus::Healthy => "Healthy",
+            HealthStatus::Stalled => "Stalled",
+            HealthStatus::Restarting => "Restarting",
+            HealthStatus::Dead => "Dead",
+        }
+    }
+}
+
 /// Per-agent health tracking for auto-recovery.
 #[derive(Debug, Clone)]
 pub struct WorkerHealth {

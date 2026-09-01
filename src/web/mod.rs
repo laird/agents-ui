@@ -77,13 +77,7 @@ pub fn new_shared_state() -> SharedWebState {
 
 impl AgentSnapshot {
     pub fn from_agent_info(info: &crate::model::swarm::AgentInfo) -> Self {
-        use crate::model::swarm::HealthStatus;
-        let health = match info.health.status() {
-            HealthStatus::Healthy    => "Healthy",
-            HealthStatus::Stalled    => "Stalled",
-            HealthStatus::Restarting => "Restarting",
-            HealthStatus::Dead       => "Dead",
-        };
+        let health = info.health.status().as_str();
         let status_timestamp = info.status.timestamp.map(|ts| {
             ts.format("%Y-%m-%dT%H:%M:%SZ").to_string()
         });
