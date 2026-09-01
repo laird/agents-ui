@@ -2755,10 +2755,21 @@ exit 0
 
             let swarm = adapter.launch_with_progress(&config, |_| {}).await.unwrap();
             let (manager_markers, worker_markers): (&[&str], &[&str]) = match runtime {
-                AgentType::Codex => (
-                    &["Starting Codex monitor loop", "== Codex Worker Monitor =="],
-                    &[],
-                ),
+                // Codex takes one of two correct paths depending on whether
+                // the installed CLI has /goal, and `codex_supports_goals()` is
+                // a process-wide OnceLock -- whichever test probes first fixes
+                // it for the whole binary. Assert whichever path was actually
+                // taken instead of pinning the one this machine happens to use.
+                AgentType::Codex => {
+                    if super::runtime_uses_loop_wrappers(&AgentType::Codex) {
+                        (
+                            &["Starting Codex monitor loop", "== Codex Worker Monitor =="],
+                            &[] as &[&str],
+                        )
+                    } else {
+                        (&["What can I help"], &[] as &[&str])
+                    }
+                }
                 // Pi, like Droid, launches both roles as shell loops whose
                 // scripts do not exist under the test's temp agents dir, so
                 // there is no marker to wait for -- the assertion here is that
@@ -2840,22 +2851,33 @@ exit 0
 
         // tmux is the authority on the index; the point is that we ask rather
         // than assume, so the expectation comes from tmux too.
-        let listed = std::process::Command::new("tmux")
-            .args([
-                "list-panes",
-                "-t",
-                &format!("{session}:review"),
-                "-F",
-                "#{pane_index}",
-            ])
-            .output()
-            .unwrap();
-        let index = String::from_utf8_lossy(&listed.stdout)
-            .lines()
-            .next()
-            .unwrap()
-            .trim()
-            .to_string();
+        // Retry briefly: a tmux server that is starting for the first time --
+        // which is the normal case on a fresh macOS runner -- can accept
+        // new-session and still have nothing to list a moment later.
+        let mut index = String::new();
+        for _ in 0..25 {
+            let listed = std::process::Command::new("tmux")
+                .args([
+                    "list-panes",
+                    "-t",
+                    &format!("{session}:review"),
+                    "-F",
+                    "#{pane_index}",
+                ])
+                .output()
+                .unwrap();
+            if let Some(line) = String::from_utf8_lossy(&listed.stdout).lines().next() {
+                index = line.trim().to_string();
+                if !index.is_empty() {
+                    break;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        assert!(
+            !index.is_empty(),
+            "tmux never reported a pane for {session}:review"
+        );
 
         let adapter =
             ClaudeAdapter::new(AgentType::Claude, crate::transport::ServerTransport::default());
