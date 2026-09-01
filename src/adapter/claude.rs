@@ -2691,6 +2691,56 @@ mod tests {
         }
     }
 
+    /// Writes a `tmux` shim into `bin_dir` that transparently redirects every
+    /// invocation onto a private `-L <socket>` server instead of the
+    /// caller's default tmux server, and returns the socket name (for
+    /// teardown via `kill_tmux_shim_server`). Must be called *before*
+    /// `bin_dir` is placed on PATH -- the shim execs the real tmux binary
+    /// resolved here, so writing it after `bin_dir` is already on PATH would
+    /// resolve to itself instead. Callers must already hold `lock_env()`:
+    /// this shells out to `command -v tmux`, which inherits the process-wide
+    /// PATH, and that PATH is exactly what sibling tests mutate under the
+    /// same lock (see `TmuxLayout::new`, #342).
+    fn write_tmux_shim(bin_dir: &std::path::Path) -> Option<String> {
+        let real = std::process::Command::new("sh")
+            .args(["-lc", "command -v tmux"])
+            .output()
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())?;
+        let socket = format!(
+            "agents-ui-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        write_executable(
+            bin_dir.join("tmux").as_path(),
+            &format!("#!/bin/sh\nexec {real} -L {socket} \"$@\"\n"),
+        );
+        Some(socket)
+    }
+
+    /// Kills the private tmux server started through a `write_tmux_shim`
+    /// socket and removes its socket file, mirroring `TmuxLayout::drop`
+    /// below -- `kill-server` leaves the socket file behind once the server
+    /// has already exited on its own.
+    fn kill_tmux_shim_server(socket: &str) {
+        let _ = std::process::Command::new("sh")
+            .arg("-lc")
+            .arg(format!("tmux -L {socket} kill-server 2>/dev/null"))
+            .status();
+        if let Ok(output) = std::process::Command::new("id").arg("-u").output() {
+            let uid = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !uid.is_empty() {
+                let _ = std::fs::remove_file(
+                    std::env::temp_dir().join(format!("tmux-{uid}")).join(socket),
+                );
+            }
+        }
+    }
+
     fn fake_agent_script(runtime_name: &str, manager_cmd: &str, worker_cmd: &str) -> String {
         format!(
             r#"#!/bin/sh
@@ -2930,6 +2980,14 @@ exit 0
             &fake_agent_script("DROID", "/monitor-loop", "/fix-loop"),
         );
 
+        // Redirect every tmux call this test makes onto a private server: this
+        // test exercises real launches across multiple runtimes and worktrees,
+        // and running that against the shared default server was a source of
+        // CI flakes under contention (#341, #342).
+        let Some(tmux_socket) = write_tmux_shim(&bin_dir) else {
+            return;
+        };
+
         let path_value = match original_path.as_ref() {
             Some(existing) => {
                 let mut value = std::ffi::OsString::from(bin_dir.as_os_str());
@@ -3046,6 +3104,8 @@ exit 0
             std::fs::remove_dir_all(&repo_path).ok();
         }
 
+        kill_tmux_shim_server(&tmux_socket);
+
         if let Some(path) = original_path {
             unsafe { std::env::set_var("PATH", path) };
         } else {
@@ -3078,6 +3138,14 @@ exit 0
             bin_dir.join("claude").as_path(),
             &fake_agent_script("CLAUDE", "/autocoder:monitor-loop", "/autocoder:fix-loop"),
         );
+
+        // Redirect every tmux call this test makes onto a private server: this
+        // test exercises a real launch and resume across a swarm's worktrees,
+        // and running that against the shared default server was a source of
+        // CI flakes under contention (#341, #342).
+        let Some(tmux_socket) = write_tmux_shim(&bin_dir) else {
+            return;
+        };
 
         let path_value = match original_path.as_ref() {
             Some(existing) => {
@@ -3191,6 +3259,8 @@ exit 0
         cleanup_tmux_session(&resumed.tmux_session).await;
         std::fs::remove_dir_all(&worker_wt).ok();
         std::fs::remove_dir_all(&repo_path).ok();
+
+        kill_tmux_shim_server(&tmux_socket);
 
         if let Some(path) = original_path {
             unsafe { std::env::set_var("PATH", path) };
@@ -3432,11 +3502,20 @@ exit 0
             )
             .ok()?;
 
-            let real = std::process::Command::new("sh")
-                .args(["-lc", "command -v tmux"])
-                .output()
-                .ok()
-                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())?;
+            // Resolve the real tmux binary under lock_env(): this shells out to
+            // `command -v tmux`, which inherits the process-wide PATH, and other
+            // tests mutate that same PATH (to point `tmux` at their own private
+            // socket) while holding this same lock. Without it, a resolution
+            // here can land mid-mutation and bake a sibling test's shim path
+            // into this layout's own shim (#342).
+            let real = {
+                let _guard = lock_env();
+                std::process::Command::new("sh")
+                    .args(["-lc", "command -v tmux"])
+                    .output()
+                    .ok()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())?
+            };
 
             write_executable(
                 dir.join("bin/tmux").as_path(),
