@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use tokio::time::{Duration, sleep};
 
 use crate::transport::ServerTransport;
-use crate::tmux::session as tmux_session;
+use crate::tmux::session::{self as tmux_session, TmuxWindowInfo};
 use crate::tmux::proxy::capture_pane;
 use crate::model::status::{AgentState, read_status_file};
 use crate::model::swarm::AgentType;
@@ -84,52 +84,28 @@ async fn build_swarm_snapshot(
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_default();
 
-    // Collect agent snapshots from all panes.
-    //
-    // Roles are decided by WINDOW NAME, never by index. The launcher builds
-    // `-n agents` for workers and `-n review` for the manager
-    // (start-parallel-agents.sh), and addresses both by window id precisely
-    // because indices are not dependable. Keying on `window.index == 0 &&
-    // pane.index == 0` here was worse than fragile: under `base-index 1` /
-    // `pane-base-index 1` -- a common tmux setting -- no window or pane has
-    // index 0 at all, so no pane was ever the manager, and every swarm was
-    // dropped by the `None` arm below. The dashboard reported zero swarms on
-    // any such machine.
-    //
-    // Worker ordinals are positional (1-based) for the same reason: raw
-    // `pane_index` yields `worker-2..worker-4` under pane-base-index 1, and
-    // looks up `<project>-wt-0` under pane-base-index 0. Position is right
-    // under both.
+    // Collect agent snapshots from all panes. Roles come from `assign_roles`,
+    // which decides by window NAME, never by index -- see its doc comment for
+    // why raw indices dropped every swarm under `base-index 1`.
     let mut manager: Option<AgentSnapshot> = None;
     let mut workers: Vec<AgentSnapshot> = Vec::new();
-    let mut ordinal: u32 = 0;
 
-    for window in &session_info.windows {
-        let is_manager_window = window.name.eq_ignore_ascii_case("review");
-        for pane in &window.panes {
-            // Only the first pane of the review window is the manager; if it
-            // were ever split, the rest are still workers.
-            let is_manager = is_manager_window && manager.is_none();
-            if !is_manager {
-                ordinal += 1;
-            }
+    for (is_manager, ordinal, target) in assign_roles(&session_info.windows) {
+        let snap = build_agent_snapshot(
+            transport,
+            &target,
+            is_manager,
+            ordinal,
+            &project_name,
+            repo_path.as_deref(),
+            &agent_type,
+        )
+        .await;
 
-            let snap = build_agent_snapshot(
-                transport,
-                &pane.target,
-                is_manager,
-                ordinal,
-                &project_name,
-                repo_path.as_deref(),
-                &agent_type,
-            )
-            .await;
-
-            if is_manager {
-                manager = Some(snap);
-            } else {
-                workers.push(snap);
-            }
+        if is_manager {
+            manager = Some(snap);
+        } else {
+            workers.push(snap);
         }
     }
 
@@ -180,6 +156,41 @@ async fn build_swarm_snapshot(
         workers,
         issues: Vec::new(), // populated by TUI path; standalone discovery doesn't fetch issues
     }))
+}
+
+/// Decide which pane is the manager and what ordinal each worker gets.
+///
+/// The manager is the first pane of the first window named "review"
+/// (case-insensitive) -- never `window.index == 0 && pane.index == 0`. Under
+/// `base-index 1` / `pane-base-index 1` -- a common tmux setting -- no window
+/// or pane has index 0 at all, so an index-based check never matches and every
+/// swarm was silently dropped. Worker ordinals are positional (1-based) for
+/// the same reason: raw `pane_index` yields `worker-2..worker-4` under
+/// pane-base-index 1, and looks up `<project>-wt-0` under pane-base-index 0.
+///
+/// Returns `(is_manager, ordinal, pane_target)` per pane, in window/pane
+/// order. `ordinal` is meaningless when `is_manager` is true.
+fn assign_roles(windows: &[TmuxWindowInfo]) -> Vec<(bool, u32, String)> {
+    let mut result = Vec::new();
+    let mut manager_found = false;
+    let mut ordinal: u32 = 0;
+
+    for window in windows {
+        let is_manager_window = window.name.eq_ignore_ascii_case("review");
+        for pane in &window.panes {
+            // Only the first pane of the review window is the manager; if it
+            // were ever split, the rest are still workers.
+            let is_manager = is_manager_window && !manager_found;
+            if is_manager {
+                manager_found = true;
+            } else {
+                ordinal += 1;
+            }
+            result.push((is_manager, ordinal, pane.target.clone()));
+        }
+    }
+
+    result
 }
 
 /// Build a single agent snapshot from a tmux pane.
@@ -409,4 +420,76 @@ fn strip_worktree_suffix(path: &std::path::Path, project_name: &str) -> PathBuf 
         }
     }
     path.to_path_buf()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::assign_roles;
+    use crate::tmux::session::{TmuxPaneInfo, TmuxWindowInfo};
+
+    fn window(index: u32, name: &str, pane_targets: &[&str]) -> TmuxWindowInfo {
+        TmuxWindowInfo {
+            index,
+            name: name.to_string(),
+            panes: pane_targets
+                .iter()
+                .enumerate()
+                .map(|(i, target)| TmuxPaneInfo {
+                    index: i as u32,
+                    target: target.to_string(),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn manager_found_by_window_name_under_base_index_1() {
+        // base-index 1 / pane-base-index 1: no window or pane has index 0.
+        // The old `window.index == 0 && pane.index == 0` check never matched
+        // here, silently dropping the whole swarm.
+        let windows = vec![
+            window(1, "agents", &["claude-demo:1.0", "claude-demo:1.1"]),
+            window(2, "review", &["claude-demo:2.0"]),
+        ];
+
+        let roles = assign_roles(&windows);
+
+        assert_eq!(roles.len(), 3);
+        assert_eq!(roles[0], (false, 1, "claude-demo:1.0".to_string()));
+        assert_eq!(roles[1], (false, 2, "claude-demo:1.1".to_string()));
+        assert_eq!(roles[2], (true, 2, "claude-demo:2.0".to_string()));
+    }
+
+    #[test]
+    fn manager_window_name_is_case_insensitive() {
+        let windows = vec![window(0, "Review", &["claude-demo:0.0"])];
+
+        let roles = assign_roles(&windows);
+
+        assert_eq!(roles, vec![(true, 0, "claude-demo:0.0".to_string())]);
+    }
+
+    #[test]
+    fn no_review_window_means_everyone_is_a_worker() {
+        let windows = vec![window(0, "agents", &["claude-demo:0.0", "claude-demo:0.1"])];
+
+        let roles = assign_roles(&windows);
+
+        assert_eq!(roles.len(), 2);
+        assert!(roles.iter().all(|(is_manager, _, _)| !is_manager));
+        assert_eq!(roles[0].1, 1);
+        assert_eq!(roles[1].1, 2);
+    }
+
+    #[test]
+    fn only_first_pane_of_review_window_is_manager() {
+        // If the review window is ever split, the extra panes are workers,
+        // not additional managers.
+        let windows = vec![window(0, "review", &["claude-demo:0.0", "claude-demo:0.1"])];
+
+        let roles = assign_roles(&windows);
+
+        assert_eq!(roles[0], (true, 0, "claude-demo:0.0".to_string()));
+        assert_eq!(roles[1], (false, 1, "claude-demo:0.1".to_string()));
+    }
 }
