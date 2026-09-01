@@ -427,6 +427,9 @@
     .health-dead    { color: #cc4444; }
     .agent-completed { color: var(--text-dim); font-size: 0.75rem; }
     .agent-restarts  { color: var(--warning); font-size: 0.75rem; }
+    .agent-age            { color: var(--text-dim); }
+    .agent-age.stale      { color: var(--warning); }
+    .agent-age.very-stale { color: var(--error); }
     /* One dot per agent on the swarm card: the shape of the swarm at a glance,
        without opening it. */
     .agent-dots {
@@ -1177,6 +1180,20 @@
       }
     }
 
+    async function resumeSwarm(project) {
+      if (!confirm('Resume ' + project + '? Each agent will be seeded with its last handoff.')) return;
+      try {
+        const r = await fetch('/api/swarms/' + encodeURIComponent(project) + '/resume', { method: 'POST' });
+        if (r.ok) {
+          setTimeout(() => { refresh(); }, 4000);
+        } else {
+          alert('Resume failed (HTTP ' + r.status + ')');
+        }
+      } catch (err) {
+        alert('Error: ' + err.message);
+      }
+    }
+
     // Per-swarm agent type override (set by the agent-type switcher, null = use swarm default).
     const swarmAgentTypeOverride = {};
 
@@ -1213,23 +1230,6 @@
           alert('Switch agent failed (HTTP ' + r.status + ')');
         } else {
           setTimeout(() => { refresh(); }, 5000);
-        }
-      } catch (err) {
-        alert('Error: ' + err.message);
-      }
-    }
-
-    async function startSwarm(repoPath, agentType, numWorkers) {
-      try {
-        const r = await fetch('/api/swarms', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ repo_path: repoPath, agent_type: agentType, num_workers: numWorkers || 2 }),
-        });
-        if (r.ok) {
-          setTimeout(() => { refresh(); }, 4000);
-        } else {
-          alert('Start failed (HTTP ' + r.status + ')');
         }
       } catch (err) {
         alert('Error: ' + err.message);
@@ -1359,6 +1359,29 @@
         (agent.current_issue_title ? ' ' + agent.current_issue_title : '');
     }
 
+    // Converts an ISO-8601 timestamp into a compact relative duration, e.g.
+    // "just now", "3m", "1h 5m". Mirrors the TUI's own age formatting.
+    function relativeTime(isoStr) {
+      const then = Date.parse(isoStr);
+      if (Number.isNaN(then)) return '';
+      const secs = Math.max(0, Math.floor((Date.now() - then) / 1000));
+      if (secs < 60) return 'just now';
+      const mins = Math.floor(secs / 60);
+      if (mins < 60) return mins + 'm';
+      const hours = Math.floor(mins / 60);
+      const remMins = mins % 60;
+      return remMins > 0 ? hours + 'h ' + remMins + 'm' : hours + 'h';
+    }
+
+    function formatAge(agent) {
+      if (!agent.status_timestamp) return '';
+      const then = Date.parse(agent.status_timestamp);
+      if (Number.isNaN(then)) return '';
+      const mins = Math.max(0, Date.now() - then) / 60000;
+      const tier = mins > 30 ? ' very-stale' : mins >= 5 ? ' stale' : '';
+      return '<span class="agent-age' + tier + '"> · ' + esc(relativeTime(agent.status_timestamp)) + '</span>';
+    }
+
     function healthIcon(h) {
       switch (h) {
         case 'Healthy':    return '<span class="health-icon health-ok" title="Healthy">✓</span>';
@@ -1396,6 +1419,7 @@
       const branchHtml = agent.branch
         ? '<span class="agent-branch" title="Checked-out branch"> · ⎇ ' + esc(agent.branch) + '</span>'
         : '';
+      const ageHtml = formatAge(agent);
       return (
         '<div class="agent-row" ' +
              'role="button" tabindex="0" ' +
@@ -1407,7 +1431,7 @@
             '<div class="agent-role">' + healthHtml + ' ' + esc(agent.role) + '</div>' +
             '<div class="agent-state-text">' +
               esc(agent.state) + esc(issueText) + worktreeHtml + branchHtml +
-              waitText + completedHtml + restartHtml +
+              ageHtml + waitText + completedHtml + restartHtml +
             '</div>' +
           '</div>' +
           '<span class="agent-row-arrow" aria-hidden="true">›</span>' +
@@ -1451,7 +1475,7 @@
             '</select>';
           return '<div class="action-bar">' +
             (swarm.stopped
-              ? '<button class="action-btn start-btn" onclick="startSwarm(' + JSON.stringify(swarm.repo_path) + ',' + JSON.stringify(swarm.agent_type) + ',' + swarm.workers.length + ')">▶ Start</button>'
+              ? '<button class="action-btn start-btn" onclick="resumeSwarm(' + JSON.stringify(proj) + ')">⏵ Resume</button>'
               : '<button class="action-btn stop-btn" onclick="stopSwarm(' + JSON.stringify(proj) + ')">■ Stop</button>' +
                 agentTypeSelector +
                 '<button class="action-btn add-worker-btn" onclick="addWorker(' + JSON.stringify(proj) + ')">+ Add Worker</button>'
@@ -1710,6 +1734,7 @@
       state.agent   = null;
       render();
       window.scrollTo(0, 0);
+      setHash(routeFor(projectName, null));
     }
 
     function openSession(project, role) {
@@ -1728,6 +1753,58 @@
       window.scrollTo(0, 0);
       // Load initial pane content then start refresh loop
       refreshSessionPane();
+      setHash(routeFor(project, role));
+    }
+
+    // ── Hash routing ───────────────────────────────────────────────────────────
+    // #/                                  → repos list
+    // #/swarm/<project>                   → swarm detail view
+    // #/swarm/<project>/agent/<role>      → agent session view
+    //
+    // navigate()/openSession() are the only places view state changes, so
+    // keeping the hash in sync there (rather than duplicating the view switch
+    // here) is what makes deep links shareable and reload-safe for free.
+    function routeFor(project, role) {
+      if (!project) return '#/';
+      if (!role) return '#/swarm/' + encodeURIComponent(project);
+      return '#/swarm/' + encodeURIComponent(project) + '/agent/' + encodeURIComponent(role);
+    }
+
+    function setHash(newHash) {
+      if (location.hash !== newHash) location.hash = newHash;
+    }
+
+    function findAgentByRole(swarm, role) {
+      if (!swarm) return null;
+      if (swarm.manager && swarm.manager.role === role) return swarm.manager;
+      return (swarm.workers || []).find(function(w) { return w.role === role; }) || null;
+    }
+
+    // Parses location.hash and applies it to view state, degrading a stale
+    // target (swarm stopped, agent gone) to the nearest parent that still
+    // exists rather than rendering blank — an alert is inherently a little
+    // stale by the time it is clicked.
+    function applyRoute() {
+      const hash = location.hash || '#/';
+      const m = hash.match(/^#\/swarm\/([^/]+)(?:\/agent\/([^/]+))?\/?$/);
+      let project = null, role = null;
+      if (m) {
+        project = decodeURIComponent(m[1]);
+        role    = m[2] ? decodeURIComponent(m[2]) : null;
+      }
+
+      const swarm = project ? state.swarms.find(s => s.project_name === project) : null;
+      if (project && !swarm) { project = null; role = null; }
+      if (swarm && role && !findAgentByRole(swarm, role)) { role = null; }
+
+      // Already there — most hashchange events are our own navigate()/
+      // openSession() setting the hash, so this avoids re-running their
+      // side effects (resetting the session pane, restarting its timer).
+      if (state.project === project && state.agent === role) return;
+
+      if (project && role)      openSession(project, role);
+      else if (project)         navigate(project);
+      else                      navigate(null);
     }
 
     // ── Session pane refresh ───────────────────────────────────────────────────
@@ -1925,7 +2002,11 @@
       }
     });
 
-    refresh();
+    // Apply the initial route only after the first swarm fetch resolves —
+    // validating a deep link (swarm/agent still exists) needs state.swarms
+    // populated, otherwise every target looks stale and falls back to '#/'.
+    window.addEventListener('hashchange', applyRoute);
+    refresh().then(applyRoute);
     setInterval(refresh, 5000);
   </script>
 </body>

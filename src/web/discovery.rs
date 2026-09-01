@@ -5,6 +5,7 @@
 //! tmux sessions, captures pane content, reads status files, and writes the result
 //! into `SharedWebState`.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio::time::{Duration, sleep};
 
@@ -12,7 +13,7 @@ use crate::transport::ServerTransport;
 use crate::tmux::session as tmux_session;
 use crate::tmux::proxy::capture_pane;
 use crate::model::status::{AgentState, read_status_file};
-use crate::model::swarm::AgentType;
+use crate::model::swarm::{AgentType, WorkerHealth};
 
 use super::{AgentSnapshot, SharedWebState, SwarmSnapshot};
 
@@ -22,11 +23,19 @@ const POLL_INTERVAL_SECS: u64 = 3;
 /// Pane scrollback lines to capture.
 const SCROLLBACK_LINES: u32 = 200;
 
+/// Per-agent health, keyed by `AgentSnapshot::id`, held across poll cycles so
+/// `stall_ticks` can accumulate. A fresh `WorkerHealth` per poll (the previous
+/// behaviour) can never observe two consecutive samples, so it always reports
+/// `Healthy` even for a worker stuck for hours -- there is nothing to compare
+/// against `last_content`.
+type HealthMap = HashMap<String, WorkerHealth>;
+
 /// Entry point: run forever, updating `state` every `POLL_INTERVAL_SECS`.
 pub async fn run(state: SharedWebState) {
     let transport = TransportServerTransport::new(None);
+    let mut health = HealthMap::new();
     loop {
-        match collect_swarms(&transport).await {
+        match collect_swarms(&transport, &mut health).await {
             Ok(snapshots) => {
                 if let Ok(mut guard) = state.write() {
                     *guard = snapshots;
@@ -44,12 +53,15 @@ pub async fn run(state: SharedWebState) {
 type TransportServerTransport = ServerTransport;
 
 /// Discover all active agent swarms from tmux sessions.
-async fn collect_swarms(transport: &ServerTransport) -> anyhow::Result<Vec<SwarmSnapshot>> {
+async fn collect_swarms(
+    transport: &ServerTransport,
+    health: &mut HealthMap,
+) -> anyhow::Result<Vec<SwarmSnapshot>> {
     let session_names = tmux_session::discover_agent_sessions(transport).await?;
 
     let mut swarms = Vec::new();
     for session_name in &session_names {
-        match build_swarm_snapshot(transport, session_name).await {
+        match build_swarm_snapshot(transport, session_name, health).await {
             Ok(Some(snap)) => swarms.push(snap),
             Ok(None) => {}
             Err(e) => {
@@ -57,7 +69,84 @@ async fn collect_swarms(transport: &ServerTransport) -> anyhow::Result<Vec<Swarm
             }
         }
     }
+
+    // A stopped swarm has no tmux session, so it is invisible above no matter
+    // what. Add back anything persisted at stop time and still marked
+    // stopped, so it still shows as a card (with a Resume button) rather than
+    // silently disappearing from the dashboard.
+    for snap in stopped_swarm_snapshots() {
+        if !swarms.iter().any(|s| s.project_name == snap.project_name) {
+            swarms.push(snap);
+        }
+    }
+
     Ok(swarms)
+}
+
+/// Synthetic snapshots for every persisted swarm still marked stopped.
+///
+/// There are no live panes to inspect, so agent state is a placeholder --
+/// enough for the dashboard to render a card and offer Resume, not a claim
+/// about what any agent is actually doing.
+fn stopped_swarm_snapshots() -> Vec<SwarmSnapshot> {
+    use crate::config::persistence::{is_swarm_stopped, list_saved_swarms, load_swarm_state};
+
+    let Ok(names) = list_saved_swarms() else {
+        return Vec::new();
+    };
+
+    names
+        .into_iter()
+        .filter(|name| is_swarm_stopped(name))
+        .filter_map(|name| {
+            let state = load_swarm_state(&name).ok().flatten()?;
+            Some(stopped_swarm_snapshot(&name, &state))
+        })
+        .collect()
+}
+
+fn stopped_placeholder_agent(project_name: &str, role: &str, is_manager: bool) -> AgentSnapshot {
+    AgentSnapshot {
+        id: format!("{project_name}/{role}"),
+        role: role.to_string(),
+        state: "Stopped".to_string(),
+        is_manager,
+        waiting_for_input: false,
+        current_issue: None,
+        current_issue_title: None,
+        pane_content: String::new(),
+        tmux_target: String::new(),
+        health: "Unknown".to_string(),
+        completed_issue_count: 0,
+        resurrection_attempts: 0,
+        status_timestamp: None,
+        worktree_path: String::new(),
+        branch: None,
+    }
+}
+
+fn stopped_swarm_snapshot(
+    project_name: &str,
+    state: &crate::config::persistence::SwarmState,
+) -> SwarmSnapshot {
+    let workers = (1..=state.num_workers)
+        .map(|i| stopped_placeholder_agent(project_name, &format!("worker-{i}"), false))
+        .collect();
+
+    SwarmSnapshot {
+        project_name: project_name.to_string(),
+        repo_path: state.repo_path.clone(),
+        agent_type: state.agent_type.clone(),
+        workflow: state.workflow.clone(),
+        tmux_session: state.tmux_session.clone(),
+        stopped: true,
+        busy_count: 0,
+        idle_count: 0,
+        attention_count: 0,
+        manager: stopped_placeholder_agent(project_name, "manager", true),
+        workers,
+        issues: Vec::new(),
+    }
 }
 
 /// Build a `SwarmSnapshot` for a single tmux session.
@@ -65,6 +154,7 @@ async fn collect_swarms(transport: &ServerTransport) -> anyhow::Result<Vec<Swarm
 async fn build_swarm_snapshot(
     transport: &ServerTransport,
     session_name: &str,
+    health: &mut HealthMap,
 ) -> anyhow::Result<Option<SwarmSnapshot>> {
     // Parse prefix → agent type, project name
     let Some((agent_type, project_name)) = parse_session_name(session_name) else {
@@ -155,6 +245,7 @@ async fn build_swarm_snapshot(
                 pane.current_path.as_deref(),
                 &branches,
                 &agent_type,
+                health,
             )
             .await;
 
@@ -258,6 +349,7 @@ async fn build_agent_snapshot(
     pane_path: Option<&str>,
     branches: &std::collections::HashMap<PathBuf, String>,
     agent_type: &AgentType,
+    health: &mut HealthMap,
 ) -> AgentSnapshot {
 
     // Capture pane content
@@ -329,8 +421,11 @@ async fn build_agent_snapshot(
     // renders, whose last line reads "Enter to select · ↑/↓ to navigate".
     let waiting_for_input = crate::model::status::agent_needs_input(&pane_content);
 
+    let id = format!("{project_name}/{role}");
+    let health_str = update_health(health, &id, &state_str, &pane_content);
+
     AgentSnapshot {
-        id: format!("{project_name}/{role}"),
+        id,
         role,
         state: state_str,
         is_manager,
@@ -339,7 +434,7 @@ async fn build_agent_snapshot(
         current_issue_title: None,
         pane_content,
         tmux_target: target.to_string(),
-        health: "Healthy".to_string(),
+        health: health_str.to_string(),
         completed_issue_count: 0,
         resurrection_attempts: 0,
         status_timestamp: None,
@@ -356,17 +451,6 @@ async fn build_agent_snapshot(
 /// One `git worktree list` per swarm refresh rather than a `git` call per
 /// agent. Paths are canonicalised so lookups match regardless of symlinks in
 /// either the git output or the pane's reported directory.
-///
-/// `git worktree list --porcelain` emits stanzas separated by blank lines:
-///
-/// ```text
-/// worktree /home/laird/src/kink-party
-/// HEAD 9f2c...
-/// branch refs/heads/master
-/// ```
-///
-/// A detached worktree has a `detached` line and no `branch` line, and is
-/// simply absent from the map.
 async fn worktree_branches(
     transport: &ServerTransport,
     repo_root: &std::path::Path,
@@ -390,33 +474,7 @@ async fn worktree_branches(
         return std::collections::HashMap::new();
     }
 
-    parse_worktree_porcelain(&String::from_utf8_lossy(&output.stdout))
-}
-
-fn parse_worktree_porcelain(stdout: &str) -> std::collections::HashMap<PathBuf, String> {
-    let mut map = std::collections::HashMap::new();
-    let mut current: Option<PathBuf> = None;
-
-    for line in stdout.lines() {
-        if let Some(path) = line.strip_prefix("worktree ") {
-            let p = PathBuf::from(path.trim());
-            // Canonicalise so a symlinked worktree still matches the pane path.
-            current = Some(std::fs::canonicalize(&p).unwrap_or(p));
-        } else if let Some(reference) = line.strip_prefix("branch ") {
-            if let Some(path) = current.take() {
-                let name = reference
-                    .trim()
-                    .strip_prefix("refs/heads/")
-                    .unwrap_or(reference.trim())
-                    .to_string();
-                map.insert(path, name);
-            }
-        } else if line.trim().is_empty() {
-            current = None;
-        }
-    }
-
-    map
+    crate::model::swarm::parse_worktree_porcelain(&String::from_utf8_lossy(&output.stdout))
 }
 
 /// Infer agent state from pane content when no status file is available.
@@ -458,6 +516,29 @@ fn infer_state_from_pane(content: &str) -> (String, Option<u32>) {
 /// Returns true if the state string looks like active work.
 fn is_busy(state: &str) -> bool {
     state.starts_with("Working")
+}
+
+/// Update the persistent per-agent health cache for one poll and return the
+/// resulting health string.
+///
+/// Mirrors the TUI's own stall detection (see `Event::PaneOutput` in app.rs):
+/// stalled only while genuinely Working and the pane hasn't moved since the
+/// last poll. Any other state resets the counter and re-baselines the content
+/// so a worker doesn't inherit stale stall_ticks from before it went idle.
+fn update_health(
+    health: &mut HealthMap,
+    id: &str,
+    state_str: &str,
+    pane_content: &str,
+) -> &'static str {
+    let agent_health = health.entry(id.to_string()).or_default();
+    if is_busy(state_str) && pane_content == agent_health.last_content {
+        agent_health.stall_ticks += 1;
+    } else {
+        agent_health.stall_ticks = 0;
+        agent_health.last_content = pane_content.to_string();
+    }
+    agent_health.status().as_str()
 }
 
 /// Parse `claude-myrepo` → `(AgentType::Claude, "myrepo")`.
@@ -542,66 +623,50 @@ fn strip_worktree_suffix(path: &std::path::Path, project_name: &str) -> PathBuf 
 
 #[cfg(test)]
 mod tests {
-    use super::parse_worktree_porcelain;
-    use std::path::PathBuf;
+    use super::*;
 
     #[test]
-    fn maps_worktrees_to_branch_names() {
-        // Paths that do not exist stay as written: canonicalize falls back to
-        // the original, which is what keeps this test hermetic.
-        let out = "\
-worktree /nonexistent/kink-party
-HEAD 9f2c1a
-branch refs/heads/master
-
-worktree /nonexistent/kink-party-wt-1
-HEAD 3b4d2e
-branch refs/heads/worker-1
-";
-        let map = parse_worktree_porcelain(out);
-
-        assert_eq!(map.len(), 2);
-        assert_eq!(
-            map.get(&PathBuf::from("/nonexistent/kink-party")).map(String::as_str),
-            Some("master")
-        );
-        assert_eq!(
-            map.get(&PathBuf::from("/nonexistent/kink-party-wt-1")).map(String::as_str),
-            Some("worker-1")
-        );
+    fn stall_ticks_accumulate_across_polls_with_unchanged_content() {
+        let mut health = HealthMap::new();
+        // First poll: nothing to compare against yet, so it just baselines.
+        assert_eq!(update_health(&mut health, "repo/worker-1", "Working #7", "same"), "Healthy");
+        // Threshold is 3 (see WorkerHealth::status): two more unchanged polls stalls it.
+        assert_eq!(update_health(&mut health, "repo/worker-1", "Working #7", "same"), "Healthy");
+        assert_eq!(update_health(&mut health, "repo/worker-1", "Working #7", "same"), "Healthy");
+        assert_eq!(update_health(&mut health, "repo/worker-1", "Working #7", "same"), "Stalled");
     }
 
     #[test]
-    fn omits_detached_worktrees_rather_than_inventing_a_branch() {
-        let out = "\
-worktree /nonexistent/base
-HEAD 9f2c1a
-branch refs/heads/main
-
-worktree /nonexistent/detached
-HEAD 3b4d2e
-detached
-";
-        let map = parse_worktree_porcelain(out);
-
-        assert_eq!(map.len(), 1);
-        assert!(!map.contains_key(&PathBuf::from("/nonexistent/detached")));
+    fn changed_pane_content_resets_stall_ticks() {
+        let mut health = HealthMap::new();
+        for _ in 0..3 {
+            update_health(&mut health, "repo/worker-1", "Working #7", "same");
+        }
+        assert_eq!(update_health(&mut health, "repo/worker-1", "Working #7", "same"), "Stalled");
+        assert_eq!(update_health(&mut health, "repo/worker-1", "Working #7", "different"), "Healthy");
     }
 
     #[test]
-    fn handles_empty_and_malformed_output() {
-        assert!(parse_worktree_porcelain("").is_empty());
-        assert!(parse_worktree_porcelain("garbage\nmore garbage\n").is_empty());
-        // A branch line with no preceding worktree line must not panic.
-        assert!(parse_worktree_porcelain("branch refs/heads/orphan\n").is_empty());
+    fn going_idle_resets_stall_ticks() {
+        let mut health = HealthMap::new();
+        for _ in 0..3 {
+            update_health(&mut health, "repo/worker-1", "Working #7", "same");
+        }
+        assert_eq!(update_health(&mut health, "repo/worker-1", "Working #7", "same"), "Stalled");
+        assert_eq!(update_health(&mut health, "repo/worker-1", "Idle", "same"), "Healthy");
+        // And it doesn't come back stalled just because content matches again while idle.
+        assert_eq!(update_health(&mut health, "repo/worker-1", "Idle", "same"), "Healthy");
     }
 
     #[test]
-    fn keeps_refs_that_are_not_under_refs_heads() {
-        let map = parse_worktree_porcelain("worktree /nonexistent/x\nbranch odd-ref\n");
-        assert_eq!(
-            map.get(&PathBuf::from("/nonexistent/x")).map(String::as_str),
-            Some("odd-ref")
-        );
+    fn health_is_tracked_independently_per_agent_id() {
+        let mut health = HealthMap::new();
+        for _ in 0..3 {
+            update_health(&mut health, "repo/worker-1", "Working #7", "stuck");
+        }
+        assert_eq!(update_health(&mut health, "repo/worker-1", "Working #7", "stuck"), "Stalled");
+        // A different agent id starts with its own fresh cache entry.
+        assert_eq!(update_health(&mut health, "repo/worker-2", "Working #8", "stuck"), "Healthy");
     }
 }
+

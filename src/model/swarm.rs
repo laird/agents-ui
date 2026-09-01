@@ -1,6 +1,6 @@
 use super::issue::IssueCache;
 use super::status::AgentStatus;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Health status of a worker agent.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -9,6 +9,18 @@ pub enum HealthStatus {
     Stalled,
     Restarting,
     Dead,
+}
+
+impl HealthStatus {
+    /// The vocabulary shared with API/JSON consumers (e.g. `AgentSnapshot::health`).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            HealthStatus::Healthy => "Healthy",
+            HealthStatus::Stalled => "Stalled",
+            HealthStatus::Restarting => "Restarting",
+            HealthStatus::Dead => "Dead",
+        }
+    }
 }
 
 /// Per-agent health tracking for auto-recovery.
@@ -244,6 +256,9 @@ pub struct AgentInfo {
     pub role: String,
     /// Path to the worktree (base repo for manager)
     pub worktree_path: PathBuf,
+    /// Git branch checked out in `worktree_path`. `None` for a detached HEAD
+    /// or when it hasn't been resolved yet.
+    pub branch: Option<String>,
     /// tmux pane target (e.g., "claude-myrepo:0.0")
     pub tmux_target: String,
     /// Current status from status file
@@ -345,6 +360,67 @@ impl AgentInfo {
         // Also flag idle agents as needing attention
         matches!(self.status.state, super::status::AgentState::Idle)
     }
+}
+
+/// Parse `git worktree list --porcelain` output into a map of worktree path
+/// to checked-out branch name.
+///
+/// Stanzas are separated by blank lines:
+///
+/// ```text
+/// worktree /home/laird/src/kink-party
+/// HEAD 9f2c...
+/// branch refs/heads/master
+/// ```
+///
+/// A detached worktree has a `detached` line and no `branch` line, and is
+/// simply absent from the map — callers should treat a missing entry as "no
+/// branch" rather than inventing one.
+pub fn parse_worktree_porcelain(stdout: &str) -> std::collections::HashMap<PathBuf, String> {
+    let mut map = std::collections::HashMap::new();
+    let mut current: Option<PathBuf> = None;
+
+    for line in stdout.lines() {
+        if let Some(path) = line.strip_prefix("worktree ") {
+            let p = PathBuf::from(path.trim());
+            // Canonicalise so a symlinked worktree still matches the pane path.
+            current = Some(std::fs::canonicalize(&p).unwrap_or(p));
+        } else if let Some(reference) = line.strip_prefix("branch ") {
+            if let Some(path) = current.take() {
+                let name = reference
+                    .trim()
+                    .strip_prefix("refs/heads/")
+                    .unwrap_or(reference.trim())
+                    .to_string();
+                map.insert(path, name);
+            }
+        } else if line.trim().is_empty() {
+            current = None;
+        }
+    }
+
+    map
+}
+
+/// Highest worker ordinal `N` among `<project_name>-wt-N` entries in a
+/// `git worktree list --porcelain` listing.
+///
+/// The worktree list is the durable record of how many workers a swarm had:
+/// unlike an in-memory `Swarm`, it survives the swarm being stopped and
+/// survives a daemon restart. Ordinal, not count — a worker whose worktree was
+/// individually removed from the middle of the roster must not renumber or
+/// hide the workers after it, so the caller can still recreate it in place.
+pub fn highest_worker_ordinal(worktree_list_porcelain: &str, project_name: &str) -> u32 {
+    let prefix = format!("{project_name}-wt-");
+    worktree_list_porcelain
+        .lines()
+        .filter_map(|line| line.strip_prefix("worktree "))
+        .filter_map(|path| {
+            let name = Path::new(path.trim()).file_name()?.to_str()?.to_string();
+            name.strip_prefix(&prefix)?.parse::<u32>().ok()
+        })
+        .max()
+        .unwrap_or(0)
 }
 
 /// A swarm of agents working on one repo.
@@ -480,6 +556,7 @@ mod tests {
             id: id.to_string(),
             role: id.to_string(),
             worktree_path: PathBuf::from("/tmp/test"),
+            branch: None,
             tmux_target: "test:0.0".to_string(),
             status: AgentStatus {
                 timestamp: None,
@@ -516,6 +593,7 @@ mod tests {
             id: "test/manager".to_string(),
             role: "manager".to_string(),
             worktree_path: PathBuf::from("/tmp/test"),
+            branch: None,
             tmux_target: "test:0.0".to_string(),
             status: AgentStatus::default(),
             is_manager: true,
@@ -893,6 +971,7 @@ mod tests {
             id: id.to_string(),
             role: role.to_string(),
             worktree_path: PathBuf::from("/tmp/test"),
+            branch: None,
             tmux_target: format!("test:0.{}", if is_manager { 0 } else { 1 }),
             status: AgentStatus::default(),
             is_manager,
@@ -1007,5 +1086,94 @@ mod tests {
         // After w2 (last), should wrap to w1
         let wrapped = swarm.next_waiting_agent(Some("w2"));
         assert_eq!(wrapped.unwrap().id, "w1");
+    }
+
+    #[test]
+    fn maps_worktrees_to_branch_names() {
+        // Paths that do not exist stay as written: canonicalize falls back to
+        // the original, which is what keeps this test hermetic.
+        let out = "\
+worktree /nonexistent/kink-party
+HEAD 9f2c1a
+branch refs/heads/master
+
+worktree /nonexistent/kink-party-wt-1
+HEAD 3b4d2e
+branch refs/heads/worker-1
+";
+        let map = parse_worktree_porcelain(out);
+
+        assert_eq!(map.len(), 2);
+        assert_eq!(
+            map.get(&PathBuf::from("/nonexistent/kink-party")).map(String::as_str),
+            Some("master")
+        );
+        assert_eq!(
+            map.get(&PathBuf::from("/nonexistent/kink-party-wt-1")).map(String::as_str),
+            Some("worker-1")
+        );
+    }
+
+    #[test]
+    fn omits_detached_worktrees_rather_than_inventing_a_branch() {
+        let out = "\
+worktree /nonexistent/base
+HEAD 9f2c1a
+branch refs/heads/main
+
+worktree /nonexistent/detached
+HEAD 3b4d2e
+detached
+";
+        let map = parse_worktree_porcelain(out);
+
+        assert_eq!(map.len(), 1);
+        assert!(!map.contains_key(&PathBuf::from("/nonexistent/detached")));
+    }
+
+    #[test]
+    fn handles_empty_and_malformed_worktree_output() {
+        assert!(parse_worktree_porcelain("").is_empty());
+        assert!(parse_worktree_porcelain("garbage\nmore garbage\n").is_empty());
+        // A branch line with no preceding worktree line must not panic.
+        assert!(parse_worktree_porcelain("branch refs/heads/orphan\n").is_empty());
+    }
+
+    #[test]
+    fn keeps_worktree_refs_that_are_not_under_refs_heads() {
+        let map = parse_worktree_porcelain("worktree /nonexistent/x\nbranch odd-ref\n");
+        assert_eq!(
+            map.get(&PathBuf::from("/nonexistent/x")).map(String::as_str),
+            Some("odd-ref")
+        );
+    }
+
+    #[test]
+    fn highest_worker_ordinal_takes_the_max_not_the_count() {
+        let listing = "worktree /src/proj\nbranch refs/heads/master\n\n\
+             worktree /src/proj-wt-1\nbranch refs/heads/worker-1\n\n\
+             worktree /src/proj-wt-3\nbranch refs/heads/worker-3\n\n";
+        // Only 2 worker entries present, but the highest ordinal is 3 -- a
+        // caller recreating the roster must restore worker-2 too, not just
+        // launch 2 workers.
+        assert_eq!(highest_worker_ordinal(listing, "proj"), 3);
+    }
+
+    #[test]
+    fn highest_worker_ordinal_ignores_other_projects_and_the_base_repo() {
+        let listing = "worktree /src/proj\nbranch refs/heads/master\n\n\
+             worktree /src/other-wt-9\nbranch refs/heads/worker-9\n\n";
+        assert_eq!(highest_worker_ordinal(listing, "proj"), 0);
+    }
+
+    #[test]
+    fn highest_worker_ordinal_ignores_non_numeric_suffixes() {
+        let listing = "worktree /src/proj-wt-abc\nbranch refs/heads/worker-abc\n\n";
+        assert_eq!(highest_worker_ordinal(listing, "proj"), 0);
+    }
+
+    #[test]
+    fn highest_worker_ordinal_is_zero_for_empty_output() {
+        assert_eq!(highest_worker_ordinal("", "proj"), 0);
     }
 }

@@ -5,7 +5,8 @@ use ratatui::{
     style::Style,
     text::{Line, Span, Text},
     widgets::{
-        Block, Borders, Cell, List, ListItem, ListState, Paragraph, Row, Table, TableState, Wrap,
+        Block, Borders, Cell, List, ListItem, ListState, Padding, Paragraph, Row, Table,
+        TableState, Wrap,
     },
 };
 use std::time::Instant;
@@ -113,17 +114,18 @@ impl SwarmView {
         ])
         .split(area);
 
-        // Size bottom panel to fit the taller of workers or issues, but never
-        // more than 50% of the body area so the manager always has room.
-        // Workers are two-line rows with no header (+2 for borders); issues
-        // are one-line rows with a header (+3 for header+borders).
-        let max_bottom = chunks[1].height / 2;
-        let workers_rows_needed = swarm.workers.len() * 2 + 2;
-        let issues_rows_needed = filtered_issues.len() + 3;
-        let bottom_rows = (workers_rows_needed.max(issues_rows_needed) as u16).min(max_bottom);
+        // Body is three stacked panels, in the same order as the web dashboard:
+        // Manager, then Workers, then Issues. Workers is sized to fit its two-line
+        // rows (identity + dimmed detail line per worker, +2 for borders — the
+        // List has no header row), capped so it can't crowd out the other two.
+        // Manager and Issues then share whatever space remains, with Manager kept
+        // to at least a usable minimum since it hosts the live tmux session.
+        let max_workers_height = (chunks[1].height / 3).max(4);
+        let workers_height = ((swarm.workers.len() * 2 + 2) as u16).min(max_workers_height);
         let body_chunks = Layout::vertical([
-            Constraint::Min(4),              // Manager gets all remaining space
-            Constraint::Length(bottom_rows), // Workers/Issues: sized to fit content
+            Constraint::Min(6),                 // Manager: primary content
+            Constraint::Length(workers_height), // Workers: sized to fit content
+            Constraint::Min(4),                 // Issues: gets remaining space
         ])
         .split(chunks[1]);
 
@@ -233,16 +235,18 @@ impl SwarmView {
             .unwrap_or_else(|_| Text::raw(manager_content.clone()));
         let manager_block = Block::default()
             .borders(Borders::ALL)
-            .title(" Manager ")
+            .title(Line::styled(" Manager ", theme::header_style()))
             .border_style(if focus == SwarmPanel::Manager {
                 theme::title_style()
             } else {
                 Style::default()
-            });
+            })
+            .padding(Padding::horizontal(1));
 
         let manager_rows =
             Layout::vertical([Constraint::Min(4), Constraint::Length(1)]).split(body_chunks[0]);
-        let content_width = manager_rows[0].width.saturating_sub(2).max(1);
+        // -2 for borders, -2 for the block's horizontal padding.
+        let content_width = manager_rows[0].width.saturating_sub(4).max(1);
         let total_lines = wrapped_line_count(&text, content_width);
         let visible = manager_rows[0].height.saturating_sub(2);
         let max_scroll = total_lines.saturating_sub(visible);
@@ -267,14 +271,9 @@ impl SwarmView {
         );
         f.render_widget(manager_input, manager_rows[1]);
 
-        // --- Bottom split: Workers (left) | Issues (right) ---
-        let bottom_cols =
-            Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)])
-                .split(body_chunks[1]);
-
         // Workers list: each agent as a two-line row (identity, then a dimmed
         // detail line), mirroring the web's renderAgentRow.
-        let max_title_chars = (bottom_cols[0].width as usize).saturating_sub(12).max(10);
+        let max_title_chars = (body_chunks[1].width as usize).saturating_sub(12).max(10);
 
         let worker_items: Vec<ListItem> = swarm
             .workers
@@ -308,27 +307,29 @@ impl SwarmView {
             })
             .collect();
 
+        let workers_title = {
+            let busy = swarm.busy_count();
+            let total = swarm.workers.len();
+            let idle = total.saturating_sub(busy);
+            if total == 0 {
+                " Workers (0) ".to_string()
+            } else if busy == 0 {
+                format!(" Workers ({total}: {idle} idle) ")
+            } else if idle == 0 {
+                format!(" Workers ({total}: {busy} busy) ")
+            } else {
+                format!(" Workers ({total}: {busy} busy, {idle} idle) ")
+            }
+        };
         let workers_block = Block::default()
             .borders(Borders::ALL)
-            .title({
-                let busy = swarm.busy_count();
-                let total = swarm.workers.len();
-                let idle = total.saturating_sub(busy);
-                if total == 0 {
-                    " Workers (0) ".to_string()
-                } else if busy == 0 {
-                    format!(" Workers ({total} idle) ")
-                } else if idle == 0 {
-                    format!(" Workers ({busy} busy) ")
-                } else {
-                    format!(" Workers ({busy} busy, {idle} idle) ")
-                }
-            })
+            .title(Line::styled(workers_title, theme::header_style()))
             .border_style(if focus == SwarmPanel::Workers {
                 theme::title_style()
             } else {
                 Style::default()
-            });
+            })
+            .padding(Padding::horizontal(1));
 
         let workers_list = List::new(worker_items)
             .block(workers_block)
@@ -338,7 +339,7 @@ impl SwarmView {
                 Style::default()
             });
 
-        f.render_stateful_widget(workers_list, bottom_cols[0], &mut self.workers_table);
+        f.render_stateful_widget(workers_list, body_chunks[1], &mut self.workers_table);
 
         // Issues table
         let filter_label = self.issue_filter.label();
@@ -359,7 +360,7 @@ impl SwarmView {
 
         // Split issues area: optional 1-line search bar + table
         let is_searching = self.search_query.is_some();
-        let issues_col = bottom_cols[1];
+        let issues_col = body_chunks[2];
         let (search_area, table_area) = if is_searching {
             let parts =
                 Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(issues_col);
@@ -438,23 +439,25 @@ impl SwarmView {
             ),
             _ => String::new(),
         };
+        let issues_title = format!(
+            " Issues ({filter_label}{type_label}{priority_label}: {}{}{}) ",
+            count_str,
+            if issues_loading {
+                ", loading\u{2026}"
+            } else {
+                ""
+            },
+            staleness_str
+        );
         let issues_block = Block::default()
             .borders(Borders::ALL)
-            .title(format!(
-                " Issues ({filter_label}{type_label}{priority_label}: {}{}{}) ",
-                count_str,
-                if issues_loading {
-                    ", loading\u{2026}"
-                } else {
-                    ""
-                },
-                staleness_str
-            ))
+            .title(Line::styled(issues_title, theme::header_style()))
             .border_style(if focus == SwarmPanel::Issues {
                 theme::title_style()
             } else {
                 Style::default()
-            });
+            })
+            .padding(Padding::horizontal(1));
 
         let issues_table = Table::new(
             issue_rows,
@@ -480,10 +483,10 @@ impl SwarmView {
                 Constraint::Length(3),
                 Constraint::Min(3),
             ])
-            .split(bottom_cols[1]);
+            .split(body_chunks[2]);
             (Some(split[0]), split[1])
         } else {
-            (None, bottom_cols[1])
+            (None, body_chunks[2])
         };
 
         if let (Some(area), Some(search)) = (search_area, &self.issue_search) {
@@ -631,7 +634,8 @@ impl SwarmView {
     }
 
     /// Return all issues passing every active filter (status, type, priority, search query),
-    /// sorted by priority then issue number — exactly matching the order rendered by `render()`.
+    /// sorted blocked-last, then by priority, then by issue number — exactly matching the
+    /// order rendered by `render()` and by the web dashboard's `renderIssuesPanel`.
     pub fn apply_filters<'a>(&self, issues: &'a [GitHubIssue]) -> Vec<&'a GitHubIssue> {
         let mut result: Vec<&'a GitHubIssue> = issues
             .iter()
@@ -664,7 +668,7 @@ impl SwarmView {
                 }
             })
             .collect();
-        result.sort_by_key(|i| (&i.priority, i.number));
+        result.sort_by_key(|i| (i.is_blocked(), &i.priority, i.number));
         result
     }
 
@@ -990,6 +994,7 @@ mod tests {
         AgentInfo {
             id: format!("test/{id}"),
             role: id.to_string(),
+            branch: None,
             worktree_path: PathBuf::new(),
             tmux_target: String::new(),
             status: AgentStatus {
@@ -1393,6 +1398,36 @@ mod tests {
     }
 
     #[test]
+    fn apply_filters_sorts_blocked_last() {
+        use crate::model::issue::{IssuePriority, IssueState, IssueType};
+        let make = |number: u32, priority: IssuePriority, labels: &[&str]| GitHubIssue {
+            number,
+            title: format!("issue {number}"),
+            state: IssueState::Open,
+            priority,
+            issue_type: IssueType::Bug,
+            labels: labels.iter().map(|s| s.to_string()).collect(),
+            is_working: false,
+            assigned_worker: None,
+            updated_at: None,
+        };
+        let issues = vec![
+            // Blocked P0 should still sort after an unblocked P3.
+            make(1, IssuePriority::P0, &["needs-design"]),
+            make(2, IssuePriority::P3, &[]),
+            make(3, IssuePriority::P1, &[]),
+            // Two blocked issues still order by priority then number among themselves.
+            make(5, IssuePriority::P2, &["too-complex"]),
+            make(4, IssuePriority::P1, &["needs-clarification"]),
+        ];
+        let view = SwarmView::new();
+        let filtered = view.apply_filters(&issues);
+        let nums: Vec<u32> = filtered.iter().map(|i| i.number).collect();
+        // Unblocked first (3: P1, 2: P3), then blocked ordered by priority (1: P0, 4: P1, 5: P2).
+        assert_eq!(nums, vec![3, 2, 1, 4, 5]);
+    }
+
+    #[test]
     fn priority_filter_cycles_p0_to_none() {
         let mut view = SwarmView::new();
         assert_eq!(view.priority_filter, None);
@@ -1516,10 +1551,59 @@ mod tests {
             .collect::<String>();
 
         assert!(rendered.contains("Manager"));
-        assert!(rendered.contains("Workers (1 busy)"));
+        assert!(rendered.contains("Workers (1: 1 busy)"));
         assert!(rendered.contains("Issues (all: 1)"));
         assert!(rendered.contains("demo"));
         assert!(rendered.contains("#12"));
+    }
+
+    #[test]
+    fn render_survives_80x24_minimum_terminal() {
+        // Acceptance criterion: layout degrades sanely at 80x24 — panels shrink,
+        // nothing panics, no crash from underflow in the size math.
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut view = SwarmView::new();
+        let manager_input = TextInput::new();
+        let mut swarm = make_swarm();
+        // Stress worker/issue sizing with more rows than an 80x24 body can show.
+        for i in 0..5 {
+            swarm.workers.push(make_agent(
+                &format!("worker-{i}"),
+                false,
+                "idle",
+                AgentState::Idle,
+            ));
+        }
+        let issues: Vec<GitHubIssue> = (0..5)
+            .map(|i| make_issue(i, &format!("issue {i}"), &[]))
+            .collect();
+
+        terminal
+            .draw(|f| {
+                view.render(
+                    f,
+                    f.area(),
+                    &swarm,
+                    &issues,
+                    SwarmPanel::Manager,
+                    false,
+                    false,
+                    None,
+                    &manager_input,
+                );
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let rendered = buffer
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(rendered.contains("Manager"));
+        assert!(rendered.contains("Workers"));
+        assert!(rendered.contains("Issues"));
     }
 
     #[test]

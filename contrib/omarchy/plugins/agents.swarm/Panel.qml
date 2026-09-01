@@ -34,8 +34,8 @@ BarWidget {
 
   // The theme carries one attention colour (`urgent`, red) and no amber, but
   // red has to mean broken: an agent waiting at a prompt is doing the right
-  // thing and needs a keystroke, not a diagnosis. So amber is defined here and
-  // `urgent` is kept for genuine failure. Chosen to stay legible on both light
+  // thing and needs a keystroke, not a diagnosis. Amber is defined here and
+  // `urgent` kept for genuine failure -- chosen to stay legible on both light
   // and dark bar backgrounds, since the theme cannot supply it.
   readonly property color attentionColor: "#d29922"
   property int swarmCount: 0
@@ -90,8 +90,54 @@ BarWidget {
   // notification every tick.
   property int lastAttention: 0
 
-  // [{ name, count }] for swarms with at least one blocked agent.
+  // [{ name, count, role? }] for swarms with at least one blocked agent.
+  // `role` is set only when `count` is 1 — the role of that swarm's single
+  // blocked agent, needed to route a click straight to its session.
   property var blockedSwarms: []
+
+  // The role of the single blocked agent in a swarm with exactly one
+  // blocked agent. Manager and workers carry `waiting_for_input` in the
+  // same snapshot this widget already polls, so no extra request is needed.
+  function blockedAgentRole(swarm) {
+    var manager = swarm.manager
+    if (manager && manager.waiting_for_input === true) return String(manager.role || "")
+    var workers = Array.isArray(swarm.workers) ? swarm.workers : []
+    for (var i = 0; i < workers.length; i++) {
+      if (workers[i] && workers[i].waiting_for_input === true) return String(workers[i].role || "")
+    }
+    return ""
+  }
+
+  // Deepest screen that still shows everything that needs attention:
+  //   1 blocked agent, 1 swarm  -> that agent's session view
+  //   >1 blocked agent, 1 swarm -> that swarm's detail screen
+  //   blocked agents in >1 swarm -> top-level repos list (no route)
+  function blockedRoute(blocked) {
+    if (!blocked || blocked.length !== 1) return ""
+    var only = blocked[0]
+    if (only.count === 1 && only.role) {
+      return "/swarm/" + encodeURIComponent(only.name) + "/agent/" + encodeURIComponent(only.role)
+    }
+    return "/swarm/" + encodeURIComponent(only.name)
+  }
+
+  // Builds the click-through command for the alert, routed to the deepest
+  // screen that still covers every blocked agent it describes. Returned as
+  // separate argv words: omarchy-notification-send's --exec runs them
+  // as-is and explicitly rejects a single pre-quoted string (it reads as an
+  // attempt to smuggle a whole command through one argument).
+  function dashboardExecArgs(blocked) {
+    var route = blockedRoute(blocked)
+
+    // An explicit openCommand wins; otherwise `openWith` picks the interface.
+    // Wrapped in `bash -lc` because a user-set command can carry its own
+    // quoting and arguments, which whitespace-splitting would mangle.
+    if (openCommand !== "") return ["bash", "-lc", openCommand]
+    if (openWith === "Terminal UI") {
+      return ["bash", "-lc", "xdg-terminal-exec --app-id=org.omarchy.agents-tui -e agents-tui"]
+    }
+    return route === "" ? ["omarchy-agents-dashboard"] : ["omarchy-agents-dashboard", route]
+  }
 
   // Name the swarm in the alert. Which repo is blocked is the thing that
   // decides where to go next, and with several swarms running a bare count
@@ -127,8 +173,6 @@ BarWidget {
 
     var swarms = parsed && Array.isArray(parsed.swarms) ? parsed.swarms : []
     var busy = 0, idle = 0, attention = 0, live = 0
-    // Dead and stalled agents are a different problem from blocked ones, and
-    // the bar has to be able to say which without changing its one glyph slot.
     var stuck = 0
     // Which projects are actually blocked. With more than one swarm running,
     // "1 agent needs input" does not say where to look.
@@ -149,8 +193,17 @@ BarWidget {
         if (health === "Dead" || health === "Stalled") stuck++
       }
       if (swarmAttention > 0) {
-        blocked.push({ name: String(swarm.project_name || "unknown"),
-                       count: swarmAttention })
+        var entry = { name: String(swarm.project_name || "unknown"),
+                      count: swarmAttention }
+        // Only meaningful (and only needed) when this swarm is the sole
+        // blocked one and has exactly one blocked agent: that is the one
+        // case dense enough to deep-link straight to the agent's session
+        // instead of stopping at the swarm or repos list.
+        if (swarmAttention === 1) {
+          var role = blockedAgentRole(swarm)
+          if (role) entry.role = role
+        }
+        blocked.push(entry)
       }
     }
 
@@ -162,7 +215,7 @@ BarWidget {
     blockedSwarms = blocked
 
     if (notifyOnAttention && attention > lastAttention) {
-      requestNotification(attentionHeadline(attention, blocked))
+      requestNotification(attentionHeadline(attention, blocked), blocked)
     }
     // The id is kept even when nothing is blocked: the next alert then
     // updates that same toast instead of adding a second one.
@@ -183,7 +236,7 @@ BarWidget {
   // never cleared and re-sent.
   property int notifyId: 0
 
-  function requestNotification(headline) {
+  function requestNotification(headline, blocked) {
     var cmd = ["omarchy-notification-send",
                "--app-name", "Agent Swarm",
                "-u", "critical",
@@ -192,10 +245,8 @@ BarWidget {
                "-p"]
     if (notifyId > 0) cmd = cmd.concat(["-r", String(notifyId)])
     notify.command = cmd.concat([headline,
-                                 openWith === "Terminal UI"
-                                   ? "Click to open the swarm in a terminal."
-                                   : "Click to open the swarm dashboard.",
-                                 "--exec"]).concat(openArgv())
+                                 "Click to open the swarm dashboard.",
+                                 "--exec"], dashboardExecArgs(blocked))
     notify.running = true
   }
 
@@ -213,25 +264,8 @@ BarWidget {
 
   Process { id: opener; running: false }
 
-  // What a click opens, resolved in one place so the widget and the alert can
-  // never disagree -- they did: the click honoured openCommand while the
-  // notification always ran the dashboard, so setting it changed one of the two.
-  function resolveOpenCommand() {
-    if (openCommand !== "") return openCommand
-    return openWith === "Terminal UI"
-      ? "xdg-terminal-exec --app-id=org.omarchy.agents-tui -e agents-tui"
-      : "omarchy-agents-dashboard"
-  }
-
-  // Wrapped in `bash -lc` rather than split on spaces: the command can come from
-  // a user-set openCommand with quoting and arguments in it, and
-  // omarchy-notification-send takes --exec as separate argv words.
-  function openArgv() {
-    return ["bash", "-lc", resolveOpenCommand()]
-  }
-
   function openDashboard() {
-    var cmd = root.resolveOpenCommand()
+    var cmd = root.openCommand !== "" ? root.openCommand : "omarchy-agents-dashboard"
     if (root.bar) root.bar.run(cmd)
     else { opener.command = ["bash", "-lc", cmd]; opener.running = true }
   }

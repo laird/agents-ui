@@ -9,11 +9,20 @@
 #
 # Idempotent: the second invocation toggles the existing window rather than
 # launching a duplicate browser.
+#
+# Optional $1: a hash route to deep-link into (e.g. "/swarm/foo" or
+# "/swarm/foo/agent/bar"), forwarded from a "needs input" alert click so it
+# lands on the blocked agent/swarm instead of the top-level list. With no
+# argument, behaves exactly as a bare toggle always has.
 
 set -euo pipefail
 
 PORT="${AGENTS_UI_PORT:-7878}"
+ROUTE="${1:-}"
 URL="http://127.0.0.1:${PORT}/"
+if [[ -n "$ROUTE" ]]; then
+  URL="${URL}#${ROUTE}"
+fi
 WORKSPACE="agents"
 APP_ID="agents-dashboard"
 
@@ -64,10 +73,31 @@ if ! curl -sf --max-time 2 "http://127.0.0.1:${PORT}/api/swarms" >/dev/null; the
     || die "no dashboard on port ${PORT}. Start it with: systemctl --user start agents-ui.service"
 fi
 
-# Already open? Just toggle the workspace.
+# Already open with no route requested? Just toggle the workspace — unchanged
+# from before routes existed.
+#
+# Already open WITH a route requested: the window is a hidden/shown surface,
+# not something a second `--app=` invocation can hand a new URL to (that
+# spawns a duplicate window instead, which is exactly what dashboard_open()
+# above exists to prevent). Closing it and falling through to the normal
+# launch path below is what lets the route actually reach the page: the
+# fresh window is launched with the target baked into $URL. Without this, a
+# second alert for a different agent would just re-show whatever the first
+# alert left on screen.
 if dashboard_open; then
-  hypr_toggle_special "$WORKSPACE"
-  exit 0
+  if [[ -z "$ROUTE" ]]; then
+    hypr_toggle_special "$WORKSPACE"
+    exit 0
+  fi
+  DASHBOARD_PID=$(hyprctl clients -j | jq -r --arg c "$APP_ID" --arg t "$WINDOW_TITLE" \
+    '[.[] | select(.class == $c or .title == $t)][0].pid // empty')
+  if [[ -n "$DASHBOARD_PID" ]]; then
+    kill "$DASHBOARD_PID" 2>/dev/null || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      dashboard_open || break
+      sleep 0.2
+    done
+  fi
 fi
 
 # Pick a browser. --class is set for the browsers that honour it; chromium

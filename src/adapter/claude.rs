@@ -371,126 +371,6 @@ impl ClaudeAdapter {
         format!("{}-{project}", agent_type.session_prefix())
     }
 
-    /// Bring a stopped swarm back up in the worktrees it was already using.
-    ///
-    /// Deliberately not `launch`: launch numbers workers from a requested
-    /// count and would create worktrees that do not exist. Resume takes the
-    /// worktrees on disk as the source of truth, so a worker added mid-session
-    /// comes back too, and `worker-N` returns to `<project>-wt-N` -- which is
-    /// what makes "its own handoff" mean anything.
-    ///
-    /// Refuses when the session is already running. Relaunching agents into
-    /// live panes would put two agents on one worktree.
-    pub async fn resume_with_progress<F: Fn(&str)>(
-        &self,
-        repo_path: &Path,
-        progress: F,
-    ) -> Result<Swarm> {
-        let runtime = self.runtime.clone();
-        let project_name = Self::project_name(repo_path);
-        let session_name = Self::session_name(&runtime, &project_name);
-
-        if session::has_session(&self.transport, &session_name).await {
-            anyhow::bail!(
-                "Swarm {project_name} is already running in tmux session {session_name}; \
-stop it before resuming"
-            );
-        }
-
-        progress("⏳ Looking for existing worktrees...\n");
-        let worktrees =
-            crate::handoff::discover_worktrees(&self.transport, repo_path, &project_name).await;
-
-        if worktrees.is_empty() {
-            anyhow::bail!(
-                "No worktrees named {project_name}-wt-<N> under {}; nothing to resume",
-                repo_path.parent().unwrap_or(repo_path).display()
-            );
-        }
-        progress(&format!("✅ Found {} worktrees\n", worktrees.len()));
-
-        // Clear the tombstones, or heal_workers and revive_agents will keep
-        // treating this swarm as intentionally stopped and skip it.
-        crate::config::persistence::clear_swarm_stopped(&project_name);
-        for (_, wt) in &worktrees {
-            clear_agent_stopped(wt);
-        }
-
-        let worktree_paths: Vec<PathBuf> = worktrees.iter().map(|(_, p)| p.clone()).collect();
-
-        progress("⏳ Creating tmux session...\n");
-        self.create_tmux_session(&session_name, repo_path, &worktree_paths)
-            .await?;
-
-        for (n, _wt) in &worktrees {
-            progress(&format!("⏳ Starting worker-{n}...\n"));
-            let target = self
-                .window_pane_target(&session_name, &format!("worker-{n}"))
-                .await;
-            if let Err(e) = self
-                .launch_agent_in_pane(&target, &session_name, &runtime, false)
-                .await
-            {
-                progress(&format!("⚠️  worker-{n} failed: {e}\n"));
-            }
-        }
-
-        progress("⏳ Starting manager...\n");
-        let manager_target = self.window_pane_target(&session_name, "review").await;
-        if let Err(e) = self
-            .launch_agent_in_pane(&manager_target, &session_name, &runtime, true)
-            .await
-        {
-            progress(&format!("⚠️  Manager failed: {e}\n"));
-        }
-
-        let swarm = self
-            .build_swarm_from_session(&session_name, repo_path.to_path_buf(), runtime.clone())
-            .await?;
-
-        // Seed each agent with its own handoff, read from the worktree it just
-        // resumed into. Best-effort: an agent with no handoff simply starts
-        // clean rather than blocking the whole resume.
-        let mut seeded = 0usize;
-        for agent in std::iter::once(&swarm.manager).chain(swarm.workers.iter()) {
-            let Some((path, _body)) =
-                crate::handoff::latest_for_role(&agent.worktree_path, &agent.role)
-            else {
-                progress(&format!("•  {} resumed without a handoff\n", agent.role));
-                continue;
-            };
-
-            if !Self::wait_for_agent_ready(&self.transport, &agent.tmux_target).await {
-                progress(&format!(
-                    "⚠️  {} not ready in time; handoff not sent\n",
-                    agent.role
-                ));
-                continue;
-            }
-
-            if let Err(e) = proxy::send_keys(
-                &self.transport,
-                &agent.tmux_target,
-                &crate::handoff::resume_prompt(&path),
-            )
-            .await
-            {
-                progress(&format!("⚠️  {} handoff not sent: {e}\n", agent.role));
-                continue;
-            }
-
-            seeded += 1;
-            tracing::info!("resume: seeded {} from {}", agent.role, path.display());
-        }
-
-        progress(&format!(
-            "\n🎉 Resumed {project_name}: {} agents, {seeded} with handoffs\n",
-            swarm.workers.len() + 1
-        ));
-
-        Ok(swarm)
-    }
-
     /// Create git worktrees for workers.
     async fn create_worktrees(
         &self,
@@ -774,6 +654,23 @@ stop it before resuming"
             .await
     }
 
+    /// If `config` carries a resume seed for `role`, wait for the pane to be
+    /// ready and send it — before any bootstrap/loop command, so it is the
+    /// first thing the agent sees. Best-effort: a failed send is logged, not
+    /// fatal to the launch.
+    async fn send_resume_seed(&self, config: &SwarmConfig, role: &str, target: &str) {
+        let Some(seed) = config.resume_seeds.as_ref().and_then(|m| m.get(role)) else {
+            return;
+        };
+        if !Self::wait_for_agent_ready(&self.transport, target).await {
+            tracing::warn!("resume: {role} not ready in time, skipping seeded handoff");
+            return;
+        }
+        if let Err(e) = self.send_input(target, seed).await {
+            tracing::warn!("resume: failed to seed handoff for {role}: {e:#}");
+        }
+    }
+
     async fn ensure_swarm_agents_running(&self, swarm: &Swarm) -> Result<()> {
         if swarm.stopped || crate::config::persistence::is_swarm_stopped(&swarm.project_name) {
             tracing::info!(
@@ -1050,6 +947,35 @@ stop it before resuming"
         false
     }
 
+    /// Map each of a repo's worktrees to the branch checked out in it, via a
+    /// single `git worktree list --porcelain` call rather than one `git` call
+    /// per agent.
+    async fn worktree_branches(
+        &self,
+        repo_root: &Path,
+    ) -> std::collections::HashMap<PathBuf, String> {
+        let Ok(output) = self
+            .output(
+                "git",
+                &[
+                    "worktree".to_string(),
+                    "list".to_string(),
+                    "--porcelain".to_string(),
+                ],
+                Some(repo_root),
+            )
+            .await
+        else {
+            return std::collections::HashMap::new();
+        };
+
+        if !output.status.success() {
+            return std::collections::HashMap::new();
+        }
+
+        crate::model::swarm::parse_worktree_porcelain(&String::from_utf8_lossy(&output.stdout))
+    }
+
     /// Build a Swarm model from an existing tmux session.
     async fn build_swarm_from_session(
         &self,
@@ -1059,6 +985,13 @@ stop it before resuming"
     ) -> Result<Swarm> {
         let project_name = Self::project_name(&repo_path);
         let session_info = session::list_panes(&self.transport, session_name).await?;
+        let branches = self.worktree_branches(&repo_path).await;
+        let lookup_branch = |path: &Path| {
+            std::fs::canonicalize(path)
+                .ok()
+                .and_then(|c| branches.get(&c).cloned())
+                .or_else(|| branches.get(path).cloned())
+        };
 
         // Convention, by NAME rather than index: the "review" window holds the
         // manager, "worker-N" windows hold one worker each. Window and pane
@@ -1069,6 +1002,7 @@ stop it before resuming"
         let mut manager = AgentInfo {
             id: format!("{project_name}/manager"),
             role: "manager".to_string(),
+            branch: lookup_branch(&repo_path),
             worktree_path: repo_path.clone(),
             // Replaced below by a real pane target. Addressing the window by
             // name means this placeholder is never a plausible-looking lie
@@ -1121,6 +1055,7 @@ stop it before resuming"
                 workers.push(AgentInfo {
                     id: format!("{project_name}/{role}"),
                     role,
+                    branch: lookup_branch(&worktree_path),
                     worktree_path,
                     tmux_target: pane.target.clone(),
                     status: AgentStatus::default(),
@@ -1324,6 +1259,8 @@ impl AgentRuntime for ClaudeAdapter {
                 tracing::warn!("Failed to launch claude in pane {i}: {e}");
             } else {
                 tracing::info!("worker-{i} started");
+                self.send_resume_seed(config, &format!("worker-{n}"), &target)
+                    .await;
             }
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
@@ -1339,6 +1276,8 @@ impl AgentRuntime for ClaudeAdapter {
             tracing::warn!("Failed to launch claude in manager pane: {e}");
         } else {
             tracing::info!("✅ Manager started\n");
+            self.send_resume_seed(config, "manager", &manager_target)
+                .await;
             // Wait for Claude to be ready, then send the manage-loop bootstrap command
             if !runtime_uses_loop_wrappers(runtime) {
                 if let Some(cmd) = manager_bootstrap_cmd(runtime) {
@@ -1388,6 +1327,82 @@ impl AgentRuntime for ClaudeAdapter {
         }
 
         Ok(swarm)
+    }
+
+    async fn resume(&self, repo_path: &Path, agent_type: &AgentType) -> Result<(Swarm, Vec<String>)> {
+        let project_name = Self::project_name(repo_path);
+        let session_name = Self::session_name(agent_type, &project_name);
+
+        // Reject rather than double-launch into live panes: a swarm with a
+        // live tmux session is running, whatever any tombstone says.
+        if session::has_session(&self.transport, &session_name).await {
+            anyhow::bail!(
+                "swarm {project_name} is still running (tmux session {session_name} exists) — refusing to resume a running swarm"
+            );
+        }
+
+        // The worktree list is the durable record of the worker roster: it
+        // survives the swarm being stopped, and survives this process
+        // restarting, unlike any in-memory Swarm.
+        let output = self
+            .output(
+                "git",
+                &[
+                    "worktree".to_string(),
+                    "list".to_string(),
+                    "--porcelain".to_string(),
+                ],
+                Some(repo_path),
+            )
+            .await
+            .context("Failed to list worktrees for resume")?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "git worktree list failed for {}: {}",
+                repo_path.display(),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let num_workers = crate::model::swarm::highest_worker_ordinal(
+            &String::from_utf8_lossy(&output.stdout),
+            &project_name,
+        );
+
+        // The user is explicitly resuming this swarm.
+        crate::config::persistence::clear_swarm_stopped(&project_name);
+
+        let parent = repo_path.parent().unwrap_or(repo_path);
+        let mut resume_seeds = std::collections::HashMap::new();
+        let mut notes = Vec::new();
+
+        // The manager resumes in the base repo, which is its own worktree.
+        self.build_resume_seed(repo_path, "manager", repo_path, &mut resume_seeds, &mut notes)
+            .await;
+
+        for i in 1..=num_workers {
+            let wt_path = parent.join(format!("{project_name}-wt-{i}"));
+            clear_agent_stopped(&wt_path);
+            let role = format!("worker-{i}");
+            self.build_resume_seed(repo_path, &role, &wt_path, &mut resume_seeds, &mut notes)
+                .await;
+        }
+
+        let config = SwarmConfig {
+            repo_path: repo_path.to_path_buf(),
+            agent_type: agent_type.clone(),
+            num_workers,
+            agents_dir: PathBuf::new(),
+            resume_seeds: Some(resume_seeds),
+        };
+
+        // `launch()` already reuses an existing worktree rather than
+        // recreating it, and reuses an existing tmux session — neither of
+        // which applies here since we just checked there is no session — so
+        // it does exactly what resuming needs: recreate any worktree that
+        // really is gone, reattach the rest, and boot every agent.
+        let swarm = self.launch(&config).await?;
+
+        Ok((swarm, notes))
     }
 
     async fn discover(&self, _agents_dir: &Path) -> Result<Vec<Swarm>> {
@@ -1549,6 +1564,7 @@ impl AgentRuntime for ClaudeAdapter {
         Ok(AgentInfo {
             id: format!("{}/{role}", swarm.project_name),
             role,
+            branch: Some(worktree_branch),
             worktree_path,
             tmux_target,
             status: AgentStatus::default(),
@@ -2074,7 +2090,6 @@ pub fn mark_agent_stopped(worktree_path: &std::path::Path) {
 }
 
 /// Remove the tombstone file so a worker can be revived.
-#[allow(dead_code)] // Counterpart to mark_agent_stopped; available for future restart UI
 pub fn clear_agent_stopped(worktree_path: &std::path::Path) {
     let _ = std::fs::remove_file(worktree_path.join(".codex").join("stopped"));
 }
@@ -2197,7 +2212,7 @@ impl ClaudeAdapter {
             status::AgentState::Working { issue: Some(n) } => Some(*n),
             _ => agent
                 .dispatched_issue
-                .or(self.issue_from_branch(agent).await),
+                .or(self.issue_from_branch(&agent.worktree_path).await),
         };
 
         if let Some(issue_number) = issue_num {
@@ -2218,7 +2233,7 @@ impl ClaudeAdapter {
             status::AgentState::Working { issue: Some(n) } => Some(*n),
             _ => agent
                 .dispatched_issue
-                .or(self.issue_from_branch(agent).await),
+                .or(self.issue_from_branch(&agent.worktree_path).await),
         };
 
         if let Some(issue_number) = issue_num {
@@ -2228,11 +2243,9 @@ impl ClaudeAdapter {
         generic_worker_ongoing_cmd(runtime)
     }
 
-    async fn issue_from_branch(&self, agent: &AgentInfo) -> Option<u32> {
-        if agent.is_manager {
-            return None;
-        }
-
+    /// Issue number encoded in the branch checked out in `worktree_path`
+    /// (`feature/issue-<N>` convention), if any.
+    async fn issue_from_branch(&self, worktree_path: &Path) -> Option<u32> {
         let output = self
             .output(
                 "git",
@@ -2241,7 +2254,7 @@ impl ClaudeAdapter {
                     "--abbrev-ref".to_string(),
                     "HEAD".to_string(),
                 ],
-                Some(&agent.worktree_path),
+                Some(worktree_path),
             )
             .await
             .ok()?;
@@ -2252,6 +2265,77 @@ impl ClaudeAdapter {
 
         let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
         extract_issue_number_from_branch(&branch)
+    }
+
+    /// Whether `issue` is closed on GitHub. `None` when the check itself
+    /// failed (no network, no `gh`, private repo) — callers should treat that
+    /// as "unknown", not "open".
+    async fn issue_is_closed(&self, repo_path: &Path, issue: u32) -> Option<bool> {
+        let output = crate::github::gh_repo_output(
+            &self.transport,
+            repo_path,
+            &[
+                "issue".to_string(),
+                "view".to_string(),
+                issue.to_string(),
+                "--json".to_string(),
+                "state".to_string(),
+            ],
+        )
+        .await
+        .ok()?;
+
+        if !output.status.success() {
+            return None;
+        }
+
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+        let state = value.get("state")?.as_str()?;
+        Some(state.eq_ignore_ascii_case("CLOSED"))
+    }
+
+    /// Build the resume seed for one agent: a short pointer at its newest
+    /// handoff file (not the handoff body itself — pasting a multi-paragraph
+    /// Markdown body through `tmux send-keys` risks tmux treating embedded
+    /// newlines as separate Enter presses and fragmenting it into several
+    /// half-submitted messages). Pushes a human-readable note either way.
+    async fn build_resume_seed(
+        &self,
+        repo_path: &Path,
+        role: &str,
+        worktree_path: &Path,
+        seeds: &mut std::collections::HashMap<String, String>,
+        notes: &mut Vec<String>,
+    ) {
+        let Some((path, _body)) = crate::handoff::latest_for_role(worktree_path, role) else {
+            notes.push(format!(
+                "{role}: no handoff found — resumed without seeded context"
+            ));
+            return;
+        };
+
+        let relative = path
+            .strip_prefix(worktree_path)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .into_owned();
+
+        let mut message = format!(
+            "You are resuming after this swarm was stopped. Read your handoff before continuing: {relative}"
+        );
+
+        let mut note = format!("{role}: resumed with handoff");
+        if let Some(issue) = self.issue_from_branch(worktree_path).await {
+            if self.issue_is_closed(repo_path, issue).await == Some(true) {
+                message.push_str(&format!(
+                    " Note: issue #{issue} was closed while this swarm was stopped — verify before resuming work on it."
+                ));
+                note = format!("{role}: resumed, but issue #{issue} was closed while stopped");
+            }
+        }
+        notes.push(note);
+
+        seeds.insert(role.to_string(), message);
     }
 }
 
@@ -2607,6 +2691,56 @@ mod tests {
         }
     }
 
+    /// Writes a `tmux` shim into `bin_dir` that transparently redirects every
+    /// invocation onto a private `-L <socket>` server instead of the
+    /// caller's default tmux server, and returns the socket name (for
+    /// teardown via `kill_tmux_shim_server`). Must be called *before*
+    /// `bin_dir` is placed on PATH -- the shim execs the real tmux binary
+    /// resolved here, so writing it after `bin_dir` is already on PATH would
+    /// resolve to itself instead. Callers must already hold `lock_env()`:
+    /// this shells out to `command -v tmux`, which inherits the process-wide
+    /// PATH, and that PATH is exactly what sibling tests mutate under the
+    /// same lock (see `TmuxLayout::new`, #342).
+    fn write_tmux_shim(bin_dir: &std::path::Path) -> Option<String> {
+        let real = std::process::Command::new("sh")
+            .args(["-lc", "command -v tmux"])
+            .output()
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())?;
+        let socket = format!(
+            "agents-ui-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        write_executable(
+            bin_dir.join("tmux").as_path(),
+            &format!("#!/bin/sh\nexec {real} -L {socket} \"$@\"\n"),
+        );
+        Some(socket)
+    }
+
+    /// Kills the private tmux server started through a `write_tmux_shim`
+    /// socket and removes its socket file, mirroring `TmuxLayout::drop`
+    /// below -- `kill-server` leaves the socket file behind once the server
+    /// has already exited on its own.
+    fn kill_tmux_shim_server(socket: &str) {
+        let _ = std::process::Command::new("sh")
+            .arg("-lc")
+            .arg(format!("tmux -L {socket} kill-server 2>/dev/null"))
+            .status();
+        if let Ok(output) = std::process::Command::new("id").arg("-u").output() {
+            let uid = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !uid.is_empty() {
+                let _ = std::fs::remove_file(
+                    std::env::temp_dir().join(format!("tmux-{uid}")).join(socket),
+                );
+            }
+        }
+    }
+
     fn fake_agent_script(runtime_name: &str, manager_cmd: &str, worker_cmd: &str) -> String {
         format!(
             r#"#!/bin/sh
@@ -2846,6 +2980,14 @@ exit 0
             &fake_agent_script("DROID", "/monitor-loop", "/fix-loop"),
         );
 
+        // Redirect every tmux call this test makes onto a private server: this
+        // test exercises real launches across multiple runtimes and worktrees,
+        // and running that against the shared default server was a source of
+        // CI flakes under contention (#341, #342).
+        let Some(tmux_socket) = write_tmux_shim(&bin_dir) else {
+            return;
+        };
+
         let path_value = match original_path.as_ref() {
             Some(existing) => {
                 let mut value = std::ffi::OsString::from(bin_dir.as_os_str());
@@ -2887,6 +3029,7 @@ exit 0
                 agent_type: runtime.clone(),
                 num_workers: 1,
                 agents_dir: root.clone(),
+                resume_seeds: None,
             };
 
             let swarm = adapter.launch_with_progress(&config, |_| {}).await.unwrap();
@@ -2961,6 +3104,8 @@ exit 0
             std::fs::remove_dir_all(&repo_path).ok();
         }
 
+        kill_tmux_shim_server(&tmux_socket);
+
         if let Some(path) = original_path {
             unsafe { std::env::set_var("PATH", path) };
         } else {
@@ -2975,24 +3120,179 @@ exit 0
         std::fs::remove_dir_all(root).ok();
     }
 
+    #[tokio::test]
+    async fn resume_reattaches_to_existing_worktree_and_seeds_handoff() {
+        crate::testutil::reap_stale_artifacts();
+        if !command_available("tmux") || !command_available("git") {
+            return;
+        }
+
+        let _guard = lock_env();
+        let original_path = std::env::var_os("PATH");
+        let root = temp_path("resume");
+        let bin_dir = root.join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+
+        write_executable(bin_dir.join("gh").as_path(), fake_gh_script());
+        write_executable(
+            bin_dir.join("claude").as_path(),
+            &fake_agent_script("CLAUDE", "/autocoder:monitor-loop", "/autocoder:fix-loop"),
+        );
+
+        // Redirect every tmux call this test makes onto a private server: this
+        // test exercises a real launch and resume across a swarm's worktrees,
+        // and running that against the shared default server was a source of
+        // CI flakes under contention (#341, #342).
+        let Some(tmux_socket) = write_tmux_shim(&bin_dir) else {
+            return;
+        };
+
+        let path_value = match original_path.as_ref() {
+            Some(existing) => {
+                let mut value = std::ffi::OsString::from(bin_dir.as_os_str());
+                value.push(":");
+                value.push(existing);
+                value
+            }
+            None => std::ffi::OsString::from(bin_dir.as_os_str()),
+        };
+        unsafe { std::env::set_var("PATH", &path_value) };
+
+        let repo_path = root.join(format!("{}-resume-repo", crate::testutil::ARTIFACT_PREFIX));
+        let runtime = AgentType::Claude;
+        let project_name = ClaudeAdapter::project_name(&repo_path);
+        let session_name = ClaudeAdapter::session_name(&runtime, &project_name);
+        cleanup_tmux_session(&session_name).await;
+        init_git_repo(&repo_path);
+
+        let adapter = ClaudeAdapter::new(runtime.clone(), crate::transport::ServerTransport::default());
+        let config = crate::adapter::traits::SwarmConfig {
+            repo_path: repo_path.clone(),
+            agent_type: runtime.clone(),
+            num_workers: 1,
+            agents_dir: root.clone(),
+            resume_seeds: None,
+        };
+
+        let swarm = adapter.launch_with_progress(&config, |_| {}).await.unwrap();
+        wait_for_pane_markers(&adapter, &swarm.manager.tmux_target, &["What can I help"]).await;
+        wait_for_pane_markers(&adapter, &swarm.workers[0].tmux_target, &["What can I help"]).await;
+
+        // Simulate a stop: tear the tmux session down (as `teardown()` does)
+        // but leave the worktrees on disk, and write a handoff into each, as
+        // `handoff::write_all` would have.
+        cleanup_tmux_session(&session_name).await;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while crate::tmux::session::has_session(&adapter.transport, &session_name).await {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "session {session_name} still alive 10s after kill-session"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+
+        let manager_handoff = crate::handoff::Handoff {
+            project: project_name.clone(),
+            role: "manager".to_string(),
+            is_manager: true,
+            worktree: repo_path.clone(),
+            ..Default::default()
+        };
+        crate::handoff::write_to_worktree(&manager_handoff, "manager handoff body", "2026-01-01T00-00-00Z")
+            .unwrap();
+
+        let worker_wt = repo_path
+            .parent()
+            .unwrap_or(&repo_path)
+            .join(format!("{project_name}-wt-1"));
+        let worker_handoff = crate::handoff::Handoff {
+            project: project_name.clone(),
+            role: "worker-1".to_string(),
+            is_manager: false,
+            worktree: worker_wt.clone(),
+            ..Default::default()
+        };
+        crate::handoff::write_to_worktree(&worker_handoff, "worker-1 handoff body", "2026-01-01T00-00-00Z")
+            .unwrap();
+
+        // Resuming a swarm whose session is still up must be rejected before
+        // any of this — but at this point it is genuinely down, so this must
+        // succeed, rediscover exactly one worker from the worktree on disk,
+        // and seed both agents from the handoffs just written.
+        let (resumed, notes) = adapter.resume(&repo_path, &runtime).await.unwrap();
+        assert_eq!(resumed.workers.len(), 1, "must rediscover worker-1 from disk, not invent a count");
+        assert!(
+            notes.iter().any(|n| n.starts_with("manager: resumed with handoff")),
+            "notes: {notes:?}"
+        );
+        assert!(
+            notes.iter().any(|n| n.starts_with("worker-1: resumed with handoff")),
+            "notes: {notes:?}"
+        );
+
+        let manager_output = wait_for_pane_markers(
+            &adapter,
+            &resumed.manager.tmux_target,
+            &["INPUT:You are resuming after this swarm was stopped"],
+        )
+        .await;
+        assert!(
+            manager_output.contains(".agents-ui/handoffs/handoff-manager-"),
+            "manager seed must point at its own handoff file: {manager_output}"
+        );
+
+        let worker_output = wait_for_pane_markers(
+            &adapter,
+            &resumed.workers[0].tmux_target,
+            &["INPUT:You are resuming after this swarm was stopped"],
+        )
+        .await;
+        assert!(
+            worker_output.contains(".agents-ui/handoffs/handoff-worker-1-"),
+            "worker seed must point at its own handoff file: {worker_output}"
+        );
+
+        // A live swarm must be rejected, not double-launched into.
+        let reject = adapter.resume(&repo_path, &runtime).await;
+        assert!(reject.is_err(), "resuming a running swarm must be rejected");
+
+        cleanup_tmux_session(&resumed.tmux_session).await;
+        std::fs::remove_dir_all(&worker_wt).ok();
+        std::fs::remove_dir_all(&repo_path).ok();
+
+        kill_tmux_shim_server(&tmux_socket);
+
+        if let Some(path) = original_path {
+            unsafe { std::env::set_var("PATH", path) };
+        } else {
+            unsafe { std::env::remove_var("PATH") };
+        }
+        std::fs::remove_dir_all(root).ok();
+    }
+
     /// Regression test for launches that silently no-op under
     /// `pane-base-index 1`: the launch path used to hardcode pane `.0`, which
     /// does not exist on such a server, so `send-keys` failed and the pane kept
     /// its shell prompt.
+    ///
+    /// Runs on a private `-L` socket (via `TmuxLayout`), not the default
+    /// server: the default server is shared with every other tmux test in
+    /// this file plus anything else running on the box, and contention there
+    /// was flaking this test on macOS CI (#341).
     #[tokio::test]
     async fn window_pane_target_resolves_a_pane_that_accepts_input() {
         crate::testutil::reap_stale_artifacts();
-        if !command_available("tmux") {
+        let Some(layout) = TmuxLayout::new(0) else {
             return;
-        }
+        };
 
         let session = format!("agents-ui-pane-target-{}", std::process::id());
-        cleanup_tmux_session(&session).await;
-        let created = std::process::Command::new("tmux")
-            .args(["new-session", "-d", "-s", &session, "-n", "review"])
-            .status()
-            .unwrap();
-        assert!(created.success());
+        let created = layout.tmux(&["new-session", "-d", "-s", &session, "-n", "review"]);
+        assert!(
+            created.status.success(),
+            "new-session failed: {}",
+            String::from_utf8_lossy(&created.stderr)
+        );
 
         // tmux is the authority on the index; the point is that we ask rather
         // than assume, so the expectation comes from tmux too.
@@ -3000,48 +3300,67 @@ exit 0
         // which is the normal case on a fresh macOS runner -- can accept
         // new-session and still have nothing to list a moment later.
         let mut index = String::new();
+        let mut last_error = String::new();
         for _ in 0..25 {
-            let listed = std::process::Command::new("tmux")
-                .args([
-                    "list-panes",
-                    "-t",
-                    &format!("{session}:review"),
-                    "-F",
-                    "#{pane_index}",
-                ])
-                .output()
-                .unwrap();
-            if let Some(line) = String::from_utf8_lossy(&listed.stdout).lines().next() {
-                index = line.trim().to_string();
-                if !index.is_empty() {
-                    break;
+            let listed = layout.tmux(&[
+                "list-panes",
+                "-t",
+                &format!("{session}:review"),
+                "-F",
+                "#{pane_index}",
+            ]);
+            if listed.status.success() {
+                if let Some(line) = String::from_utf8_lossy(&listed.stdout).lines().next() {
+                    index = line.trim().to_string();
+                    if !index.is_empty() {
+                        break;
+                    }
                 }
+            } else {
+                last_error = format!(
+                    "exit {}: {}",
+                    listed.status,
+                    String::from_utf8_lossy(&listed.stderr).trim()
+                );
             }
             std::thread::sleep(std::time::Duration::from_millis(200));
         }
         assert!(
             !index.is_empty(),
-            "tmux never reported a pane for {session}:review"
+            "tmux never reported a pane for {session}:review (last list-panes error: {})",
+            if last_error.is_empty() {
+                "none -- list-panes kept succeeding with empty output"
+            } else {
+                &last_error
+            }
         );
+
+        let _guard = lock_env();
+        let original = std::env::var_os("PATH");
+        // SAFETY: test-only, serialized by lock_env.
+        unsafe { std::env::set_var("PATH", layout.path_env()) };
 
         let adapter =
             ClaudeAdapter::new(AgentType::Claude, crate::transport::ServerTransport::default());
         let target = adapter.window_pane_target(&session, "review").await;
+
+        unsafe {
+            match original {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+
         assert_eq!(target, format!("{session}:review.{index}"));
 
         // The resolved target must be addressable -- this is what the old
         // hardcoded `.0` got wrong.
-        let sent = std::process::Command::new("tmux")
-            .args(["send-keys", "-t", &target, "true", "Enter"])
-            .output()
-            .unwrap();
+        let sent = layout.tmux(&["send-keys", "-t", &target, "true", "Enter"]);
         assert!(
             sent.status.success(),
             "send-keys to {target} failed: {}",
             String::from_utf8_lossy(&sent.stderr)
         );
-
-        cleanup_tmux_session(&session).await;
     }
 
     /// Healing must not manufacture phantom workers.
@@ -3056,33 +3375,42 @@ exit 0
     #[tokio::test]
     async fn healing_finds_worker_windows_by_name_not_index() {
         crate::testutil::reap_stale_artifacts();
-        if !command_available("tmux") {
+        let Some(layout) = TmuxLayout::new(0) else {
             return;
-        }
+        };
 
         let session = format!("agents-ui-heal-test-{}", std::process::id());
-        cleanup_tmux_session(&session).await;
         assert!(
-            std::process::Command::new("tmux")
-                .args(["new-session", "-d", "-s", &session, "-n", "review"])
-                .status()
-                .unwrap()
+            layout
+                .tmux(&["new-session", "-d", "-s", &session, "-n", "review"])
+                .status
                 .success()
         );
         for n in 1..=2 {
             assert!(
-                std::process::Command::new("tmux")
-                    .args(["new-window", "-t", &session, "-n", &format!("worker-{n}")])
-                    .status()
-                    .unwrap()
+                layout
+                    .tmux(&["new-window", "-t", &session, "-n", &format!("worker-{n}")])
+                    .status
                     .success()
             );
         }
+
+        let _guard = lock_env();
+        let original = std::env::var_os("PATH");
+        // SAFETY: test-only, serialized by lock_env.
+        unsafe { std::env::set_var("PATH", layout.path_env()) };
 
         let transport = crate::transport::ServerTransport::default();
         let info = crate::tmux::session::list_panes(&transport, &session)
             .await
             .expect("list panes");
+
+        unsafe {
+            match original {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+        }
 
         let worker_windows: Vec<_> = info
             .windows
@@ -3107,8 +3435,6 @@ exit 0
             "pane targets must come from tmux, got {panes:?}"
         );
         assert_eq!(panes.len(), 2, "each worker window contributes its pane");
-
-        cleanup_tmux_session(&session).await;
     }
 
     /// A healed window must be created with `-c`, or it inherits the launching
@@ -3176,11 +3502,20 @@ exit 0
             )
             .ok()?;
 
-            let real = std::process::Command::new("sh")
-                .args(["-lc", "command -v tmux"])
-                .output()
-                .ok()
-                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())?;
+            // Resolve the real tmux binary under lock_env(): this shells out to
+            // `command -v tmux`, which inherits the process-wide PATH, and other
+            // tests mutate that same PATH (to point `tmux` at their own private
+            // socket) while holding this same lock. Without it, a resolution
+            // here can land mid-mutation and bake a sibling test's shim path
+            // into this layout's own shim (#342).
+            let real = {
+                let _guard = lock_env();
+                std::process::Command::new("sh")
+                    .args(["-lc", "command -v tmux"])
+                    .output()
+                    .ok()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())?
+            };
 
             write_executable(
                 dir.join("bin/tmux").as_path(),
@@ -3332,6 +3667,97 @@ exit 0
         }
     }
 
+    /// #328: the manager and every worker must report the git branch checked
+    /// out in their worktree, resolved via a real `git worktree list`, with a
+    /// detached HEAD yielding `None` rather than an invented branch name.
+    #[tokio::test]
+    async fn build_swarm_from_session_resolves_branches_for_manager_and_workers() {
+        crate::testutil::reap_stale_artifacts();
+        if !command_available("git") {
+            return;
+        }
+        let Some(layout) = TmuxLayout::new(0) else {
+            return;
+        };
+
+        let root = temp_path("branch-resolution");
+        let project_name = format!("{}-branchrepo", crate::testutil::ARTIFACT_PREFIX);
+        let repo_path = root.join(&project_name);
+        init_git_repo(&repo_path);
+
+        // Worker 1: a real feature branch.
+        let wt1 = root.join(format!("{project_name}-wt-1"));
+        let status = std::process::Command::new("git")
+            .args(["worktree", "add", "-b", "worker-1", &wt1.to_string_lossy()])
+            .current_dir(&repo_path)
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        // Worker 2: a detached HEAD -- must yield `branch: None`, not an
+        // invented name.
+        let wt2 = root.join(format!("{project_name}-wt-2"));
+        let status = std::process::Command::new("git")
+            .args(["worktree", "add", "--detach", &wt2.to_string_lossy()])
+            .current_dir(&repo_path)
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let session_name = format!("claude-{project_name}");
+        let status = layout.tmux(&["new-session", "-d", "-s", &session_name, "-n", "review"]);
+        assert!(status.status.success());
+        for name in ["worker-1", "worker-2"] {
+            let status = layout.tmux(&["new-window", "-t", &session_name, "-n", name]);
+            assert!(status.status.success());
+        }
+
+        let _guard = lock_env();
+        let original = std::env::var_os("PATH");
+        // SAFETY: test-only, serialized by lock_env.
+        unsafe { std::env::set_var("PATH", layout.path_env()) };
+
+        let adapter = ClaudeAdapter::new(
+            AgentType::Claude,
+            crate::transport::ServerTransport::default(),
+        );
+        let result = adapter
+            .build_swarm_from_session(&session_name, repo_path.clone(), AgentType::Claude)
+            .await;
+
+        unsafe {
+            match original {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+
+        let _ = std::fs::remove_dir_all(&root);
+
+        let swarm = result.expect("build swarm");
+        assert_eq!(
+            swarm.manager.branch.as_deref(),
+            Some("main"),
+            "manager should report the base repo's branch"
+        );
+        assert_eq!(swarm.workers.len(), 2);
+        let w1 = swarm
+            .workers
+            .iter()
+            .find(|w| w.role == "worker-1")
+            .expect("worker-1 present");
+        assert_eq!(w1.branch.as_deref(), Some("worker-1"));
+        let w2 = swarm
+            .workers
+            .iter()
+            .find(|w| w.role == "worker-2")
+            .expect("worker-2 present");
+        assert_eq!(
+            w2.branch, None,
+            "detached HEAD worktree must not invent a branch name"
+        );
+    }
+
     /// Pane targets must be resolved from tmux under either numbering.
     #[tokio::test]
     async fn window_pane_target_matches_the_servers_numbering() {
@@ -3455,6 +3881,7 @@ exit 0
             manager: AgentInfo {
                 id: "demo/manager".to_string(),
                 role: "manager".to_string(),
+                branch: None,
                 worktree_path: PathBuf::from("/tmp/repo"),
                 tmux_target: "codex-demo:review.0".to_string(),
                 status: AgentStatus::default(),
@@ -3472,6 +3899,7 @@ exit 0
                 AgentInfo {
                     id: "demo/worker-1".to_string(),
                     role: "worker-1".to_string(),
+                    branch: None,
                     worktree_path: PathBuf::from("/tmp/repo-wt-1"),
                     tmux_target: "codex-demo:worker-1.0".to_string(),
                     status: AgentStatus::default(),
@@ -3488,6 +3916,7 @@ exit 0
                 AgentInfo {
                     id: "demo/worker-2".to_string(),
                     role: "worker-2".to_string(),
+                    branch: None,
                     worktree_path: PathBuf::from("/tmp/repo-wt-2"),
                     tmux_target: "codex-demo:worker-2.0".to_string(),
                     status: AgentStatus::default(),

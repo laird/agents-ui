@@ -77,13 +77,7 @@ pub fn new_shared_state() -> SharedWebState {
 
 impl AgentSnapshot {
     pub fn from_agent_info(info: &crate::model::swarm::AgentInfo) -> Self {
-        use crate::model::swarm::HealthStatus;
-        let health = match info.health.status() {
-            HealthStatus::Healthy    => "Healthy",
-            HealthStatus::Stalled    => "Stalled",
-            HealthStatus::Restarting => "Restarting",
-            HealthStatus::Dead       => "Dead",
-        };
+        let health = info.health.status().as_str();
         let status_timestamp = info.status.timestamp.map(|ts| {
             ts.format("%Y-%m-%dT%H:%M:%SZ").to_string()
         });
@@ -102,9 +96,7 @@ impl AgentSnapshot {
             resurrection_attempts: info.resurrection_attempts,
             status_timestamp,
             worktree_path: info.worktree_path.to_string_lossy().into_owned(),
-            // The TUI-owned AgentInfo does not track a branch yet (see #328);
-            // the discovery path fills this in for the headless dashboard.
-            branch: None,
+            branch: info.branch.clone(),
         }
     }
 }
@@ -173,6 +165,7 @@ mod tests {
         AgentInfo {
             id: format!("test-repo/{role}"),
             role: role.to_string(),
+            branch: None,
             worktree_path: PathBuf::from("/tmp/test"),
             tmux_target: "test:0.0".to_string(),
             status: AgentStatus {
