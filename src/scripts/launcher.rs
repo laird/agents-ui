@@ -255,14 +255,10 @@ mod tests {
     use std::fs;
 
     /// These tests mutate AGENTS_DIR and CLAUDE_CONFIG_DIR, which the resolver
-    /// reads; cargo runs tests as threads of one process, so without this they
-    /// would see each other's environment.
-    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-        LOCK.get_or_init(|| std::sync::Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
+    /// reads. The lock is process-wide because the readers live in other
+    /// modules: adapter::claude's launch test depends on AGENTS_DIR staying
+    /// put for the length of a tmux launch.
+    use crate::testutil::env_lock;
 
     /// Write a Claude Code plugin manifest naming an install path for autocoder.
     fn write_installed_manifest(config_dir: &std::path::Path, entries: &str) {
@@ -285,8 +281,7 @@ mod tests {
 
     #[test]
     fn resolve_agents_dir_env_override_used_when_exists() {
-        let tmp = std::env::temp_dir()
-            .join(format!("agents-launcher-test-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(crate::testutil::artifact_name("launcher"));
         fs::create_dir_all(&tmp).expect("create temp dir");
 
         // AGENTS_DIR now outranks every auto-detected location. It used to be
@@ -334,8 +329,7 @@ mod tests {
 
     #[test]
     fn resolve_agents_dir_uses_the_installed_plugin_manifest() {
-        let tmp = std::env::temp_dir()
-            .join(format!("agents-launcher-installed-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(crate::testutil::artifact_name("launcher"));
         let config = tmp.join("claude");
         let install = tmp.join("cache/plugin-marketplace/autocoder/4.21.0");
         fs::create_dir_all(&install).expect("create install dir");
@@ -378,8 +372,7 @@ mod tests {
 
     #[test]
     fn installed_plugin_manifest_entry_for_a_removed_version_is_ignored() {
-        let tmp = std::env::temp_dir()
-            .join(format!("agents-launcher-stale-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(crate::testutil::artifact_name("launcher"));
         let config = tmp.join("claude");
         // An upgrade removes the old version directory but can leave it listed.
         let gone = tmp.join("cache/plugin-marketplace/autocoder/4.20.0");
@@ -417,8 +410,7 @@ mod tests {
 
     #[test]
     fn find_script_returns_path_when_found() {
-        let tmp = std::env::temp_dir()
-            .join(format!("agents-launcher-find-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(crate::testutil::artifact_name("launcher"));
         let scripts_dir = tmp.join("plugins/autocoder/scripts");
         fs::create_dir_all(&scripts_dir).expect("create scripts dir");
         let script_file = scripts_dir.join("test-script.sh");

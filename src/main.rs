@@ -7,6 +7,8 @@ mod model;
 mod project_management;
 mod runtime;
 mod scripts;
+#[cfg(test)]
+mod testutil;
 mod tmux;
 mod transport;
 mod tui;

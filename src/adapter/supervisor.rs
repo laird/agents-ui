@@ -312,11 +312,8 @@ mod tests {
     /// exist, and failed on CI where neither does.
     #[test]
     fn runtime_wrapper_usage_matches_expected_runtimes() {
-        let dir = std::env::temp_dir().join(format!(
-            "agents-ui-supervisor-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
+        let dir = std::env::temp_dir().join(crate::testutil::artifact_name("supervisor"));
+        let _guard = crate::testutil::env_lock();
         std::fs::create_dir_all(dir.join("scripts")).expect("scripts dir");
         for name in ["droid-fix-loop.sh", "gemini-fix-loop.sh"] {
             std::fs::write(dir.join("scripts").join(name), "#!/bin/sh\nexit 0\n").expect("write");

@@ -2421,14 +2421,10 @@ mod tests {
     }
 
     fn temp_path(name: &str) -> PathBuf {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        std::env::temp_dir().join(format!(
-            "agents-ui-adapter-{name}-{}-{nanos}",
-            std::process::id()
-        ))
+        // One naming scheme for every artifact, with the pid in a fixed
+        // position, so a later run can tell debris from live work.
+        std::env::temp_dir()
+            .join(crate::testutil::artifact_name(name))
     }
 
     fn test_lock() -> &'static std::sync::Mutex<()> {
@@ -2436,17 +2432,10 @@ mod tests {
         LOCK.get_or_init(|| std::sync::Mutex::new(()))
     }
 
-    /// Take the shared env lock, tolerating poisoning.
-    ///
-    /// A failing test that held this mutex used to turn every other test that
-    /// wanted it into a PoisonError, burying the one real failure under a pile
-    /// of unrelated ones. The lock guards environment variables, not data whose
-    /// invariants a panic could break.
-    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
-        test_lock()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
+    /// The process-wide env lock. Must be the same mutex every module uses:
+    /// a test elsewhere that removes AGENTS_DIR mid-run is indistinguishable
+    /// from the variable never having been set.
+    use crate::testutil::env_lock as lock_env;
 
     /// An AGENTS_DIR whose `scripts/` holds the named loop scripts.
     ///
@@ -2670,6 +2659,7 @@ exit 0
 
     #[tokio::test]
     async fn launches_manager_and_worker_loops_for_all_runtimes() {
+        crate::testutil::reap_stale_artifacts();
         if !command_available("tmux") || !command_available("git") {
             return;
         }
@@ -2754,7 +2744,15 @@ exit 0
             AgentType::Gemini,
             AgentType::Pi,
         ] {
-            let repo_path = root.join(format!("repo-{}", runtime.script_flag()));
+            // The session name comes from the repo directory name, so the
+            // pid has to be in it -- otherwise a leaked session
+            // ("codex-repo-codex") is indistinguishable from a real swarm and
+            // nothing can ever reap it.
+            let repo_path = root.join(format!(
+                "{}-repo-{}",
+                crate::testutil::ARTIFACT_PREFIX,
+                runtime.script_flag()
+            ));
             let session_name =
                 ClaudeAdapter::session_name(&runtime, &ClaudeAdapter::project_name(&repo_path));
             cleanup_tmux_session(&session_name).await;
@@ -2863,6 +2861,7 @@ exit 0
     /// its shell prompt.
     #[tokio::test]
     async fn window_pane_target_resolves_a_pane_that_accepts_input() {
+        crate::testutil::reap_stale_artifacts();
         if !command_available("tmux") {
             return;
         }
@@ -2936,6 +2935,7 @@ exit 0
     /// back as three idle workers.
     #[tokio::test]
     async fn healing_finds_worker_windows_by_name_not_index() {
+        crate::testutil::reap_stale_artifacts();
         if !command_available("tmux") {
             return;
         }
@@ -3107,6 +3107,23 @@ exit 0
                 .arg("-lc")
                 .arg(format!("tmux -L {} kill-server 2>/dev/null", self.socket))
                 .status();
+            // kill-server leaves the socket file behind once the server has
+            // already exited on its own -- a clean run should still leave the
+            // socket directory as it found it.
+            let uid = std::process::Command::new("id")
+                .arg("-u")
+                .output()
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_default();
+            if !uid.is_empty() {
+                std::fs::remove_file(
+                    std::env::temp_dir()
+                        .join(format!("tmux-{uid}"))
+                        .join(&self.socket),
+                )
+                .ok();
+            }
             std::fs::remove_dir_all(&self.dir).ok();
         }
     }
@@ -3115,6 +3132,7 @@ exit 0
     /// from 0 (stock Linux/macOS) or from 1 (omarchy and many dotfiles).
     #[tokio::test]
     async fn swarm_reconstruction_is_independent_of_tmux_base_index() {
+        crate::testutil::reap_stale_artifacts();
         for base_index in [0, 1] {
             let Some(layout) = TmuxLayout::new(base_index) else {
                 return;
@@ -3197,6 +3215,7 @@ exit 0
     /// Pane targets must be resolved from tmux under either numbering.
     #[tokio::test]
     async fn window_pane_target_matches_the_servers_numbering() {
+        crate::testutil::reap_stale_artifacts();
         for base_index in [0, 1] {
             let Some(layout) = TmuxLayout::new(base_index) else {
                 return;
