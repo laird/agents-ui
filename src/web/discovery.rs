@@ -5,6 +5,7 @@
 //! tmux sessions, captures pane content, reads status files, and writes the result
 //! into `SharedWebState`.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio::time::{Duration, sleep};
 
@@ -12,7 +13,7 @@ use crate::transport::ServerTransport;
 use crate::tmux::session as tmux_session;
 use crate::tmux::proxy::capture_pane;
 use crate::model::status::{AgentState, read_status_file};
-use crate::model::swarm::AgentType;
+use crate::model::swarm::{AgentType, WorkerHealth};
 
 use super::{AgentSnapshot, SharedWebState, SwarmSnapshot};
 
@@ -22,11 +23,19 @@ const POLL_INTERVAL_SECS: u64 = 3;
 /// Pane scrollback lines to capture.
 const SCROLLBACK_LINES: u32 = 200;
 
+/// Per-agent health, keyed by `AgentSnapshot::id`, held across poll cycles so
+/// `stall_ticks` can accumulate. A fresh `WorkerHealth` per poll (the previous
+/// behaviour) can never observe two consecutive samples, so it always reports
+/// `Healthy` even for a worker stuck for hours -- there is nothing to compare
+/// against `last_content`.
+type HealthMap = HashMap<String, WorkerHealth>;
+
 /// Entry point: run forever, updating `state` every `POLL_INTERVAL_SECS`.
 pub async fn run(state: SharedWebState) {
     let transport = TransportServerTransport::new(None);
+    let mut health = HealthMap::new();
     loop {
-        match collect_swarms(&transport).await {
+        match collect_swarms(&transport, &mut health).await {
             Ok(snapshots) => {
                 if let Ok(mut guard) = state.write() {
                     *guard = snapshots;
@@ -44,12 +53,15 @@ pub async fn run(state: SharedWebState) {
 type TransportServerTransport = ServerTransport;
 
 /// Discover all active agent swarms from tmux sessions.
-async fn collect_swarms(transport: &ServerTransport) -> anyhow::Result<Vec<SwarmSnapshot>> {
+async fn collect_swarms(
+    transport: &ServerTransport,
+    health: &mut HealthMap,
+) -> anyhow::Result<Vec<SwarmSnapshot>> {
     let session_names = tmux_session::discover_agent_sessions(transport).await?;
 
     let mut swarms = Vec::new();
     for session_name in &session_names {
-        match build_swarm_snapshot(transport, session_name).await {
+        match build_swarm_snapshot(transport, session_name, health).await {
             Ok(Some(snap)) => swarms.push(snap),
             Ok(None) => {}
             Err(e) => {
@@ -65,6 +77,7 @@ async fn collect_swarms(transport: &ServerTransport) -> anyhow::Result<Vec<Swarm
 async fn build_swarm_snapshot(
     transport: &ServerTransport,
     session_name: &str,
+    health: &mut HealthMap,
 ) -> anyhow::Result<Option<SwarmSnapshot>> {
     // Parse prefix → agent type, project name
     let Some((agent_type, project_name)) = parse_session_name(session_name) else {
@@ -155,6 +168,7 @@ async fn build_swarm_snapshot(
                 pane.current_path.as_deref(),
                 &branches,
                 &agent_type,
+                health,
             )
             .await;
 
@@ -258,6 +272,7 @@ async fn build_agent_snapshot(
     pane_path: Option<&str>,
     branches: &std::collections::HashMap<PathBuf, String>,
     agent_type: &AgentType,
+    health: &mut HealthMap,
 ) -> AgentSnapshot {
 
     // Capture pane content
@@ -329,8 +344,11 @@ async fn build_agent_snapshot(
     // renders, whose last line reads "Enter to select · ↑/↓ to navigate".
     let waiting_for_input = crate::model::status::agent_needs_input(&pane_content);
 
+    let id = format!("{project_name}/{role}");
+    let health_str = update_health(health, &id, &state_str, &pane_content);
+
     AgentSnapshot {
-        id: format!("{project_name}/{role}"),
+        id,
         role,
         state: state_str,
         is_manager,
@@ -339,7 +357,7 @@ async fn build_agent_snapshot(
         current_issue_title: None,
         pane_content,
         tmux_target: target.to_string(),
-        health: "Healthy".to_string(),
+        health: health_str.to_string(),
         completed_issue_count: 0,
         resurrection_attempts: 0,
         status_timestamp: None,
@@ -423,6 +441,29 @@ fn is_busy(state: &str) -> bool {
     state.starts_with("Working")
 }
 
+/// Update the persistent per-agent health cache for one poll and return the
+/// resulting health string.
+///
+/// Mirrors the TUI's own stall detection (see `Event::PaneOutput` in app.rs):
+/// stalled only while genuinely Working and the pane hasn't moved since the
+/// last poll. Any other state resets the counter and re-baselines the content
+/// so a worker doesn't inherit stale stall_ticks from before it went idle.
+fn update_health(
+    health: &mut HealthMap,
+    id: &str,
+    state_str: &str,
+    pane_content: &str,
+) -> &'static str {
+    let agent_health = health.entry(id.to_string()).or_default();
+    if is_busy(state_str) && pane_content == agent_health.last_content {
+        agent_health.stall_ticks += 1;
+    } else {
+        agent_health.stall_ticks = 0;
+        agent_health.last_content = pane_content.to_string();
+    }
+    agent_health.status().as_str()
+}
+
 /// Parse `claude-myrepo` → `(AgentType::Claude, "myrepo")`.
 fn parse_session_name(name: &str) -> Option<(AgentType, String)> {
     if let Some(rest) = name.strip_prefix("claude-") {
@@ -501,5 +542,54 @@ fn strip_worktree_suffix(path: &std::path::Path, project_name: &str) -> PathBuf 
         }
     }
     path.to_path_buf()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stall_ticks_accumulate_across_polls_with_unchanged_content() {
+        let mut health = HealthMap::new();
+        // First poll: nothing to compare against yet, so it just baselines.
+        assert_eq!(update_health(&mut health, "repo/worker-1", "Working #7", "same"), "Healthy");
+        // Threshold is 3 (see WorkerHealth::status): two more unchanged polls stalls it.
+        assert_eq!(update_health(&mut health, "repo/worker-1", "Working #7", "same"), "Healthy");
+        assert_eq!(update_health(&mut health, "repo/worker-1", "Working #7", "same"), "Healthy");
+        assert_eq!(update_health(&mut health, "repo/worker-1", "Working #7", "same"), "Stalled");
+    }
+
+    #[test]
+    fn changed_pane_content_resets_stall_ticks() {
+        let mut health = HealthMap::new();
+        for _ in 0..3 {
+            update_health(&mut health, "repo/worker-1", "Working #7", "same");
+        }
+        assert_eq!(update_health(&mut health, "repo/worker-1", "Working #7", "same"), "Stalled");
+        assert_eq!(update_health(&mut health, "repo/worker-1", "Working #7", "different"), "Healthy");
+    }
+
+    #[test]
+    fn going_idle_resets_stall_ticks() {
+        let mut health = HealthMap::new();
+        for _ in 0..3 {
+            update_health(&mut health, "repo/worker-1", "Working #7", "same");
+        }
+        assert_eq!(update_health(&mut health, "repo/worker-1", "Working #7", "same"), "Stalled");
+        assert_eq!(update_health(&mut health, "repo/worker-1", "Idle", "same"), "Healthy");
+        // And it doesn't come back stalled just because content matches again while idle.
+        assert_eq!(update_health(&mut health, "repo/worker-1", "Idle", "same"), "Healthy");
+    }
+
+    #[test]
+    fn health_is_tracked_independently_per_agent_id() {
+        let mut health = HealthMap::new();
+        for _ in 0..3 {
+            update_health(&mut health, "repo/worker-1", "Working #7", "stuck");
+        }
+        assert_eq!(update_health(&mut health, "repo/worker-1", "Working #7", "stuck"), "Stalled");
+        // A different agent id starts with its own fresh cache entry.
+        assert_eq!(update_health(&mut health, "repo/worker-2", "Working #8", "stuck"), "Healthy");
+    }
 }
 
