@@ -55,6 +55,9 @@ pub fn for_runtime(runtime: &AgentType) -> &'static dyn RuntimeSupervisor {
         AgentType::Codex => &CodexSupervisor,
         AgentType::Droid => &DroidSupervisor,
         AgentType::Gemini => &GeminiSupervisor,
+        // Pi runs both roles as shell loops, exactly like Droid: nothing is
+        // typed into a session, so the wrapper supervisor applies unchanged.
+        AgentType::Pi => &DroidSupervisor,
     }
 }
 

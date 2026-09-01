@@ -165,6 +165,44 @@ pub fn read_status_file(path: &Path) -> AgentStatus {
     }
 }
 
+/// True when the pane is waiting on a human keypress.
+///
+/// One detector, because there used to be two: the TUI checked for the strings
+/// an agent actually prints ("Enter to select", "AskUserQuestion"), while the
+/// web dashboard had its own weaker copy that looked for a trailing "?" and
+/// "(y/n)". A manager parked on a numbered menu -- the single most common way
+/// a swarm stalls -- matched only the first, so the dashboard reported nothing
+/// wrong while the manager waited indefinitely.
+pub fn agent_needs_input(pane_content: &str) -> bool {
+    if pane_content.is_empty() {
+        return false;
+    }
+    let stripped = strip_ansi(pane_content);
+    let tail: String = stripped
+        .lines()
+        .rev()
+        .take(12)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let lower = tail.to_lowercase();
+
+    lower.contains("what should claude do instead")
+        || lower.contains("what should gemini do instead")
+        || lower.contains("what should the agent do instead")
+        || lower.contains("interrupted")
+        || lower.contains("do you want to")
+        || lower.contains("should i proceed")
+        || lower.contains("would you like")
+        || lower.contains("please confirm")
+        || lower.contains("askuserquestion")
+        || lower.contains("enter to select")
+        || lower.contains("press enter")
+        || lower.contains("(y/n)")
+}
+
 pub fn classify_pane_activity(content: &str) -> PaneActivity {
     let stripped = strip_ansi(content);
     let non_empty_lines: Vec<&str> = stripped
@@ -181,10 +219,22 @@ pub fn classify_pane_activity(content: &str) -> PaneActivity {
     let mut saw_idle_prompt = false;
     let mut saw_busy_indicator = false;
 
-    for line in non_empty_lines.iter().take(8) {
+    // 20, not 8. Claude Code's footer alone is seven lines -- separator, input
+    // box, separator, status line, permissions line, shortcut hint -- and the
+    // spinner sits ABOVE it. An 8-line window therefore covered the footer and
+    // stopped just short of the one line that says the agent is working, while
+    // the footer's always-present empty input box supplied an idle verdict. A
+    // pane thinking for 41 minutes read as idle.
+    for line in non_empty_lines.iter().take(20) {
         let lower = line.trim().to_lowercase();
 
-        if lower.contains("thinking")
+        // The spinner verb is randomized -- Coalescing, Cascading, Mustering --
+        // so matching a vocabulary of verbs cannot work. What is stable is the
+        // shape: "<verb>… (<elapsed> · ↓ <n> tokens)". Match that instead.
+        let is_spinner = line.contains('…') && (lower.contains("tokens") || lower.contains("esc to interrupt"));
+
+        if is_spinner
+            || lower.contains("thinking")
             || lower.contains("working")
             || lower.contains("reading")
             || lower.contains("writing")
@@ -702,6 +752,73 @@ mod tests {
         assert_eq!(extract_issue_number("no issue here"), None);
         assert_eq!(extract_issue_number("working"), None);
         assert_eq!(extract_issue_number(""), None);
+    }
+
+    /// Real capture from a worker that had been thinking for 41 minutes and
+    /// was reported idle. The spinner sits above Claude Code's seven-line
+    /// footer, and the footer's empty input box supplied an idle verdict.
+    const BUSY_WORKER_PANE: &str = concat!(
+        "     echo \"still running: $(pgrep -fc 'cargo test')\"\n",
+        "\u{25cf} Background command \"Unify both gates\" completed (exit code 0)\n",
+        "\u{273b} Coalescing\u{2026} (41m 25s \u{00b7} \u{2193} 42.7k tokens \u{00b7} still thinking)\n",
+        "  \u{23bf}  Tip: Use /clear to start fresh when switching topics\n",
+        "                                    Update available! Run: mise upgrade claude\n",
+        "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\n",
+        "\u{276f} \n",
+        "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\n",
+        "  ctx 26% of 1M | Opus 5 (1M context) | repo kink-party | wt kink-party-wt-1\n",
+        "  \u{23f5}\u{23f5} bypass permissions on \u{00b7} 2 shells \u{00b7} \u{2190} for agents\n",
+        "                                                                           /rc\n",
+    );
+
+    /// The manager parked on a numbered menu -- the most common way a swarm
+    /// stalls, and the case the web dashboard's own heuristic missed.
+    const BLOCKED_MANAGER_PANE: &str = concat!(
+        "\u{2502} stale (#2930, #2929, #2896, #2889). Release them so workers can claim them?\n",
+        "\u{276f} 1. Release all 8 (Recommended)\n",
+        "  2. Release only the 3-week-old 4\n",
+        "  3. Release none\n",
+        "  4. Type something.\n",
+        "  5. Chat about this\n",
+        "Enter to select \u{00b7} \u{2191}/\u{2193} to navigate \u{00b7} Esc to cancel\n",
+    );
+
+    #[test]
+    fn spinner_above_the_footer_counts_as_busy() {
+        assert_eq!(
+            classify_pane_activity(BUSY_WORKER_PANE),
+            PaneActivity::AgentBusy,
+            "a worker mid-turn must not be classified idle"
+        );
+    }
+
+    #[test]
+    fn randomized_spinner_verbs_are_recognized() {
+        // Cascading and Mustering are as valid as Coalescing; the verb is
+        // randomized, so the shape is what gets matched.
+        for verb in ["Cascading", "Mustering", "Percolating"] {
+            let pane = format!(
+                "some output\n* {verb}\u{2026} (1h 21m \u{00b7} \u{2193} 17.7k tokens)\n\u{2500}\n\u{276f} \n"
+            );
+            assert_eq!(
+                classify_pane_activity(&pane),
+                PaneActivity::AgentBusy,
+                "spinner verb {verb} should read as busy"
+            );
+        }
+    }
+
+    #[test]
+    fn menu_awaiting_a_keypress_needs_input() {
+        assert!(
+            agent_needs_input(BLOCKED_MANAGER_PANE),
+            "a numbered menu ending in 'Enter to select' is waiting on a human"
+        );
+    }
+
+    #[test]
+    fn a_working_pane_does_not_need_input() {
+        assert!(!agent_needs_input(BUSY_WORKER_PANE));
     }
 
     // --- parse_status_line tests ---

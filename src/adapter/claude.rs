@@ -2586,7 +2586,11 @@ exit 0
                     &["Starting Codex monitor loop", "== Codex Worker Monitor =="],
                     &[],
                 ),
-                AgentType::Droid => (&[], &[]),
+                // Pi, like Droid, launches both roles as shell loops whose
+                // scripts do not exist under the test's temp agents dir, so
+                // there is no marker to wait for -- the assertion here is that
+                // the launch completes and builds a swarm at all.
+                AgentType::Droid | AgentType::Pi => (&[], &[]),
                 // Gemini's fake runtime is flaky in tmux worker panes and can drop back to a
                 // shell prompt before the historical test marker is observed. The wrapper-launch
                 // regression in #243 is specific to Codex, so keep this smoke-level for Gemini.

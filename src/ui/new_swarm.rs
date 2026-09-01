@@ -12,7 +12,29 @@ use crate::app::{
 };
 use crate::model::swarm::{ALL_AGENT_TYPES, AgentType};
 
-pub fn render_runtime_dialog(f: &mut Frame, area: Rect, selected: AgentType) {
+/// One line per runtime, with the blurb shown beside its name.
+fn runtime_blurb(agent_type: &AgentType) -> (&'static str, char) {
+    match agent_type {
+        AgentType::Claude => ("Claude Code (autocoder plugin from ../agents)", 'c'),
+        AgentType::Codex => ("Codex (.codex workflows)", 'x'),
+        AgentType::Droid => ("Droid (.factory workflows)", 'd'),
+        AgentType::Gemini => ("Gemini (laird/agents skills + .agent scripts)", 'g'),
+        AgentType::Pi => ("Pi (.pi skills, prompts and scripts)", 'p'),
+    }
+}
+
+/// Render the default-runtime picker.
+///
+/// `available` lists the runtimes whose CLI is actually installed. Offering a
+/// runtime that is not installed is how a repo ends up with a saved default it
+/// cannot launch -- which used to surface as a hard startup error ("droid is
+/// not installed on this machine") rather than as a choice never presented.
+pub fn render_runtime_dialog(
+    f: &mut Frame,
+    area: Rect,
+    selected: AgentType,
+    available: &[AgentType],
+) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" Select Runtime ")
@@ -22,16 +44,14 @@ pub fn render_runtime_dialog(f: &mut Frame, area: Rect, selected: AgentType) {
     f.render_widget(Clear, area);
     f.render_widget(block, area);
 
-    let chunks = Layout::vertical([
+    let mut constraints = vec![Constraint::Length(2)];
+    constraints.extend(std::iter::repeat_n(
         Constraint::Length(2),
-        Constraint::Length(2),
-        Constraint::Length(2),
-        Constraint::Length(2),
-        Constraint::Length(2),
-        Constraint::Min(0),
-        Constraint::Length(2),
-    ])
-    .split(inner);
+        available.len().max(1),
+    ));
+    constraints.push(Constraint::Min(0));
+    constraints.push(Constraint::Length(2));
+    let chunks = Layout::vertical(constraints).split(inner);
 
     let instructions = Paragraph::new(Line::from(Span::styled(
         " Choose default runtime (saved in repo):",
@@ -39,66 +59,39 @@ pub fn render_runtime_dialog(f: &mut Frame, area: Rect, selected: AgentType) {
     )));
     f.render_widget(instructions, chunks[0]);
 
-    let claude_style = if selected == AgentType::Claude {
-        theme::input_style()
-    } else {
-        theme::help_style()
-    };
-    let codex_style = if selected == AgentType::Codex {
-        theme::input_style()
-    } else {
-        theme::help_style()
-    };
-    let droid_style = if selected == AgentType::Droid {
-        theme::input_style()
-    } else {
-        theme::help_style()
-    };
-    let gemini_style = if selected == AgentType::Gemini {
-        theme::input_style()
-    } else {
-        theme::help_style()
-    };
+    if available.is_empty() {
+        let none = Paragraph::new(Line::from(Span::styled(
+            " No agent CLI found. Install claude, codex, droid, gemini or pi.",
+            theme::help_style(),
+        )));
+        f.render_widget(none, chunks[1]);
+    }
 
-    let claude = Paragraph::new(Line::from(Span::styled(
-        " > Claude Code (autocoder plugin from ../agents)",
-        claude_style,
-    )));
-    f.render_widget(claude, chunks[1]);
-
-    let codex = Paragraph::new(Line::from(Span::styled(
-        " > Codex (.codex workflows)",
-        codex_style,
-    )));
-    f.render_widget(codex, chunks[2]);
-
-    let droid = Paragraph::new(Line::from(Span::styled(
-        " > Droid (.factory workflows)",
-        droid_style,
-    )));
-    f.render_widget(droid, chunks[3]);
-
-    let gemini = Paragraph::new(Line::from(Span::styled(
-        " > Gemini (laird/agents skills + .agent scripts)",
-        gemini_style,
-    )));
-    f.render_widget(gemini, chunks[4]);
-
-    let help = Paragraph::new(Line::from(vec![
+    let mut help_spans = vec![
         Span::styled(" ↑/↓", theme::title_style()),
         Span::styled(" choose  ", theme::help_style()),
-        Span::styled("c", theme::title_style()),
-        Span::styled(" claude  ", theme::help_style()),
-        Span::styled("x", theme::title_style()),
-        Span::styled(" codex  ", theme::help_style()),
-        Span::styled("d", theme::title_style()),
-        Span::styled(" droid  ", theme::help_style()),
-        Span::styled("g", theme::title_style()),
-        Span::styled(" gemini  ", theme::help_style()),
-        Span::styled("Enter", theme::title_style()),
-        Span::styled(" confirm", theme::help_style()),
-    ]));
-    f.render_widget(help, chunks[5]);
+    ];
+    for (i, agent_type) in available.iter().enumerate() {
+        let (blurb, key) = runtime_blurb(agent_type);
+        let style = if &selected == agent_type {
+            theme::input_style()
+        } else {
+            theme::help_style()
+        };
+        let line = Paragraph::new(Line::from(Span::styled(format!(" > {blurb}"), style)));
+        f.render_widget(line, chunks[1 + i]);
+
+        help_spans.push(Span::styled(key.to_string(), theme::title_style()));
+        help_spans.push(Span::styled(
+            format!(" {}  ", agent_type.script_flag()),
+            theme::help_style(),
+        ));
+    }
+    help_spans.push(Span::styled("Enter", theme::title_style()));
+    help_spans.push(Span::styled(" confirm", theme::help_style()));
+
+    let help = Paragraph::new(Line::from(help_spans));
+    f.render_widget(help, chunks[chunks.len() - 1]);
 }
 
 /// Render the "switch agent runtime" overlay for a running swarm.
@@ -196,6 +189,10 @@ pub fn render_install_scope_dialog(
         AgentType::Gemini => (
             " Install Gemini Agents ",
             " Gemini needs `.agent` installed from the shared `../agents` checkout.",
+        ),
+        AgentType::Pi => (
+            " Install Pi Agents ",
+            " Pi needs the `.pi` package (skills, prompts, scripts) in this repo.",
         ),
         _ => (
             " Install Runtime Assets ",
@@ -339,6 +336,7 @@ pub fn render_new_swarm_dialog(
                 (AgentType::Codex, "Codex", 'x'),
                 (AgentType::Droid, "Droid", 'd'),
                 (AgentType::Gemini, "Gemini", 'g'),
+                (AgentType::Pi, "Pi", 'p'),
             ];
 
             let mut spans = vec![Span::raw(" ")];
@@ -665,7 +663,7 @@ mod tests {
     fn runtime_dialog_shows_supported_runtimes() {
         let rendered = rendered_text(|terminal| {
             terminal
-                .draw(|f| render_runtime_dialog(f, f.area(), AgentType::Codex))
+                .draw(|f| render_runtime_dialog(f, f.area(), AgentType::Codex, crate::model::swarm::ALL_AGENT_TYPES))
                 .unwrap();
         });
 

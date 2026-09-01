@@ -156,7 +156,15 @@ async fn build_swarm_snapshot(
 
     let busy_count = workers.iter().filter(|w| is_busy(&w.state)).count();
     let idle_count = workers.iter().filter(|w| !is_busy(&w.state)).count();
-    let attention_count = workers.iter().filter(|w| w.waiting_for_input).count();
+    // The manager counts toward attention too. It was excluded, and it is the
+    // agent that ASKS the questions: a manager blocked on "release these 8
+    // stale locks?" left the dashboard reporting zero agents needing input,
+    // which is the exact moment a human is needed.
+    let attention_count = workers
+        .iter()
+        .chain(std::iter::once(&manager))
+        .filter(|a| a.waiting_for_input)
+        .count();
 
     Ok(Some(SwarmSnapshot {
         project_name,
@@ -259,11 +267,11 @@ async fn build_agent_snapshot(
         infer_state_from_pane(&pane_content)
     };
 
-    // Detect if waiting for input (simple heuristic: ends with a prompt character)
-    let waiting_for_input = pane_content.trim_end().ends_with('?')
-        || pane_content.contains("Do you want to")
-        || pane_content.contains("Press Enter")
-        || pane_content.contains("(y/n)");
+    // The shared detector, not a second weaker copy. The local heuristic this
+    // replaces looked for a trailing "?", "Do you want to", "Press Enter" or
+    // "(y/n)" -- none of which appear in the numbered menu an agent actually
+    // renders, whose last line reads "Enter to select · ↑/↓ to navigate".
+    let waiting_for_input = crate::model::status::agent_needs_input(&pane_content);
 
     AgentSnapshot {
         id: format!("{project_name}/{role}"),
@@ -283,6 +291,15 @@ async fn build_agent_snapshot(
 }
 
 /// Infer agent state from pane content when no status file is available.
+/// Infer a worker's state from its pane.
+///
+/// The literal "Working #NNN" marker comes first: it carries the issue number,
+/// which nothing else does. Everything after it used to be a pair of string
+/// tests -- contains "Idle", ends with "$ " or "% " -- that no agent TUI ever
+/// prints, so a pane mid-turn fell through to "Unknown" and `is_busy` read
+/// false. Three workers thinking for over an hour were reported idle. Defer to
+/// `classify_pane_activity`, the detector that knows what these panes look
+/// like, rather than keeping a second guess here.
 fn infer_state_from_pane(content: &str) -> (String, Option<u32>) {
     let trimmed = content.trim_end();
     // Look for "Working #NNN" pattern
@@ -293,10 +310,20 @@ fn infer_state_from_pane(content: &str) -> (String, Option<u32>) {
             return (format!("Working #{n}"), Some(n));
         }
     }
-    if trimmed.contains("Idle") || trimmed.ends_with("$ ") || trimmed.ends_with("% ") {
-        return ("Idle".to_string(), None);
+
+    match crate::model::status::classify_pane_activity(content) {
+        // "Working" with no number: is_busy() keys on the prefix, and the
+        // issue is genuinely unknown here.
+        crate::model::status::PaneActivity::AgentBusy => ("Working".to_string(), None),
+        crate::model::status::PaneActivity::AgentIdle => ("Idle".to_string(), None),
+        _ => {
+            if trimmed.contains("Idle") || trimmed.ends_with("$ ") || trimmed.ends_with("% ") {
+                ("Idle".to_string(), None)
+            } else {
+                ("Unknown".to_string(), None)
+            }
+        }
     }
-    ("Unknown".to_string(), None)
 }
 
 /// Returns true if the state string looks like active work.

@@ -57,6 +57,7 @@ pub enum AgentType {
     Codex,
     Droid,
     Gemini,
+    Pi,
 }
 
 /// All supported agent types, in display order.
@@ -65,6 +66,7 @@ pub const ALL_AGENT_TYPES: &[AgentType] = &[
     AgentType::Codex,
     AgentType::Droid,
     AgentType::Gemini,
+    AgentType::Pi,
 ];
 
 impl std::fmt::Display for AgentType {
@@ -74,6 +76,7 @@ impl std::fmt::Display for AgentType {
             AgentType::Codex => write!(f, "Codex"),
             AgentType::Droid => write!(f, "Droid"),
             AgentType::Gemini => write!(f, "Gemini"),
+            AgentType::Pi => write!(f, "Pi"),
         }
     }
 }
@@ -86,6 +89,7 @@ impl AgentType {
             AgentType::Codex => "codex",
             AgentType::Droid => "droid",
             AgentType::Gemini => "gemini",
+            AgentType::Pi => "pi",
         }
     }
 
@@ -96,6 +100,7 @@ impl AgentType {
             AgentType::Codex => "codex",
             AgentType::Droid => "droid",
             AgentType::Gemini => "gemini",
+            AgentType::Pi => "pi",
         }
     }
 
@@ -107,6 +112,7 @@ impl AgentType {
             "codex" => Some(AgentType::Codex),
             "droid" => Some(AgentType::Droid),
             "gemini" => Some(AgentType::Gemini),
+            "pi" => Some(AgentType::Pi),
             _ => None,
         }
     }
@@ -119,6 +125,8 @@ impl AgentType {
             AgentType::Codex => "codex",
             AgentType::Droid => "droid",
             AgentType::Gemini => "gemini --sandbox=false",
+            // Pi has no permission prompts, so there is no bypass flag to pass.
+            AgentType::Pi => "pi",
         }
     }
 
@@ -128,7 +136,8 @@ impl AgentType {
     pub fn exit_cmd(&self) -> (&str, bool) {
         match self {
             AgentType::Claude | AgentType::Gemini => ("q", false),
-            AgentType::Codex | AgentType::Droid => ("C-c", true),
+            // Pi workers are a shell loop, not a TUI: interrupt the loop.
+            AgentType::Codex | AgentType::Droid | AgentType::Pi => ("C-c", true),
         }
     }
 
@@ -139,6 +148,9 @@ impl AgentType {
             AgentType::Codex => "/goal Work the issue queue: pull the next available GitHub issue, fix it, open a PR, and repeat until the queue is empty or you are paused.",
             AgentType::Droid => "/fix-loop",
             AgentType::Gemini => "/fix-loop",
+            // Pi runs the loop in the shell (pi-fix-loop.sh), so nothing is
+            // typed into a session -- the same shape as Droid's wrapper.
+            AgentType::Pi => "",
         }
     }
 
@@ -148,7 +160,7 @@ impl AgentType {
         match self {
             AgentType::Claude => "/autocoder:fix",
             AgentType::Gemini => "/fix",
-            AgentType::Codex | AgentType::Droid => "",
+            AgentType::Codex | AgentType::Droid | AgentType::Pi => "",
         }
     }
 
@@ -158,7 +170,7 @@ impl AgentType {
             AgentType::Claude => "/autocoder:monitor-workers",
             AgentType::Gemini => "/monitor-workers",
             AgentType::Codex => "/goal Monitor and coordinate workers: check worker status, unblock stuck agents, merge completed PRs, triage new issues, and repeat indefinitely.",
-            AgentType::Droid => "",
+            AgentType::Droid | AgentType::Pi => "",
         }
     }
 
@@ -167,21 +179,23 @@ impl AgentType {
     pub fn exit_key(&self) -> (&str, bool) {
         match self {
             AgentType::Claude | AgentType::Gemini => ("q", true),
-            AgentType::Codex | AgentType::Droid => ("C-c", false),
+            AgentType::Codex | AgentType::Droid | AgentType::Pi => ("C-c", false),
         }
     }
 
     /// Status file directory within a worktree
     pub fn status_dir(&self) -> &str {
         match self {
-            AgentType::Claude | AgentType::Codex | AgentType::Gemini => ".codex/loops",
+            AgentType::Claude | AgentType::Codex | AgentType::Gemini | AgentType::Pi => {
+                ".codex/loops"
+            }
             AgentType::Droid => ".factory/loops",
         }
     }
 
     /// Whether this runtime is supervised by an outer shell loop wrapper.
     pub fn uses_loop_wrapper(&self) -> bool {
-        matches!(self, AgentType::Droid | AgentType::Gemini)
+        matches!(self, AgentType::Droid | AgentType::Gemini | AgentType::Pi)
     }
 
     pub fn from_name(value: &str) -> Option<Self> {
@@ -190,6 +204,7 @@ impl AgentType {
             "codex" => Some(AgentType::Codex),
             "droid" => Some(AgentType::Droid),
             "gemini" => Some(AgentType::Gemini),
+            "pi" => Some(AgentType::Pi),
             _ => None,
         }
     }

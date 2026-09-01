@@ -873,34 +873,9 @@ pub fn count_attention(swarm: &Swarm, issues: &[crate::model::issue::GitHubIssue
 }
 
 /// Check if an agent's pane content indicates it's waiting for human input.
-pub fn agent_needs_input(pane_content: &str) -> bool {
-    if pane_content.is_empty() {
-        return false;
-    }
-    // Strip ANSI for matching
-    let stripped: String = strip_ansi(pane_content);
-    let tail: String = stripped
-        .lines()
-        .rev()
-        .take(10)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<Vec<_>>()
-        .join(" ");
-    let lower = tail.to_lowercase();
-
-    lower.contains("what should claude do instead")
-        || lower.contains("what should gemini do instead")
-        || lower.contains("what should the agent do instead")
-        || lower.contains("interrupted")
-        || lower.contains("do you want to proceed")
-        || lower.contains("should i proceed")
-        || lower.contains("would you like")
-        || lower.contains("please confirm")
-        || lower.contains("askuserquestion")
-        || lower.contains("enter to select")
-}
+/// Re-exported so the TUI and the web dashboard cannot drift apart again; the
+/// implementation lives in `model::status`.
+pub use crate::model::status::agent_needs_input;
 
 fn strip_ansi(s: &str) -> String {
     s.chars()

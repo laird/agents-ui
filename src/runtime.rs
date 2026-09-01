@@ -9,6 +9,22 @@ use crate::transport::ServerTransport;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidationOutcome {
     pub gh_warning: Option<String>,
+    /// Set when the requested runtime is unusable. A warning, not an error:
+    /// a repo whose saved default is a CLI this machine lacks should open the
+    /// dashboard and offer the runtimes it does have, not refuse to start.
+    pub runtime_warning: Option<String>,
+}
+
+/// The runtimes whose CLI is actually present, in display order.
+pub async fn installed_runtimes(transport: &ServerTransport) -> Vec<AgentType> {
+    let mut found = Vec::new();
+    for agent_type in crate::model::swarm::ALL_AGENT_TYPES {
+        let (binary, _) = runtime_binary_hint(agent_type);
+        if transport.command_exists(binary).await {
+            found.push(agent_type.clone());
+        }
+    }
+    found
 }
 
 pub async fn validate_environment(
@@ -27,15 +43,24 @@ pub async fn validate_environment(
         bail!("tmux is not installed on {location}. Install with: {tmux_hint}");
     }
 
-    if let Some(agent_type) = agent_type {
-        validate_runtime(transport, agent_type, repo_root).await?;
-    }
+    // A missing agent CLI is reported, never fatal. tmux above still is: with
+    // no multiplexer there is nothing to attach to, so no runtime could run.
+    let runtime_warning = match agent_type {
+        Some(agent_type) => validate_runtime(transport, agent_type, repo_root)
+            .await
+            .err()
+            .map(|err| err.to_string()),
+        None => None,
+    };
 
     let gh_warning = crate::github::check_gh_auth(transport)
         .await
         .map(|err| err.to_string());
 
-    Ok(ValidationOutcome { gh_warning })
+    Ok(ValidationOutcome {
+        gh_warning,
+        runtime_warning,
+    })
 }
 
 pub async fn validate_runtime(
@@ -160,6 +185,7 @@ fn runtime_binary_hint(agent_type: &AgentType) -> (&'static str, &'static str) {
         AgentType::Codex => ("codex", "npm install -g @openai/codex"),
         AgentType::Droid => ("droid", "See https://droid.dev"),
         AgentType::Gemini => ("gemini", "See https://ai.google.dev"),
+        AgentType::Pi => ("pi", "curl -fsSL https://pi.dev/install.sh | sh"),
     }
 }
 
@@ -201,6 +227,17 @@ fn runtime_live_probes(agent_type: &AgentType) -> Vec<RuntimeProbe<'static>> {
             ],
             current_dir: None,
             timeout: Duration::from_secs(25),
+        }],
+        // Pi's own readiness check, rather than spending a model call: it
+        // reports whether the configured provider has usable credentials, and
+        // an unauthenticated Pi is the failure that would otherwise show up as
+        // a worker that starts and immediately does nothing.
+        AgentType::Pi => vec![RuntimeProbe {
+            label: "provider credentials",
+            program: "pi",
+            args: &["auth", "check", "--provider", "anthropic"],
+            current_dir: None,
+            timeout: Duration::from_secs(15),
         }],
         AgentType::Claude | AgentType::Gemini => Vec::new(),
     }

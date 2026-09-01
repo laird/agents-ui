@@ -38,6 +38,7 @@ where
     let mut has_codex = false;
     let mut has_droid = false;
     let mut has_gemini = false;
+    let mut has_pi = false;
     let mut server = None;
     let mut web_port: Option<u16> = None;
     let mut headless = false;
@@ -49,6 +50,7 @@ where
             "--codex" => has_codex = true,
             "--droid" => has_droid = true,
             "--gemini" => has_gemini = true,
+            "--pi" => has_pi = true,
             "--web" => {
                 if web_port.is_none() {
                     web_port = Some(web::server::DEFAULT_PORT);
@@ -94,15 +96,19 @@ where
         }
     }
 
-    let selected = [has_claude, has_codex, has_droid, has_gemini]
+    let selected = [has_claude, has_codex, has_droid, has_gemini, has_pi]
         .into_iter()
         .filter(|flag| *flag)
         .count();
     if selected > 1 {
-        anyhow::bail!("Use only one runtime flag: --claude, --codex, --droid, or --gemini");
+        anyhow::bail!(
+            "Use only one runtime flag: --claude, --codex, --droid, --gemini, or --pi"
+        );
     }
 
-    let agent_type = if has_gemini {
+    let agent_type = if has_pi {
+        Some(AgentType::Pi)
+    } else if has_gemini {
         Some(AgentType::Gemini)
     } else if has_droid {
         Some(AgentType::Droid)
@@ -144,15 +150,40 @@ async fn main() -> Result<()> {
         .as_deref()
         .and_then(crate::config::persistence::find_repo_root);
 
-    let initial_agent_type =
+    let requested_agent_type =
         select_initial_agent_type(cli.agent_type.clone(), repo_root.as_deref())?;
-    let startup_warning = crate::runtime::validate_environment(
+    let outcome = crate::runtime::validate_environment(
         &transport,
-        initial_agent_type.as_ref(),
+        requested_agent_type.as_ref(),
         repo_root.as_deref(),
     )
-    .await?
-    .gh_warning;
+    .await?;
+
+    // Offer what is installed rather than refusing to start. A repo's saved
+    // default runtime outlives the machine it was chosen on: cloning that repo
+    // somewhere without that CLI used to abort at startup ("droid is not
+    // installed on this machine") instead of falling back to a runtime that
+    // is present.
+    let installed = crate::runtime::installed_runtimes(&transport).await;
+    let (initial_agent_type, fallback_note) = match (&requested_agent_type, &outcome.runtime_warning)
+    {
+        (Some(requested), Some(warning)) => match installed.first() {
+            Some(replacement) => (
+                Some(replacement.clone()),
+                Some(format!("{warning} Using {replacement} instead.")),
+            ),
+            // Nothing installed at all: keep the request so the UI still names
+            // the runtime the repo expects, and say what is missing.
+            None => (Some(requested.clone()), Some(warning.clone())),
+        },
+        _ => (requested_agent_type, outcome.runtime_warning.clone()),
+    };
+
+    let startup_warning = match (fallback_note, outcome.gh_warning) {
+        (Some(runtime), Some(gh)) => Some(format!("{runtime}  {gh}")),
+        (Some(runtime), None) => Some(runtime),
+        (None, gh) => gh,
+    };
 
     // Initialize logging to file (not stdout, since we own the terminal)
     tracing_subscriber::fmt()
@@ -224,6 +255,7 @@ async fn main() -> Result<()> {
         cli.server,
         startup_warning,
         web_state,
+        installed,
     )
     .await?;
     let result = app.run(&mut terminal).await;

@@ -405,6 +405,10 @@ pub(crate) struct RuntimeOption {
 }
 
 pub struct App {
+    /// Runtimes whose CLI is installed here. The picker offers only these, and
+    /// cycling skips the rest -- selecting a runtime that cannot launch is a
+    /// choice that should never have been on screen.
+    available_runtimes: Vec<AgentType>,
     pub running: bool,
     pub screen: Screen,
     pub swarms: Vec<Swarm>,
@@ -490,6 +494,17 @@ pub struct App {
 }
 
 impl App {
+    /// Honour a direct runtime key only when that runtime can actually launch.
+    fn select_runtime_if_available(&mut self, agent_type: AgentType) {
+        if self.available_runtimes.contains(&agent_type) {
+            self.new_swarm_agent_type = agent_type;
+        } else {
+            self.status_message = Some(format!(
+                "{agent_type} is not installed here; showing only installed runtimes"
+            ));
+        }
+    }
+
     pub async fn new(
         initial_agent_type: Option<AgentType>,
         runtime_locked_from_cli: bool,
@@ -497,6 +512,7 @@ impl App {
         remote_server: Option<String>,
         startup_warning: Option<String>,
         web_state: Option<crate::web::SharedWebState>,
+        available_runtimes: Vec<AgentType>,
     ) -> Result<Self> {
         let agents_dir = launcher::resolve_agents_dir();
         let transport = ServerTransport::new(remote_server);
@@ -542,6 +558,7 @@ impl App {
             new_swarm_repo: String::new(),
             new_swarm_agent_type: AgentType::Claude,
             status_message: startup_warning,
+            available_runtimes,
             available_repos: Vec::new(),
             swarm_view: SwarmView::new(),
             swarm_focus: SwarmPanel::Manager,
@@ -622,6 +639,7 @@ impl App {
                             f,
                             area,
                             self.default_agent_type.clone(),
+                            &self.available_runtimes,
                         );
                     }
                     Screen::InstallScopeSelect => {
@@ -1668,6 +1686,7 @@ impl App {
                 AgentType::Codex => ("codex", Some("needs Codex repo/user assets")),
                 AgentType::Droid => ("droid", Some("needs Droid plugin/assets")),
                 AgentType::Gemini => ("gemini", Some("needs laird/agents skills/scripts/agents")),
+                AgentType::Pi => ("pi", Some("needs laird/agents .pi package")),
             };
 
             if agent_type != current && !self.transport.command_exists(binary).await {
@@ -2128,25 +2147,18 @@ impl App {
                     };
                 }
                 KeyCode::Left | KeyCode::Char('h') => {
-                    self.new_swarm_agent_type = match self.new_swarm_agent_type {
-                        AgentType::Claude => AgentType::Gemini,
-                        AgentType::Codex => AgentType::Claude,
-                        AgentType::Droid => AgentType::Codex,
-                        AgentType::Gemini => AgentType::Droid,
-                    };
+                    self.new_swarm_agent_type =
+                        step_runtime(&self.new_swarm_agent_type, &self.available_runtimes, -1);
                 }
                 KeyCode::Right | KeyCode::Char('l') => {
-                    self.new_swarm_agent_type = match self.new_swarm_agent_type {
-                        AgentType::Claude => AgentType::Codex,
-                        AgentType::Codex => AgentType::Droid,
-                        AgentType::Droid => AgentType::Gemini,
-                        AgentType::Gemini => AgentType::Claude,
-                    };
+                    self.new_swarm_agent_type =
+                        step_runtime(&self.new_swarm_agent_type, &self.available_runtimes, 1);
                 }
-                KeyCode::Char('c') => self.new_swarm_agent_type = AgentType::Claude,
-                KeyCode::Char('x') => self.new_swarm_agent_type = AgentType::Codex,
-                KeyCode::Char('d') => self.new_swarm_agent_type = AgentType::Droid,
-                KeyCode::Char('g') => self.new_swarm_agent_type = AgentType::Gemini,
+                KeyCode::Char('c') => self.select_runtime_if_available(AgentType::Claude),
+                KeyCode::Char('x') => self.select_runtime_if_available(AgentType::Codex),
+                KeyCode::Char('d') => self.select_runtime_if_available(AgentType::Droid),
+                KeyCode::Char('g') => self.select_runtime_if_available(AgentType::Gemini),
+                KeyCode::Char('p') => self.select_runtime_if_available(AgentType::Pi),
                 _ => {}
             },
             NewSwarmField::NumWorkers => match key.code {
@@ -3507,7 +3519,9 @@ impl App {
     fn worker_dispatch_cmd(&self, agent_type: &AgentType, issue_number: u32) -> Option<String> {
         match agent_type {
             AgentType::Claude => Some(format!("/autocoder:fix {issue_number}")),
-            AgentType::Gemini | AgentType::Droid => Some(format!("/fix {issue_number}")),
+            AgentType::Gemini | AgentType::Droid | AgentType::Pi => {
+                Some(format!("/fix {issue_number}"))
+            }
             AgentType::Codex => None,
         }
     }
@@ -3515,7 +3529,7 @@ impl App {
     fn fix_cmd_prefix(&self, agent_type: &AgentType) -> Option<String> {
         match agent_type {
             AgentType::Claude => Some("/autocoder:fix".to_string()),
-            AgentType::Gemini | AgentType::Droid => Some("/fix".to_string()),
+            AgentType::Gemini | AgentType::Droid | AgentType::Pi => Some("/fix".to_string()),
             AgentType::Codex => None,
         }
     }
@@ -3523,7 +3537,9 @@ impl App {
     fn review_blocked_cmd(&self, agent_type: &AgentType) -> Option<String> {
         match agent_type {
             AgentType::Claude => Some("/autocoder:review-blocked".to_string()),
-            AgentType::Gemini | AgentType::Droid => Some("/review-blocked".to_string()),
+            AgentType::Gemini | AgentType::Droid | AgentType::Pi => {
+                Some("/review-blocked".to_string())
+            }
             AgentType::Codex => None,
         }
     }
@@ -3531,7 +3547,9 @@ impl App {
     fn monitor_workers_cmd(&self, agent_type: &AgentType) -> Option<String> {
         match agent_type {
             AgentType::Claude => Some("/autocoder:monitor-workers".to_string()),
-            AgentType::Gemini | AgentType::Droid => Some("/monitor-workers".to_string()),
+            AgentType::Gemini | AgentType::Droid | AgentType::Pi => {
+                Some("/monitor-workers".to_string())
+            }
             AgentType::Codex => None,
         }
     }
@@ -5561,21 +5579,41 @@ impl App {
     }
 }
 
+/// Move `current` by `step` places through `available`, wrapping.
+///
+/// Cycling used to walk the full ALL_AGENT_TYPES ring, so a machine with only
+/// Claude installed still let you land on Droid and launch a swarm that could
+/// not start.
+fn step_runtime(current: &AgentType, available: &[AgentType], step: isize) -> AgentType {
+    if available.is_empty() {
+        return current.clone();
+    }
+    let position = available
+        .iter()
+        .position(|candidate| candidate == current)
+        .unwrap_or(0) as isize;
+    let len = available.len() as isize;
+    let next = ((position + step) % len + len) % len;
+    available[next as usize].clone()
+}
+
 fn next_runtime(agent_type: &AgentType) -> AgentType {
     match agent_type {
         AgentType::Claude => AgentType::Codex,
         AgentType::Codex => AgentType::Droid,
         AgentType::Droid => AgentType::Gemini,
-        AgentType::Gemini => AgentType::Claude,
+        AgentType::Gemini => AgentType::Pi,
+        AgentType::Pi => AgentType::Claude,
     }
 }
 
 fn prev_runtime(agent_type: &AgentType) -> AgentType {
     match agent_type {
-        AgentType::Claude => AgentType::Gemini,
+        AgentType::Claude => AgentType::Pi,
         AgentType::Codex => AgentType::Claude,
         AgentType::Droid => AgentType::Codex,
         AgentType::Gemini => AgentType::Droid,
+        AgentType::Pi => AgentType::Gemini,
     }
 }
 
@@ -6585,12 +6623,56 @@ mod tests {
         assert_eq!(next_runtime(&AgentType::Claude), AgentType::Codex);
         assert_eq!(next_runtime(&AgentType::Codex), AgentType::Droid);
         assert_eq!(next_runtime(&AgentType::Droid), AgentType::Gemini);
-        assert_eq!(next_runtime(&AgentType::Gemini), AgentType::Claude);
+        assert_eq!(next_runtime(&AgentType::Gemini), AgentType::Pi);
+        assert_eq!(next_runtime(&AgentType::Pi), AgentType::Claude);
 
-        assert_eq!(prev_runtime(&AgentType::Claude), AgentType::Gemini);
+        assert_eq!(prev_runtime(&AgentType::Claude), AgentType::Pi);
+        assert_eq!(prev_runtime(&AgentType::Pi), AgentType::Gemini);
         assert_eq!(prev_runtime(&AgentType::Gemini), AgentType::Droid);
         assert_eq!(prev_runtime(&AgentType::Droid), AgentType::Codex);
         assert_eq!(prev_runtime(&AgentType::Codex), AgentType::Claude);
+    }
+
+    /// The picker must never land on a runtime this machine cannot launch --
+    /// that is how a repo ends up with a saved default that aborts at startup.
+    #[test]
+    fn runtime_stepping_visits_only_installed_runtimes() {
+        let installed = vec![AgentType::Claude, AgentType::Pi];
+
+        assert_eq!(
+            step_runtime(&AgentType::Claude, &installed, 1),
+            AgentType::Pi
+        );
+        assert_eq!(
+            step_runtime(&AgentType::Pi, &installed, 1),
+            AgentType::Claude
+        );
+        assert_eq!(
+            step_runtime(&AgentType::Claude, &installed, -1),
+            AgentType::Pi
+        );
+
+        // A current value outside the installed set still lands somewhere
+        // launchable rather than sticking on the uninstalled runtime.
+        assert!(installed.contains(&step_runtime(&AgentType::Droid, &installed, 1)));
+
+        // Nothing installed: stepping is a no-op instead of panicking on an
+        // empty slice.
+        assert_eq!(
+            step_runtime(&AgentType::Claude, &[], 1),
+            AgentType::Claude
+        );
+    }
+
+    /// A missing runtime binary must not abort startup; it becomes a warning
+    /// and the caller falls back to something installed.
+    #[test]
+    fn missing_runtime_is_reported_not_fatal() {
+        let outcome = crate::runtime::ValidationOutcome {
+            gh_warning: None,
+            runtime_warning: Some("droid is not installed on this machine.".to_string()),
+        };
+        assert!(outcome.runtime_warning.is_some());
     }
 
     #[tokio::test]
@@ -6703,7 +6785,7 @@ mod tests {
             AgentType::Droid,
             AgentType::Gemini,
         ] {
-            let mut app = App::new(None, false, None, None, None, None).await.unwrap();
+            let mut app = App::new(None, false, None, None, None, None, ALL_AGENT_TYPES.to_vec()).await.unwrap();
             app.default_agent_type = AgentType::Claude;
             app.new_swarm_agent_type = runtime.clone();
 
@@ -6713,7 +6795,7 @@ mod tests {
 
     #[tokio::test]
     async fn selected_agent_type_for_new_swarm_respects_locked_runtime() {
-        let mut app = App::new(Some(AgentType::Claude), true, None, None, None, None)
+        let mut app = App::new(Some(AgentType::Claude), true, None, None, None, None, ALL_AGENT_TYPES.to_vec())
             .await
             .unwrap();
         app.new_swarm_agent_type = AgentType::Codex;
@@ -6726,7 +6808,7 @@ mod tests {
         let repo_path = temp_path("new-swarm-repo-flow");
         std::fs::create_dir_all(&repo_path).unwrap();
 
-        let mut unlocked = App::new(None, false, None, None, None, None).await.unwrap();
+        let mut unlocked = App::new(None, false, None, None, None, None, ALL_AGENT_TYPES.to_vec()).await.unwrap();
         unlocked.available_repos = vec![repo_path.clone()];
         unlocked.select_repo_row(0).await.unwrap();
         assert!(matches!(
@@ -6736,7 +6818,7 @@ mod tests {
             }
         ));
 
-        let mut locked = App::new(Some(AgentType::Gemini), true, None, None, None, None)
+        let mut locked = App::new(Some(AgentType::Gemini), true, None, None, None, None, ALL_AGENT_TYPES.to_vec())
             .await
             .unwrap();
         locked.available_repos = vec![repo_path.clone()];
@@ -6753,7 +6835,7 @@ mod tests {
 
     #[tokio::test]
     async fn preferred_agent_type_for_repo_defaults_to_current_runtime_when_unsaved() {
-        let app = App::new(Some(AgentType::Droid), false, None, None, None, None)
+        let app = App::new(Some(AgentType::Droid), false, None, None, None, None, ALL_AGENT_TYPES.to_vec())
             .await
             .unwrap();
         let repo_path = temp_path("preferred-runtime-unsaved");
@@ -7072,7 +7154,7 @@ mod tests {
     #[tokio::test]
     async fn s_key_does_not_open_switch_agent_when_manager_focused() {
         use crate::ui::swarm_view::SwarmPanel;
-        let mut app = App::new(None, false, None, None, None, None)
+        let mut app = App::new(None, false, None, None, None, None, ALL_AGENT_TYPES.to_vec())
             .await
             .expect("App::new failed");
         app.screen = Screen::RepoView { swarm_idx: 0 };
@@ -7093,7 +7175,7 @@ mod tests {
     #[tokio::test]
     async fn s_key_opens_switch_agent_when_workers_focused() {
         use crate::ui::swarm_view::SwarmPanel;
-        let mut app = App::new(None, false, None, None, None, None)
+        let mut app = App::new(None, false, None, None, None, None, ALL_AGENT_TYPES.to_vec())
             .await
             .expect("App::new failed");
         app.screen = Screen::RepoView { swarm_idx: 0 };
@@ -7112,7 +7194,7 @@ mod tests {
     /// no interceptor consumes keys in passthrough mode.
     #[tokio::test]
     async fn enter_agent_view_clears_overlays() {
-        let mut app = App::new(None, false, None, None, None, None)
+        let mut app = App::new(None, false, None, None, None, None, ALL_AGENT_TYPES.to_vec())
             .await
             .expect("App::new failed");
         app.show_shortcuts_viewer = true;
@@ -7126,7 +7208,7 @@ mod tests {
     /// the current screen is `AgentView` (the key should pass through to tmux).
     #[tokio::test]
     async fn question_mark_does_not_open_shortcuts_viewer_in_agent_view() {
-        let mut app = App::new(None, false, None, None, None, None)
+        let mut app = App::new(None, false, None, None, None, None, ALL_AGENT_TYPES.to_vec())
             .await
             .expect("App::new failed");
         app.screen = Screen::AgentView {
