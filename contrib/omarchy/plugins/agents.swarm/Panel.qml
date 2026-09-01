@@ -141,24 +141,54 @@ BarWidget {
     idleCount = idle
     blockedSwarms = blocked
 
-    // omarchy-notification-send rather than notify-send: `--exec` makes the
-    // notification itself open the dashboard, and `-r` replaces the previous
-    // one instead of stacking a column of them down the screen.
     if (notifyOnAttention && attention > lastAttention) {
-      notify.command = ["omarchy-notification-send",
-                        "--app-name", "Agent Swarm",
-                        "-u", "critical",
-                        "-r", "9377",
-                        attentionHeadline(attention, blocked),
-                        "Click to open the swarm dashboard.",
-                        "--exec", "omarchy-agents-dashboard"]
-      notify.running = true
+      requestNotification(attentionHeadline(attention, blocked))
     }
+    // The id is kept even when nothing is blocked: the next alert then
+    // updates that same toast instead of adding a second one.
+
     lastAttention = attention
     attentionCount = attention
   }
 
-  Process { id: notify; running: false }
+  // Id of the toast currently on screen. Keeping exactly one swarm alert up
+  // depends on this being an id the daemon actually handed out: ids are
+  // assigned sequentially, so the made-up constant used previously matched
+  // nothing and every send created another toast, which is how these stacked
+  // a column deep.
+  //
+  // Replacing via `-r` is the mechanism that works here. Closing by id over
+  // D-Bus does not -- this daemon accepts CloseNotification and returns
+  // success without removing the popup -- so the alert is always superseded,
+  // never cleared and re-sent.
+  property int notifyId: 0
+
+  function requestNotification(headline) {
+    var cmd = ["omarchy-notification-send",
+               "--app-name", "Agent Swarm",
+               "-u", "critical",
+               // -p prints the id the daemon assigned; it is the only handle
+               // that can update this toast rather than adding another.
+               "-p"]
+    if (notifyId > 0) cmd = cmd.concat(["-r", String(notifyId)])
+    notify.command = cmd.concat([headline,
+                                 "Click to open the swarm dashboard.",
+                                 "--exec", "omarchy-agents-dashboard"])
+    notify.running = true
+  }
+
+  Process {
+    id: notify
+    running: false
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var id = parseInt(String(text).trim(), 10)
+        if (!isNaN(id) && id > 0) root.notifyId = id
+      }
+    }
+  }
+
   Process { id: opener; running: false }
 
   function openDashboard() {
