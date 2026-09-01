@@ -3204,20 +3204,25 @@ exit 0
     /// `pane-base-index 1`: the launch path used to hardcode pane `.0`, which
     /// does not exist on such a server, so `send-keys` failed and the pane kept
     /// its shell prompt.
+    ///
+    /// Runs on a private `-L` socket (via `TmuxLayout`), not the default
+    /// server: the default server is shared with every other tmux test in
+    /// this file plus anything else running on the box, and contention there
+    /// was flaking this test on macOS CI (#341).
     #[tokio::test]
     async fn window_pane_target_resolves_a_pane_that_accepts_input() {
         crate::testutil::reap_stale_artifacts();
-        if !command_available("tmux") {
+        let Some(layout) = TmuxLayout::new(0) else {
             return;
-        }
+        };
 
         let session = format!("agents-ui-pane-target-{}", std::process::id());
-        cleanup_tmux_session(&session).await;
-        let created = std::process::Command::new("tmux")
-            .args(["new-session", "-d", "-s", &session, "-n", "review"])
-            .status()
-            .unwrap();
-        assert!(created.success());
+        let created = layout.tmux(&["new-session", "-d", "-s", &session, "-n", "review"]);
+        assert!(
+            created.status.success(),
+            "new-session failed: {}",
+            String::from_utf8_lossy(&created.stderr)
+        );
 
         // tmux is the authority on the index; the point is that we ask rather
         // than assume, so the expectation comes from tmux too.
@@ -3225,48 +3230,67 @@ exit 0
         // which is the normal case on a fresh macOS runner -- can accept
         // new-session and still have nothing to list a moment later.
         let mut index = String::new();
+        let mut last_error = String::new();
         for _ in 0..25 {
-            let listed = std::process::Command::new("tmux")
-                .args([
-                    "list-panes",
-                    "-t",
-                    &format!("{session}:review"),
-                    "-F",
-                    "#{pane_index}",
-                ])
-                .output()
-                .unwrap();
-            if let Some(line) = String::from_utf8_lossy(&listed.stdout).lines().next() {
-                index = line.trim().to_string();
-                if !index.is_empty() {
-                    break;
+            let listed = layout.tmux(&[
+                "list-panes",
+                "-t",
+                &format!("{session}:review"),
+                "-F",
+                "#{pane_index}",
+            ]);
+            if listed.status.success() {
+                if let Some(line) = String::from_utf8_lossy(&listed.stdout).lines().next() {
+                    index = line.trim().to_string();
+                    if !index.is_empty() {
+                        break;
+                    }
                 }
+            } else {
+                last_error = format!(
+                    "exit {}: {}",
+                    listed.status,
+                    String::from_utf8_lossy(&listed.stderr).trim()
+                );
             }
             std::thread::sleep(std::time::Duration::from_millis(200));
         }
         assert!(
             !index.is_empty(),
-            "tmux never reported a pane for {session}:review"
+            "tmux never reported a pane for {session}:review (last list-panes error: {})",
+            if last_error.is_empty() {
+                "none -- list-panes kept succeeding with empty output"
+            } else {
+                &last_error
+            }
         );
+
+        let _guard = lock_env();
+        let original = std::env::var_os("PATH");
+        // SAFETY: test-only, serialized by lock_env.
+        unsafe { std::env::set_var("PATH", layout.path_env()) };
 
         let adapter =
             ClaudeAdapter::new(AgentType::Claude, crate::transport::ServerTransport::default());
         let target = adapter.window_pane_target(&session, "review").await;
+
+        unsafe {
+            match original {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+
         assert_eq!(target, format!("{session}:review.{index}"));
 
         // The resolved target must be addressable -- this is what the old
         // hardcoded `.0` got wrong.
-        let sent = std::process::Command::new("tmux")
-            .args(["send-keys", "-t", &target, "true", "Enter"])
-            .output()
-            .unwrap();
+        let sent = layout.tmux(&["send-keys", "-t", &target, "true", "Enter"]);
         assert!(
             sent.status.success(),
             "send-keys to {target} failed: {}",
             String::from_utf8_lossy(&sent.stderr)
         );
-
-        cleanup_tmux_session(&session).await;
     }
 
     /// Healing must not manufacture phantom workers.
@@ -3281,33 +3305,42 @@ exit 0
     #[tokio::test]
     async fn healing_finds_worker_windows_by_name_not_index() {
         crate::testutil::reap_stale_artifacts();
-        if !command_available("tmux") {
+        let Some(layout) = TmuxLayout::new(0) else {
             return;
-        }
+        };
 
         let session = format!("agents-ui-heal-test-{}", std::process::id());
-        cleanup_tmux_session(&session).await;
         assert!(
-            std::process::Command::new("tmux")
-                .args(["new-session", "-d", "-s", &session, "-n", "review"])
-                .status()
-                .unwrap()
+            layout
+                .tmux(&["new-session", "-d", "-s", &session, "-n", "review"])
+                .status
                 .success()
         );
         for n in 1..=2 {
             assert!(
-                std::process::Command::new("tmux")
-                    .args(["new-window", "-t", &session, "-n", &format!("worker-{n}")])
-                    .status()
-                    .unwrap()
+                layout
+                    .tmux(&["new-window", "-t", &session, "-n", &format!("worker-{n}")])
+                    .status
                     .success()
             );
         }
+
+        let _guard = lock_env();
+        let original = std::env::var_os("PATH");
+        // SAFETY: test-only, serialized by lock_env.
+        unsafe { std::env::set_var("PATH", layout.path_env()) };
 
         let transport = crate::transport::ServerTransport::default();
         let info = crate::tmux::session::list_panes(&transport, &session)
             .await
             .expect("list panes");
+
+        unsafe {
+            match original {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+        }
 
         let worker_windows: Vec<_> = info
             .windows
@@ -3332,8 +3365,6 @@ exit 0
             "pane targets must come from tmux, got {panes:?}"
         );
         assert_eq!(panes.len(), 2, "each worker window contributes its pane");
-
-        cleanup_tmux_session(&session).await;
     }
 
     /// A healed window must be created with `-c`, or it inherits the launching
@@ -3563,9 +3594,12 @@ exit 0
     #[tokio::test]
     async fn build_swarm_from_session_resolves_branches_for_manager_and_workers() {
         crate::testutil::reap_stale_artifacts();
-        if !command_available("tmux") || !command_available("git") {
+        if !command_available("git") {
             return;
         }
+        let Some(layout) = TmuxLayout::new(0) else {
+            return;
+        };
 
         let root = temp_path("branch-resolution");
         let project_name = format!("{}-branchrepo", crate::testutil::ARTIFACT_PREFIX);
@@ -3592,19 +3626,17 @@ exit 0
         assert!(status.success());
 
         let session_name = format!("claude-{project_name}");
-        cleanup_tmux_session(&session_name).await;
-        let status = std::process::Command::new("tmux")
-            .args(["new-session", "-d", "-s", &session_name, "-n", "review"])
-            .status()
-            .unwrap();
-        assert!(status.success());
+        let status = layout.tmux(&["new-session", "-d", "-s", &session_name, "-n", "review"]);
+        assert!(status.status.success());
         for name in ["worker-1", "worker-2"] {
-            let status = std::process::Command::new("tmux")
-                .args(["new-window", "-t", &session_name, "-n", name])
-                .status()
-                .unwrap();
-            assert!(status.success());
+            let status = layout.tmux(&["new-window", "-t", &session_name, "-n", name]);
+            assert!(status.status.success());
         }
+
+        let _guard = lock_env();
+        let original = std::env::var_os("PATH");
+        // SAFETY: test-only, serialized by lock_env.
+        unsafe { std::env::set_var("PATH", layout.path_env()) };
 
         let adapter = ClaudeAdapter::new(
             AgentType::Claude,
@@ -3614,7 +3646,13 @@ exit 0
             .build_swarm_from_session(&session_name, repo_path.clone(), AgentType::Claude)
             .await;
 
-        cleanup_tmux_session(&session_name).await;
+        unsafe {
+            match original {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+
         let _ = std::fs::remove_dir_all(&root);
 
         let swarm = result.expect("build swarm");
