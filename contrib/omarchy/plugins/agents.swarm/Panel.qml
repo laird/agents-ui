@@ -72,12 +72,35 @@ BarWidget {
     idleCount = 0
     attentionCount = 0
     lastAttention = 0
+    blockedSwarms = []
   }
 
   // Notify on the rising edge only. Polling every few seconds against a
   // worker that sits waiting for ten minutes would otherwise fire a
   // notification every tick.
   property int lastAttention: 0
+
+  // [{ name, count }] for swarms with at least one blocked agent.
+  property var blockedSwarms: []
+
+  // Name the swarm in the alert. Which repo is blocked is the thing that
+  // decides where to go next, and with several swarms running a bare count
+  // does not carry it.
+  function attentionHeadline(total, blocked) {
+    var agents = total === 1 ? "1 agent" : total + " agents"
+
+    if (!blocked || blocked.length === 0) return agents + " need input"
+    if (blocked.length === 1) return agents + " in " + blocked[0].name + " need" +
+                                    (total === 1 ? "s" : "") + " input"
+
+    // Several swarms blocked at once: lead with the total, then break it down
+    // so the alert still says where without becoming a paragraph.
+    var parts = []
+    for (var i = 0; i < blocked.length; i++) {
+      parts.push(blocked[i].name + " (" + blocked[i].count + ")")
+    }
+    return agents + " need input: " + parts.join(", ")
+  }
 
   function applySnapshot(output) {
     var raw = String(output || "").trim()
@@ -94,6 +117,9 @@ BarWidget {
 
     var swarms = parsed && Array.isArray(parsed.swarms) ? parsed.swarms : []
     var busy = 0, idle = 0, attention = 0, live = 0
+    // Which projects are actually blocked. With more than one swarm running,
+    // "1 agent needs input" does not say where to look.
+    var blocked = []
 
     for (var i = 0; i < swarms.length; i++) {
       var swarm = swarms[i] || {}
@@ -101,13 +127,19 @@ BarWidget {
       live++
       busy += Number(swarm.busy_count || 0)
       idle += Number(swarm.idle_count || 0)
-      attention += Number(swarm.attention_count || 0)
+      var swarmAttention = Number(swarm.attention_count || 0)
+      attention += swarmAttention
+      if (swarmAttention > 0) {
+        blocked.push({ name: String(swarm.project_name || "unknown"),
+                       count: swarmAttention })
+      }
     }
 
     reachable = true
     swarmCount = live
     busyCount = busy
     idleCount = idle
+    blockedSwarms = blocked
 
     // omarchy-notification-send rather than notify-send: `--exec` makes the
     // notification itself open the dashboard, and `-r` replaces the previous
@@ -117,8 +149,7 @@ BarWidget {
                         "--app-name", "Agent Swarm",
                         "-u", "critical",
                         "-r", "9377",
-                        attention === 1 ? "1 agent needs input"
-                                        : attention + " agents need input",
+                        attentionHeadline(attention, blocked),
                         "Click to open the swarm dashboard.",
                         "--exec", "omarchy-agents-dashboard"]
       notify.running = true
@@ -156,7 +187,7 @@ BarWidget {
     active: root.attentionCount > 0
 
     tooltipText: root.attentionCount > 0
-                   ? root.attentionCount + (root.attentionCount === 1 ? " agent needs input" : " agents need input")
+                   ? root.attentionHeadline(root.attentionCount, root.blockedSwarms)
                    : root.hasSwarm
                      ? root.busyCount + " busy, " + root.idleCount + " idle"
                      : root.reachable ? "No swarm running" : "Swarm dashboard unreachable"
