@@ -560,9 +560,59 @@
     .key-btn:active { background: var(--accent); color: var(--bg); }
     .key-row-label  { color: var(--text-dim); font-size: 0.75rem; margin-right: 0.15rem; }
     .key-hint       { color: var(--text-dim); font-size: 0.75rem; margin-left: auto; }
+    /* The pane is the primary input surface, so its focus state has to be
+       unmistakable: an inset ring plus a lit border on the whole wrap, and a
+       live label in the toolbar. Anything subtler and the page goes back to
+       looking like the field below is where you are meant to type. (The caret
+       inside the pane is the real tmux cursor, drawn by ansiToHtml.) */
     .terminal-output:focus {
       outline: 2px solid var(--accent);
       outline-offset: -2px;
+    }
+    .terminal-wrap:focus-within {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
+    }
+    .terminal-wrap:focus-within .pane-focus-state {
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    /* The multi-line field is deliberately demoted to a closed disclosure: it
+       is for pasting or drafting something long, not the everyday way in. */
+    .composer {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--card);
+      padding: 0.35rem 0.6rem;
+    }
+    .composer-toggle {
+      cursor: pointer;
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      list-style: none;
+    }
+    .composer-toggle::-webkit-details-marker { display: none; }
+    .composer-toggle::before {
+      content: '\25b8';
+      display: inline-block;
+      margin-right: 0.35rem;
+      transition: transform 0.15s;
+    }
+    .composer[open] .composer-toggle::before { transform: rotate(90deg); }
+    .composer-toggle:hover { color: var(--text); }
+    .composer-note {
+      font-size: 0.7rem;
+      color: var(--text-dim);
+      margin: 0.4rem 0 0.5rem;
+    }
+    /* Send sits at the bottom edge rather than stretching to the full height
+       of a 3-row textarea. */
+    .composer .input-row { align-items: flex-end; }
+    textarea.session-input {
+      resize: vertical;
+      min-height: 3.5rem;
+      line-height: 1.45;
     }
 
     /* The tmux cursor, drawn as a block over the cell it occupies so editing
@@ -893,6 +943,7 @@
         refreshTimer: null,
         stream:       null,  // EventSource for live pane updates
         cursor:       null,  // { x, y, h } from tmux, null when unknown
+        composerOpen: false, // multi-line composer disclosure
       },
       // launch form state
       launch: {
@@ -1487,8 +1538,16 @@
       queueInput({ type: 'text', text: ch });
     }
 
+    // Says out loud which surface has the keyboard. The CSS already lights the
+    // pane on :focus-within; this makes the same fact readable rather than
+    // leaving the user to infer it from a border colour.
+    function setPaneFocusLabel(focused) {
+      const el = document.getElementById('pane-focus-label');
+      if (el) el.textContent = focused ? 'typing goes to the agent' : 'click to type here';
+    }
+
     // Keys pressed while the pane itself has focus go to the agent, so the
-    // pane behaves like a terminal. The text box keeps normal editing
+    // pane behaves like a terminal. The composer textarea keeps normal editing
     // behaviour -- arrows there move the caret.
     function onTerminalKeyDown(e) {
       // Leave browser/OS shortcuts alone.
@@ -1733,12 +1792,14 @@
 
         '<div class="terminal-wrap">' +
           '<div class="terminal-toolbar">' +
-            '<span>pane output</span>' +
+            '<span class="pane-focus-state" id="pane-focus-label">click to type here</span>' +
             '<button onclick="refreshSessionPane()" aria-label="Refresh pane">↺ Refresh</button>' +
           '</div>' +
           '<div class="terminal-output" id="terminal-output" tabindex="0" ' +
-               'role="application" aria-label="Agent pane. Focus here to send keys directly." ' +
-               'onkeydown="onTerminalKeyDown(event)">' + ansiToHtml(s.paneContent, paneCursorTarget(s.paneContent, s.cursor)) + '</div>' +
+               'role="application" aria-label="Agent pane. Type here to send keys straight to the agent." ' +
+               'onkeydown="onTerminalKeyDown(event)" ' +
+               'onfocus="setPaneFocusLabel(true)" onblur="setPaneFocusLabel(false)">' +
+               ansiToHtml(s.paneContent, paneCursorTarget(s.paneContent, s.cursor)) + '</div>' +
         '</div>' +
 
         '<div class="key-row">' +
@@ -1749,19 +1810,28 @@
               '<button class="key-btn" onclick="pressKey(\'' + key + '\')" ' +
                       'aria-label="Send ' + key + '">' + label + '</button>'
             ).join('') +
-          '<span class="key-hint">or click the pane and type \u2014 completions work there</span>' +
+          '<span class="key-hint">for keys the browser swallows \u2014 otherwise just type in the pane</span>' +
         '</div>' +
 
-        '<div class="input-row">' +
-          '<input class="session-input" id="session-input" type="text" ' +
-                 'placeholder="Type a command and press Enter or Send…" ' +
-                 'onkeydown="if(event.key===\'Enter\'){event.preventDefault();submitSessionInput()}" ' +
-                 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />' +
-          '<button class="send-btn" id="send-btn" onclick="submitSessionInput()" ' +
-                  (s.sending ? 'disabled' : '') + '>' +
-            (s.sending ? '…' : 'Send') +
-          '</button>' +
-        '</div>' +
+        '<details class="composer" id="composer"' + (s.composerOpen ? ' open' : '') + ' ' +
+                 'ontoggle="state.session.composerOpen = this.open">' +
+          '<summary class="composer-toggle">Compose a multi-line message</summary>' +
+          '<p class="composer-note">Sent as one burst when you hit Send, so it cannot answer a ' +
+            'picker or show completions \u2014 type in the pane for those. Good for pasting or ' +
+            'drafting something long.</p>' +
+          '<div class="input-row">' +
+            '<textarea class="session-input" id="session-input" rows="3" ' +
+                   'placeholder="Paste or draft a message, then Ctrl+Enter or Send\u2026" ' +
+                   'onkeydown="if(event.key===\'Enter\'&&(event.ctrlKey||event.metaKey))' +
+                     '{event.preventDefault();submitSessionInput()}" ' +
+                   'autocomplete="off" autocorrect="off" autocapitalize="off" ' +
+                   'spellcheck="false"></textarea>' +
+            '<button class="send-btn" id="send-btn" onclick="submitSessionInput()" ' +
+                    (s.sending ? 'disabled' : '') + '>' +
+              (s.sending ? '\u2026' : 'Send') +
+            '</button>' +
+          '</div>' +
+        '</details>' +
         feedbackHtml
       );
     }
@@ -1861,12 +1931,16 @@
 
       if (state.agent && state.project) {
         app.innerHTML = renderSessionView(state.project, state.agent);
-        // Scroll terminal to bottom
+        // The pane is the primary input surface, so it takes focus on entry --
+        // keys then reach the agent without the user first having to discover
+        // that the pane is typable. preventScroll keeps focus from fighting the
+        // scroll-to-bottom that follows.
         const t = document.getElementById('terminal-output');
-        if (t) t.scrollTop = t.scrollHeight;
-        // Focus the input
-        const inp = document.getElementById('session-input');
-        if (inp && document.activeElement !== inp) inp.focus();
+        if (t) {
+          if (document.activeElement !== t) t.focus({ preventScroll: true });
+          t.scrollTop = t.scrollHeight;
+          setPaneFocusLabel(document.activeElement === t);
+        }
         return;
       }
 
@@ -1908,6 +1982,7 @@
         refreshTimer: null,
         stream:       null,
         cursor:       null,
+        composerOpen: false,
       };
       render();
       window.scrollTo(0, 0);
@@ -2114,7 +2189,12 @@
             if (fb) { fb.className = 'send-feedback'; fb.textContent = ''; }
           }, 3000);
         }
-        inp.focus();
+        // Hand the keyboard back to the pane: the composer is the occasional
+        // path, so leaving focus in it would quietly undo the whole point of
+        // making the pane primary.
+        const pane = document.getElementById('terminal-output');
+        if (pane) { pane.focus({ preventScroll: true }); setPaneFocusLabel(true); }
+        else inp.focus();
       }
     }
 

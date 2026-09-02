@@ -1394,6 +1394,51 @@ mod tests {
         assert!(body.contains("cellWidth"), "caret must count cells, not chars");
     }
 
+    /// The session pane is the primary input surface (issue #345): entering the
+    /// view focuses the pane so keys reach the agent without the user first
+    /// having to discover that the pane is typable, and the multi-line field is
+    /// demoted to a collapsed composer rather than being the obvious way in.
+    #[tokio::test]
+    async fn session_pane_is_the_primary_input_surface() {
+        let body = INDEX_HTML;
+
+        // The pane takes focus on entry, not the text field.
+        assert!(body.contains("t.focus({ preventScroll: true })"));
+        assert!(
+            !body.contains("if (inp && document.activeElement !== inp) inp.focus();"),
+            "entering the session view must not focus the line field"
+        );
+
+        // Focus state is legible, not just a border colour.
+        assert!(body.contains("setPaneFocusLabel"));
+        assert!(body.contains("typing goes to the agent"));
+        assert!(body.contains(".terminal-wrap:focus-within"));
+
+        // The line field is demoted to a collapsed multi-line composer.
+        assert!(body.contains("class=\"composer\""));
+        assert!(body.contains("<textarea"));
+        assert!(
+            !body.contains("<input class=\"session-input\""),
+            "the single-line burst field should no longer be the dominant input"
+        );
+
+        // The on-screen key buttons stay -- they are the touch/accessible path.
+        assert!(body.contains("class=\"key-btn\""));
+    }
+
+    /// Regression guard from issue #345's notes: pane updates must keep being
+    /// written in place, so no refresh tears the focused pane out from under
+    /// the user. #343's live stream and the 2s fallback both go through this.
+    #[tokio::test]
+    async fn session_view_updates_do_not_tear_out_the_focused_pane() {
+        let body = INDEX_HTML;
+        // The 5s swarm loop must not re-render while the session view is open.
+        assert!(body.contains("if (!state.agent) {"));
+        // Pane updates are written into the existing node, never by replacing
+        // the view, so the focused pane survives every refresh.
+        assert!(body.contains("t.innerHTML = renderPaneHtml();"));
+    }
+
     #[tokio::test]
     async fn index_html_contains_hash_routing() {
         let body = INDEX_HTML;
