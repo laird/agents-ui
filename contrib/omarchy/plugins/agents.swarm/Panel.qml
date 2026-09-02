@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import qs.Commons
 import qs.Ui
 
 // A bar readout for agents-tui swarms.
@@ -32,12 +33,22 @@ BarWidget {
   property int attentionCount: 0
   property int stuckCount: 0
 
-  // The theme carries one attention colour (`urgent`, red) and no amber, but
-  // red has to mean broken: an agent waiting at a prompt is doing the right
-  // thing and needs a keystroke, not a diagnosis. Amber is defined here and
-  // `urgent` kept for genuine failure -- chosen to stay legible on both light
-  // and dark bar backgrounds, since the theme cannot supply it.
-  readonly property color attentionColor: "#d29922"
+  // Waiting is not an error, so red is reserved for broken and the theme's
+  // accent carries attention. Accent is a real theme colour in 21 of the 22
+  // stock themes, which keeps the bar looking like the rest of the desktop.
+  //
+  // It is not usable unconditionally: kanagawa sets accent equal to
+  // foreground, and an alert the same colour as ordinary text does not alert.
+  // Where accent is too close to the bar's own text to read as a signal, fall
+  // back to an amber that always does -- the point is standing out, and a
+  // theme colour that cannot be seen fails the requirement it was chosen for.
+  readonly property color fallbackAttention: "#d29922"
+  readonly property color attentionColor: {
+    var a = Color.accent
+    var f = root.bar ? root.bar.barForeground : Color.foreground
+    var distance = Math.abs(a.r - f.r) + Math.abs(a.g - f.g) + Math.abs(a.b - f.b)
+    return distance > 0.25 ? a : root.fallbackAttention
+  }
   property int swarmCount: 0
   property bool reachable: false
 
@@ -292,7 +303,7 @@ BarWidget {
     active: root.stuckCount > 0 || root.attentionCount > 0
     // Red only for broken; amber for waiting.
     activeColor: root.stuckCount > 0
-                   ? (root.bar ? root.bar.urgent : root.attentionColor)
+                   ? (root.bar ? root.bar.urgent : Color.urgent)
                    : root.attentionColor
 
     tooltipText: root.stuckCount > 0
