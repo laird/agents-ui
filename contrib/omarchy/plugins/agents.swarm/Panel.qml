@@ -90,22 +90,32 @@ BarWidget {
   // notification every tick.
   property int lastAttention: 0
 
-  // [{ name, count, role? }] for swarms with at least one blocked agent.
-  // `role` is set only when `count` is 1 — the role of that swarm's single
-  // blocked agent, needed to route a click straight to its session.
+  // [{ name, count, roles, role? }] for swarms with at least one blocked
+  // agent. `roles` names every blocked agent in that swarm, so the headline
+  // can say who rather than only how many. `role` keeps its narrower
+  // meaning — the sole blocked agent of a swarm that has exactly one —
+  // because `blockedRoute` keys the deep link off precisely that.
   property var blockedSwarms: []
 
-  // The role of the single blocked agent in a swarm with exactly one
-  // blocked agent. Manager and workers carry `waiting_for_input` in the
-  // same snapshot this widget already polls, so no extra request is needed.
-  function blockedAgentRole(swarm) {
+  // Roles of every agent in this swarm that is waiting for input, manager
+  // first then workers in order. Manager and workers carry
+  // `waiting_for_input` in the same snapshot this widget already polls, so
+  // no extra request is needed.
+  function blockedAgentRoles(swarm) {
+    var roles = []
     var manager = swarm.manager
-    if (manager && manager.waiting_for_input === true) return String(manager.role || "")
+    if (manager && manager.waiting_for_input === true) {
+      var managerRole = String(manager.role || "")
+      if (managerRole !== "") roles.push(managerRole)
+    }
     var workers = Array.isArray(swarm.workers) ? swarm.workers : []
     for (var i = 0; i < workers.length; i++) {
-      if (workers[i] && workers[i].waiting_for_input === true) return String(workers[i].role || "")
+      if (workers[i] && workers[i].waiting_for_input === true) {
+        var workerRole = String(workers[i].role || "")
+        if (workerRole !== "") roles.push(workerRole)
+      }
     }
-    return ""
+    return roles
   }
 
   // Deepest screen that still shows everything that needs attention:
@@ -139,15 +149,52 @@ BarWidget {
     return route === "" ? ["omarchy-agents-dashboard"] : ["omarchy-agents-dashboard", route]
   }
 
-  // Name the swarm in the alert. Which repo is blocked is the thing that
-  // decides where to go next, and with several swarms running a bare count
-  // does not carry it.
+  // How a role reads in prose. The manager takes a definite article — there
+  // is only ever one, and "manager needs input" reads like a headline with
+  // a word missing. Worker roles are already names and stand on their own.
+  function roleLabel(role) {
+    return role === "manager" ? "the manager" : role
+  }
+
+  // "the manager", "the manager and worker-2",
+  // "the manager, worker-1 and worker-2".
+  function rolePhrase(roles) {
+    var labels = []
+    for (var i = 0; i < roles.length; i++) labels.push(roleLabel(roles[i]))
+    if (labels.length === 1) return labels[0]
+    return labels.slice(0, -1).join(", ") + " and " + labels[labels.length - 1]
+  }
+
+  // Say who needs input, not just how many. Which repo is blocked decides
+  // where to go next, and the role decides what it means once you get
+  // there: a blocked manager has stalled the whole swarm's coordination, a
+  // blocked worker has parked one issue while the rest keep moving.
+  //
+  // Specificity drops one step at a time — named roles, then a count within
+  // the named swarm, then a bare total — because a snapshot can carry an
+  // `attention_count` without any agent flagged `waiting_for_input`, and
+  // the generic wording has to stay reachable for that.
   function attentionHeadline(total, blocked) {
     var agents = total === 1 ? "1 agent" : total + " agents"
 
     if (!blocked || blocked.length === 0) return agents + " need input"
-    if (blocked.length === 1) return agents + " in " + blocked[0].name + " need" +
-                                    (total === 1 ? "s" : "") + " input"
+    if (blocked.length === 1) {
+      var only = blocked[0]
+      var roles = Array.isArray(only.roles) ? only.roles : []
+
+      // Name them only when every blocked agent in the swarm resolved to a
+      // role, and only while the list is short enough to stay one glance
+      // long. Past that the count is the more readable summary.
+      if (roles.length > 0 && roles.length === only.count && roles.length <= 3) {
+        var phrase = rolePhrase(roles)
+        if (phrase.indexOf("the ") === 0) phrase = "The" + phrase.slice(3)
+        return phrase + " in " + only.name +
+               (total === 1 ? " needs" : " need") + " input"
+      }
+
+      return agents + " in " + only.name + " need" +
+             (total === 1 ? "s" : "") + " input"
+    }
 
     // Several swarms blocked at once: lead with the total, then break it down
     // so the alert still says where without becoming a paragraph.
@@ -194,14 +241,16 @@ BarWidget {
       }
       if (swarmAttention > 0) {
         var entry = { name: String(swarm.project_name || "unknown"),
-                      count: swarmAttention }
-        // Only meaningful (and only needed) when this swarm is the sole
-        // blocked one and has exactly one blocked agent: that is the one
-        // case dense enough to deep-link straight to the agent's session
-        // instead of stopping at the swarm or repos list.
-        if (swarmAttention === 1) {
-          var role = blockedAgentRole(swarm)
-          if (role) entry.role = role
+                      count: swarmAttention,
+                      // Every blocked role, so the headline can name them
+                      // instead of falling back to a bare count.
+                      roles: blockedAgentRoles(swarm) }
+        // `role` stays narrower than `roles` on purpose: it is set only when
+        // this swarm has exactly one blocked agent, which is the one case
+        // dense enough to deep-link straight to that agent's session instead
+        // of stopping at the swarm or repos list.
+        if (swarmAttention === 1 && entry.roles.length > 0) {
+          entry.role = entry.roles[0]
         }
         blocked.push(entry)
       }
