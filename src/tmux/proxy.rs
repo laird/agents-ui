@@ -62,6 +62,42 @@ pub struct PaneCapture {
     pub pane_height: u16,
 }
 
+/// Build the argv for the combined cursor + capture invocation.
+///
+/// Split out from [`capture_pane_with_cursor`] so the flag set can be asserted
+/// on: the caret's position depends on it, and the dependency is not obvious
+/// from reading the flags.
+///
+/// Deliberately WITHOUT `-J`. [`capture_pane`] joins wrapped lines because it
+/// only has to read well, but `cursor_y` counts *physical* pane rows, and the
+/// page finds the caret's line by counting back `pane_height` lines from the
+/// end of the capture. `-J` collapses a wrapped row and its continuation into
+/// one line, so every wrap at or below the caret shifts it a row too high --
+/// and a completion menu, the one thing this caret exists to make usable,
+/// opens directly below the input line and wraps freely. One line per pane row
+/// keeps that arithmetic exact.
+fn capture_with_cursor_args(target: &str, scrollback_lines: u32) -> Vec<String> {
+    vec![
+        "display-message".to_string(),
+        "-p".to_string(),
+        "-t".to_string(),
+        target.to_string(),
+        "-F".to_string(),
+        "#{cursor_x} #{cursor_y} #{pane_height}".to_string(),
+        // A tmux command separator. The transport shell-quotes every argument,
+        // so it reaches tmux as a literal ';' rather than being eaten by the
+        // shell -- true for both the local and the ssh transport.
+        ";".to_string(),
+        "capture-pane".to_string(),
+        "-p".to_string(),
+        "-e".to_string(),
+        "-t".to_string(),
+        target.to_string(),
+        "-S".to_string(),
+        format!("-{scrollback_lines}"),
+    ]
+}
+
 /// Capture a pane's content and its cursor position.
 ///
 /// This issues ONE tmux invocation for both. Two calls would not just double
@@ -73,31 +109,8 @@ pub async fn capture_pane_with_cursor(
     target: &str,
     scrollback_lines: u32,
 ) -> Result<PaneCapture> {
-    // The ';' is a tmux command separator. The transport shell-quotes every
-    // argument, so it reaches tmux as a literal ';' rather than being eaten by
-    // the shell -- true for both the local and the ssh transport.
     let output = transport
-        .output(
-            "tmux",
-            &[
-                "display-message".to_string(),
-                "-p".to_string(),
-                "-t".to_string(),
-                target.to_string(),
-                "-F".to_string(),
-                "#{cursor_x} #{cursor_y} #{pane_height}".to_string(),
-                ";".to_string(),
-                "capture-pane".to_string(),
-                "-p".to_string(),
-                "-e".to_string(),
-                "-J".to_string(),
-                "-t".to_string(),
-                target.to_string(),
-                "-S".to_string(),
-                format!("-{scrollback_lines}"),
-            ],
-            None,
-        )
+        .output("tmux", &capture_with_cursor_args(target, scrollback_lines), None)
         .await
         .context("Failed to capture tmux pane with cursor")?;
 
@@ -414,6 +427,36 @@ pub fn spawn_pane_watcher(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // `-J` would collapse a wrapped pane row into one line, and the page
+    // locates the caret's row by counting back `pane_height` lines from the
+    // end of the capture -- so a joined capture draws the caret a row too high
+    // for every wrap at or below it. One output line per pane row is what
+    // makes that arithmetic exact.
+    #[test]
+    fn capture_with_cursor_does_not_join_wrapped_lines() {
+        let args = capture_with_cursor_args("sess:0.1", 500);
+        assert!(
+            !args.iter().any(|a| a == "-J"),
+            "-J breaks cursor_y row alignment: {args:?}"
+        );
+    }
+
+    #[test]
+    fn capture_with_cursor_args_request_cursor_then_content() {
+        let args = capture_with_cursor_args("sess:0.1", 500);
+        let sep = args.iter().position(|a| a == ";").expect("no ';' separator");
+        assert_eq!(args[0], "display-message");
+        assert!(
+            args[..sep].contains(&"#{cursor_x} #{cursor_y} #{pane_height}".to_string()),
+            "cursor header must come first so it can be split off: {args:?}"
+        );
+        assert_eq!(args[sep + 1], "capture-pane");
+        // ANSI escapes, and the target and scrollback depth, on the capture.
+        assert!(args[sep..].contains(&"-e".to_string()));
+        assert!(args[sep..].contains(&"-500".to_string()));
+        assert_eq!(args.iter().filter(|a| *a == "sess:0.1").count(), 2);
+    }
 
     #[test]
     fn parses_cursor_header_and_content() {
