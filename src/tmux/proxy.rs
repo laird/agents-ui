@@ -40,6 +40,155 @@ pub async fn capture_pane(
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+/// A pane capture together with the cursor position at the moment of capture.
+///
+/// `cursor_y` is a row within the *visible* pane, while `content` also carries
+/// scrollback, so the two only line up via `pane_height`: the last
+/// `pane_height` lines of `content` are the visible region, and the cursor sits
+/// on line `content_lines - pane_height + cursor_y`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PaneCapture {
+    /// Pane text, including scrollback and ANSI escapes.
+    pub content: String,
+    /// Cursor column within the visible pane, 0-based, measured in terminal
+    /// cells (not characters -- a wide glyph advances this by two).
+    pub cursor_x: u16,
+    /// Cursor row within the visible pane, 0-based from the top of the
+    /// visible region.
+    pub cursor_y: u16,
+    /// Height of the visible pane in rows. Zero means the cursor position
+    /// could not be read, and callers should render no cursor rather than
+    /// guess at one.
+    pub pane_height: u16,
+}
+
+/// Capture a pane's content and its cursor position.
+///
+/// This issues ONE tmux invocation for both. Two calls would not just double
+/// the round trip on the streaming path, where this runs several times a
+/// second -- they could also straddle a redraw and pair a cursor position with
+/// content from a different frame, drawing the caret in the wrong place.
+pub async fn capture_pane_with_cursor(
+    transport: &ServerTransport,
+    target: &str,
+    scrollback_lines: u32,
+) -> Result<PaneCapture> {
+    // The ';' is a tmux command separator. The transport shell-quotes every
+    // argument, so it reaches tmux as a literal ';' rather than being eaten by
+    // the shell -- true for both the local and the ssh transport.
+    let output = transport
+        .output(
+            "tmux",
+            &[
+                "display-message".to_string(),
+                "-p".to_string(),
+                "-t".to_string(),
+                target.to_string(),
+                "-F".to_string(),
+                "#{cursor_x} #{cursor_y} #{pane_height}".to_string(),
+                ";".to_string(),
+                "capture-pane".to_string(),
+                "-p".to_string(),
+                "-e".to_string(),
+                "-J".to_string(),
+                "-t".to_string(),
+                target.to_string(),
+                "-S".to_string(),
+                format!("-{scrollback_lines}"),
+            ],
+            None,
+        )
+        .await
+        .context("Failed to capture tmux pane with cursor")?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "tmux capture-pane (with cursor) failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    Ok(parse_capture_with_cursor(
+        &String::from_utf8_lossy(&output.stdout),
+    ))
+}
+
+/// Split the combined `display-message` + `capture-pane` output into a
+/// [`PaneCapture`].
+///
+/// The first line is the cursor header. If it is not exactly three integers
+/// the whole payload is treated as content with `pane_height: 0` -- losing the
+/// caret is survivable, silently eating the pane's first line is not.
+pub fn parse_capture_with_cursor(raw: &str) -> PaneCapture {
+    let (header, rest) = match raw.split_once('\n') {
+        Some(parts) => parts,
+        // No newline at all: nothing to split off, so treat it as content.
+        None => {
+            return PaneCapture {
+                content: raw.to_string(),
+                ..Default::default()
+            };
+        }
+    };
+
+    let fields: Vec<&str> = header.split_whitespace().collect();
+    if fields.len() == 3
+        && let (Ok(x), Ok(y), Ok(h)) = (
+            fields[0].parse::<u16>(),
+            fields[1].parse::<u16>(),
+            fields[2].parse::<u16>(),
+        )
+    {
+        return PaneCapture {
+            content: rest.to_string(),
+            cursor_x: x,
+            cursor_y: y,
+            pane_height: h,
+        };
+    }
+
+    PaneCapture {
+        content: raw.to_string(),
+        ..Default::default()
+    }
+}
+
+/// Send a literal string to a pane and wait for tmux to accept it.
+///
+/// [`send_literal`] is fire-and-forget, which is the right trade for a single
+/// keystroke but destroys ordering when several are sent in sequence: two
+/// spawned processes can reach the pane in either order. Batched input has to
+/// await each send, so it uses this.
+pub async fn send_literal_ordered(
+    transport: &ServerTransport,
+    target: &str,
+    text: &str,
+) -> Result<()> {
+    let output = transport
+        .output(
+            "tmux",
+            &[
+                "send-keys".to_string(),
+                "-t".to_string(),
+                target.to_string(),
+                "-l".to_string(),
+                text.to_string(),
+            ],
+            None,
+        )
+        .await
+        .context("Failed to send literal text to tmux pane")?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "tmux send-keys -l failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    Ok(())
+}
+
 /// Send keys without appending Enter.
 pub async fn send_keys_no_enter(
     transport: &ServerTransport,
@@ -260,4 +409,67 @@ pub fn spawn_pane_watcher(
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_cursor_header_and_content() {
+        let cap = parse_capture_with_cursor("37 9 10\nline one\nline two\n");
+        assert_eq!(cap.cursor_x, 37);
+        assert_eq!(cap.cursor_y, 9);
+        assert_eq!(cap.pane_height, 10);
+        assert_eq!(cap.content, "line one\nline two\n");
+    }
+
+    #[test]
+    fn parses_zero_cursor() {
+        let cap = parse_capture_with_cursor("0 0 24\n");
+        assert_eq!((cap.cursor_x, cap.cursor_y, cap.pane_height), (0, 0, 24));
+        assert_eq!(cap.content, "");
+    }
+
+    #[test]
+    fn keeps_ansi_escapes_in_content() {
+        let cap = parse_capture_with_cursor("1 2 3\n\x1b[31mred\x1b[0m\n");
+        assert_eq!(cap.content, "\x1b[31mred\x1b[0m\n");
+        assert_eq!(cap.pane_height, 3);
+    }
+
+    // A malformed header must not be swallowed: dropping the caret is fine,
+    // dropping a line of pane output is not.
+    #[test]
+    fn malformed_header_is_treated_as_content() {
+        let raw = "not a cursor header\nreal content\n";
+        let cap = parse_capture_with_cursor(raw);
+        assert_eq!(cap.content, raw);
+        assert_eq!(cap.pane_height, 0, "pane_height 0 signals 'no cursor'");
+    }
+
+    #[test]
+    fn wrong_field_count_is_treated_as_content() {
+        for raw in ["1 2\ncontent\n", "1 2 3 4\ncontent\n", "a b c\ncontent\n"] {
+            let cap = parse_capture_with_cursor(raw);
+            assert_eq!(cap.content, raw, "raw: {raw:?}");
+            assert_eq!(cap.pane_height, 0, "raw: {raw:?}");
+        }
+    }
+
+    #[test]
+    fn payload_without_newline_is_content() {
+        let cap = parse_capture_with_cursor("no newline here");
+        assert_eq!(cap.content, "no newline here");
+        assert_eq!(cap.pane_height, 0);
+    }
+
+    // Values that do not fit u16 are a malformed header, not a silent zero.
+    #[test]
+    fn out_of_range_header_is_treated_as_content() {
+        let raw = "99999 1 10\ncontent\n";
+        let cap = parse_capture_with_cursor(raw);
+        assert_eq!(cap.content, raw);
+        assert_eq!(cap.pane_height, 0);
+    }
 }

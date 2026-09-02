@@ -4,12 +4,16 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::Html,
+    response::sse::{Event, KeepAlive, Sse},
     routing::{delete, get, patch, post},
 };
+use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use super::SharedWebState;
 use crate::transport::ServerTransport;
@@ -70,21 +74,45 @@ async fn api_pane_handler(
     };
 
     // Do a live capture from tmux with ANSI escape codes (-e flag) to ensure
-    // colors and styling are preserved in the web UI.
-    let pane_content = match crate::tmux::proxy::capture_pane(&state.transport, &tmux_target, 500).await {
-        Ok(content) => content,
-        Err(e) => {
-            tracing::warn!("Live pane capture failed for {tmux_target}: {e}, using cached content");
-            cached_content
-        }
-    };
+    // colors and styling are preserved in the web UI, plus the cursor position
+    // so the page can draw a caret.
+    let capture =
+        match crate::tmux::proxy::capture_pane_with_cursor(&state.transport, &tmux_target, 500)
+            .await
+        {
+            Ok(capture) => capture,
+            Err(e) => {
+                tracing::warn!(
+                    "Live pane capture failed for {tmux_target}: {e}, using cached content"
+                );
+                crate::tmux::proxy::PaneCapture {
+                    content: cached_content,
+                    ..Default::default()
+                }
+            }
+        };
 
-    Ok(Json(json!({
+    Ok(Json(pane_frame(&role, &tmux_target, &cached_state, &capture)))
+}
+
+/// The JSON shape shared by the pane endpoint and the pane stream, so a frame
+/// pushed over SSE is interchangeable with one fetched over HTTP and the page
+/// has a single code path for applying either.
+fn pane_frame(
+    role: &str,
+    tmux_target: &str,
+    agent_state: &str,
+    capture: &crate::tmux::proxy::PaneCapture,
+) -> Value {
+    json!({
         "role": role,
         "tmux_target": tmux_target,
-        "state": cached_state,
-        "pane_content": pane_content,
-    })))
+        "state": agent_state,
+        "pane_content": capture.content,
+        "cursor_x": capture.cursor_x,
+        "cursor_y": capture.cursor_y,
+        "pane_height": capture.pane_height,
+    })
 }
 
 /// Body for the send-input endpoint.
@@ -223,6 +251,223 @@ async fn api_key_handler(
     })?;
 
     Ok(Json(serde_json::json!({ "ok": true, "key": tmux_key })))
+}
+
+/// One item in an ordered batch of input.
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum InputItem {
+    /// A named key, validated through [`tmux_key_name`] exactly as the
+    /// single-key endpoint validates its input.
+    Key { key: String },
+    /// Literal text, sent with `-l` and no Enter.
+    Text { text: String },
+}
+
+/// Body for the batched send-keys endpoint.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct SendKeysBatchBody {
+    pub items: Vec<InputItem>,
+}
+
+/// Upper bound on a single batch. The page coalesces one animation frame of
+/// input, which is a handful of keys; anything near this is a client bug or an
+/// attempt to use the endpoint as an arbitrary-length input pump.
+pub const MAX_BATCH_ITEMS: usize = 64;
+
+/// Upper bound on the literal text in one batch, in bytes.
+pub const MAX_BATCH_TEXT_BYTES: usize = 4096;
+
+/// Resolve a batch into the ordered tmux sends it represents, rejecting the
+/// whole batch if any part of it is invalid.
+///
+/// Validation is all-or-nothing on purpose. Sending the valid prefix and then
+/// failing would leave the pane holding half a keystroke sequence with no way
+/// for the caller to know where it stopped -- worse than sending nothing.
+pub fn resolve_batch(items: &[InputItem]) -> Option<Vec<InputItem>> {
+    if items.is_empty() || items.len() > MAX_BATCH_ITEMS {
+        return None;
+    }
+
+    let text_bytes: usize = items
+        .iter()
+        .map(|item| match item {
+            InputItem::Text { text } => text.len(),
+            InputItem::Key { .. } => 0,
+        })
+        .sum();
+    if text_bytes > MAX_BATCH_TEXT_BYTES {
+        return None;
+    }
+
+    let mut resolved = Vec::with_capacity(items.len());
+    for item in items {
+        match item {
+            // Every key goes through the same allowlist the single-key
+            // endpoint uses. Batching must not become a way around it.
+            InputItem::Key { key } => resolved.push(InputItem::Key {
+                key: tmux_key_name(key)?,
+            }),
+            InputItem::Text { text } => {
+                if text.is_empty() {
+                    return None;
+                }
+                resolved.push(InputItem::Text { text: text.clone() });
+            }
+        }
+    }
+    Some(resolved)
+}
+
+/// Send an ordered batch of keys and literal text to an agent's pane.
+/// `POST /api/swarms/:project/agents/:role/keys`
+///
+/// The single-key endpoint is fine for one press, but the page fires one
+/// request per keystroke and nothing sequences them: two keys pressed in quick
+/// succession are two in-flight requests that can land in either order, so
+/// fast typing or a held arrow key arrives at the pane scrambled. This takes
+/// the keys already in order and sends them in that order, awaiting each, so
+/// the pane sees exactly what was typed.
+async fn api_keys_batch_handler(
+    Path((project, role)): Path<(String, String)>,
+    State(state): State<WebServerState>,
+    Json(body): Json<SendKeysBatchBody>,
+) -> Result<Json<Value>, StatusCode> {
+    let Some(resolved) = resolve_batch(&body.items) else {
+        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+    };
+
+    let tmux_target = lookup_tmux_target(&state, &project, &role)?;
+
+    let sent = resolved.len();
+    for item in &resolved {
+        let result = match item {
+            InputItem::Key { key } => {
+                crate::tmux::proxy::send_keys_no_enter(&state.transport, &tmux_target, key).await
+            }
+            InputItem::Text { text } => {
+                crate::tmux::proxy::send_literal_ordered(&state.transport, &tmux_target, text).await
+            }
+        };
+        result.map_err(|e| {
+            tracing::warn!("tmux send-keys failed for {tmux_target}: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    }
+
+    Ok(Json(json!({ "ok": true, "sent": sent })))
+}
+
+/// How often the pane stream re-reads tmux. Fast enough that a completion
+/// menu or a moving menu highlight is drawn while it is still on screen --
+/// the 2s poll this replaces could miss such a frame entirely.
+const STREAM_POLL: Duration = Duration::from_millis(120);
+
+/// Stream pane updates as server-sent events.
+/// `GET /api/swarms/:project/agents/:role/pane/stream`
+///
+/// Only changed frames are sent, so an idle pane costs one tmux read per tick
+/// and no network traffic.
+async fn api_pane_stream_handler(
+    Path((project, role)): Path<(String, String)>,
+    State(state): State<WebServerState>,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, StatusCode> {
+    // Resolve once, up front, so an unknown agent is a 404 rather than a
+    // stream that opens and then silently never yields anything.
+    let tmux_target = lookup_tmux_target(&state, &project, &role)?;
+
+    struct StreamState {
+        state: WebServerState,
+        project: String,
+        role: String,
+        tmux_target: String,
+        last: Option<(crate::tmux::proxy::PaneCapture, String)>,
+    }
+
+    let stream = futures::stream::unfold(
+        StreamState {
+            state,
+            project,
+            role,
+            tmux_target,
+            last: None,
+        },
+        |mut st| async move {
+            loop {
+                tokio::time::sleep(STREAM_POLL).await;
+
+                let capture = match crate::tmux::proxy::capture_pane_with_cursor(
+                    &st.state.transport,
+                    &st.tmux_target,
+                    500,
+                )
+                .await
+                {
+                    Ok(capture) => capture,
+                    // A failed read is usually a pane that is gone or briefly
+                    // busy. Keep the stream open and try again -- tearing it
+                    // down would drop the page back to polling for good.
+                    Err(e) => {
+                        tracing::debug!("Pane stream capture failed for {}: {e}", st.tmux_target);
+                        continue;
+                    }
+                };
+
+                let agent_state = current_agent_state(&st.state, &st.project, &st.role);
+
+                if st.last.as_ref() == Some(&(capture.clone(), agent_state.clone())) {
+                    continue;
+                }
+
+                let frame = pane_frame(&st.role, &st.tmux_target, &agent_state, &capture);
+                st.last = Some((capture, agent_state));
+                return Some((Ok(Event::default().data(frame.to_string())), st));
+            }
+        },
+    );
+
+    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+
+/// Look up an agent's tmux target, mapping the failure modes to status codes.
+fn lookup_tmux_target(
+    state: &WebServerState,
+    project: &str,
+    role: &str,
+) -> Result<String, StatusCode> {
+    let guard = state
+        .swarms
+        .read()
+        .map_err(|e| {
+            tracing::warn!("Web state lock poisoned: {e}");
+        })
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let swarm = guard
+        .iter()
+        .find(|s| s.project_name == project)
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    Ok(find_agent(swarm, role)
+        .ok_or(StatusCode::NOT_FOUND)?
+        .tmux_target
+        .clone())
+}
+
+/// The agent's last known state string, or empty if it has since disappeared.
+fn current_agent_state(state: &WebServerState, project: &str, role: &str) -> String {
+    state
+        .swarms
+        .read()
+        .ok()
+        .and_then(|guard| {
+            guard
+                .iter()
+                .find(|s| s.project_name == project)
+                .and_then(|swarm| find_agent(swarm, role))
+                .map(|agent| agent.state.clone())
+        })
+        .unwrap_or_default()
 }
 
 /// Send a line of input to an agent's tmux pane.
@@ -838,6 +1083,14 @@ pub async fn run(port: u16, state: WebServerState) -> Result<()> {
             "/api/swarms/{project}/agents/{role}/key",
             post(api_key_handler),
         )
+        .route(
+            "/api/swarms/{project}/agents/{role}/keys",
+            post(api_keys_batch_handler),
+        )
+        .route(
+            "/api/swarms/{project}/agents/{role}/pane/stream",
+            get(api_pane_stream_handler),
+        )
         .with_state(state);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
@@ -888,6 +1141,10 @@ mod tests {
             .route(
                 "/api/swarms/{project}/agents/{role}/key",
                 post(api_key_handler),
+            )
+            .route(
+                "/api/swarms/{project}/agents/{role}/keys",
+                post(api_keys_batch_handler),
             )
             .with_state(state)
     }
@@ -1104,6 +1361,37 @@ mod tests {
         let body = INDEX_HTML;
         assert!(body.contains("/pane"));
         assert!(body.contains("/input"));
+    }
+
+    // The page must drive the pane through the sequenced queue and the live
+    // stream, not the per-keystroke fetch and 2s poll they replaced.
+    #[tokio::test]
+    async fn index_html_wires_the_sequenced_input_queue() {
+        let body = INDEX_HTML;
+        assert!(body.contains("/keys"), "batch endpoint not called");
+        assert!(body.contains("queueInput"));
+        assert!(body.contains("flushInputQueue"));
+        assert!(
+            body.contains("requestAnimationFrame"),
+            "input should be coalesced per animation frame"
+        );
+    }
+
+    #[tokio::test]
+    async fn index_html_wires_the_live_pane_stream() {
+        let body = INDEX_HTML;
+        assert!(body.contains("EventSource"));
+        assert!(body.contains("/pane/stream"));
+        assert!(body.contains("startSessionStream"));
+        assert!(body.contains("stopSessionStream"));
+    }
+
+    #[tokio::test]
+    async fn index_html_renders_a_cursor() {
+        let body = INDEX_HTML;
+        assert!(body.contains("pane-cursor"), "no caret element");
+        assert!(body.contains("paneCursorTarget"));
+        assert!(body.contains("cellWidth"), "caret must count cells, not chars");
     }
 
     #[tokio::test]
@@ -1363,5 +1651,191 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    // ── Batched input ─────────────────────────────────────────────────────
+
+    #[test]
+    fn resolve_batch_normalises_every_key_through_the_allowlist() {
+        let items = vec![
+            InputItem::Key { key: "up".into() },
+            InputItem::Text { text: "ab".into() },
+            InputItem::Key { key: "esc".into() },
+        ];
+        let resolved = super::resolve_batch(&items).expect("batch should resolve");
+        assert_eq!(
+            resolved,
+            vec![
+                InputItem::Key { key: "Up".into() },
+                InputItem::Text { text: "ab".into() },
+                InputItem::Key {
+                    key: "Escape".into()
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_batch_preserves_order() {
+        let items = vec![
+            InputItem::Text { text: "a".into() },
+            InputItem::Key {
+                key: "Down".into(),
+            },
+            InputItem::Text { text: "b".into() },
+        ];
+        let resolved = super::resolve_batch(&items).unwrap();
+        // Ordering is the entire point of this endpoint.
+        assert_eq!(
+            resolved,
+            vec![
+                InputItem::Text { text: "a".into() },
+                InputItem::Key {
+                    key: "Down".into()
+                },
+                InputItem::Text { text: "b".into() },
+            ]
+        );
+    }
+
+    // Batching must not become a way around the allowlist that the single-key
+    // endpoint enforces.
+    #[test]
+    fn resolve_batch_rejects_the_whole_batch_if_any_key_is_disallowed() {
+        let items = vec![
+            InputItem::Key { key: "Up".into() },
+            InputItem::Key {
+                key: "kill-session".into(),
+            },
+        ];
+        assert!(super::resolve_batch(&items).is_none());
+    }
+
+    #[test]
+    fn resolve_batch_rejects_empty_and_oversized_batches() {
+        assert!(super::resolve_batch(&[]).is_none());
+
+        let too_many: Vec<InputItem> = (0..super::MAX_BATCH_ITEMS + 1)
+            .map(|_| InputItem::Key { key: "Up".into() })
+            .collect();
+        assert!(super::resolve_batch(&too_many).is_none());
+
+        let at_limit: Vec<InputItem> = (0..super::MAX_BATCH_ITEMS)
+            .map(|_| InputItem::Key { key: "Up".into() })
+            .collect();
+        assert!(super::resolve_batch(&at_limit).is_some());
+    }
+
+    #[test]
+    fn resolve_batch_rejects_oversized_text() {
+        let big = "x".repeat(super::MAX_BATCH_TEXT_BYTES + 1);
+        assert!(super::resolve_batch(&[InputItem::Text { text: big }]).is_none());
+    }
+
+    #[test]
+    fn resolve_batch_rejects_empty_text() {
+        assert!(super::resolve_batch(&[InputItem::Text { text: String::new() }]).is_none());
+    }
+
+    #[tokio::test]
+    async fn keys_endpoint_rejects_a_disallowed_key_before_touching_tmux() {
+        let shared = new_shared_state();
+        {
+            let mut guard = shared.write().unwrap();
+            guard.push(sample_swarm("test-proj"));
+        }
+
+        let app = make_app(make_web_state(shared));
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/swarms/test-proj/agents/manager/keys")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{"items":[{"type":"key","key":"Up"},{"type":"key","key":"kill-session"}]}"#,
+            ))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[tokio::test]
+    async fn keys_endpoint_404s_for_an_unknown_agent() {
+        let shared = new_shared_state();
+        {
+            let mut guard = shared.write().unwrap();
+            guard.push(sample_swarm("test-proj"));
+        }
+
+        let app = make_app(make_web_state(shared));
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/swarms/test-proj/agents/worker-99/keys")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"items":[{"type":"key","key":"Up"}]}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn keys_endpoint_rejects_an_empty_batch() {
+        let shared = new_shared_state();
+        {
+            let mut guard = shared.write().unwrap();
+            guard.push(sample_swarm("test-proj"));
+        }
+
+        let app = make_app(make_web_state(shared));
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/swarms/test-proj/agents/manager/keys")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"items":[]}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[test]
+    fn input_item_deserialises_both_variants() {
+        let parsed: Vec<InputItem> =
+            serde_json::from_str(r#"[{"type":"key","key":"Up"},{"type":"text","text":"hi"}]"#)
+                .unwrap();
+        assert_eq!(
+            parsed,
+            vec![
+                InputItem::Key { key: "Up".into() },
+                InputItem::Text { text: "hi".into() },
+            ]
+        );
+    }
+
+    // The pane endpoint must carry the cursor fields the page needs to draw a
+    // caret, even when the live capture fails and it falls back to cached
+    // content (pane_height 0 = "no cursor known").
+    #[tokio::test]
+    async fn api_pane_includes_cursor_fields() {
+        let shared = new_shared_state();
+        {
+            let mut guard = shared.write().unwrap();
+            guard.push(sample_swarm("test-proj"));
+        }
+
+        let app = make_app(make_web_state(shared));
+        let req = Request::builder()
+            .uri("/api/swarms/test-proj/agents/manager/pane")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        for field in ["cursor_x", "cursor_y", "pane_height"] {
+            assert!(json.get(field).is_some(), "missing {field}");
+            assert!(json[field].is_u64(), "{field} should be a number");
+        }
     }
 }
