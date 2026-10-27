@@ -30,7 +30,10 @@ Tests are inline `#[cfg(test)]` modules in each source file:
 - `src/model/swarm.rs` — Agent counting, lookups, state queries, type methods
 - `src/config/persistence.rs` — TOML save/load round-trips, listing, missing files
 - `src/app.rs` — Key-to-tmux conversion, pane status inference, tab completion helpers
-- `src/web/village.rs` — House kinds and statuses, crew grouping, backlog/board sorting, tip-ref and environment parsing
+- `src/web/village.rs` — House kinds and statuses, crew grouping, backlog/board sorting, tip-ref and environment parsing, transcript actions
+- `src/web/herdr.rs`, `src/web/temporal.rs` — herdr and Temporal parsing and village building, from JSON fixtures
+
+For the village UI, `tools/mock/demo.sh` runs agents-tui against simulated herdr and Temporal swarms.
 
 Tests use `tempfile` for filesystem tests. No mocking of tmux — integration-level tmux testing is done manually via `tmux new-session -d` + `cargo run`.
 
@@ -67,9 +70,12 @@ src/
     persistence.rs  # Swarm state save/load (~/.agents-ui/)
   web/
     server.rs       # HTTP API + embedded pages (`--web` / `--headless`)
-    discovery.rs    # Headless swarm discovery from tmux
+    discovery.rs    # Headless swarm discovery from tmux (and herdr)
+    herdr.rs        # Swarms under herdr: `herdr agent list`, grouped by worktree cwd
+    temporal.rs     # Temporal namespaces as villages, via the frontend HTTP API
     village.rs      # Village model: houses per worktree, issue crates, pipeline from git
-    village.html    # /village: the swarm as a 16-bit village (canvas renderer)
+    village.html    # /village: the swarm as a 16-bit village (canvas renderer, themes)
+tools/mock/         # Simulated herdr/Temporal swarms for the village: demo.sh
 ```
 
 ## Key conventions

@@ -13,9 +13,41 @@ agent is waiting on you, dust means stalled, fog means unknown.
 The server listens on 127.0.0.1 only. To watch a swarm on another machine,
 tunnel to it: `ssh -L 7878:localhost:7878 swarm-host`.
 
+## Try it without agents
+
+```bash
+tools/mock/demo.sh          # then open http://127.0.0.1:7878/village
+```
+
+runs agents-tui against simulated swarms: an autocoder swarm and a modernize
+swarm under herdr (with real git worktrees, issues, tip refs and
+environments) and a Temporal namespace of agentic workstreams. See the
+header of `tools/mock/demo.sh`.
+
+## What people are doing
+
+Every agent's current action is acted out:
+
+| Action | Prop | From Claude Code | From a Temporal activity named like |
+|---|---|---|---|
+| Thinking | thought cloud | model's turn, or reading a tool result | `call_llm`, `plan`, `summarize`, `classify` |
+| Reading | open book | `Read`, `Grep`, `Glob` | `read`, `load`, `get`, `extract` |
+| Writing | swinging hammer | `Edit`, `Write` | `write`, `commit`, `update`, `draft` |
+| Running | terminal | `Bash` (and any other tool) | `run`, `test`, `build`, or anything else |
+| Searching | magnifying glass, walking | `WebFetch`, `WebSearch`, MCP tools | `search`, `fetch`, `http`, `query` |
+| Messaging | letter, walking | `Task`, `Agent`, `SendMessage` | `send`, `email`, `notify`, `slack` |
+
+People out front act out their own action; a busy house shows its own
+agent's action on a small sign over the door. Claude Code actions come from
+the last step in each transcript; Temporal actions from each workflow's
+first pending activity.
+
 ## Coding swarms (autocoder, modernize)
 
-Found automatically from tmux. The manager lives in the castle (medieval) or headquarters (modern); every worker
+Found automatically from tmux and herdr. Under herdr (`herdr agent list`) an
+agent in a `<repo>-wt-<N>` worktree is worker N and the agent in `<repo>` is
+the manager, as in autocoder's `/monitor-workers`; a worker's issue comes
+from its branch (`feature/issue-412`). The manager lives in the castle (medieval) or headquarters (modern); every worker
 session is a house, and agents sharing a worktree are one house.
 
 | What you see | Where it comes from |
