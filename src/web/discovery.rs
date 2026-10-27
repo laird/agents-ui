@@ -78,6 +78,13 @@ async fn collect_swarms(
         }
     }
 
+    // Swarms under herdr, unless tmux already shows the same project.
+    for snap in super::herdr::collect(transport).await {
+        if !swarms.iter().any(|s| s.project_name == snap.project_name) {
+            swarms.push(snap);
+        }
+    }
+
     // A stopped swarm has no tmux session, so it is invisible above no matter
     // what. Add back anything persisted at stop time and still marked
     // stopped, so it still shows as a card (with a Resume button) rather than
