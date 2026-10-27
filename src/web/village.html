@@ -95,8 +95,7 @@
   const KINDCOL = { bug: '#e03838', feature: '#40b8e8', tests: '#e070d0', security: '#3058b0', research: '#c0a8f0', perf: '#d8c8a8', refactor: '#6878a0', docs: '#2878a0', chores: '#a83028', workshop: '#c88848', cottage: '#c8a048' };
   const NOTECOL = { 'needs-design': '#f8c800', 'needs-clarification': '#d0c0f8', 'needs-approval': '#e89890', 'too-complex': '#b02010', 'future': '#8088a8', 'proposal': '#c0a8f0' };
   const STOPCOL = ['#38c848', '#f8d040', '#f8f8f8', '#4868e8', '#e070d0'];
-  const HATS = ['#d07040', '#586078', '#4890e0', '#d860a0', '#48a878', '#a8b0c0'];
-  /* A sub-agent's hat matches the building its specialty would build. */
+  /* A sub-agent's accent (tie, apron, belt) matches the building its specialty would build. */
   const SPECIALTIES = [['architect', 'research'], ['security', 'security'], ['test', 'tests'], ['doc', 'docs'], ['coder', 'feature']];
   const subHat = s => {
     const role = s.agent_type.toLowerCase().split(':').pop();
@@ -273,17 +272,6 @@
   }
 
   /* ---------- People and things ---------- */
-  const VILLAGER = ['..oooo..', '.ohhhho.', 'ohhhhhho', 'ohssssho', 'osossoso', '.oSssSo.', '.octtco.', 'oCcttcCo', 'sCcttcCs', '.occcco.', '.opoopo.', '.oo..oo.'];
-  const WAVE = VILLAGER.slice(0, 6).concat(['.octtcos', 'oCcttcCo', 'sCcttcCo', '.occcco.', '.opoopo.', '.oo..oo.']);
-  const CARRY = ['..oooo..', '.ohhhho.', 'ohhhhhho', 'ohssssho', 'osossoso', 'soSssSos', 'soctcos.', '.CcttcC.', '.CcttcC.', '.occcco.', '.opoopo.', '.oo..oo.'];
-  const STEP = CARRY.slice(0, 10).concat(['.opoopo.', '.oo...o.']);
-  const WORKER = { c: '#a87848', C: '#785030', t: '#f8f8f8', p: '#484858' };
-  const MAYOR = { c: '#804098', C: '#582868', t: '#f8d040', p: '#302838' };
-  function villager(c, x, y, outfit, hat, rows = VILLAGER) {
-    const map = { o: P.o, s: P.skin, S: P.skinS, h: hat, c: outfit.c, C: outfit.C, t: outfit.t, p: outfit.p };
-    x = Math.round(x); y = Math.round(y);
-    for (let r = 0; r < rows.length; r++) for (let k = 0; k < 8; k++) { const ch = rows[r][k]; if (ch !== '.') R(c, x + k, y + r, 1, 1, map[ch]); }
-  }
   const ICONS = {
     blocked: ['..#..', '..#..', '..#..', '.....', '..#..'],
     done: ['.....', '....#', '...#.', '#.#..', '.#...'],
@@ -390,7 +378,7 @@
     ground: grass, road: path, yard: path, channel: water,
     dock(c, x, y, w) { R(c, x, y, w, 7, P.o); R(c, x + 1, y, w - 2, 6, P.plank); },
     tree, hall, board, crate, B, scaffold, gate: lock, destination: castle,
-    worker: WORKER, mayor: MAYOR, steam: [P.white, P.stoneL]
+    people: 'medieval', steam: [P.white, P.stoneL]
   };
 
   const M = {
@@ -590,8 +578,7 @@
         });
       }
     },
-    worker: { c: '#4878c8', C: '#305898', t: '#f8f8f8', p: '#383850' },
-    mayor: { c: '#283048', C: '#181c30', t: '#f8d040', p: '#202838' },
+    people: 'modern',
     steam: [P.white, M.concreteL]
   };
 
@@ -601,6 +588,79 @@
     try { return THEMES[localStorage.getItem('village-theme')] ? localStorage.getItem('village-theme') : 'medieval'; } catch { return 'medieval'; }
   })();
   let T = THEMES[themeName];
+
+  /* ---------- People ----------
+   * Four body templates per theme, two women and two men, alternating so a
+   * village is a mix. Letters: o outline, h hair, s/S skin and its shade,
+   * c/C clothing and its shade, t accent (belt, apron, tie), w shirt, p legs
+   * or skirt. Who a villager is (template, skin, hair, clothes) comes from a
+   * hash of their agent, so a person looks the same on every refresh. */
+  const BODY = {
+    medieval: [
+      // man in a belted tunic
+      ['..oooo..', '.ohhhho.', 'ohhhhhho', 'ohssssho', 'osossoso', '.oSssSo.', '.occcco.', 'oCccccCo', 'sCttttCs', '.occcco.', '.opoopo.', '.oo..oo.'],
+      // woman with long hair in a dress
+      ['..oooo..', '.ohhhho.', 'ohhhhhho', 'ohssssho', 'hsossosh', 'hoSssSoh', 'hoctccoh', 'oCccccCo', 'sCccccCs', 'oCccccCo', 'oCCCCCCo', '.oo..oo.'],
+      // bearded man in a hood
+      ['..oooo..', '.occcco.', 'occcccco', 'ocssssco', 'osossoso', 'ochhhhco', '.ochhco.', 'oCccccCo', 'sCttttCs', '.occcco.', '.opoopo.', '.oo..oo.'],
+      // woman with a bun and an apron
+      ['...oo...', '..ohho..', '.ohhhho.', 'ohssssho', 'osossoso', '.oSssSo.', '.occcco.', 'oCttttCo', 'sCttttCs', 'oCttttCo', 'oCCCCCCo', '.oo..oo.']
+    ],
+    modern: [
+      // man in a suit and tie
+      ['..oooo..', '.ohhhho.', 'ohhhhhho', 'ohssssho', 'osossoso', '.oSssSo.', '.owttwo.', 'oCcttcCo', 'sCcttcCs', '.occcco.', '.opoopo.', '.oo..oo.'],
+      // woman with long hair in a blazer and skirt
+      ['..oooo..', '.ohhhho.', 'ohhhhhho', 'ohssssho', 'hsossosh', 'hoSssSoh', 'hocwwcoh', 'oCcwwcCo', 'sCccccCs', '.oppppo.', '.os..so.', '.oo..oo.'],
+      // woman with a bob in a trouser suit
+      ['..oooo..', '.ohhhho.', 'ohhhhhho', 'hhssssho', 'hsossosh', '.hSssSh.', '.ocwwco.', 'oCcwwcCo', 'sCccccCs', '.occcco.', '.opoopo.', '.oo..oo.'],
+      // bearded man in a jacket, open collar
+      ['..oooo..', '.ohhhho.', 'ohhhhhho', 'ohssssho', 'osossoso', '.ohhhho.', '.ocwwco.', 'oCcwwcCo', 'sCccccCs', '.occcco.', '.opoopo.', '.oo..oo.']
+    ]
+  };
+  const SKIN = [['#f8d0a8', '#d8a880'], ['#e8b088', '#c08860'], ['#c88858', '#a06838'], ['#94603c', '#704428'], ['#603c28', '#482818']];
+  const HAIR = ['#302018', '#704830', '#c89040', '#a03820', '#181820', '#d0c8c0', '#583828'];
+  const DRESS = {
+    medieval: { cloth: [['#a87848', '#785030'], ['#4878a0', '#305878'], ['#7a8a3a', '#56622a'], ['#8a4a6a', '#62324a'], ['#a85838', '#783a24']], accent: ['#e8dcc0', '#583820', '#f8f8f8'], legs: ['#585060', '#685038'],
+      mayor: { c: '#804098', C: '#582868', t: '#f8d040', p: '#302838' } },
+    modern: { cloth: [['#283048', '#181c30'], ['#3a3a44', '#262630'], ['#4a3a30', '#33281f'], ['#5a6070', '#40465a'], ['#2a4a70', '#1c3450']], accent: ['#c03838', '#3878c8', '#f8d040', '#48a878'], legs: ['#262630', '#383850'],
+      mayor: { c: '#1c2030', C: '#101420', t: '#f8d040', p: '#181c28' } }
+  };
+  function strHash(s) {
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+    return h >>> 0;
+  }
+  /* Poses are edits of the standing body: a raised hand, both hands up under
+   * a crate, a foot lifted mid-step. */
+  const setAt = (row, i, ch) => row.slice(0, i) + ch + row.slice(i + 1);
+  function pose(rows, kind) {
+    const r = rows.slice();
+    if (kind === 'wave') { r[6] = setAt(r[6], 7, 's'); r[8] = setAt(r[8], 7, '.'); }
+    if (kind === 'carry' || kind === 'carrystep') {
+      r[5] = setAt(setAt(r[5], 0, 's'), 7, 's');
+      r[8] = setAt(setAt(r[8], 0, '.'), 7, '.');
+    }
+    if (kind === 'carrystep') r[11] = '.oo...o.';
+    return r;
+  }
+  /* Draw a person. `seed` names who they are; `accent` (a specialist's color)
+   * overrides their tie, apron or belt; `mayor` dresses them for the hall. */
+  function person(c, x, y, seed, kind = 'stand', opts = {}) {
+    const style = T.people, h = strHash(seed + '|' + style);
+    const bodies = BODY[style], dress = DRESS[style];
+    const rows = pose(bodies[h % bodies.length], kind);
+    const [skin, skinS] = SKIN[(h >>> 3) % SKIN.length];
+    const cloth = opts.mayor ? [dress.mayor.c, dress.mayor.C] : dress.cloth[(h >>> 7) % dress.cloth.length];
+    const map = {
+      o: P.o, s: skin, S: skinS, w: P.white,
+      h: HAIR[(h >>> 11) % HAIR.length],
+      c: cloth[0], C: cloth[1],
+      t: opts.accent || (opts.mayor ? dress.mayor.t : dress.accent[(h >>> 15) % dress.accent.length]),
+      p: opts.mayor ? dress.mayor.p : dress.legs[(h >>> 19) % dress.legs.length]
+    };
+    x = Math.round(x); y = Math.round(y);
+    for (let r = 0; r < rows.length; r++) for (let k = 0; k < 8; k++) { const ch = rows[r][k]; if (ch !== '.') R(c, x + k, y + r, 1, 1, map[ch]); }
+  }
 
   /* ---------- Layout ---------- */
   const LW = 20, LH = 26, RD = 6, DOCK_W = 64;
@@ -650,7 +710,7 @@
       const slot = oldBacklog.indexOf(h.issue);
       if (slot < 0) return;
       const s = slotPos(slot), lot = lay.lots[i];
-      porters.push({ t0: t, speed: 0.05, hat: HATS[i % HATS.length], kind: (old.backlog[slot] || {}).kind, pr: h.priority,
+      porters.push({ t0: t, speed: 0.05, seed: h.id, kind: (old.backlog[slot] || {}).kind, pr: h.priority,
         pts: [[s.x + 2, s.y + 6], [s.x + 2, 53], [lay.roadX + 3, 53], [lay.roadX + 3, lot.lane], [lot.x + 8, lot.lane]] });
     });
     const oldQuay = new Set(old.pipeline.quay);
@@ -660,7 +720,7 @@
       if (i < 0) return;
       const lot = lay.lots[now.houses.findIndex(h => h.id === old.houses[i].id)] || lay.lots[i];
       if (!lot) return;
-      porters.push({ t0: t, speed: 0.05, hat: HATS[i % HATS.length], kind: old.houses[i].kind, pr: old.houses[i].priority, sealed: true, issue: n,
+      porters.push({ t0: t, speed: 0.05, seed: old.houses[i].id, kind: old.houses[i].kind, pr: old.houses[i].priority, sealed: true, issue: n,
         pts: [[lot.x + 8, lot.lane], [lay.roadX + 3, lot.lane], [lay.roadX + 3, lay.quayY]] });
     });
   }
@@ -697,12 +757,12 @@
     T.hall(c, hallX, 18, v.manager.status);
     T.board(c, hallX + 36, 26, v.board);
     if (v.manager.status !== 'working' && v.manager.status !== 'stopped') {
-      villager(c, hallX + 26, 30, T.mayor, HATS[0], v.manager.status === 'blocked' && blink(t, 200) ? WAVE : VILLAGER);
+      person(c, hallX + 26, 30, 'manager:' + v.project, v.manager.status === 'blocked' && blink(t, 200) ? 'wave' : 'stand', { mayor: true });
     }
     // The manager's sub-agents (a modernize coordinator's specialists) work in the plaza.
     (v.manager.subagents || []).slice(0, 4).forEach((sa, k) => {
       const bob = !reduce && blink(t + k * 170, 220) ? -1 : 0;
-      villager(c, hallX - 2 + k * 10, 39 + bob, T.worker, subHat(sa));
+      person(c, hallX - 2 + k * 10, 39 + bob, `manager:${v.project}/sub${k}`, 'stand', { accent: subHat(sa) });
     });
 
     v.backlog.slice(0, 40).forEach((cr, i) => { const s = slotPos(i); T.crate(c, s.x, s.y, cr.kind, cr.priority); });
@@ -717,21 +777,20 @@
       pennant(c, lot.x, lot.y, h.priority, tt);
       if (st === 'stalled') cobwebs(c, lot.x, lot.y);
       if (st === 'unknown') R(c, lot.x - 1, lot.y - 6, 18, 23, 'rgba(32,34,60,.6)');
-      const hat = HATS[i % HATS.length];
-      const away = porters.some(p => p.house === h.id);
+      const away = porters.some(p => p.seed === h.id);
       if (!away) {
-        if (st === 'idle') villager(c, lot.x + 4, lot.y + 9, T.worker, hat);
-        if (st === 'done') villager(c, lot.x + 4, lot.y + 8, T.worker, hat);
-        if (st === 'blocked') { const b = blink(t, 200) ? -1 : 0; villager(c, lot.x + 4, lot.y + 10 + b, T.worker, hat, b ? WAVE : VILLAGER); }
+        if (st === 'idle') person(c, lot.x + 4, lot.y + 9, h.id);
+        if (st === 'done') person(c, lot.x + 4, lot.y + 8, h.id);
+        if (st === 'blocked') { const b = blink(t, 200) ? -1 : 0; person(c, lot.x + 4, lot.y + 10 + b, h.id, b ? 'wave' : 'stand'); }
       }
-      if (h.crew.length > 1 && st !== 'working') villager(c, lot.x + 12, lot.y + 11, T.worker, HATS[(i + 3) % HATS.length]);
+      if (h.crew.length > 1 && st !== 'working') person(c, lot.x + 12, lot.y + 11, h.id + '#crew');
       if (h.crew.length > 1 && st === 'working' && !reduce) puffs(c, lot.x + 3, lot.y - 3, tt + 700, ...T.steam);
       // Sub-agents keep the house busy: they work out front, two at most shown.
       const subs = h.subagents || [];
       if (subs.length && !reduce) puffs(c, lot.x + 3, lot.y - 3, tt + 400, ...T.steam);
       subs.slice(0, 2).forEach((sa, k) => {
         const bob = !reduce && blink(t + k * 190, 210) ? -1 : 0;
-        villager(c, lot.x + (k ? 9 : -1), lot.y + 12 + bob, T.worker, subHat(sa));
+        person(c, lot.x + (k ? 9 : -1), lot.y + 12 + bob, `${h.id}/sub${k}`, 'stand', { accent: subHat(sa) });
       });
       if (subs.length > 2) R(c, lot.x + 16, lot.y + 13, 2, 2, P.gold);
       if (ICONS[st]) bubbles.push([lot.x + 4, lot.y - (st === 'blocked' ? 1 : 3) + (st === 'blocked' && blink(t, 200) ? -1 : 0), st]);
@@ -754,7 +813,7 @@
     porters = porters.filter(p => {
       const pos = porterPos(p, t);
       if (!pos) return false;
-      villager(c, pos[0] - 4, pos[1] - 11, T.worker, p.hat, blink(t, 140) ? STEP : CARRY);
+      person(c, pos[0] - 4, pos[1] - 11, p.seed, blink(t, 140) ? 'carrystep' : 'carry');
       T.crate(c, pos[0] - 2, pos[1] - 16, p.kind, p.pr, p.sealed);
       return true;
     });
