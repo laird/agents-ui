@@ -15,7 +15,7 @@ tunnel to it: `ssh -L 7878:localhost:7878 swarm-host`.
 
 ## Coding swarms (autocoder, modernize)
 
-Found automatically from tmux. The manager runs the hall; every worker
+Found automatically from tmux. The manager lives in the castle (medieval) or headquarters (modern); every worker
 session is a house, and agents sharing a worktree are one house.
 
 | What you see | Where it comes from |
@@ -26,7 +26,7 @@ session is a house, and agents sharing a worktree are one house.
 | Crates at the docks | Open, unclaimed, unblocked issues, highest priority first |
 | Notes on the board | Issues with a blocking label (`needs-design`, `proposal`, ...) |
 | Crates at the quay | `refs/autocoder/tips/<integration>/<sha>-<issue>` not yet green |
-| Locks, then the castle | `<integration>-green`, then each environment in `.autocoder.json` |
+| Locks, then the harbour or launch pad | `<integration>-green`, then each environment in `.autocoder.json` |
 
 ## Temporal
 
@@ -48,7 +48,7 @@ with `curl`. It turns on the web view by itself.
 | Dark | Its task queue has no workers polling it |
 | People in the hall's plaza | Workers polling the namespace's task queues |
 | Notes on the board | Top-level workflows that failed, timed out or were terminated in the last 24h |
-| Crates at the end | Top-level workflows completed in the last 24h |
+| Crates at the harbour or launch pad | Top-level workflows completed in the last 24h |
 
 ### Telling the village an agent is waiting on you
 

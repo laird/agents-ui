@@ -324,12 +324,27 @@
       R(c, cx + dx, cy + dy, 1, 1, d > (r - 1) * (r - 1) ? P.o : dx + dy > 3 ? P.leafD : dx + dy < -3 ? P.leafL : P.leaf);
     }
   }
+  /* The manager's castle: a keep with banners between two round-roofed
+   * towers, behind a crenellated curtain wall. 40 wide, centred on the
+   * 32-wide hall slot; the gate opens when the manager waits on you. */
   function hall(c, x, y, st) {
-    R(c, x + 16, y - 5, 1, 7, P.stoneD); R(c, x + 17, y - 5, 5, 4, P.o); R(c, x + 17, y - 4, 4, 2, P.gold);
-    gable(c, x, y + 1, 32, 11, P.roofB, P.roofBD);
-    R(c, x + 1, y + 11, 30, 11, P.o); R(c, x + 2, y + 11, 28, 10, P.stone);
-    [x + 3, x + 8, x + 20, x + 25].forEach(wx => { R(c, wx, y + 13, 4, 5, P.woodD); R(c, wx + 1, y + 14, 2, 3, glassOf(st)); });
-    R(c, x + 13, y + 15, 6, 7, st === 'blocked' ? P.o : P.woodD); R(c, x + 16, y + 15, 1, 7, P.o);
+    const x0 = x - 4, gy = y + 22, lit = glassOf(st);
+    R(c, x0 + 12, y - 2, 16, 20, P.o); R(c, x0 + 13, y - 1, 14, 18, P.stoneL);
+    for (let k = 0; k < 16; k += 3) R(c, x0 + 12 + k, y - 4, 2, 2, P.o);
+    R(c, x0 + 16, y + 3, 2, 4, lit); R(c, x0 + 22, y + 3, 2, 4, lit);
+    [x0 + 14, x0 + 25].forEach(bx => { R(c, bx, y + 1, 2, 7, '#804098'); R(c, bx, y + 1, 2, 1, P.gold); R(c, bx, y + 8, 1, 1, '#804098'); });
+    R(c, x0 + 20, y - 11, 1, 7, P.stoneD); R(c, x0 + 21, y - 11, 5, 3, P.o); R(c, x0 + 21, y - 10, 4, 1, P.gold);
+    R(c, x0, gy - 12, 40, 12, P.o); R(c, x0 + 1, gy - 11, 38, 10, P.stone);
+    for (let k = 0; k < 40; k += 4) R(c, x0 + k, gy - 14, 2, 2, P.o);
+    for (let yy = gy - 9; yy < gy - 1; yy += 3) for (let xx = x0 + 2 + ((yy % 2) ? 2 : 0); xx < x0 + 38; xx += 5) R(c, xx, yy, 1, 1, P.stoneD);
+    [x0, x0 + 32].forEach(tx => {
+      R(c, tx, y - 4, 8, gy - y + 4, P.o); R(c, tx + 1, y - 3, 6, gy - y + 2, P.stoneL);
+      R(c, tx + 3, y + 3, 2, 3, lit);
+      for (let r = 0; r < 4; r++) { R(c, tx + 3 - r, y - 8 + r, 2 + 2 * r, 1, P.o); if (r) R(c, tx + 4 - r, y - 8 + r, 2 * r, 1, r % 2 ? P.red : P.redD); }
+    });
+    R(c, x0 + 16, gy - 9, 8, 9, P.o);
+    if (st === 'blocked') R(c, x0 + 17, gy - 8, 6, 8, P.o);
+    else { R(c, x0 + 17, gy - 8, 6, 8, P.woodD); for (let k = 0; k < 6; k += 2) R(c, x0 + 17 + k, gy - 8, 1, 8, P.stoneD); }
   }
   function board(c, x, y, notes) {
     R(c, x + 1, y + 9, 1, 6, P.woodD); R(c, x + 16, y + 9, 1, 6, P.woodD);
@@ -345,22 +360,26 @@
     R(c, x, cy - 10, 3, 4, P.woodD);
     R(c, x + 8, cy - 25, 1, 10, P.stoneD); R(c, x + 9, cy - 25, 5, 4, P.o); R(c, x + 9, cy - 24, 4, 2, flag);
   }
-  function castle(c, x, cy, t, fw) {
-    const y = cy - 36;
-    R(c, x, y + 6, 36, 46, P.o); R(c, x + 1, y + 7, 34, 44, P.stone);
-    for (let yy = y + 10; yy < y + 48; yy += 3) for (let xx = x + 3 + ((yy % 2) ? 2 : 0); xx < x + 34; xx += 5) R(c, xx, yy, 1, 1, P.stoneD);
-    [[x - 2, y], [x + 28, y]].forEach(([tx, ty]) => {
-      R(c, tx, ty, 10, 52, P.o); R(c, tx + 1, ty + 1, 8, 50, P.stoneL);
-      R(c, tx, ty - 3, 3, 3, P.o); R(c, tx + 7, ty - 3, 3, 3, P.o); R(c, tx + 4, ty + 8, 2, 4, P.dark);
-    });
-    for (let k = 0; k < 4; k++) R(c, x + 10 + k * 5, y + 3, 3, 3, P.o);
-    R(c, x + 8, cy - 2, 20, 18, P.o); R(c, x + 9, cy, 18, 15, P.dark);
-    R(c, x + 18, y - 12, 1, 18, P.stoneD); R(c, x + 19, y - 12, 7, 5, P.o); R(c, x + 19, y - 11, 6, 3, P.gold);
+  /* Where finished work ships out: a harbour with a lighthouse and a ship
+   * at the end of the canal. Its lamp flares when new work arrives. */
+  function harbour(c, x, cy, t, fw) {
+    R(c, x, cy - 20, 38, 20, P.o); R(c, x + 1, cy - 19, 36, 18, P.stone);
+    for (let yy = cy - 17; yy < cy - 2; yy += 3) for (let xx = x + 2 + ((yy % 2) ? 2 : 0); xx < x + 36; xx += 5) R(c, xx, yy, 1, 1, P.stoneD);
+    [x + 3, x + 12, x + 21].forEach(bx => { R(c, bx, cy - 4, 3, 3, P.o); R(c, bx + 1, cy - 3, 1, 1, P.stoneD); });
+    const lx = x + 27;
+    R(c, lx, cy - 50, 9, 32, P.o);
+    for (let yy = cy - 49; yy < cy - 19; yy++) R(c, lx + 1, yy, 7, 1, Math.floor((yy - cy) / 5) % 2 ? P.white : P.red);
+    R(c, lx - 1, cy - 56, 11, 7, P.o); R(c, lx, cy - 55, 9, 4, blink(t, 700) || t - fw < 1600 ? P.lamp : P.glass);
+    R(c, lx + 1, cy - 59, 7, 3, P.o); R(c, lx + 2, cy - 58, 5, 1, P.red);
+    R(c, x + 2, cy + 3, 22, 9, P.o); R(c, x + 3, cy + 4, 20, 6, P.wood); R(c, x + 3, cy + 4, 20, 1, P.woodL); R(c, x + 5, cy + 10, 16, 1, P.woodD);
+    R(c, x + 12, cy - 14, 1, 18, P.woodD);
+    R(c, x + 6, cy - 12, 13, 12, P.o); R(c, x + 7, cy - 11, 11, 10, P.sail); R(c, x + 12, cy - 11, 1, 10, P.millD);
+    R(c, x + 13, cy - 17, 5, 3, P.o); R(c, x + 13, cy - 16, 4, 1, '#804098');
     const ft = t - fw;
     if (ft >= 0 && ft < 1600) {
       const p = ft / 1600;
-      [[x + 8, P.gold], [x + 18, P.fizzA], [x + 28, P.fizzB]].forEach(([fx, col], i) => {
-        const fy = y - 10 - p * 20 - i * 3;
+      [[x + 8, P.gold], [x + 20, P.fizzA], [lx + 4, P.fizzB]].forEach(([fx, col], i) => {
+        const fy = cy - 62 - p * 18 - i * 3;
         for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; R(c, fx + Math.cos(a) * p * 9, fy + Math.sin(a) * p * 9, 1, 1, col); }
       });
     }
@@ -374,10 +393,10 @@
    * unknown -- so switching themes never means relearning the map. */
   const MEDIEVAL = {
     name: 'Medieval village',
-    labels: { docks: 'Docks', board: 'Notice board', houses: 'Houses', quay: 'Quay', castle: 'Castle', hall: 'Town Hall' },
+    labels: { docks: 'Docks', board: 'Notice board', houses: 'Houses', quay: 'Quay', castle: 'Harbour', hall: 'Castle' },
     ground: grass, road: path, yard: path, channel: water,
     dock(c, x, y, w) { R(c, x, y, w, 7, P.o); R(c, x + 1, y, w - 2, 6, P.plank); },
-    tree, hall, board, crate, B, scaffold, gate: lock, destination: castle,
+    tree, hall, board, crate, B, scaffold, gate: lock, destination: harbour,
     people: 'medieval', steam: [P.white, P.stoneL]
   };
 
@@ -493,7 +512,7 @@
   };
   const MODERN = {
     name: 'Modern business district',
-    labels: { docks: 'Mailroom', board: 'Whiteboard', houses: 'Offices', quay: 'Loading bay', castle: 'Production', hall: 'Headquarters' },
+    labels: { docks: 'Mailroom', board: 'Whiteboard', houses: 'Offices', quay: 'Loading bay', castle: 'Launch pad', hall: 'Headquarters' },
     ground(c, x0, y0, w, h) {
       for (let y = y0; y < y0 + h; y += 4) R(c, x0, y, w, Math.min(4, y0 + h - y), (y >> 2) % 2 ? M.lawn : M.lawnD);
     },
@@ -526,14 +545,23 @@
         R(c, cx + dx, cy + dy, 1, 1, d > (r - 1) * (r - 1) ? P.o : dx + dy > 2 ? P.leafD : dx + dy < -2 ? P.leafL : P.leaf);
       }
     },
+    /* Headquarters: a glass tower with a gold crown over a colonnaded
+     * podium, flags out front. The lobby doors go dark when the manager
+     * waits on you. */
     hall(c, x, y, st) {
-      R(c, x, y + 14, 32, 8, P.o); R(c, x + 1, y + 15, 30, 6, M.concrete);
-      R(c, x + 6, y - 8, 20, 24, P.o); R(c, x + 7, y - 7, 18, 22, M.glassD);
-      for (let wy = y - 6; wy < y + 13; wy += 3) for (let wx = x + 8; wx < x + 24; wx += 3) R(c, wx, wy, 2, 2, mWin(st));
-      R(c, x + 7, y - 7, 18, 1, M.glassL);
-      R(c, x + 15, y - 12, 1, 5, M.steelD); R(c, x + 15, y - 13, 1, 1, blink(performance.now(), 600) ? P.p0 : P.dark);
-      R(c, x + 12, y + 16, 8, 6, st === 'blocked' ? P.o : M.glassL); R(c, x + 16, y + 16, 1, 6, P.o);
-      R(c, x + 2, y + 16, 3, 3, mWin(st)); R(c, x + 27, y + 16, 3, 3, mWin(st));
+      const x0 = x - 4, gy = y + 22;
+      R(c, x0 + 9, y - 8, 22, 22, P.o); R(c, x0 + 10, y - 7, 20, 20, M.glassD);
+      for (let wy = y - 6; wy < y + 12; wy += 3) for (let wx = x0 + 11; wx < x0 + 29; wx += 3) R(c, wx, wy, 2, 2, mWin(st));
+      for (let wx = x0 + 13; wx < x0 + 29; wx += 6) R(c, wx, y - 7, 1, 20, M.glassL);
+      R(c, x0 + 9, y - 11, 22, 4, P.o); R(c, x0 + 10, y - 10, 20, 2, P.gold);
+      R(c, x0 + 14, y - 13, 12, 2, P.o); R(c, x0 + 15, y - 13, 10, 1, P.gold);
+      R(c, x0 + 19, y - 17, 2, 4, P.gold);
+      R(c, x0, gy - 9, 40, 9, P.o); R(c, x0 + 1, gy - 8, 38, 7, M.concreteL);
+      R(c, x0 + 1, gy - 8, 38, 1, P.gold);
+      for (let k = 3; k < 38; k += 5) R(c, x0 + k, gy - 7, 2, 6, M.concrete);
+      R(c, x0 + 15, gy - 7, 10, 7, P.o); R(c, x0 + 16, gy - 6, 8, 6, st === 'blocked' ? P.o : M.glassL);
+      if (st !== 'blocked') R(c, x0 + 20, gy - 6, 1, 6, P.o);
+      [[x0 - 2, P.gold], [x0 + 40, '#3878e0']].forEach(([fx, col]) => { R(c, fx, gy - 22, 1, 22, M.steelD); R(c, fx + 1, gy - 22, 4, 3, P.o); R(c, fx + 1, gy - 21, 3, 1, col); });
     },
     board(c, x, y, notes) {
       R(c, x + 2, y + 9, 1, 6, M.steelD); R(c, x + 15, y + 9, 1, 6, M.steelD);
@@ -562,21 +590,30 @@
       R(c, x + 2, cy - 4, 2, 4, P.o);
       if (!open) for (let k = 0; k < 14; k += 2) R(c, x + 2, cy + k, 2, 2, (k / 2) % 2 ? P.white : P.p0);
     },
-    /* The production tower; fireworks become a rooftop light show. */
+    /* Launch pad: shipped work lifts off. The engines fire and the sky
+     * lights up when new work arrives. */
     destination(c, x, cy, t, fw) {
-      R(c, x, cy - 48, 36, 48, P.o); R(c, x + 1, cy - 47, 34, 46, M.glassD);
-      for (let wy = cy - 45; wy < cy - 4; wy += 3) for (let wx = x + 3; wx < x + 33; wx += 3) R(c, wx, wy, 2, 2, hash(wx, wy) < 0.7 ? P.lamp : M.glass);
-      R(c, x + 1, cy - 47, 34, 1, M.glassL);
-      R(c, x + 12, cy - 54, 12, 6, P.o); R(c, x + 13, cy - 53, 10, 5, M.steel); R(c, x + 17, cy - 52, 2, 3, P.white);
-      R(c, x + 8, cy - 2, 20, 18, P.o); R(c, x + 9, cy, 18, 15, P.dark);
+      R(c, x, cy - 8, 38, 8, P.o); R(c, x + 1, cy - 7, 36, 6, M.concrete);
+      for (let k = 2; k < 36; k += 6) R(c, x + k, cy - 4, 3, 1, M.dash);
+      R(c, x + 4, cy - 50, 4, 42, P.o); R(c, x + 5, cy - 49, 2, 40, P.red);
+      for (let yy = cy - 46; yy < cy - 8; yy += 6) R(c, x + 8, yy, 6, 1, M.steelD);
+      const rx = x + 16;
+      R(c, rx, cy - 44, 10, 36, P.o); R(c, rx + 1, cy - 42, 8, 33, P.white); R(c, rx + 1, cy - 42, 2, 33, M.concreteL);
+      R(c, rx + 2, cy - 48, 6, 4, P.o); R(c, rx + 3, cy - 47, 4, 4, P.red); R(c, rx + 4, cy - 50, 2, 2, P.red);
+      R(c, rx + 3, cy - 34, 4, 3, P.o); R(c, rx + 4, cy - 33, 2, 1, M.glassL);
+      R(c, rx - 3, cy - 16, 3, 8, P.o); R(c, rx - 2, cy - 15, 2, 6, P.red);
+      R(c, rx + 10, cy - 16, 3, 8, P.o); R(c, rx + 10, cy - 15, 2, 6, P.red);
+      R(c, rx + 2, cy - 18, 6, 1, M.steelD);
       const ft = t - fw;
       if (ft >= 0 && ft < 1600) {
+        for (let k = 0; k < 4; k++) R(c, rx + 2 + k * 2, cy - 8 + (blink(t + k * 60, 80) ? 1 : 0), 2, 3, k % 2 ? P.gold : '#f8f8f8');
         const p = ft / 1600;
-        [[x + 6, P.gold], [x + 18, P.fizzA], [x + 30, P.fizzB]].forEach(([fx, col], i) => {
-          const fy = cy - 60 - p * 18 - i * 3;
+        [[x + 6, P.gold], [x + 21, P.fizzA], [x + 34, P.fizzB]].forEach(([fx, col], i) => {
+          const fy = cy - 58 - p * 18 - i * 3;
           for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; R(c, fx + Math.cos(a) * p * 9, fy + Math.sin(a) * p * 9, 1, 1, col); }
         });
       }
+      R(c, x + 8, cy - 2, 20, 18, P.o); R(c, x + 9, cy, 18, 15, P.dark);
     },
     people: 'modern',
     steam: [P.white, M.concreteL]
@@ -685,7 +722,7 @@
     const locks = Math.max(0, v.pipeline.stops.length - 1);
     const lockStart = roadX + 40;
     const castleX = lockStart + locks * 34 + 6;
-    const W = Math.max(cx0 + vw + 40, castleX + 44);
+    const W = Math.max(cx0 + vw + 40, roadX + 70, castleX + 46);
     const H = canalY + 34;
     return { per, rows, cx0, vw, roadX, hallX, top, lots, quayY, canalY, lockStart, castleX, W, H };
   }
@@ -744,7 +781,7 @@
     T.yard(c, 6, 18, 56, 34);
     T.road(c, 4, 50, cx0 + vw - 4, 6);
     T.road(c, roadX, 50, RD, quayY - 50 + 2);
-    T.yard(c, hallX - 4, 42, 40, 9);
+    T.yard(c, hallX - 8, 42, 48, 9);
     for (let r = 0; r < lay.rows; r++) {
       const left = roadX - lay.per * LW + 2, right = roadX + RD + lay.per * LW - 2;
       T.road(c, left - 1, lay.top + r * LH + 17, right - left + 2, 4);
@@ -752,10 +789,10 @@
     T.channel(c, roadX - 16, canalY, W - roadX + 16, 14, t, 0.6);
     T.dock(c, roadX - 4, quayY + 1, 22);
 
-    for (let x = cx0 + vw + 6; x < W - 14; x += 15) for (let y = 16; y < canalY - 38; y += 16) if (hash(x, y) < 0.55) T.tree(c, x + Math.floor(hash(y, x) * 4), y);
+    for (let x = Math.max(cx0 + vw + 6, hallX + 64); x < W - 14; x += 15) for (let y = 16; y < canalY - 38; y += 16) if (hash(x, y) < 0.55) T.tree(c, x + Math.floor(hash(y, x) * 4), y);
 
     T.hall(c, hallX, 18, v.manager.status);
-    T.board(c, hallX + 36, 26, v.board);
+    T.board(c, hallX + 42, 28, v.board);
     if (v.manager.status !== 'working' && v.manager.status !== 'stopped') {
       person(c, hallX + 26, 30, 'manager:' + v.project, v.manager.status === 'blocked' && blink(t, 200) ? 'wave' : 'stand', { mayor: true });
     }
@@ -871,7 +908,7 @@
     if (!current) return;
     const r = cv.getBoundingClientRect();
     const x = (e.clientX - r.left) / r.width * L.W, y = (e.clientY - r.top) / r.height * L.H;
-    if (x >= L.hallX && x < L.hallX + 32 && y >= 12 && y < 42) return show(current.manager, true);
+    if (x >= L.hallX - 4 && x < L.hallX + 36 && y >= 6 && y < 42) return show(current.manager, true);
     const i = L.lots.findIndex((lot, k) => k < current.houses.length && x >= lot.x && x < lot.x + 16 && y >= lot.y - 4 && y < lot.y + 21);
     if (i >= 0) show(current.houses[i], false);
   });
