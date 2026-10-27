@@ -397,7 +397,7 @@
     ground: grass, road: path, yard: path, channel: water,
     dock(c, x, y, w) { R(c, x, y, w, 7, P.o); R(c, x + 1, y, w - 2, 6, P.plank); },
     tree, hall, board, crate, B, scaffold, gate: lock, destination: harbour,
-    people: 'medieval', steam: [P.white, P.stoneL]
+    people: 'medieval', steam: [P.white, P.stoneL], sign: [P.woodD, P.parch, P.woodD]
   };
 
   const M = {
@@ -616,7 +616,7 @@
       R(c, x + 8, cy - 2, 20, 18, P.o); R(c, x + 9, cy, 18, 15, P.dark);
     },
     people: 'modern',
-    steam: [P.white, M.concreteL]
+    steam: [P.white, M.concreteL], sign: [P.o, P.dark, M.led]
   };
 
   const THEMES = { medieval: MEDIEVAL, modern: MODERN };
@@ -697,6 +697,54 @@
     };
     x = Math.round(x); y = Math.round(y);
     for (let r = 0; r < rows.length; r++) for (let k = 0; k < 8; k++) { const ch = rows[r][k]; if (ch !== '.') R(c, x + k, y + r, 1, 1, map[ch]); }
+  }
+
+  /* ---------- Actions ----------
+   * What an agent is doing right now, acted out with a prop: a thought cloud,
+   * a book, a swinging hammer, a terminal, a magnifying glass, a letter.
+   * Searching and messaging also walk a few steps back and forth. */
+  const wander = (action, t, seed) =>
+    action === 'searching' || action === 'messaging' ? Math.round(Math.sin(t / 520 + (strHash(seed) % 7)) * 3) : 0;
+  function drawAction(c, x, y, action, t) {
+    const up = blink(t, 240);
+    switch (action) {
+      case 'thinking':
+        [[8, -2, 1], [10, -4, 1], [12, -7, 2]].forEach(([dx, dy, sz], k) => {
+          if (blink(t + k * 160, 480) || reduce) { R(c, x + dx - 1, y + dy - 1, sz + 2, sz + 2, P.o); R(c, x + dx, y + dy, sz, sz, P.white); }
+        });
+        break;
+      case 'reading':
+        R(c, x + 1, y + 7, 6, 3, P.o); R(c, x + 2, y + 7, 2, 2, P.white); R(c, x + 4, y + 7, 2, 2, P.parch);
+        break;
+      case 'writing':
+        if (up) { R(c, x + 8, y + 4, 1, 4, P.woodD); R(c, x + 7, y + 3, 3, 2, P.stoneD); }
+        else { R(c, x + 8, y + 7, 3, 1, P.woodD); R(c, x + 10, y + 6, 2, 3, P.stoneD); R(c, x + 12, y + 10, 1, 1, P.gold); }
+        break;
+      case 'running':
+        R(c, x + 8, y + 8, 5, 4, P.o); R(c, x + 9, y + 9, 3, 2, up ? '#58e878' : P.dark);
+        break;
+      case 'searching':
+        R(c, x + 7, y + 1, 4, 4, P.o); R(c, x + 8, y + 2, 2, 2, P.glass); R(c, x + 10, y + 5, 1, 1, P.o); R(c, x + 11, y + 6, 1, 1, P.o);
+        break;
+      case 'messaging':
+        R(c, x + 6, y + 7, 4, 3, P.o); R(c, x + 7, y + 8, 2, 1, P.white); R(c, x + 8, y + 8, 1, 1, P.p0);
+        break;
+    }
+  }
+  const ACTION_ICONS = {
+    thinking: ['.###.', '#####', '.###.', '.....', '#....'],
+    reading: ['##.##', '#.#.#', '#.#.#', '##.##', '.....'],
+    writing: ['###..', '###..', '.#...', '.#...', '.#...'],
+    running: ['#.#.#', '.###.', '##.##', '.###.', '#.#.#'],
+    searching: ['.##..', '#..#.', '.##..', '...#.', '....#'],
+    messaging: ['#####', '##.##', '#.#.#', '#...#', '#####']
+  };
+  /* A small sign over a busy house naming what its own agent is doing. */
+  function actionSign(c, x, y, action) {
+    const icon = ACTION_ICONS[action]; if (!icon) return;
+    const [frame, face, ink] = T.sign;
+    R(c, x, y, 7, 7, frame); R(c, x + 1, y + 1, 5, 5, face);
+    for (let r = 0; r < 5; r++) for (let k = 0; k < 5; k++) if (icon[r][k] === '#') R(c, x + 1 + k, y + 1 + r, 1, 1, ink);
   }
 
   /* ---------- Layout ---------- */
@@ -799,7 +847,9 @@
     // The manager's sub-agents (a modernize coordinator's specialists) work in the plaza.
     (v.manager.subagents || []).slice(0, 4).forEach((sa, k) => {
       const bob = !reduce && blink(t + k * 170, 220) ? -1 : 0;
-      person(c, hallX - 2 + k * 10, 39 + bob, `manager:${v.project}/${sa.description || k}`, 'stand', { accent: subHat(sa) });
+      const seed = `manager:${v.project}/${sa.description || k}`, px = hallX - 2 + k * 10 + (reduce ? 0 : wander(sa.action, t, seed));
+      person(c, px, 39 + bob, seed, 'stand', { accent: subHat(sa) });
+      drawAction(c, px, 39 + bob, sa.action, t + k * 131);
     });
 
     v.backlog.slice(0, 40).forEach((cr, i) => { const s = slotPos(i); T.crate(c, s.x, s.y, cr.kind, cr.priority); });
@@ -828,9 +878,12 @@
       // Anyone waiting on a person is shown first, waving.
       [...subs].sort((a, b) => (b.status === 'blocked') - (a.status === 'blocked')).slice(0, 2).forEach((sa, k) => {
         const bob = !reduce && blink(t + k * 190, 210) ? -1 : 0;
-        const waiting = sa.status === 'blocked';
-        person(c, lot.x + (k ? 9 : -1), lot.y + 12 + bob, `${h.id}/${sa.description || k}`, waiting && bob ? 'wave' : 'stand', { accent: subHat(sa) });
+        const waiting = sa.status === 'blocked', seed = `${h.id}/${sa.description || k}`;
+        const px = lot.x + (k ? 9 : -1) + (reduce ? 0 : wander(sa.action, t, seed)), py = lot.y + 12 + bob;
+        person(c, px, py, seed, waiting && bob ? 'wave' : 'stand', { accent: subHat(sa) });
+        if (!waiting) drawAction(c, px, py, sa.action, t + k * 97);
       });
+      if (st === 'working' && h.action) actionSign(c, lot.x + 4, lot.y - 4, h.action);
       if (subs.length > 2) R(c, lot.x + 16, lot.y + 13, 2, 2, P.gold);
       if (ICONS[st]) bubbles.push([lot.x + 4, lot.y - (st === 'blocked' ? 1 : 3) + (st === 'blocked' && blink(t, 200) ? -1 : 0), st]);
     });
@@ -901,7 +954,8 @@
     document.getElementById('d-line').textContent = house.issue ? `#${house.issue} ${house.issue_title || ''}` : (house.issue_title || 'No issue claimed');
     document.getElementById('d-meta').textContent =
       `Status: ${house.status}${house.priority ? ' · ' + house.priority : ''} · Crew: ${house.crew.join(', ') || '—'}` +
-      ((house.subagents || []).length ? ` · ${current.workflow === 'Temporal' ? 'Agents' : 'Sub-agents'}: ${house.subagents.map(sa => sa.agent_type + (sa.description ? ' (' + sa.description + ')' : '') + (sa.status === 'blocked' ? ' waiting on you' : '')).join(', ')}` : '');
+      ((house.subagents || []).length ? ` · ${current.workflow === 'Temporal' ? 'Agents' : 'Sub-agents'}: ${house.subagents.map(sa => sa.agent_type + (sa.description ? ' (' + sa.description + ')' : '') + (sa.status === 'blocked' ? ' waiting on you' : sa.action ? ' ' + sa.action : '')).join(', ')}` : '') +
+      (house.action ? ` · Now: ${house.action}` : '');
     dialog.hidden = false;
   }
   cv.addEventListener('click', e => {

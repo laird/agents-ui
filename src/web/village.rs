@@ -80,6 +80,53 @@ pub enum HouseStatus {
     Unknown,
 }
 
+/// What an agent is doing this moment, which its villager acts out: a
+/// thought cloud, a book, a hammer, a terminal, a magnifying glass, a letter.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Action {
+    /// Waiting on the model: composing, planning, reading a tool's result.
+    Thinking,
+    Reading,
+    Writing,
+    /// Running commands, tests or builds.
+    Running,
+    /// Searching or fetching from the web or another system.
+    Searching,
+    /// Delegating to or messaging another agent or a person.
+    Messaging,
+}
+
+/// A Claude Code tool's action.
+pub fn tool_action(tool: &str) -> Action {
+    match tool {
+        "Read" | "Grep" | "Glob" | "LS" | "NotebookRead" => Action::Reading,
+        "Edit" | "Write" | "MultiEdit" | "NotebookEdit" => Action::Writing,
+        "WebFetch" | "WebSearch" => Action::Searching,
+        "Task" | "Agent" | "SendMessage" | "SubagentHandback" => Action::Messaging,
+        t if t.starts_with("mcp__") => Action::Searching,
+        _ => Action::Running,
+    }
+}
+
+/// An action guessed from a name such as a Temporal activity type
+/// (`call_llm`, `SendEmail`, `fetchVendorQuotes`). Unrecognised work runs.
+pub fn name_action(name: &str) -> Action {
+    let n = name.to_ascii_lowercase();
+    const WORDS: &[(Action, &[&str])] = &[
+        (Action::Messaging, &["email", "notify", "send", "slack", "message", "post", "signal", "handoff"]),
+        (Action::Searching, &["search", "fetch", "http", "scrape", "browse", "crawl", "lookup", "query"]),
+        (Action::Writing, &["write", "commit", "edit", "create", "update", "save", "patch", "draft"]),
+        (Action::Thinking, &["llm", "model", "chat", "prompt", "complet", "think", "plan", "reason", "generat", "summar", "classif"]),
+        (Action::Reading, &["read", "load", "get", "retriev", "download", "parse", "extract"]),
+    ];
+    WORDS
+        .iter()
+        .find(|(_, words)| words.iter().any(|w| n.contains(w)))
+        .map(|(a, _)| *a)
+        .unwrap_or(Action::Running)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct House {
     /// Stable key: the worktree path, or the role when the path is unknown.
@@ -96,6 +143,9 @@ pub struct House {
     /// Sub-agents the crew's sessions are running right now.
     #[serde(default)]
     pub subagents: Vec<Subagent>,
+    /// What the house's own agent is doing, when known.
+    #[serde(default)]
+    pub action: Option<Action>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -107,6 +157,8 @@ pub struct Subagent {
     /// Set when the source knows it, e.g. a Temporal child waiting on a person.
     #[serde(default)]
     pub status: Option<HouseStatus>,
+    #[serde(default)]
+    pub action: Option<Action>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -276,6 +328,7 @@ fn house_for(id: String, crew: &[&AgentSnapshot], issues: &HashMap<u32, &IssueSn
         priority: found.and_then(|i| priority(i)),
         crew: crew.iter().map(|a| a.role.clone()).collect(),
         subagents: Vec::new(),
+        action: None,
     }
 }
 
@@ -381,6 +434,52 @@ fn modified_within(path: &Path, now: SystemTime, window: Duration) -> bool {
         .is_some_and(|age| age <= window)
 }
 
+/// Bytes read from the end of a transcript to find its latest step.
+const TRANSCRIPT_TAIL: u64 = 64 * 1024;
+
+/// What a Claude Code transcript's agent is doing: the tool its latest turn
+/// called, or thinking while the model composes or reads a tool's result.
+pub fn transcript_action(tail: &str) -> Option<Action> {
+    for line in tail.lines().rev() {
+        let Ok(entry) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        let content = entry.pointer("/message/content").and_then(|c| c.as_array());
+        match entry.get("type").and_then(|t| t.as_str()) {
+            Some("assistant") => {
+                let tool = content
+                    .and_then(|items| items.iter().rev().find(|i| i.get("type").and_then(|t| t.as_str()) == Some("tool_use")))
+                    .and_then(|i| i.get("name"))
+                    .and_then(|n| n.as_str());
+                return Some(tool.map(tool_action).unwrap_or(Action::Thinking));
+            }
+            Some("user") => return Some(Action::Thinking),
+            _ => continue,
+        }
+    }
+    None
+}
+
+fn last_action(transcript: &Path) -> Option<Action> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(transcript).ok()?;
+    let len = file.metadata().ok()?.len();
+    file.seek(SeekFrom::Start(len.saturating_sub(TRANSCRIPT_TAIL))).ok()?;
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf).ok()?;
+    transcript_action(&String::from_utf8_lossy(&buf))
+}
+
+/// The action of the most recent live main session under a Claude project
+/// dir: the agent living in the house itself, not its sub-agents.
+pub fn session_action(project_dir: &Path, now: SystemTime) -> Option<Action> {
+    let newest = std::fs::read_dir(project_dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "jsonl") && modified_within(p, now, SUBAGENT_STALE))
+        .max_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())?;
+    last_action(&newest)
+}
+
 /// Sub-agents running in any recent session under one Claude project dir.
 ///
 /// A sub-agent is running when its `.meta.json` isn't marked `finished` and
@@ -423,7 +522,7 @@ pub fn active_subagents(project_dir: &Path, now: SystemTime) -> Vec<Subagent> {
             if meta.finished || !modified_within(&transcript, now, SUBAGENT_STALE) {
                 continue;
             }
-            found.push(Subagent { agent_type: meta.agent_type, description: meta.description, status: None });
+            found.push(Subagent { agent_type: meta.agent_type, description: meta.description, status: None, action: last_action(&transcript) });
         }
     }
     found
@@ -489,6 +588,9 @@ fn attach_subagents(village: &mut VillageSnapshot, home: &Path, now: SystemTime)
         if house.id.starts_with('/') {
             let subs = scan(&house.id);
             apply_subagents(house, subs);
+            if house.status == HouseStatus::Working {
+                house.action = session_action(&projects.join(claude_project_dir_name(&house.id)), now);
+            }
         }
     }
     if village.workflow.is_none() {
@@ -1037,7 +1139,7 @@ mod tests {
     }
 
     fn sub(agent_type: &str) -> Subagent {
-        Subagent { agent_type: agent_type.to_string(), description: String::new(), status: None }
+        Subagent { agent_type: agent_type.to_string(), description: String::new(), status: None, action: None }
     }
 
     #[test]
@@ -1090,6 +1192,49 @@ mod tests {
         assert_eq!(v.houses[1].status, HouseStatus::Idle);
         assert_eq!(v.workflow.as_deref(), Some("Modernize"));
         std::fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn transcript_action_follows_the_latest_step() {
+        let tool = |name: &str| format!(r#"{{"type":"assistant","message":{{"content":[{{"type":"text","text":"x"}},{{"type":"tool_use","name":"{name}"}}]}}}}"#);
+        let result = r#"{"type":"user","message":{"content":[{"type":"tool_result"}]}}"#;
+        let noise = r#"{"type":"attachment"}"#;
+        assert_eq!(transcript_action(&format!("{}\n{noise}", tool("Edit"))), Some(Action::Writing));
+        assert_eq!(transcript_action(&format!("{}\n{result}", tool("Bash"))), Some(Action::Thinking), "tool done, model's turn");
+        assert_eq!(transcript_action(&tool("Grep")), Some(Action::Reading));
+        assert_eq!(transcript_action(&tool("WebSearch")), Some(Action::Searching));
+        assert_eq!(transcript_action(&tool("Task")), Some(Action::Messaging));
+        assert_eq!(transcript_action(r#"{"type":"assistant","message":{"content":[{"type":"text","text":"plan"}]}}"#), Some(Action::Thinking));
+        // A truncated first line from reading the tail is skipped.
+        assert_eq!(transcript_action(&format!("ol\"}}]}}\n{}", tool("Read"))), Some(Action::Reading));
+        assert_eq!(transcript_action(noise), None);
+    }
+
+    #[test]
+    fn name_action_reads_activity_names() {
+        assert_eq!(name_action("call_llm"), Action::Thinking);
+        assert_eq!(name_action("SendApprovalEmail"), Action::Messaging);
+        assert_eq!(name_action("fetchVendorQuotes"), Action::Searching);
+        assert_eq!(name_action("commit_changes"), Action::Writing);
+        assert_eq!(name_action("load_contract"), Action::Reading);
+        assert_eq!(name_action("run_tests"), Action::Running);
+        assert_eq!(name_action("frobnicate"), Action::Running);
+    }
+
+    #[test]
+    fn sub_agent_actions_come_from_their_transcripts() {
+        let project = temp_project("actions");
+        write_subagent(&project, "s", "a", "Explore", false);
+        std::fs::write(
+            project.join("s").join("subagents").join("agent-a.jsonl"),
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Grep"}]}}"#,
+        )
+        .unwrap();
+        std::fs::write(project.join("s.jsonl"), r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash"}]}}"#).unwrap();
+        let now = SystemTime::now();
+        assert_eq!(active_subagents(&project, now)[0].action, Some(Action::Reading));
+        assert_eq!(session_action(&project, now), Some(Action::Running));
+        std::fs::remove_dir_all(&project).ok();
     }
 
     #[test]

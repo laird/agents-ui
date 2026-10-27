@@ -21,7 +21,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
 
-use super::village::{House, HouseKind, HouseStatus, Note, Pipeline, Stop, Subagent, VillageSnapshot, house_kind};
+use super::village::{Action, House, HouseKind, HouseStatus, Note, Pipeline, Stop, Subagent, VillageSnapshot, house_kind, name_action};
 use crate::transport::ServerTransport;
 
 pub const DEFAULT_HTTP_URL: &str = "http://localhost:7243";
@@ -30,8 +30,19 @@ pub const DEFAULT_HTTP_URL: &str = "http://localhost:7243";
 pub const WAITING_ATTRIBUTE: &str = "AgentStatus";
 const WAITING_VALUES: &[&str] = &["waiting_for_human", "blocked"];
 
-/// Houses described per refresh; the rest show their people but no activity.
-const DESCRIBE_LIMIT: usize = 40;
+/// Workflows described per refresh, houses first; the rest show no activity.
+const DESCRIBE_LIMIT: usize = 60;
+
+/// What a workflow is doing, from its first pending activity, or messaging
+/// while it only waits on children it started.
+fn pending_action(p: Option<&Pending>) -> Option<Action> {
+    let p = p?;
+    match p.activity_types.first() {
+        Some(name) => Some(name_action(name)),
+        None if p.children > 0 => Some(Action::Messaging),
+        None => None,
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TemporalSource {
@@ -62,6 +73,8 @@ impl Workflow {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Pending {
     pub activities: usize,
+    /// Types of the pending activities, e.g. `call_llm`.
+    pub activity_types: Vec<String>,
     /// Activities on a retry after a failure.
     pub retrying: usize,
     pub children: usize,
@@ -157,6 +170,7 @@ pub fn parse_pending(json: &str) -> Option<Pending> {
     let activities = v.get("pendingActivities").and_then(Value::as_array).cloned().unwrap_or_default();
     Some(Pending {
         activities: activities.len(),
+        activity_types: activities.iter().filter_map(|a| str_at(a, &["activityType", "name"])).collect(),
         retrying: activities
             .iter()
             .filter(|a| number(a.get("attempt")) > 1 && a.get("lastFailure").is_some())
@@ -257,6 +271,7 @@ pub fn build_village(
                     agent_type: p.type_name.clone(),
                     description: p.id.clone(),
                     status: Some(if p.waiting() { HouseStatus::Blocked } else { HouseStatus::Working }),
+                    action: if p.waiting() { None } else { pending_action(pending.get(&p.id)) },
                 })
                 .collect();
             let status = if root.waiting() || crew.iter().any(|p| p.waiting()) {
@@ -282,6 +297,7 @@ pub fn build_village(
                 priority: None,
                 crew: vec![root.type_name.clone()],
                 subagents,
+                action: if status == HouseStatus::Working { pending_action(pending.get(&root.id)) } else { None },
             }
         })
         .collect();
@@ -307,8 +323,9 @@ pub fn build_village(
         crew: vec!["workers".to_string()],
         subagents: workers
             .into_iter()
-            .map(|identity| Subagent { agent_type: "worker".to_string(), description: identity, status: Some(HouseStatus::Working) })
+            .map(|identity| Subagent { agent_type: "worker".to_string(), description: identity, status: Some(HouseStatus::Working), action: None })
             .collect(),
+        action: None,
     };
 
     let top_closed = closed.iter().filter(|w| w.parent.is_none());
@@ -379,11 +396,13 @@ pub async fn read_village(transport: &ServerTransport, source: &TemporalSource) 
     };
     let running = parse_workflows(&running_json);
 
+    // Houses first, then their people, until the limit.
     let mut pending = HashMap::new();
-    for root in running.iter().filter(|w| w.parent.is_none()).take(DESCRIBE_LIMIT) {
-        let url = format!("{base}/workflows/{}", encode(&root.id));
+    let order = running.iter().filter(|w| w.parent.is_none()).chain(running.iter().filter(|w| w.parent.is_some()));
+    for wf in order.take(DESCRIBE_LIMIT) {
+        let url = format!("{base}/workflows/{}", encode(&wf.id));
         if let Some(p) = get(transport, &url).await.as_deref().and_then(parse_pending) {
-            pending.insert(root.id.clone(), p);
+            pending.insert(wf.id.clone(), p);
         }
     }
 
@@ -451,7 +470,7 @@ mod tests {
                 {"attempt":"4","lastFailure":{"message":"429"}}],"pendingChildren":[{}]}"#,
         )
         .unwrap();
-        assert_eq!(p, Pending { activities: 2, retrying: 1, children: 1 });
+        assert_eq!((p.activities, p.retrying, p.children), (2, 1, 1));
         assert_eq!(parse_pending("{}").unwrap(), Pending::default());
         assert_eq!(parse_pollers(r#"{"pollers":[{"identity":"w1@host"}]}"#).unwrap(), vec!["w1@host"]);
         assert_eq!(parse_pollers("{}").unwrap(), Vec::<String>::new());
@@ -497,7 +516,7 @@ mod tests {
     #[test]
     fn retries_stall_and_unserved_queues_stop() {
         let mut pending = HashMap::new();
-        pending.insert("w".to_string(), Pending { activities: 1, retrying: 1, children: 0 });
+        pending.insert("w".to_string(), Pending { activities: 1, retrying: 1, ..Pending::default() });
         let v = build_village(&src(), &[wf("w", "Workstream", None, None)], &pending, &HashMap::new(), &[]);
         assert_eq!(v.houses[0].status, HouseStatus::Stalled);
 
@@ -522,6 +541,18 @@ mod tests {
         assert_eq!(v.pipeline.stops[0].issues.len(), 1, "only top-level work ships");
         assert_eq!(v.board.len(), 1);
         assert_eq!(v.board[0].label, "failed");
+    }
+
+    #[test]
+    fn pending_activities_set_actions() {
+        let p = parse_pending(r#"{"pendingActivities":[{"activityType":{"name":"call_llm"},"attempt":1}]}"#).unwrap();
+        assert_eq!(p.activity_types, vec!["call_llm"]);
+        let mut pending = HashMap::new();
+        pending.insert("w".to_string(), p);
+        pending.insert("w/c".to_string(), Pending { activities: 1, activity_types: vec!["send_email".into()], ..Pending::default() });
+        let v = build_village(&src(), &[wf("w", "Workstream", None, None), wf("w/c", "Notifier", Some("w"), Some("w"))], &pending, &HashMap::new(), &[]);
+        assert_eq!(v.houses[0].action, Some(Action::Thinking));
+        assert_eq!(v.houses[0].subagents[0].action, Some(Action::Messaging));
     }
 
     #[test]
