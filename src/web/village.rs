@@ -8,13 +8,20 @@
 //! pipeline stop (the sentinel's green ref, then each `.autocoder.json`
 //! environment) to the castle.
 //!
-//! Everything here is a pure function of a `SwarmSnapshot`, its issues, and a
-//! `Pipeline` read from git, so the renderer never has to infer anything.
+//! A session that spawns sub-agents (Claude Code's Task tool, or a modernize
+//! coordinator dispatching its architect/coder/tester/security/documentation
+//! specialists) is busy for as long as any of them runs. Claude Code records
+//! each one under `~/.claude/projects/<cwd>/<session>/subagents/`, which is
+//! where the village counts them.
+//!
+//! Everything here is a pure function of a `SwarmSnapshot`, its issues, a
+//! `Pipeline` read from git, and the sub-agents on disk, so the renderer never
+//! has to infer anything.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
@@ -29,6 +36,13 @@ const HISTORY_DEPTH: usize = 400;
 
 /// Delivered crates kept for the castle; older ones only count.
 const DELIVERED_KEEP: usize = 12;
+
+/// A sub-agent whose transcript hasn't moved for this long is treated as gone
+/// (its session crashed or was killed before it could mark it finished).
+const SUBAGENT_STALE: Duration = Duration::from_secs(10 * 60);
+
+/// Session directories untouched for this long aren't scanned for sub-agents.
+const SESSION_STALE: Duration = Duration::from_secs(2 * 60 * 60);
 
 /// What a house is built as, from the labels on the issue its crew is working.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -79,6 +93,16 @@ pub struct House {
     pub priority: Option<String>,
     /// Agents living in this house (one session, one task).
     pub crew: Vec<String>,
+    /// Sub-agents the crew's sessions are running right now.
+    #[serde(default)]
+    pub subagents: Vec<Subagent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Subagent {
+    /// Claude Code agent type, e.g. `Explore` or `modernize:coder`.
+    pub agent_type: String,
+    pub description: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -120,6 +144,9 @@ pub struct Pipeline {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct VillageSnapshot {
     pub project: String,
+    /// `Autocoder` or `Modernize`: from the swarm, or inferred from a
+    /// `modernize:*` sub-agent.
+    pub workflow: Option<String>,
     pub repo_path: String,
     pub manager: House,
     pub houses: Vec<House>,
@@ -244,6 +271,7 @@ fn house_for(id: String, crew: &[&AgentSnapshot], issues: &HashMap<u32, &IssueSn
             .or_else(|| crew.iter().find_map(|a| a.current_issue_title.clone())),
         priority: found.and_then(|i| priority(i)),
         crew: crew.iter().map(|a| a.role.clone()).collect(),
+        subagents: Vec::new(),
     }
 }
 
@@ -315,6 +343,7 @@ pub fn build(swarm: &SwarmSnapshot, issues: &[IssueSnapshot], pipeline: Pipeline
 
     VillageSnapshot {
         project: swarm.project_name.clone(),
+        workflow: swarm.workflow.clone(),
         repo_path: swarm.repo_path.clone(),
         manager: house_for(
             "manager".to_string(),
@@ -325,6 +354,139 @@ pub fn build(swarm: &SwarmSnapshot, issues: &[IssueSnapshot], pipeline: Pipeline
         backlog,
         board,
         pipeline,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Sub-agents from Claude Code's transcripts
+// ---------------------------------------------------------------------------
+
+/// Claude Code's per-project directory name: every character that isn't
+/// ASCII alphanumeric becomes `-` (`/home/u/repo-wt-1` → `-home-u-repo-wt-1`).
+pub fn claude_project_dir_name(cwd: &str) -> String {
+    cwd.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
+}
+
+fn modified_within(path: &Path, now: SystemTime, window: Duration) -> bool {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| now.duration_since(t).ok().or(Some(Duration::ZERO)))
+        .is_some_and(|age| age <= window)
+}
+
+/// Sub-agents running in any recent session under one Claude project dir.
+///
+/// A sub-agent is running when its `.meta.json` isn't marked `finished` and
+/// its transcript moved within `SUBAGENT_STALE`.
+pub fn active_subagents(project_dir: &Path, now: SystemTime) -> Vec<Subagent> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Meta {
+        #[serde(default)]
+        agent_type: String,
+        #[serde(default)]
+        description: String,
+        #[serde(default)]
+        finished: bool,
+    }
+    let Ok(sessions) = std::fs::read_dir(project_dir) else {
+        return Vec::new();
+    };
+    let mut found = Vec::new();
+    for session in sessions.flatten() {
+        let dir = session.path().join("subagents");
+        if !session.path().is_dir() || !modified_within(&session.path(), now, SESSION_STALE) {
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        let mut metas: Vec<PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.to_string_lossy().ends_with(".meta.json"))
+            .collect();
+        metas.sort();
+        for meta_path in metas {
+            let Some(meta) = std::fs::read_to_string(&meta_path)
+                .ok()
+                .and_then(|s| serde_json::from_str::<Meta>(&s).ok())
+            else {
+                continue;
+            };
+            let transcript = PathBuf::from(meta_path.to_string_lossy().replace(".meta.json", ".jsonl"));
+            if meta.finished || !modified_within(&transcript, now, SUBAGENT_STALE) {
+                continue;
+            }
+            found.push(Subagent { agent_type: meta.agent_type, description: meta.description });
+        }
+    }
+    found
+}
+
+/// The house a specialist sub-agent builds when its session has no issue.
+fn specialist_kind(agent_type: &str) -> Option<HouseKind> {
+    let t = agent_type.to_ascii_lowercase();
+    let role = t.rsplit(':').next().unwrap_or(&t);
+    [
+        ("architect", HouseKind::Research),
+        ("security", HouseKind::Security),
+        ("test", HouseKind::Tests),
+        ("doc", HouseKind::Docs),
+        ("coder", HouseKind::Feature),
+    ]
+    .iter()
+    .find(|(name, _)| role.contains(name))
+    .map(|(_, kind)| *kind)
+}
+
+/// Move a house's sub-agents in: any running sub-agent makes the house busy,
+/// and with no issue of its own the house takes its first specialist's shape.
+pub fn apply_subagents(house: &mut House, subagents: Vec<Subagent>) {
+    if subagents.is_empty() {
+        return;
+    }
+    if matches!(
+        house.status,
+        HouseStatus::Idle | HouseStatus::Done | HouseStatus::Unknown | HouseStatus::Stalled
+    ) {
+        house.status = HouseStatus::Working;
+    }
+    if house.issue.is_none() {
+        house.kind = subagents
+            .iter()
+            .find_map(|s| specialist_kind(&s.agent_type))
+            .unwrap_or(HouseKind::Workshop);
+    }
+    house.subagents = subagents;
+}
+
+fn infer_workflow(village: &VillageSnapshot) -> Option<String> {
+    let modernize = std::iter::once(&village.manager)
+        .chain(village.houses.iter())
+        .flat_map(|h| h.subagents.iter())
+        .any(|s| s.agent_type.to_ascii_lowercase().starts_with("modernize"));
+    modernize.then(|| "Modernize".to_string())
+}
+
+/// Attach running sub-agents to the hall and every house. Reads the local
+/// `~/.claude`, so it is skipped when agents run on a remote `--server`.
+fn attach_subagents(village: &mut VillageSnapshot, home: &Path, now: SystemTime) {
+    let projects = home.join(".claude").join("projects");
+    let scan = |cwd: &str| active_subagents(&projects.join(claude_project_dir_name(cwd)), now);
+    if !village.repo_path.is_empty() {
+        let subs = scan(&village.repo_path);
+        apply_subagents(&mut village.manager, subs);
+    }
+    for house in &mut village.houses {
+        if house.id.starts_with('/') {
+            let subs = scan(&house.id);
+            apply_subagents(house, subs);
+        }
+    }
+    if village.workflow.is_none() {
+        village.workflow = infer_workflow(village);
     }
 }
 
@@ -422,12 +584,23 @@ async fn git_lines(transport: &ServerTransport, repo: &Path, args: &[&str]) -> O
     })
 }
 
+/// The integration branch: origin's default, or whichever of `main` and
+/// `master` exists when the clone has no `origin/HEAD`.
 async fn integration_branch(transport: &ServerTransport, repo: &Path) -> String {
-    git_lines(transport, repo, &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
+    if let Some(branch) = git_lines(transport, repo, &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
         .await
         .and_then(|l| l.first().cloned())
         .and_then(|r| r.strip_prefix("origin/").map(str::to_string))
-        .unwrap_or_else(|| "main".to_string())
+    {
+        return branch;
+    }
+    for candidate in ["main", "master"] {
+        let rev = format!("refs/remotes/origin/{candidate}");
+        if git_lines(transport, repo, &["rev-parse", "--verify", "--quiet", &rev]).await.is_some() {
+            return candidate.to_string();
+        }
+    }
+    "main".to_string()
 }
 
 /// Read where pushed work is in the pipeline. Uses local remote-tracking
@@ -533,7 +706,13 @@ impl VillageCache {
                 }
             };
             let issues = if swarm.issues.is_empty() { &extras.issues } else { &swarm.issues };
-            out.push(build(swarm, issues, extras.pipeline.clone()));
+            let mut village = build(swarm, issues, extras.pipeline.clone());
+            if transport.server().is_none()
+                && let Some(home) = dirs::home_dir()
+            {
+                attach_subagents(&mut village, &home, SystemTime::now());
+            }
+            out.push(village);
         }
         out
     }
@@ -772,6 +951,102 @@ mod tests {
         let (quay, placed) = place_tips(&tips, &names, &stops);
         assert_eq!(quay, vec![7, 8], "no green ref: nothing passes the sentinel");
         assert!(placed.iter().all(|s| s.issues.is_empty()));
+    }
+
+    fn temp_project(name: &str) -> PathBuf {
+        let nanos = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("agents-ui-village-{name}-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write_subagent(project: &Path, session: &str, id: &str, agent_type: &str, finished: bool) {
+        let dir = project.join(session).join("subagents");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(format!("agent-{id}.meta.json")),
+            format!(r#"{{"agentType":"{agent_type}","description":"do {id}","finished":{finished}}}"#),
+        )
+        .unwrap();
+        std::fs::write(dir.join(format!("agent-{id}.jsonl")), "{}\n").unwrap();
+    }
+
+    #[test]
+    fn claude_project_dir_name_replaces_non_alphanumerics() {
+        assert_eq!(claude_project_dir_name("/home/user/agents-ui"), "-home-user-agents-ui");
+        assert_eq!(claude_project_dir_name("/src/my.repo-wt-2"), "-src-my-repo-wt-2");
+    }
+
+    #[test]
+    fn active_subagents_skips_finished_and_stale_ones() {
+        let project = temp_project("subagents");
+        write_subagent(&project, "s1", "a", "modernize:coder", false);
+        write_subagent(&project, "s1", "b", "Explore", true);
+        write_subagent(&project, "s2", "c", "modernize:tester", false);
+        let now = SystemTime::now();
+        let mut found: Vec<String> = active_subagents(&project, now).into_iter().map(|s| s.agent_type).collect();
+        found.sort();
+        assert_eq!(found, vec!["modernize:coder", "modernize:tester"]);
+        // An hour later every transcript is stale, so nothing is running.
+        assert!(active_subagents(&project, now + Duration::from_secs(3600)).is_empty());
+        assert!(active_subagents(&project.join("missing"), now).is_empty());
+        std::fs::remove_dir_all(&project).ok();
+    }
+
+    fn sub(agent_type: &str) -> Subagent {
+        Subagent { agent_type: agent_type.to_string(), description: String::new() }
+    }
+
+    #[test]
+    fn subagents_make_an_idle_house_busy_and_shape_it() {
+        let v = build(&swarm(vec![agent("worker-1", "Idle", "/wt1")]), &[], Pipeline::default());
+        let mut house = v.houses[0].clone();
+        apply_subagents(&mut house, vec![sub("modernize:security"), sub("modernize:coder")]);
+        assert_eq!(house.status, HouseStatus::Working);
+        assert_eq!(house.kind, HouseKind::Security);
+        assert_eq!(house.subagents.len(), 2);
+
+        let mut generic = v.houses[0].clone();
+        apply_subagents(&mut generic, vec![sub("Explore")]);
+        assert_eq!(generic.kind, HouseKind::Workshop);
+    }
+
+    #[test]
+    fn subagents_keep_blocked_and_issue_shapes() {
+        let mut a = agent("worker-1", "Working #5", "/wt1");
+        a.waiting_for_input = true;
+        let v = build(&swarm(vec![a]), &[issue(5, &["bug"])], Pipeline::default());
+        let mut house = v.houses[0].clone();
+        apply_subagents(&mut house, vec![sub("modernize:architect")]);
+        assert_eq!(house.status, HouseStatus::Blocked, "a person is still needed");
+        assert_eq!(house.kind, HouseKind::Bug, "the issue decides the shape");
+    }
+
+    #[test]
+    fn specialists_map_to_buildings() {
+        assert_eq!(specialist_kind("modernize:architect"), Some(HouseKind::Research));
+        assert_eq!(specialist_kind("modernize:tester"), Some(HouseKind::Tests));
+        assert_eq!(specialist_kind("modernize:documentation"), Some(HouseKind::Docs));
+        assert_eq!(specialist_kind("general-purpose"), None);
+    }
+
+    #[test]
+    fn attach_subagents_finds_sessions_by_worktree_and_infers_modernize() {
+        let home = temp_project("home");
+        let projects = home.join(".claude").join("projects");
+        write_subagent(&projects.join(claude_project_dir_name("/repos/proj")), "s", "m", "modernize:architect", false);
+        write_subagent(&projects.join(claude_project_dir_name("/wt1")), "s", "w", "Explore", false);
+        let mut v = build(
+            &swarm(vec![agent("worker-1", "Idle", "/wt1"), agent("worker-2", "Idle", "/wt2")]),
+            &[],
+            Pipeline::default(),
+        );
+        attach_subagents(&mut v, &home, SystemTime::now());
+        assert_eq!(v.manager.subagents.len(), 1);
+        assert_eq!(v.houses[0].status, HouseStatus::Working);
+        assert_eq!(v.houses[1].status, HouseStatus::Idle);
+        assert_eq!(v.workflow.as_deref(), Some("Modernize"));
+        std::fs::remove_dir_all(&home).ok();
     }
 
     #[test]

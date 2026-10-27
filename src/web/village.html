@@ -54,7 +54,7 @@
 </head>
 <body>
   <div class="bar">
-    <div class="title">Worktree Hollow <select id="pick" aria-label="Village" hidden></select> <a href="/">Dashboard</a></div>
+    <div class="title">Worktree Hollow <span id="workflow" class="status"></span> <select id="pick" aria-label="Village" hidden></select> <a href="/">Dashboard</a></div>
     <div class="status" id="status" aria-live="polite">Connecting…</div>
   </div>
   <div class="win stage">
@@ -96,6 +96,13 @@
   const NOTECOL = { 'needs-design': '#f8c800', 'needs-clarification': '#d0c0f8', 'needs-approval': '#e89890', 'too-complex': '#b02010', 'future': '#8088a8', 'proposal': '#c0a8f0' };
   const STOPCOL = ['#38c848', '#f8d040', '#f8f8f8', '#4868e8', '#e070d0'];
   const HATS = ['#d07040', '#586078', '#4890e0', '#d860a0', '#48a878', '#a8b0c0'];
+  /* A sub-agent's hat matches the building its specialty would build. */
+  const SPECIALTIES = [['architect', 'research'], ['security', 'security'], ['test', 'tests'], ['doc', 'docs'], ['coder', 'feature']];
+  const subHat = s => {
+    const role = s.agent_type.toLowerCase().split(':').pop();
+    const hit = SPECIALTIES.find(([name]) => role.includes(name));
+    return hit ? KINDCOL[hit[1]] : P.white;
+  };
 
   const R = (c, x, y, w, h, col) => { c.fillStyle = col; c.fillRect(Math.round(x), Math.round(y), w, h); };
   function hash(x, y) {
@@ -468,6 +475,11 @@
     if (v.manager.status !== 'working' && v.manager.status !== 'stopped') {
       villager(c, hallX + 26, 30, MAYOR, HATS[0], v.manager.status === 'blocked' && blink(t, 200) ? WAVE : VILLAGER);
     }
+    // The manager's sub-agents (a modernize coordinator's specialists) work in the plaza.
+    (v.manager.subagents || []).slice(0, 4).forEach((sa, k) => {
+      const bob = !reduce && blink(t + k * 170, 220) ? -1 : 0;
+      villager(c, hallX - 2 + k * 10, 39 + bob, WORKER, subHat(sa));
+    });
 
     v.backlog.slice(0, 40).forEach((cr, i) => { const s = slotPos(i); crate(c, s.x, s.y, cr.kind, cr.priority); });
 
@@ -490,6 +502,14 @@
       }
       if (h.crew.length > 1 && st !== 'working') villager(c, lot.x + 12, lot.y + 11, WORKER, HATS[(i + 3) % HATS.length]);
       if (h.crew.length > 1 && st === 'working' && !reduce) puffs(c, lot.x + 3, lot.y - 3, tt + 700, P.white, P.stoneL);
+      // Sub-agents keep the house busy: they work out front, two at most shown.
+      const subs = h.subagents || [];
+      if (subs.length && !reduce) puffs(c, lot.x + 3, lot.y - 3, tt + 400, P.white, P.stoneL);
+      subs.slice(0, 2).forEach((sa, k) => {
+        const bob = !reduce && blink(t + k * 190, 210) ? -1 : 0;
+        villager(c, lot.x + (k ? 9 : -1), lot.y + 12 + bob, WORKER, subHat(sa));
+      });
+      if (subs.length > 2) R(c, lot.x + 16, lot.y + 13, 2, 2, P.gold);
       if (ICONS[st]) bubbles.push([lot.x + 4, lot.y - (st === 'blocked' ? 1 : 3) + (st === 'blocked' && blink(t, 200) ? -1 : 0), st]);
     });
 
@@ -525,6 +545,7 @@
       ['Docks', 'backlog', v.backlog.length],
       ['Notice board', 'blocked · proposals', v.board.length],
       ['Houses', `${working} of ${v.houses.length} working`, v.houses.filter(h => h.issue).length],
+      ['Sub-agents', 'running in sessions', [v.manager, ...v.houses].reduce((n, h) => n + (h.subagents || []).length, 0)],
       ['Quay', `pushed to ${v.pipeline.integration || 'integration'}`, v.pipeline.quay.length],
       ...stops.map((s, i) => [i === stops.length - 1 ? `Castle · ${s.name}` : s.name, i === 0 ? `sentinel: ${v.pipeline.sentinel}` : 'environment', s.issues.length])
     ];
@@ -539,7 +560,8 @@
     document.getElementById('d-title').textContent = isManager ? 'Town Hall · manager' : `${house.role} · ${house.kind}`;
     document.getElementById('d-line').textContent = house.issue ? `#${house.issue} ${house.issue_title || ''}` : 'No issue claimed';
     document.getElementById('d-meta').textContent =
-      `Status: ${house.status}${house.priority ? ' · ' + house.priority : ''} · Crew: ${house.crew.join(', ') || '—'}`;
+      `Status: ${house.status}${house.priority ? ' · ' + house.priority : ''} · Crew: ${house.crew.join(', ') || '—'}` +
+      ((house.subagents || []).length ? ` · Sub-agents: ${house.subagents.map(sa => sa.agent_type + (sa.description ? ' (' + sa.description + ')' : '')).join(', ')}` : '');
     dialog.hidden = false;
   }
   cv.addEventListener('click', e => {
@@ -571,6 +593,7 @@
     if (lastDelivered !== null && current && current.project === v.project && delivered !== lastDelivered && delivered) fireworks = t;
     lastDelivered = delivered;
     current = v; L = lay;
+    document.getElementById('workflow').textContent = v.workflow ? `· ${v.workflow} swarm` : '';
     if (cv.width !== L.W || cv.height !== L.H) { cv.width = L.W; cv.height = L.H; }
     fit(); renderFlow(v);
     if (reduce) draw(0);
