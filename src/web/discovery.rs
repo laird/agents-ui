@@ -57,7 +57,15 @@ async fn collect_swarms(
     transport: &ServerTransport,
     health: &mut HealthMap,
 ) -> anyhow::Result<Vec<SwarmSnapshot>> {
-    let session_names = tmux_session::discover_agent_sessions(transport).await?;
+    // No tmux at all (a container watching only Temporal) is not an error
+    // worth a warning every poll: there are simply no tmux swarms.
+    let session_names = match tmux_session::discover_agent_sessions(transport).await {
+        Ok(names) => names,
+        Err(e) => {
+            tracing::debug!("No tmux swarms: {e:#}");
+            Vec::new()
+        }
+    };
 
     let mut swarms = Vec::new();
     for session_name in &session_names {

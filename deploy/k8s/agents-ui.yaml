@@ -1,0 +1,67 @@
+# A read-only village dashboard for the Temporal namespaces in a cluster.
+#
+#   kubectl apply -n agents -f deploy/k8s/agents-ui.yaml
+#   kubectl port-forward -n agents svc/agents-ui 7878:80
+#   open http://localhost:7878/village
+#
+# Set the image to wherever you pushed `docker build -t ... .`, and the
+# --temporal namespaces and --temporal-url to your Temporal frontend's HTTP
+# port (7243 unless frontend.httpPort says otherwise).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agents-ui
+  labels: { app: agents-ui }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: agents-ui }
+  template:
+    metadata:
+      labels: { app: agents-ui }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: agents-ui
+          image: ghcr.io/laird/agents-ui:latest
+          # The image's entrypoint already serves read-only on 0.0.0.0:7878.
+          args:
+            - --temporal
+            - default
+            - --temporal-url
+            - http://temporal-frontend.temporal.svc.cluster.local:7243
+          ports:
+            - name: http
+              containerPort: 7878
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 500m, memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: home, mountPath: /home/agents }
+      volumes:
+        - name: home
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agents-ui
+  labels: { app: agents-ui }
+spec:
+  selector: { app: agents-ui }
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

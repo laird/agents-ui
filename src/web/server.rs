@@ -1074,8 +1074,21 @@ fn find_agent<'a>(
 
 /// Start the web server on the given port, sharing `state` with the TUI app.
 /// This function runs until the server shuts down or an error occurs.
-pub async fn run(port: u16, state: WebServerState) -> Result<()> {
+/// Refuse every request that could change something: launching, stopping,
+/// typing into panes. For a dashboard other people can reach.
+async fn reject_writes(req: axum::extract::Request, next: axum::middleware::Next) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if req.method() == axum::http::Method::GET || req.method() == axum::http::Method::HEAD {
+        return next.run(req).await;
+    }
+    (StatusCode::FORBIDDEN, Json(json!({ "error": "this dashboard is read-only (--read-only)" }))).into_response()
+}
+
+/// Serve the dashboard on `addr`. With `read_only`, only GET and HEAD get
+/// through, so the dashboard can be shared without handing out control.
+pub async fn run(addr: SocketAddr, read_only: bool, state: WebServerState) -> Result<()> {
     let app = Router::new()
+        .route("/healthz", get(|| async { "ok" }))
         .route("/", get(index_handler))
         .route("/village", get(village_handler))
         .route("/api/village", get(api_village_handler))
@@ -1115,8 +1128,18 @@ pub async fn run(port: u16, state: WebServerState) -> Result<()> {
             get(api_pane_stream_handler),
         )
         .with_state(state);
+    let app = if read_only {
+        app.layer(axum::middleware::from_fn(reject_writes))
+    } else {
+        app
+    };
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    if !addr.ip().is_loopback() && !read_only {
+        tracing::warn!(
+            "Web UI is reachable from other machines and accepts control requests; add --read-only for a shared view"
+        );
+        eprintln!("agents-tui: warning: {addr} is reachable from other machines and is not --read-only");
+    }
     tracing::info!("Web UI listening on http://{addr}");
     eprintln!("agents-tui: web UI available at http://{addr}");
 
@@ -1229,6 +1252,20 @@ mod tests {
         let headers = resp.headers();
         let content_type = headers.get("content-type").unwrap().to_str().unwrap();
         assert!(content_type.contains("text/html"));
+    }
+
+    #[tokio::test]
+    async fn read_only_refuses_everything_but_reads() {
+        let app = make_app(make_web_state(new_shared_state())).layer(axum::middleware::from_fn(reject_writes));
+        let post = Request::builder()
+            .method("POST")
+            .uri("/api/swarms")
+            .header("content-type", "application/json")
+            .body(Body::from("{}"))
+            .unwrap();
+        assert_eq!(app.clone().oneshot(post).await.unwrap().status(), StatusCode::FORBIDDEN);
+        let get = Request::builder().uri("/api/village").body(Body::empty()).unwrap();
+        assert_eq!(app.oneshot(get).await.unwrap().status(), StatusCode::OK);
     }
 
     #[tokio::test]

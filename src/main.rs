@@ -34,6 +34,10 @@ struct CliOptions {
     temporal: Vec<String>,
     /// Temporal frontend HTTP API (`--temporal-url`).
     temporal_url: Option<String>,
+    /// Address the web UI listens on (`--web-bind`); loopback by default.
+    web_bind: Option<std::net::IpAddr>,
+    /// Refuse every request that would change something (`--read-only`).
+    read_only: bool,
 }
 
 fn parse_cli_options<I, S>(args: I) -> Result<CliOptions>
@@ -51,6 +55,8 @@ where
     let mut headless = false;
     let mut temporal = Vec::new();
     let mut temporal_url = None;
+    let mut web_bind = None;
+    let mut read_only = false;
 
     let mut iter = args.into_iter().skip(1);
     while let Some(arg) = iter.next() {
@@ -110,6 +116,22 @@ where
             value if value.starts_with("--temporal=") => {
                 temporal.push(value.trim_start_matches("--temporal=").to_string());
             }
+            "--read-only" => read_only = true,
+            "--web-bind" => {
+                let Some(value) = iter.next() else {
+                    anyhow::bail!("--web-bind requires an address, e.g. 0.0.0.0");
+                };
+                let raw = value.as_ref();
+                web_bind = Some(raw.parse().map_err(|_| {
+                    anyhow::anyhow!("--web-bind value '{raw}' is not an IP address")
+                })?);
+            }
+            value if value.starts_with("--web-bind=") => {
+                let raw = value.trim_start_matches("--web-bind=");
+                web_bind = Some(raw.parse().map_err(|_| {
+                    anyhow::anyhow!("--web-bind value '{raw}' is not an IP address")
+                })?);
+            }
             "--temporal-url" => {
                 let Some(value) = iter.next() else {
                     anyhow::bail!("--temporal-url requires a URL, e.g. http://localhost:7243");
@@ -152,7 +174,13 @@ where
         web_port = Some(web::server::DEFAULT_PORT);
     }
 
-    Ok(CliOptions { agent_type, server, web_port, headless, temporal, temporal_url })
+    Ok(CliOptions { agent_type, server, web_port, headless, temporal, temporal_url, web_bind, read_only })
+}
+
+/// Where the web UI listens: loopback unless `--web-bind` says otherwise.
+fn web_addr(cli: &CliOptions, port: u16) -> std::net::SocketAddr {
+    let ip = cli.web_bind.unwrap_or(std::net::IpAddr::from([127, 0, 0, 1]));
+    std::net::SocketAddr::new(ip, port)
 }
 
 /// The village cache, with a village per `--temporal` namespace.
@@ -286,8 +314,9 @@ async fn main() -> Result<()> {
             transport,
             village: village_cache(&cli),
         };
+        let (addr, read_only) = (web_addr(&cli, port), cli.read_only);
         tokio::spawn(async move {
-            if let Err(e) = web::server::run(port, web_server_state).await {
+            if let Err(e) = web::server::run(addr, read_only, web_server_state).await {
                 tracing::error!("Web server exited with error: {e:#}");
             }
         });
@@ -349,12 +378,12 @@ async fn run_headless(cli: &CliOptions) -> Result<()> {
 
     // Unlike the TUI path, this awaits the server instead of detaching it --
     // the process has nothing else to keep it alive.
-    web::server::run(port, state).await
+    web::server::run(web_addr(cli, port), cli.read_only, state).await
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{CliOptions, parse_cli_options, select_initial_agent_type};
+    use super::{CliOptions, parse_cli_options, select_initial_agent_type, web_addr};
     use crate::model::swarm::AgentType;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -382,6 +411,8 @@ mod tests {
                 headless: false,
                 temporal: Vec::new(),
                 temporal_url: None,
+                web_bind: None,
+                read_only: false,
             }
         );
     }
@@ -393,6 +424,16 @@ mod tests {
         assert_eq!(cli.temporal_url.as_deref(), Some("http://t:7243"));
         assert_eq!(cli.web_port, Some(crate::web::server::DEFAULT_PORT));
         assert!(parse_cli_options(["agents-tui", "--temporal"]).is_err());
+    }
+
+    #[test]
+    fn web_bind_and_read_only() {
+        let cli = parse_cli_options(["agents-tui", "--headless", "--web-bind", "0.0.0.0", "--read-only"]).unwrap();
+        assert_eq!(web_addr(&cli, 7878).to_string(), "0.0.0.0:7878");
+        assert!(cli.read_only);
+        let local = parse_cli_options(["agents-tui", "--web"]).unwrap();
+        assert_eq!(web_addr(&local, 7878).to_string(), "127.0.0.1:7878");
+        assert!(parse_cli_options(["agents-tui", "--web-bind", "nope"]).is_err());
     }
 
     #[test]
@@ -449,6 +490,8 @@ mod tests {
                 headless: false,
                 temporal: Vec::new(),
                 temporal_url: None,
+                web_bind: None,
+                read_only: false,
             }
         );
 
@@ -462,6 +505,8 @@ mod tests {
                 headless: false,
                 temporal: Vec::new(),
                 temporal_url: None,
+                web_bind: None,
+                read_only: false,
             }
         );
     }
