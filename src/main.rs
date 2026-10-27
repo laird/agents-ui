@@ -241,6 +241,7 @@ async fn main() -> Result<()> {
             swarms: shared.clone(),
             agents_dir,
             transport,
+            village: Default::default(),
         };
         tokio::spawn(async move {
             if let Err(e) = web::server::run(port, web_server_state).await {
@@ -300,6 +301,7 @@ async fn run_headless(cli: &CliOptions) -> Result<()> {
         swarms: shared,
         agents_dir: crate::scripts::launcher::resolve_agents_dir(),
         transport: ServerTransport::new(cli.server.clone()),
+        village: Default::default(),
     };
 
     // Unlike the TUI path, this awaits the server instead of detaching it --

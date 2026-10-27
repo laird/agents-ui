@@ -30,6 +30,7 @@ Tests are inline `#[cfg(test)]` modules in each source file:
 - `src/model/swarm.rs` — Agent counting, lookups, state queries, type methods
 - `src/config/persistence.rs` — TOML save/load round-trips, listing, missing files
 - `src/app.rs` — Key-to-tmux conversion, pane status inference, tab completion helpers
+- `src/web/village.rs` — House kinds and statuses, crew grouping, backlog/board sorting, tip-ref and environment parsing
 
 Tests use `tempfile` for filesystem tests. No mocking of tmux — integration-level tmux testing is done manually via `tmux new-session -d` + `cargo run`.
 
@@ -64,6 +65,11 @@ src/
     theme.rs        # Color/style constants
   config/
     persistence.rs  # Swarm state save/load (~/.agents-ui/)
+  web/
+    server.rs       # HTTP API + embedded pages (`--web` / `--headless`)
+    discovery.rs    # Headless swarm discovery from tmux
+    village.rs      # Village model: houses per worktree, issue crates, pipeline from git
+    village.html    # /village: the swarm as a 16-bit village (canvas renderer)
 ```
 
 ## Key conventions

@@ -55,6 +55,10 @@
 
     .header-title svg { flex-shrink: 0; }
 
+    .header-actions { display: flex; align-items: center; gap: 1rem; }
+    .header-link { font-size: 0.8rem; color: var(--text-dim); text-decoration: none; }
+    .header-link:hover { color: var(--text); text-decoration: underline; }
+
     .refresh-indicator {
       font-size: 0.75rem;
       color: var(--text-dim);
@@ -865,7 +869,10 @@
       </svg>
       Agents UI
     </div>
-    <span class="refresh-indicator" id="refresh-indicator" aria-live="polite">Connecting…</span>
+    <div class="header-actions">
+      <a class="header-link" href="/village">Village view</a>
+      <span class="refresh-indicator" id="refresh-indicator" aria-live="polite">Connecting…</span>
+    </div>
   </header>
 
   <main id="app" role="main">

@@ -21,6 +21,9 @@ use crate::transport::ServerTransport;
 /// The embedded single-page web UI.
 const INDEX_HTML: &str = include_str!("ui.html");
 
+/// The village view: the swarm drawn as a 16-bit village.
+const VILLAGE_HTML: &str = include_str!("village.html");
+
 /// Default port for the web server.
 pub const DEFAULT_PORT: u16 = 7878;
 
@@ -31,10 +34,28 @@ pub struct WebServerState {
     pub agents_dir: PathBuf,
     /// Transport used for live tmux pane captures in the pane endpoint.
     pub transport: ServerTransport,
+    /// Issues and pipeline refs for the village view, cached per repo.
+    pub village: super::village::VillageCache,
 }
 
 async fn index_handler() -> Html<&'static str> {
     Html(INDEX_HTML)
+}
+
+async fn village_handler() -> Html<&'static str> {
+    Html(VILLAGE_HTML)
+}
+
+/// The village model for every swarm.
+/// `GET /api/village`
+async fn api_village_handler(State(state): State<WebServerState>) -> Json<Value> {
+    let swarms = state
+        .swarms
+        .read()
+        .map(|s| s.clone())
+        .unwrap_or_default();
+    let villages = state.village.villages(&state.transport, &swarms).await;
+    Json(json!({ "villages": villages }))
 }
 
 async fn api_swarms_handler(State(state): State<WebServerState>) -> Json<Value> {
@@ -1056,6 +1077,8 @@ fn find_agent<'a>(
 pub async fn run(port: u16, state: WebServerState) -> Result<()> {
     let app = Router::new()
         .route("/", get(index_handler))
+        .route("/village", get(village_handler))
+        .route("/api/village", get(api_village_handler))
         .route("/api/swarms", get(api_swarms_handler).post(api_launch_swarm_handler))
         .route("/api/repos", get(api_repos_handler))
         .route("/api/agent-types", get(api_agent_types_handler))
@@ -1115,12 +1138,15 @@ mod tests {
             swarms: shared,
             agents_dir: PathBuf::from("/tmp/test-agents"),
             transport: ServerTransport::default(),
+            village: Default::default(),
         }
     }
 
     fn make_app(state: WebServerState) -> Router {
         Router::new()
             .route("/", get(index_handler))
+            .route("/village", get(village_handler))
+            .route("/api/village", get(api_village_handler))
             .route("/api/swarms", get(api_swarms_handler).post(api_launch_swarm_handler))
             .route("/api/repos", get(api_repos_handler))
             .route("/api/agent-types", get(api_agent_types_handler))
@@ -1203,6 +1229,27 @@ mod tests {
         let headers = resp.headers();
         let content_type = headers.get("content-type").unwrap().to_str().unwrap();
         assert!(content_type.contains("text/html"));
+    }
+
+    #[tokio::test]
+    async fn village_page_returns_html() {
+        let app = make_app(make_web_state(new_shared_state()));
+        let req = Request::builder().uri("/village").body(Body::empty()).unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        assert!(String::from_utf8_lossy(&body).contains("Worktree Hollow"));
+    }
+
+    #[tokio::test]
+    async fn api_village_empty_when_no_swarms() {
+        let app = make_app(make_web_state(new_shared_state()));
+        let req = Request::builder().uri("/api/village").body(Body::empty()).unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["villages"], serde_json::json!([]));
     }
 
     #[tokio::test]

@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Worktree Hollow</title>
+<style>
+  /* SNES-style menu windows around a pixel-art canvas. One dark look on purpose. */
+  :root {
+    color-scheme: dark;
+    --night: #0c1028;
+    --win-top: #2c44a8;
+    --win-bot: #101850;
+    --win-inner: #6878c8;
+    --frame: #f8f8f8;
+    --frame-shadow: #060814;
+    --rule: #2a3470;
+    --ink: #eef0fa;
+    --ink-dim: #a8b0d8;
+    --gold: #f8d040;
+    --orange: #f07020;
+    --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--night); color: var(--ink); font: 14px/1.5 var(--sans); }
+  body { padding: 12px max(12px, env(safe-area-inset-right)) 24px max(12px, env(safe-area-inset-left)); }
+  a { color: var(--ink-dim); }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin: 0 auto 10px; max-width: 1400px; }
+  .title { font: 700 16px/1.2 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--gold); display: flex; gap: 12px; align-items: center; }
+  .title a { font-weight: 400; font-size: 12px; text-transform: none; letter-spacing: 0; }
+  select { background: var(--win-bot); color: var(--ink); border: 2px solid var(--win-inner); border-radius: 4px; font: 13px var(--mono); padding: 4px 6px; }
+  .status { font: 12px var(--mono); color: var(--ink-dim); }
+  .win {
+    background: linear-gradient(180deg, var(--win-top), var(--win-bot));
+    border: 3px solid var(--frame); border-radius: 6px;
+    box-shadow: 0 0 0 3px var(--frame-shadow), inset 0 0 0 2px var(--win-inner);
+  }
+  .stage { max-width: 1400px; margin: 0 auto; padding: 8px; }
+  .viewport { overflow: auto; display: flex; justify-content: center; background: var(--frame-shadow); border-radius: 2px; min-height: 200px; align-items: center; }
+  canvas { image-rendering: pixelated; image-rendering: crisp-edges; display: block; cursor: pointer; }
+  .flow { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .step { flex: 1 1 90px; padding: 6px 8px; background: rgba(6,8,20,.45); border: 2px solid var(--rule); border-radius: 4px; }
+  .step b { display: block; font: 700 18px/1.1 var(--mono); font-variant-numeric: tabular-nums; }
+  .step span { font: 12px var(--mono); color: var(--ink-dim); }
+  .empty { padding: 48px 16px; text-align: center; color: var(--ink-dim); font: 14px var(--mono); }
+  .dialog { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); width: min(560px, calc(100vw - 32px)); padding: 14px 16px; z-index: 10; }
+  .dialog h2 { margin: 0 0 4px; font: 700 14px var(--mono); color: var(--gold); letter-spacing: .04em; }
+  .dialog p { margin: 4px 0; font: 15px/1.4 var(--mono); }
+  .dialog .dim { color: var(--ink-dim); font-size: 13px; }
+  .dialog button { position: absolute; top: 8px; right: 10px; background: none; border: 0; color: var(--ink); font: 700 16px var(--mono); cursor: pointer; }
+  :focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+</style>
+</head>
+<body>
+  <div class="bar">
+    <div class="title">Worktree Hollow <select id="pick" aria-label="Village" hidden></select> <a href="/">Dashboard</a></div>
+    <div class="status" id="status" aria-live="polite">Connecting…</div>
+  </div>
+  <div class="win stage">
+    <div class="viewport" id="viewport">
+      <div class="empty" id="empty">Looking for swarms…</div>
+      <canvas id="map" width="320" height="180" hidden aria-label="The swarm drawn as a village. Select a house to see its crew and issue."></canvas>
+    </div>
+    <div class="flow" id="flow"></div>
+  </div>
+  <div class="win dialog" id="dialog" hidden role="dialog" aria-live="polite">
+    <button id="close" aria-label="Close">×</button>
+    <h2 id="d-title"></h2>
+    <p id="d-line"></p>
+    <p class="dim" id="d-meta"></p>
+  </div>
+
+<script>
+(() => {
+  /* ---------- Palette (15-bit, outline #202030) ---------- */
+  const P = {
+    o: '#202030', skin: '#f8c898', skinS: '#d09068',
+    grass: '#58a048', grassD: '#386830', grassL: '#88c858',
+    path: '#d8b878', pathS: '#b08858', pathL: '#e8d098',
+    wood: '#a06030', woodD: '#683818', woodL: '#c88848', plank: '#e0b070',
+    stone: '#9898a8', stoneD: '#606078', stoneL: '#c8c8d8',
+    roofB: '#4868b8', roofBD: '#283878',
+    leaf: '#308838', leafD: '#205028', leafL: '#58b050',
+    white: '#f8f8f8', gold: '#f8d040', glass: '#a8d0f0', lamp: '#f8e080', dark: '#383850',
+    red: '#c04838', redD: '#802828', thatch: '#c8a048', thatchD: '#907028',
+    teal: '#2878a0', tealD: '#185070', parch: '#e8dcc0',
+    purple: '#7848a8', purpleD: '#503078', copper: '#d08840',
+    slate: '#6878a0', slateD: '#485878', barn: '#a83028', barnD: '#701818',
+    bug: '#e03838', fizzA: '#e070d0', fizzB: '#60e0c8', shield: '#3058b0', mill: '#d8c8a8', millD: '#a89878', sail: '#f0e8d8',
+    dome: '#e0e4f0', domeD: '#a8b0c8', water: '#3870c0', waterD: '#2850a0', waterL: '#80b8f0',
+    p0: '#e02828', seal: '#38c848', web: '#d8d8e8'
+  };
+  const STATE = { blocked: '#f07020', done: '#3878e0', unknown: '#585870', stalled: '#8088a8' };
+  const KINDCOL = { bug: '#e03838', feature: '#40b8e8', tests: '#e070d0', security: '#3058b0', research: '#c0a8f0', perf: '#d8c8a8', refactor: '#6878a0', docs: '#2878a0', chores: '#a83028', workshop: '#c88848', cottage: '#c8a048' };
+  const NOTECOL = { 'needs-design': '#f8c800', 'needs-clarification': '#d0c0f8', 'needs-approval': '#e89890', 'too-complex': '#b02010', 'future': '#8088a8', 'proposal': '#c0a8f0' };
+  const STOPCOL = ['#38c848', '#f8d040', '#f8f8f8', '#4868e8', '#e070d0'];
+  const HATS = ['#d07040', '#586078', '#4890e0', '#d860a0', '#48a878', '#a8b0c0'];
+
+  const R = (c, x, y, w, h, col) => { c.fillStyle = col; c.fillRect(Math.round(x), Math.round(y), w, h); };
+  function hash(x, y) {
+    let n = (Math.imul(x, 374761393) + Math.imul(y, 668265263)) | 0;
+    n = Math.imul(n ^ (n >>> 13), 1274126177);
+    return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
+  }
+  const blink = (t, ms) => Math.floor(t / ms) % 2 === 1;
+  const lit = st => st === 'working';
+  const glassOf = st => st === 'working' ? P.lamp : (st === 'unknown' || st === 'stopped') ? P.dark : P.glass;
+  function win(c, x, y, st) { R(c, x, y, 4, 4, P.woodD); R(c, x + 1, y + 1, 2, 2, glassOf(st)); }
+  function door(c, x, y, st) {
+    if (st === 'blocked') { R(c, x, y, 4, 5, P.o); return; }
+    R(c, x, y, 4, 5, P.woodD); R(c, x + 2, y + 2, 1, 1, P.gold);
+  }
+  function gable(c, x, y, w, h, a, d) {
+    R(c, x, y, w, h, P.o);
+    for (let r = 1; r < h - 1; r++) R(c, x + 1, y + r, w - 2, 1, (r % 3 === 0) ? d : a);
+    R(c, x + 1, y + 1, w - 2, 1, d);
+  }
+  function wall(c, x, y, w, h, col) { R(c, x, y, w, h, P.o); R(c, x + 1, y, w - 2, h - 1, col); }
+  function puffs(c, x, y, t, a, b) {
+    for (let k = 0; k < 3; k++) {
+      const p = ((t / 110) + k * 7) % 21;
+      const s = p < 9 ? 2 : 1;
+      R(c, x + Math.round(Math.sin((p + k * 2) / 3)), y - Math.floor(p * 0.6), s, s, p < 12 ? a : b);
+    }
+  }
+
+  /* ---------- Houses: each draws in x..x+15, y-4..y+16 ---------- */
+  const B = {
+    cottage(c, x, y, st, t, roof = P.thatch, roofD = P.thatchD) {
+      R(c, x + 11, y - 2, 4, 5, P.o); R(c, x + 12, y - 1, 2, 4, P.stone);
+      gable(c, x, y + 1, 16, 9, roof, roofD);
+      wall(c, x + 1, y + 9, 14, 7, P.wood); R(c, x + 2, y + 9, 12, 1, P.woodD);
+      win(c, x + 2, y + 10, st); win(c, x + 10, y + 10, st); door(c, x + 6, y + 11, st);
+      if (lit(st)) puffs(c, x + 12, y - 4, t, P.white, P.stoneL);
+    },
+    workshop(c, x, y, st, t) {
+      B.cottage(c, x, y, st, t, P.red, P.redD);
+      R(c, x + 4, y + 4, 6, 3, P.o); R(c, x + 5, y + 4, 4, 1, P.stoneL); R(c, x + 6, y + 5, 2, 1, P.stoneL);
+    },
+    feature(c, x, y, st, t) {
+      gable(c, x, y + 1, 11, 9, P.red, P.redD);
+      wall(c, x + 1, y + 9, 10, 7, P.wood); R(c, x + 2, y + 9, 8, 1, P.woodD);
+      win(c, x + 2, y + 10, st); door(c, x + 6, y + 11, st);
+      R(c, x + 11, y + 2, 1, 14, P.plank); R(c, x + 15, y + 2, 1, 14, P.plank);
+      R(c, x + 10, y + 2, 6, 1, P.plank); R(c, x + 11, y + 7, 5, 1, P.plank);
+      for (let k = 0; k < 4; k++) R(c, x + 12 + k, y + 3 + k, 1, 1, P.woodL);
+      R(c, x + 11, y + 12, 5, 1, P.plank); R(c, x + 11, y + 13, 5, 1, P.woodD); R(c, x + 11, y + 14, 5, 1, P.plank); R(c, x + 11, y + 15, 5, 1, P.o);
+      if (lit(st) && blink(t, 140)) { R(c, x + 12 + (Math.floor(t / 280) % 3), y + 6, 1, 1, P.white); R(c, x + 13, y + 5, 1, 1, P.gold); }
+    },
+    bug(c, x, y, st, t) {
+      gable(c, x, y + 1, 16, 9, P.thatch, P.thatchD);
+      R(c, x + 3, y + 3, 5, 4, P.woodD); R(c, x + 4, y + 4, 3, 2, P.plank); R(c, x + 5, y + 4, 1, 2, P.woodD);
+      wall(c, x + 1, y + 9, 14, 7, P.wood); R(c, x + 2, y + 9, 12, 1, P.woodD);
+      win(c, x + 2, y + 10, st); door(c, x + 6, y + 11, st);
+      R(c, x + 11, y + 2, 1, 14, P.woodL); R(c, x + 14, y + 2, 1, 14, P.woodL);
+      for (let yy = y + 3; yy < y + 16; yy += 3) R(c, x + 11, yy, 4, 1, P.woodD);
+      R(c, x + 9, y - 1, 1, 2, P.o);
+      R(c, x + 6, y - 4, 7, 4, P.o); R(c, x + 7, y - 3, 5, 2, P.bug); R(c, x + 8, y - 3, 1, 1, P.o); R(c, x + 10, y - 2, 1, 1, P.o); R(c, x + 9, y - 3, 1, 2, P.o);
+      if (lit(st)) R(c, x + 2 + Math.floor(t / 160) % 8, y + 7, 2, 1, P.o);
+    },
+    security(c, x, y, st, t) {
+      R(c, x, y + 10, 4, 6, P.o); R(c, x + 1, y + 11, 2, 4, P.stone);
+      R(c, x + 12, y + 10, 4, 6, P.o); R(c, x + 13, y + 11, 2, 4, P.stone);
+      R(c, x + 3, y - 2, 10, 18, P.o); R(c, x + 4, y - 1, 8, 16, P.stone); R(c, x + 4, y - 1, 8, 1, P.stoneL);
+      for (let yy = y + 1; yy < y + 14; yy += 3) for (let xx = x + 5 + ((yy - y) % 2 ? 2 : 0); xx < x + 11; xx += 4) R(c, xx, yy, 1, 1, P.stoneD);
+      [3, 7, 11].forEach(dx => R(c, x + dx, y - 4, 2, 2, P.o));
+      R(c, x + 5, y + 1, 1, 3, glassOf(st)); R(c, x + 10, y + 1, 1, 3, glassOf(st));
+      R(c, x + 6, y + 4, 4, 4, P.gold); R(c, x + 7, y + 5, 2, 2, P.shield); R(c, x + 7, y + 8, 2, 1, P.gold);
+      door(c, x + 6, y + 11, st);
+      if (lit(st)) R(c, x + 7, y - 5, 2, 1, blink(t, 160) ? P.gold : P.lamp);
+    },
+    tests(c, x, y, st, t) {
+      gable(c, x, y + 1, 16, 9, P.purple, P.purpleD);
+      R(c, x + 2, y - 2, 5, 1, P.o); R(c, x + 3, y - 1, 3, 3, P.o); R(c, x + 4, y - 1, 1, 3, P.copper);
+      R(c, x + 9, y + 2, 2, 1, P.o); R(c, x + 8, y + 3, 4, 4, P.o); R(c, x + 9, y + 4, 2, 2, lit(st) ? (blink(t, 300) ? P.fizzA : P.fizzB) : P.glass);
+      wall(c, x + 1, y + 9, 14, 7, P.wood); R(c, x + 2, y + 9, 12, 1, P.woodD);
+      win(c, x + 2, y + 10, st); win(c, x + 10, y + 10, st); door(c, x + 6, y + 11, st);
+      if (lit(st)) puffs(c, x + 4, y - 4, t, P.fizzA, P.fizzB);
+    },
+    research(c, x, y, st, t) {
+      for (let dy = -7; dy <= 0; dy++) for (let dx = -7; dx <= 7; dx++) {
+        const d = dx * dx + dy * dy; if (d > 49) continue;
+        R(c, x + 8 + dx, y + 9 + dy, 1, 1, d > 36 ? P.o : dx < -1 ? P.dome : P.domeD);
+      }
+      R(c, x + 8, y + 3, 2, 6, P.dark);
+      const a = -Math.PI / 4 + (lit(st) ? Math.sin(t / 900) * 0.35 : 0);
+      for (let d = 0; d < 8; d++) {
+        const px = Math.round(x + 9 + Math.cos(a) * d), py = Math.round(y + 6 + Math.sin(a) * d);
+        R(c, px, py, 2, 2, P.o); if (d > 1) R(c, px, py, 1, 1, P.stoneD);
+      }
+      wall(c, x + 1, y + 9, 14, 7, P.stone);
+      win(c, x + 2, y + 10, st); win(c, x + 10, y + 10, st); door(c, x + 6, y + 11, st);
+    },
+    docs(c, x, y, st, t) {
+      for (let r = 0; r < 7; r++) R(c, x + 7 - r, y + r, 2 + 2 * r, 1, P.o);
+      for (let r = 1; r < 7; r++) R(c, x + 8 - r, y + r, 2 * r, 1, r % 2 ? P.teal : P.tealD);
+      R(c, x + 7, y + 3, 2, 2, P.gold);
+      R(c, x, y + 7, 16, 2, P.o); R(c, x + 1, y + 7, 14, 1, P.stoneL);
+      wall(c, x + 1, y + 9, 14, 7, P.parch);
+      const books = ['#c04838', '#3870c0', '#58a048', '#f8d040'];
+      [x + 2, x + 10].forEach((wx, i) => {
+        R(c, wx, y + 9, 4, 6, P.woodD); R(c, wx + 1, y + 10, 2, 4, glassOf(st));
+        R(c, wx + 1, y + 12, 1, 2, books[i * 2]); R(c, wx + 2, y + 12, 1, 2, books[i * 2 + 1]);
+      });
+      door(c, x + 6, y + 11, st);
+    },
+    refactor(c, x, y, st, t) {
+      gable(c, x, y + 1, 16, 9, P.red, P.redD);
+      for (let r = 1; r < 8; r++) R(c, x + 8, y + 1 + r, 7, 1, (r % 3 === 0) ? P.slateD : P.slate);
+      wall(c, x + 1, y + 9, 14, 7, P.wood); R(c, x + 2, y + 9, 12, 1, P.woodD);
+      win(c, x + 2, y + 10, st); door(c, x + 6, y + 11, st);
+      R(c, x + 11, y + 12, 5, 4, P.o); R(c, x + 12, y + 13, 1, 2, P.stoneL); R(c, x + 14, y + 13, 1, 2, P.stoneL);
+      R(c, x + 14, y - 4, 1, 6, P.woodD); R(c, x + 9, y - 4, 6, 1, P.woodD);
+      const drop = lit(st) ? Math.round((Math.sin(t / 300) + 1) * 1.5) : 0;
+      R(c, x + 10, y - 3, 1, 1 + drop, P.stoneD);
+      R(c, x + 9, y - 2 + drop, 3, 2, P.o); R(c, x + 10, y - 2 + drop, 1, 1, P.stoneL);
+    },
+    perf(c, x, y, st, t) {
+      for (let r = 0; r < 13; r++) {
+        const hw = 3 + Math.floor(r / 4);
+        R(c, x + 8 - hw - 1, y + 3 + r, 2 * hw + 2, 1, P.o);
+        R(c, x + 8 - hw, y + 3 + r, 2 * hw, 1, r === 12 ? P.o : (r % 4 === 3 ? P.millD : P.mill));
+      }
+      R(c, x + 4, y + 1, 8, 3, P.o); R(c, x + 5, y + 1, 6, 2, P.red);
+      win(c, x + 6, y + 5, st); door(c, x + 6, y + 10, st);
+      const a = lit(st) ? t / 260 : Math.PI / 4, hx = x + 8, hy = y + 3;
+      for (let k = 0; k < 4; k++) {
+        const ang = a + k * Math.PI / 2, cs = Math.cos(ang), sn = Math.sin(ang);
+        for (let d = 2; d <= 7; d++) {
+          const px = Math.round(hx + cs * d), py = Math.round(hy + sn * d);
+          if (d > 2) R(c, Math.round(px - sn * 1.2), Math.round(py + cs * 1.2), 1, 1, P.sail);
+          R(c, px, py, 1, 1, P.woodD);
+        }
+      }
+      R(c, hx - 1, hy - 1, 2, 2, P.o);
+    },
+    chores(c, x, y, st, t) {
+      for (let r = 0; r < 9; r++) { const i = Math.max(0, 3 - r); R(c, x + i, y + 1 + r, 16 - 2 * i, 1, P.o); }
+      for (let r = 1; r < 8; r++) { const i = Math.max(0, 3 - r) + 1; R(c, x + i, y + 1 + r, 16 - 2 * i, 1, r % 3 === 0 ? P.barnD : P.barn); }
+      R(c, x + 6, y + 3, 4, 4, P.white); R(c, x + 7, y + 4, 2, 2, glassOf(st));
+      wall(c, x + 1, y + 9, 14, 7, P.barn); R(c, x + 2, y + 9, 12, 1, P.barnD);
+      if (st === 'blocked') R(c, x + 4, y + 10, 8, 6, P.o);
+      else {
+        R(c, x + 4, y + 10, 8, 6, P.white); R(c, x + 5, y + 11, 6, 4, P.woodL);
+        for (let k = 0; k < 4; k++) { R(c, x + 5 + k, y + 11 + k, 1, 1, P.white); R(c, x + 10 - k, y + 11 + k, 1, 1, P.white); }
+      }
+    }
+  };
+  function scaffold(c, x, y, t) {
+    R(c, x + 1, y + 2, 1, 14, P.woodL); R(c, x + 14, y + 2, 1, 14, P.woodL);
+    for (let yy = y + 3; yy < y + 16; yy += 5) R(c, x + 1, yy, 14, 1, P.woodL);
+    for (let k = 0; k < 12; k++) R(c, x + 2 + k, y + 15 - k, 1, 1, P.woodD);
+    if (blink(t, 90)) R(c, x + 4 + Math.floor(hash(Math.floor(t / 90), 3) * 8), y + 4, 1, 1, P.gold);
+  }
+  function cobwebs(c, x, y) {
+    [[x + 1, y + 9], [x + 12, y + 9]].forEach(([wx, wy]) => {
+      R(c, wx, wy, 3, 1, P.web); R(c, wx, wy, 1, 3, P.web); R(c, wx + 1, wy + 1, 1, 1, P.web);
+    });
+  }
+  function pennant(c, x, y, pr, t) {
+    if (!pr || pr === 'P3') return;
+    R(c, x - 1, y - 5, 1, 9, P.stoneD);
+    if (pr === 'P0') { const w = blink(t, 300) ? 1 : 0; R(c, x, y - 5, 5, 4, P.o); R(c, x, y - 4, 4 + w, 2, P.p0); }
+    else { R(c, x, y - 5, 4, 3, P.o); R(c, x, y - 4, 3, 1, pr === 'P1' ? P.gold : P.white); }
+  }
+
+  /* ---------- People and things ---------- */
+  const VILLAGER = ['..oooo..', '.ohhhho.', 'ohhhhhho', 'ohssssho', 'osossoso', '.oSssSo.', '.octtco.', 'oCcttcCo', 'sCcttcCs', '.occcco.', '.opoopo.', '.oo..oo.'];
+  const WAVE = VILLAGER.slice(0, 6).concat(['.octtcos', 'oCcttcCo', 'sCcttcCo', '.occcco.', '.opoopo.', '.oo..oo.']);
+  const CARRY = ['..oooo..', '.ohhhho.', 'ohhhhhho', 'ohssssho', 'osossoso', 'soSssSos', 'soctcos.', '.CcttcC.', '.CcttcC.', '.occcco.', '.opoopo.', '.oo..oo.'];
+  const STEP = CARRY.slice(0, 10).concat(['.opoopo.', '.oo...o.']);
+  const WORKER = { c: '#a87848', C: '#785030', t: '#f8f8f8', p: '#484858' };
+  const MAYOR = { c: '#804098', C: '#582868', t: '#f8d040', p: '#302838' };
+  function villager(c, x, y, outfit, hat, rows = VILLAGER) {
+    const map = { o: P.o, s: P.skin, S: P.skinS, h: hat, c: outfit.c, C: outfit.C, t: outfit.t, p: outfit.p };
+    x = Math.round(x); y = Math.round(y);
+    for (let r = 0; r < rows.length; r++) for (let k = 0; k < 8; k++) { const ch = rows[r][k]; if (ch !== '.') R(c, x + k, y + r, 1, 1, map[ch]); }
+  }
+  const ICONS = {
+    blocked: ['..#..', '..#..', '..#..', '.....', '..#..'],
+    done: ['.....', '....#', '...#.', '#.#..', '.#...'],
+    unknown: ['.###.', '#...#', '..##.', '.....', '..#..'],
+    stalled: ['.....', '.....', '#.#.#', '.....', '.....']
+  };
+  function bubble(c, x, y, icon) {
+    const o = P.o, w = P.white, m = ICONS[icon], col = STATE[icon];
+    R(c, x + 1, y, 7, 1, o); R(c, x + 1, y + 8, 7, 1, o); R(c, x, y + 1, 1, 7, o); R(c, x + 8, y + 1, 1, 7, o);
+    R(c, x + 1, y + 1, 7, 7, w); R(c, x + 4, y + 8, 1, 2, w); R(c, x + 3, y + 9, 1, 1, o); R(c, x + 5, y + 9, 1, 1, o); R(c, x + 4, y + 10, 1, 1, o);
+    for (let r = 0; r < 5; r++) for (let k = 0; k < 5; k++) if (m[r][k] === '#') R(c, x + 2 + k, y + 2 + r, 1, 1, col);
+  }
+  function crate(c, x, y, kind, pr, sealed) {
+    x = Math.round(x); y = Math.round(y);
+    R(c, x, y, 5, 5, P.o); R(c, x + 1, y + 1, 3, 3, P.woodL);
+    R(c, x + 1, y + 1, 3, 1, KINDCOL[kind] || P.woodD);
+    if (pr === 'P0') R(c, x + 2, y + 3, 1, 1, P.p0);
+    if (sealed) R(c, x + 2, y + 2, 1, 1, P.seal);
+  }
+
+  /* ---------- Scenery ---------- */
+  function grass(c, x0, y0, w, h) {
+    R(c, x0, y0, w, h, P.grass);
+    for (let y = y0; y < y0 + h; y += 3) for (let x = x0; x < x0 + w; x += 3) {
+      const v = hash(x, y);
+      if (v < 0.05) { R(c, x, y, 1, 1, P.grassL); R(c, x + 2, y, 1, 1, P.grassL); R(c, x + 1, y - 1, 1, 1, P.grassL); }
+      else if (v < 0.1) R(c, x, y, 1, 1, P.grassD);
+    }
+  }
+  function path(c, x0, y0, w, h) {
+    R(c, x0, y0, w, h, P.path);
+    for (let y = y0; y < y0 + h; y += 2) for (let x = x0; x < x0 + w; x += 2) {
+      const v = hash(x + 7, y + 3);
+      if (v < 0.07) R(c, x, y, 1, 1, P.pathS); else if (v < 0.11) R(c, x, y, 1, 1, P.pathL);
+    }
+  }
+  function water(c, x0, y0, w, h, t, flow) {
+    R(c, x0, y0, w, h, P.water);
+    R(c, x0, y0, w, 1, P.waterD); R(c, x0, y0 + h - 1, w, 1, P.waterD);
+    const off = Math.floor(t / 120 * flow);
+    for (let y = y0 + 2; y < y0 + h - 2; y += 3) for (let x = x0; x < x0 + w; x += 7) {
+      if (hash(x, y) < 0.35) R(c, x0 + (((x - x0 + off) % w) + w) % w, y, 2, 1, P.waterL);
+    }
+  }
+  function tree(c, x, y) {
+    R(c, x + 5, y + 8, 2, 4, P.woodD);
+    const cx = x + 6, cy = y + 5, r = 5;
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      const d = dx * dx + dy * dy; if (d > r * r) continue;
+      R(c, cx + dx, cy + dy, 1, 1, d > (r - 1) * (r - 1) ? P.o : dx + dy > 3 ? P.leafD : dx + dy < -3 ? P.leafL : P.leaf);
+    }
+  }
+  function hall(c, x, y, st) {
+    R(c, x + 16, y - 5, 1, 7, P.stoneD); R(c, x + 17, y - 5, 5, 4, P.o); R(c, x + 17, y - 4, 4, 2, P.gold);
+    gable(c, x, y + 1, 32, 11, P.roofB, P.roofBD);
+    R(c, x + 1, y + 11, 30, 11, P.o); R(c, x + 2, y + 11, 28, 10, P.stone);
+    [x + 3, x + 8, x + 20, x + 25].forEach(wx => { R(c, wx, y + 13, 4, 5, P.woodD); R(c, wx + 1, y + 14, 2, 3, glassOf(st)); });
+    R(c, x + 13, y + 15, 6, 7, st === 'blocked' ? P.o : P.woodD); R(c, x + 16, y + 15, 1, 7, P.o);
+  }
+  function board(c, x, y, notes) {
+    R(c, x + 1, y + 9, 1, 6, P.woodD); R(c, x + 16, y + 9, 1, 6, P.woodD);
+    R(c, x, y, 18, 11, P.o); R(c, x + 1, y + 1, 16, 9, P.wood);
+    notes.slice(0, 8).forEach((n, i) => R(c, x + 2 + (i % 4) * 4, y + 2 + Math.floor(i / 4) * 4, 3, 3, NOTECOL[n.label] || P.white));
+  }
+  function lock(c, x, cy, open, flag) {
+    R(c, x - 1, cy - 4, 8, 4, P.o); R(c, x, cy - 3, 6, 2, P.stone);
+    R(c, x - 1, cy + 14, 8, 4, P.o); R(c, x, cy + 15, 6, 2, P.stone);
+    if (!open) { R(c, x + 1, cy, 1, 14, P.woodD); R(c, x + 4, cy, 1, 14, P.woodD); R(c, x + 2, cy, 2, 14, P.wood); }
+    R(c, x - 4, cy - 15, 12, 10, P.o); R(c, x - 3, cy - 13, 10, 7, P.stone);
+    R(c, x - 5, cy - 18, 14, 5, P.o); R(c, x - 4, cy - 17, 12, 3, P.red);
+    R(c, x, cy - 10, 3, 4, P.woodD);
+    R(c, x + 8, cy - 25, 1, 10, P.stoneD); R(c, x + 9, cy - 25, 5, 4, P.o); R(c, x + 9, cy - 24, 4, 2, flag);
+  }
+  function castle(c, x, cy, t, fw) {
+    const y = cy - 36;
+    R(c, x, y + 6, 36, 46, P.o); R(c, x + 1, y + 7, 34, 44, P.stone);
+    for (let yy = y + 10; yy < y + 48; yy += 3) for (let xx = x + 3 + ((yy % 2) ? 2 : 0); xx < x + 34; xx += 5) R(c, xx, yy, 1, 1, P.stoneD);
+    [[x - 2, y], [x + 28, y]].forEach(([tx, ty]) => {
+      R(c, tx, ty, 10, 52, P.o); R(c, tx + 1, ty + 1, 8, 50, P.stoneL);
+      R(c, tx, ty - 3, 3, 3, P.o); R(c, tx + 7, ty - 3, 3, 3, P.o); R(c, tx + 4, ty + 8, 2, 4, P.dark);
+    });
+    for (let k = 0; k < 4; k++) R(c, x + 10 + k * 5, y + 3, 3, 3, P.o);
+    R(c, x + 8, cy - 2, 20, 18, P.o); R(c, x + 9, cy, 18, 15, P.dark);
+    R(c, x + 18, y - 12, 1, 18, P.stoneD); R(c, x + 19, y - 12, 7, 5, P.o); R(c, x + 19, y - 11, 6, 3, P.gold);
+    const ft = t - fw;
+    if (ft >= 0 && ft < 1600) {
+      const p = ft / 1600;
+      [[x + 8, P.gold], [x + 18, P.fizzA], [x + 28, P.fizzB]].forEach(([fx, col], i) => {
+        const fy = y - 10 - p * 20 - i * 3;
+        for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; R(c, fx + Math.cos(a) * p * 9, fy + Math.sin(a) * p * 9, 1, 1, col); }
+      });
+    }
+  }
+
+  /* ---------- Layout ---------- */
+  const LW = 20, LH = 26, RD = 6, DOCK_W = 64;
+  function layout(v) {
+    const n = v.houses.length;
+    const per = Math.max(1, Math.ceil(Math.sqrt(Math.max(n, 1) / 2)));
+    const rows = Math.max(1, Math.ceil(n / (2 * per)));
+    const cx0 = DOCK_W + 8;
+    const vw = Math.max(per * LW * 2 + RD, 72);
+    const roadX = cx0 + Math.floor((vw - RD) / 2);
+    const hallX = roadX + RD / 2 - 16;
+    const top = 60;
+    const lots = [];
+    for (let i = 0; i < rows * 2 * per; i++) {
+      const r = Math.floor(i / (2 * per)), j = i % (2 * per), side = j % 2, pos = Math.floor(j / 2);
+      const x = side === 0 ? roadX - (pos + 1) * LW + 2 : roadX + RD + pos * LW + 2;
+      lots.push({ x, y: top + r * LH, lane: top + r * LH + 18 });
+    }
+    const quayY = top + rows * LH + 4;
+    const canalY = quayY + 8;
+    // Every stop but the last is a lock; the last stop is the castle.
+    const locks = Math.max(0, v.pipeline.stops.length - 1);
+    const lockStart = roadX + 40;
+    const castleX = lockStart + locks * 34 + 6;
+    const W = Math.max(cx0 + vw + 40, castleX + 44);
+    const H = canalY + 34;
+    return { per, rows, cx0, vw, roadX, hallX, top, lots, quayY, canalY, lockStart, castleX, W, H };
+  }
+
+  /* ---------- State ---------- */
+  const cv = document.getElementById('map'), ctx = cv.getContext('2d');
+  const pick = document.getElementById('pick');
+  let villages = [], current = null, L = null, prev = null;
+  let porters = [], fireworks = -1e9, lastDelivered = null;
+  const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const slotPos = i => ({ x: 10 + (i % 8) * 6, y: 22 + Math.floor(i / 8) * 6 });
+  const houseLot = (lay, id) => { const i = current.houses.findIndex(h => h.id === id); return i >= 0 ? lay.lots[i] : null; };
+
+  /* Animate crates that moved since the last snapshot. */
+  function diff(old, now, lay, t) {
+    if (!old || old.project !== now.project) return;
+    const oldBacklog = old.backlog.map(c => c.number);
+    now.houses.forEach((h, i) => {
+      const before = old.houses.find(o => o.id === h.id);
+      if (!h.issue || (before && before.issue === h.issue)) return;
+      const slot = oldBacklog.indexOf(h.issue);
+      if (slot < 0) return;
+      const s = slotPos(slot), lot = lay.lots[i];
+      porters.push({ t0: t, speed: 0.05, hat: HATS[i % HATS.length], kind: (old.backlog[slot] || {}).kind, pr: h.priority,
+        pts: [[s.x + 2, s.y + 6], [s.x + 2, 53], [lay.roadX + 3, 53], [lay.roadX + 3, lot.lane], [lot.x + 8, lot.lane]] });
+    });
+    const oldQuay = new Set(old.pipeline.quay);
+    now.pipeline.quay.forEach(n => {
+      if (oldQuay.has(n)) return;
+      const i = old.houses.findIndex(h => h.issue === n);
+      if (i < 0) return;
+      const lot = lay.lots[now.houses.findIndex(h => h.id === old.houses[i].id)] || lay.lots[i];
+      if (!lot) return;
+      porters.push({ t0: t, speed: 0.05, hat: HATS[i % HATS.length], kind: old.houses[i].kind, pr: old.houses[i].priority, sealed: true, issue: n,
+        pts: [[lot.x + 8, lot.lane], [lay.roadX + 3, lot.lane], [lay.roadX + 3, lay.quayY]] });
+    });
+  }
+  function porterPos(p, t) {
+    let d = (t - p.t0) * p.speed;
+    for (let k = 0; k < p.pts.length - 1; k++) {
+      const [ax, ay] = p.pts[k], [bx, by] = p.pts[k + 1], len = Math.hypot(bx - ax, by - ay);
+      if (d <= len) return [ax + (bx - ax) * d / len, ay + (by - ay) * d / len];
+      d -= len;
+    }
+    return null;
+  }
+
+  function draw(t) {
+    if (!current) return;
+    const v = current, lay = L, c = ctx;
+    const { W, H, roadX, hallX, lots, quayY, canalY, cx0, vw } = lay;
+    grass(c, 0, 0, W, H);
+    water(c, 0, 0, W, 11, t, 1);
+    R(c, 14, 10, 40, 7, P.o); R(c, 15, 10, 38, 6, P.plank);
+    path(c, 6, 18, 56, 34);
+    path(c, 4, 50, cx0 + vw - 4, 6);
+    path(c, roadX, 50, RD, quayY - 50 + 2);
+    path(c, hallX - 4, 42, 40, 9);
+    for (let r = 0; r < lay.rows; r++) {
+      const left = roadX - lay.per * LW + 2, right = roadX + RD + lay.per * LW - 2;
+      path(c, left - 1, lay.top + r * LH + 17, right - left + 2, 4);
+    }
+    water(c, roadX - 16, canalY, W - roadX + 16, 14, t, 0.6);
+    R(c, roadX - 4, quayY + 3, 22, 4, P.o); R(c, roadX - 3, quayY + 3, 20, 3, P.plank);
+
+    for (let x = cx0 + vw + 6; x < W - 14; x += 15) for (let y = 16; y < canalY - 38; y += 16) if (hash(x, y) < 0.55) tree(c, x + Math.floor(hash(y, x) * 4), y);
+
+    hall(c, hallX, 18, v.manager.status);
+    board(c, hallX + 36, 26, v.board);
+    if (v.manager.status !== 'working' && v.manager.status !== 'stopped') {
+      villager(c, hallX + 26, 30, MAYOR, HATS[0], v.manager.status === 'blocked' && blink(t, 200) ? WAVE : VILLAGER);
+    }
+
+    v.backlog.slice(0, 40).forEach((cr, i) => { const s = slotPos(i); crate(c, s.x, s.y, cr.kind, cr.priority); });
+
+    const bubbles = [];
+    if (['blocked', 'done', 'unknown', 'stalled'].includes(v.manager.status)) bubbles.push([hallX + 26, 18, v.manager.status]);
+    v.houses.forEach((h, i) => {
+      const lot = lots[i]; if (!lot) return;
+      const st = h.status, tt = t + i * 311;
+      if (st === 'building') scaffold(c, lot.x, lot.y, tt);
+      else (B[h.kind] || B.workshop)(c, lot.x, lot.y, st, reduce ? 0 : tt);
+      pennant(c, lot.x, lot.y, h.priority, tt);
+      if (st === 'stalled') cobwebs(c, lot.x, lot.y);
+      if (st === 'unknown') R(c, lot.x - 1, lot.y - 6, 18, 23, 'rgba(32,34,60,.6)');
+      const hat = HATS[i % HATS.length];
+      const away = porters.some(p => p.house === h.id);
+      if (!away) {
+        if (st === 'idle') villager(c, lot.x + 4, lot.y + 9, WORKER, hat);
+        if (st === 'done') villager(c, lot.x + 4, lot.y + 8, WORKER, hat);
+        if (st === 'blocked') { const b = blink(t, 200) ? -1 : 0; villager(c, lot.x + 4, lot.y + 10 + b, WORKER, hat, b ? WAVE : VILLAGER); }
+      }
+      if (h.crew.length > 1 && st !== 'working') villager(c, lot.x + 12, lot.y + 11, WORKER, HATS[(i + 3) % HATS.length]);
+      if (h.crew.length > 1 && st === 'working' && !reduce) puffs(c, lot.x + 3, lot.y - 3, tt + 700, P.white, P.stoneL);
+      if (ICONS[st]) bubbles.push([lot.x + 4, lot.y - (st === 'blocked' ? 1 : 3) + (st === 'blocked' && blink(t, 200) ? -1 : 0), st]);
+    });
+
+    const carried = new Set(porters.filter(p => p.issue).map(p => p.issue));
+    v.pipeline.quay.filter(n => !carried.has(n)).slice(0, 6).forEach((n, k) => crate(c, roadX + 6 + (k % 3) * 6, quayY - 3 - Math.floor(k / 3) * 6, 'workshop', null, true));
+
+    // The sentinel's flag is grey while it still has newer work to test.
+    const flagOf = i => i === 0 && v.pipeline.sentinel !== 'green' ? P.stoneD : STOPCOL[i] || P.white;
+    const stops = v.pipeline.stops;
+    stops.slice(0, -1).forEach((s, i) => {
+      const lx = lay.lockStart + i * 34;
+      lock(c, lx, canalY, false, flagOf(i));
+      s.issues.slice(0, 4).forEach((n, k) => crate(c, lx + 8 + (k % 2) * 6, canalY + 18 + Math.floor(k / 2) * 6, 'workshop', null, true));
+    });
+    castle(c, lay.castleX, canalY, t, fireworks);
+    if (stops.length) stops[stops.length - 1].issues.slice(0, 6).forEach((n, k) => crate(c, lay.castleX + 6 + (k % 4) * 6, canalY + 18 + Math.floor(k / 4) * 6, 'workshop', null, true));
+
+    porters = porters.filter(p => {
+      const pos = porterPos(p, t);
+      if (!pos) return false;
+      villager(c, pos[0] - 4, pos[1] - 11, WORKER, p.hat, blink(t, 140) ? STEP : CARRY);
+      crate(c, pos[0] - 2, pos[1] - 16, p.kind, p.pr, p.sealed);
+      return true;
+    });
+    bubbles.forEach(([x, y, s]) => bubble(c, x, y, s));
+  }
+
+  /* ---------- Panels ---------- */
+  function renderFlow(v) {
+    const stops = v.pipeline.stops;
+    const working = v.houses.filter(h => h.status === 'working').length;
+    const items = [
+      ['Docks', 'backlog', v.backlog.length],
+      ['Notice board', 'blocked · proposals', v.board.length],
+      ['Houses', `${working} of ${v.houses.length} working`, v.houses.filter(h => h.issue).length],
+      ['Quay', `pushed to ${v.pipeline.integration || 'integration'}`, v.pipeline.quay.length],
+      ...stops.map((s, i) => [i === stops.length - 1 ? `Castle · ${s.name}` : s.name, i === 0 ? `sentinel: ${v.pipeline.sentinel}` : 'environment', s.issues.length])
+    ];
+    document.getElementById('flow').innerHTML = items.map(([l, s, n], i) =>
+      `<div class="step"><b>${n}</b><span>${esc(l)}<br>${esc(s)}</span></div>`).join('');
+  }
+  const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+
+  const dialog = document.getElementById('dialog');
+  document.getElementById('close').addEventListener('click', () => { dialog.hidden = true; });
+  function show(house, isManager) {
+    document.getElementById('d-title').textContent = isManager ? 'Town Hall · manager' : `${house.role} · ${house.kind}`;
+    document.getElementById('d-line').textContent = house.issue ? `#${house.issue} ${house.issue_title || ''}` : 'No issue claimed';
+    document.getElementById('d-meta').textContent =
+      `Status: ${house.status}${house.priority ? ' · ' + house.priority : ''} · Crew: ${house.crew.join(', ') || '—'}`;
+    dialog.hidden = false;
+  }
+  cv.addEventListener('click', e => {
+    if (!current) return;
+    const r = cv.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width * L.W, y = (e.clientY - r.top) / r.height * L.H;
+    if (x >= L.hallX && x < L.hallX + 32 && y >= 12 && y < 42) return show(current.manager, true);
+    const i = L.lots.findIndex((lot, k) => k < current.houses.length && x >= lot.x && x < lot.x + 16 && y >= lot.y - 4 && y < lot.y + 21);
+    if (i >= 0) show(current.houses[i], false);
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') dialog.hidden = true; });
+
+  /* ---------- Data ---------- */
+  function fit() {
+    if (!L) return;
+    const vp = document.getElementById('viewport');
+    const s = Math.max(1, Math.min(8, Math.floor((vp.clientWidth - 8) / L.W), Math.floor((window.innerHeight - 190) / L.H) || 1));
+    cv.style.width = L.W * s + 'px'; cv.style.height = L.H * s + 'px';
+  }
+  window.addEventListener('resize', fit);
+
+  function select(name) {
+    const v = villages.find(x => x.project === name) || villages[0];
+    if (!v) return;
+    const lay = layout(v);
+    const t = performance.now();
+    diff(current, v, lay, t);
+    const delivered = v.pipeline.stops.length ? v.pipeline.stops[v.pipeline.stops.length - 1].issues.join(',') : '';
+    if (lastDelivered !== null && current && current.project === v.project && delivered !== lastDelivered && delivered) fireworks = t;
+    lastDelivered = delivered;
+    current = v; L = lay;
+    if (cv.width !== L.W || cv.height !== L.H) { cv.width = L.W; cv.height = L.H; }
+    fit(); renderFlow(v);
+    if (reduce) draw(0);
+  }
+  pick.addEventListener('change', () => { location.hash = pick.value; select(pick.value); });
+  window.addEventListener('hashchange', () => select(decodeURIComponent(location.hash.slice(1))));
+
+  async function poll() {
+    try {
+      const res = await fetch('/api/village');
+      if (!res.ok) throw new Error(res.status);
+      villages = (await res.json()).villages || [];
+      const names = villages.map(v => v.project);
+      pick.hidden = names.length < 2;
+      if (pick.options.length !== names.length || [...pick.options].some((o, i) => o.value !== names[i])) {
+        pick.innerHTML = names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+      }
+      const want = decodeURIComponent(location.hash.slice(1)) || (current && current.project) || names[0];
+      if (names.includes(want)) pick.value = want;
+      document.getElementById('empty').hidden = villages.length > 0;
+      cv.hidden = villages.length === 0;
+      if (!villages.length) document.getElementById('empty').textContent = 'No swarms running. Start one from the dashboard or the agents-tui terminal.';
+      else select(pick.value || names[0]);
+      document.getElementById('status').textContent = 'Live · updated ' + new Date().toLocaleTimeString();
+    } catch (e) {
+      document.getElementById('status').textContent = "Can't reach agents-tui. Retrying…";
+    }
+    setTimeout(poll, 3000);
+  }
+  poll();
+
+  if (!reduce) {
+    const loop = t => { draw(t); requestAnimationFrame(loop); };
+    requestAnimationFrame(loop);
+  }
+})();
+</script>
+</body>
+</html>
