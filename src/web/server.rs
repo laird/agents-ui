@@ -1238,7 +1238,9 @@ mod tests {
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
-        assert!(String::from_utf8_lossy(&body).contains("Worktree Hollow"));
+        let html = String::from_utf8_lossy(&body);
+        assert!(html.contains("Worktree Hollow"));
+        assert!(html.contains("Medieval village") && html.contains("Modern business district"));
     }
 
     #[tokio::test]
