@@ -200,8 +200,7 @@ pub async fn list_panes(transport: &ServerTransport, session: &str) -> Result<Tm
                 "-t".to_string(),
                 session.to_string(),
                 "-F".to_string(),
-                "#{window_index}\t#{window_name}\t#{pane_index}\t#{pane_current_path}"
-                    .to_string(),
+                format!("#{{window_index}}{SEP}#{{window_name}}{SEP}#{{pane_index}}{SEP}#{{pane_current_path}}"),
             ],
             None,
         )
@@ -219,13 +218,25 @@ pub async fn list_panes(transport: &ServerTransport, session: &str) -> Result<Tm
     Ok(parse_list_panes_output(session, &stdout))
 }
 
+/// Field separator for `list-panes -F`.
+///
+/// Printable on purpose: tmux 3.4 escapes control characters in format
+/// output, so a tab separator arrives as `_` and every line failed to parse --
+/// no panes, no swarms. The path is the last field and is split off with
+/// `splitn`, so a path containing the separator still parses.
+const SEP: &str = "|#|";
+
 fn parse_list_panes_output(session: &str, stdout: &str) -> TmuxSessionInfo {
     let mut windows: Vec<TmuxWindowInfo> = Vec::new();
 
     for line in stdout.lines() {
         // The path field is optional so that output captured from an older
-        // format string (and the existing fixtures) still parses.
-        let parts: Vec<&str> = line.splitn(4, '\t').collect();
+        // format string (and the existing tab-separated fixtures) still parses.
+        let parts: Vec<&str> = if line.contains(SEP) {
+            line.splitn(4, SEP).collect()
+        } else {
+            line.splitn(4, '\t').collect()
+        };
         if parts.len() < 3 {
             continue;
         }
@@ -302,6 +313,20 @@ mod tests {
         // Older format string, and the shape the other fixtures use.
         let parsed = parse_list_panes_output("codex-demo", "0\treview\t0\n");
         assert_eq!(parsed.windows[0].panes[0].current_path, None);
+    }
+
+    #[test]
+    fn parses_the_printable_separator_tmux_3_4_leaves_alone() {
+        // tmux 3.4 turned the old tab separator into `_`; this is what it
+        // prints for the current format string.
+        let parsed = parse_list_panes_output(
+            "claude-demo",
+            "0|#|agents|#|0|#|/src/demo-wt-1\n1|#|review|#|0|#|/src/odd|#|path\n",
+        );
+        assert_eq!(parsed.windows.len(), 2);
+        assert_eq!(parsed.windows[1].name, "review");
+        assert_eq!(parsed.windows[0].panes[0].current_path.as_deref(), Some("/src/demo-wt-1"));
+        assert_eq!(parsed.windows[1].panes[0].current_path.as_deref(), Some("/src/odd|#|path"));
     }
 
     #[test]
