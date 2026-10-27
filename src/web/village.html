@@ -93,7 +93,7 @@
   };
   const STATE = { blocked: '#f07020', done: '#3878e0', unknown: '#585870', stalled: '#8088a8' };
   const KINDCOL = { bug: '#e03838', feature: '#40b8e8', tests: '#e070d0', security: '#3058b0', research: '#c0a8f0', perf: '#d8c8a8', refactor: '#6878a0', docs: '#2878a0', chores: '#a83028', workshop: '#c88848', cottage: '#c8a048' };
-  const NOTECOL = { 'needs-design': '#f8c800', 'needs-clarification': '#d0c0f8', 'needs-approval': '#e89890', 'too-complex': '#b02010', 'future': '#8088a8', 'proposal': '#c0a8f0' };
+  const NOTECOL = { 'needs-design': '#f8c800', 'needs-clarification': '#d0c0f8', 'needs-approval': '#e89890', 'too-complex': '#b02010', 'future': '#8088a8', 'proposal': '#c0a8f0', 'failed': '#e02828', 'unreachable': '#585870' };
   const STOPCOL = ['#38c848', '#f8d040', '#f8f8f8', '#4868e8', '#e070d0'];
   /* A sub-agent's accent (tie, apron, belt) matches the building its specialty would build. */
   const SPECIALTIES = [['architect', 'research'], ['security', 'security'], ['test', 'tests'], ['doc', 'docs'], ['coder', 'feature']];
@@ -762,7 +762,7 @@
     // The manager's sub-agents (a modernize coordinator's specialists) work in the plaza.
     (v.manager.subagents || []).slice(0, 4).forEach((sa, k) => {
       const bob = !reduce && blink(t + k * 170, 220) ? -1 : 0;
-      person(c, hallX - 2 + k * 10, 39 + bob, `manager:${v.project}/sub${k}`, 'stand', { accent: subHat(sa) });
+      person(c, hallX - 2 + k * 10, 39 + bob, `manager:${v.project}/${sa.description || k}`, 'stand', { accent: subHat(sa) });
     });
 
     v.backlog.slice(0, 40).forEach((cr, i) => { const s = slotPos(i); T.crate(c, s.x, s.y, cr.kind, cr.priority); });
@@ -788,9 +788,11 @@
       // Sub-agents keep the house busy: they work out front, two at most shown.
       const subs = h.subagents || [];
       if (subs.length && !reduce) puffs(c, lot.x + 3, lot.y - 3, tt + 400, ...T.steam);
-      subs.slice(0, 2).forEach((sa, k) => {
+      // Anyone waiting on a person is shown first, waving.
+      [...subs].sort((a, b) => (b.status === 'blocked') - (a.status === 'blocked')).slice(0, 2).forEach((sa, k) => {
         const bob = !reduce && blink(t + k * 190, 210) ? -1 : 0;
-        person(c, lot.x + (k ? 9 : -1), lot.y + 12 + bob, `${h.id}/sub${k}`, 'stand', { accent: subHat(sa) });
+        const waiting = sa.status === 'blocked';
+        person(c, lot.x + (k ? 9 : -1), lot.y + 12 + bob, `${h.id}/${sa.description || k}`, waiting && bob ? 'wave' : 'stand', { accent: subHat(sa) });
       });
       if (subs.length > 2) R(c, lot.x + 16, lot.y + 13, 2, 2, P.gold);
       if (ICONS[st]) bubbles.push([lot.x + 4, lot.y - (st === 'blocked' ? 1 : 3) + (st === 'blocked' && blink(t, 200) ? -1 : 0), st]);
@@ -822,6 +824,7 @@
 
   /* ---------- Panels ---------- */
   function renderFlow(v) {
+    if (v.workflow === 'Temporal') return renderTemporalFlow(v);
     const stops = v.pipeline.stops;
     const working = v.houses.filter(h => h.status === 'working').length;
     const items = [
@@ -835,16 +838,33 @@
     document.getElementById('flow').innerHTML = items.map(([l, s, n], i) =>
       `<div class="step"><b>${n}</b><span>${esc(l)}<br>${esc(s)}</span></div>`).join('');
   }
+  /* Temporal villages count workstreams and agents, not issues and pushes. */
+  function renderTemporalFlow(v) {
+    const count = st => v.houses.filter(h => h.status === st).length;
+    const shipped = v.pipeline.stops.reduce((n, s) => n + s.issues.length, 0);
+    const items = [
+      [T.labels.houses, 'top-level workstreams', v.houses.length],
+      ['Working', 'workstreams busy', count('working')],
+      ['Waiting on you', 'agent set AgentStatus', count('blocked')],
+      ['Retrying', 'activity failing', count('stalled')],
+      ['Agents', 'child workflows running', v.houses.reduce((n, h) => n + (h.subagents || []).length, 0)],
+      ['Workers', v.manager.status === 'stalled' ? 'a task queue has none' : 'polling task queues', (v.manager.subagents || []).length],
+      [T.labels.board, 'failed in 24h', v.board.filter(n => n.label === 'failed').length],
+      [T.labels.castle, 'completed in 24h', shipped]
+    ];
+    document.getElementById('flow').innerHTML = items.map(([l, s, n]) =>
+      `<div class="step"><b>${n}</b><span>${esc(l)}<br>${esc(s)}</span></div>`).join('');
+  }
   const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 
   const dialog = document.getElementById('dialog');
   document.getElementById('close').addEventListener('click', () => { dialog.hidden = true; });
   function show(house, isManager) {
     document.getElementById('d-title').textContent = isManager ? `${T.labels.hall} · manager` : `${house.role} · ${house.kind}`;
-    document.getElementById('d-line').textContent = house.issue ? `#${house.issue} ${house.issue_title || ''}` : 'No issue claimed';
+    document.getElementById('d-line').textContent = house.issue ? `#${house.issue} ${house.issue_title || ''}` : (house.issue_title || 'No issue claimed');
     document.getElementById('d-meta').textContent =
       `Status: ${house.status}${house.priority ? ' · ' + house.priority : ''} · Crew: ${house.crew.join(', ') || '—'}` +
-      ((house.subagents || []).length ? ` · Sub-agents: ${house.subagents.map(sa => sa.agent_type + (sa.description ? ' (' + sa.description + ')' : '')).join(', ')}` : '');
+      ((house.subagents || []).length ? ` · ${current.workflow === 'Temporal' ? 'Agents' : 'Sub-agents'}: ${house.subagents.map(sa => sa.agent_type + (sa.description ? ' (' + sa.description + ')' : '') + (sa.status === 'blocked' ? ' waiting on you' : '')).join(', ')}` : '');
     dialog.hidden = false;
   }
   cv.addEventListener('click', e => {

@@ -1,5 +1,6 @@
 pub mod discovery;
 pub mod server;
+pub mod temporal;
 pub mod village;
 
 use serde::{Deserialize, Serialize};

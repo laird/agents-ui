@@ -100,9 +100,13 @@ pub struct House {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Subagent {
-    /// Claude Code agent type, e.g. `Explore` or `modernize:coder`.
+    /// Claude Code agent type, e.g. `Explore` or `modernize:coder`, or a
+    /// Temporal child workflow's type.
     pub agent_type: String,
     pub description: String,
+    /// Set when the source knows it, e.g. a Temporal child waiting on a person.
+    #[serde(default)]
+    pub status: Option<HouseStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -419,7 +423,7 @@ pub fn active_subagents(project_dir: &Path, now: SystemTime) -> Vec<Subagent> {
             if meta.finished || !modified_within(&transcript, now, SUBAGENT_STALE) {
                 continue;
             }
-            found.push(Subagent { agent_type: meta.agent_type, description: meta.description });
+            found.push(Subagent { agent_type: meta.agent_type, description: meta.description, status: None });
         }
     }
     found
@@ -447,7 +451,9 @@ pub fn apply_subagents(house: &mut House, subagents: Vec<Subagent>) {
     if subagents.is_empty() {
         return;
     }
-    if matches!(
+    if subagents.iter().any(|s| s.status == Some(HouseStatus::Blocked)) {
+        house.status = HouseStatus::Blocked;
+    } else if matches!(
         house.status,
         HouseStatus::Idle | HouseStatus::Done | HouseStatus::Unknown | HouseStatus::Stalled
     ) {
@@ -677,14 +683,50 @@ struct Extras {
     pipeline: Pipeline,
 }
 
-/// Shared between requests so `gh` and `git ls-remote` run at most once per
-/// `EXTRAS_TTL` per repo however many browsers are watching.
+/// How long a Temporal namespace's village is reused before rereading it.
+const TEMPORAL_TTL: Duration = Duration::from_secs(10);
+
+/// Shared between requests so `gh`, `git ls-remote` and Temporal's API run at
+/// most once per TTL per source however many browsers are watching.
 #[derive(Clone, Default)]
 pub struct VillageCache {
     inner: Arc<Mutex<HashMap<PathBuf, Extras>>>,
+    temporal: Vec<super::temporal::TemporalSource>,
+    temporal_cache: Arc<Mutex<HashMap<String, (Instant, VillageSnapshot)>>>,
 }
 
 impl VillageCache {
+    /// A cache that also shows one village per Temporal namespace.
+    pub fn with_temporal(temporal: Vec<super::temporal::TemporalSource>) -> Self {
+        Self { temporal, ..Self::default() }
+    }
+
+    async fn temporal_villages(&self, transport: &ServerTransport) -> Vec<VillageSnapshot> {
+        let mut out = Vec::with_capacity(self.temporal.len());
+        for source in &self.temporal {
+            let key = format!("{}|{}", source.http_url, source.namespace);
+            let cached = self
+                .temporal_cache
+                .lock()
+                .ok()
+                .and_then(|m| m.get(&key).cloned())
+                .filter(|(at, _)| at.elapsed() < TEMPORAL_TTL)
+                .map(|(_, v)| v);
+            let village = match cached {
+                Some(v) => v,
+                None => {
+                    let v = super::temporal::read_village(transport, source).await;
+                    if let Ok(mut m) = self.temporal_cache.lock() {
+                        m.insert(key, (Instant::now(), v.clone()));
+                    }
+                    v
+                }
+            };
+            out.push(village);
+        }
+        out
+    }
+
     pub async fn villages(&self, transport: &ServerTransport, swarms: &[SwarmSnapshot]) -> Vec<VillageSnapshot> {
         let mut out = Vec::with_capacity(swarms.len());
         for swarm in swarms {
@@ -714,6 +756,7 @@ impl VillageCache {
             }
             out.push(village);
         }
+        out.extend(self.temporal_villages(transport).await);
         out
     }
 
@@ -994,7 +1037,7 @@ mod tests {
     }
 
     fn sub(agent_type: &str) -> Subagent {
-        Subagent { agent_type: agent_type.to_string(), description: String::new() }
+        Subagent { agent_type: agent_type.to_string(), description: String::new(), status: None }
     }
 
     #[test]

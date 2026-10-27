@@ -30,6 +30,10 @@ struct CliOptions {
     /// run as a background service. The discovery poller reads tmux directly,
     /// so no TUI is needed to keep the swarm view live.
     headless: bool,
+    /// Temporal namespaces to show as villages (`--temporal <namespace>`).
+    temporal: Vec<String>,
+    /// Temporal frontend HTTP API (`--temporal-url`).
+    temporal_url: Option<String>,
 }
 
 fn parse_cli_options<I, S>(args: I) -> Result<CliOptions>
@@ -45,6 +49,8 @@ where
     let mut server = None;
     let mut web_port: Option<u16> = None;
     let mut headless = false;
+    let mut temporal = Vec::new();
+    let mut temporal_url = None;
 
     let mut iter = args.into_iter().skip(1);
     while let Some(arg) = iter.next() {
@@ -95,6 +101,24 @@ where
                 })?;
                 web_port = Some(port);
             }
+            "--temporal" => {
+                let Some(value) = iter.next() else {
+                    anyhow::bail!("--temporal requires a namespace");
+                };
+                temporal.push(value.as_ref().to_string());
+            }
+            value if value.starts_with("--temporal=") => {
+                temporal.push(value.trim_start_matches("--temporal=").to_string());
+            }
+            "--temporal-url" => {
+                let Some(value) = iter.next() else {
+                    anyhow::bail!("--temporal-url requires a URL, e.g. http://localhost:7243");
+                };
+                temporal_url = Some(value.as_ref().to_string());
+            }
+            value if value.starts_with("--temporal-url=") => {
+                temporal_url = Some(value.trim_start_matches("--temporal-url=").to_string());
+            }
             _ => {}
         }
     }
@@ -123,7 +147,26 @@ where
         None
     };
 
-    Ok(CliOptions { agent_type, server, web_port, headless })
+    // Temporal villages only exist in the web view, so asking for one serves it.
+    if !temporal.is_empty() && web_port.is_none() {
+        web_port = Some(web::server::DEFAULT_PORT);
+    }
+
+    Ok(CliOptions { agent_type, server, web_port, headless, temporal, temporal_url })
+}
+
+/// The village cache, with a village per `--temporal` namespace.
+fn village_cache(cli: &CliOptions) -> web::village::VillageCache {
+    let url = cli
+        .temporal_url
+        .clone()
+        .unwrap_or_else(|| web::temporal::DEFAULT_HTTP_URL.to_string());
+    web::village::VillageCache::with_temporal(
+        cli.temporal
+            .iter()
+            .map(|namespace| web::temporal::TemporalSource { namespace: namespace.clone(), http_url: url.clone() })
+            .collect(),
+    )
 }
 
 fn select_initial_agent_type(
@@ -241,7 +284,7 @@ async fn main() -> Result<()> {
             swarms: shared.clone(),
             agents_dir,
             transport,
-            village: Default::default(),
+            village: village_cache(&cli),
         };
         tokio::spawn(async move {
             if let Err(e) = web::server::run(port, web_server_state).await {
@@ -301,7 +344,7 @@ async fn run_headless(cli: &CliOptions) -> Result<()> {
         swarms: shared,
         agents_dir: crate::scripts::launcher::resolve_agents_dir(),
         transport: ServerTransport::new(cli.server.clone()),
-        village: Default::default(),
+        village: village_cache(&cli),
     };
 
     // Unlike the TUI path, this awaits the server instead of detaching it --
@@ -337,8 +380,19 @@ mod tests {
                 server: None,
                 web_port: None,
                 headless: false,
+                temporal: Vec::new(),
+                temporal_url: None,
             }
         );
+    }
+
+    #[test]
+    fn temporal_namespaces_turn_on_the_web_view() {
+        let cli = parse_cli_options(["agents-tui", "--temporal", "agents", "--temporal=ops", "--temporal-url", "http://t:7243"]).unwrap();
+        assert_eq!(cli.temporal, vec!["agents", "ops"]);
+        assert_eq!(cli.temporal_url.as_deref(), Some("http://t:7243"));
+        assert_eq!(cli.web_port, Some(crate::web::server::DEFAULT_PORT));
+        assert!(parse_cli_options(["agents-tui", "--temporal"]).is_err());
     }
 
     #[test]
@@ -393,6 +447,8 @@ mod tests {
                 server: Some("builder".to_string()),
                 web_port: None,
                 headless: false,
+                temporal: Vec::new(),
+                temporal_url: None,
             }
         );
 
@@ -404,6 +460,8 @@ mod tests {
                 server: Some("builder".to_string()),
                 web_port: None,
                 headless: false,
+                temporal: Vec::new(),
+                temporal_url: None,
             }
         );
     }
