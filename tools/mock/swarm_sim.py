@@ -18,6 +18,11 @@ workers) against them:
 The state agents-tui can't read from git goes to <dir>/state, where the
 `herdr` and `gh` shims in tools/mock/bin serve it.
 
+Linked to the platform (temporal_sim.py): every prod promotion of "shop"
+writes the released commit to <dir>/state/release, and every line the
+platform appends to <dir>/state/incidents.jsonl becomes an `incident` issue
+in "shop" naming the workstream that failed.
+
     swarm_sim.py --dir DEMO setup     # create repos (idempotent)
     swarm_sim.py --dir DEMO run       # play it out, forever
 """
@@ -203,6 +208,33 @@ class Swarm:
     def promote(self, env, source):
         git(self.repo, "push", "-q", "-f", "origin", f"refs/remotes/origin/{source}:refs/heads/{env}")
         git(self.repo, "fetch", "-q", "origin")
+        if env == "env/prod":
+            self.write_release()
+
+    def write_release(self):
+        sha = git(self.repo, "rev-parse", "refs/remotes/origin/env/prod")
+        self.state.mkdir(parents=True, exist_ok=True)
+        (self.state / "release").write_text(sha + "\n")
+
+    def file_incidents(self, offset):
+        """New lines from the platform's incident file become incident issues."""
+        path = self.state / "incidents.jsonl"
+        try:
+            with open(path) as f:
+                f.seek(offset)
+                lines = f.read()
+                offset = f.tell()
+        except OSError:
+            return offset
+        for line in lines.splitlines():
+            try:
+                inc = json.loads(line)
+            except ValueError:
+                continue
+            self.next_issue_no += 1
+            self.issues.append({"number": self.next_issue_no, "title": f"{inc['type']} {inc['id']} failed: {inc['reason']}",
+                                "labels": ["incident", "bug", "P1"], "opened": time.time()})
+        return offset
 
     # -- what the shims serve -----------------------------------------------
     def herdr_agents(self):
@@ -243,12 +275,15 @@ def main():
     for s in swarms:
         for _ in range(8):
             s.new_issue()
+    swarms[0].write_release()
+    incident_offset = 0
     print(f"simulating {', '.join(s.name for s in swarms)} in {root}", flush=True)
     next_green, next_staging, next_prod, red_until, next_red = 0, 0, 0, 0, time.time() + 150
     while True:
         t = time.time()
         for s in swarms:
             s.tick(t)
+        incident_offset = swarms[0].file_incidents(incident_offset)
         if t >= next_red:
             red_until, next_red = t + 25, t + random.uniform(150, 240)
         if t >= next_green:

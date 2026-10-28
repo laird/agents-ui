@@ -54,8 +54,8 @@ async fn api_village_handler(State(state): State<WebServerState>) -> Json<Value>
         .read()
         .map(|s| s.clone())
         .unwrap_or_default();
-    let villages = state.village.villages(&state.transport, &swarms).await;
-    Json(json!({ "villages": villages }))
+    let snapshot = state.village.snapshot(&state.transport, &swarms).await;
+    Json(json!(snapshot))
 }
 
 async fn api_swarms_handler(State(state): State<WebServerState>) -> Json<Value> {
@@ -1289,6 +1289,7 @@ mod tests {
         let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["villages"], serde_json::json!([]));
+        assert_eq!(json["worlds"], serde_json::json!([]));
     }
 
     #[tokio::test]

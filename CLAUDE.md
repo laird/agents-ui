@@ -32,6 +32,7 @@ Tests are inline `#[cfg(test)]` modules in each source file:
 - `src/app.rs` — Key-to-tmux conversion, pane status inference, tab completion helpers
 - `src/web/village.rs` — House kinds and statuses, crew grouping, backlog/board sorting, tip-ref and environment parsing, transcript actions
 - `src/web/herdr.rs`, `src/web/temporal.rs` — herdr and Temporal parsing and village building, from JSON fixtures
+- `src/web/world.rs` — world specs, build-ID matching, incident origins, shipping vs landed
 
 For the village UI, `tools/mock/demo.sh` runs agents-tui against simulated herdr and Temporal swarms.
 
@@ -74,7 +75,8 @@ src/
     herdr.rs        # Swarms under herdr: `herdr agent list`, grouped by worktree cwd
     temporal.rs     # Temporal namespaces as villages, via the frontend HTTP API
     village.rs      # Village model: houses per worktree, issue crates, pipeline from git
-    village.html    # /village: the swarm as a 16-bit village (canvas renderer, themes)
+    world.rs        # Worlds: a dev village paired with the platform it builds (incidents down, releases up)
+    village.html    # /village: the swarm as a 16-bit village (canvas renderer, themes, worlds)
 tools/mock/         # Simulated herdr/Temporal swarms for the village: demo.sh
 ```
 

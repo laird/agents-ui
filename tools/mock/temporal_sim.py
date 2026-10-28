@@ -13,6 +13,12 @@ activities, start agents (child workflows, sometimes grandchildren), wait on
 a person (AgentStatus=waiting_for_human), retry failing activities, and end
 completed or failed. A "nightly-reports" queue loses its workers now and then.
 
+Linked to the dev swarm (swarm_sim.py) through two files, so the demo plays
+the whole loop: --release-file holds the commit the dev swarm last released
+to prod, and workers roll over to it one at a time as their build ID;
+--incident-file gets a line for every workstream that fails, which the dev
+swarm files as an `incident` issue.
+
     python3 tools/mock/temporal_sim.py --port 7243 --namespace agents
 """
 
@@ -94,8 +100,10 @@ class Workflow:
 
 
 class Namespace:
-    def __init__(self, name):
+    def __init__(self, name, release_file=None, incident_file=None):
         self.name = name
+        self.release_file, self.incident_file = release_file, incident_file
+        self.builds = {"old": "initial", "new": "initial", "at": 0.0}
         self.lock = threading.Lock()
         self.workflows = []
         self.counter = 100
@@ -114,8 +122,24 @@ class Namespace:
         wf.will_fail = random.random() < 0.15
         self.workflows.append(wf)
 
+    def read_release(self, t):
+        if not self.release_file:
+            return
+        try:
+            with open(self.release_file) as f:
+                sha = f.read().strip()[:12]
+        except OSError:
+            return
+        if sha and sha != self.builds["new"]:
+            self.builds = {"old": self.builds["new"], "new": sha, "at": t}
+
+    def build_for(self, i):
+        """Workers roll over to a new release one at a time, 5 s apart."""
+        return self.builds["new"] if time.time() >= self.builds["at"] + 5 * (i + 1) else self.builds["old"]
+
     def tick(self):
         t = time.time()
+        self.read_release(t)
         with self.lock:
             running = [w for w in self.workflows if w.status == "RUNNING"]
             if t >= self.next_stream and sum(1 for w in running if not w.parent) < 9:
@@ -164,6 +188,9 @@ class Namespace:
 
     def finish(self, wf, status):
         wf.status, wf.close = status, time.time()
+        if status == "FAILED" and not wf.parent and self.incident_file:
+            with open(self.incident_file, "a") as f:
+                f.write(json.dumps({"id": wf.id, "type": wf.type_name, "reason": "upstream returned 429 after 5 attempts"}) + "\n")
         for c in wf.children:
             if c.status == "RUNNING":
                 self.finish(c, "TERMINATED" if status == "FAILED" else "COMPLETED")
@@ -185,7 +212,8 @@ class Namespace:
         if queue == NIGHTLY and not self.nightly_workers:
             return []
         n = 2 if queue == NIGHTLY else 3
-        return [{"identity": f"{queue}-worker-{i}@pod-{i}", "lastAccessTime": now_iso(time.time())} for i in range(1, n + 1)]
+        return [{"identity": f"{queue}-worker-{i}@pod-{i}", "lastAccessTime": now_iso(time.time()),
+                 "deploymentOptions": {"buildId": self.build_for(i)}} for i in range(1, n + 1)]
 
 
 def handler(ns):
@@ -225,10 +253,14 @@ def main():
     ap.add_argument("--port", type=int, default=7243)
     ap.add_argument("--namespace", default="agents")
     ap.add_argument("--seed", type=int)
+    ap.add_argument("--release-file", help="file holding the commit the dev swarm last released")
+    ap.add_argument("--incident-file", help="file to append failed workstreams to, one JSON line each")
     args = ap.parse_args()
     if args.seed is not None:
         random.seed(args.seed)
-    ns = Namespace(args.namespace)
+    ns = Namespace(args.namespace, args.release_file, args.incident_file)
+    ns.read_release(0)
+    ns.builds["old"] = ns.builds["new"]
     for _ in range(4):
         ns.start_stream()
 

@@ -778,12 +778,17 @@
   /* ---------- State ---------- */
   const cv = document.getElementById('map'), ctx = cv.getContext('2d');
   const pick = document.getElementById('pick');
-  let villages = [], current = null, L = null, prev = null;
-  let porters = [], fireworks = -1e9, lastDelivered = null;
+  let villages = [], worlds = [], view = null;
+  /* One scene per village: its model, layout and the animations in flight.
+   * `current`, `L`, `porters` and `fireworks` hold the scene being drawn
+   * while paint() runs, so the drawing code reads them as before. */
+  const scenes = {};
+  let current = null, L = null, porters = [], fireworks = -1e9;
+  /* Per world: the incidents and landing seen last poll, and crates afloat. */
+  const worldState = {};
   const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   const slotPos = i => ({ x: 10 + (i % 8) * 6, y: 22 + Math.floor(i / 8) * 6 });
-  const houseLot = (lay, id) => { const i = current.houses.findIndex(h => h.id === id); return i >= 0 ? lay.lots[i] : null; };
 
   /* Animate crates that moved since the last snapshot. */
   function diff(old, now, lay, t) {
@@ -819,9 +824,8 @@
     return null;
   }
 
-  function draw(t) {
-    if (!current) return;
-    const v = current, lay = L, c = ctx;
+  function paint(c, t) {
+    const v = current, lay = L;
     const { W, H, roadX, hallX, lots, quayY, canalY, cx0, vw } = lay;
     T.ground(c, 0, 0, W, H);
     T.channel(c, 0, 0, W, 11, t, 1);
@@ -912,6 +916,142 @@
     bubbles.forEach(([x, y, s]) => bubble(c, x, y, s));
   }
 
+  function drawVillage(c, sc, t) {
+    current = sc.v; L = sc.L; porters = sc.porters; fireworks = sc.fireworks;
+    paint(c, t);
+    sc.porters = porters;
+  }
+
+  /* Fold a new model into its village's scene, starting the animations its
+   * changes call for. */
+  function updateScene(v, t) {
+    const sc = scenes[v.project] || (scenes[v.project] = { v: null, porters: [], fireworks: -1e9, lastDelivered: null });
+    const lay = layout(v);
+    porters = sc.porters;
+    diff(sc.v, v, lay, t);
+    sc.porters = porters;
+    const delivered = v.pipeline.stops.length ? v.pipeline.stops[v.pipeline.stops.length - 1].issues.join(',') : '';
+    if (sc.lastDelivered !== null && sc.v && delivered !== sc.lastDelivered && delivered) sc.fireworks = t;
+    sc.lastDelivered = delivered;
+    sc.v = v; sc.L = lay;
+    return sc;
+  }
+
+  /* ---------- Worlds ----------
+   * A world stacks the platform village (what runs) over the dev village
+   * (what builds it). Issues the platform raises leave the building they
+   * came from and float down the river on the left to the dev village's
+   * docks; releases leave the dev village's harbour and climb the road on
+   * the right to the platform, until its workers run them. The platform is
+   * drawn in the other style, so the two read apart at a glance. */
+  const SIDE = 24, GAP = 28;
+  const otherTheme = () => (T === MEDIEVAL ? MODERN : MEDIEVAL);
+  function worldGeom(Ps, Ds) {
+    const W = Math.max(Ps.L.W, Ds.L.W) + 2 * SIDE, devTop = Ps.L.H + GAP;
+    return { W, H: devTop + Ds.L.H, devTop, srcY: Ps.L.top, roadY: 53 };
+  }
+  function offscreen(sc) {
+    if (!sc.canvas) { sc.canvas = document.createElement('canvas'); sc.cx = sc.canvas.getContext('2d'); }
+    if (sc.canvas.width !== sc.L.W || sc.canvas.height !== sc.L.H) { sc.canvas.width = sc.L.W; sc.canvas.height = sc.L.H; }
+    return sc.cx;
+  }
+  /* A channel that flows down: water in the village, a conveyor road in the district. */
+  function downstream(c, x, y, w, h, t) {
+    const modern = T === MODERN;
+    R(c, x, y, w, h, modern ? M.asphaltD : P.water);
+    R(c, x, y, 1, h, modern ? M.concreteD : P.waterD); R(c, x + w - 1, y, 1, h, modern ? M.concreteD : P.waterD);
+    const off = Math.floor(t / 70) % 8;
+    for (let yy = y - 8 + off; yy < y + h; yy += 8) if (yy >= y) {
+      if (modern) R(c, x + (w >> 1), yy, 1, 4, P.white);
+      else { R(c, x + 3, yy, 1, 2, P.waterL); R(c, x + w - 5, yy + 4, 1, 2, P.waterL); }
+    }
+  }
+  function cart(c, x, y, loads) {
+    const modern = T === MODERN;
+    x = Math.round(x); y = Math.round(y);
+    R(c, x, y, 14, 8, P.o); R(c, x + 1, y + 1, 12, 5, modern ? P.white : P.wood);
+    if (modern) { R(c, x + 10, y - 3, 4, 4, P.o); R(c, x + 11, y - 2, 2, 2, M.glassL); }
+    R(c, x + 2, y + 7, 3, 3, P.o); R(c, x + 9, y + 7, 3, 3, P.o);
+    for (let k = 0; k < Math.min(loads, modern ? 1 : 2); k++) T.crate(c, x + 2 + k * 5, y - 4, 'workshop', null, true);
+  }
+  function updateWorld(w, t) {
+    const st = worldState[w.name] || (worldState[w.name] = { seen: null, floaters: [], landed: undefined, upgradedAt: -1e9 });
+    const now = new Set(w.incidents.map(i => i.number));
+    if (st.seen) w.incidents.forEach(i => { if (!st.seen.has(i.number)) st.floaters.push({ n: i.number, origin: i.origin, t0: t }); });
+    st.seen = now;
+    if (st.landed === false && w.landed === true) {
+      st.upgradedAt = t;
+      if (scenes[w.platform]) scenes[w.platform].fireworks = t;
+    }
+    st.landed = w.landed;
+  }
+  function originPoint(Ps, id) {
+    const i = Ps.v.houses.findIndex(h => h.id === id), lot = i >= 0 ? Ps.L.lots[i] : null;
+    return lot ? [SIDE + lot.x + 8, lot.y + 8] : [12, Ps.L.top - 6];
+  }
+  function drawWorld(t, w) {
+    const Ps = scenes[w.platform], Ds = scenes[w.dev];
+    if (!Ps || !Ps.v || !Ds || !Ds.v) return;
+    const g = worldGeom(Ps, Ds), st = worldState[w.name] || { floaters: [], upgradedAt: -1e9 };
+    if (cv.width !== g.W || cv.height !== g.H) { cv.width = g.W; cv.height = g.H; fit(); }
+    const devTheme = T;
+    T.ground(ctx, 0, 0, g.W, g.H);
+
+    T = otherTheme();
+    T.ground(ctx, 0, 0, g.W, Ps.L.H);
+    drawVillage(offscreen(Ps), Ps, t);
+    ctx.drawImage(Ps.canvas, SIDE, 0);
+    // Platform buildings with an open incident against them are on fire.
+    w.damaged.forEach(id => {
+      const i = Ps.v.houses.findIndex(h => h.id === id), lot = Ps.L.lots[i];
+      if (!lot) return;
+      const x = SIDE + lot.x, y = lot.y;
+      R(ctx, x, y - 1, 16, 17, 'rgba(40,24,24,.35)');
+      for (let k = 0; k < 3; k++) {
+        puffs(ctx, x + 4 + k * 4, y - 6, t + k * 450, '#484858', '#282830');
+        puffs(ctx, x + 5 + k * 4, y - 12, t + k * 450 + 900, '#585870', '#383848');
+      }
+      const f = blink(t, 140) ? 1 : 0;
+      R(ctx, x + 4, y + 2 - f, 3, 3 + f, P.p0); R(ctx, x + 5, y + 1 - f, 1, 2, P.gold);
+      R(ctx, x + 10, y + 3 + f, 3, 3 - f, P.p0); R(ctx, x + 11, y + 2 + f, 1, 2, P.gold);
+    });
+    if (t - st.upgradedAt < 2400) Ps.v.houses.forEach((h, i) => {
+      const lot = Ps.L.lots[i]; if (lot && blink(t + i * 90, 160)) R(ctx, SIDE + lot.x + 2 + (i * 5) % 12, lot.y - 2, 1, 1, P.gold);
+    });
+    T = devTheme;
+
+    drawVillage(offscreen(Ds), Ds, t);
+    ctx.drawImage(Ds.canvas, SIDE, g.devTop);
+
+    // The river down: from the platform's gate to the dev village's river.
+    downstream(ctx, 5, g.srcY, 14, g.devTop + 11 - g.srcY, t);
+    R(ctx, 2, g.srcY - 8, 20, 8, P.o); R(ctx, 3, g.srcY - 7, 18, 6, T === MODERN ? M.concrete : P.stone); R(ctx, 9, g.srcY - 6, 6, 5, P.dark);
+    // The road up: from the dev village's harbour to the platform's main road.
+    const ry = g.devTop + Ds.L.canalY + 4;
+    T.road(ctx, g.W - 20, g.roadY - 3, 16, ry - g.roadY + 9);
+    T.road(ctx, SIDE + Ds.L.castleX + 36, ry, g.W - 20 - (SIDE + Ds.L.castleX + 36), 6);
+    const roadEnd = SIDE + Ps.L.cx0 + Ps.L.vw - 4;
+    T.road(ctx, roadEnd, g.roadY - 3, g.W - 20 - roadEnd, 6);
+
+    // Released work on its way up, until the platform's workers run it.
+    if (w.shipping.length) {
+      const pts = [[SIDE + Ds.L.castleX + 34, ry], [g.W - 12, ry], [g.W - 12, g.roadY], [roadEnd, g.roadY]];
+      const len = pts.slice(1).reduce((n, p, k) => n + Math.hypot(p[0] - pts[k][0], p[1] - pts[k][1]), 0);
+      const d = reduce ? len / 2 : (t / 30) % len;
+      const at = porterPos({ t0: 0, speed: 1, pts }, d) || pts[0];
+      cart(ctx, at[0] - 7, at[1] - 6, w.shipping.length);
+    }
+    // New incidents leave their building and float down to the docks.
+    st.floaters = st.floaters.filter(f => {
+      const [ox, oy] = originPoint(Ps, f.origin);
+      const pts = [[ox, oy], [12, oy], [12, g.devTop + 6], [SIDE + 30, g.devTop + 6]];
+      const at = porterPos({ t0: f.t0, speed: 0.04, pts }, t);
+      if (!at) return false;
+      T.crate(ctx, at[0] - 2, at[1] - 2, 'bug', 'P0');
+      return true;
+    });
+  }
+
   /* ---------- Panels ---------- */
   function renderFlow(v) {
     if (v.workflow === 'Temporal') return renderTemporalFlow(v);
@@ -945,59 +1085,96 @@
     document.getElementById('flow').innerHTML = items.map(([l, s, n]) =>
       `<div class="step"><b>${n}</b><span>${esc(l)}<br>${esc(s)}</span></div>`).join('');
   }
+  /* World counters follow the loop: raised, being fixed, released, running. */
+  function renderWorldFlow(w) {
+    const Ds = scenes[w.dev], Ps = scenes[w.platform];
+    const open = w.incidents.filter(i => !i.in_progress).length, fixing = w.incidents.length - open;
+    const short = s => (s ? s.slice(0, 7) : '—');
+    const landed = w.landed === null ? 'platform reports no build IDs' : w.landed ? 'running on the platform' : 'rolling out';
+    const items = [
+      ['Incidents', 'raised by the platform', open],
+      ['Being fixed', `claimed in ${w.dev}`, fixing],
+      ['Dev village', 'houses working', Ds && Ds.v ? Ds.v.houses.filter(h => h.status === 'working').length : 0],
+      ['Shipping', 'released, not yet running', w.shipping.length],
+      ['Release', landed, short(w.release)],
+      ['Platform', 'workstreams busy', Ps && Ps.v ? Ps.v.houses.filter(h => h.status === 'working').length : 0],
+      ['Platform builds', 'reported by workers', w.platform_builds.map(short).join(' ') || '—']
+    ];
+    document.getElementById('flow').innerHTML = items.map(([l, s, n]) =>
+      `<div class="step"><b>${esc(n)}</b><span>${esc(l)}<br>${esc(s)}</span></div>`).join('');
+  }
   const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 
   const dialog = document.getElementById('dialog');
   document.getElementById('close').addEventListener('click', () => { dialog.hidden = true; });
-  function show(house, isManager) {
-    document.getElementById('d-title').textContent = isManager ? `${T.labels.hall} · manager` : `${house.role} · ${house.kind}`;
+  function show(house, isManager, v, theme) {
+    document.getElementById('d-title').textContent = isManager ? `${theme.labels.hall} · manager` : `${house.role} · ${house.kind}`;
     document.getElementById('d-line').textContent = house.issue ? `#${house.issue} ${house.issue_title || ''}` : (house.issue_title || 'No issue claimed');
     document.getElementById('d-meta').textContent =
       `Status: ${house.status}${house.priority ? ' · ' + house.priority : ''} · Crew: ${house.crew.join(', ') || '—'}` +
-      ((house.subagents || []).length ? ` · ${current.workflow === 'Temporal' ? 'Agents' : 'Sub-agents'}: ${house.subagents.map(sa => sa.agent_type + (sa.description ? ' (' + sa.description + ')' : '') + (sa.status === 'blocked' ? ' waiting on you' : sa.action ? ' ' + sa.action : '')).join(', ')}` : '') +
+      ((house.subagents || []).length ? ` · ${v.workflow === 'Temporal' ? 'Agents' : 'Sub-agents'}: ${house.subagents.map(sa => sa.agent_type + (sa.description ? ' (' + sa.description + ')' : '') + (sa.status === 'blocked' ? ' waiting on you' : sa.action ? ' ' + sa.action : '')).join(', ')}` : '') +
       (house.action ? ` · Now: ${house.action}` : '');
     dialog.hidden = false;
   }
+  function hit(sc, x, y, theme) {
+    const lay = sc.L, v = sc.v;
+    if (x >= lay.hallX - 4 && x < lay.hallX + 36 && y >= 6 && y < 42) return show(v.manager, true, v, theme);
+    const i = lay.lots.findIndex((lot, k) => k < v.houses.length && x >= lot.x && x < lot.x + 16 && y >= lot.y - 4 && y < lot.y + 21);
+    if (i >= 0) show(v.houses[i], false, v, theme);
+  }
   cv.addEventListener('click', e => {
-    if (!current) return;
+    if (!view) return;
     const r = cv.getBoundingClientRect();
-    const x = (e.clientX - r.left) / r.width * L.W, y = (e.clientY - r.top) / r.height * L.H;
-    if (x >= L.hallX - 4 && x < L.hallX + 36 && y >= 6 && y < 42) return show(current.manager, true);
-    const i = L.lots.findIndex((lot, k) => k < current.houses.length && x >= lot.x && x < lot.x + 16 && y >= lot.y - 4 && y < lot.y + 21);
-    if (i >= 0) show(current.houses[i], false);
+    const x = (e.clientX - r.left) / r.width * cv.width, y = (e.clientY - r.top) / r.height * cv.height;
+    if (!view.world) { const sc = scenes[view.village]; if (sc && sc.v) hit(sc, x, y, T); return; }
+    const w = worlds.find(x => x.name === view.world), Ps = w && scenes[w.platform], Ds = w && scenes[w.dev];
+    if (!Ps || !Ds || !Ps.v || !Ds.v) return;
+    const g = worldGeom(Ps, Ds);
+    if (y < Ps.L.H) hit(Ps, x - SIDE, y, otherTheme());
+    else if (y >= g.devTop) hit(Ds, x - SIDE, y - g.devTop, T);
   });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') dialog.hidden = true; });
 
   /* ---------- Data ---------- */
   function fit() {
-    if (!L) return;
-    const vp = document.getElementById('viewport');
-    const s = Math.max(1, Math.min(8, Math.floor((vp.clientWidth - 8) / L.W), Math.floor((window.innerHeight - 190) / L.H) || 1));
-    cv.style.width = L.W * s + 'px'; cv.style.height = L.H * s + 'px';
+    const vp = document.getElementById('viewport'), W = cv.width, H = cv.height;
+    const s = Math.max(1, Math.min(8, Math.floor((vp.clientWidth - 8) / W), Math.floor((window.innerHeight - 190) / H) || 1));
+    cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
   }
   window.addEventListener('resize', fit);
 
+  /* Show a village (`shop`) or a world (`world:shop`). */
   function select(name) {
-    const v = villages.find(x => x.project === name) || villages[0];
-    if (!v) return;
-    const lay = layout(v);
-    const t = performance.now();
-    diff(current, v, lay, t);
-    const delivered = v.pipeline.stops.length ? v.pipeline.stops[v.pipeline.stops.length - 1].issues.join(',') : '';
-    if (lastDelivered !== null && current && current.project === v.project && delivered !== lastDelivered && delivered) fireworks = t;
-    lastDelivered = delivered;
-    current = v; L = lay;
-    document.getElementById('workflow').textContent = v.workflow ? `· ${v.workflow} swarm` : '';
-    if (cv.width !== L.W || cv.height !== L.H) { cv.width = L.W; cv.height = L.H; }
-    fit(); renderFlow(v);
+    const w = worlds.find(x => x.name === name);
+    const v = villages.find(x => x.project === name);
+    if (w) view = { world: w.name };
+    else if (v || villages[0]) view = { village: (v || villages[0]).project };
+    else return;
+    if (view.world) {
+      document.getElementById('workflow').textContent = `· ${w.dev} builds ${w.platform}`;
+      renderWorldFlow(w);
+    } else {
+      const sc = scenes[view.village];
+      document.getElementById('workflow').textContent = sc.v.workflow ? `· ${sc.v.workflow} swarm` : '';
+      if (cv.width !== sc.L.W || cv.height !== sc.L.H) { cv.width = sc.L.W; cv.height = sc.L.H; }
+      renderFlow(sc.v);
+    }
+    fit();
     if (reduce) draw(0);
+  }
+  function draw(t) {
+    if (!view) return;
+    ctx.imageSmoothingEnabled = false;
+    if (view.world) { const w = worlds.find(x => x.name === view.world); if (w) drawWorld(t, w); return; }
+    const sc = scenes[view.village];
+    if (sc && sc.v) drawVillage(ctx, sc, t);
   }
   const themePick = document.getElementById('theme');
   themePick.value = themeName;
   themePick.addEventListener('change', () => {
     themeName = themePick.value; T = THEMES[themeName];
     try { localStorage.setItem('village-theme', themeName); } catch {}
-    if (current) { renderFlow(current); if (reduce) draw(0); }
+    if (view) select(view.world || view.village);
   });
   pick.addEventListener('change', () => { location.hash = pick.value; select(pick.value); });
   window.addEventListener('hashchange', () => select(decodeURIComponent(location.hash.slice(1))));
@@ -1006,13 +1183,19 @@
     try {
       const res = await fetch('/api/village');
       if (!res.ok) throw new Error(res.status);
-      villages = (await res.json()).villages || [];
-      const names = villages.map(v => v.project);
+      const data = await res.json();
+      villages = data.villages || [];
+      worlds = data.worlds || [];
+      const t = performance.now();
+      villages.forEach(v => updateScene(v, t));
+      worlds.forEach(w => updateWorld(w, t));
+      const names = [...worlds.map(w => w.name), ...villages.map(v => v.project)];
+      const label = n => { const w = worlds.find(x => x.name === n); return w ? `${w.dev} \u21c4 ${w.platform}` : n; };
       pick.hidden = names.length < 2;
       if (pick.options.length !== names.length || [...pick.options].some((o, i) => o.value !== names[i])) {
-        pick.innerHTML = names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+        pick.innerHTML = names.map(n => `<option value="${esc(n)}">${esc(label(n))}</option>`).join('');
       }
-      const want = decodeURIComponent(location.hash.slice(1)) || (current && current.project) || names[0];
+      const want = decodeURIComponent(location.hash.slice(1)) || (view && (view.world || view.village)) || names[0];
       if (names.includes(want)) pick.value = want;
       document.getElementById('empty').hidden = villages.length > 0;
       cv.hidden = villages.length === 0;

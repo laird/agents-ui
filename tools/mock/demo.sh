@@ -6,7 +6,10 @@
 #     git worktrees, GitHub issues, tip refs, master-green and staging/prod;
 #   * "billing": a modernize swarm under herdr whose manager runs specialist
 #     sub-agents;
-#   * "temporal:agents": a Temporal namespace of agentic workstreams.
+#   * "temporal:agents": a Temporal namespace of agentic workstreams;
+#   * "world:shop": the two together. Workstreams that fail on the platform
+#     file incident issues that flow down to "shop", and every prod release
+#     of "shop" rolls out to the platform's workers.
 #
 #   tools/mock/demo.sh                 # then open http://127.0.0.1:7878/village
 #   PORT=8080 tools/mock/demo.sh
@@ -31,11 +34,13 @@ trap cleanup EXIT INT TERM
 
 python3 "$HERE/swarm_sim.py" --dir "$DEMO" setup
 python3 "$HERE/swarm_sim.py" --dir "$DEMO" run & pids+=($!)
-python3 "$HERE/temporal_sim.py" --port "$TEMPORAL_PORT" --namespace agents & pids+=($!)
+python3 "$HERE/temporal_sim.py" --port "$TEMPORAL_PORT" --namespace agents \
+  --release-file "$DEMO/state/release" --incident-file "$DEMO/state/incidents.jsonl" & pids+=($!)
 sleep 1
 
 echo "Village:    http://127.0.0.1:$PORT/village"
+echo "World:      http://127.0.0.1:$PORT/village#world:shop"
 echo "Demo files: $DEMO"
 HOME="$DEMO/home" PATH="$HERE/bin:$PATH" "$BIN" --headless --web-port "$PORT" \
-  --temporal agents --temporal-url "http://127.0.0.1:$TEMPORAL_PORT" & pids+=($!)
+  --temporal agents --temporal-url "http://127.0.0.1:$TEMPORAL_PORT" --world shop=temporal:agents & pids+=($!)
 wait

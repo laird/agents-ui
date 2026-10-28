@@ -38,6 +38,10 @@ struct CliOptions {
     web_bind: Option<std::net::IpAddr>,
     /// Refuse every request that would change something (`--read-only`).
     read_only: bool,
+    /// Dev villages paired with the platform they build (`--world shop=temporal:agents`).
+    worlds: Vec<String>,
+    /// Label marking issues the platform raised (`--incident-label`).
+    incident_label: Option<String>,
 }
 
 fn parse_cli_options<I, S>(args: I) -> Result<CliOptions>
@@ -57,6 +61,8 @@ where
     let mut temporal_url = None;
     let mut web_bind = None;
     let mut read_only = false;
+    let mut worlds = Vec::new();
+    let mut incident_label = None;
 
     let mut iter = args.into_iter().skip(1);
     while let Some(arg) = iter.next() {
@@ -117,6 +123,22 @@ where
                 temporal.push(value.trim_start_matches("--temporal=").to_string());
             }
             "--read-only" => read_only = true,
+            "--world" => {
+                let Some(value) = iter.next() else {
+                    anyhow::bail!("--world requires <dev>=<platform>, e.g. shop=temporal:agents");
+                };
+                worlds.push(value.as_ref().to_string());
+            }
+            value if value.starts_with("--world=") => worlds.push(value.trim_start_matches("--world=").to_string()),
+            "--incident-label" => {
+                let Some(value) = iter.next() else {
+                    anyhow::bail!("--incident-label requires a label");
+                };
+                incident_label = Some(value.as_ref().to_string());
+            }
+            value if value.starts_with("--incident-label=") => {
+                incident_label = Some(value.trim_start_matches("--incident-label=").to_string());
+            }
             "--web-bind" => {
                 let Some(value) = iter.next() else {
                     anyhow::bail!("--web-bind requires an address, e.g. 0.0.0.0");
@@ -169,12 +191,18 @@ where
         None
     };
 
-    // Temporal villages only exist in the web view, so asking for one serves it.
-    if !temporal.is_empty() && web_port.is_none() {
+    for spec in &worlds {
+        if web::world::WorldConfig::parse(spec, "").is_none() {
+            anyhow::bail!("--world value '{spec}' is not <dev>=<platform>, e.g. shop=temporal:agents");
+        }
+    }
+
+    // Temporal villages and worlds only exist in the web view, so asking for one serves it.
+    if (!temporal.is_empty() || !worlds.is_empty()) && web_port.is_none() {
         web_port = Some(web::server::DEFAULT_PORT);
     }
 
-    Ok(CliOptions { agent_type, server, web_port, headless, temporal, temporal_url, web_bind, read_only })
+    Ok(CliOptions { agent_type, server, web_port, headless, temporal, temporal_url, web_bind, read_only, worlds, incident_label })
 }
 
 /// Where the web UI listens: loopback unless `--web-bind` says otherwise.
@@ -183,17 +211,19 @@ fn web_addr(cli: &CliOptions, port: u16) -> std::net::SocketAddr {
     std::net::SocketAddr::new(ip, port)
 }
 
-/// The village cache, with a village per `--temporal` namespace.
+/// The village cache, with a village per `--temporal` namespace and a world per `--world`.
 fn village_cache(cli: &CliOptions) -> web::village::VillageCache {
     let url = cli
         .temporal_url
         .clone()
         .unwrap_or_else(|| web::temporal::DEFAULT_HTTP_URL.to_string());
-    web::village::VillageCache::with_temporal(
+    let label = cli.incident_label.as_deref().unwrap_or(web::world::DEFAULT_INCIDENT_LABEL);
+    web::village::VillageCache::new(
         cli.temporal
             .iter()
             .map(|namespace| web::temporal::TemporalSource { namespace: namespace.clone(), http_url: url.clone() })
             .collect(),
+        cli.worlds.iter().filter_map(|spec| web::world::WorldConfig::parse(spec, label)).collect(),
     )
 }
 
@@ -413,6 +443,8 @@ mod tests {
                 temporal_url: None,
                 web_bind: None,
                 read_only: false,
+                worlds: Vec::new(),
+                incident_label: None,
             }
         );
     }
@@ -434,6 +466,15 @@ mod tests {
         let local = parse_cli_options(["agents-tui", "--web"]).unwrap();
         assert_eq!(web_addr(&local, 7878).to_string(), "127.0.0.1:7878");
         assert!(parse_cli_options(["agents-tui", "--web-bind", "nope"]).is_err());
+    }
+
+    #[test]
+    fn worlds_pair_a_dev_village_with_its_platform() {
+        let cli = parse_cli_options(["agents-tui", "--world", "shop=temporal:agents", "--incident-label", "sre"]).unwrap();
+        assert_eq!(cli.worlds, vec!["shop=temporal:agents"]);
+        assert_eq!(cli.incident_label.as_deref(), Some("sre"));
+        assert_eq!(cli.web_port, Some(crate::web::server::DEFAULT_PORT));
+        assert!(parse_cli_options(["agents-tui", "--world", "shop"]).is_err());
     }
 
     #[test]
@@ -492,6 +533,8 @@ mod tests {
                 temporal_url: None,
                 web_bind: None,
                 read_only: false,
+                worlds: Vec::new(),
+                incident_label: None,
             }
         );
 
@@ -507,6 +550,8 @@ mod tests {
                 temporal_url: None,
                 web_bind: None,
                 read_only: false,
+                worlds: Vec::new(),
+                incident_label: None,
             }
         );
     }

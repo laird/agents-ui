@@ -21,7 +21,9 @@ tools/mock/demo.sh          # then open http://127.0.0.1:7878/village
 
 runs agents-tui against simulated swarms: an autocoder swarm and a modernize
 swarm under herdr (with real git worktrees, issues, tip refs and
-environments) and a Temporal namespace of agentic workstreams. See the
+environments) and a Temporal namespace of agentic workstreams, linked as a
+world (`#world:shop`): failed workstreams file incident issues in the dev
+swarm, and its prod releases roll out to the platform's workers. See the
 header of `tools/mock/demo.sh`.
 
 ## What people are doing
@@ -101,3 +103,29 @@ workflow.upsert_search_attributes([AGENT_STATUS.value_set("working")])
 
 A workstream with any workflow set to `waiting_for_human` (or `blocked`)
 shows an open door and a waving agent.
+
+## Worlds: the dev village and the platform it builds
+
+```bash
+agents-tui --headless --temporal agents --world shop=temporal:agents
+```
+
+`--world <dev>=<platform>` (repeatable) pairs a dev village (the coding swarm
+that writes the system) with the platform village (the Temporal namespace
+that runs it). Pick `shop ⇄ temporal:agents` in the title bar, or open
+`/village#world:shop`. The platform is drawn above, in the other style; work
+moves between the two in a loop:
+
+| What you see | Where it comes from |
+|---|---|
+| A burning platform building | An open issue with the incident label (`--incident-label`, default `incident`) whose title names that workflow's id or type |
+| A crate floating down the river | A new incident issue, on its way from the building that raised it to the dev village's docks |
+| A cart climbing the road | Issues at the dev village's last pipeline stop that no platform worker runs yet |
+| Sparkles and fireworks over the platform | A platform worker reporting a build ID that matches the release |
+
+The release is the commit at the dev village's last stop. It has landed when
+a worker on one of the platform's task queues reports a build ID (Temporal
+worker versioning: `deploymentOptions.buildId`, or the older
+`workerVersionCapabilities.buildId`) that is a prefix of it, or it of the
+build ID, at least 7 characters long, so build workers with the git sha.
+Without build IDs the village can't tell, and says so in the counters.

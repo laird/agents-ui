@@ -3,6 +3,7 @@ pub mod herdr;
 pub mod server;
 pub mod temporal;
 pub mod village;
+pub mod world;
 
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};

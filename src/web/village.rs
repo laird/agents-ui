@@ -195,6 +195,9 @@ pub struct Pipeline {
     pub quay: Vec<u32>,
     /// The green ref, then each environment in pipeline order.
     pub stops: Vec<Stop>,
+    /// The commit at the last stop: what is released.
+    #[serde(default)]
+    pub release: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -209,6 +212,9 @@ pub struct VillageSnapshot {
     pub backlog: Vec<Crate>,
     pub board: Vec<Note>,
     pub pipeline: Pipeline,
+    /// Build IDs the village's workers report running (Temporal pollers).
+    #[serde(default)]
+    pub builds: Vec<String>,
 }
 
 /// Labels checked in order; the first that matches decides the house.
@@ -411,6 +417,7 @@ pub fn build(swarm: &SwarmSnapshot, issues: &[IssueSnapshot], pipeline: Pipeline
         backlog,
         board,
         pipeline,
+        builds: Vec::new(),
     }
 }
 
@@ -765,13 +772,16 @@ pub async fn read_pipeline(transport: &ServerTransport, repo: &Path) -> Pipeline
     .to_string();
 
     let mut names = vec![green];
+    let mut release = green_set.as_ref().and_then(|v| v.first().cloned());
     let mut sets = vec![green_set.map(|v| v.into_iter().collect::<HashSet<_>>())];
     for env in &envs {
         names.push(env.name.clone());
-        sets.push(history(env.branch.clone()).await.map(|v| v.into_iter().collect()));
+        let commits = history(env.branch.clone()).await;
+        release = commits.as_ref().and_then(|v| v.first().cloned());
+        sets.push(commits.map(|v| v.into_iter().collect()));
     }
     let (quay, stops) = place_tips(&tips, &names, &sets);
-    Pipeline { integration, sentinel, quay, stops }
+    Pipeline { integration, sentinel, quay, stops, release }
 }
 
 // ---------------------------------------------------------------------------
@@ -795,12 +805,22 @@ pub struct VillageCache {
     inner: Arc<Mutex<HashMap<PathBuf, Extras>>>,
     temporal: Vec<super::temporal::TemporalSource>,
     temporal_cache: Arc<Mutex<HashMap<String, (Instant, VillageSnapshot)>>>,
+    worlds: Vec<super::world::WorldConfig>,
+}
+
+/// What `/api/village` serves: every village, and every world pairing a dev
+/// village with its platform.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct VillageResponse {
+    pub villages: Vec<VillageSnapshot>,
+    pub worlds: Vec<super::world::WorldSnapshot>,
 }
 
 impl VillageCache {
-    /// A cache that also shows one village per Temporal namespace.
-    pub fn with_temporal(temporal: Vec<super::temporal::TemporalSource>) -> Self {
-        Self { temporal, ..Self::default() }
+    /// A cache that also shows one village per Temporal namespace, and a
+    /// world for each dev/platform pairing.
+    pub fn new(temporal: Vec<super::temporal::TemporalSource>, worlds: Vec<super::world::WorldConfig>) -> Self {
+        Self { temporal, worlds, ..Self::default() }
     }
 
     async fn temporal_villages(&self, transport: &ServerTransport) -> Vec<VillageSnapshot> {
@@ -829,7 +849,29 @@ impl VillageCache {
         out
     }
 
-    pub async fn villages(&self, transport: &ServerTransport, swarms: &[SwarmSnapshot]) -> Vec<VillageSnapshot> {
+    /// Every village, and the worlds built from them.
+    pub async fn snapshot(&self, transport: &ServerTransport, swarms: &[SwarmSnapshot]) -> VillageResponse {
+        let mut issues_by_project: HashMap<String, Vec<IssueSnapshot>> = HashMap::new();
+        let villages = self.villages(transport, swarms, &mut issues_by_project).await;
+        let worlds = self
+            .worlds
+            .iter()
+            .filter_map(|w| {
+                let dev = villages.iter().find(|v| v.project == w.dev)?;
+                let platform = villages.iter().find(|v| v.project == w.platform)?;
+                let issues = issues_by_project.get(&w.dev).map(Vec::as_slice).unwrap_or_default();
+                Some(super::world::build_world(w, dev, issues, platform))
+            })
+            .collect();
+        VillageResponse { villages, worlds }
+    }
+
+    async fn villages(
+        &self,
+        transport: &ServerTransport,
+        swarms: &[SwarmSnapshot],
+        issues_by_project: &mut HashMap<String, Vec<IssueSnapshot>>,
+    ) -> Vec<VillageSnapshot> {
         let mut out = Vec::with_capacity(swarms.len());
         for swarm in swarms {
             let repo = PathBuf::from(&swarm.repo_path);
@@ -850,6 +892,7 @@ impl VillageCache {
                 }
             };
             let issues = if swarm.issues.is_empty() { &extras.issues } else { &swarm.issues };
+            issues_by_project.insert(swarm.project_name.clone(), issues.clone());
             let mut village = build(swarm, issues, extras.pipeline.clone());
             if transport.server().is_none()
                 && let Some(home) = dirs::home_dir()

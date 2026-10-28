@@ -190,6 +190,23 @@ pub fn parse_pollers(json: &str) -> Option<Vec<String>> {
     )
 }
 
+/// DescribeTaskQueue output: the build ID each poller runs, from worker
+/// versioning (`deploymentOptions.buildId`, or the older
+/// `workerVersionCapabilities.buildId`). Pollers without one are left out.
+pub fn parse_poller_builds(json: &str) -> Vec<String> {
+    let Ok(v) = serde_json::from_str::<Value>(json) else {
+        return Vec::new();
+    };
+    v.get("pollers")
+        .and_then(Value::as_array)
+        .map(|p| {
+            p.iter()
+                .filter_map(|p| str_at(p, &["deploymentOptions", "buildId"]).or_else(|| str_at(p, &["workerVersionCapabilities", "buildId"])))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Split a workflow type into lowercase words so labels can match it:
 /// `SecurityReviewWorkflow` and `security_review` both give `security`.
 fn type_words(name: &str) -> Vec<String> {
@@ -346,7 +363,9 @@ pub fn build_village(
             sentinel: "green".to_string(),
             quay: Vec::new(),
             stops: vec![Stop { name: "completed (24h)".to_string(), issues: completed.iter().map(|w| id_number(&w.id)).collect() }],
+            release: None,
         },
+        builds: Vec::new(),
     }
 }
 
@@ -408,10 +427,14 @@ pub async fn read_village(transport: &ServerTransport, source: &TemporalSource) 
 
     let queues: HashSet<&str> = running.iter().map(|w| w.task_queue.as_str()).filter(|q| !q.is_empty()).collect();
     let mut pollers = HashMap::new();
+    let mut builds = std::collections::BTreeSet::new();
     for queue in queues {
         let url = format!("{base}/task-queues/{}?taskQueueType=TASK_QUEUE_TYPE_WORKFLOW", encode(queue));
-        if let Some(p) = get(transport, &url).await.as_deref().and_then(parse_pollers) {
-            pollers.insert(queue.to_string(), p);
+        if let Some(json) = get(transport, &url).await {
+            builds.extend(parse_poller_builds(&json));
+            if let Some(p) = parse_pollers(&json) {
+                pollers.insert(queue.to_string(), p);
+            }
         }
     }
 
@@ -421,7 +444,9 @@ pub async fn read_village(transport: &ServerTransport, source: &TemporalSource) 
         .map(|j| parse_workflows(&j))
         .unwrap_or_default();
 
-    build_village(source, &running, &pending, &pollers, &closed)
+    let mut village = build_village(source, &running, &pending, &pollers, &closed);
+    village.builds = builds.into_iter().collect();
+    village
 }
 
 #[cfg(test)]
@@ -474,6 +499,11 @@ mod tests {
         assert_eq!(parse_pending("{}").unwrap(), Pending::default());
         assert_eq!(parse_pollers(r#"{"pollers":[{"identity":"w1@host"}]}"#).unwrap(), vec!["w1@host"]);
         assert_eq!(parse_pollers("{}").unwrap(), Vec::<String>::new());
+        let builds = parse_poller_builds(
+            r#"{"pollers":[{"identity":"a","deploymentOptions":{"buildId":"9f3c2e1"}},
+                {"identity":"b","workerVersionCapabilities":{"buildId":"1a2b3c4"}},{"identity":"c"}]}"#,
+        );
+        assert_eq!(builds, vec!["9f3c2e1", "1a2b3c4"]);
     }
 
     #[test]
