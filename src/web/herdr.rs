@@ -13,8 +13,10 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
+use futures::future::BoxFuture;
 use serde_json::Value;
 
+use super::source::SwarmSource;
 use super::{AgentSnapshot, SwarmSnapshot};
 use crate::transport::ServerTransport;
 
@@ -177,7 +179,18 @@ pub fn swarms_from_agents(agents: &[HerdrAgent], branches: &HashMap<PathBuf, Str
 
 /// Swarms under a running herdr server; none when herdr isn't installed or
 /// running.
-pub async fn collect(transport: &ServerTransport) -> Vec<SwarmSnapshot> {
+pub struct HerdrSwarms;
+
+impl SwarmSource for HerdrSwarms {
+    fn name(&self) -> &'static str {
+        "herdr"
+    }
+    fn swarms<'a>(&'a self, transport: &'a ServerTransport) -> BoxFuture<'a, Vec<SwarmSnapshot>> {
+        Box::pin(collect(transport))
+    }
+}
+
+async fn collect(transport: &ServerTransport) -> Vec<SwarmSnapshot> {
     let args = ["agent".to_string(), "list".to_string()];
     let Ok(out) = transport.output("herdr", &args, None).await else {
         return Vec::new();

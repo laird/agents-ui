@@ -1,6 +1,7 @@
 pub mod discovery;
 pub mod herdr;
 pub mod server;
+pub mod source;
 pub mod temporal;
 pub mod village;
 pub mod world;

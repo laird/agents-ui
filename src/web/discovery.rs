@@ -1,12 +1,14 @@
-//! Background task that discovers running agent swarms from tmux directly,
-//! without requiring the TUI to be running.
+//! Background task that discovers running agent swarms without requiring the
+//! TUI to be running.
 //!
-//! Polls every few seconds, scans for `claude-*` / `codex-*` / `droid-*` / `gemini-*`
-//! tmux sessions, captures pane content, reads status files, and writes the result
-//! into `SharedWebState`.
+//! Polls every few seconds and writes every swarm its sources show into
+//! `SharedWebState`. Two sources live here: tmux (scans for `claude-*` /
+//! `codex-*` / `droid-*` / `gemini-*` sessions, captures pane content, reads
+//! status files) and saved swarms that are stopped. herdr's is in `herdr.rs`.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use futures::future::BoxFuture;
 use tokio::time::{Duration, sleep};
 
 use crate::transport::ServerTransport;
@@ -15,6 +17,7 @@ use crate::tmux::proxy::capture_pane;
 use crate::model::status::{AgentState, read_status_file};
 use crate::model::swarm::{AgentType, WorkerHealth};
 
+use super::source::SwarmSource;
 use super::{AgentSnapshot, SharedWebState, SwarmSnapshot};
 
 /// How often to refresh the web state (seconds).
@@ -30,33 +33,56 @@ const SCROLLBACK_LINES: u32 = 200;
 /// against `last_content`.
 type HealthMap = HashMap<String, WorkerHealth>;
 
-/// Entry point: run forever, updating `state` every `POLL_INTERVAL_SECS`.
-pub async fn run(state: SharedWebState) {
-    let transport = TransportServerTransport::new(None);
-    let mut health = HealthMap::new();
+/// Entry point: run forever, updating `state` every `POLL_INTERVAL_SECS`
+/// with every swarm the sources show.
+pub async fn run(state: SharedWebState, sources: Vec<Box<dyn SwarmSource>>) {
+    let transport = ServerTransport::new(None);
+    let names: Vec<&str> = sources.iter().map(|s| s.name()).collect();
+    tracing::info!("Swarm sources: {}", if names.is_empty() { "none".to_string() } else { names.join(", ") });
     loop {
-        match collect_swarms(&transport, &mut health).await {
-            Ok(snapshots) => {
-                if let Ok(mut guard) = state.write() {
-                    *guard = snapshots;
-                }
-            }
-            Err(e) => {
-                tracing::warn!("Web discovery error: {e:#}");
-            }
+        let snapshots = super::source::discover(&sources, &transport).await;
+        if let Ok(mut guard) = state.write() {
+            *guard = snapshots;
         }
         sleep(Duration::from_secs(POLL_INTERVAL_SECS)).await;
     }
 }
 
-// Type alias to avoid collision with the local `transport` variable name.
-type TransportServerTransport = ServerTransport;
+/// Swarms in `claude-*` / `codex-*` / `droid-*` / `gemini-*` tmux sessions.
+/// Holds each agent's health across polls.
+#[derive(Default)]
+pub struct TmuxSwarms {
+    health: tokio::sync::Mutex<HealthMap>,
+}
+
+impl SwarmSource for TmuxSwarms {
+    fn name(&self) -> &'static str {
+        "tmux"
+    }
+    fn swarms<'a>(&'a self, transport: &'a ServerTransport) -> BoxFuture<'a, Vec<SwarmSnapshot>> {
+        Box::pin(async move {
+            let mut health = self.health.lock().await;
+            collect_swarms(transport, &mut health).await
+        })
+    }
+}
+
+/// Swarms persisted at stop time and still marked stopped. A stopped swarm
+/// has no tmux session, so without this it would silently disappear from the
+/// dashboard instead of showing as a card with a Resume button.
+pub struct SavedSwarms;
+
+impl SwarmSource for SavedSwarms {
+    fn name(&self) -> &'static str {
+        "saved"
+    }
+    fn swarms<'a>(&'a self, _: &'a ServerTransport) -> BoxFuture<'a, Vec<SwarmSnapshot>> {
+        Box::pin(async { stopped_swarm_snapshots() })
+    }
+}
 
 /// Discover all active agent swarms from tmux sessions.
-async fn collect_swarms(
-    transport: &ServerTransport,
-    health: &mut HealthMap,
-) -> anyhow::Result<Vec<SwarmSnapshot>> {
+async fn collect_swarms(transport: &ServerTransport, health: &mut HealthMap) -> Vec<SwarmSnapshot> {
     // No tmux at all (a container watching only Temporal) is not an error
     // worth a warning every poll: there are simply no tmux swarms.
     let session_names = match tmux_session::discover_agent_sessions(transport).await {
@@ -77,25 +103,7 @@ async fn collect_swarms(
             }
         }
     }
-
-    // Swarms under herdr, unless tmux already shows the same project.
-    for snap in super::herdr::collect(transport).await {
-        if !swarms.iter().any(|s| s.project_name == snap.project_name) {
-            swarms.push(snap);
-        }
-    }
-
-    // A stopped swarm has no tmux session, so it is invisible above no matter
-    // what. Add back anything persisted at stop time and still marked
-    // stopped, so it still shows as a card (with a Resume button) rather than
-    // silently disappearing from the dashboard.
-    for snap in stopped_swarm_snapshots() {
-        if !swarms.iter().any(|s| s.project_name == snap.project_name) {
-            swarms.push(snap);
-        }
-    }
-
-    Ok(swarms)
+    swarms
 }
 
 /// Synthetic snapshots for every persisted swarm still marked stopped.

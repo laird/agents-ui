@@ -31,6 +31,7 @@ Tests are inline `#[cfg(test)]` modules in each source file:
 - `src/config/persistence.rs` — TOML save/load round-trips, listing, missing files
 - `src/app.rs` — Key-to-tmux conversion, pane status inference, tab completion helpers
 - `src/web/village.rs` — House kinds and statuses, crew grouping, backlog/board sorting, tip-ref and environment parsing, transcript actions
+- `src/web/source.rs` — `--source` parsing, swarm-source precedence, any village source as a world's platform
 - `src/web/herdr.rs`, `src/web/temporal.rs` — herdr and Temporal parsing and village building, from JSON fixtures
 - `src/web/world.rs` — world specs, build-ID matching, incident origins, shipping vs landed
 
@@ -71,7 +72,8 @@ src/
     persistence.rs  # Swarm state save/load (~/.agents-ui/)
   web/
     server.rs       # HTTP API + embedded pages (`--web` / `--headless`)
-    discovery.rs    # Headless swarm discovery from tmux (and herdr)
+    source.rs       # Swappable source layers (villages, swarms, issues, pipeline, activity), `--source`
+    discovery.rs    # Polls the swarm sources; the tmux and saved-swarm sources
     herdr.rs        # Swarms under herdr: `herdr agent list`, grouped by worktree cwd
     temporal.rs     # Temporal namespaces as villages, via the frontend HTTP API
     village.rs      # Village model: houses per worktree, issue crates, pipeline from git

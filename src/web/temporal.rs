@@ -19,8 +19,11 @@
 
 use std::collections::{HashMap, HashSet};
 
+use futures::future::BoxFuture;
 use serde_json::Value;
 
+use super::SwarmSnapshot;
+use super::source::{Reading, TtlCache, VillageSource};
 use super::village::{Action, House, HouseKind, HouseStatus, Note, Pipeline, Stop, Subagent, VillageSnapshot, house_kind, name_action};
 use crate::transport::ServerTransport;
 
@@ -447,6 +450,33 @@ pub async fn read_village(transport: &ServerTransport, source: &TemporalSource) 
     let mut village = build_village(source, &running, &pending, &pollers, &closed);
     village.builds = builds.into_iter().collect();
     village
+}
+
+/// How long a namespace's village is reused before rereading it.
+const TTL: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// A Temporal namespace as a village source.
+pub struct TemporalVillages {
+    source: TemporalSource,
+    cache: TtlCache<(), VillageSnapshot>,
+}
+
+impl TemporalVillages {
+    pub fn new(source: TemporalSource) -> Self {
+        Self { source, cache: TtlCache::new(TTL) }
+    }
+}
+
+impl VillageSource for TemporalVillages {
+    fn name(&self) -> String {
+        format!("temporal {} at {}", self.source.namespace, self.source.http_url)
+    }
+    fn read<'a>(&'a self, transport: &'a ServerTransport, _: &'a [SwarmSnapshot]) -> BoxFuture<'a, Vec<Reading>> {
+        Box::pin(async move {
+            let village = self.cache.get_or((), || read_village(transport, &self.source)).await;
+            vec![Reading { village, issues: Vec::new() }]
+        })
+    }
 }
 
 #[cfg(test)]

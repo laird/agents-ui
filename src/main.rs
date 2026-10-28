@@ -42,6 +42,8 @@ struct CliOptions {
     worlds: Vec<String>,
     /// Label marking issues the platform raised (`--incident-label`).
     incident_label: Option<String>,
+    /// Which source runs at each layer (`--source <layer>=<name>`).
+    sources: web::source::SourceConfig,
 }
 
 fn parse_cli_options<I, S>(args: I) -> Result<CliOptions>
@@ -63,6 +65,7 @@ where
     let mut read_only = false;
     let mut worlds = Vec::new();
     let mut incident_label = None;
+    let mut sources = web::source::SourceConfig::default();
 
     let mut iter = args.into_iter().skip(1);
     while let Some(arg) = iter.next() {
@@ -139,6 +142,15 @@ where
             value if value.starts_with("--incident-label=") => {
                 incident_label = Some(value.trim_start_matches("--incident-label=").to_string());
             }
+            "--source" => {
+                let Some(value) = iter.next() else {
+                    anyhow::bail!("--source requires <layer>=<name>, e.g. issues=none");
+                };
+                sources.set(value.as_ref()).map_err(anyhow::Error::msg)?;
+            }
+            value if value.starts_with("--source=") => {
+                sources.set(value.trim_start_matches("--source=")).map_err(anyhow::Error::msg)?;
+            }
             "--web-bind" => {
                 let Some(value) = iter.next() else {
                     anyhow::bail!("--web-bind requires an address, e.g. 0.0.0.0");
@@ -202,7 +214,7 @@ where
         web_port = Some(web::server::DEFAULT_PORT);
     }
 
-    Ok(CliOptions { agent_type, server, web_port, headless, temporal, temporal_url, web_bind, read_only, worlds, incident_label })
+    Ok(CliOptions { agent_type, server, web_port, headless, temporal, temporal_url, web_bind, read_only, worlds, incident_label, sources })
 }
 
 /// Where the web UI listens: loopback unless `--web-bind` says otherwise.
@@ -211,20 +223,24 @@ fn web_addr(cli: &CliOptions, port: u16) -> std::net::SocketAddr {
     std::net::SocketAddr::new(ip, port)
 }
 
-/// The village cache, with a village per `--temporal` namespace and a world per `--world`.
-fn village_cache(cli: &CliOptions) -> web::village::VillageCache {
+/// The village sources: swarm villages from `--source`, a village per
+/// `--temporal` namespace, and a world per `--world`.
+fn village_cache(cli: &CliOptions) -> web::source::Villages {
     let url = cli
         .temporal_url
         .clone()
         .unwrap_or_else(|| web::temporal::DEFAULT_HTTP_URL.to_string());
     let label = cli.incident_label.as_deref().unwrap_or(web::world::DEFAULT_INCIDENT_LABEL);
-    web::village::VillageCache::new(
+    let villages = web::source::Villages::from_config(
+        &cli.sources,
         cli.temporal
             .iter()
             .map(|namespace| web::temporal::TemporalSource { namespace: namespace.clone(), http_url: url.clone() })
             .collect(),
         cli.worlds.iter().filter_map(|spec| web::world::WorldConfig::parse(spec, label)).collect(),
-    )
+    );
+    tracing::info!("Village sources: {}", villages.source_names().join("; "));
+    villages
 }
 
 fn select_initial_agent_type(
@@ -330,9 +346,9 @@ async fn main() -> Result<()> {
         let shared = web::new_shared_state();
 
         // Discovery poller: populates web state from tmux independently of the TUI
-        let discovery_state = shared.clone();
+        let (discovery_state, swarm_sources) = (shared.clone(), cli.sources.swarm_sources());
         tokio::spawn(async move {
-            web::discovery::run(discovery_state).await;
+            web::discovery::run(discovery_state, swarm_sources).await;
         });
 
         // HTTP server
@@ -394,9 +410,9 @@ async fn run_headless(cli: &CliOptions) -> Result<()> {
     let port = cli.web_port.unwrap_or(web::server::DEFAULT_PORT);
     let shared = web::new_shared_state();
 
-    let discovery_state = shared.clone();
+    let (discovery_state, swarm_sources) = (shared.clone(), cli.sources.swarm_sources());
     tokio::spawn(async move {
-        web::discovery::run(discovery_state).await;
+        web::discovery::run(discovery_state, swarm_sources).await;
     });
 
     let state = web::server::WebServerState {
@@ -445,6 +461,7 @@ mod tests {
                 read_only: false,
                 worlds: Vec::new(),
                 incident_label: None,
+                sources: Default::default(),
             }
         );
     }
@@ -475,6 +492,16 @@ mod tests {
         assert_eq!(cli.incident_label.as_deref(), Some("sre"));
         assert_eq!(cli.web_port, Some(crate::web::server::DEFAULT_PORT));
         assert!(parse_cli_options(["agents-tui", "--world", "shop"]).is_err());
+    }
+
+    #[test]
+    fn sources_swap_layers() {
+        let cli = parse_cli_options(["agents-tui", "--source", "swarms=herdr", "--source=issues=none"]).unwrap();
+        assert_eq!(cli.sources.swarms, vec!["herdr"]);
+        assert_eq!(cli.sources.issues, "none");
+        assert_eq!(cli.sources.pipeline, "autocoder");
+        assert!(parse_cli_options(["agents-tui", "--source", "issues=jira"]).is_err());
+        assert!(parse_cli_options(["agents-tui", "--source"]).is_err());
     }
 
     #[test]
@@ -535,6 +562,7 @@ mod tests {
                 read_only: false,
                 worlds: Vec::new(),
                 incident_label: None,
+                sources: Default::default(),
             }
         );
 
@@ -552,6 +580,7 @@ mod tests {
                 read_only: false,
                 worlds: Vec::new(),
                 incident_label: None,
+                sources: Default::default(),
             }
         );
     }

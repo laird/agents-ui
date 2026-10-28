@@ -129,3 +129,34 @@ worker versioning: `deploymentOptions.buildId`, or the older
 `workerVersionCapabilities.buildId`) that is a prefix of it, or it of the
 build ID, at least 7 characters long, so build workers with the git sha.
 Without build IDs the village can't tell, and says so in the counters.
+
+## Sources
+
+The village reads its data in layers, and each layer's source can be swapped
+without touching the others (`src/web/source.rs`):
+
+| Layer | Answers | Sources | Trait |
+|---|---|---|---|
+| villages | what is drawn | swarm villages (from the layers below), `--temporal` namespaces | `VillageSource` |
+| swarms | who is working | `tmux`, `herdr`, `saved` (stopped swarms) | `SwarmSource` |
+| issues | the backlog | `github`, `none` | `IssueTracker` |
+| pipeline | where pushed work is | `autocoder`, `none` | `PipelineSource` |
+| activity | what each agent is doing | `claude` (transcripts), `none` | `ActivitySource` |
+
+Below them all, commands run through the transport: locally, or over ssh
+with `--server`. Above them, worlds only see villages and their issues, so
+any village source can be a platform and any swarm village a dev village.
+
+`--source <layer>=<name>[,<name>]` picks what runs; by default everything
+does. Swarm sources are tried in order and the first to show a project owns
+it.
+
+```bash
+agents-tui --headless --source swarms=herdr                  # herdr only
+agents-tui --headless --source swarms=none --temporal agents # a pod watching only Temporal
+agents-tui --headless --source issues=none --source pipeline=none
+```
+
+To add a source (an AgentEx platform, a Jira backlog, a different CI),
+implement the layer's trait and give it a name in the registry at the bottom
+of `source.rs`. The startup log lists the sources that are running.

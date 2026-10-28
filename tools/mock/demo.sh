@@ -13,6 +13,7 @@
 #
 #   tools/mock/demo.sh                 # then open http://127.0.0.1:7878/village
 #   PORT=8080 tools/mock/demo.sh
+#   tools/mock/demo.sh --source issues=none   # extra flags go to agents-tui
 #
 # Everything lives in a temporary directory (AGENTS_UI_DEMO_DIR to reuse one),
 # with its own HOME, so your real ~/.claude and ~/.agents-ui are untouched.
@@ -42,5 +43,5 @@ echo "Village:    http://127.0.0.1:$PORT/village"
 echo "World:      http://127.0.0.1:$PORT/village#world:shop"
 echo "Demo files: $DEMO"
 HOME="$DEMO/home" PATH="$HERE/bin:$PATH" "$BIN" --headless --web-port "$PORT" \
-  --temporal agents --temporal-url "http://127.0.0.1:$TEMPORAL_PORT" --world shop=temporal:agents & pids+=($!)
+  --temporal agents --temporal-url "http://127.0.0.1:$TEMPORAL_PORT" --world shop=temporal:agents "$@" & pids+=($!)
 wait

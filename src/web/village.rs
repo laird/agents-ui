@@ -20,11 +20,12 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, SystemTime};
 
+use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 
+use super::source::{ActivitySource, IssueTracker, PipelineSource, Reading, TtlCache, VillageSource};
 use super::{AgentSnapshot, IssueSnapshot, SwarmSnapshot};
 use crate::transport::ServerTransport;
 
@@ -785,144 +786,88 @@ pub async fn read_pipeline(transport: &ServerTransport, repo: &Path) -> Pipeline
 }
 
 // ---------------------------------------------------------------------------
-// Cache of slow-changing extras (issues, pipeline), per repo
+// Sources: autocoder's pipeline, Claude Code's activity, and swarm villages
 // ---------------------------------------------------------------------------
 
-#[derive(Clone)]
-struct Extras {
-    at: Instant,
-    issues: Vec<IssueSnapshot>,
-    pipeline: Pipeline,
+/// The pipeline autocoder records in git: tip refs, the green sentinel, and
+/// the environments in `.autocoder.json`.
+pub struct AutocoderPipeline;
+
+impl PipelineSource for AutocoderPipeline {
+    fn name(&self) -> &'static str {
+        "autocoder"
+    }
+    fn pipeline<'a>(&'a self, transport: &'a ServerTransport, repo: &'a Path) -> BoxFuture<'a, Pipeline> {
+        Box::pin(read_pipeline(transport, repo))
+    }
 }
 
-/// How long a Temporal namespace's village is reused before rereading it.
-const TEMPORAL_TTL: Duration = Duration::from_secs(10);
+/// Sub-agents and actions from Claude Code's transcripts. They're local
+/// files, so a village read through `--server` shows none.
+pub struct ClaudeActivity;
 
-/// Shared between requests so `gh`, `git ls-remote` and Temporal's API run at
-/// most once per TTL per source however many browsers are watching.
-#[derive(Clone, Default)]
-pub struct VillageCache {
-    inner: Arc<Mutex<HashMap<PathBuf, Extras>>>,
-    temporal: Vec<super::temporal::TemporalSource>,
-    temporal_cache: Arc<Mutex<HashMap<String, (Instant, VillageSnapshot)>>>,
-    worlds: Vec<super::world::WorldConfig>,
+impl ActivitySource for ClaudeActivity {
+    fn name(&self) -> &'static str {
+        "claude"
+    }
+    fn attach(&self, transport: &ServerTransport, village: &mut VillageSnapshot) {
+        if transport.server().is_none()
+            && let Some(home) = dirs::home_dir()
+        {
+            attach_subagents(village, &home, SystemTime::now());
+        }
+    }
 }
 
-/// What `/api/village` serves: every village, and every world pairing a dev
-/// village with its platform.
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct VillageResponse {
-    pub villages: Vec<VillageSnapshot>,
-    pub worlds: Vec<super::world::WorldSnapshot>,
+/// A village per discovered swarm, with its issues, pipeline and activity
+/// from whichever sources are plugged in.
+pub struct SwarmVillages {
+    issues: Box<dyn IssueTracker>,
+    pipeline: Box<dyn PipelineSource>,
+    activity: Box<dyn ActivitySource>,
+    extras: TtlCache<PathBuf, (Vec<IssueSnapshot>, Pipeline)>,
 }
 
-impl VillageCache {
-    /// A cache that also shows one village per Temporal namespace, and a
-    /// world for each dev/platform pairing.
-    pub fn new(temporal: Vec<super::temporal::TemporalSource>, worlds: Vec<super::world::WorldConfig>) -> Self {
-        Self { temporal, worlds, ..Self::default() }
+impl SwarmVillages {
+    pub fn new(issues: Box<dyn IssueTracker>, pipeline: Box<dyn PipelineSource>, activity: Box<dyn ActivitySource>) -> Self {
+        Self { issues, pipeline, activity, extras: TtlCache::new(EXTRAS_TTL) }
     }
 
-    async fn temporal_villages(&self, transport: &ServerTransport) -> Vec<VillageSnapshot> {
-        let mut out = Vec::with_capacity(self.temporal.len());
-        for source in &self.temporal {
-            let key = format!("{}|{}", source.http_url, source.namespace);
-            let cached = self
-                .temporal_cache
-                .lock()
-                .ok()
-                .and_then(|m| m.get(&key).cloned())
-                .filter(|(at, _)| at.elapsed() < TEMPORAL_TTL)
-                .map(|(_, v)| v);
-            let village = match cached {
-                Some(v) => v,
-                None => {
-                    let v = super::temporal::read_village(transport, source).await;
-                    if let Ok(mut m) = self.temporal_cache.lock() {
-                        m.insert(key, (Instant::now(), v.clone()));
-                    }
-                    v
-                }
-            };
-            out.push(village);
-        }
-        out
-    }
-
-    /// Every village, and the worlds built from them.
-    pub async fn snapshot(&self, transport: &ServerTransport, swarms: &[SwarmSnapshot]) -> VillageResponse {
-        let mut issues_by_project: HashMap<String, Vec<IssueSnapshot>> = HashMap::new();
-        let villages = self.villages(transport, swarms, &mut issues_by_project).await;
-        let worlds = self
-            .worlds
-            .iter()
-            .filter_map(|w| {
-                let dev = villages.iter().find(|v| v.project == w.dev)?;
-                let platform = villages.iter().find(|v| v.project == w.platform)?;
-                let issues = issues_by_project.get(&w.dev).map(Vec::as_slice).unwrap_or_default();
-                Some(super::world::build_world(w, dev, issues, platform))
-            })
-            .collect();
-        VillageResponse { villages, worlds }
-    }
-
-    async fn villages(
-        &self,
-        transport: &ServerTransport,
-        swarms: &[SwarmSnapshot],
-        issues_by_project: &mut HashMap<String, Vec<IssueSnapshot>>,
-    ) -> Vec<VillageSnapshot> {
-        let mut out = Vec::with_capacity(swarms.len());
-        for swarm in swarms {
-            let repo = PathBuf::from(&swarm.repo_path);
-            let cached = self
-                .inner
-                .lock()
-                .ok()
-                .and_then(|m| m.get(&repo).cloned())
-                .filter(|e| e.at.elapsed() < EXTRAS_TTL);
-            let extras = match cached {
-                Some(e) => e,
-                None => {
-                    let e = self.refresh(transport, swarm, &repo).await;
-                    if let Ok(mut m) = self.inner.lock() {
-                        m.insert(repo.clone(), e.clone());
-                    }
-                    e
-                }
-            };
-            let issues = if swarm.issues.is_empty() { &extras.issues } else { &swarm.issues };
-            issues_by_project.insert(swarm.project_name.clone(), issues.clone());
-            let mut village = build(swarm, issues, extras.pipeline.clone());
-            if transport.server().is_none()
-                && let Some(home) = dirs::home_dir()
-            {
-                attach_subagents(&mut village, &home, SystemTime::now());
-            }
-            out.push(village);
-        }
-        out.extend(self.temporal_villages(transport).await);
-        out
-    }
-
-    async fn refresh(&self, transport: &ServerTransport, swarm: &SwarmSnapshot, repo: &Path) -> Extras {
-        if swarm.repo_path.is_empty() {
-            return Extras { at: Instant::now(), issues: Vec::new(), pipeline: Pipeline::default() };
-        }
-        let issues = if swarm.issues.is_empty() {
-            crate::github::fetch_issues(transport, repo)
-                .await
-                .map(|list| {
-                    list.iter()
-                        .map(|i| IssueSnapshot::from_issue(i, &swarm.project_name))
-                        .collect()
-                })
-                .unwrap_or_default()
+    async fn village(&self, transport: &ServerTransport, swarm: &SwarmSnapshot) -> Reading {
+        let repo = PathBuf::from(&swarm.repo_path);
+        let (fetched, pipeline) = if swarm.repo_path.is_empty() {
+            (Vec::new(), Pipeline::default())
         } else {
-            Vec::new()
+            self.extras
+                .get_or(repo.clone(), || async {
+                    // Swarms that bring their own issues (the TUI's) aren't refetched.
+                    let issues = match swarm.issues.is_empty() {
+                        true => self.issues.issues(transport, &repo, &swarm.project_name).await,
+                        false => Vec::new(),
+                    };
+                    (issues, self.pipeline.pipeline(transport, &repo).await)
+                })
+                .await
         };
-        let pipeline = read_pipeline(transport, repo).await;
-        Extras { at: Instant::now(), issues, pipeline }
+        let issues = if swarm.issues.is_empty() { fetched } else { swarm.issues.clone() };
+        let mut village = build(swarm, &issues, pipeline);
+        self.activity.attach(transport, &mut village);
+        Reading { village, issues }
+    }
+}
+
+impl VillageSource for SwarmVillages {
+    fn name(&self) -> String {
+        format!("swarms ({}, {}, {})", self.issues.name(), self.pipeline.name(), self.activity.name())
+    }
+    fn read<'a>(&'a self, transport: &'a ServerTransport, swarms: &'a [SwarmSnapshot]) -> BoxFuture<'a, Vec<Reading>> {
+        Box::pin(async move {
+            let mut out = Vec::with_capacity(swarms.len());
+            for swarm in swarms {
+                out.push(self.village(transport, swarm).await);
+            }
+            out
+        })
     }
 }
 

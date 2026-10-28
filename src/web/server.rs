@@ -34,8 +34,8 @@ pub struct WebServerState {
     pub agents_dir: PathBuf,
     /// Transport used for live tmux pane captures in the pane endpoint.
     pub transport: ServerTransport,
-    /// Issues and pipeline refs for the village view, cached per repo.
-    pub village: super::village::VillageCache,
+    /// The village view's sources.
+    pub village: super::source::Villages,
 }
 
 async fn index_handler() -> Html<&'static str> {
