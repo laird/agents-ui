@@ -110,9 +110,17 @@
     return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
   }
   const blink = (t, ms) => Math.floor(t / ms) % 2 === 1;
+  /* Light comes from the upper left: shadows fall right and down. */
+  const SHADE = 'rgba(12,20,36,.28)', SHINE = 'rgba(255,255,240,.22)';
+  const shadow = (c, x, y, w, h) => R(c, x, y, w, h, SHADE);
   const lit = st => st === 'working';
   const glassOf = st => st === 'working' ? P.lamp : (st === 'unknown' || st === 'stopped') ? P.dark : P.glass;
-  function win(c, x, y, st) { R(c, x, y, 4, 4, P.woodD); R(c, x + 1, y + 1, 2, 2, glassOf(st)); }
+  function win(c, x, y, st) {
+    R(c, x, y, 4, 4, P.woodD); R(c, x + 1, y + 1, 2, 2, glassOf(st));
+    if (st === 'working') R(c, x + 1, y + 1, 1, 1, P.white);
+    // A flower box under every window.
+    R(c, x, y + 4, 4, 1, P.woodL); R(c, x, y + 3, 1, 1, '#e05050'); R(c, x + 3, y + 3, 1, 1, P.gold);
+  }
   function door(c, x, y, st) {
     if (st === 'blocked') { R(c, x, y, 4, 5, P.o); return; }
     R(c, x, y, 4, 5, P.woodD); R(c, x + 2, y + 2, 1, 1, P.gold);
@@ -121,8 +129,17 @@
     R(c, x, y, w, h, P.o);
     for (let r = 1; r < h - 1; r++) R(c, x + 1, y + r, w - 2, 1, (r % 3 === 0) ? d : a);
     R(c, x + 1, y + 1, w - 2, 1, d);
+    // Shingles on the lit slope, shade on the far one, a sunlit ridge.
+    for (let r = 2; r < h - 1; r += 3) for (let k = x + 2 + (r % 2) * 2; k < x + w - 2; k += 4) R(c, k, y + r, 1, 1, d);
+    R(c, x + 1 + Math.ceil((w - 2) * 0.62), y + 1, Math.floor((w - 2) * 0.38), h - 2, SHADE);
+    R(c, x + 1, y + 1, Math.ceil((w - 2) * 0.62), 1, SHINE);
+    R(c, x + 1, y + h - 1, w - 2, 1, SHADE);
   }
-  function wall(c, x, y, w, h, col) { R(c, x, y, w, h, P.o); R(c, x + 1, y, w - 2, h - 1, col); }
+  function wall(c, x, y, w, h, col) {
+    R(c, x, y, w, h, P.o); R(c, x + 1, y, w - 2, h - 1, col);
+    R(c, x + 1, y + h - 2, w - 2, 1, P.stoneD);
+    R(c, x + w - 3, y, 2, h - 2, SHADE);
+  }
   function puffs(c, x, y, t, a, b) {
     for (let k = 0; k < 3; k++) {
       const p = ((t / 110) + k * 7) % 21;
@@ -293,12 +310,19 @@
   }
 
   /* ---------- Scenery ---------- */
+  const FLOWERS = ['#f8f8f8', '#f8d040', '#e070d0', '#e05050', '#a8c8f8'];
   function grass(c, x0, y0, w, h) {
     R(c, x0, y0, w, h, P.grass);
+    // Soft, dithered variation in the grass, then tufts and the odd flower.
+    for (let y = y0; y < y0 + h; y += 2) for (let x = x0 + (y >> 1) % 2; x < x0 + w; x += 2) {
+      const v = hash(x >> 3, y >> 3) * 0.6 + hash(x >> 2, y >> 2) * 0.4;
+      if (v < 0.2) R(c, x, y, 1, 1, '#62a850'); else if (v > 0.82) R(c, x, y, 1, 1, '#4c9040');
+    }
     for (let y = y0; y < y0 + h; y += 3) for (let x = x0; x < x0 + w; x += 3) {
       const v = hash(x, y);
       if (v < 0.05) { R(c, x, y, 1, 1, P.grassL); R(c, x + 2, y, 1, 1, P.grassL); R(c, x + 1, y - 1, 1, 1, P.grassL); }
       else if (v < 0.1) R(c, x, y, 1, 1, P.grassD);
+      else if (v > 0.985) { R(c, x, y + 1, 1, 1, P.leafD); R(c, x, y, 1, 1, FLOWERS[Math.floor(hash(y, x) * FLOWERS.length)]); }
     }
   }
   function path(c, x0, y0, w, h) {
@@ -307,22 +331,36 @@
       const v = hash(x + 7, y + 3);
       if (v < 0.07) R(c, x, y, 1, 1, P.pathS); else if (v < 0.11) R(c, x, y, 1, 1, P.pathL);
     }
+    // Worn edges where the path meets the grass.
+    if (w > h) { R(c, x0, y0, w, 1, P.pathL); R(c, x0, y0 + h - 1, w, 1, P.pathS); }
+    else { R(c, x0, y0, 1, h, P.pathL); R(c, x0 + w - 1, y0, 1, h, P.pathS); }
   }
   function water(c, x0, y0, w, h, t, flow) {
     R(c, x0, y0, w, h, P.water);
-    R(c, x0, y0, w, 1, P.waterD); R(c, x0, y0 + h - 1, w, 1, P.waterD);
+    R(c, x0, y0 + 1, w, 2, P.waterD);
+    R(c, x0, y0, w, 1, P.pathS); R(c, x0, y0 + h - 1, w, 1, P.pathL);
     const off = Math.floor(t / 120 * flow);
-    for (let y = y0 + 2; y < y0 + h - 2; y += 3) for (let x = x0; x < x0 + w; x += 7) {
+    for (let y = y0 + 3; y < y0 + h - 2; y += 3) for (let x = x0; x < x0 + w; x += 7) {
       if (hash(x, y) < 0.35) R(c, x0 + (((x - x0 + off) % w) + w) % w, y, 2, 1, P.waterL);
+    }
+    // Reeds on the near bank and the odd lily pad.
+    for (let x = x0 + 2; x < x0 + w - 2; x += 5) {
+      const v = hash(x, y0 + h);
+      if (v < 0.22) { R(c, x, y0 + h - 3, 1, 2, P.leafD); R(c, x + 1, y0 + h - 4, 1, 3, P.leaf); }
+      else if (v > 0.93 && h > 9) { R(c, x, y0 + (h >> 1), 3, 1, P.leaf); R(c, x + 1, y0 + (h >> 1), 1, 1, '#e070d0'); }
     }
   }
   function tree(c, x, y) {
-    R(c, x + 5, y + 8, 2, 4, P.woodD);
+    shadow(c, x + 4, y + 11, 9, 2);
+    R(c, x + 5, y + 8, 2, 4, P.woodD); R(c, x + 5, y + 8, 1, 4, P.wood);
     const cx = x + 6, cy = y + 5, r = 5;
     for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
       const d = dx * dx + dy * dy; if (d > r * r) continue;
       R(c, cx + dx, cy + dy, 1, 1, d > (r - 1) * (r - 1) ? P.o : dx + dy > 3 ? P.leafD : dx + dy < -3 ? P.leafL : P.leaf);
     }
+    // Leaf clusters and, on some trees, fruit.
+    [[-2, -1], [1, 1], [2, -2]].forEach(([dx, dy]) => { R(c, cx + dx, cy + dy, 2, 1, P.leafL); R(c, cx + dx + 1, cy + dy + 1, 1, 1, P.leafD); });
+    if (hash(x, y) < 0.3) { R(c, cx - 2, cy + 1, 1, 1, '#e05050'); R(c, cx + 2, cy - 1, 1, 1, '#e05050'); }
   }
   /* The manager's castle: a keep with banners between two round-roofed
    * towers, behind a crenellated curtain wall. 40 wide, centred on the
@@ -391,12 +429,81 @@
    * places, and keeps the shared status language -- lit windows for working,
    * an open door and an orange "!" for blocked, dust for stalled, fog for
    * unknown -- so switching themes never means relearning the map. */
+  /* ---------- Decoration ----------
+   * Free ground is never left bare: bushes, flowerbeds, rocks, hay and
+   * logs in the village; planters, benches, lamps and bike racks downtown.
+   * Placed once per layout on a grid of free cells (layout().decor). */
+  const DECOR = {
+    medieval(c, x, y, k, t) {
+      switch (k) {
+        case 0: // bush
+          shadow(c, x + 1, y + 5, 7, 1);
+          R(c, x, y + 1, 7, 4, P.o); R(c, x + 1, y, 5, 1, P.o);
+          R(c, x + 1, y + 1, 5, 3, P.leaf); R(c, x + 1, y + 1, 2, 1, P.leafL); R(c, x + 4, y + 3, 2, 1, P.leafD);
+          R(c, x + 2, y + 2, 1, 1, '#e05050'); break;
+        case 1: // flowerbed
+          R(c, x, y + 3, 8, 2, P.woodD); R(c, x + 1, y + 2, 6, 1, '#6a4a2a');
+          for (let i = 0; i < 4; i++) { R(c, x + 1 + i * 2, y + 1, 1, 1, P.leaf); R(c, x + 1 + i * 2, y, 1, 1, FLOWERS[(i + Math.floor(hash(x, y) * 5)) % FLOWERS.length]); } break;
+        case 2: // rocks
+          shadow(c, x + 1, y + 4, 6, 1);
+          R(c, x, y + 1, 5, 3, P.o); R(c, x + 1, y + 1, 3, 2, P.stone); R(c, x + 1, y + 1, 2, 1, P.stoneL);
+          R(c, x + 4, y + 2, 3, 2, P.o); R(c, x + 5, y + 2, 1, 1, P.stone); break;
+        case 3: // haystack
+          shadow(c, x + 2, y + 6, 7, 1);
+          R(c, x + 1, y, 5, 1, P.o); R(c, x, y + 1, 7, 5, P.o); R(c, x + 1, y + 1, 5, 4, P.thatch); R(c, x + 1, y + 1, 3, 1, P.gold);
+          R(c, x + 2, y + 3, 1, 1, P.thatchD); R(c, x + 4, y + 2, 1, 1, P.thatchD); break;
+        case 4: // log with a mushroom
+          R(c, x, y + 2, 7, 3, P.o); R(c, x + 1, y + 3, 5, 1, P.wood); R(c, x + 5, y + 2, 2, 3, P.plank); R(c, x + 6, y + 3, 1, 1, P.woodD);
+          R(c, x + 1, y, 2, 1, '#e05050'); R(c, x + 2, y + 1, 1, 1, P.white); break;
+        default: // fence
+          for (let i = 0; i < 8; i += 3) R(c, x + i, y + 1, 1, 4, P.woodD);
+          R(c, x, y + 2, 8, 1, P.woodL); R(c, x, y + 4, 8, 1, P.woodL);
+      }
+    },
+    modern(c, x, y, k, t) {
+      switch (k) {
+        case 0: // planter
+          shadow(c, x + 1, y + 6, 7, 1);
+          R(c, x, y + 3, 7, 3, P.o); R(c, x + 1, y + 3, 5, 2, M.concreteL);
+          R(c, x + 1, y, 5, 3, P.o); R(c, x + 2, y, 3, 3, P.leaf); R(c, x + 2, y, 1, 1, P.leafL); break;
+        case 1: // bench
+          shadow(c, x, y + 5, 8, 1);
+          R(c, x, y + 1, 8, 2, P.o); R(c, x + 1, y + 1, 6, 1, M.box); R(c, x, y + 3, 8, 1, M.boxD);
+          R(c, x + 1, y + 4, 1, 1, P.o); R(c, x + 6, y + 4, 1, 1, P.o); break;
+        case 2: // lamp post, lit at night-blue intervals
+          shadow(c, x + 3, y + 7, 3, 1);
+          R(c, x + 2, y + 1, 1, 7, M.steelD); R(c, x + 1, y, 3, 2, P.o); R(c, x + 2, y, 1, 1, blink(t + x * 37, 1800) ? P.lamp : M.glassL); break;
+        case 3: // bike rack
+          for (let i = 0; i < 3; i++) { R(c, x + i * 3, y + 2, 1, 3, M.steel); R(c, x + i * 3, y + 2, 2, 1, M.steel); }
+          R(c, x, y + 5, 8, 1, M.concreteD); break;
+        case 4: // fountain
+          shadow(c, x + 1, y + 6, 8, 1);
+          R(c, x, y + 3, 8, 3, P.o); R(c, x + 1, y + 3, 6, 2, M.concreteL); R(c, x + 2, y + 3, 4, 1, M.glassL);
+          R(c, x + 3, y + 1, 2, 2, M.glassL); if (blink(t + y * 13, 300)) R(c, x + 3, y, 1, 1, P.white); break;
+        default: // hedge strip
+          R(c, x, y + 2, 8, 3, P.o); R(c, x + 1, y + 2, 6, 2, P.leaf); R(c, x + 1, y + 2, 3, 1, P.leafL);
+      }
+    }
+  };
+  /* A hedge around the village, a low fence downtown, as in the mockups. */
+  const BORDER = {
+    medieval(c, W, H) {
+      const leaf = (x, y, w, h) => { R(c, x, y, w, h, P.leafD); for (let yy = y; yy < y + h; yy += 2) for (let xx = x + ((yy >> 1) % 2); xx < x + w; xx += 2) R(c, xx, yy, 1, 1, P.leaf); };
+      leaf(0, H - 3, W, 3); leaf(0, 11, 3, H - 11); leaf(W - 3, 11, 3, H - 11);
+      R(c, 3, H - 3, W - 6, 1, P.o); R(c, 3, 11, 1, H - 14, P.o); R(c, W - 4, 11, 1, H - 14, P.o);
+    },
+    modern(c, W, H) {
+      R(c, 0, H - 2, W, 2, M.concreteD); R(c, 0, 11, 2, H - 11, M.concreteD); R(c, W - 2, 11, 2, H - 11, M.concreteD);
+      for (let x = 2; x < W - 2; x += 6) R(c, x, H - 3, 1, 1, M.steel);
+    }
+  };
+
   const MEDIEVAL = {
     name: 'Medieval village',
     labels: { docks: 'Docks', board: 'Notice board', houses: 'Houses', quay: 'Quay', castle: 'Harbour', hall: 'Castle' },
     ground: grass, road: path, yard: path, channel: water,
     dock(c, x, y, w) { R(c, x, y, w, 7, P.o); R(c, x + 1, y, w - 2, 6, P.plank); },
-    tree, hall, board, crate, B, scaffold, gate: lock, destination: harbour,
+    tree, hall, board, crate, B, scaffold, gate: lock, destination: harbour, decor: DECOR.medieval, border: BORDER.medieval,
     people: 'medieval', steam: [P.white, P.stoneL], sign: [P.woodD, P.parch, P.woodD]
   };
 
@@ -615,6 +722,7 @@
       }
       R(c, x + 8, cy - 2, 20, 18, P.o); R(c, x + 9, cy, 18, 15, P.dark);
     },
+    decor: DECOR.modern, border: BORDER.modern,
     people: 'modern',
     steam: [P.white, M.concreteL], sign: [P.o, P.dark, M.led]
   };
@@ -696,6 +804,7 @@
       p: opts.mayor ? dress.mayor.p : dress.legs[(h >>> 19) % dress.legs.length]
     };
     x = Math.round(x); y = Math.round(y);
+    shadow(c, x + 1, y + 11, 7, 1);
     for (let r = 0; r < rows.length; r++) for (let k = 0; k < 8; k++) { const ch = rows[r][k]; if (ch !== '.') R(c, x + k, y + r, 1, 1, map[ch]); }
   }
 
@@ -772,7 +881,34 @@
     const castleX = lockStart + locks * 34 + 6;
     const W = Math.max(cx0 + vw + 40, roadX + 70, castleX + 46);
     const H = canalY + 34;
-    return { per, rows, cx0, vw, roadX, hallX, top, lots, quayY, canalY, lockStart, castleX, W, H };
+    const forestX = Math.max(cx0 + vw + 6, hallX + 64);
+    // What's built on: river, docks, plaza, roads, house rows, canal and its
+    // stations. Every free 9×8 cell may get a decoration.
+    const taken = [
+      [0, 0, W, 14], [4, 8, 62, 46], [4, 46, cx0 + vw, 14], [hallX - 10, 4, 74, 46],
+      [roadX - 2, 46, RD + 4, quayY - 40], [roadX - 18, quayY - 12, W, H],
+      [forestX - 2, 12, W, canalY - 46]
+    ];
+    for (let r = 0; r < rows; r++) {
+      const left = roadX - per * LW, right = roadX + RD + per * LW;
+      taken.push([left - 4, top + r * LH - 10, right - left + 8, LH + 4]);
+    }
+    const free = (x, y, w, h) => !taken.some(([tx, ty, tw, th]) => x < tx + tw && x + w > tx && y < ty + th && y + h > ty);
+    // Big free ground grows small groves; what's left gets a few props. The
+    // prop kind drifts slowly across the map, so neighbours form a garden
+    // (flowerbeds together, rocks together) instead of random clutter.
+    const decor = [];
+    for (let y = 16; y < H - 18; y += 15) for (let x = 6; x < W - 16; x += 14) {
+      if (!free(x, y, 14, 15) || hash(x * 7, y * 3) > 0.45) continue;
+      decor.push({ x: x + Math.floor(hash(y, x) * 3), y: y + Math.floor(hash(x, y) * 2), tree: true });
+      taken.push([x, y, 14, 15]);
+    }
+    for (let y = 16; y < H - 10; y += 9) for (let x = 6; x < W - 14; x += 11) {
+      if (!free(x, y, 11, 9) || hash(x * 3, y * 5) > 0.2) continue;
+      const zone = Math.floor(hash(x >> 5, y >> 5) * 6), k = hash(x + 11, y + 7) < 0.7 ? zone : Math.floor(hash(y, x + 3) * 6);
+      decor.push({ x: x + Math.floor(hash(y, x) * 4), y: y + Math.floor(hash(x, y + 1) * 3), k });
+    }
+    return { per, rows, cx0, vw, roadX, hallX, top, lots, quayY, canalY, lockStart, castleX, W, H, decor };
   }
 
   /* ---------- State ---------- */
@@ -828,6 +964,7 @@
     const v = current, lay = L;
     const { W, H, roadX, hallX, lots, quayY, canalY, cx0, vw } = lay;
     T.ground(c, 0, 0, W, H);
+    if (T.border) T.border(c, W, H);
     T.channel(c, 0, 0, W, 11, t, 1);
     T.dock(c, 14, 10, 40);
     T.yard(c, 6, 18, 56, 34);
@@ -842,6 +979,8 @@
     T.dock(c, roadX - 4, quayY + 1, 22);
 
     for (let x = Math.max(cx0 + vw + 6, hallX + 64); x < W - 14; x += 15) for (let y = 16; y < canalY - 38; y += 16) if (hash(x, y) < 0.55) T.tree(c, x + Math.floor(hash(y, x) * 4), y);
+    lay.decor.forEach(d => d.tree ? T.tree(c, d.x, d.y) : T.decor && T.decor(c, d.x, d.y, d.k, reduce ? 0 : t));
+    shadow(c, hallX - 2, 40, 42, 2);
 
     T.hall(c, hallX, 18, v.manager.status);
     T.board(c, hallX + 42, 28, v.board);
@@ -863,6 +1002,7 @@
     v.houses.forEach((h, i) => {
       const lot = lots[i]; if (!lot) return;
       const st = h.status, tt = t + i * 311;
+      shadow(c, lot.x + 2, lot.y + 16, 16, 2); shadow(c, lot.x + 16, lot.y + 4, 2, 12);
       if (st === 'building') T.scaffold(c, lot.x, lot.y, tt);
       else (T.B[h.kind] || T.B.workshop)(c, lot.x, lot.y, st, reduce ? 0 : tt);
       pennant(c, lot.x, lot.y, h.priority, tt);
