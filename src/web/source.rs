@@ -326,11 +326,13 @@ impl Villages {
     pub fn from_config(
         config: &SourceConfig,
         temporal: Vec<TemporalSource>,
+        kubernetes: Vec<super::kubernetes::KubeSource>,
         frameworks: Vec<super::framework::ReportSpec>,
         worlds: Vec<WorldConfig>,
     ) -> Self {
         let mut sources: Vec<Box<dyn VillageSource>> = vec![Box::new(config.swarm_villages())];
         sources.extend(temporal.into_iter().map(|t| Box::new(TemporalVillages::new(t)) as Box<dyn VillageSource>));
+        sources.extend(kubernetes.into_iter().map(|k| Box::new(super::kubernetes::KubeVillages::new(k)) as Box<dyn VillageSource>));
         sources.extend(frameworks.into_iter().map(|f| Box::new(super::framework::ReportVillages::new(f)) as Box<dyn VillageSource>));
         Self::new(sources, worlds)
     }

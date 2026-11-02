@@ -14,6 +14,7 @@
 #     of "shop" rolls out to the platform's workers.
 #
 #   tools/mock/demo.sh                 # then open http://127.0.0.1:7878/village
+#   RUNTIME=k8s tools/mock/demo.sh     # the platform as a simulated Kubernetes namespace instead of Temporal
 #   PORT=8080 tools/mock/demo.sh
 #   tools/mock/demo.sh --source issues=none   # extra flags go to agents-tui
 #
@@ -37,15 +38,26 @@ trap cleanup EXIT INT TERM
 
 python3 "$HERE/swarm_sim.py" --dir "$DEMO" setup
 python3 "$HERE/swarm_sim.py" --dir "$DEMO" run & pids+=($!)
-python3 "$HERE/temporal_sim.py" --port "$TEMPORAL_PORT" --namespace agents \
-  --release-file "$DEMO/state/release" --incident-file "$DEMO/state/incidents.jsonl" & pids+=($!)
+# One runtime source at a time: Temporal, or a Kubernetes namespace.
+RUNTIME=${RUNTIME:-temporal}
+if [ "$RUNTIME" = k8s ]; then
+  python3 "$HERE/k8s_sim.py" --dir "$DEMO" \
+    --release-file "$DEMO/state/release" --incident-file "$DEMO/state/incidents.jsonl" & pids+=($!)
+  runtime=(--runtime k8s:sim/shop-prod --world shop=k8s:shop-prod)
+  platform=k8s:shop-prod
+else
+  python3 "$HERE/temporal_sim.py" --port "$TEMPORAL_PORT" --namespace agents \
+    --release-file "$DEMO/state/release" --incident-file "$DEMO/state/incidents.jsonl" & pids+=($!)
+  runtime=(--temporal agents --temporal-url "http://127.0.0.1:$TEMPORAL_PORT" --world shop=temporal:agents)
+  platform=temporal:agents
+fi
 sleep 1
 
 echo "Village:    http://127.0.0.1:$PORT/village"
+echo "Platform:   http://127.0.0.1:$PORT/village#$platform"
 echo "World:      http://127.0.0.1:$PORT/village#world:shop"
 echo "Demo files: $DEMO"
-HOME="$DEMO/home" PATH="$HERE/bin:$PATH" "$BIN" --headless --web-port "$PORT" \
-  --temporal agents --temporal-url "http://127.0.0.1:$TEMPORAL_PORT" --world shop=temporal:agents \
+HOME="$DEMO/home" PATH="$HERE/bin:$PATH" "$BIN" --headless --web-port "$PORT" "${runtime[@]}" \
   --framework "$ROOT/tools/adapters/example-report.json" \
   --framework "exec:$ROOT/tools/adapters/adapter-template.py" "$@" & pids+=($!)
 wait

@@ -16,6 +16,9 @@ tunnel to it: `ssh -L 7878:localhost:7878 swarm-host`.
 
 ## Try it without agents
 
+Watch a recording first: `python3 tools/mock/replay-build.py tools/mock/recordings/demo.json.gz replay.html`
+builds a self-contained page that replays six minutes of the demo, with Temporal or Kubernetes as the runtime.
+
 ```bash
 tools/mock/demo.sh          # then open http://127.0.0.1:7878/village
 ```
@@ -24,8 +27,12 @@ runs agents-tui against simulated swarms: an autocoder swarm and a modernize
 swarm under herdr (with real git worktrees, issues, tip refs and
 environments) and a Temporal namespace of agentic workstreams, linked as a
 world (`#world:shop`): failed workstreams file incident issues in the dev
-swarm, and its prod releases roll out to the platform's workers. See the
-header of `tools/mock/demo.sh`.
+swarm, and its prod releases roll out to the platform's workers. With
+`RUNTIME=k8s` the platform is a simulated Kubernetes namespace instead
+(`tools/mock/k8s_sim.py` behind a `kubectl` shim): releases roll out pod by
+pod as new image tags, pods crash-loop and file incidents, a scale-up goes
+unschedulable, a node goes NotReady. See the header of `tools/mock/demo.sh`;
+`tools/mock/record.py` records running demos for the replay page.
 
 ## Drilling in
 
@@ -92,6 +99,31 @@ session is a house, and agents sharing a worktree are one house.
 | Notes on the board | Issues with a blocking label (`needs-design`, `proposal`, ...) |
 | Crates at the quay | `refs/autocoder/tips/<integration>/<sha>-<issue>` not yet green |
 | Locks, then the harbour or launch pad | `<integration>-green`, then each environment in `.autocoder.json` |
+
+## Kubernetes
+
+```bash
+agents-tui --headless --runtime k8s:prod/shop-prod      # context prod, namespace shop-prod
+agents-tui --headless --runtime k8s:shop-prod           # the current context
+```
+
+A runtime village can be drawn from Kubernetes instead of Temporal: one
+source per village (`--runtime temporal:<namespace>` is the same as
+`--temporal`). agents-tui reads it with `kubectl ... -o json` (read-only: get
+and list on pods, workloads, jobs and nodes is enough).
+
+| What you see | Where it comes from |
+|---|---|
+| House | A workload: Deployment, StatefulSet, DaemonSet, CronJob, or a Job of its own; CronJobs and Jobs are barns, other names shape the house as issue labels do (`security-scanner` is a watchtower) |
+| Scaffolding | A rollout in progress: fewer updated replicas than wanted |
+| People out front | Its pods; a pod that needs you waves |
+| Waving, orange `!` | CrashLoopBackOff, ImagePullBackOff, unschedulable, a rollout past its deadline; the pod's line says why ("CrashLoopBackOff · 7 restarts, last OOMKilled") |
+| The hall's people | The nodes; a NotReady node waves, a cordoned one idles |
+| Notice board | Failed Jobs and failed pods |
+| Harbour | Completed Jobs |
+| Builds (for worlds) | The image tags running pods use: a world's release lands when a pod runs an image tagged with it |
+
+`--world shop=k8s:shop-prod` pairs a dev village with it like any other platform.
 
 ## Temporal
 

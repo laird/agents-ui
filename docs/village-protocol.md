@@ -143,6 +143,7 @@ Matching ignores case. Anything else counts as `unknown`.
 |---|---|---|
 | autocoder, modernize (tmux) | development | tmux panes, status files, the issue tracker, autocoder's git refs, Claude Code transcripts |
 | herdr | development | `herdr agent list`; the issue comes from the branch name |
+| Kubernetes | runtime | `kubectl get <workloads>,pods -o json` and `get nodes` (`--runtime k8s:[<context>/]<namespace>`): workloads are houses, pods the people, nodes the hall; stuck pods need you; image tags are the builds |
 | Temporal | runtime | the frontend HTTP API: running and closed workflows, pending activities, task-queue pollers and their build IDs; with `--temporal-ui <url>`, each workflow links to its page in Temporal's web UI |
 
 The `--source` layers (see `village.md`) choose which of these run. AgentEx runs its agents as Temporal workflows, so `--temporal <namespace>` already shows them. Use an adapter for anything AgentEx keeps outside Temporal, such as task messages.

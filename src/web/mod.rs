@@ -1,6 +1,7 @@
 pub mod discovery;
 pub mod framework;
 pub mod herdr;
+pub mod kubernetes;
 pub mod server;
 pub mod source;
 pub mod temporal;

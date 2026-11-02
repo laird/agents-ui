@@ -36,6 +36,8 @@ struct CliOptions {
     temporal_url: Option<String>,
     /// Temporal's web UI, for links from the village (`--temporal-ui`).
     temporal_ui: Option<String>,
+    /// Kubernetes namespaces drawn as runtime villages (`--runtime k8s:[<context>/]<namespace>`).
+    kubernetes: Vec<String>,
     /// Address the web UI listens on (`--web-bind`); loopback by default.
     web_bind: Option<std::net::IpAddr>,
     /// Refuse every request that would change something (`--read-only`).
@@ -66,6 +68,7 @@ where
     let mut temporal = Vec::new();
     let mut temporal_url = None;
     let mut temporal_ui = None;
+    let mut kubernetes = Vec::new();
     let mut web_bind = None;
     let mut read_only = false;
     let mut worlds = Vec::new();
@@ -179,6 +182,13 @@ where
                     anyhow::anyhow!("--web-bind value '{raw}' is not an IP address")
                 })?);
             }
+            "--runtime" => {
+                let Some(value) = iter.next() else {
+                    anyhow::bail!("--runtime requires temporal:<namespace> or k8s:[<context>/]<namespace>");
+                };
+                runtime_spec(value.as_ref(), &mut temporal, &mut kubernetes)?;
+            }
+            value if value.starts_with("--runtime=") => runtime_spec(value.trim_start_matches("--runtime="), &mut temporal, &mut kubernetes)?,
             "--temporal-ui" => {
                 let Some(value) = iter.next() else {
                     anyhow::bail!("--temporal-ui requires a URL, e.g. http://localhost:8233");
@@ -235,12 +245,23 @@ where
         }
     }
 
-    // Temporal villages, outside frameworks and worlds only exist in the web view, so asking for one serves it.
-    if (!temporal.is_empty() || !worlds.is_empty() || !frameworks.is_empty()) && web_port.is_none() {
+    // Runtime villages, outside frameworks and worlds only exist in the web view, so asking for one serves it.
+    if (!temporal.is_empty() || !kubernetes.is_empty() || !worlds.is_empty() || !frameworks.is_empty()) && web_port.is_none() {
         web_port = Some(web::server::DEFAULT_PORT);
     }
 
-    Ok(CliOptions { agent_type, server, web_port, headless, temporal, temporal_url, temporal_ui, web_bind, read_only, worlds, incident_label, sources, frameworks })
+    Ok(CliOptions { agent_type, server, web_port, headless, temporal, temporal_url, temporal_ui, kubernetes, web_bind, read_only, worlds, incident_label, sources, frameworks })
+}
+
+/// `--runtime temporal:<namespace>` or `--runtime k8s:[<context>/]<namespace>`:
+/// a runtime village drawn from one source.
+fn runtime_spec(spec: &str, temporal: &mut Vec<String>, kubernetes: &mut Vec<String>) -> Result<()> {
+    match spec.split_once(':') {
+        Some(("temporal", ns)) if !ns.is_empty() => temporal.push(ns.to_string()),
+        Some(("k8s" | "kubernetes", rest)) if web::kubernetes::KubeSource::parse(rest).is_some() => kubernetes.push(rest.to_string()),
+        _ => anyhow::bail!("--runtime value '{spec}' is not temporal:<namespace> or k8s:[<context>/]<namespace>"),
+    }
+    Ok(())
 }
 
 /// Where the web UI listens: loopback unless `--web-bind` says otherwise.
@@ -263,6 +284,7 @@ fn village_cache(cli: &CliOptions) -> web::source::Villages {
             .iter()
             .map(|namespace| web::temporal::TemporalSource { namespace: namespace.clone(), http_url: url.clone(), ui_url: cli.temporal_ui.clone() })
             .collect(),
+        cli.kubernetes.iter().filter_map(|spec| web::kubernetes::KubeSource::parse(spec)).collect(),
         cli.frameworks.iter().filter_map(|spec| web::framework::ReportSpec::parse(spec)).collect(),
         cli.worlds.iter().filter_map(|spec| web::world::WorldConfig::parse(spec, label)).collect(),
     );
@@ -485,6 +507,7 @@ mod tests {
                 temporal: Vec::new(),
                 temporal_url: None,
                 temporal_ui: None,
+                kubernetes: Vec::new(),
                 web_bind: None,
                 read_only: false,
                 worlds: Vec::new(),
@@ -531,6 +554,16 @@ mod tests {
         assert_eq!(cli.sources.pipeline, "autocoder");
         assert!(parse_cli_options(["agents-tui", "--source", "issues=jira"]).is_err());
         assert!(parse_cli_options(["agents-tui", "--source"]).is_err());
+    }
+
+    #[test]
+    fn runtimes_pick_a_source() {
+        let cli = parse_cli_options(["agents-tui", "--runtime", "k8s:prod/shop", "--runtime=temporal:agents"]).unwrap();
+        assert_eq!(cli.kubernetes, vec!["prod/shop"]);
+        assert_eq!(cli.temporal, vec!["agents"]);
+        assert_eq!(cli.web_port, Some(crate::web::server::DEFAULT_PORT));
+        assert!(parse_cli_options(["agents-tui", "--runtime", "nomad:x"]).is_err());
+        assert!(parse_cli_options(["agents-tui", "--runtime", "k8s:"]).is_err());
     }
 
     #[test]
@@ -596,6 +629,7 @@ mod tests {
                 temporal: Vec::new(),
                 temporal_url: None,
                 temporal_ui: None,
+                kubernetes: Vec::new(),
                 web_bind: None,
                 read_only: false,
                 worlds: Vec::new(),
@@ -616,6 +650,7 @@ mod tests {
                 temporal: Vec::new(),
                 temporal_url: None,
                 temporal_ui: None,
+                kubernetes: Vec::new(),
                 web_bind: None,
                 read_only: false,
                 worlds: Vec::new(),

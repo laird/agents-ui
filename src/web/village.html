@@ -27,7 +27,8 @@
   body { padding: 12px max(12px, env(safe-area-inset-right)) 24px max(12px, env(safe-area-inset-left)); }
   a { color: var(--ink-dim); }
   .bar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin: 0 auto 10px; max-width: 1400px; }
-  .title { font: 700 16px/1.2 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--gold); display: flex; gap: 12px; align-items: center; }
+  .title { font: 700 16px/1.2 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--gold); display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; min-width: 0; }
+  .title select { max-width: 100%; }
   .title a { font-weight: 400; font-size: 12px; text-transform: none; letter-spacing: 0; }
   select { background: var(--win-bot); color: var(--ink); border: 2px solid var(--win-inner); border-radius: 4px; font: 13px var(--mono); padding: 4px 6px; }
   .status { font: 12px var(--mono); color: var(--ink-dim); }
