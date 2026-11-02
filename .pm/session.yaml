@@ -1,0 +1,71 @@
+schema: 2
+plugin_version: "0.9.2"
+created_at: "2026-11-02T00:13:45Z"
+workspace: "/home/user/agents-ui"
+workspace_mode: in-repo
+outputs_dir: outputs
+
+readiness:
+  status: ready
+  checked_at: "2026-11-02T00:16:00Z"
+  git: ok
+  web: ok
+  search: ok
+  feeds: [fetch, search]
+  reddit_rss: false
+  browser_test: unconfirmed
+  design: available
+  stopped_after_setup: false
+  notes:
+    - "Cloud session: no local browser to open a test file; prototypes are viewed by publishing or downloading them."
+
+case:
+  id: agents-ui
+  source: custom
+  dir: .pm/case
+  origin: "."
+  lane: attention-and-answering
+  chosen_at: "2026-11-02T00:28:00Z"
+  preselected: false
+
+sources:
+  - role: primary
+    owner_repo: laird/agents-ui
+    root: "."
+    clone_to: null
+    pinned_sha: 0019fe82bb464451f3df7678a4de2392c4283c0b
+    verified_sha: 0019fe82bb464451f3df7678a4de2392c4283c0b
+    method: in-place
+    access: public
+    archive_ref: null
+    dirty_at_start: false
+    baseline: ""
+    moved_to: null
+    clean_at_start: true
+    clean_at_end: null
+
+stage:
+  current: discovery
+  status: in-progress
+
+stages:
+  discovery:
+    status: in-progress
+    output: outputs/01-discovery.md
+    started_at: "2026-11-02T00:29:14Z"
+    fetches: .pm/fetches
+
+stale: []
+decisions:
+  - id: D-001
+    stage: discovery
+    checkin: case-check
+    claude_recommended: "Confirm the case: Solo developer, Never miss a blocked agent, lane attention-and-answering on the web dashboard and village fed by herdr and Temporal waiting states; expect a provisional brief because customer voice comes from neighbouring tools."
+    pm_decided: "Confirm"
+    reason: "Source of truth is herdr sessions and temporal/agentex"
+    at: "2026-11-02T00:29:00Z"
+notes:
+  - "Sources: PM ticked Community only; rungs 3 to 7 dropped. PM named herdr, claude-squad, Claude Code's own agent views and laird/agents; added as rung 1 community sources (issue pages)."
+  - "GitHub API refused for repositories other than laird/agents-ui from this cloud machine; neighbouring tools are read through their public HTML issue pages."
+  - "PM chose to commit both outputs/ and .pm/ to the repository at the end of the stage."
+  - "Run in a Claude Code cloud container: .pm/ and outputs/ are lost when the session ends unless saved elsewhere."

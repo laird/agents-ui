@@ -1,0 +1,31 @@
+url: https://github.com/smtg-ai/claude-squad/issues?q=is%3Aissue%20sort%3Areactions-%2B1-desc
+rung: 1 (extra: claude-squad-issues)
+accessed: 2026-11-02
+truncated: yes (page 1; text as returned by the fetch tool, restructured as a table; "—" = no thumbs-up count shown)
+
+Total result count: 134
+1 | No more updates? | #214 | Closed | closed on Mar 12, 2026 | 1
+2 | Error captureing pane content after starting cs | #216 | Closed | closed on Aug 20, 2026 | 10
+3 | Project Seems Abandoned, PR's and bugs are not being accepted or fixed. | #250 | Closed | closed on Mar 12, 2026 | 2
+4 | Support configurable worktree location patterns | #86 | Closed | closed on Dec 10, 2025 | —
+5 | Bug: Failed to start new session after fresh install | #132 | Closed | closed on Jun 30, 2025 | 10
+6 | TMUX error capturing pane content | #189 | Closed | closed on Sep 10, 2025 | 4
+7 | Diff scrolling broken on Mac default Terminal | #137 | Closed | closed on Feb 24, 2026 | 3
+8 | Feature request: worktree environment setup hook (deps, env files, port isolation) | #260 | Open | opened on Mar 5, 2026 | 3
+9 | Support flexible branch naming patterns with templates | #88 | Closed | closed on Dec 10, 2025 | —
+10 | Multi-repository session management | #89 | Closed | closed on Dec 10, 2025 | —
+11 | TUI Interactions very slow | #215 | Closed | closed on Aug 11, 2026 | 4
+12 | Error capturing pane content: exit status 1 | #51 | Closed | closed on Jan 5, 2026 | 18
+13 | Enable multiple git repos with claude squad | #56 | Open | opened on Apr 6, 2025 | 8
+14 | Support scrolling in the preview pane | #60 | Closed | closed on Jul 13, 2025 | 8
+15 | Modify Key Binding for Detach Session Action | #119 | Closed | closed on Dec 12, 2025 | —
+16 | Feature Request: Allow starting session from a PR / remote branch. | #124 | Closed | closed on Dec 14, 2025 | —
+17 | Feature Request: jujutsu support | #104 | Closed | closed on Dec 10, 2025 | 2
+18 | Feature request: Open in IDE | #181 | Closed | closed on Jan 25, 2026 | 2
+19 | yolo mode (autoyes) not working | #151 | Closed | closed on Jun 7, 2026 | 7
+20 | feat: start a new session in another repository without relaunching | #299 | Open | opened on May 26, 2026 | —
+21 | uninstall procedure | #98 | Closed | closed on Dec 10, 2025 | —
+22 | Feature Request: Start AI sessions in subdirectories when Claude Squad is run from a subdirectory | #141 | Closed | closed on Jan 1, 2026 | 1
+23 | Feature request: allow to run without git worktree | #69 | Closed | closed on Jan 6, 2026 | 2
+24 | resume after reboot | #212 | Closed | closed on Mar 23, 2026 | —
+25 | Feature Request: Responsive UI Layout for Mobile Terminals | #147 | Closed | closed on Dec 28, 2025 | —

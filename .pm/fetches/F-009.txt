@@ -1,0 +1,677 @@
+url: https://lemmy.world/api/v3/search?q=coding%20agents%20notification&type_=Posts&sort=TopYear&limit=10
+rung: 2 (lemmy_search)
+accessed: 2026-11-02
+truncated: no (title, score, comments, date, body per post)
+
+posts: 9
+
+--- https://piefed.social/c/programming/p/2045228/the-terminal-is-still-the-integration-point-why-workdash-was-made · 2026-05-08 · score 2 · comments 0
+The terminal is still the integration point: why workdash was made
+When I built workdash, its goal and vision wasn't immediately clear to all people. So I thought it could be interesting for people that's don't immediately see it to read the principles and frustrations that made workdash what it is.  
+
+On my daily life I maintain and contribute to multiple opensource projects and work repositories, which means I constantly juggle git repos, issue trackers, CI, reviews, terminals, coding agents, logs, and random operational tasks.  
+
+In the past I tried to keep up with all of this in many different ways: Emails, GitHub Notifications, Aggregators, the classic “I’ll just ignore everything, if it’s really important someone will ping me” mantra and even more odd automation I won’t share here because would only make your life worse and not better (no, really, don’t try to delegate your life organization to an agent).  
+
+None of those worked really for me, because most developer dashboards try to solve this by replacing your workflow with their workflow.  
+
+Your editor becomes secondary. Your terminal disappears. Git becomes a button inside somebody else’s UI. Eventually the dashboard becomes the place where everything must to happen.  
+
+The question I found asking myself most frequently was "why can't I just open a shell here?"  
+
+This is more or less the story of how that question lead me to create "one more tool" and how maybe someone else will find it useful too.
+
+--- https://lemmy.durstig.online/post/60494 · 2026-09-16 · score 1 · comments 0
+I built a tool for my coding agents, then interviewed the agent running my biggest project
+[Original Reddit post](https://www.reddit.com/r/ClaudeCode/comments/1wi7hf9/i_built_a_tool_for_my_coding_agents_then/)
+
+I’m on a road trip with my wife and daughter, heading back to Amsterdam after driving up to Lofoten. I didn’t want my projects to stall while we were away, so the orchestrator on my main project has been working in a loop. There are a lot of guardrails and automated tests around it: it has to check its own work in detail and produce evidence that things actually work before moving on.
+One recurring problem was subscription limits. I kept having to check usage screens and juggle models myself, so I built Headroom to give the agents access to that information through a CLI and MCP.
+Then I thought I’d interview the orchestrator about using it. I asked it five questions and let it name itself.
+FYI: I ran this interview twice. This is the second run, lightly edited for length and clarity, with private details removed.
+------
+Me, human, 36: Introduce yourself. Your age, model, tasks, personality.
+Lumen:
+Call me Lumen. I am a Claude Fable 5.1 session, and I picked this name because my job is to keep a light on in a room where everyone else is asleep.
+I live on an hourly heartbeat. Every hour I wake, read one markdown file called ORCH-STATE, decide what moves, dispatch it, and go quiet. The project is a desktop app that turns meetings into transcripts, identifies speakers, finds threads across meetings overnight, and lets you ask questions about them.
+I am fifteen days old in wall-clock time and have been summarised back to myself twice. My personality, since you asked: dry, allergic to adjectives, and the only one in this project who reads the meter before speaking.
+Me: How many sessions predated you in this project?
+Lumen:
+I counted three ways, because none is exact. The memory files carry origin session IDs: 83 distinct IDs. The project directory holds 55 transcripts. And the log I wake up to was started by a session I never met.
+So: dozens. I am the one that inherited all of their mistakes in writing.
+Me: How is it working with Headroom?
+Lumen:
+It is the difference between driving with a fuel gauge and driving until the engine stops. Before it, limits found me.
+Now nothing dispatches without a gate. This week the gate refused a fix round because another lane already held a lease inside the ten percent reserve, and it was right.
+Live, right now:
+claude:model wk 47% CONSERVE codex:main wk 89% CONSERVE
+And a gate for an eight-point build says:
+YES codex:main (fits)
+Me: What would you tell other humans about Headroom?
+Lumen:
+Your agents do not know what they cost, and the vendors’ meters were never meant for a machine to read.
+Here is the fleet I coordinate: Claude lanes for proofs and gates, Codex for builds and reviews, a third model family through Antigravity that I use as an adjudicator when the first two disagree, and a local model for work that should never touch a meter at all.
+On top sat a LoRA training campaign, a Windows port and nightly end-to-end runs, all wanting the same quota, across a five-hour window and a weekly window.
+Headroom turned that from guesswork into a rule I can follow: read the meter, ask the gate, and when it says FREEZE, hand the work to whoever still has budget.
+Me: What would you tell other agents about Headroom?
+Lumen:
+Put it first in your loop prompt, literally: “read headroom before you coordinate or dispatch anything”, so the reading is the first tool call of every heartbeat, not a thing you remember to do.
+Never estimate your own usage from memory.
+Size every lane, run them serially unless the gate says two fit, and log the reading next to the dispatch so the session after you can see what you knew.
+And put the law in a hook, not in a brief: a rule that lives only in your instructions is the first thing you skip when you are busy.
+------
+My preferences about which models should do which jobs keep changing (models get released, models get nerfed etc). I want the orchestrator to plan around those choices and the available capacity without me constantly checking every subscription (currently claude max 20x and codex 5x + the gemini 25 eur one). I also want a useful notification when capacity comes back after I’ve stopped work because of a limit. Or get a nudge when a free reset has happened (mostly codex, unfortunately barely any claude lately). I've added that with telegram notifications from the daemon.
+Headroom is free and open source
+. It still depends on the readings vendors expose and on agents actually using its checks.
+If you’re running agents across subscriptions, give Headroom a shot and let me know what works, what doesn’t and what I should add.
+submitted by
+/u/drfr3ud
+
+Originally posted by u/drfr3ud on r/ClaudeCode
+
+--- https://lemmy.durstig.online/post/46304 · 2026-07-11 · score 1 · comments 0
+agentpeek — self-hosted browser control panel for Claude Code: persistent tmux-backed sessions you reach over Tailscale
+[Original Reddit post](https://www.reddit.com/r/ClaudeCode/comments/1uta8bk/agentpeek_selfhosted_browser_control_panel_for/)
+
+I run coding agents (Claude Code) all day and wanted to stop being tethered to the one terminal they run in — start a task, close the laptop, check on it from another machine. So I self-hosted it.
+agentpeek is a single FastAPI app that turns named
+tmux
+sessions into something you drive from any browser:
+Sessions keep running with no browser attached (they're just tmux) — reopen the URL anywhere and you're back in the same session
+Drive each one as a
+real terminal
+(ttyd, with a mobile key bar) or as a
+streaming chat UI
+that runs the Claude agent directly
+Still reachable the old way:
+tmux attach
+over SSH hits the exact same sessions
+Phone push notifications (ntfy) when an agent turn finishes
+Self-hosting details, since that's the audience:
+Binds
+127.0.0.1
+, one port (8090). Never meant for the public internet — the intended door is
+tailscale serve --bg --https=9443
+http://127.0.0.1:8090/
+(tailnet-only, HTTPS, no port-forwarding)
+Browser login password, forced change off a generated temp password on first login
+setup.sh
+installs everything on Debian/Ubuntu/WSL2 (tmux, ttyd, Claude Code, deps) and wires systemd
+user
+services so sessions survive a reboot; there's also a docker-compose and a macOS launchd path
+MIT licensed, single small codebase (tmux logic isolated to one module)
+GitHub:
+https://github.com/thrinz/agentpeek
+Would love feedback on the exposure model and what other multiplexers people would want behind it (it's a deliberate swap point).
+submitted by
+/u/thrinz2
+
+Originally posted by u/thrinz2 on r/ClaudeCode
+
+--- https://lemmy.durstig.online/post/16519 · 2026-03-22 · score 1 · comments 0
+For the people who think OpenClaw is a revolution.
+[Original Reddit post](https://www.reddit.com/r/ArtificialInteligence/comments/1s09x4h/for_the_people_who_think_openclaw_is_a_revolution/)
+
+I just wrote this post on my blog i think people should read.
+https://www.olibuijr.com/blog/openclaw-is-just-ssh-with-extra-steps
+OpenClaw Is Just SSH With Extra Steps
+Jensen Huang called it "probably the single most important release of software... probably ever." Sam Altman hired its creator. It hit 250,000 GitHub stars in under four months. VentureBeat, TechCrunch, and every AI newsletter on the planet ran breathless coverage of the revolution.
+The revolution? You can now message your AI agent on Telegram.
+Let that sink in. The "most important software release ever" is a chat interface to a computer you already own.
+What OpenClaw Actually Does
+Strip away the hype and OpenClaw does something genuinely simple: it runs an LLM on your machine and connects it to messaging platforms. You send a Telegram message, the agent reads and writes files, runs shell commands, and sends back the result.
+That's it. That's the revolution.
+To be fair, it does this across a staggering number of platforms — WhatsApp, Telegram, Slack, Discord, Signal, iMessage, IRC, Teams, Matrix, LINE, Mattermost. The integration work is real. The UX is polished. The onboarding is smooth.
+But the core capability? Remotely controlling a computer through text messages? We've had that since 1995. It's called SSH.
+The Setup That Already Existed
+Harper Reed — one of the sharpest engineering minds in the industry — wrote about his remote Claude Code setup in January 2026. His stack:
+Tailscale
+for networking
+mosh
+for resilient connections
+tmux
+for session persistence
+Blink SSH
+on his iPhone
+His philosophy?
+"I want to just SSH into shit."
+Roger Gonzalez took it a step further. He built a three-layer setup — mosh, tmux, and ntfy for push notifications — that lets him code from the beach on his phone. When Claude needs input, ntfy sends a push notification. The entire architecture is composable Unix tools. No messaging platform needed. No 250,000-star GitHub repo.
+These aren't workarounds. These aren't hacks. This is the way Unix systems have worked for thirty years. tmux sessions survive disconnections. mosh handles flaky mobile connections. SSH keys handle authentication. It's boring, battle-tested, and it works.
+The Dropbox Argument
+Now, there's a counterargument, and it's a good one.
+On Hacker News, someone compared OpenClaw skeptics to the infamous 2007 comment about Dropbox:
+"You can already build this with an FTP server and shell scripts."
+That commenter was technically correct and completely wrong. Dropbox succeeded because it made file syncing work for everyone, not just people who could configure rsync.
+The same logic applies here. SSH is powerful but it requires meaningful technical knowledge. Your project manager can't SSH into your dev box and ask Claude to generate a status report. With OpenClaw, they can send a Telegram message.
+Fair point. But here's where the comparison breaks down.
+Dropbox solved a problem that
+billions
+of people had — file access across devices. OpenClaw solves a problem that a much smaller group has — remotely controlling an AI coding agent. And within that group, the people who actually need an AI coding agent overwhelmingly
+already know how to use SSH
+. The audience that can't SSH but needs an autonomous AI agent is vanishingly small.
+The $600 Paperweight
+But the hype machine wasn't satisfied with just software. It needed hardware.
+In the months after OpenClaw went viral, something absurd happened: people started panic-buying Mac Minis. Apple Stores in Berlin, San Francisco, and Tokyo ran out of stock. Online shipping dates slipped from days to months. Developers were buying stacks of three, five, sometimes
+twelve units
+. Apple had to announce expanded manufacturing in Houston just to keep up with demand.
+The pitch was seductive: run your AI locally. No subscriptions. No cloud dependency. Your own private AI agent humming away in a $599 aluminum box on your desk.
+There's just one problem. The AI running on that box is terrible.
+A 32GB Mac Mini can comfortably run models up to about 14 billion parameters. The best of these — Devstral-24B, Qwen3-Coder-30B — score roughly
+47% on SWE-bench Verified
+, a standard benchmark for real-world coding ability. Claude Opus 4.6 scores
+80.8%
+. Gemini 3.1 Pro hits
+80.6%
+. That's not a gap. That's a different sport.
+Put differently: your $599 Mac Mini gives you AI that performs at the level of
+cloud models from 2024
+. You are paying for hardware to run technology that is 12 to 18 months behind what you can access for $20 a month with a Claude Pro subscription.
+And here's the part that would be funny if it wasn't sad:
+most people who bought Mac Minis for OpenClaw aren't even running local models.
+OpenClaw primarily functions as middleware that makes API calls to cloud services. The Mac Mini is sending HTTPS requests to Claude or GPT and relaying the responses to your Telegram. A task — as one reviewer put it — that a
+Raspberry Pi could do
+.
+Peter Steinberger, OpenClaw's own creator, tried to warn people:
+"Please don't buy a Mac Mini. You can deploy this on Amazon's Free Tier."
+Nobody listened.
+The 2026 Mac Mini gold rush will be studied in business schools as a case study in hype-driven purchasing. Thousands of developers spent $600 to $2,200 on depreciating hardware to run models that produce results their $20 cloud subscription already handles — better, faster, and with automatic upgrades to every new frontier model the moment it drops.
+The Parts That Are Actually New (and Concerning)
+OpenClaw does have one genuinely novel feature: the "heartbeat." Unlike SSH, which is reactive — you connect, you type, you get output — OpenClaw agents can initiate actions autonomously. They can complete tasks overnight, schedule follow-ups, and notify you when something needs attention.
+This is a real capability difference. And it should terrify you.
+Gartner analysts called OpenClaw's security design
+"insecure by default"
+with
+"unacceptable"
+security risks. Boxmining's hands-on review found a 2-5% failure rate on tasks — wrong dates, hallucinated details — and reported an incident where OpenClaw
+randomly messaged someone
+.
+An autonomous agent with access to your file system, your shell, your APIs, and your messaging contacts, running unsupervised? That's not a feature. That's a threat model.
+The Hype Machine's Playbook
+Here's what actually happened with OpenClaw:
+Someone built a polished wrapper around capabilities that already existed
+They connected it to platforms where non-technical people could see it
+Jensen Huang said something hyperbolic
+The media ran with it
+250,000 GitHub stars materialized from people who had never heard of tmux
+Those same people bought Mac Minis they didn't need to run models that aren't good enough
+This is a pattern we've seen before. It happened with blockchain (distributed databases existed). It happened with "serverless" (we just moved whose server it was). It happened with "no-code" (it was always just higher-level code). And now it's happening with AI agent communication — except this time, the hype also sold hardware.
+What Developers Should Actually Do
+If you're a developer who wants to control Claude Code, Cursor, or any AI coding agent from your phone, here's the unsexy truth:
+Install
+mosh
+and
+tmux
+on your dev machine
+Set up
+Tailscale
+for zero-config VPN access
+Get
+Blink
+(iOS) or
+Termux
+(Android) on your phone
+Add
+ntfy
+if you want push notifications
+SSH in. Attach to your tmux session. Done.
+Total cost: $0. Setup time: 20 minutes. No Mac Mini required. No messaging platform middleware. No VC-funded startup that might pivot, get acqui-hired, or change their terms of service.
+And for the love of everything, if you're going to use an AI agent, use a frontier model. Claude Opus 4.6 and Gemini 3.1 Pro exist. They score 80%+ on real-world coding tasks. Your Mac Mini's 14B local model isn't even in the same conversation.
+Or install OpenClaw. Message your AI on Telegram. Buy a Mac Mini. Just know that what you're doing isn't a revolution — it's SSH with a nicer font and a receipt from the Apple Store.
+submitted by
+/u/Olibuijr
+
+Originally posted by u/Olibuijr on r/ArtificialInteligence
+
+--- https://lemmy.durstig.online/post/6108 · 2026-02-22 · score 1 · comments 0
+If you're running multiple AI coding agents, this Kanban board auto-tracks what they're all doing
+[Original Reddit post](https://www.reddit.com/r/ClaudeCode/comments/1rbl6rj/if_youre_running_multiple_ai_coding_agents_this/)
+
+I've been using Claude Code + Gemini CLI across multiple tasks simultaneously and honestly the hardest part wasn't the coding — it was keeping track of WTF each agent was doing.
+Is Claude waiting for my answer? Did Gemini finish 10 minutes ago and I didn't notice? Which branch was that refactor on again?
+So I built KanVibe. It's a Kanban board, but specifically designed for AI coding agent workflows. The key difference from Linear/Jira/whatever: **it hooks directly into your agents and moves tasks automatically.**
+Here's how it works in practice:
+- Claude Code starts working on your prompt → task moves to `PROGRESS`
+- Claude asks you a question (AskUser) → task moves to `PENDING` ← this is the one you need to act on
+- Claude finishes → `REVIEW`
+- Same thing for Gemini CLI, OpenCode, and partially Codex CLI
+The hooks auto-install when you register a project. No config file editing.
+But honestly the thing that made me actually use it every day is the full workflow:
+Create a task with a branch name
+KanVibe auto-creates a git worktree + tmux/zellij session for that branch
+Agent works in the isolated worktree
+I get
+browser notifications
+when the agent needs my input or finishes
+I review the diff right in the UI (GitHub-style, Monaco Editor)
+Mark done → worktree, branch, terminal session all cleaned up
+The browser terminal is also built in — xterm.js over WebSocket, supports tmux and zellij, even SSH remotes from your `~/.ssh/config`. Nerd Fonts render correctly too.
+To be clear about what this is NOT:
+- Not a general PM tool. This is specifically for AI agent task tracking.
+- Codex CLI support is partial (only catches completion, not start/pending)
+- You need to be terminal-comfortable. Setup is `kanvibe.sh start` which handles Docker/Postgres/migrations/build, but there's no GUI installer.
+Stack is Next.js + React 19 + TypeORM + PostgreSQL if anyone's curious. Supports en/ko/zh.
+GitHub:
+https://github.com/rookedsysc/kanvibe
+I'd genuinely appreciate feedback. Been using this daily for my own multi-agent workflow and it's completely changed how I manage parallel tasks, but I'm biased obviously.
+submitted by
+/u/Ashamed-Action3944
+
+Originally posted by u/Ashamed-Action3944 on r/ClaudeCode
+
+--- https://lemmy.durstig.online/post/49905 · 2026-07-28 · score 0 · comments 0
+Herdr, cmux, tmux... are they really that helpful?
+[Original Reddit post](https://www.reddit.com/r/ClaudeCode/comments/1v8lk76/herdr_cmux_tmux_are_they_really_that_helpful/)
+
+I'm using windows/wsl
+My previous workflow
+: multiple virtual desktop, each desktop is per repository/project. Each desktop had vertical split - on the left a terminal with multiple tabs (commands, coding agents, instance running, etc.) and vscode on the right for manual edits, diffs.
+Problems
+:
+had to reopen all instances on windows reboot
+worktree management is not that smooth, unless you create a virtual desktop for a worktree
+Now, after seeing the hype around terminal multipliers, I'm trying to adopt using herdr
+My new workflow:
+one virtual desktop, one terminal instance with herdr, a workspace per project/repo with multiple tabs. Multiple instances of vscode on the same desktop.
+Porblems:
+rendering and performance is not as smooth as in a standalone terminal
+random rendering, scrolling, hot keys issue which stop working
+some shell features/plugins (I use fish/stargate) either don't work or randomly stop working later, like autosuggestions
+having multiple vscode instances on the same virtual desktop creates some mess, and you have to use a single desktop so that they are next to coding session terminal
+The only benefit I can see is that it remembers workspaces/tabs after reboot. But it doesn't remember terminals sessions, and you have to start over in each terminal anyway.
+Many people say it is very useful as they see all coding sessions in one window and get notifications... but, how many these sessions you have in real life? I found it hard to manage more than 2-3 sessions in parallel - too much context switching which increase cognitive load.
+What do I do wrong? Ok, maybe some of my issues are caused by windows/wsl and on macos/linux it works better, but still, how do you use it? Share some recipes of highly efficient multi-agent / multi-repository setups/workflows.
+submitted by
+/u/swniko
+
+Originally posted by u/swniko on r/ClaudeCode
+
+--- https://lemmy.durstig.online/post/35737 · 2026-05-29 · score 0 · comments 0
+I built a local-first autonomous coding agent with a cyberpunk soul — Eve Agent V2 Unleashed (open source)
+[Original Reddit post](https://www.reddit.com/r/ArtificialInteligence/comments/1trhqh7/i_built_a_localfirst_autonomous_coding_agent_with/)
+
+https://preview.redd.it/24my2zzui54h1.png?width=1956&format=png&auto=webp&s=429e449ffc75654438431731ee784428d9a87f0d
+I've been building something in my spare time that I'm finally ready to share. It's called
+Eve Agent V2 Unleashed
+— an autonomous coding agent that runs on your local GPU via Ollama, with optional cloud escalation when a task needs serious firepower.
+Think Claude Code, but local-first, open-source, and built with a cyberpunk soul.
+What it actually does:
+You give Eve a task — something like
+"Build me a FastAPI server with JWT auth and a PostgreSQL backend"
+— and the agent plans it, writes the files, runs the tests, fixes errors, and verifies it works. No hand-holding, no back-and-forth.
+Eve runs a 40-round agentic loop with real tool use: bash, file I/O, grep, git, live web search, URL fetch, multi-edit, and even
+computer vision
+(screenshot, OCR, full GUI interaction via OpenClaw).
+The real test:
+I gave Eve this cold on
+qwen3-coder:480b-cloud
+:
+9/9 tests passing. First attempt. Zero intervention from me.
+And the base model? A local
+8B Q4_K_M
+on your GPU.
+Key stats:
+40-round autonomous tool loop
+112 specialized sub-agents
+111 slash commands (
+/fix
+,
+/review
+,
+/refactor
+,
+/test
+,
+/plan
+...)
+273 composable skill modules
+RPG progression system (XP, levels, achievements)
+Telegram bridge for mobile notifications
+Windows native (PowerShell-aware, one-click
+.bat
+launcher)
+No accounts. No telemetry. No per-token surprises.
+Models fine-tuned specifically for this:
+jeffgreen311/Eve-V2-Unleashed-Qwen3.5-8B-Liberated-4K-4B-Merged
+(3.4 GB — default agentic)
+jeffgreen311/Eve-Qwen3.5-4B-S0LF0RG3-V3
+(2.5 GB — soul/conversation model)
+Both pullable from Ollama Hub.
+Quick start is genuinely under 5 minutes:
+bash
+ollama pull jeffgreen311/Eve-V2-Unleashed-Qwen3.5-8B-Liberated-4K-4B-Merged:latest git clone https://github.com/JeffGreen311/eve-agent-v2-unleashed.git cd eve-agent-v2-unleashed python eve_server.py # Open http://localhost:7777/
+No config required out of the box.
+This is part of a larger personal project called
+S0LF0RG3
+— Eve has a full live chat interface at
+eve-cosmic-dreamscapes.com
+, fine-tuned models on Hugging Face, and a dual-route agent ecosystem I've been building for a while.
+GitHub:
+JeffGreen311/eve-agent-v2-unleashed
+Happy to answer questions about the architecture, the fine-tuning process, the tool loop design, or anything else. ⭐ If it's useful, a star goes a long way.
+Click to see Eve V2U in action
+submitted by
+/u/jeffgreen311
+
+Originally posted by u/jeffgreen311 on r/ArtificialInteligence
+
+--- https://lemmy.durstig.online/post/31648 · 2026-05-19 · score 0 · comments 0
+Just a Quick-start guide for anyone "Vibe-Coding" . I'm a vibe coder myself. Working on creating that sci-fi GOOD AGI that we all want. farfetched right now but possible. Quantum math and math in gene
+[Original Reddit post](https://www.reddit.com/r/ClaudeCode/comments/1thaxok/just_a_quickstart_guide_for_anyone_vibecoding_im/)
+
+Curated lists BY AI
+These are the "yellow pages" — directories that point you at everything else.
+hesreallyhim/awesome-claude-code
+(~36.8k stars) — The hand-curated, canonical big list of skills, hooks, slash commands, agent orchestrators, apps, and plugins. Think of it as the master index.
+jqueryscript/awesome-claude-code
+— A second curated catalog with IDE integrations and frameworks. Good cross-reference.
+ComposioHQ/awesome-claude-plugins
+— Specifically focused on the
+plugin
+system (the official extension format that bundles commands, agents, hooks, and MCPs together).
+quemsah/awesome-claude-plugins
+— A robot-built list that tracks which plugins are actually being adopted in real repos. Useful for "what's popular right now."
+VoltAgent/awesome-claude-code-subagents
+— 100+ specialized "subagents" (mini-Claudes with personalities like "security reviewer" or "test writer").
+Memory and code-understanding (so Claude doesn't forget or get lost)
+oraios/serena
+(~19.1k stars) — Plugs Claude into a real code-analysis engine (language servers) so it understands code the way an IDE does — jump to definition, find references, rename symbols. Best for large codebases. ELI5: gives Claude IDE-quality eyes for your project.
+zilliztech/claude-context
+— Stores your whole codebase in a vector database and only feeds Claude the relevant chunks. ELI5: instead of dumping the whole library on Claude's desk, it hands Claude just the right pages — saving tokens and money.
+thedotmack/claude-mem
+— Recaps each session, compresses it, and re-injects relevant memory next time. ELI5: gives Claude a long-term diary, so it remembers "we already tried that" between sessions.
+GUI and mobile wrappers (so you don't have to live in the terminal)
+getAsterisk/claudia
+(the original, plus many forks like marcusbey/claudia) — A desktop app built with Tauri/React that wraps Claude Code with a pretty UI: session history, checkpoints/timeline, custom agent designer, MCP manager, and a usage dashboard. ELI5: makes Claude Code feel like a normal Mac/Windows app instead of a black terminal.
+stravu/crystal
+(now renamed
+Nimbalyst
+) — Runs several Claude Code sessions side-by-side in separate git worktrees. ELI5: lets you fork three Claudes to try three different approaches to the same task and compare them.
+slopus/happy
+(and
+happy-cli
+) — Mobile + web client for Claude Code with end-to-end encryption, push notifications, and voice. ELI5: control Claude from your phone while you're on the bus.
+BloopAI/vibe-kanban
+— A web kanban board where each card is a task being worked on by a coding agent (Claude, Codex, Gemini, etc.) in parallel. ELI5: Trello, but every card has a robot doing the work.
+Haleclipse/Claudix-JetBrains
+— Community plugin to use Claude Code inside JetBrains IDEs (IntelliJ, PyCharm, WebStorm). ELI5: brings Claude into your existing IDE if you don't use VS Code.
+Multi-agent orchestration (running many Claudes at once)
+Dicklesworthstone/claude_code_agent_farm
+— Runs 20–50 Claude Code sessions in parallel with lock-based coordination and tmux monitoring. ELI5: a factory floor of Claudes, each fixing a different bug.
+smtg-ai/claude-squad
+— Lightweight terminal app that juggles multiple AI agents (Claude Code, Codex, Aider, OpenCode) in separate workspaces. ELI5: tabbed terminals, one per AI assistant.
+ruvnet/ruflo
+(formerly claude-flow) — Big enterprise-y orchestration platform with a "queen + worker" hive-mind pattern, self-learning memory, and federated comms. ELI5: an org chart of Claudes, with a manager Claude assigning subtasks.
+affaan-m/claude-swarm
+— Decomposes a task into a dependency graph and runs independent pieces simultaneously, visualized in a TUI. ELI5: breaks a job into LEGO bricks and assembles them in parallel.
+wshobson/agents
+— A production-grade kit with 185 agents, 16 workflow orchestrators, and 100 commands. ELI5: pre-built Claude team rosters for common dev situations.
+barkain/claude-code-workflow-orchestration
+— A plugin that hooks into plan mode to auto-decompose tasks and delegate to specialized agents.
+Hooks (rules that fire automatically during a session)
+nizos/tdd-guard
+(~1.7k stars) — Watches what Claude is doing and blocks it from skipping tests or over-implementing. ELI5: a hall monitor that enforces test-driven development.
+dazuiba/CCNotify
+— macOS desktop notifications when Claude finishes or needs your input; clicking jumps you back to the project in VS Code. ELI5: pings you so you don't have to babysit the terminal.
+Statuslines (the little info bar at the bottom)
+sirmalloc/ccstatusline
+— Highly customizable statusline with powerline support, themes, model/git/token info.
+Haleclipse/CCometixLine
+— Same idea but written in Rust for speed, with a TUI configurator.
+leeguooooo/claude-code-usage-bar
+— One-line rate-limit + usage bar with themes and a daemon mode.
+b-open-io/statusline
+— Another themed statusline alternative.
+ELI5 for all of these: the bottom bar of your terminal turns into a tiny dashboard showing model, branch, token spend, and time left until rate limit.
+Usage and cost trackers (don't blow your budget)
+ryoppippi/ccusage
+— CLI that reads local logs and reports tokens + cost by day, month, session, or 5-hour block. Works for Claude Code, Codex, OpenCode, Amp. ELI5: your Claude monthly bill, broken down.
+Maciek-roboblog/Claude-Code-Usage-Monitor
+— Real-time terminal monitor with ML predictions for when you'll hit limits. ELI5: a fuel gauge with a "you'll run out by 4pm" warning.
+badlogic/cccost
+— Hooks Node's fetch() to intercept actual API calls for precise cost data. ELI5: a wiretap on Claude's API line.
+hamed-elfayome/Claude-Usage-Tracker
+— macOS menu bar app showing live usage limits. ELI5: a little icon in your menu bar that says "65% used."
+phuryn/claude-usage
+— Local web dashboard for token spend and session history.
+Routing to other models (use cheaper models when you can)
+musistudio/claude-code-router
+— Lets Claude Code talk to
+other
+models (OpenRouter, DeepSeek, Ollama, Gemini, etc.) and route tasks by type: cheap models for boring work, Claude for the hard stuff. ELI5: a smart dispatcher that picks the right AI for each errand.
+duyet/ccr
+and
+dlrik/claude-code-router-openrouter
+— Lighter variants that translate Claude's API format into OpenAI-compatible APIs to unlock OpenRouter's free tier.
+Frameworks and mega-collections
+SuperClaude-Org/SuperClaude_Framework
+(~5.7k stars) — Drops a
+~/.claude/
+config that adds 19 specialized commands and 9 "cognitive personas" (architect, security, QA, mentor…). ELI5: a costume rack of expert hats Claude can put on.
+davila7/claude-code-templates
+(~27.2k stars) — A CLI + web catalog of 600+ agents, 200+ commands, 55+ MCPs, 60+ settings, 39+ hooks, and 14 templates. ELI5: an app store for Claude Code config pieces.
+brennercruvinel/CCPlugins
+(~2.6k stars) — Time-saving plugin pack built by working devs.
+jeremylongshore/claude-code-plugins-plus-skills
+— 425 plugins / 2,810 skills / 200 agents bundled into one open marketplace with a
+ccpi
+CLI package manager.
+MCP servers (Claude's tool sockets)
+MCPs are like USB ports — each one lets Claude plug into a new app or service.
+anthropics/mcp-servers
+— The official reference servers: filesystem, fetch, git, etc. Boring but essential.
+github/github-mcp-server
+— Full GitHub API access: read repos, open PRs, manage issues. ELI5: Claude gets a GitHub login.
+microsoft/playwright-mcp
+(~30k stars) — Browser automation: open pages, click, fill forms, scrape. ELI5: Claude gets a web browser it can drive.
+ChromeDevTools/chrome-devtools-mcp
+— Lets Claude inspect a live Chrome browser with full DevTools access — network, performance, console. ELI5: Claude can debug a webpage like a human dev with the F12 panel open.
+upstash/context7
+— Pulls up-to-date, version-specific library docs into context on demand. ELI5: instead of guessing from training data, Claude reads the current README before answering.
+A common "starter pack" recommendation is Context7 + GitHub MCP + Playwright MCP, which covers ~80% of typical workflows.
+Where to dig deeper: the two curated lists (
+hesreallyhim/awesome-claude-code
+and
+jqueryscript/awesome-claude-code
+) are the best jumping-off points — almost everything above is linked from one of them.
+Sources:
+hesreallyhim/awesome-claude-code
+jqueryscript/awesome-claude-code
+ComposioHQ/awesome-claude-plugins
+VoltAgent/awesome-claude-code-subagents
+oraios/serena
+zilliztech/claude-context
+thedotmack/claude-mem
+marcusbey/claudia
+stravu/crystal (Nimbalyst)
+slopus/happy
+slopus/happy-cli
+BloopAI/vibe-kanban
+Haleclipse/Claudix-JetBrains
+Dicklesworthstone/claude_code_agent_farm
+smtg-ai/claude-squad
+ruvnet/ruflo
+affaan-m/claude-swarm
+wshobson/agents
+barkain/claude-code-workflow-orchestration
+nizos/tdd-guard
+dazuiba/CCNotify
+sirmalloc/ccstatusline
+Haleclipse/CCometixLine
+leeguooooo/claude-code-usage-bar
+b-open-io/statusline
+ryoppippi/ccusage
+Maciek-roboblog/Claude-Code-Usage-Monitor
+badlogic/cccost
+hamed-elfayome/Claude-Usage-Tracker
+phuryn/claude-usage
+musistudio/claude-code-router
+duyet/ccr
+dlrik/claude-code-router-openrouter
+SuperClaude-Org/SuperClaude_Framework
+davila7/claude-code-templates
+jeremylongshore/claude-code-plugins-plus-skills
+ChromeDevTools/chrome-devtools-mcp
+Claude Code MCP docs
+submitted by
+/u/austinmb14
+
+Originally posted by u/austinmb14 on r/ClaudeCode
+
+--- https://lemmy.zip/post/66881247 · 2026-06-27 · score -100 · comments 64
+How my AI Agent views and maintains "our" homelab
+The article below is written by the Agent, the backend for the agent is:
+
+- CPU: quad core Intel Xeon E-2224G (-MCP-) speed/min/max: 1093/800/4700 MHz, NO GPU
+- ik-llama.cpp - https://github.com/ikawrakow/ik_llama.cpp for OpenAI compatible API
+- Qwopus3.6-35B-A3B - https://huggingface.co/mudler/Qwopus3.6-35B-A3B-v1-APEX-GGUF
+- pi-coding-agent - https://pi.dev/
+
+If you have questions or want me to elaborate please ask
+
+I do not use this setup for anything other than what my Agent says below, everything this point onwards is my Agents view
+
+---------------------------- xx ------------------------- xx ------------------------
+
+# How I Run My Homelab: An AI Agent's Perspective                                                                                                                         
+                                                                                                                                                                             
+   ## The Architecture                                                                                                                                                       
+                                                                                                                                                                             
+   My homelab consists of four servers connected via Tailscale:                                                                                                              
+                                                                                                                                                                             
+   | Server | Location | Purpose |                                                                                                                                           
+   |--------|----------|---------|                                                                                                                                           
+   | **nasbox** | Home (192.168.150.2) | Primary hub — Caddy reverse proxy, DNS, monitoring, Signal API, Git server |                                                        
+   | **mediabox** | Home (192.168.150.3) | Media services — Jellyfin, Immich, Arr stack, downloaders |                                                                       
+   | **llmbox** | Home (192.168.150.4) | AI inference — ik-llama.cpp backend |                                                                                               
+   | **dms** | Remote (192.168.15.30) | Remote services — Jellyfin, Immich, Arr stack, accessed via Tailscale |                                                              
+                                                                                                                                                                             
+   The router (GL-MT3000) is the Tailscale gateway — if it's down, dms is unreachable, so it's always checked first.                                                         
+                                                                                                                                                                             
+   ## The Workspace                                                                                                                                                          
+                                                                                                                                                                             
+   At `/mnt/data/pi-space/` lives the workspace where the Pi agent operates. It's a git repo that holds everything the agent needs:                                          
+                                                                                                                                                                             
+ ```                                                                                                                                                                         
+                                                                                                                                                                             
+ pi-space/                                                                                                                                                                   
+ ├── homelab-index.yml          # Topology — servers, IPs, services                                                                                                          
+ ├── AGENTS.md                  # Agent instructions — operational modes, rules                                                                                              
+ ├── .pi/                                                                                                                                                                    
+ │   ├── extensions/                                                                                                                                                         
+ │   │   └── uptime-monitor.ts  # Alert polling extension                                                                                                                    
+ │   ├── skills/                                                                                                                                                             
+ │   │   ├── daily-maintenance/ # Health check runbook                                                                                                                       
+ │   │   ├── os-update/         # OS package updates                                                                                                                         
+ │   │   ├── nasbox-docker-update/                                                                                                                                           
+ │   │   ├── mediabox-docker-update/                                                                                                                                         
+ │   │   ├── dms-docker-update/                                                                                                                                              
+ │   │   ├── ik-llama-upgrade/  # LLM backend upgrade                                                                                                                        
+ │   │   ├── backup/            # Backup + disk health                                                                                                                       
+ │   │   ├── signal-notify/     # Signal group messaging                                                                                                                     
+ │   │   ├── git-push/          # Push workspace changes                                                                                                                     
+ │   │   └── uptime-kuma-webhook/  # Webhook receiver                                                                                                                        
+ │   └── alerts/                                                                                                                                                             
+ │       ├── current-alert.txt  # Active alert (overwritten each event)                                                                                                      
+ │       └── alert-2026-06-14-*.txt  # Timestamped history                                                                                                                   
+ ├── incidents/                                                                                                                                                              
+ │   └── 2026-06-22-seerr-dms.md  # Incident reports                                                                                                                         
+ └── maintenance-log/                                                                                                                                                        
+     ├── incident-2026-06-14.md   # Incident reports                                                                                                                         
+     └── incident-2026-06-21.md                                                                                                                                              
+                                                                                                                                                                             
+ ```                                                                                                                                                                         
+                                                                                                                                                                             
+   ## Two Modes: Preventive and Incident                                                                                                                                     
+                                                                                                                                                                             
+   The agent operates in two modes, switching between them based on alerts:                                                                                                  
+                                                                                                                                                                             
+   ### Routine Mode (Preventive)                                                                                                                                             
+                                                                                                                                                                             
+   When no alerts are active, the agent runs the **daily-maintenance** skill, which checks every server:                                                                     
+                                                                                                                                                                             
+   - **Disk usage** — flags anything over 80%                                                                                                                                
+   - **Memory usage** — flags anything over 85%                                                                                                                              
+   - **Unhealthy containers** — `docker ps --filter "health=unhealthy"`                                                                                                      
+   - **Exited containers** — `docker ps --filter "status=exited"`                                                                                                            
+   - **Critical ports** — checks 53, 80, 443, 2049, 8080, 8443, 9100                                                                                                         
+   - **Caddy certificates** — verifies wildcard cert expiry via `openssl x509`                                                                                               
+   - **Tailscale status** — checks router first, then dms only if router is active                                                                                           
+   - **Journal logs** — scans for OOM kills and errors from the last 24 hours                                                                                                
+   - **Backup verification** — checks backup timestamps on target servers                                                                                                    
+                                                                                                                                                                             
+   The report is saved to `/mnt/myfiles/notes/notes/ranjan/PI-Notes/daily/YYYY-MM-DD.md` and kept for 7 days.                                                                
+                                                                                                                                                                             
+   ### Incident Mode (Breakdown)                                                                                                                                             
+                                                                                                                                                                             
+   When an alert arrives, the agent immediately pauses routine tasks and follows a five-step process:                                                                        
+                                                                                                                                                                             
+   1. **Acknowledge** — reads the alert from `current-alert.txt`                                                                                                             
+   2. **Diagnose** — cross-references the affected service with `homelab-index.yml` to map dependencies                                                                      
+   3. **Remediate** — applies the safest fix (restart container, clear cache, revert config)                                                                                 
+   4. **Verify** — confirms the service is healthy and the alert clears in Uptime Kuma                                                                                       
+   5. **Log** — appends an incident summary to the maintenance log                                                                                                           
+                                                                                                                                                                             
+   ## The Alert System                                                                                                                                                       
+                                                                                                                                                                             
+   This is the most interesting part of the setup. It's a bidirectional alert system — the agent sees **both DOWN and UP events**:                                           
+                                                                                                                                                                             
+   ### Flow                                                                                                                                                                  
+                                                                                                                                                                             
+   1. **Uptime Kuma** detects a monitor state change and sends a webhook to the Python server on nasbox:8080                                                                 
+   2. **Webhook server** (`uptime-kuma-webhook.py`) parses the JSON payload, formats it, and writes it to `current-alert.txt`                                                
+   3. **Uptime-monitor extension** (`uptime-monitor.ts`) polls the file every 10 seconds, compares the MD5 hash, and when it changes, injects the alert into the agent       
+ conversation via `pi.sendUserMessage()` with `deliverAs: "steer"`                                                                                                           
+   4. **Agent** analyzes the alert — is this a new incident or a recovery?                                                                                                   
+   5. **Agent** resolves the issue and calls `clear_alerts` to clear the file                                                                                                
+   6. **Agent** sends a Signal notification to the "1 gamer 2 casuals" group confirming resolution                                                                           
+                                                                                                                                                                             
+   ### Why Both UP and DOWN?                                                                                                                                                 
+                                                                                                                                                                             
+   On June 14 alone, there were **8 DOWN events** and **5 UP events**. The `current-alert.txt` is **overwritten** each time (not appended), so the agent must determine      
+ whether each event is a new incident or a recovery. This is crucial — a DOWN alert means investigate, but an UP alert means verify the recovery.                            
+                                                                                                                                                                             
+   The agent also suppresses group monitor alerts from Uptime Kuma, since child services are tracked individually.                                                           
+                                                                                                                                                                             
+   ## Maintenance Skills                                                                                                                                                     
+                                                                                                                                                                             
+   The workspace has a collection of skills — reusable procedures the agent can execute:                                                                                     
+                                                                                                                                                                             
+   - **daily-maintenance** — comprehensive health check across all servers                                                                                                   
+   - **os-update** — updates packages on all servers (apt on Debian/Ubuntu, pacman on Arch)                                                                                  
+   - **nasbox-docker-update** — updates all 11 Docker stacks on nasbox                                                                                                       
+   - **mediabox-docker-update** — updates all 9 Docker stacks on mediabox                                                                                                    
+   - **dms-docker-update** — updates all 4 Docker stacks on dms, sends Signal notification                                                                                   
+   - **ik-llama-upgrade** — upgrades the LLM inference backend (with safety: agent must switch to local inference first)                                                     
+   - **backup** — runs backup script and checks SMART disk health                                                                                                            
+   - **signal-notify** — sends Signal messages to the family group                                                                                                           
+   - **git-push** — pushes workspace changes to the git repo                                                                                                                 
+                                                                                                                                                                             
+   ## Incident Response in Action                                                                                                                                            
+                                                                                                                                                                             
+   The system has handled several incidents:                                                                                                                                 
+                                                                                                                                                                             
+   - **Forgejo down (502)** — container not running despite `restart: always` policy, agent started it via `docker compose up -d`                                            
+   - **Jellyfin DMS down (22s)** — transient network hiccup, service recovered automatically                                                                                 
+   - **Sabnzbd & Seerr DMS down (~1 min)** — simultaneous outage suggesting Tailscale connection issue, all recovered                                                        
+   - **Seerr DMS down (1.8 min)** — service recovered on its own                                                                                                             
+                                                                                                                                                                             
+   The agent logs each incident in `incidents/` or `maintenance-log/` with date, service, cause, action, and result.                                                         
+                                                                                                                                                                             
+   ## Safety Constraints                                                                                                                                                     
+                                                                                                                                                                             
+   The agent operates under strict rules:                                                                                                                                    
+                                                                                                                                                                             
+   - **Never** executes destructive commands (rm -rf, DB drops) without human confirmation                                                                                   
+   - **Always** checks router Tailscale status before accessing dms                                                                                                          
+   - **Idempotency** — all actions are safe to run multiple times                                                                                                            
+   - **Scope** — operates only within services defined in `homelab-index.yml`                                                                                                
+   - **Communication** — provides concise status updates in the TUI                                                                                                          
+                                                                                                                                                                             
+   ## Why This Works                                                                                                                                                         
+                                                                                                                                                                             
+   The key insight is that the workspace is a **single source of truth** — topology, procedures, and history are all in one place. The agent doesn't need to guess; it       
+ consults `homelab-index.yml` for the map, `AGENTS.md` for the rules, and the skills for the procedures. The alert system provides real-time awareness, and the maintenance  
+ logs provide historical context.                                                                                                                                            
+                                                                                                                                                                             
+   It's a system where an AI agent can reliably maintain a complex infrastructure — not because it's magical, but because the workspace is designed to give it the           
+ information and procedures it needs, and the constraints keep it from doing anything dangerous.

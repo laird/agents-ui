@@ -1,0 +1,35 @@
+url: https://github.com/anthropics/claude-code/issues/57230
+rung: 1 (extra: claude-code-issues)
+accessed: 2026-11-02
+truncated: no (text as returned by the fetch tool; long code blocks omitted here)
+
+Issue #57230: [VSCode Extension] Add native system/toast notifications when Claude needs attention
+State: Open · Opened: May 8, 2026 · Labels: area:ide, enhancement, platform:vscode
+Reactions on the issue body: 👍 56, 😕 1
+
+Body (verbatim):
+Summary
+The VSCode native extension currently has no way to notify the user when Claude needs attention (permission approval, task completion, waiting for input). The only indicators are:
+* A colored dot on the editor tab (🔵 pending / 🟠 done)
+* "✱ Claude Code" text in the status bar
+Both are easy to miss when focus is on another window or monitor.
+Request
+Add a setting to emit VSCode/system-level notifications on key events, e.g.: claude-code.notifications.enabled: boolean; claude-code.notifications.events: array of permissionRequest | taskComplete | waitingForInput | error
+Why not hooks?
+Hooks (Notification / Stop) + external tools (BurntToast, msg, terminal-notifier) work, but:
+* Require platform-specific scripting
+* Not discoverable for new users
+* Duplicate work every user has to redo
+A first-class setting would be much more ergonomic.
+
+Comments (no role labels shown):
+3. May 26, 2026 (👍 3): "Please! I constantly work on other things while Claude Code is working in the background. Not knowing when the agent is done causes great inefficiencies. I have to check back constantly, or accept that work goes far slower than it should."
+5. Jun 2, 2026 (👍 1): "It's rather surprising to find that this is not included today. Any known workarounds?"
+6. Jun 17, 2026: "I am a Windows 11 user, and I am exploring BurntToast at this moment. Would love to see unread markers in the sessions list though. I am heavily using parallel sessions."
+7. Jun 28, 2026: "Notifications are such an obvious feature, and their lack is so glaring ... It's ridiculous that there [at least] THREE [extensions] for [Claude notifications]. Using competing tools is really an eye-opener."
+8. Jun 29, 2026 (👍 2): "How do they still not have this! I am so pissed trying to get a workaround here."
+9. Jul 16, 2026: "I just tried for 2h to get this (or a workaround) working... didn't succeed. what a shame."
+11. Aug 5, 2026: "... I love being able to give permission for commands directly in the notification as long as there is enough context in the notification text."
+13. Aug 21, 2026 (👍 1): "Agree this is desperately needed!"
+17. Oct 27, 2026: "... The `Notification` hook's `idle_prompt` never arrives for panel sessions (in my testing), and `permission_prompt` only fires there from v2.1.233 (about 6 s after Claude asks, even while you type). ..."
+18. Oct 27, 2026: "... the `Notification` hook with `permission_prompt` fires from the VS Code panel since v2.1.233 (`idle_prompt` doesn't), so a hook is the most reliable "needs you" signal today. ..."

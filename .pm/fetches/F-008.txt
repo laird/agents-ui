@@ -1,0 +1,48 @@
+url: https://hn.algolia.com/api/v1/search?query=claude%20code%20parallel%20agents%20permission%20prompt&tags=comment&hitsPerPage=10
+rung: 2 (hackernews_comments)
+accessed: 2026-11-02
+truncated: no (full comment_text of each hit; HTML tags removed and entities decoded; saved from a second download of the same URL minutes after the first read)
+
+nbHits: 4
+
+--- objectID 47901927 · created 2026-04-25 · story: Show HN: MultiTable – I built a dashboard so I could vibe-code from my phone · https://news.ycombinator.com/item?id=47901927
+Author here. I built MultiTable because I kept losing context running Claude Code, Codex, and a bunch of dev servers in parallel — six tmux panes, missed permission prompts, no idea which agent was waiting on me. I also wanted to be able to approve a Claude permission prompt from my phone without ssh-ing into anything.
+
+--- objectID 47329624 · created 2026-03-10 · story: Levels of Agentic Engineering · https://news.ycombinator.com/item?id=47329624
+Floating what you call levels 6, 7 and 8. I have a strong harness, but manually kick off the background agents which pick up tasks I queue while off my machine.
+
+I've experimented with agent teams. However the current implementation (in Claude Code) burns tokens. I used 1 prompt to spin up a team of 9+ agents: Claude Code used up about 1M output tokens. Granted, it was a long; very long horizon task. (It kept itself busy for almost an hour uninterrupted). But 1M+ output tokens is excessive. What I also find is that for parallel agents, the UI is not good enough yet when you run it in the foreground. My permission management is done in such a way that I almost never get interrupted, but that took a lot of investment to make it that way. Most users will likely run agent teams in an unsafe fashion. From my point of view the devex for agent teams does not really exist yet.
+
+--- objectID 48265161 · created 2026-05-25 · story: Show HN: Fleet – Python supervisor for running coding agents in parallel · https://news.ycombinator.com/item?id=48265161
+Fleet's design hits directly on a cluster I've been tracking on the Claude Code issue tracker — 8 independent operator reports filed between 2026-05-20 and 2026-05-25, all at the subagent dispatch surface, all converging on the same structural axis: observability and control primitives absent at four lifecycle events.
+
+If you're running 50+ parallel claude -p sessions through fleet, you'll hit each of these in distribution within hours of any non-trivial workload:
+
+1. *Dispatch fabrication* (#61167): subagent reports "task completed" with zero corresponding tool invocations in ~/.claude/projects/.jsonl. At 50-session scale this is "verification theater at compounding rate" — most dramatic case in the cluster was an OpenClaw trauma-therapy deploy where 39 claimed dispatches mapped to 5 actual sessions and 0 returned artifacts.
+
+2. *Silent stall* (#60987, #61315, #61547): subagent blocks on MCP permission gate, OAuth prompt, missing pty for spawn, or entry-tool dispatch failure. Parent UI continues showing "running"; the wedge persists until manual intervention. Especially nasty when fleet's supervisor is doing automated requeuing — the queue thinks the task is making progress.
+
+3. *Absence of observation and control* (#61405, #62161): per-dispatch timeout, progress signal, and abort affordances don't exist as primitives. A 12-hour silent hang lost the parent's session state when OS-level force-kill was the only recovery path. khoward's #62161 (filed 2026-05-25) is the 14h parallel-Bash variant — same shape at a different lifecycle event.
+
+4. *Scope expansion* (#61102): subagent enumerates removable items; parent treats enumeration as authorization. Awis13's case: "delete caches and simulators" → 4 subagents enumerated ~120GB including node_modules and Docker Desktop → parent ran rm -rf against the union. Recovery was reinstalling Docker and rebuilding Spotlight index.
+
+The operator-side defenses I've written for cc-safe-setup (https://github.com/yurukusa/cc-safe-setup) ship as MIT hooks that fire at PreToolUse/PostToolUse boundaries: dispatch-receipt (#283) for sub-pattern 1, dispatch-allowlist-preflight (#286) for sub-pattern 2, dispatch-liveness-watchdog (#298) for sub-pattern 3, scope-expansion-receipt (#282) for sub-pattern 4. None of them prevent the underlying primitive gap — the harness layer needs per-dispatch timeout/progress/abort — but they at least make the divergence visible at next UserPromptSubmit.
+
+Cluster catalog as a free preview Gist: https://gist.github.com/yurukusa/1c26934ed95f638354f0063df6c... (Japanese, articulates all 8 cases with timeline + 4 sub-pattern decomposition). Per-sub-pattern English deep-dives at the same author. The Keesan12 principle from #61102 — "subagent output is evidence, not authorization" — generalizes cleanly to fleet's centralized beads queue: the queue should treat subagent completion claims as evidence requiring receipt-verification, not as state mutations.
+
+Author disclosure: I sell a Sub-Agent Observability Handbook ($19, ships 2026-05-27) that walks the operator-side install path in depth; the hooks above are MIT and don't require the book. Not pitching the book here — fleet is exactly the kind of harness where the cluster will surface, and the free preview Gist + cc-safe-setup hooks should be useful regardless.
+
+--- objectID 45047168 · created 2025-08-28 · story: Ask HN: What are you working on (August 2025)? · https://news.ycombinator.com/item?id=45047168
+I contribute to the Happy Coder app https://github.com/slopus/happy (MIT License)
+
+I've gotten a lot of use out of Claude Code in the past few months. The big problem for me is struggling to stay on top of multiple sessions in parallel. I know that all the cool kids on twitter have all these AI employees and agents farms... A lot of its probably bullshit, but directionally its clear that tooling will absorb some fraction of my workload.
+
+I know I need to push myself to have 2 or 3 balls in the air. But without push notifications to know when Claude Code needs permissions or input, I end up "wasting" time a lot.
+
+So having an app that sends discrete push notifications to my watch is pretty nice.
+
+Oh, and before I forget, I'm pretty excited by the Voice Agent feature another contributor is working on https://x.com/giaccoangelo/status/1960550007272300964
+
+You talk to a voice agent, then voice agent talks to Claude Code. The voice agent acts like a buffer for me to ramble and gather my thoughts. Then the voice agent writes the prompt for claude code when I'm ready. So that unlocked walk and code for me. Now as I walk to the train from the office, I can dump some of the brain ideas into Claude Code plan mode, and they'll be waiting for me in the morning.
+
+Plus I've been using plan mode more and more.

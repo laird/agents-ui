@@ -1,0 +1,6 @@
+url: https://community.temporal.io/search.json?q=human%20in%20the%20loop%20approval%20notify
+rung: 1 (forum_search_json, Temporal community forum; PM's extra fetch)
+accessed: 2026-11-02
+truncated: no
+
+posts: 0 · topics: 0 (query too narrow; retried as F-015)

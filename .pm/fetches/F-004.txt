@@ -1,0 +1,6 @@
+url: https://github.com/maxjendrall/herdr/issues?q=is%3Aissue%20sort%3Areactions-%2B1-desc
+rung: 1 (extra: herdr-issues)
+accessed: 2026-11-02
+truncated: no
+
+The page shows no issues. The results count is 0, and the page displays "No results matched your search" with the prompt "Try a different search query."

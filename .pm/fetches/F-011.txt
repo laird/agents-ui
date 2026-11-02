@@ -1,0 +1,28 @@
+url: https://github.com/anthropics/claude-code/issues/29438
+rung: 1 (extra: claude-code-issues) · counter-evidence fetch for theme A
+accessed: 2026-11-02
+truncated: no (text as returned by the fetch tool; reactor names omitted)
+
+Title: [FEATURE] Remote Control: Push notifications on iOS when permission approval is needed #29438
+State: Closed · Opened: Feb 27, 2026
+Reactions on body: 👍 59, 😕 1, 👀 9
+
+Body:
+Description
+When using Remote Control from the iOS Claude app, there's no push notification when the CLI session needs permission approval (e.g., tool calls waiting for user consent). You have to keep the app open and actively watch the session to notice when it's blocked on a permission prompt.
+Expected Behavior
+The iOS Claude app should send a push notification when a Remote Control session is waiting for permission approval, so the user can step away and be alerted when their input is needed — similar to how CI/CD systems notify on pipeline approval gates.
+Current Behavior
+No notification is sent. The session silently blocks until you happen to check the app, which can waste significant time if you're away from your phone.
+Why This Matters
+Remote Control is most useful when you can kick off a task and walk away. Without notifications, you have to babysit the session to catch permission prompts, which defeats the purpose of remote control.
+
+Comments (no role label unless stated):
+4. Mar 27, 2026 (👍 20): "Every day I check and see if this is a new feature. Def a needed thing."
+6. Apr 9, 2026: "It would be super useful to have this, otherwise I'm just checking my phone every few minutes"
+12. May 29, 2026: "This is almost critical. It is too easy to get distracted and leave Claude Code to wait for a few minutes or much more. Finally a great use of notifications."
+13. Jun 21, 2026: "this is the use case that makes remote control actually hands-off, agreed. being alerted is half of it, the other half is answering from the phone so the session unblocks without you returning to the desk. ..."
+14. Jun 27, 2026: "This exists — ai-agent-notifier sends push notifications to iOS (via Pushover or ntfy) when Claude Code needs approval or finishes a task ..."
+15. Jul 18, 2026: "... I built a third-party iOS app, PocketAI, that does exactly this: permission approvals come to your phone as notifications, and you can see the full command / a red-green diff before you approve. ..."
+17. Collaborator (Anthropic), Aug 17, 2026: "This shipped in a recent release. In your terminal run `/config` and enable **Push when actions required** — the Claude mobile app then gets a push notification whenever a Remote Control session is waiting on a permission prompt or question. **Push when Claude decides** adds proactive pushes (e.g. when a long task finishes)."
+18. Collaborator closed this as completed on Aug 17, 2026.

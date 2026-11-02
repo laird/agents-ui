@@ -1,0 +1,140 @@
+url: https://hn.algolia.com/api/v1/search?query=agents%20waiting%20for%20input%20tmux&tags=comment&hitsPerPage=10
+rung: 2 (hackernews_comments)
+accessed: 2026-11-02
+truncated: no (full comment_text of each hit; HTML tags removed and entities decoded; saved from a second download of the same URL minutes after the first read)
+
+nbHits: 11
+
+--- objectID 47442573 · created 2026-03-19 · story: TTal – CLI that turns Claude Code into a multi-agent software factory · https://news.ycombinator.com/item?id=47442573
+the two-plane idea here is really interesting -- separating long-lived planners from short-lived workers is a clean mental model.
+
+curious what happens when you're on windows though? tmux + ttal means you're locked out of a decent chunk of potential users.
+
+been building in this space too -- pane (github.com/Dcouple-Inc/Pane) takes a different approach, standalone desktop app, no tmux at all. each pane maps to one worktree + n terminals, agents spin up and tear down cleanly. works the same on windows, mac, linux.
+
+the telegram interface for managing from your phone is a nice touch -- does it block if the manager agent gets stuck waiting for human input?
+
+--- objectID 50302116 · created 2026-10-30 · story: Herdr has released native app · https://news.ycombinator.com/item?id=50302116
+From someone who also used screen and tmux for 30 years: 3 reasons why I switched to herder. They may not be relevant to you and in that case tmux is just great. One: visual indication which agent is working and which is waiting for an input. Two: native support for remote herdr sessions - in the same view. Three: it’s responsive and can be completely touch-driven through menus on a small iOS screen in Termius.
+
+--- objectID 48717413 · created 2026-06-29 · story: Herdr: Agent multiplexer that lives in your terminal · https://news.ycombinator.com/item?id=48717413
+It's not so straight-forward.  Either you must add hooks the the agent to notify tmux directly or you must use an external tool that polls tmux to determine one of its panes has gone silent and then based on that, send notification to tmux.
+
+The poling requires tmux (not screen nor dtach, as far as I could find).  And, silence for N seconds is just that, the poll doesn't know if that really means waiting for input or something else.  With agents (like claude) that have a throbber/spinner going while "thinking", silence is a good indicator.
+
+Kitty terminal can be polled for current text and then see if that has changed in N seconds.  This would allow not having to depend on tmux which may be preferable to some kitty users.  Generally, using tmux always surfaces some annoying problems for me.
+
+--- objectID 48292244 · created 2026-05-27 · story: Domux · https://news.ycombinator.com/item?id=48292244
+domux helps me scale multiple AI coding sessions in a single project. It's built on top of tmux. I wanted something that extends my current workflow rather learning another tool. I am comfortable working in the terminal, and that's where I wanted this to work. It's simple, and it's not trying to do too much. There are a bunch of alternatives to this of course, but this works best for me, and it's quite scalable, yet simple. The beauty of the world we live in today is building software tailored to you. This is my take on an AI IDE. This is currently my daily driver.
+
+There are two main parts to domux, the switcher and the todolist.
+
+switcher is a custom tmux session switcher, but rich with details like the branch a worktree is on, a name for your session, preview of the tasks attached to that session — and shows the status of what AI agent attached to that session is doing,  is it working or waiting for your input. It currently works with claude and codex.
+
+todolist is a simple tracker to remember what you were doing on that workspace.
+
+That's it, feedback welcome!
+
+--- objectID 46861892 · created 2026-02-02 · story: The Codex App · https://news.ycombinator.com/item?id=46861892
+I'm still waiting for the big pivotal moment in this space, I think there is a lot of potential with rethinking an IDE to be Agent first, and lots of what is out there is still lacking. (It's like we all don't know what we don't know, so we are just recycling UX around trying to solve it)
+
+I keep coming back to my basic terminal with tmux running multiple sessions. I recently though forked this https://github.com/tiann/hapi and been loving using tailscale to expose my setup on my mobile device for convenience (plus the voice input there)
+
+--- objectID 46286444 · created 2025-12-16 · story: Ask HN: Why are Gemini CLI and Claude Code TUIs so terrible? · https://news.ycombinator.com/item?id=46286444
+If you check out the GitHub issues on the Claude Code repo and sort by comments, you'll see that the first page is littered with the same issue you're talking about.
+
+The answer seems to be in the vendored ink.js, at least in Claude Code's case. I actually asked Claude Code to look into its own minified and abfuscated source code and pointed it to ink.js's repo to try and deduce how and why the bug occurs; the easiest way to reproduce is to already have a few hundred to a couple of thousand lines of chat output ready and enter enough newlines that the height of the inputed text is > the height of the current terminal. But not only input box, but also other ink.js "widgets" have the same problem: everything gets redrawn over and over again (each color change of the flabbergasting... status re-triggers it, forcing terminals that don't handle OSC10/11 codes properly to rescroll from the beginning... or at least that's my interpretation).
+
+Anyway, after a few flabbergastings of its own and my suggestion to make a wrapper around its output via xterm.js to always render a sliding fixed window of terminal_width x terminal_height and manage its scroll internally, as well as mapping the mouse wheel to scrolling / panning horizontally this virtual viewport and I had a basic, scroll-bug-free, 650 LOC node.js app that basically circumvents this issue completely, plus works in Windows Terminal and VS Code terminal. I've been using this as a drop in replacement since about a week or so and the only thing missing is a bit more draw call waiting on terminal resize since it triggers a reflow with visible scroll, but much, much faster than the annoying bug (sub 100ms).
+
+As always, the feature creep is strong, there are som vim bindings now, and Claude, Gemini and Codex are currently working together (I have multiple terminal planes inside the app a la tmux) on implementing FIPA ACL inter agent communication via built-in MCP chat server. You can check it out at github.com/vmitro/bukowski and don't worry about the license, it's satire, it's basically free for any use (and besides, Paddle won't let me set up the $1M "Premium Luxury Enterprise License for Companies valued > $1B that Make non-open-source AI Tools"...)
+
+--- objectID 47355428 · created 2026-03-12 · story: Kotlin creator's new language: talk to LLMs in specs, not English · https://news.ycombinator.com/item?id=47355428
+Rehashing my comment from before:
+
+I use Kiro IDE (≠ Kiro CLI) primarily as a spec generator.
+In my experience, it's high-quality for creating and iterating on specs. Tools like Cursor are optimized for human-driven vibing -- they have great autocomplete, etc. Kiro, by contrast, is optimized around spec, which ironically has been the most effective approach I've found for driving agents.
+
+I'd argue that Cursor, Antigravity, and similar tools are optimized for human steering, which explains their popularity, while Kiro is optimized for agent harnesses. That's also why it’s underused: it's quite opinionated, but very effective. Vibe-coding culture isn't sold on spec driven development (they think it's waterfall and summarily dismiss it -- even Yegge has this bias), so people tend to underrate it.
+
+Kiro writes specs using structured formats like EARS and INCOSE (which is the spc format used in places like Boeing for engineering reqs). It performs automated reasoning to check for consistency, then generates a design document and task list from the spec -- similar to what Beads does. I usually spend a significant amount of time pressure-testing the spec before implementing (often hours to days), and it pays off. Writing a good, consistent spec is essentially the computer equivalent of "writing as a tool of thought" in practice.
+
+Once the spec is tight, implementation tends to follow it closely. Kiro also generates property-based tests (PBTs) using Hypothesis in Python, inspired by Haskell's QuickCheck. These tests sweep the input domain and, when combined with traditional scenario-based unit tests, tend to produce code that adheres closely to the spec. I also add a small instruction "do red/green TDD" (I learned this from Simon Willison) and that one line alone improved the quality of all my tests.
+Kiro can technically implement the task list itself, but this is where agents come in. With the spec in hand, I use multiple headless CLI agents in tmux (e.g., Kiro CLI, Claude Code) for implementation. The results have been very good. With a solid Kiro spec and task list, agents usually implement everything end-to-end without stopping -- I haven’t found a need for Ralph loops. (agents sometimes tend to stop mid way on Claude plans, but I've never had that happen with Kiro, not sure why, maybe it's the checklist, which includes PBT tests as gates).
+
+didn't have the strongest start, but the Kiro IDE is one of the best spec generators I've used, and it integrates extremely well with agent-driven workflows.
+
+--- objectID 47330762 · created 2026-03-11 · story: After outages, Amazon to make senior engineers sign off on AI-assisted changes · https://news.ycombinator.com/item?id=47330762
+I use Kiro IDE (≠ Kiro CLI) primarily as a spec generator.
+
+In my experience, it's high-quality for creating and iterating on specs. Tools like Cursor are optimized for human-driven vibing -- they have great autocomplete, etc. Kiro, by contrast, is optimized around spec, which ironically has been the most effective approach I've found for driving agents.
+
+I'd argue that Cursor, Antigravity, and similar tools are optimized for human steering, which explains their popularity, while Kiro is optimized for agent harnesses. That's also why it’s underused: it's quite opinionated, but very effective. Vibe-coding culture isn't sold on spec driven development (they think it's waterfall and summarily dismiss it -- even Yegge has this bias), so people tend to underrate it.
+
+Kiro writes specs using structured formats like EARS and INCOSE. It performs automated reasoning to check for consistency, then generates a design document and task list from the spec -- similar to what Beads does. I usually spend a significant amount of time pressure-testing the spec before implementing (often hours to days), and it pays off. Writing a good, consistent spec is essentially the computer equivalent of "writing as a tool of thought" in practice.
+
+Once the spec is tight, implementation tends to follow it closely. Kiro also generates property-based tests (PBTs) using Hypothesis in Python, inspired by Haskell's QuickCheck. These tests sweep the input domain and, when combined with traditional scenario-based unit tests, tend to produce code that adheres closely to the spec. I also add a small instruction "do red/green TDD" (I learned this from Simon Willison) and that one line alone improved the quality of all my tests.
+
+Kiro can technically implement the task list itself, but this is where agents come in. With the spec in hand, I use multiple headless CLI agents in tmux (e.g., Kiro CLI, Claude Code) for implementation. The results have been very good. With a solid Kiro spec and task list, agents usually implement everything end-to-end without stopping -- I haven’t found a need for Ralph loops. (agents sometimes tend to stop mid way on Claude plans, but I've never had that happen with Kiro, not sure why, maybe it's the checklist, which includes PBT tests as gates).
+
+Kiro didn't have the strongest start, but the Kiro IDE is one of the best spec generators I've used, and it integrates extremely well with agent-driven workflows.
+
+--- objectID 40576372 · created 2024-06-04 · story: ht: Headless Terminal · https://news.ycombinator.com/item?id=40576372
+Hey, project lead here. I had a very specific use case in mind: I’m playing with using LLM agent frameworks for software engineering - like MemGPT, swe-agent, Langchain and my own hobby project called headlong (https://github.com/andyk/headlong). Headlong is focused on making it easy for a human to edit the thought history of an agent via a webapp. The longer term goal of headlong is collecting large-ish human curated datasets that intermix actions/observations/inner-thoughts and then use those data to fine-tune models to see if we can improve their reasoning.
+
+While working on headlong I tried out and implemented a variety of ‘tools’ (i.e., functions) like editFile(), findFile(), sendText(), checkTime(), searchWeb(), etc., which the agents call using LLM function calling.
+
+A bunch of these ended up being functions that interacted with an underlying terminal. This is similar to how swe-agent works actually.
+
+But I figured instead of writing a bunch of functions that sit between the LLM and the terminal, maybe let the LLM use a terminal more like a human does, i.e., by “typing” input into it and looking at snapshots of the current state of it. Needed a way to get those stateful text snapshots though.
+
+I first tried using tmux and also looked to see if any existing libs provide the same functionality. Couldn’t find anything so teamed up with Marcin to design and make ht.
+
+playing with the agent using the terminal directly has evolved into a hypothesis that I’ve been exploring: the terminal may be the “one tool to rule them all” - i.e., if an agent learns to use a terminal well it can do most of what humans do on our computers. Or maybe terminal + browser are the “two tools to rule them all”?
+
+Not sure how useful ht will be for other use cases, but maybe!
+
+--- objectID 40526205 · created 2024-05-30 · story: TTE: Terminal Text Effects · https://news.ycombinator.com/item?id=40526205
+> [0] As I mentioned in a recent comment on a thread[1] here:
+
+> "Motivated by the thought that at the current point in time perhaps the 'essence' of a 'terminal' is its linear 'chronological' presentation of input/interaction/output history rather than its use of 'text'."
+
+I somewhat object to this.
+
+If you think of a TTY/PTY as an Abstract Data Type, it's a very specific (and clever) one. It's not just a transcript of bytes that flowed through the wire.
+
+Rather, a TTY/PTY is five distinct but inter-related things:
+
+1. a (passive) character-cell viewport grid, of (at any given time) a fixed size, where each cell holds not only a character as data, but also a set of metadata/annotations attached to it (the particular metadata being dependent on the implementation)
+
+2. an active "brush" state for the viewport grid — this includes things like a cursor position, an active foreground and background color, etc.
+
+3. a byte pipe "but better" — in that it's actually a multi-subscriber byte message-queue, plus (only in baked mode) message persistence into an expandable ring buffer, with logical line-oriented consumer-group cursoring to trigger forward-truncation of said buffer
+
+4. a rendering agent with a rendering ruleset (or, in old-school TTY terms, a "line discipline") that sits as one consumer of the byte pipe; reacts to characters in the byte pipe by writing them to the cursor position in the viewport grid; and reacts to in-band messages by manipulating the "brush", making big changes to the viewport grid (e.g. clearing it entirely), and/or swapping out the rendering ruleset itself
+
+5. (the part everyone forgets about) a replay stream-conversion function, that can convert the current state of the viewport grid + its brush, into a stream of characters + in-band messages, such that the rendering agent would parse that stream back into the current viewport + brush state
+
+The clever function you get from this set of components, can be seen in the case of attaching a "client" TTY/PTY to an existing persistent "server" TTY/PTY, such as is created by something like tmux or docker — or even by /bin/login on an old-school terminal server that you've dialed into.
+
+When a client like telnet, ssh, docker-exec, tmux-attach, etc. attaches to an existing backing PTY (either locally or remotely), the client either establishes its own "replica PTY" or reuses the one it's running attached to, and then wants to establish replication from the backing PTY into this replica PTY.
+
+To get a coherent replica, that doesn't just paint garbage at a random position with a random brush, several things need to happen:
+
+• the client needs to reset its own local PTY a known-neutral brush state;
+
+• the client needs to set an ACK position in the byte-stream, and a memorized brush state, for the remote PTY (usually both of these are done implicitly by the syscall on the remote end that opens the PTY for reading);
+
+• the client needs to fetch from the backing PTY, an implementation-neutral byte stream representing the current contents of the character viewport grid of the PTY — and replay that (i.e. it needs to trigger the replay stream-conversion function) — this also happens implicitly, such that when the remote end open(2)s its its PTY, the current state is serialized and dumped into a buffer for read(2)s on the PTY to read;
+
+• the client needs to set up its local terminal's brush to match the memorized one that was set as of its ACK position on the remote.
+
+Once these four things happen, the client can in theory simply shunt the remote PTY's byte-pipe into the local PTY's byte-pipe, select(2)ing and write(2)ing in a loop on a thread; whereupon the local PTY's rendering agent will handle reducing that stream to the visual grid.
+
+In practice, though, the rendering rules / line disciplines / syntaxes of local vs remote PTY aren't guaranteed to match (especially if the local PTY is actually a real physical TTY); and so in practice, clients doing PTY replication like this actually have their own translation function — logic that acts as a hybrid of a rendering agent and a replay stream-conversion function, taking the byte-stream from the remote, reducing it into a model of immediate state-change effects, and then re-serializing those immediate state-change effects as a byte-stream that the local PTY/TTY will understand. (With the first half of this usually being app-specific code, and the second half of this usually being done using some version of libcurses, to know exactly what rendering-rule syntax the local PTY/TTY claims to understand.)
+
+---
+
+Given all that, you could generalize a TTY/PTY to something other than "text". I've often myself considered a PTY where the "lines" are each (a binary, minimal encoding of) HTML body markup; or even where the "lines" are JSON-encoded log events with parent-node-IDs, and the "rendering" is of a default-collapsed hierarchical event history.
+
+But you'd be losing a lot if you didn't bring across the concept of there being a message-stream + a "canvas" + a brush-state for that "canvas" + rules for two-way conversion between the message-stream and "canvas." Without the stateful canvas, you would need an unlimited-size transcript — and potentially hours of replay — to be able to "attach" a client to an existing backing PTY.

@@ -1,0 +1,78 @@
+url: https://community.temporal.io/search.json?q=human%20approval
+rung: 1 (forum_search_json, Temporal community forum; retry of F-014 with a shorter query)
+accessed: 2026-11-02
+truncated: yes (search returns post blurbs, not full posts)
+
+posts: 18 · topics: 18
+
+--- https://community.temporal.io/t/dealing-with-authorization-execution-drift-toctou-in-long-running-workflows-recommended-patterns/19610 · post 1 · 2026-06-05 · likes 0 · topic views None · replies 0
+Dealing with Authorization/Execution Drift (TOCTOU) in long-running workflows: Recommended patterns?
+...I'm looking for the best architectural patterns to handle execution context validity at the moment of resume: In scenarios where a workflow waits for human approval or external events (potentially for minutes or hours), how do you recommend ensuring that the execution step re-validates the initial authorization c...
+
+--- https://community.temporal.io/t/modeling-human-tasks/18109 · post 1 · 2025-08-04 · likes 0 · topic views None · replies 3
+Modeling human tasks
+I've modelled human approvals (e.g. waiting for 3 approvals) in a very simple way: var result2 = Async.function(activityStub::waitForApproval, "Approval 2"); var result3 = Async....
+
+--- https://community.temporal.io/t/promise-get-vs-workflow-await-what-are-the-major-differences-and-is-there-a-performance-benefit-associated-with-one-over-the-other/7778 · post 1 · 2023-04-03 · likes 0 · topic views None · replies 4
+Promise.get() vs Workflow.await() what are the major differences, and is there a performance benefit associated with one over the other
+We have a use case where I have a parent Workflow and there is a child workflow that creates a task that requires human approval to get completed. Approval endpoints complete the task in which interns complete the child workflow and it also calls a signal method of parent use c...
+
+--- https://community.temporal.io/t/pausing-resuming-a-workflow/758 · post 6 · 2021-09-08 · likes 0 · topic views None · replies 15
+Pausing/resuming a workflow
+Is temporal workflow allow requesting human approval by email ? in our case, we many require to wait for an authorize person to respond before continuing workflow.
+
+--- https://community.temporal.io/t/update-the-logic-of-pending-workflow/6792 · post 1 · 2022-12-26 · likes 0 · topic views None · replies 0
+Update the Logic of Pending Workflow
+Hi, I want to ask a question related to expense sample which defined in here https://github.com/temporalio/samples-go/tree/main/expense samples-go/expense at main · temporalio/samples-go · GitHub Let’s say I implemented this and deploy to production and everything is working fine. A week later I ...
+
+--- https://community.temporal.io/t/adding-child-workflows-after-parent-has-started/17646 · post 1 · 2025-06-09 · likes 0 · topic views None · replies 3
+Adding Child Workflows after Parent has started
+Hi, I'm working on modeling a business use case where, at the moment, I'm creating a parent workflow and N child workflows when the workflow is started; however, after the start of the workflow there may be other requests that come in to add other child workflows. To help illustrate here's a made...
+
+--- https://community.temporal.io/t/best-practices-for-combining-temporal-with-autogen-for-ai-driven-workflows/16438 · post 1 · 2025-02-10 · likes 0 · topic views None · replies 0
+Best Practices for Combining Temporal with Autogen for AI-Driven Workflows
+Hi everyone, I'm exploring a hybrid approach that integrates Temporal with https://microsoft.github.io/autogen/stable/user-guide/core-user-guide/index.html Autogen Core (v0.4) to orchestrate AI-powered workflows. The idea is to use Temporal for fault-tolerant execution while leveraging Autogen as...
+
+--- https://community.temporal.io/t/best-practices-for-modeling-long-running-business-processes-with-temporal/19404 · post 1 · 2026-03-14 · likes 0 · topic views None · replies 0
+Best practices for modeling long-running business processes with Temporal?
+Hi everyone, I'm working on migrating some long-running business processes to Temporal and would love to hear your experiences and best practices. Specifically, I'm dealing with workflows that: - Run for days or weeks (customer onboarding, approval chains) - Need to handle human tasks and wait fo...
+
+--- https://community.temporal.io/t/recommended-pattern-for-projecting-workflow-progress-to-our-own-db-for-a-business-facing-ui/19653 · post 1 · 2026-06-12 · likes 0 · topic views None · replies 1
+Recommended pattern for projecting workflow progress to our own DB for a business-facing UI
+Hi all — I'm fairly new to Temporal and evaluating it to automate internal business workflows. We need to visualise runs for business/admin users in our own frontend (they won't use the Temporal Web UI) — both live progress (including human-in-the-loop steps waiting on approval) and a historical ...
+
+--- https://community.temporal.io/t/human-dependent-long-running-workflows/3403 · post 1 · 2021-11-16 · likes 0 · topic views None · replies 7
+Human dependent long running Workflows
+Not sure if this has been discussed before, I did a search in the forums and so far haven’t found exactly what I was looking for. But I am trying to find best practices for creating Human dependent long running workflows and specifically How I would represent things like task/approval queues, whe...
+
+--- https://community.temporal.io/t/how-to-manage-growing-code-versions-with-long-running-workflows-and-worker-versioning/16614 · post 1 · 2025-02-28 · likes 0 · topic views None · replies 8
+How to manage growing code versions with long running workflows and Worker Versioning
+Hi all, I am looking for suggestions on how to best manage versions and worker count in our use case. In summary, we are using temporal for long running workflows, think about human in the loop situations where the workflow can be blocked by client approval for weeks, if not months. At the same t...
+
+--- https://community.temporal.io/t/signals-and-asynchronous-activity-completion-use-cases/4612 · post 1 · 2022-05-04 · likes 0 · topic views None · replies 2
+Signals and asynchronous activity completion use cases
+Hi Team, Apologies for raising this topic again but the guidelines as to where to use Signal vs Async Activity completion were not very clear. I have tried reading the following thread comments. https://community.temporal.io/t/signals-vs-activitycompletionclient/4413/3 Signals Vs ActivityCompleti...
+
+--- https://community.temporal.io/t/implementing-a-bpm-system-with-composable-activities/877 · post 1 · 2020-10-30 · likes 0 · topic views None · replies 6
+Implementing a BPM system with composable activities
+I am intending to implement a system that the user can create a combination of different tasks in different orders with many human involved tasks. For example, the user can create a workflow, starting with anyone adding a new record in some table, then the record will be send to his manager for a...
+
+--- https://community.temporal.io/t/workflow-and-streaming-event-subscription-make-wait-condition-retryable/14993 · post 3 · 2024-11-05 · likes 0 · topic views None · replies 2
+Workflow and streaming event subscription & Make wait_condition retryable
+Thanks for the quick response! the ticket is created by the company internal infra; and the only way to get update is via subscribing to the live stream (very similar to kafka), and the internal infra wouldn't send signal to workflow directly; and if the live stream is down, we can't fetch the mi...
+
+--- https://community.temporal.io/t/implement-a-traceable-react-agent-using-temporal-and-langchain/18301 · post 3 · 2025-09-09 · likes 0 · topic views None · replies 1
+Implement a Traceable ReAct Agent Using Temporal and LangChain
+...s . :tada: The design uses signals to send back the tool call ID along with the human decision. When defining tools, I distinguish which ones require human approval by checking whether the tool name starts with an uppercase letter(Well, yes, I'm a Go programmer). This is obviously not the ideal approach—the more...
+
+--- https://community.temporal.io/t/q-a-from-learn-how-to-build-ai-agents-with-temporal-webinar/17050 · post 1 · 2025-04-04 · likes 0 · topic views None · replies 0
+Q&A from Learn How to Build AI Agents with Temporal webinar
+...Temporal is open source software https://github.com/temporalio/temporal (MIT license) Whats the memory usage of Temporal Workflows when they wait for human approval over long times (e.g. days)? Temporal Workflows can last indefinitely and while they are not active, don't require any worker (application) memory. S...
+
+--- https://community.temporal.io/t/pattern-sharing-durable-multi-agent-ai-workflows-with-hitl-via-crewai/19715 · post 1 · 2026-07-08 · likes 1 · topic views None · replies 0
+Pattern Sharing: Durable Multi-Agent AI Workflows with HITL via CrewAI
+Hi everyone, I've put together a reference implementation for building fault-tolerant, long-running multi-agent AI orchestrations with Temporal and CrewAI, including explicit Human-in-the-Loop (HITL) approval gates. To keep workflow execution deterministic, I isolated CrewAI's non-deterministic i...
+
+--- https://community.temporal.io/t/graph-compose-api-orchestration-and-ai-agent-workflows-on-temporal-declarative-dags-jsonata-byok/19504 · post 1 · 2026-04-21 · likes 0 · topic views None · replies 0
+Graph Compose: API orchestration and AI agent workflows on Temporal (declarative DAGs, JSONata, BYOK)
+Hey everyone. I've been building Graph Compose, a workflow orchestration platform built entirely on Temporal, and wanted to share it with this community. What it is Graph Compose sits in the API orchestration / workflow automation space, adjacent to AWS Step Functions, Airflow, Argo Workflows, n8...

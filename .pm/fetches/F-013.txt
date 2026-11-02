@@ -1,0 +1,24 @@
+url: https://github.com/maxjendrall/herdr
+rung: 1 (extra: herdr) · counter-evidence fetch for theme C
+accessed: 2026-11-02
+truncated: yes (the fetch tool returned selected README sentences, some quoted under a 125-character limit and some paraphrased; paraphrases marked)
+
+Agent state detection
+- Detection works by identifying "the foreground process and reading terminal output."
+- States: "blocked — agent needs input or approval," "done — work finished and you have not looked at it yet," "working — agent is actively running," "idle — done, seen, and calm," and "unknown — plain shell or undetected."
+- Workspace rollups "prefer the most urgent thing happening in that workspace."
+- The heuristics are "pattern-matched against each agent's actual terminal output." [paraphrase: prompt boxes, spinners, waiting messages]
+- Detection runs "on a separate async task per pane, polled every 300-500ms, decoupled from terminal rendering."
+- [paraphrase] no hooks or agent-side setup are needed for built-in detection.
+Accuracy and limits
+- The support table marks pi and amp as "partial" for blocked detection.
+- "detection heuristics also exist for these agents but have not been fully tested yet." (gemini cli, cursor agent, cline, kimi, github copilot cli)
+- "richer direct agent-side reporting on top of the socket/event layer is still evolving."
+- "there will be rough edges."
+Notifications and alerts
+- "herdr can also play sounds or show top-right toast notifications for background events." [paraphrase: opt-in]
+- Planned: "os-level notifications when an agent needs attention and herdr is not in focus." [not yet available]
+Answering or approving agents
+- [paraphrase] No dedicated approve or answer feature; agents can "send text and keys into other panes" through the socket API and CLI.
+Repository details
+- Stars: 0. No Issues tab (issues disabled); the README links to issues on ogulcancelik/herdr, which appears to be the upstream repository. maxjendrall/herdr appears to be a fork.

@@ -1,0 +1,31 @@
+url: https://github.com/anthropics/claude-code/issues?q=is%3Aissue%20in%3Atitle%20notification%20sort%3Areactions-%2B1-desc
+rung: 1 (extra: claude-code-issues)
+accessed: 2026-11-02
+truncated: yes (page 1 of results; text as returned by the fetch tool, restructured as a list; the right-hand number is the reaction count shown, sorted by thumbs-up)
+
+Total results: 989
+1. Capture MCP Tools Changed notifications - notifications/prompts/list_changed notifications | #4118 | closed | closed on May 23, 2026 | 30
+2. "Notification" hook doesn't work in VS Code extension "native UI" mode | #8985 | closed | closed on Aug 19, 2026 | 15
+3. Remote Control: Push notifications on iOS when permission approval is needed | #29438 | closed | closed on Aug 17, 2026 | 15
+4. [VSCode Extension] Add native system/toast notifications when Claude needs attention | #57230 | open | opened on May 8, 2026 | 15
+5. Feature: Push notifications for completed tasks in remote-control mode | #28765 | closed | closed on Aug 17, 2026 | 18
+6. Feature: Sound notifications | #1288 | closed | closed on Aug 22, 2025 | 26
+7. [FEATURE] Configurable timeout for idle_prompt notification hook | #13922 | open | opened on Dec 13, 2025 | 9
+8. [FEATURE] Option to disable notifications | #12046 | closed | closed on Aug 17, 2026 | 13
+9. --channels plugin shows 'Channels are not currently available' but inbound notifications are ignored | #36503 | open | opened on Mar 20, 2026 | 49
+10. Feature request: built-in completion notifications for VS Code extension | #29928 | closed | closed on Oct 22, 2026 · Duplicate | 16
+11. Feature Request: System notifications when Claude needs attention or completes tasks | #26581 | closed | closed on Aug 17, 2026 | 9
+12. [BUG] iOS Claude Code notifications broken | #30592 | closed | closed on Jun 5, 2026 | 18
+13. Support IDE-level notifications for claude-code plugins (IntelliJ + VS Code) | #6091 | closed | closed on Dec 13, 2025 | 2
+14. [BUG] Notification Hook 10 second delay | #5186 | open | opened on Aug 5, 2025 | 25
+15. Telegram plugin: inbound MCP channel notifications not delivered to conversation | #36431 | open | opened on Mar 20, 2026 | 22
+16. Desktop app fires "Claude is ready" notification on taskbar-icon focus switch, but not on Alt-Tab (GNOME Wayland, Linux) | #74914 | open | opened on Jul 6, 2026 | 4
+17. [BUG] Notification hook does not fire in VSCode extension | #11156 | closed | closed on Feb 6, 2026 | 30
+18. [FEATURE] Support terminal notifications when running inside tmux | #19976 | closed | closed on Aug 17, 2026 | 12
+19. [BUG] False update notification despite being on latest version (2.1.6) | #18055 | closed | closed on Apr 19, 2026 · Duplicate | 9
+20. High latency in hook invocation for Notification events | #19627 | open | opened on Jan 21, 2026 | 4
+21. [BUG] Telegram MCP plugin: inbound notifications/claude/channel never delivered to session (outbound works) | #36411 | closed | closed on Jun 25, 2026 | 23
+22. [BUG] Routines: no way to list/reopen a routine's session in the mobile app after the notification is gone | #76841 | open | opened on Jul 12, 2026 | 7
+23. Peer-message security boilerplate fires on idle_notification status pings, spamming mobile UI | #73647 | open | opened on Jul 3, 2026 | 11
+24. [BUG] Silent context degradation — tool results cleared without notification on 1M context sessions ... | #42542 | open | opened on Apr 2, 2026 | 29
+25. MCP channel notifications (notifications/claude/channel) not surfaced to conversation | #36975 | closed | closed on May 23, 2026 | 10

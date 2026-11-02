@@ -1,0 +1,1188 @@
+url: https://api.github.com/repos/laird/agents-ui/issues?state=all&per_page=100
+rung: 1 (github_issues_top, own repository; all states, newest first)
+accessed: 2026-11-02
+truncated: no (number, state, created, reactions, title, first 600 characters of body)
+
+items: 100
+
+--- #345 · closed · created 2026-09-02 · reactions 0 · https://github.com/laird/agents-ui/issues/345
+Web session view: typing should go into the session pane, not a separate text field below it
+## Problem
+
+The web session view has two input surfaces, and the wrong one is the obvious one. Below the pane sits a text field and a Send button (`#session-input`, `src/web/ui.html:1601-1607`) — visually the place you're meant to type. But that field is a fire-and-forget line submitter: `submitSessionInput` (`ui.html:1861`) posts the whole string and appends Enter.
+
+That means everything interactive is impossible from the field that looks like the input:
+
+- You can't answer an arrow-key picker (`/model`, `/plugin`, a numbered prompt) — there are no arrow keys, and the text arrives as one burs
+
+--- #344 · closed · created 2026-09-02 · reactions 0 · https://github.com/laird/agents-ui/issues/344
+Swarm alerts should name the blocked role (manager vs worker-N), not just the swarm
+## Problem
+
+Swarm attention alerts name the *swarm* but never the *role*. You get:
+
+> 1 agent in agents-ui needs input
+
+which still doesn't tell you whether it's the manager or one of the workers — and those mean very different things. A blocked manager means the whole swarm's coordination has stalled; a blocked worker means one issue is parked while the rest keep moving. The alert should say which.
+
+Wanted instead:
+
+> The manager in agents-ui needs input
+> worker-2 in agents-ui needs input
+
+## The role is already computed and then thrown away
+
+`blockedAgentRole(swarm)` (`contrib/omarchy/plugi
+
+--- #343 · closed · created 2026-09-02 · reactions 0 · https://github.com/laird/agents-ui/issues/343
+Web session view: arrow keys and autocomplete don't work live enough to drive interactive menus
+## Problem
+
+In the web dashboard's session view, typing into the agent pane does not behave like a live terminal. Arrow keys, Tab completion and interactive menus are effectively unusable: you cannot reliably drive an arrow-key picker (`/model`, `/plugin`, a numbered prompt), and you cannot watch an autocomplete menu open and filter as you type.
+
+The plumbing already exists — this is not a missing feature, it's one that doesn't work well enough to use:
+
+- `browserKeyToTmux` (`src/web/ui.html:1298`) already maps `ArrowUp/Down/Left/Right`, `Enter`, `Escape`, `Tab`/`BTab`, `Backspace`, `Home`/`En
+
+--- #342 · closed · created 2026-09-01 · reactions 0 · https://github.com/laird/agents-ui/issues/342
+Move remaining default-server tmux tests in claude.rs onto private sockets
+## Background
+
+Follow-up to #341, which moved the specifically-reported flaky test (`window_pane_target_resolves_a_pane_that_accepts_input`) plus two other simple tests (`healing_finds_worker_windows_by_name_not_index`, `build_swarm_from_session_resolves_branches_for_manager_and_workers`) off the shared default tmux server and onto a private `-L` socket via the existing `TmuxLayout` test helper.
+
+Two tests in `src/adapter/claude.rs` still create real tmux sessions on the shared default server:
+
+- `launches_manager_and_worker_loops_for_all_runtimes` (multi-runtime swarm launch, via `adapter.lau
+
+--- #341 · closed · created 2026-09-01 · reactions 0 · https://github.com/laird/agents-ui/issues/341
+Flaky on macOS CI: window_pane_target_resolves_a_pane_that_accepts_input uses the shared default tmux server
+## Symptom
+
+`test (macos-latest)` fails intermittently on `master`. ubuntu-latest passes every time.
+
+```
+adapter::claude::tests::window_pane_target_resolves_a_pane_that_accepts_input ... FAILED
+panicked at src/adapter/claude.rs:3247:
+tmux never reported a pane for agents-ui-pane-target-6252:review
+test result: FAILED. 564 passed; 1 failed
+```
+
+Same test, three separate runs today — and it passed in three interleaved runs on the same branch, so it is a flake, not a regression:
+
+| Run | Time (UTC) | macOS |
+|---|---|---|
+| 33543017813 | 18:20 | **fail** |
+| 33542405100 | 18:13 | pass |
+| 335412
+
+--- #340 · closed · created 2026-09-01 · reactions 0 · https://github.com/laird/agents-ui/issues/340
+Alert click should deep-link to the blocked agent, swarm, or repos list depending on scope
+## Problem
+
+Clicking a "needs input" alert always lands on the top-level dashboard, no matter how many agents are blocked or where. When exactly one agent in one swarm needs input, the click should take you straight to that agent — instead you arrive at the repos list and have to navigate down two levels to reach the thing the alert was about.
+
+This is pure lost information: the alert **already knows** precisely where to go. `Panel.qml` builds `blockedSwarms` as `[{ name, count }]` and the headline says so out loud ("2 agents in agents-ui need input"). The click handler then throws it away:
+
+`
+
+--- #339 · closed · created 2026-09-01 · reactions 0 · https://github.com/laird/agents-ui/issues/339
+Resume a stopped swarm from its handoffs
+## Context
+
+Stopping a swarm writes a handoff for the manager and every worker (`src/handoff.rs`), to the agent's issue as a comment and to `<worktree>/.agents-ui/handoffs/`. Nothing reads them back. Every public function in `handoff.rs` is a writer — `render`, `write_to_worktree`, `post_issue_comment`, `write_all` — and the only references elsewhere are `tracing::info!` lines in `src/app.rs:2304` and `src/web/server.rs:484`.
+
+So stop is a one-way door. Starting again calls `launch()`, which produces agents that know nothing about what came before; the handoffs serve a human, or whoever next c
+
+--- #334 · closed · created 2026-09-01 · reactions 0 · https://github.com/laird/agents-ui/issues/334
+Tests leak tmux servers, sessions and temp trees when interrupted
+## What happens
+
+A `cargo test` run that is interrupted — Ctrl+C, a harness timeout, a panic in the wrong place — leaves the machine dirtier every time. After a day of iterating on the tmux tests, this developer machine had accumulated:
+
+- **~50 orphaned private tmux servers**: sockets `agents-ui-test-*` under `/tmp/tmux-1000/`, each with a live `tmux` process still running.
+- **A stray session on the DEFAULT tmux server** (`claude-layout0`), sitting alongside a real swarm session.
+- **Five `/tmp/agents-ui-adapter-runtime-launch-*` temp trees**, the oldest a day old, each containing fake agent
+
+--- #333 · closed · created 2026-09-01 · reactions 0 · https://github.com/laird/agents-ui/issues/333
+Web UI: show worktree and branch per worker, matching the TUI
+## Context
+
+The web dashboard and the TUI should answer the same questions about a worker. Today the web row (`renderAgentRow`, `src/web/ui.html:1150`) shows:
+
+- ✅ state
+- ✅ issue number and title (`formatIssueInfo`, `ui.html:1134`)
+- ✅ needs input (`ui.html:1153`)
+- ✅ completed / restart counters
+- ❌ **worktree**
+- ❌ **branch**
+
+So "which worktree is worker-3 in?" is answerable in neither UI, and once #331 lands it will be answerable only in the TUI. This issue is the web counterpart of #331 — the two should ship the same field set.
+
+## Scope
+
+Add worktree and branch to the agent row's detail
+
+--- #332 · closed · created 2026-09-01 · reactions 0 · https://github.com/laird/agents-ui/issues/332
+TUI: one state colour and symbol language in theme.rs
+## Context
+
+The web UI has exactly one definition of what each state looks like; the TUI spreads styling across views, so the same state can render differently depending on where you are looking.
+
+The web's two mappings (`src/web/ui.html`):
+
+```js
+// statusClass — ui.html:899
+working | idle | stopped | starting | unknown
+
+// healthIcon — ui.html:1140
+Healthy ✓   Stalled ⚠   Restarting ↺   Dead ✗
+```
+
+`src/ui/theme.rs:25` already has `status_style`, but there is no symbol equivalent, and health has neither colour nor symbol helper. Views end up hand-rolling both.
+
+## Scope
+
+Make `theme.rs` the 
+
+--- #331 · closed · created 2026-09-01 · reactions 0 · https://github.com/laird/agents-ui/issues/331
+TUI: two-line agent rows showing issue, branch and worktree
+## Context
+
+The web UI and the TUI disagree on how a single agent is drawn, and the web version carries more information in less space. Copy it.
+
+## The row to copy
+
+`renderAgentRow` (`src/web/ui.html:1150`) draws a two-line row:
+
+```
+● ✓ worker-3                                          ›
+    Working · #2948 Fix the flaky pane test · ⚠ Needs input · ✔2 · ↺1
+```
+
+- **Line 1**: status dot (colour = state), health icon, role
+- **Line 2** (dimmed): state, then ` · `-joined fields, each omitted when empty
+- Health icon and the `✔`/`↺` counters are shown for **workers only** — managers have no heal
+
+--- #330 · closed · created 2026-09-01 · reactions 0 · https://github.com/laird/agents-ui/issues/330
+TUI: mirror the web dashboard's Manager / Workers / Issues panel layout
+## Context
+
+The web dashboard and the TUI show the same swarm but look nothing alike, and the web version is the one that reads clearly. The TUI should copy its layout rather than invent a third arrangement.
+
+The live TUI renderer is `SwarmView::render` (`src/ui/swarm_view.rs:74`) — note that `RepoView` (`src/ui/repo_view.rs`) is constructed in `app.rs` but is **not** on the render path (`app.rs:689`, `:759` both call `swarm_view.render`). Change `swarm_view.rs`.
+
+## The layout to copy
+
+From `src/web/ui.html:1228`:
+
+```
+detail-layout
+├── panel  ── header "Manager"          ── agent-list (1 row
+
+--- #329 · closed · created 2026-09-01 · reactions 0 · https://github.com/laird/agents-ui/issues/329
+Web API reports empty repo_path for discovered swarms
+## Context
+
+`GET /api/swarms` reports an empty string for `repo_path` on a live swarm. Observed against a running 8-worker swarm:
+
+```
+$ curl -s http://127.0.0.1:7878/api/swarms | jq '.swarms[0] | {project_name, repo_path, tmux_session}'
+{
+  "project_name": "kink-party",
+  "repo_path": "",
+  "tmux_session": "claude-kink-party"
+}
+```
+
+`SwarmSnapshot.repo_path` is declared as a plain `String` (`src/web/mod.rs:49`), so a missing value serialises as `""` rather than failing loudly.
+
+`project_name` and `tmux_session` are populated correctly on the same object, which points at the discovery path con
+
+--- #328 · closed · created 2026-09-01 · reactions 0 · https://github.com/laird/agents-ui/issues/328
+Expose each agent's worktree path and git branch
+## Context
+
+The bar widget and web dashboard can say *that* a worker is busy, but not *where* it is working. Answering "what is worker-3 actually doing?" today means finding its tmux pane by hand.
+
+`AgentInfo` already carries `worktree_path` (`src/model/swarm.rs:246`) — it is simply never serialised or displayed. The git branch is not tracked at all, even though `create_worktrees` computes it and throws it away:
+
+```rust
+// src/adapter/claude.rs:386
+let branch_name = format!("worker-{i}");
+```
+
+## Scope
+
+**1. Model** — add to `AgentInfo` (`src/model/swarm.rs:240`):
+
+```rust
+/// Git branch chec
+
+--- #327 · closed · created 2026-08-31 · reactions 0 · https://github.com/laird/agents-ui/issues/327
+Web dashboard shows zero swarms: manager detection hardcodes window/pane index 0, impossible under tmux base-index 1
+## Summary
+
+`src/web/discovery.rs:100` identifies the manager pane by hardcoded index:
+
+```rust
+// Window 0 pane 0 = manager, everything else = workers
+if window.index == 0 && pane.index == 0 {
+    manager = Some(snap);
+} else {
+    workers.push(snap);
+}
+```
+
+Under `base-index 1` / `pane-base-index 1` — a very common tmux config, and the one on this machine — **no window has index 0 and no pane has index 0**. The condition never matches, `manager` stays `None`, and the function hits:
+
+```rust
+let manager = match manager {
+    Some(m) => m,
+    None => return Ok(None),   // silently drops the e
+
+--- #326 · closed · created 2026-08-31 · reactions 0 · https://github.com/laird/agents-ui/issues/326
+launches_manager_and_worker_loops_for_all_runtimes fails: manager pane never reaches the Claude TUI
+## Summary
+
+`adapter::claude::tests::launches_manager_and_worker_loops_for_all_runtimes` fails on a clean checkout of `master` (231088c). The manager pane is spawned but never renders the Claude TUI, so the marker wait times out after ~90s.
+
+## Failure
+
+```
+thread 'adapter::claude::tests::launches_manager_and_worker_loops_for_all_runtimes' panicked at src/adapter/claude.rs:2457:9:
+Pane claude-repo-claude:1.1 missing markers ["What can I help", "MANAGER_LOOP_STARTED"]. Last output:
+repo-claude main ❯
+```
+
+The captured pane holds a bare shell prompt — the launch command either never ran or exite
+
+--- #324 · closed · created 2026-04-07 · reactions 0 · https://github.com/laird/agents-ui/issues/324
+Proposal: show status age (time since last change) in web UI worker rows
+## Proposed Enhancement
+
+The TUI's swarm view shows an \"Age\" column indicating how long since the worker last changed state. The web UI does not show any time information, making it harder to identify workers that have been in the same state for an unusually long time.
+
+The `status_timestamp` field is already exposed in the `AgentSnapshot` JSON response (ISO-8601 string), but the web UI does not display it.
+
+## Implementation Plan
+
+**Frontend only** — no backend changes needed.
+
+1. Add a `relativeTime(isoStr)` helper function to \`ui.html\` that converts an ISO timestamp to a human-readable 
+
+--- #323 · closed · created 2026-04-07 · reactions 0 · https://github.com/laird/agents-ui/issues/323
+Proposal: track stall-detection state across web discovery polls
+## Proposed Enhancement
+
+The web discovery poller always reports worker health as \"Healthy\" because it cannot track stall ticks across poll cycles. In the TUI, `WorkerHealth.stall_ticks` is incremented each tick when a Working agent's pane content doesn't change — but the discovery poller creates a fresh `AgentSnapshot` each poll with `health: \"Healthy\"`.
+
+This means in web-only mode (running \`agents-tui --web\` without the TUI), the health indicators on the swarm detail page are always green even for stalled workers.
+
+## Implementation Plan
+
+Add a persistent health cache in the discovery
+
+--- #322 · closed · created 2026-04-07 · reactions 0 · https://github.com/laird/agents-ui/issues/322
+Flaky tests: parallel test isolation failures in persistence and adapter tests
+## Bug Description
+
+Two tests fail intermittently when run in parallel (default `cargo test`), but pass reliably with `cargo test -- --test-threads=1`.
+
+## Failing Tests
+
+### 1. `config::persistence::tests::list_saved_swarms_returns_saved_names`
+
+**Root cause**: `save_swarm_state` and `list_saved_swarms` operate on the shared `~/.agents-ui/` config directory. When tests run in parallel, state from other tests leaks in, or concurrent writes cause read failures.
+
+**Fix**: Use a unique temporary directory per test via `tempfile::tempdir()` and a test-local config path, rather than the real global
+
+--- #321 · closed · created 2026-04-07 · reactions 0 · https://github.com/laird/agents-ui/issues/321
+Feature: Add switch agent type capability to web UI
+## Summary
+The TUI supports switching the agent runtime (Claude/Codex/Droid/Gemini) for a running swarm via a selection overlay. The web UI has no equivalent.
+
+## TUI Behavior
+From the swarm view, a key (e.g., `S`) opens a runtime selection overlay listing available agent types with availability status. Selecting one changes the swarm's agent type going forward.
+
+## Suggested Web UI Implementation
+Add a "Switch Agent" button on the swarm detail action bar (alongside Stop and Add Worker). This could open a simple dropdown or modal to select the new agent type (Claude/Codex/Droid/Gemini).
+
+Requi
+
+--- #320 · closed · created 2026-04-07 · reactions 0 · https://github.com/laird/agents-ui/issues/320
+Feature: Add issue creation to web UI
+## Summary
+The TUI supports creating GitHub issues via a rich dialog. The web UI has no issue creation capability.
+
+## TUI Create Issue Dialog Fields
+- **Title** (text input)
+- **Body** (text area)
+- **Priority**: P0 (Critical) / P1 (High) / P2 (Medium) / P3 (Low)
+- **Type**: Bug / Enhancement
+- **Blocking Labels** (toggleable): needs-design, needs-clarification, needs-approval, too-complex, future, proposal
+
+Labels are composed as a comma-separated string and passed to `gh issue create --label ...`.
+
+## Suggested Web UI Implementation
+Add a "+ New Issue" button on the swarm detail page that o
+
+--- #319 · closed · created 2026-04-07 · reactions 0 · https://github.com/laird/agents-ui/issues/319
+Feature: Show worker health indicators in web UI
+## Summary
+The TUI shows detailed worker health status in the swarm view. The web UI only shows role name and state text — health indicators are absent.
+
+## TUI Workers Table Columns
+| # | H | Status | Task | Age |
+|---|---|--------|------|-----|
+
+- **H (Health)**: ✓ Healthy (green) / ⚠ Stalled (yellow) / ↺ Restarting (cyan) / ✗ Dead (red)
+- **Status**: Idle / Working #N / ⚠ input (attention blink)
+- **Task**: Issue number and title being worked
+- **Age**: How long since last status change
+
+The TUI also shows a health summary in the swarm header:
+```
+Health: ✓3 ⚠1 ↺0 ✗0
+```
+
+## Web UI Worker R
+
+--- #318 · closed · created 2026-04-07 · reactions 0 · https://github.com/laird/agents-ui/issues/318
+Feature: Add GitHub Issues panel to web UI swarm detail view
+## Summary
+The TUI swarm view has a rich Issues panel showing GitHub issues with filtering. The web UI has no issues view at all — this is a significant capability gap.
+
+## TUI Features Missing in Web UI
+
+### Issues Table (swarm detail view, Issues panel)
+- Lists open GitHub issues with: number, title, priority, status, labels
+- Sorts by: blocked first, then by priority (P0→P3), then by issue number
+- Shows which issues are being worked (blue), blocked (orange/attention), or available
+
+### Issue Filtering
+- Filter by status: All / Open / Blocked / Being Worked
+- Filter by type: Bug / Enhanceme
+
+--- #317 · closed · created 2026-04-07 · reactions 0 · https://github.com/laird/agents-ui/issues/317
+Bug: Active swarms incorrectly shown as '(stopped)' in web UI
+## Summary
+The web UI swarm detail page shows a `(stopped)` badge and the swarm list cards show reduced opacity for swarms that are actively running with busy workers.
+
+## Steps to Reproduce
+1. Open http://localhost:7878/
+2. Observe swarm cards — both show dimmed opacity (CSS class `stopped` applied)
+3. Click into a swarm — the detail title shows `agents-ui (stopped)` even though workers show "Working #N"
+
+## Expected
+`(stopped)` badge and dimmed opacity should only appear for swarms where `stopped === true` AND no workers are actively running.
+
+## Actual
+Swarms with 4–5 busy workers (state "W
+
+--- #316 · closed · created 2026-04-07 · reactions 0 · https://github.com/laird/agents-ui/issues/316
+Bug: ANSI escape sequences render as raw text in web session pane
+## Summary
+In the web UI session view (when clicking into an agent), the terminal output displays raw ANSI escape sequences as literal text instead of rendering them as colors/styles.
+
+## Steps to Reproduce
+1. Open http://localhost:7878/
+2. Click on a swarm
+3. Click on any agent (manager or worker)
+4. Observe the pane output
+
+## Expected
+Colored terminal output with ANSI codes rendered as styled HTML (the `ansiToHtml()` function exists in ui.html for this purpose).
+
+## Actual
+Raw codes appear as text, e.g.:
+```
+[38;5;246m  ⊢  (No output) [39m
+[38;5;231m• [39m
+```
+
+## Root Cause
+The `ansiToHtml
+
+--- #315 · closed · created 2026-04-07 · reactions 0 · https://github.com/laird/agents-ui/issues/315
+Bug: typing in worker session view echoes input twice (doubled output)
+## Bug Description
+
+When typing into a worker agent session view in the TUI, each character is echoed twice — the output appears doubled. This does not happen in the manager session view.
+
+## Steps to Reproduce
+
+1. Open the TUI and navigate to a worker agent session
+2. Type any text into the input bar
+3. Observe that each character appears twice in the output
+
+## Expected Behavior
+
+Characters typed appear once, forwarded cleanly to the tmux pane.
+
+## Actual Behavior
+
+Each character is doubled — appears to be sent twice or echoed both by the TUI and by tmux's own echo.
+
+## Notes
+
+- This only af
+
+--- #314 · closed · created 2026-04-06 · reactions 0 · https://github.com/laird/agents-ui/issues/314
+Proposal: add unit tests for supervisor.rs health-check and resurrection logic
+## Proposed Enhancement
+
+Add unit tests for the core logic in \`src/adapter/supervisor.rs\` — specifically the worker health-check decision functions and resurrection-trigger conditions. These are critical to swarm reliability but currently have no direct unit tests.
+
+## Rationale
+
+The supervisor is responsible for detecting stuck/dead workers and restarting them. A regression here would cause workers to silently stop without recovery. The decision logic (\`should_resurrect\`, health status transitions, stuck-pane detection) is pure or near-pure and can be tested without spawning real tmux ses
+
+--- #312 · closed · created 2026-04-06 · reactions 0 · https://github.com/laird/agents-ui/issues/312
+Proposal: add unit tests for discovery.rs pure functions
+## Proposed Enhancement
+
+Add unit tests for the pure helper functions in \`src/web/discovery.rs\`. This module has zero tests today despite containing non-trivial parsing logic used by the web UI's background discovery poller.
+
+## Rationale
+
+These functions run on every 3-second poll cycle and silently affect what appears in the web UI. Regressions here would cause wrong agent states, garbled project names, or missing swarms — with no test catching them.
+
+## Untested Pure Functions
+
+- \`infer_state_from_pane(content: &str) -> (String, Option<u32>)\`  
+  Parses pane text to detect idle/working 
+
+--- #311 · closed · created 2026-04-06 · reactions 0 · https://github.com/laird/agents-ui/issues/311
+Proposal: add unit tests for web server text_input widget navigation and editing
+## Proposed Enhancement
+
+Add unit tests for \`src/ui/text_input.rs\` — the custom text input widget used in swarm launch dialogs and other UI forms. The widget handles cursor movement, character insertion/deletion, and field validation but has no tests.
+
+## Rationale
+
+\`TextInput\` is the primary way users type repository paths and other config when launching a swarm. Bugs in cursor movement or backspace handling would silently corrupt user input. Since the widget is pure state manipulation (no rendering needed), it's straightforward to test.
+
+## Implementation Plan
+
+Add a \`#[cfg(test)] mod t
+
+--- #310 · closed · created 2026-04-06 · reactions 0 · https://github.com/laird/agents-ui/issues/310
+Flaky test: launches_manager_and_worker_loops_for_all_runtimes occasionally fails in CI
+## Bug
+
+\`adapter::claude::tests::launches_manager_and_worker_loops_for_all_runtimes\` fails intermittently when run as part of the full test suite but passes reliably when run in isolation.
+
+## Symptoms
+
+```
+test adapter::claude::tests::launches_manager_and_worker_loops_for_all_runtimes ... FAILED
+```
+
+Passes with: \`cargo test launches_manager\`
+Fails ~1 in 3 runs with: \`cargo test\`
+
+## Root Cause
+
+The test creates real tmux sessions and waits for marker strings in pane output. When run alongside other tests, timing pressure from concurrent test processes causes the fake agent scripts to s
+
+--- #307 · closed · created 2026-04-06 · reactions 0 · https://github.com/laird/agents-ui/issues/307
+Bug: single-character keys (S, ?, etc.) intercepted in agent session view
+## Bug Description
+
+In the agent session view (AgentView), single-character keypresses that are bound to TUI commands (e.g. `S` to switch agents, `?` to show help) are intercepted by the TUI and not forwarded to the tmux pane.
+
+All keystrokes in the agent session view should be forwarded to tmux unconditionally. TUI commands like switching agents, showing help, etc. should only be active when the user is in the worker list or issues panels — not inside a live agent session.
+
+## Steps to Reproduce
+
+1. Open an agent session view (drill down into a worker)
+2. Try to type `S` (or `?` or other boun
+
+--- #306 · closed · created 2026-04-06 · reactions 0 · https://github.com/laird/agents-ui/issues/306
+Enhancement: Web UI swarm view needs Start, Stop, and Add Worker action buttons
+## Feature Request
+
+The web UI swarm detail page should have action buttons matching the TUI's Level 2 (RepoView) controls. Currently the web UI can only view swarms — it has no way to start, stop, or manage them interactively.
+
+## Required Actions
+
+- **Start swarm** — launch a new swarm for a repo (POST /api/swarms)
+- **Stop swarm** — stop all agents; backend exists via `DELETE /api/swarms/:project` (#297) but no button in the UI
+- **Add worker** — launch an additional worker agent into a running swarm
+- Any other swarm-level actions from the TUI RepoView that make sense on the web (e.g. rest
+
+--- #305 · closed · created 2026-04-06 · reactions 0 · https://github.com/laird/agents-ui/issues/305
+Proposal: add unit tests for IssueListView::sorted_open and IssueListState navigation
+## Proposed Enhancement
+
+Add unit tests for two untested behaviors in \`src/ui/issue_list.rs\`:
+
+1. **\`IssueListView::sorted_open()\`** — filters open issues and sorts by (blocked, priority, number). No tests exist despite the sort key being non-trivial: unblocked P0 issues come first, blocked issues sink to the bottom, and ties break by issue number.
+
+2. **\`IssueListState::next()\` and \`previous()\`** — circular navigation through a list. Edge cases include empty list (no-op), wrap-around from last to first, and wrap-around from first to last.
+
+## Rationale
+
+\`sorted_open\` drives the orde
+
+--- #304 · closed · created 2026-04-06 · reactions 0 · https://github.com/laird/agents-ui/issues/304
+Bug: Shift+Tab does not cycle backwards through focusable elements
+## Bug
+
+Shift+Tab should cycle backwards through focusable UI elements (dialogs, form fields, tabs), but it is not handled — either it does nothing or is forwarded to the tmux pane.
+
+## Expected Behavior
+
+- Tab cycles forward through focusable elements
+- Shift+Tab cycles backward (reverse direction)
+
+This is standard keyboard navigation behavior expected in TUI dialogs and forms (e.g. the New Swarm dialog, runtime select, install scope select).
+
+## Relevant Code
+
+- `src/app.rs` — key handling; check `KeyCode::BackTab` (crossterm's Shift+Tab keycode)
+- Dialog screens: `Screen::NewSwarm`, `Scree
+
+--- #303 · closed · created 2026-04-06 · reactions 0 · https://github.com/laird/agents-ui/issues/303
+Bug: ANSI color codes not rendered in web UI agent session view
+## Bug
+
+In the web UI's agent session view, ANSI escape codes (color, bold, etc.) are displayed as raw escape sequences rather than being rendered as styled text. The terminal output appears as unformatted plain text with visible escape codes.
+
+## Expected Behavior
+
+Agent session output should render with color coding, bold/italic styling, and other ANSI formatting — matching how the TUI renders pane content via `ansi-to-tui`.
+
+## Actual Behavior
+
+Raw ANSI sequences (e.g. `\x1b[32m`, `\x1b[0m`) appear as literal text in the web session view.
+
+## Root Cause (likely)
+
+The web UI serves pane cont
+
+--- #302 · closed · created 2026-04-06 · reactions 0 · https://github.com/laird/agents-ui/issues/302
+Proposal: add unit tests for IssueFilter::label and IssuePriority ordering
+## Proposed Enhancement
+
+Add unit tests for two untested behaviors in \`src/model/issue.rs\`:
+
+1. **\`IssueFilter::label()\`** — only the \`Working\` variant is currently tested (in \`filter_working_matches_only_working_issues\`). The \`All\`, \`Open\`, and \`Blocked\` variants have no coverage.
+
+2. **\`IssuePriority\` ordering** — the enum derives \`PartialOrd\`/\`Ord\` (used to sort issues), but no test verifies the ordering is correct (P0 < P1 < P2 < P3 < None).
+
+## Rationale
+
+\`IssueFilter::label()\` drives the filter tab display in the TUI issues view. A wrong return value would show inco
+
+--- #301 · closed · created 2026-04-06 · reactions 0 · https://github.com/laird/agents-ui/issues/301
+Proposal: add unit tests for FeedbackType methods in ui/feedback_dialog.rs
+## Proposed Enhancement
+
+Add unit tests for the pure methods on \`FeedbackType\` in \`src/ui/feedback_dialog.rs\`:
+
+- \`FeedbackType::label()\` — human-readable label ("bug", "enhancement", "feature request")
+- \`FeedbackType::github_label()\` — GitHub label string sent to the API ("bug" or "enhancement")
+- \`FeedbackType::all()\` — the complete ordered list of variants
+
+These methods have zero test coverage despite driving what labels get applied when users submit feedback via the TUI.
+
+## Rationale
+
+A silent regression in \`github_label()\` (e.g., returning the wrong string for \`FeatureRequ
+
+--- #300 · closed · created 2026-04-06 · reactions 0 · https://github.com/laird/agents-ui/issues/300
+Proposal: add unit tests for GitHubIssue priority helpers and IssueCache methods
+## Proposed Enhancement
+
+Add unit tests for four untested public methods in \`src/model/issue.rs\`:
+
+**\`GitHubIssue\` methods:**
+- \`priority_num(&self) -> Option<u8>\` — extracts numeric priority from labels (e.g. \`P2\` → \`Some(2)\`)
+- \`priority_label(&self) -> String\` — formats priority as \`\"P0\"…\"P3\"\` or \`\"—\"\`
+
+**\`IssueCache\` methods:**
+- \`priority_counts(&self) -> (usize, usize, usize, usize)\` — counts issues at each priority level
+- \`filtered(&self, filter: Option<&IssuePriority>) -> Vec<&GitHubIssue>\` — filters issues by priority
+
+## Rationale
+
+These methods are used 
+
+--- #299 · closed · created 2026-04-06 · reactions 0 · https://github.com/laird/agents-ui/issues/299
+Proposal: add unit tests for KeyBind::matches and expand_command in config modules
+## Proposed Enhancement
+
+Add unit tests for two pure functions in the config modules that currently have zero test coverage:
+
+1. **`KeyBind::matches`** in \`src/config/keybindings.rs\` (line 94) — checks whether a crossterm \`KeyEvent\` matches a binding. Tests should cover character keys, special keys (Enter, Esc, Up, Down, etc.), modifier combos (ctrl, alt, shift), and non-matching cases.
+
+2. **`expand_command`** in \`src/config/shortcuts.rs\` (line 100) — substitutes \`{issue}\`, \`{worker}\`, and \`{project}\` template variables in a command string. Tests should cover all three variables, 
+
+--- #298 · closed · created 2026-04-06 · reactions 0 · https://github.com/laird/agents-ui/issues/298
+Proposal: add unit tests for log-error utility functions in app.rs
+## Proposed Enhancement
+
+Add unit tests for four pure utility functions in \`src/app.rs\` that form the log-error collection pipeline but currently have no test coverage:
+
+- \`normalize_whitespace(input: &str) -> String\` — collapses runs of whitespace into single spaces and trims
+- \`truncate_chars(input: &str, max_chars: usize) -> String\` — truncates to N chars with a \`…\` suffix
+- \`extract_error_message(line: &str) -> Option<String>\` — strips a log-line prefix to expose the error text
+- \`log_error_fingerprint(summary: &str) -> String\` — FNV-1a hash of the summary for deduplication
+
+##
+
+--- #297 · closed · created 2026-04-06 · reactions 0 · https://github.com/laird/agents-ui/issues/297
+Proposal: add DELETE /api/swarms/:project endpoint to stop a running swarm from the web UI
+## Proposed Enhancement
+
+Add a \`DELETE /api/swarms/:project\` endpoint to the web server that stops a running swarm by killing its tmux session, and add a "Stop" button to the web UI.
+
+## Rationale
+
+The web UI was recently made self-sufficient (#132) — it can now discover running swarms AND launch new ones. The missing piece is the ability to **stop** a swarm. Currently users must open a terminal and run \`tmux kill-session\` manually. This creates an asymmetry: you can start a swarm from the web but can only stop it from the terminal.
+
+The adapter already has a \`stop(&self, swarm: &Swarm) -
+
+--- #296 · closed · created 2026-04-06 · reactions 0 · https://github.com/laird/agents-ui/issues/296
+Proposal: add unit tests for web/discovery.rs pure functions
+## Proposed Enhancement
+
+Add unit tests for the pure functions in \`src/web/discovery.rs\`. These functions drive how the web server discovers and classifies agent swarms from tmux sessions, but they currently have zero test coverage.
+
+## Rationale
+
+\`web/discovery.rs\` was added as the self-sufficiency backbone of the web UI (so the web server works without the TUI running). The pure functions are straightforward to test and cover important logic:
+
+- \`infer_state_from_pane\` — parses raw pane text to extract state string + issue number
+- \`is_busy\` — classifies state as active vs idle
+- \`p
+
+--- #295 · closed · created 2026-04-06 · reactions 0 · https://github.com/laird/agents-ui/issues/295
+Proposal: add unit tests for classify_pane_activity in model/status.rs
+## Proposed Enhancement
+
+Add unit tests for `classify_pane_activity` in \`src/model/status.rs\` (line 158). This function drives how agent status is inferred from raw pane content, but several branches lack test coverage.
+
+## Rationale
+
+\`classify_pane_activity\` is called on every pane update and powers the Idle/Busy/NeedsLaunch state that determines what the TUI shows. The current tests cover busy and idle shell cases but miss:
+- NeedsLaunch via restart message
+- NeedsLaunch via bare shell prompt (\`$\`, \`%\`, \`#\`)
+- AgentIdle via agent indicator (claude/gemini/codex name in pane)
+- Unkno
+
+--- #294 · closed · created 2026-04-06 · reactions 0 · https://github.com/laird/agents-ui/issues/294
+Proposal: add unit tests for blocking_guidance in model/issue.rs
+## Proposed Enhancement
+
+Add unit tests for the `blocking_guidance` function in `src/model/issue.rs` (line 106). This function returns the action hint displayed in the UI when an issue has a blocking label, but has no test coverage.
+
+## Rationale
+
+`blocking_guidance` is called in the issue detail view to show users what action to take for blocked issues. Each of the 6 blocking labels maps to a distinct human-readable instruction. A typo or wrong match arm would silently show the wrong guidance to users.
+
+## Implementation Plan
+
+Add tests to the `#[cfg(test)] mod tests` block in `src/model/issu
+
+--- #293 · closed · created 2026-04-06 · reactions 0 · https://github.com/laird/agents-ui/issues/293
+Proposal: add unit tests for detect_waiting_for_input in model/swarm.rs
+## Proposed Enhancement
+
+Add unit tests for the `detect_waiting_for_input` function in `src/model/swarm.rs` (line 199). This function is called on every pane content update to determine if the NEEDS INPUT banner should be shown, but currently has no test coverage.
+
+## Rationale
+
+The function has non-trivial logic: it examines only the last 15 lines of pane content and checks multiple different prompt patterns (permission prompts, interruption prompts, bare bypass-permissions lines). A regression in any of these patterns would silently suppress the NEEDS INPUT indicator for users.
+
+## Implement
+
+--- #291 · closed · created 2026-04-05 · reactions 0 · https://github.com/laird/agents-ui/issues/291
+Add unit tests for RuntimeSupervisor command methods in supervisor.rs
+## Summary
+
+`src/adapter/supervisor.rs` (301 lines) has only 1 test (`runtime_wrapper_usage_matches_expected_runtimes`), leaving the core command-generation logic untested.
+
+## Untested methods
+
+For all four runtimes (Claude, Codex, Droid, Gemini):
+- `launch_command` — returns the shell command used to start the agent process
+- `bootstrap_command` — returns the initial command/prompt sent after launch
+- `ongoing_command` — returns the command sent to a already-running session
+- `start_manager_loop_command` / `start_worker_loop_command` — trait default methods that delegate to wrapper or bootst
+
+--- #289 · closed · created 2026-04-05 · reactions 0 · https://github.com/laird/agents-ui/issues/289
+Fix #288: Gemini worker pane test markers cause flaky test failure
+## Bug
+
+The test `launches_manager_and_worker_loops_for_all_runtimes` fails intermittently for the Gemini runtime.
+
+## Root Cause
+
+In `src/adapter/claude.rs`, there is a comment noting that Gemini worker panes are flaky:
+
+```rust
+// Gemini's fake runtime is flaky in tmux worker panes and can drop back to a
+// shell prompt before the historical test marker is observed. The wrapper-launch
+// regression in #243 is specific to Codex, so keep this smoke-level for Gemini.
+AgentType::Gemini => (
+    &["What can I help", "MANAGER_LOOP_STARTED"],
+    &["What can I help", "FIX_LOOP_STARTED"],  // ← stil
+
+--- #287 · closed · created 2026-04-04 · reactions 0 · https://github.com/laird/agents-ui/issues/287
+Add web interface
+Manage a swarm via web interface with adaptive ui for phone or desktop.
+
+--- #285 · closed · created 2026-04-04 · reactions 0 · https://github.com/laird/agents-ui/issues/285
+Proposal: add unit tests for GitHubIssue display methods and JSON conversion
+## Proposed Enhancement
+
+Add unit tests in \`src/model/issue.rs\` covering three currently untested code paths:
+
+1. \`GitHubIssue::status_label\` with \`assigned_worker: Some(\"worker-1\")\` — the branch that shows \`🔨 worker-1\` is exercised by the UI but has no test
+2. \`IssuePriority::Display\` and \`IssueType::Display\` \`fmt\` implementations — used in UI rendering but only tested indirectly
+3. \`GitHubIssue::From<GhIssueJson>\` conversion — the \`CLOSED\` state path and label-to-type mapping are untested
+
+## Rationale
+
+These are small, self-contained gaps. Each is one or two assert lines
+
+--- #284 · closed · created 2026-04-04 · reactions 0 · https://github.com/laird/agents-ui/issues/284
+Proposal: add unit tests for parse_monitor_workers_output in app.rs
+## Proposed Enhancement
+
+Add unit tests for the `parse_monitor_workers_output` function in `src/app.rs` (line 4060). This function parses markdown table output from the manager pane to extract worker status updates, but has zero test coverage despite non-trivial parsing logic.
+
+## Rationale
+
+The function is called in a critical path (`app.rs:3622`) to update worker statuses from the manager pane content. It handles markdown table rows, header/separator skipping, issue number extraction, and bold marker stripping. A parsing bug here would cause worker statuses to silently fail to update in the 
+
+--- #283 · closed · created 2026-04-04 · reactions 0 · https://github.com/laird/agents-ui/issues/283
+Test issue - delete me
+Test
+
+--- #282 · closed · created 2026-04-04 · reactions 0 · https://github.com/laird/agents-ui/issues/282
+Proposal: add unit tests for shell_quote function in transport.rs
+## Proposed Enhancement
+
+Add unit tests for the `shell_quote` function in `src/transport.rs` (line 102). This function is the sole mechanism for safely escaping shell arguments in every remote SSH command the TUI issues (tmux, git, etc.) and currently has no direct test coverage.
+
+## Rationale
+
+`shell_quote` is called in every `build_shell_command` invocation (lines 90–97) and its correctness is critical for remote execution safety. The existing test only exercises it indirectly via `build_shell_command`. Edge cases with single quotes, empty strings, and special shell characters ($, backticks,
+
+--- #281 · closed · created 2026-04-04 · reactions 0 · https://github.com/laird/agents-ui/issues/281
+Proposal: add unit test for '?' key passthrough in AgentView (regression guard for #278)
+## Proposed Enhancement
+
+Add a unit test to `src/app.rs` that verifies the `?` key is NOT intercepted by the shortcuts-viewer guard when the screen is `Screen::AgentView`. This prevents regression of the fix made in PR #280 (issue #278).
+
+## Rationale
+
+PR #280 added `Screen::AgentView { .. }` to the exclusion list so `?` forwards to tmux. Without a test, this could silently regress if the guard condition is refactored.
+
+## Implementation Plan
+
+In `src/app.rs` tests block, add a test that constructs an `App` with `Screen::AgentView`, fires `KeyCode::Char('?')`, and asserts `show_shortcuts_viewe
+
+--- #278 · closed · created 2026-04-04 · reactions 0 · https://github.com/laird/agents-ui/issues/278
+Bug: '?' intercepted as shortcuts-viewer toggle in agent view, cannot pass '?' to tmux session
+## Bug
+
+In agent view (Level 3), pressing `?` opens the shortcuts viewer overlay instead of forwarding the character to the tmux pane. This makes it impossible to type `?` in the agent session (e.g., writing Go code, using CLI tools that accept `?`, or any shell command that uses `?`).
+
+## Root Cause
+
+`src/app.rs` lines 1097–1108:
+
+```rust
+// ? key opens shortcuts viewer (not in passthrough mode, not on non-session screens)
+if key.code == KeyCode::Char('?')
+    && !self.is_passthrough_mode()
+    && !matches!(
+        self.screen,
+        Screen::ReposList | Screen::NewSwarm { .. } | Screen::Ru
+
+--- #277 · closed · created 2026-04-04 · reactions 0 · https://github.com/laird/agents-ui/issues/277
+Proposal: add unit tests for agent_view, feedback_dialog, issue_view, and repo_view render functions
+## Proposed Enhancement
+
+Add smoke/unit tests for the four remaining UI render modules that currently have no test coverage:
+
+- **`src/ui/agent_view.rs`** (194 lines) — `AgentView` struct with scroll/render logic
+- **`src/ui/feedback_dialog.rs`** (242 lines) — `render_feedback_dialog` overlay
+- **`src/ui/issue_view.rs`** (103 lines) — `IssueView` struct with scroll and render
+- **`src/ui/repo_view.rs`** (781 lines) — `RepoView` struct, the Level 2 repo dashboard
+
+## Rationale
+
+Tests already exist for `repos_list.rs`, `swarm_view.rs`, `issue_detail.rs`, `issue_list.rs`, `help_overlay.rs`, `shor
+
+--- #275 · closed · created 2026-04-04 · reactions 0 · https://github.com/laird/agents-ui/issues/275
+Proposal: Add unit tests for ProjectManagementClient command builders
+## Proposed Enhancement
+
+Add unit tests to `src/project_management.rs` for the command-builder methods that currently lack coverage.
+
+## Rationale
+
+`ProjectManagementClient` has five command-building methods tested by the existing 5 tests, but several methods have no dedicated coverage: `view_issue`, `view_issue_web`, `view_issue_json`, `remove_label`, and `manager_create_issue_prompt`. These are pure functions (no I/O) that produce `ProjectCommand` structs, making them ideal for unit tests.
+
+## Functions to Test
+
+- `view_issue(id)` — produces `gh issue view <id>` (or linear/jira equivalent)
+-
+
+--- #274 · closed · created 2026-04-04 · reactions 0 · https://github.com/laird/agents-ui/issues/274
+Proposal: add unit tests for help_overlay, shortcuts_viewer, and switch_agent_dialog render functions
+## Proposed Enhancement
+
+Add smoke-style render tests for three UI functions that currently have zero test coverage:
+
+1. **`src/ui/help_overlay.rs`** — `render_help_overlay()` (52 lines, 0 tests)
+2. **`src/ui/shortcuts_viewer.rs`** — `render_shortcuts_viewer()` (83 lines, 0 tests)  
+3. **`src/ui/new_swarm.rs`** — `render_switch_agent_dialog()` (not yet tested; the other 4 dialogs already have tests)
+
+## Rationale
+
+These are the only remaining UI render functions without any test coverage. All other UI modules (repos_list, swarm_view, agent_view, repo_view, issue_view, issue_detail, feedback_di
+
+--- #271 · closed · created 2026-04-04 · reactions 0 · https://github.com/laird/agents-ui/issues/271
+Proposal: Add unit tests for SwarmView navigation and count_attention
+## Proposed Enhancement
+
+Add unit tests to \`src/ui/swarm_view.rs\` for navigation state methods and the \`count_attention\` pure function that currently have no test coverage.
+
+## Rationale
+
+These methods drive core UI navigation behavior in the swarm view (worker selection, issue selection, manager scroll, panel cycling) but are tested only via smoke rendering tests. Pure state-management logic should have dedicated unit tests.
+
+## Functions to Test
+
+- \`SwarmPanel::next()\` — panel cycle: Manager→Workers→Issues→Manager
+- \`SwarmView::scroll_manager_up/down\` — scroll offset changes, saturat
+
+--- #270 · closed · created 2026-04-04 · reactions 0 · https://github.com/laird/agents-ui/issues/270
+Proposal: Add unit tests for IssueDetailView scroll behavior and render helpers
+## Proposed Enhancement
+
+Add unit tests to \`src/ui/issue_detail.rs\` for the \`IssueDetailView\` struct covering scroll behavior edge cases and the render helper's layout logic.
+
+## Rationale
+
+\`IssueDetailView\` already has tests for \`new()\` and basic scroll, but several edge cases are untested:
+- \`scroll_down\` then \`scroll_up\` round-trip back to zero
+- \`scroll_offset\` clamping in \`render\` when offset exceeds \`max_scroll\`
+- Label joining (\`labels.join(" · ")\`) and empty-label path
+- State string display in header
+
+These are pure-logic paths with no tmux or terminal dependencies
+
+--- #269 · closed · created 2026-04-04 · reactions 0 · https://github.com/laird/agents-ui/issues/269
+Proposal: Add unit tests for ReposListView navigation (next/previous/selected)
+## Summary
+
+`src/ui/repos_list.rs` has `ReposListView` navigation methods with no unit tests. These are pure state-management functions that don't require frame rendering.
+
+## Methods to test
+
+- `ReposListView::new()` — selected=None initially
+- `next(len)` — selects first item when nothing selected; increments selected; wraps at end
+- `previous(len)` — wraps to last when at 0; decrements
+- `selected()` — returns None when empty, Some(index) after navigation
+- Edge: `next(0)` / `previous(0)` with empty list (should not panic)
+
+## Implementation
+
+Add ~7 tests to the `#[cfg(test)] mod tests` blo
+
+--- #268 · closed · created 2026-04-04 · reactions 0 · https://github.com/laird/agents-ui/issues/268
+Proposal: Add unit tests for swarm.rs detect_waiting_for_input, idle_count, waiting_count, all_agents, next_waiting_agent
+## Proposed Enhancement
+
+Add unit tests to \`src/model/swarm.rs\` for five functions that currently have no test coverage.
+
+## Rationale
+
+These functions drive key UI behaviors (waiting indicator, agent cycling, count displays) but are untested:
+
+- \`detect_waiting_for_input(content)\` — detects if pane content indicates the agent is waiting for input; used to highlight agents needing attention
+- \`Swarm::idle_count()\` — counts idle agents; shown in the repo view header
+- \`Swarm::waiting_count()\` — counts agents waiting for input; drives the attention indicator
+- \`Swarm::all_agents()\` — r
+
+--- #266 · closed · created 2026-04-04 · reactions 0 · https://github.com/laird/agents-ui/issues/266
+Proposal: Add unit tests for AgentView scroll and following-mode logic
+## Summary
+
+`src/ui/agent_view.rs` contains `AgentView` with scroll and auto-follow state management methods that have no unit tests. These are pure logic functions testable without frame/tmux dependencies.
+
+## Methods to test
+
+- `AgentView::new()` — scroll_offset=0, following=true
+- `scroll_up(amount)` — decrements offset, sets following=false
+- `scroll_down(amount)` — increments offset via saturating_add
+- `scroll_up` saturates at 0
+- `scroll_down` saturates at u16::MAX
+- `scroll_up` disables following mode
+- `page_up()` / `page_down()` — delegate to scroll_up/down with default page size
+
+##
+
+--- #265 · closed · created 2026-04-04 · reactions 0 · https://github.com/laird/agents-ui/issues/265
+Proposal: Add unit tests for issue.rs priority_label, priority_num, filtered, and labels_to_type
+## Proposed Enhancement
+
+Add unit tests to `src/model/issue.rs` for functions that currently have no test coverage.
+
+## Rationale
+
+The file has 8 tests covering `is_blocked`, `is_being_worked`, `priority_extraction`, `filter_matching`, `filter_cycle`, `status_label_display`, and `priority_counts_work`. The following pure functions have zero coverage:
+
+- `priority_label()` — returns a display string ("P0", "P1", etc. or "--")
+- `priority_num()` — returns `Option<u8>` (0..3 or None)
+- `IssueFilter::label()` — returns display label for each filter variant
+- `labels_to_type()` — maps labels to `Is
+
+--- #264 · closed · created 2026-04-04 · reactions 0 · https://github.com/laird/agents-ui/issues/264
+Proposal: Add unit tests for IssueView scroll and construction
+## Proposed Enhancement
+
+Add unit tests to \`src/ui/issue_view.rs\` — the module has zero tests despite containing pure-logic methods on \`IssueView\`.
+
+## Rationale
+
+\`IssueView\` has three testable pure methods:
+
+- \`new\` — field initialisation, scroll starts at 0, body starts as \"Loading…\"
+- \`scroll_up\` — saturating subtraction (can't go below 0)
+- \`scroll_down\` — saturating addition (wraps at u16::MAX safely)
+
+These mirror the already-tested \`IssueDetailView\` pattern. Regressions here would be silent.
+
+## Implementation Plan
+
+### Phase 1: Construction tests
+- [ ] \`new_sets_issue_
+
+--- #263 · closed · created 2026-04-04 · reactions 0 · https://github.com/laird/agents-ui/issues/263
+Proposal: Add unit tests for persistence.rs swarm state and repo root functions
+## Proposed Enhancement
+
+Add unit tests to `src/config/persistence.rs` for the swarm state save/load/list functions and the edge cases in `find_repo_root`.
+
+## Rationale
+
+The file currently has only 2 tests covering `find_repo_root` (happy path) and `save/load_repo_agent_type`. The swarm state functions (`save_swarm_state`, `load_swarm_state`, `list_saved_swarms`) and several `find_repo_root` edge cases have zero test coverage despite being non-trivial file I/O logic.
+
+## Implementation Plan
+
+Add a `#[cfg(test)]` block with the following tests (no production code changes):
+
+- `save_and_load_sw
+
+--- #262 · closed · created 2026-04-04 · reactions 0 · https://github.com/laird/agents-ui/issues/262
+Proposal: Add unit tests for IssueDetailView scroll and construction
+## Proposed Enhancement
+
+Add unit tests to \`src/ui/issue_detail.rs\` — the module has zero tests despite containing pure-logic methods that are straightforward to verify.
+
+## Rationale
+
+\`IssueDetailView\` has three testable pure methods:
+
+- \`new\` — field initialisation, scroll starts at 0
+- \`scroll_up\` — saturating subtraction (can't go below 0)
+- \`scroll_down\` — saturating addition (wraps at u16::MAX safely)
+
+These are invisible regressions: a change that accidentally resets \`scroll_offset\` or breaks the saturation guard would pass all current tests silently.
+
+## Implementation Plan
+
+--- #260 · closed · created 2026-04-04 · reactions 0 · https://github.com/laird/agents-ui/issues/260
+Proposal: Add unit tests for feedback_dialog FeedbackType and FeedbackState
+## Proposed Enhancement
+
+Add unit tests to \`src/ui/feedback_dialog.rs\` — the module has pure-logic methods on \`FeedbackType\` and \`FeedbackState\` that are currently untested.
+
+## Rationale
+
+\`feedback_dialog.rs\` contains non-trivial pure logic:
+
+- \`FeedbackType::label\` / \`github_label\` — string mappings that silently break if a variant is added or renamed
+- \`FeedbackType::all\` — must enumerate every variant; easy to forget when adding a new one
+- \`FeedbackState::new\` — initialises default selection and input buffer; regression-prone
+
+No tests currently cover this module (confirme
+
+--- #258 · closed · created 2026-04-04 · reactions 0 · https://github.com/laird/agents-ui/issues/258
+Proposal: Add unit tests for ui/repo_view.rs navigation and banner logic
+## Proposed Enhancement
+
+Add unit tests to \`src/ui/repo_view.rs\` — the module is the largest untested UI file (684 lines) and contains non-trivial pure logic in its navigation methods and banner management.
+
+## Rationale
+
+\`repo_view.rs\` manages focus, list selection, and notification banners used throughout the main swarm view. Several methods have edge-case logic that is easy to break silently:
+
+- \`next_worker\` / \`previous_worker\`: wrap-around and boundary conditions, return value signals focus transfer to manager input
+- \`next_issue\` / \`previous_issue\`: header-offset arithmetic (
+
+--- #257 · closed · created 2026-04-04 · reactions 0 · https://github.com/laird/agents-ui/issues/257
+Implement MacOS Ui, Windows ui, and Linux Watson ui
+Design and implement a macOS ui, a windows ui, and a Linux Watson ui.
+
+--- #256 · closed · created 2026-04-03 · reactions 0 · https://github.com/laird/agents-ui/issues/256
+Proposal: Add unit tests for ui/theme.rs
+## Proposed Enhancement
+
+Add unit tests to \`src/ui/theme.rs\` — the module contains several pure functions with non-trivial logic that are currently untested.
+
+## Rationale
+
+\`theme.rs\` defines styling functions used throughout the TUI. While most functions are simple style constructors, several have logic branches worth testing:
+
+- \`status_style\` maps \`AgentState\` variants to colors — a new state variant added without updating this match would silently produce wrong colors
+- \`priority_style\` maps \`IssuePriority\` variants to colors — same risk
+- \`attention_blink_style\` returns diff
+
+--- #255 · closed · created 2026-04-03 · reactions 0 · https://github.com/laird/agents-ui/issues/255
+Proposal: Add unit tests for ShortcutsConfig module
+## Proposed Enhancement
+
+Add unit tests to `src/config/shortcuts.rs` — the `ShortcutsConfig` struct has non-trivial logic that is currently untested.
+
+## Rationale
+
+`ShortcutsConfig` is user-facing configuration that drives the shortcuts bar shown throughout the TUI. Key risks:
+- `defaults()` parses a const TOML string with `unwrap_or_default()` — if the embedded config has a syntax error, it silently degrades to empty shortcuts, making the shortcuts bar blank for all users with no warning
+- `for_panel()` has a catch-all branch (`_ => &self.global`) — unexpected panel names silently fall back 
+
+--- #254 · closed · created 2026-04-03 · reactions 0 · https://github.com/laird/agents-ui/issues/254
+Proposal: Add unit tests for KeyBindings and scripts/launcher modules
+## Proposed Enhancement
+
+Add unit tests to two untested modules that contain non-trivial logic:
+
+1. `src/config/keybindings.rs` — `KeyBindings` default bindings, `display()`, `help_entries()`, and TOML load/save round-trip
+2. `src/scripts/launcher.rs` — `resolve_agents_dir()` path resolution (env var override, fallback paths)
+
+## Rationale
+
+These modules are used in the hot path (keybindings drives all keyboard input; launcher resolves plugin paths on startup) but have zero test coverage. A regression in either would be silent until manually discovered.
+
+- `keybindings.rs`: 14 actions, 2 bindi
+
+--- #253 · closed · created 2026-04-03 · reactions 0 · https://github.com/laird/agents-ui/issues/253
+Fix #132: pane_exists uses wrong tmux command and is unused dead code
+## Bug
+
+`src/tmux/session.rs:64` — `pane_exists` calls `tmux has-session` which only checks if a *session* exists, not whether a specific *pane* is alive. The correct command is `tmux list-panes -t <target>`.
+
+Additionally, the function is never called anywhere, generating a dead-code compiler warning.
+
+## Impact
+
+- Build warning: `warning: function `pane_exists` is never used`
+- If ever used as-is, worker healing would falsely report panes as alive as long as the session exists
+
+## Fix
+
+1. Fix `pane_exists` to use `tmux list-panes -t <target>` (exits 0 if pane exists, non-zero otherwise)
+2. U
+
+--- #252 · closed · created 2026-04-03 · reactions 0 · https://github.com/laird/agents-ui/issues/252
+Issue age labels always blank: background poller omits updatedAt field
+## Bug Description
+
+The swarm view displays an Age column for issues (src/ui/swarm_view.rs:278) and marks stale issues (not updated in 7+ days) with a different color. However, the age column is always blank and stale detection never fires because the background issue poller never fetches updatedAt from GitHub.
+
+## Root Cause
+
+Two issue-fetch paths exist:
+
+1. Background poller (github::fetch_issues, called by spawn_issue_fetcher every 60s):
+   - Fetches fields: number,title,state,labels — no updatedAt
+   - updated_at is always None so age_label() returns empty string and is_stale() returns fal
+
+--- #251 · closed · created 2026-04-03 · reactions 0 · https://github.com/laird/agents-ui/issues/251
+Proposal: Worker Healing & Auto-Recovery with Health Indicators
+## Proposed Enhancement
+
+Expand the existing \`revive_dropped_agents()\` and \`heal_all_workers()\` stubs into a comprehensive health-check and auto-recovery system, with a live health indicator rendered in the \`SwarmView\` header.
+
+## Rationale
+
+Multi-worker swarms are fragile: a worker can hang silently, a tmux pane can crash, or a status file can become stale after a machine sleep/wake cycle. Currently the app polls every ~30s but recovery logic is minimal. Manual teardown and restart is high friction. Auto-healing with observable health status turns a fragile system into a resilient one —
+
+--- #250 · closed · created 2026-04-01 · reactions 0 · https://github.com/laird/agents-ui/issues/250
+Droid worker fix loop does not appear to be working
+## Summary
+In Droid runtime, the worker fix loop does not appear to be working.
+
+## Actual behavior
+Workers do not seem to execute or progress through the expected fix-loop workflow.
+
+## Expected behavior
+Droid workers should run the fix loop reliably and update status/dispatch as expected.
+
+## Impact
+Issue processing can stall because workers are not actively handling fix-loop tasks.
+
+--- #249 · closed · created 2026-04-01 · reactions 0 · https://github.com/laird/agents-ui/issues/249
+atui should ensure required agent skills are installed for selected agent runtime
+## Summary
+atui should make sure the required agent skills are installed for the selected agent runtime.
+
+## Actual behavior
+Required skills may be missing when launching/using an agent runtime.
+
+## Expected behavior
+Before starting agent workflows, atui verifies required skills for that runtime and automatically installs any missing skills.
+
+## Impact
+Missing skills can break workflows and cause runtime-specific commands to fail unexpectedly.
+
+--- #248 · closed · created 2026-04-01 · reactions 0 · https://github.com/laird/agents-ui/issues/248
+Missing autocoder skill for monitor-workers
+## Summary
+There should be an autocoder skill to monitor workers.
+
+## Actual behavior
+A dedicated autocoder monitor-workers skill is missing/inaccessible.
+
+## Expected behavior
+An autocoder skill/command should exist and be available to monitor workers reliably.
+
+## Impact
+Without this, manager workflows cannot consistently monitor and dispatch worker activity.
+
+--- #247 · closed · created 2026-04-01 · reactions 0 · https://github.com/laird/agents-ui/issues/247
+atui --droid launches Codex manager with Droid workers
+## Summary
+Running atui --droid currently starts a mixed runtime setup.
+
+## Actual behavior
+- Manager starts as Codex
+- Workers start as Droid
+
+## Expected behavior
+When --droid is specified, both manager and workers should run as Droid.
+
+## Impact
+Mixed runtimes cause inconsistent command behavior and adapter logic during swarm management.
+
+--- #246 · closed · created 2026-04-01 · reactions 0 · https://github.com/laird/agents-ui/issues/246
+tmux session width should match terminal width to avoid wrapped lines
+## Summary
+When launching/managing sessions in tmux, pane/session width should track the current terminal width.
+
+## Problem
+Lines get wrapped unexpectedly because tmux is using a width that does not match the active terminal width.
+
+## Expected behavior
+tmux session/panes should be resized to match the terminal width so output lines are not wrapped unnecessarily.
+
+## Notes
+This impacts readability in agent views and manager/worker monitoring flows.

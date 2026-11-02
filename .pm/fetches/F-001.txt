@@ -1,0 +1,32 @@
+url: https://github.com/anthropics/claude-code/issues?q=is%3Aissue%20notification%20sort%3Areactions-%2B1-desc
+rung: 1 (extra: claude-code-issues)
+accessed: 2026-11-02
+truncated: yes (page 1 of 40; text as returned by the fetch tool, which restructures pages into a list, not raw HTML)
+
+Issues list (25 items, sorted by thumbs-up, page 1 of 40; 5,794 results)
+Thumbs-up = reaction count shown on the right of each row.
+1 | Feature Request: Support AGENTS.md. | #6235 | Closed | Aug 17, 2026 | 409
+2 | [MODEL] Claude Code is unusable for complex engineering tasks with the Feb updates | #42796 | Closed | Apr 6, 2026 | 583
+3 | Bring Back Buddy — A Consolidated Plea from the Community | #45596 | Open | Apr 9, 2026 | 283
+4 | [FEATURE] Add the ability to manage multiple Claude accounts within the Claude Desktop app with easy switching between profiles. | #18435 | Open | Jan 15, 2026 | 228
+5 | [BUG] Claude says "You're absolutely right!" about everything | #3382 | Closed | Aug 22, 2025 | 179
+6 | [BUG] Phone verification | #34229 | Open | Mar 14, 2026 | 742
+7 | [FEATURE] Multi-account switching in Claude Mobile app without shared email | #36151 | Open | Mar 19, 2026 | 188
+8 | [BUG] Instantly hitting usage limits with Max subscription | #16157 | Open | Jan 3, 2026 | 1499
+9 | Terminal Scrolling Uncontrollably During Claude Code Interaction | #3648 | Closed | Dec 17, 2025 | 337
+10 | [BUG] Console scrolling top of history when claude add text to the console | #826 | Open | Apr 19, 2025 | 354
+11 | Feature Request: India-Specific Pricing Plans (INR) for Claude & Claude Code | #17432 | Open | Jan 11, 2026 | 215
+12 | Add support for Visual Studio 2026 Integration | #15942 | Open | Jan 1, 2026 | 156
+13 | [BUG] Claude Max plan session limits exhausted abnormally fast since March 23, 2026 (CLI usage) | #38335 | Open | Mar 24, 2026 | 879
+14 | [FEATURE] Support multiple Connector accounts (same connector, different accounts) in Claude and Claude Code on the web (claude.ai/code) | #27302 | Open | Feb 21, 2026 | 292
+15 | [BUG] Claude 4.7, 4.8, 5.0, and Fable increasingly default to repetitive rhetorical tics and often struggle to produce coherent prose despite explicit style instructions | #77136 | Closed | Oct 3, 2026 | 139
+16 | Feature Request: Add support for Agent Client Protocol (ACP) | #6686 | Closed | Feb 9, 2026 | 37
+17 | Feature request: Connect Claude code to Claude projects | #2511 | Open | Jun 24, 2025 | 52
+18 | [BUG] AskUserQuestion: "No response after 60s — continued without an answer" | #73125 | Closed | Jul 4, 2026 | 144
+19 | [BUG] In-progress Call causes Screen Flickering | #769 | Open | Apr 12, 2025 | 307
+20 | Allow viewing and editing content of "pasted text" blocks before submission | #3412 | Closed | Aug 17, 2026 | 88
+21 | [BUG] Claude Desktop (Windows 11): main window stays always-on-top of other applications, with no setting to disable it | #85891 | Closed | Oct 23, 2026 | 123
+22 | Allow MCP tools to be available only to subagent | #6915 | Closed | Mar 11, 2026 | 89
+23 | Cache TTL silently regressed from 1h to 5m around early March 2026, causing quota and cost inflation | #46829 | Closed | Apr 12, 2026 | 56
+24 | Automatic light/dark theme selection? | #2990 | Closed | May 31, 2026 | 50
+25 | [BUG] github-actions incorrectly closed a bunch of issues for "60 days of inactivity" | #16497 | Closed | Feb 17, 2026 | 48

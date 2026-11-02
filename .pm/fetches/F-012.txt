@@ -1,0 +1,20 @@
+url: https://github.com/anthropics/claude-code/issues/12046
+rung: 1 (extra: claude-code-issues) · counter-evidence fetch for theme B
+accessed: 2026-11-02
+truncated: no (text as returned by the fetch tool; screenshot and hook config details omitted)
+
+Title: [FEATURE] Option to disable notifications #12046
+State: Closed (completed Aug 17, 2026) · Opened: Nov 20, 2025 · Labels: area:tui, enhancement, platform:macos
+Body reactions: 👍 41
+
+Body: "I find it very annoying that Claude Code sends me notifications via my Terminal app which show up as MacOS system notifications. ... I would like there to be a configuration option to disable notifications entirely." Priority: Critical - Blocking my work
+
+Comments (no role label unless stated):
+1. Nov 25, 2025 (👍 23): "+1 This is very _very_ annoying ... It's gotten worse today suddenly — I get a notification for just starting a session, and when Claude Code ticks off a todo from its plan, and just randomly when it is still in the middle of thinking, and of course the usual end of response. It's blocking me from doing focused work with no documented way of turning off or controlling what notifications are sent."
+2. Nov 25, 2025 (👍 5): "+1 I agree with the comments above. It's sending so many notifications that I'm just ignoring it because it's become noise."
+3. Collaborator, Nov 26, 2025: "We have a fix for the excessive notifications that should be out in the latest release. Will leave the issue open because it's asking for a setting."
+8. Feb 14, 2026 (👍 4): "... Notifications fire from tabs that have been completely dormant for minutes (or longer). When you're managing 5-6+ Claude Code sessions across different projects, you get a barrage of macOS notifications from idle tabs that finished their work ages ago. It makes notification center completely useless because it's flooded with stale "Ready for input" alerts. ... What would actually fix this: ... Tab/window focus awareness ... A debounce or cooldown option ..."
+9. Mar 5, 2026 (👍 3): "... What I would expect is to be notified when: 1. Claude needs my input 2. Claude finished the work I do not see much value in other notification types."
+10. Mar 27, 2026: "I find it quite annoying that Claude sends notification even when it's being focused. ..."
+11. May 1, 2026 (👍 7): "Yes control of notifications needs to be much more granular eg. default first. Permissions to run commands yes/no Waiting an answer to a question yes/no Bored waiting for next prompt no/yes"
+12. Collaborator, Aug 17, 2026: "You can turn these off today: run `/config` and set **Notifications** to disabled, or add `"preferredNotifChannel": "notifications_disabled"` to `~/.claude/settings.json`."

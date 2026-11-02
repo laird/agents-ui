@@ -1,0 +1,40 @@
+# Written by /nlyu-pm:scout from what the PM said (case build, 2026-11-02).
+budget:
+  fetches: 20
+  searches: 8
+drop:
+  - rung 3   # no phone app
+  - rung 4   # PM did not tick numbers and competitors
+  - rung 5
+  - rung 6   # PM did not tick official and search
+  - rung 7
+add:
+  # The PM named neighbouring tools; read as community sources (their users are agents-ui's likely users).
+  - id: herdr-issues
+    name: herdr GitHub issues, most reactions first
+    kind: html
+    url: "https://github.com/maxjendrall/herdr/issues?q=is%3Aissue+{query}+sort%3Areactions-%2B1-desc"
+    rung: 1
+    hears_from: terminal power users running several coding agents side by side
+    max_fetches: 2
+  - id: claude-squad-issues
+    name: claude-squad GitHub issues, most reactions first
+    kind: html
+    url: "https://github.com/smtg-ai/claude-squad/issues?q=is%3Aissue+{query}+sort%3Areactions-%2B1-desc"
+    rung: 1
+    hears_from: developers managing several Claude Code or Codex sessions in tmux and worktrees
+    max_fetches: 2
+  - id: claude-code-issues
+    name: Claude Code GitHub issues about sub-agents and background work, most reactions first
+    kind: html
+    url: "https://github.com/anthropics/claude-code/issues?q=is%3Aissue+{query}+sort%3Areactions-%2B1-desc"
+    rung: 1
+    hears_from: Claude Code users who file bugs and feature requests; Anthropic staff reply
+    max_fetches: 2
+  - id: laird-agents-issues
+    name: laird/agents GitHub issues (autocoder and modernize plugins)
+    kind: html
+    url: "https://github.com/laird/agents/issues?q=is%3Aissue+{query}"
+    rung: 1
+    hears_from: the plugin's own users, mostly its maintainer
+    max_fetches: 1

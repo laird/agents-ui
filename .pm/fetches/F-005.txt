@@ -1,0 +1,36 @@
+url: https://github.com/anthropics/claude-code/issues/19976
+rung: 1 (extra: claude-code-issues)
+accessed: 2026-11-02
+truncated: no (text as returned by the fetch tool; reactor names omitted here)
+
+Title: [FEATURE] Support terminal notifications when running inside tmux
+Issue: #19976, anthropics/claude-code
+State: Closed (completed), then locked as resolved
+Opened: January 22, 2026
+Reactions on the body: 👍 26
+Labels: area:tui, enhancement
+
+Issue body (verbatim):
+Problem Statement
+Claude Code's desktop notifications don't work when running inside tmux. This is because tmux requires applications to wrap OSC sequences in DCS passthrough format, but Claude Code sends plain OSC sequences.
+Proposed Solution
+Detect when running inside tmux (via `$TMUX` environment variable) and wrap notification sequences in DCS passthrough format: [...]
+Alternative Solutions
+Users can create a notification hook as a workaround. [script and settings omitted here]
+This workaround requires manual setup and isn't discoverable by users.
+Additional Context
+Requires tmux 3.3+ with `allow-passthrough on` (or `all`)
+
+Comments:
+2. no role label, Jan 22, 2026 (👍 2): "You can also try `workmux` as it has status tracking: https://workmux.raine.dev/guide/status-tracking"
+3. no role label, Feb 7, 2026: "amp has a pre-installed skill to configure this for the user. And they use the `\ePtmux;...\e\\` escape sequence when running inside tmux. claude-code should also support this behavior."
+4. no role label, Feb 20, 2026: "I built this recently to solve this issue: [C3Poh] - a Telegram comms bridge for Claude Code. Your agent DMs you when it's done (or when something goes wrong), and you can DM it back to kick off new tasks. ..."
+5. no role label, Feb 27, 2026 (👍 5): "+1 — experiencing this with Ghostty + tmux 3.6a. Have `allow-passthrough on` set but notifications don't come through."
+6. no role label, Mar 20, 2026 (👍 4): "Progress bar (OSC 9;4) also doesn't work in tmux ... So tmux DCS passthrough is functional — Claude Code just isn't wrapping the sequences. The v2.1.78 changelog reportedly added tmux passthrough support, but it doesn't appear to be working as of 2.1.80."
+7. no role label, Mar 26, 2026: "2.1.78 supposedly fixed this problem but I can also confirm it does not work."
+8. no role label, Mar 30, 2026: "notifications were working fine for me in tmux until recently. 2.1.78 seems to have broken my setup ... update: downgraded to 2.1.77 and notifications work again. so, 2.1.78 clearly broke something"
+9. no role label, Apr 1, 2026: "For anyone hitting this in SSH + tmux setups — I built a workaround as part of [cc-clip] ... The approach bypasses OSC entirely: Claude Code's `Stop` and `Notification` hooks pipe JSON to a small script that forwards it through the SSH reverse tunnel to a local daemon, which then delivers via macOS Notification Center (or terminal-notifier). ... Hope it helps someone dealing with the same frustration!"
+10. no role label, May 14, 2026 (👍 1): "For tmux users where the `Notification` hook never fires, this hook config works without `allow-passthrough` — it bypasses OSC entirely and writes `\a` to the Claude pane's tty: [...] Combined with default `monitor-bell on` + `window-status-bell-style reverse`, the Claude window-status entry inverts on end-of-turn and tool-permission prompts. Doesn't cover `AskUserQuestion` — no current hook fires for it (#15872, #13830, #44326)."
+12. no role label, Jun 1, 2026 (👍 1): "Until this is fixed upstream, I put together a more complete workaround that's been working well for me on iTerm2 + tmux: ... Focus-gating. OSC 9 doesn't auto-suppress when the session is focused, so you get pinged for the tab you're already looking at. ... Tab flagging via BEL so you can see which tab needs attention. ..."
+13. Collaborator (Anthropic), Aug 17, 2026: "This shipped in v2.1.78: notification and progress sequences are now wrapped in tmux passthrough format automatically. You just need `set -g allow-passthrough on` in your `~/.tmux.conf` so tmux forwards them to the outer terminal."
+14. Collaborator, Aug 17, 2026: closed the issue as completed.
