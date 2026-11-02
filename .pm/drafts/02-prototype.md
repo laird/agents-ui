@@ -4,7 +4,7 @@
 |---|---|
 | Status | draft |
 | Based on | outputs/01-discovery.md rev 1 · OPP-003 |
-| Path used | HTML fallback (Claude Design available, but its export would land outside this cloud session; PM chose HTML) |
+| Path used | HTML fallback, on the product's own village renderer (Claude Design available, but its export would land outside this cloud session; PM chose HTML) |
 | File | outputs/prototype/index.html |
 | Surface · viewport | desktop web · 1440×900 |
 | Run summary | (written at close) |
@@ -90,29 +90,35 @@
 | Agent dots (amber = waiting) | src/web/ui.html lines 455 to 467 (Verified) | agent markers |
 
 ## 7. Where the prototype differs from the product UI
-- Markers carry their source and waiting time ("Needs you · herdr · 3 min"); the product shows an amber dot and "needs input" with no source (deliberate).
-- A dashed "Guessed from screen" marker and badge for states read from screen text (deliberate).
-- A "Why" side panel listing source, ask, since and agreement; the product has no such panel (deliberate).
-- A Temporal app card on the dashboard; the product shows Temporal only in the village view (deliberate, per the PM's sources).
-- A banner and greyed card when a source cannot be read; the product shows nothing (deliberate).
-- Swarm cards are simplified: no stats row, no issue panel, no stop or resume buttons (limitation).
+- Built on the product's own village renderer (`src/web/village.html`, the Worktree Hollow page), fed with synthetic data instead of `/api/village`; regenerate with `python3 .pm/prototype-build.py outputs/prototype/index.html` (deliberate).
+- A sign over each house that needs you names who reported it and how long it has waited: solid gold for reported ("herdr · 3 min", "Temporal · 6 min"), dashed for guessed ("screen guess · 40 s"); the product shows an orange "!" with no source (deliberate).
+- A guessed wait also gets a dashed rim on its "!" bubble (deliberate).
+- Selecting a sign or a house opens a "Why" dialog: source, what it asked, since when, other sources, with Open agent; the product's dialog shows only issue and status (deliberate).
+- An unreachable source puts that village's houses in fog with "?" signs and a banner; the product shows nothing (deliberate).
+- Open agent shows a static session excerpt; answering is out of scope (limitation).
+- The demo bar switches scenarios; the picker also shows a Temporal app, "temporal:support", drawn as a runtime village (deliberate).
 
 ## 8. Walkthrough findings
-This is a design critique, not customer validation.
+This is a design critique, not customer validation. Revision 0 was a conventional dashboard; the PM's click-through led to revision 1, the village.
 | Area | Claude's check | PM's click-through | Severity |
 |---|---|---|---|
-| Labels | Pass: markers read "Needs you · source · time"; buttons say Open agent, Close, Retry, Open agent anyway | | |
-| Navigation | Pass: every panel has Close; the session view has Back to swarms; demo bar reaches both states | | |
-| Keyboard (Tab order, Enter and Space, focus moves to the new screen's heading) | Pass: Tab reaches the first marker, Enter opens the panel, focus lands on its heading (checked in a headless browser) | | |
-| State clarity (each state visibly different, each offers a next step, error uses role="alert") | Found and fixed before the walkthrough: long "last known" text spilled into the next card, and markers wrapped behind the panel. Now pass: unreachable banner has role="alert" and Retry; guess state has a dashed badge and a next step | | minor (fixed) |
-| Contrast (body text and primary buttons at least 4.5 to 1) | Finding: faded "last known" text in the unreachable state is under 4.5:1 by design (opacity .55); everything else passes | | minor |
-| Scope (nothing from another focus area) | Pass: no answering, notifications or waiting list | | |
+| Labels | Pass (rev 1): signs read "source · wait"; dialog buttons say Open agent, Close, Back to the village | "The data model looks fine, but it needs to be visualized as a village, not a traditional app gui." | major (rev 0), fixed in rev 1 |
+| Navigation | Pass: dialog closes with ×, Close or Esc; changing village closes it (fixed in rev 1: a stale dialog stayed open) | as above | minor (fixed) |
+| Keyboard (Tab order, Enter and Space, focus moves to the new screen's heading) | Pass: the canvas cannot take focus, so each waiting house has a real button sign; Tab reaches it, Enter opens the dialog, focus lands on its title | as above | |
+| State clarity (each state visibly different, each offers a next step, error uses role="alert") | Pass: unreachable = fog, "?" signs and a role="alert" banner; guess = dashed sign, dashed bubble rim and "this may be wrong"; each offers Open agent | as above | |
+| Contrast (body text and primary buttons at least 4.5 to 1) | Pass: gold signs with dark text, dialog text on the menu blue; faded fog is deliberate | as above | |
+| Scope (nothing from another focus area) | Pass: no answering, notifications or waiting list | as above | |
 
 ## 9. Revision made
-(Filled after the walkthrough.)
+- Change: rebuilt the prototype as the 16-bit village instead of a conventional dashboard: source-and-wait signs over waiting houses (solid reported, dashed guessed), a Why dialog with Open agent, fog for an unreachable source.
+- Tied to: the PM's walkthrough finding (section 8, Labels) and SIG-007, SIG-013, CON-003 (show whether a wait is reported or guessed).
+- Before and after: a three-card dashboard with pill markers → the village with signs over the houses that need you.
 
 ## 10. Remaining limitations
-(Filled at close.)
+- Static data per scenario; waits do not tick and agents do not move between states.
+- The real village page's picker does not follow a link change (found here; fixed only in the prototype).
+- Answering, freshness ("checked 5 s ago") and the single waiting list are not shown.
+- Only the medieval style was checked; the modern style draws the same signs.
 
 ## 11. Decision record
 | Check-in | Claude recommended | PM decided | Reason / trade-off |
