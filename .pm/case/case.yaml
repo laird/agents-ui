@@ -18,7 +18,7 @@ repositories:
     url: https://github.com/laird/agents-ui
     host: github
     default_branch: master
-    pinned_sha: 0019fe82bb464451f3df7678a4de2392c4283c0b
+    pinned_sha: e4422c5dc22698500b71a8c9865379b138378eb4  # re-pinned for run 2 (was 0019fe8)
     pinned_at: "2026-11-02"
     license: unknown
     clone_to: null

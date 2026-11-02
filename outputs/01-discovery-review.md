@@ -1,56 +1,26 @@
-# Discovery review: agents-ui · Attention and answering
+# Evidence review: A feature from spec to production (Scout run 2)
 
-| Field | Value |
-|---|---|
-| Reviewed | .pm/drafts/01-discovery.md, before the priority check-in |
-| Reviewer | nlyu-pm:discovery-reviewer (read-only) |
-| Reviewed at | 2026-11-02 |
-| Result | 0 blocking · 8 major · 5 minor · quotes 10/10 verified · floor met |
+Reviewer: the nlyu-pm discovery-reviewer agent (read-only), 2026-11-02, against `.pm/drafts/01-discovery.md`, fetches F-016 to F-032, and laird/agents-ui at e4422c5 (lines re-checked at the current head).
 
-## Summary
-All ten quotes match their saved fetches word for word and all five constraint lines are at their cited paths. Nothing is blocking; the major findings were about how strongly the brief states its evidence (source-type counts, listing pages labelled Evidence, unreliable reaction counts). The coverage floor is met: approved allowed.
+**Verdict:** all 8 quotes are verbatim in their saved fetches, and all 5 code constraints are at the cited lines. The problems were about weight, not fabrication. All three opportunities (OPP-004, OPP-005, OPP-006) are **provisional**: the coverage floor for market or competitor observations is not met (1 of 2).
 
-## Findings and disposition
-| ID | Severity | Area | Finding | Where | Disposition |
-|---|---|---|---|---|---|
-| RV-001 | major | label | SIG-004, SIG-015 (search listings) and SIG-016 (forum blurbs) were labelled Evidence | 4c | fixed in brief (relabelled Inference, as SIG-014) |
-| RV-002 | major | label | Listing-page numbers are not thumbs-up counts; "144 thumbs-up", "9 to 49 reactions", "top item 18", and the "5,000+" base are unreliable | 4c SIG-004, -014, -015; OPP-003 | fixed in brief (numbers dropped or re-described; base corrected to 989 of 5,794 matching "notification") |
-| RV-003 | major | label | SIG-016 overstated: "several build their own UI" rests on one post; post 758 asks about approval by email | 4c SIG-016 | fixed in brief (claim restated with posts 19653 and 758) |
-| RV-004 | major | label | Rung-2 items and SIG-010 cite permalinks, not the fetched search URLs | 4c | fixed in brief (a "Fetched as" line with the saved URL added to each) |
-| RV-005 | major | opportunity | OPP-001 counted channels as source types | OPP-001 | fixed in brief (6 signals, 5 Evidence, 2 source types) |
-| RV-006 | major | opportunity | OPP-003 overstated: SIG-011 cited as support and counter, SIG-014 is Inference, SIG-003 and SIG-013 the same issue | OPP-003 | fixed in brief (4 signals, 3 Evidence, 2 source types; SIG-011 out of support) |
-| RV-007 | major | triangulation | The tmux fix was released by March 2026 with mixed reports; August is the issue's closing | Section 2, Theme A | fixed in brief |
-| RV-008 | major | opportunity | OPP-001 reads GitHub issues; not tested against the third-party key or OAuth exclusion | OPP-001 | PM decided (D-003): reading through the PM's own signed-in gh is allowed |
-| RV-009 | minor | opportunity | Exclusions checks did not name each case exclusion | OPP-001 to 003 | fixed in brief (all seven named) |
-| RV-010 | minor | triangulation | "Who says so" counts did not match cited items | Section 2 | fixed in brief |
-| RV-011 | minor | label | SIG-010 base was the first page of 100 items, not the repository | 4c SIG-010 | fixed in brief |
-| RV-012 | minor | triangulation | Rung-1 items sat in the "Numbers, competitors, official" column | 4a | fixed in brief (moved to the rung-1 column) |
-| RV-013 | minor | counter-evidence | SIG-002 and SIG-011 used as both support and counter-evidence | 4a | accepted with note (a fetch stands behind each; the double use is now stated in the table) |
-
-## Quote verification
-| Quote | Saved file | Result | Note |
+| ID | Severity | Finding | Disposition |
 |---|---|---|---|
-| QUO-001 | F-008 | verified | |
-| QUO-002 | F-009 | verified | |
-| QUO-003 | F-011 | verified | |
-| QUO-004 | F-011 | verified | |
-| QUO-005 | F-006 | verified | |
-| QUO-006 | F-012 | verified | |
-| QUO-007 | F-007 | verified | |
-| QUO-008 | F-007 | verified | |
-| QUO-009 | F-008 | verified | |
-| QUO-010 | F-006 | verified | |
-
-## Coverage floor
-| Floor | Minimum | Found | Met |
-|---|---|---|---|
-| Rungs with at least one Evidence item | 2 | 2 | yes |
-| Evidence items in total | 5 | 12 after relabelling | yes |
-| CON-### whose quoted line was confirmed | 2 | 5 | yes |
-| Quotes per opportunity verified or PM-held | 1 | OPP-001: 3, OPP-002: 3, OPP-003: 1 | yes |
-
-Verdict: approved allowed
-
-## Notes for the PM
-- The constraint lines were checked in the current working tree; the code has moved past the pinned commit 0019fe8, and all five lines are still at their cited places.
-- OPP-003 is the thinnest: three Evidence items from two kinds of source.
+| RV-001 | blocking | Market or competitor observations: 1 of the 2 required (SIG-017) | Open. The PM's call: waive it (community-only sources were chosen for this run) or research one more |
+| RV-002 | major | The "69 votes" are on GitHub's own announcement, not on user requests | Fixed: the requests (21 and 20 votes) are cited as demand |
+| RV-003 | major | "Roll-up still asked for" was wrong: GitHub's API already has `sub_issues_summary` | Fixed |
+| RV-004 | major | laird/agents #146 and #148 are the product owner's own proposals | Fixed: counted separately from customer voice |
+| RV-005 | major | SIG-022's source was given as an unfetched Reddit URL, with "date not shown" | Fixed: Lemmy post URL, 2026-09-12, score -1, 0 comments |
+| RV-006 | major | SIG-025 (ship small, often) is context, not demand | Fixed: removed from OPP-005's support |
+| RV-007 | major | Theme B was called fully open, but GitHub Deployments records the sha per environment | Fixed: "partly addressed; open per feature" |
+| RV-008 | major | Theme A's counter-evidence was weak and not from a dedicated search | Fixed: labelled weak, and F-024 42761674 added as a counter |
+| RV-009 | major | Theme C was called "recurring" without one direct signal | Fixed by RV-010 |
+| RV-010 | major | On-topic QA, UAT and pre-production sign-off comments in F-017 and F-026 were set aside | Fixed: logged as SIG-032 to SIG-034, with QUO-019 to QUO-021 (each checked verbatim) |
+| RV-011 | minor | Community count was 12; actually 11 | Fixed (14 with the new signals) |
+| RV-012 | minor | Supply signals (SIG-030, SIG-031) were counted as demand | Fixed: demand and supply counted separately |
+| RV-013 | minor | OPP-005 cited CON-007 without listing it | Fixed |
+| RV-014 | minor | Case and session files still pinned 0019fe8 | Fixed: re-pinned to e4422c5 |
+| RV-015 | minor | CON-007's quote didn't show the claim | Fixed: describes the struct's whole field span |
+| RV-016 | minor | Reading sub-issues and Deployments extends D-003; GitHub Environments may depend on the plan for private repositories | Noted in the exclusions checks, to confirm before building |
+| RV-017 | minor | SIG-030 left out the non-transient and auto_inactive caveats | Fixed |
+| RV-018 | minor | OPP-006 left out QUO-018, and QUO-015 linked nowhere | Fixed |

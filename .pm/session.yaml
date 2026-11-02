@@ -35,14 +35,14 @@ sources:
     owner_repo: laird/agents-ui
     root: "."
     clone_to: null
-    pinned_sha: 0019fe82bb464451f3df7678a4de2392c4283c0b
-    verified_sha: 0019fe82bb464451f3df7678a4de2392c4283c0b
+    pinned_sha: e4422c5dc22698500b71a8c9865379b138378eb4  # re-pinned for run 2 (was 0019fe8)
+    verified_sha: e4422c5dc22698500b71a8c9865379b138378eb4
     method: in-place
     access: public
     archive_ref: null
     dirty_at_start: false
     baseline: ""
-    moved_to: 45ee978
+    moved_to: null
     clean_at_start: true
     clean_at_end: true
 
