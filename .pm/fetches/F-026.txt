@@ -1,0 +1,40 @@
+url: https://hn.algolia.com/api/v1/search?query=%22staging%22%20%22UAT%22%20feature%20release&tags=comment&hitsPerPage=10
+rung: 2 (hackernews_comments)
+accessed: 2026-11-02
+truncated: no (full comment_text of each hit; HTML tags removed, entities decoded)
+
+nbHits: 2
+
+--- objectID 18937649 · created 2019-01-18 · story: Let’s talk about open-source sustainability · https://news.ycombinator.com/item?id=18937649
+I think for this to be feasible, a project would need to maintain firm to strict discipline about testing and versioning. Let me expand on that.
+
+When an issue comes in, once verified, a test that reproduces the unwanted/unexpected behavior is attached to the issue. This lets both the reporter and dev prove the issue exists, and lets the dev trigger the behavior on-demand to aid in his troubleshooting efforts. Then, once the issue is fixed, the test proves it. Afterward, that test should go into the regression test suite that gets run before each release to make sure it doesn't come back.
+
+When the fix is released, it ideally would be released only in a bugfix release, bumping only the patch version number a al SemVer, and not wrapped up in a feature release. It should be a lot easier to get a patch release prioritized through testing, staging, UAT, and finally into production when the version number tells you that the bugfix was the only thing that has changed, and the test suite can prove that.
+
+Coming back from fantasy land to reality there's other things that would have to happen to make this feasible, but it's well past bed o'clock for me. I'll try to remember to post an additional reply later this morning.
+
+--- objectID 17473030 · created 2018-07-06 · story: Ask HN: What's your branch and merge strategy till production deployment? · https://news.ycombinator.com/item?id=17473030
+I don't argue the following is good, but it's what's been done for a couple of years for an internally used line of business app with a sole enterprise owner/client. Release frequency is roughly fortnightly for feature work.
+
+there's one main team git repo for application code, people push feature branches into it, then there's code review (gitlab with automated pre-merge runs off the unit tests) and automated post merge runs of all the automated tests (takes more like 1-2 hours).
+
+dev - main integration branch
+
+feature/$ticket - branched off dev, typically merged into dev after code review but before serious testing or uat
+
+master - dev is merged into master infrequently, when we have dev branch in a state that plausibly resembles releasable software.
+
+We can build deployment packages from any branch, but typically build packages from dev branch to deploy into test environments. When we merge dev into master, build a package from master, then do full dry run of release into staging env before deploying same package to production.
+
+What doesn't work so well:
+
+* Same issue as bitherd's comment: since features are merged into dev branch before manual QA/uat process, quite often dev branch contains mix of new changes that are good to release, and changes that are broken and block release from that branch.  there is increasing automated test coverage to catch some of this, but historically culture was not to write automated tests and try to manually test everything (yup, that doesn't scale for regression testing).
+
+* because of above, when the current date is a week or less from a planned prod release, devs cannot merge new feature branches into dev branch unless they are small patches to stabilise dev. This could be trivially avoided by forking release branches off dev branch and using these to stabilise to decouple from dev branch, but we never started doing that...
+
+* i lied by omission earlier: instead there are actually multiple "dev" integration branches , say dev dev2, targeting different release dates. When we are gearing up to do a release from dev branch then more experimental changes that haven't gone through uat can be merged into dev2 targeting a later release date. dev is merged into dev2 every day. After a release dev2 is merged into dev. the worst it ever got was dev, dev2, dev3 and devbarr when there were large batches of features that had been planned and were in some state of contruction but stakeholders weren't yet agreed should be released for consumption by users. At some point obviously you can't kid yourself this is continuous integration, is continuous something but not integration.
+
+* I lied by omission earlier - above is what we do for application code, we have multiple other repos (related to Jenkins build scripts, per-environment configuration) where we more or less just feature branch off master, merge into master and try to keep master stable.
+
+We're in a place now where in principle we could bake a package off any random branch and deploy it to prod environment in about half an hour (without testing and with an outage), so even though some parts of our branching strategy are not ideal probably the main blocker to a higher release cadence is just getting the different stakeholders (business, users, support, ops, dev, change management approval process) to agree to it.

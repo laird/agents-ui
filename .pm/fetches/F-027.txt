@@ -1,0 +1,107 @@
+url: https://hn.algolia.com/api/v1/search?query=%22what%27s%20in%20production%22&tags=comment&hitsPerPage=12
+rung: 2 (hackernews_comments)
+accessed: 2026-11-02
+truncated: no (full comment_text; HTML removed)
+
+nbHits: 26
+
+--- objectID 9456630 · created 2015-04-29 · story: Blinking LED Using Elixir Embedded Image on Raspberry Pi · https://news.ycombinator.com/item?id=9456630
+I'm not sure what's in production, but Duncan has talked about just this in his talk "The State of LFE: A Lisp Flavoured Smörgåsbord" 8 months ago:
+
+  https://vimeo.com/102108797
+
+--- objectID 5000561 · created 2013-01-03 · story: Web Scraping with Node.js and Chimera · https://news.ycombinator.com/item?id=5000561
+Great project. The biggest question for me when I'm using phantomjs is why phantomjs is trying to replicate nodejs infrastructure. For example, phantomjs has an HTTP server feature for processing incoming requests. This doesn't make sense to me because a browser shouldn't be a server. If you need to get information out of the worker, you should POST it somewhere. The proclivity of phantomjs users to prefer stdout is astounding. It's definitely the #1 question or issue that I get fielded in #phantomjs on freenode.
+
+For example, for POSTing and reading from redis/resque I wrote this (proof of concept, not what's in production):
+
+https://gist.github.com/000037f472b72d9490a6
+
+A few thoughts..
+
+    > There are similar "glues" like phantomjs-node that integrate phantomjs by
+    > spawning a process, and processing the stdout stream, but it is limited by 
+    > what can be done via the command line of phantomjs. If you really want direct
+    > api access to the browser, the best way is via direct integration.
+
+This seems like a lot of overhead on top of a phantomjs (or even just a generic webkit) worker. Substack's approach was to just put a proxy in front of a browser that injects a  tag into the page to boss the browser around:
+
+https://github.com/substack/schoolbus
+
+Supposedly the actual browser client shouldn't matter, as long as your fleet of workers are up and running. I bet chimera's approach will end up with more access to npm modules in the long run compared to phantomjs.
+
+Also, the link wasn't in the article: https://github.com/deanmao/node-chimera
+
+For the python equivalent of this project, there's https://github.com/kanzure/pyphantomjs
+
+--- objectID 48279449 · created 2026-05-26 · story: Using AI to write better code more slowly · https://news.ycombinator.com/item?id=48279449
+I have noticed this as well, but I think it's somewhat a good thing. I know what I want for my application more than Claude does for example, especially when it comes to what's in production.
+
+An example from earlier, Claude strongly suggested a migration that would run a full vacuum on postgres. However, in production this would lock tables which would grind the application to a halt. After I informed Claude that there were millions of rows in production, it accepted that and helped me get to the right thing.
+
+Another example, I'm developing a TOTP authentication app because I'm dissatisfied with all those that I've tried. I want something strictly local, and with a very easy use case when you have dozens or even a hundred or more accounts on there, that is also efficient when left open for long periods of time. Claude strongly suggested that we force users to encrypt their vault with a passphrase all the time. However this makes the CLI extremely painful to use if you are using a strong passphrase. I told Claude about the user experience impacts and that I wanted to allow users to optionally use a vault with no passphrase encryption, and it accepted that and suggested as a medium that we have a checkbox for the user to explicitly acknowledge that they're creating an unencrypted vault on disc. This is the right thing IMHO.
+
+--- objectID 48028944 · created 2026-05-05 · story: AI didn't delete your database, you did · https://news.ycombinator.com/item?id=48028944
+>But that won't take away the inability of the LLM from confusing whats in dev, whats in production, whats in localhost and whats remote
+
+In my experience, Claude Code with Opus 4.7 tends to assume things are production unless explicitly told otherwise.
+
+>there's no way to force the LLM into a protocols that limits their damage to a remote system or a narrow scope of tools
+
+Might not be able to force it but prompting and context help. An AGENTS.md that explicitly calls out what is and isn't production helps (at least with Claude Code)
+
+Not sure about OpenCode but in Claude Code, memories also help (more injected context)
+
+--- objectID 48023339 · created 2026-05-05 · story: AI didn't delete your database, you did · https://news.ycombinator.com/item?id=48023339
+One thing AI can power nicely is the anti-SaaS movement. Being able to just boot a cheap PC and test out any of the open source packages is so infinitely easier than piling into all the random credential Bazaars.
+
+But that won't take away the inability of the LLM from confusing whats in dev, whats in production, whats in localhost and whats remote; I've been working on getting a tools/skill for opencode that works with chrome/devtools via a linuxserver.io image. I can herd it to the right _arbitrary_ ports, but every compaction event steers it back to wanting to use the standard 9222 port and all that. I'm tempted to just revert it but there's a security and now, security-through-LLM-obscurity value in not using defaults. Defaults are where the LLM ends up being weak. It will always want to use the defaults. It'll always forget it's suppose to be working on a remote system.
+
+Using opencode, there's no way to force the LLM into a protocols that limits their damage to a remote system or a narrow scope of tools. Yes, you can change permissions on various tools, but that's not the weakness that's exposed by these types of events. The weakness is the LLM is a averaged 'problem solver' so will always tend towards a use case that's not novel, and will tend to do whatever it saw on stackoverflow, even if what you wanted isn't the stackoverflow answer.
+
+--- objectID 47250829 · created 2026-03-04 · story: Nobody gets promoted for simplicity · https://news.ycombinator.com/item?id=47250829
+To add to this, sometimes leadership will assume (or even imply) that there's some laziness involved in not wanting to jump immediately on-board with the complex proposal.
+
+I often end up saying, "I can build this, and I will build this if product insists on it, but first let me suggest an alternative ordering of deliverables that starts with a simple implementation and moves towards this one." In almost every case, that simple implementation is still what's in production years later.
+
+--- objectID 44070416 · created 2025-05-23 · story: 1,145 pull requests per day · https://news.ycombinator.com/item?id=44070416
+> With some napkin math assuming a similar distribution today, that would mean on average each engineer ships at least 1 change to production every 3 days.
+
+This is the important metric. It means there is very little divergence between what’s being worked on and what’s in production. The smaller the difference, the quicker you deliver value to users and the less risky it is to deploy.
+
+--- objectID 44004456 · created 2025-05-16 · story: Prompts for our Grok chat assistant and grok bot on X · https://news.ycombinator.com/item?id=44004456
+"We need to feign some transparency and release something. Quick, sanitize the instructions and put something on a repo, doesn't need to be exactly what's in production."
+
+--- objectID 42407293 · created 2024-12-13 · story: Parkinson's Law: It’s real, so use it · https://news.ycombinator.com/item?id=42407293
+Fwiw I agree with most of what you said, but as a business owner I can't let this one slide:
+
+> In the end all the discussion should be about the code - if it is not about the code you are discussing the wrong thing.
+
+The code is important, but in the end it's all about the customer. For us, if it's not about the customer (in the end), you're discussing the wrong thing. This is a key part of our "ship fast and incrementally" ethos - how can you tell whether something is better than what's in production now? By explaining how it impacts the customer.
+
+--- objectID 42065042 · created 2024-11-06 · story: Monorepo – Our Experience · https://news.ycombinator.com/item?id=42065042
+To me, monorepo vs multi-repo is not about the code organization, but about the deployment strategy. My rule is that there should be a 1:1 relation between a repository and a release/deployment.
+
+If you do one big monolithic deploy, one big monorepo is ideal. (Also, to be clear, this is separate from microservice vs monolithic app: your monolithic deploy can be made up of as many different applications/services/lambdas/databases as makes sense).  You don't have to worry about cross-compatibility between parts of your code, because there's never a state where you can deploy something incompatible, because it all deploys at once. A single PR makes all the changes in one shot.
+
+The other rule I have is that if you want to have individual repos with individual deployments, they must be both forward- and backwards-compatible for long enough that you never need to do a coordinated deploy (deploying two at once, where everything is broken in between). If you have to do coordinated deploys, you really have a monolith that's just masquerading as something more sophisticated, and you've given up the biggest benefits of both models (simplicity of mono, independence of multi).
+
+Consider what happens with a monorepo with parts of it being deployed individually. You can't checkout any specific commit and mirror what's in production. You could make multiple copies of the repo, checkout a different commit on each one, then try to keep in mind which part of which commit is where -- but this is utterly confusing. If you have 5 deployments, you now have 4 copies of any given line of code on your system that are potentially wrong. It becomes very hard to not accidentally break compatibility.
+
+TL;DR: Figure out your deployment strategy, then make your repository structure mirror that.
+
+--- objectID 41936228 · created 2024-10-24 · story: Developing with Docker · https://news.ycombinator.com/item?id=41936228
+I love Docker (more so the idea of containers). Use it almost everywhere: self hosting services, at work everything is deployed as a docker container.
+
+Except local development. Absolutely hate the "oh need to add a dependency, gotta rebuild everything" flow.
+
+I do use it if the project I'm developing against needs a DB/redis/etc, but I don't think there's a chance I'm going back to using it for local development.
+
+In fact, at work, the project where we do use docker in development actually causes the most headaches getting up and running.
+
+I use a combination of CPU architectures, so the idea of running _exactly_ what's in production when developing is already out the window.
+
+--- objectID 39084693 · created 2024-01-22 · story: Trunk-Based Development · https://news.ycombinator.com/item?id=39084693
+If there are multiple environments it quickly gets impossible to keep track of "what's in production" as a branch.
+
+Two possible solutions: Git tag everything that's getting deployed. Or just keep track of the commit hash that is deployed.

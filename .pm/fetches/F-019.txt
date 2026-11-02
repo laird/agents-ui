@@ -1,0 +1,9 @@
+url: https://github.com/orgs/community/discussions?discussions_q=sub-issues+progress+sort%3Atop
+rung: 1 (extra: GitHub community discussions)
+accessed: 2026-11-02
+truncated: yes (page as returned by the fetch tool, restructured as a table)
+
+Top: All
+1 | "🌟 Put Your First Project in the Spotlight!" | /orgs/community/discussions/137746 | New to GitHub | Sep 4, 2024 | 140 upvotes | 181 comments | Answered
+2 | "Issue fields: Structured issue metadata" | /orgs/community/discussions/189141 | Projects and Issues | Mar 10, 2026 | 93 upvotes | 999 comments | Unanswered
+3 | "Hierarchy view in GitHub Projects [Public Preview]" | /orgs/community/discussions/184225 | Projects and Issues | Jan 13, 2026 | 69 upvotes | 88 comments | Unanswered

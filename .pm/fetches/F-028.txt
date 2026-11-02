@@ -1,0 +1,588 @@
+url: https://lemmy.world/api/v3/search?q=sub-issues&type_=Posts&sort=TopAll&limit=10
+rung: 2 (lemmy_search)
+accessed: 2026-11-02
+truncated: no
+
+posts: 9
+
+--- https://programming.dev/post/20262465 · 2024-10-06 · score 12 · comments 0
+Evolving GitHub Issues (Public Beta to get sub-issues)
+
+
+--- https://lemmy.bestiver.se/post/196401 · 2025-01-19 · score 5 · comments 0
+GitHub introduces sub-issues, issue types and advanced search
+[Comments](https://news.ycombinator.com/item?id=42725692)
+
+--- https://lemy.nl/post/3955563 · 2026-06-03 · score 1 · comments 0
+Wereldwijde economische groei valt dit jaar lager uit en staat onder druk
+De wereldwijde economische groei komt steeds verder onder druk te staan door de oorlog in het Midden-Oosten. Dat [meldt](https://www.oecd.org/en/topics/sub-issues/economic-surveys/netherlands-economic-snapshot.html) de Organisatie voor Economische Samenwerking en Ontwikkeling woensdag.
+
+--- https://ibbit.at/post/212390 · 2026-03-27 · score 1 · comments 0
+Analysis: UK is ‘halving’ its climate finance for developing countries
+The UK is roughly halving the climate aid it allocates to developing countries, when accounting changes and inflation are factored in, according to new analysis by Carbon Brief.
+
+On 19 March, the government [announced](https://questions-statements.parliament.uk/written-statements/detail/2026-03-19/hcws1425) that the UK would provide “around £6bn” of international “[climate finance](https://www.carbonbrief.org/analysis-seven-charts-showing-how-the-100bn-climate-finance-goal-was-met/)” over the next three years.
+
+This replaces a previous [goal](https://www.carbonbrief.org/analysis-uk-climate-aid-to-hit-11-6bn-goal-but-only-due-to-accounting-rule-change/) to provide £11.6bn across the 2021-2026 period to help nations in the global south cut their emissions and deal with climate threats.
+
+The new target was [reported](https://www.theguardian.com/environment/2026/mar/19/uk-cut-climate-aid-budget-developing-countries-refocus) as a spending reduction of up to 14% compared to recent years, reflecting the UK’s wider plan to cut development aid and [spend more](https://www.bbc.co.uk/news/articles/clyrkkv4gd7o) on defence.
+
+In fact, Carbon Brief analysis reveals that the cut is far larger in real terms, with the new target worth around 30% less per year once inflation is taken into account.
+
+When also excluding the government’s use of widely [criticised](https://www.carbonbrief.org/revealed-uk-double-counting-500m-of-aid-for-war-torn-countries-as-climate-finance/) “[creative accounting](https://www.bond.org.uk/press-releases/2023/10/uks-international-climate-finance-commitments-are-weakening-over-70-csos-write-to-the-prime-minister/)” to boost apparent spending, the new pledge is roughly 50% lower than the old one.
+
+The drop in climate finance means that – alongside other [major donors](https://www.carbonbrief.org/analysis-nearly-a-tenth-of-global-climate-finance-threatened-by-trump-aid-cuts/) – the UK is diverging from an [international target](https://www.carbonbrief.org/analysis-why-the-300bn-climate-finance-goal-is-even-less-ambitious-than-it-seems/), agreed in 2024 at [COP29](https://www.carbonbrief.org/cop29-key-outcomes-agreed-at-the-un-climate-talks-in-baku/) in Baku, to ramp up climate aid to $300bn a year by 2035.
+
+## ‘Innovative reforms’
+
+Under the [Paris Agreement](https://www.carbonbrief.org/interactive-the-paris-agreement-on-climate-change/), the UK and other developed countries committed to provide financial support for climate action in developing countries. This “[climate finance](https://www.carbonbrief.org/analysis-seven-charts-showing-how-the-100bn-climate-finance-goal-was-met/)” comes from the UK’s wider budget for “[official development assistance](https://www.gov.uk/government/collections/official-development-assistance-oda--2)”.
+
+Successive governments have pledged set amounts of climate finance over five-year periods, supporting everything from solar energy in [Nigeria](https://devtracker.fcdo.gov.uk/programme/GB-1-203674/summary) to mangroves in [Indonesia](https://devtracker.fcdo.gov.uk/programme/GB-GOV-7-BPFBlueForests/summary).
+
+In 2019, the Conservative government promised to “[double](https://www.gov.uk/government/news/uk-aid-to-double-efforts-to-tackle-climate-change)” the previous target of £5.8bn for the financial years 2016-17 to 2020-21 and reach a total of £11.6bn between 2021-22 and 2025-26.
+
+The current Labour government inherited this goal in 2024, at a time of [geopolitical instability](https://www.carbonbrief.org/experts-what-are-the-biggest-geopolitical-risks-to-climate-action-in-2024/), conflict and [threats](https://www.carbonbrief.org/analysis-nearly-a-tenth-of-global-climate-finance-threatened-by-trump-aid-cuts/) to global climate action.
+
+Alongside other developed countries, the UK then [pledged](https://www.carbonbrief.org/analysis-why-the-300bn-climate-finance-goal-is-even-less-ambitious-than-it-seems/) at the [COP29](https://www.carbonbrief.org/cop29-key-outcomes-agreed-at-the-un-climate-talks-in-baku/) climate summit in2024 to roughly triple the total amount of global climate finance to $300bn a year by 2035.
+
+With its £11.6bn target expiring in April 2026, the government has been [under pressure](https://www.carbonbrief.org/cop30-key-outcomes-agreed-at-the-un-climate-talks-in-belem/) to set a new goal that would increase climate finance in line with this global ambition.
+
+Instead, since COP29, the UK has [announced](https://www.bbc.co.uk/news/articles/clyrkkv4gd7o) it will cut overall aid spending to 0.3% of [gross national income](https://www.oecd.org/en/data/indicators/gross-national-income.html), compared to the historic 0.7%, to raise money for military spending.
+
+This continues a trend of aid cuts [started](https://www.carbonbrief.org/analysis-how-the-uk-has-fallen-40-behind-on-its-11-6bn-climate-finance-pledge/) by the former Conservative government and mirrors [similar](https://www.euractiv.com/news/germany-slashes-climate-finance-in-blow-to-developing-worlds-cop30-priority/) cuts taking place in other countries. Most notably, the US has [virtually eliminated](https://www.carbonbrief.org/analysis-nearly-a-tenth-of-global-climate-finance-threatened-by-trump-aid-cuts/) its contribution to international climate finance.
+
+In March, foreign secretary Yvette Cooper finally [announced](https://questions-statements.parliament.uk/written-statements/detail/2026-03-19/hcws1425) details of how the UK’s headline cuts in overseas aid would impact specific spending priorities between 2026-27 and 2028-29, including climate finance. She said:
+
+> “Over the next three years, the UK will spend around £6bn of official development assistance as international climate finance. We will balance support between mitigation and adaptation and maintain a focus on nature.”
+
+This amounts to a clear cut in annual climate-finance spending, even without considering the impact of inflation or accounting changes, as the chart below shows.
+
+![UK’s annual international climate finance spending](https://www.carbonbrief.org/wp-content/uploads/2026/03/uk-announced-less-climate-finance-over-next-3-years.png)
+
+UK’s annual international climate finance spending, £bn without adjustment for inflation, by financial year for the period 2011-12 to 2025-26. The 2025-26 figure is an estimate based on the remaining finance needed to reach the £11.6bn goal. The final three years assume the new target of £6bn is divided equally over three years. Source: UK government data for [2011-12 to 2020-21](https://questions-statements.parliament.uk/written-statements/detail/2023-10-17/hcws1071) and [2021-22 to 2023-24](https://questions-statements.parliament.uk/written-questions/detail/2025-03-07/36410), with 2024-25 figure provided by FOI request.
+
+Despite Cooper’s pledge to “maintain a focus on nature”, the government also scrapped the “[ring-fencing](https://www.carbonbrief.org/analysis-uk-foreign-aid-for-nature-hits-800m-record-due-to-cash-for-carbon-credits/)” of funds for nature and forest conservation, as well as the practice of setting five-year goals to provide more certainty to climate-aid recipients.
+
+(The relatively vague “around” £6bn is also notable, given the previous targets were set at precisely £11.6bn and [£5.8bn](https://committees.parliament.uk/writtenevidence/95523/html/). This could allow the government to ultimately spend less than £6bn.)
+
+The government is also [clear](https://questions-statements.parliament.uk/written-statements/detail/2026-03-19/hcws1425) that it is shifting its focus to using public development aid to “unlock private investment for development”, [framing](https://www.gov.uk/government/news/foreign-secretary-sets-out-new-innovative-development-reforms) its overall approach as “innovative development reforms”. Cooper stated that, as well as the £6bn in climate finance:
+
+> “We will aim to generate an additional £6.7bn of UK-backed climate and nature positive investments and to mobilise billions more in private finance.”
+
+Cooper described “climate and nature” as two of the government’s four “priority” themes for its dwindling aid spending.
+
+Nevertheless, the [international development committee](https://committees.parliament.uk/committee/98/international-development-committee/) of MPs [expressed](https://committees.parliament.uk/committee/98/international-development-committee/news/212779/idc-chair-responds-to-unrelenting-aid-cuts/) “deep concern” about the new climate pledge and NGOs [called](https://www.bond.org.uk/news/2026/03/oda-allocations-for-2026-onwards-show-the-grim-reality-of-aid-cuts/#%3A%7E%3Atext=The+UK+has+announced+that%2C5+years%2C+ending+this+month.) it a “backward step”.
+
+## Accounting changes
+
+[Media](https://www.theguardian.com/environment/2026/mar/19/uk-cut-climate-aid-budget-developing-countries-refocus) [coverage](https://www.endsreport.com/article/1952256/short-sighted-uk-cut-its-international-climate-fund-approximately-13) of Cooper’s announcement stated that the new climate-finance target was 13-14% lower than the previous one.
+
+This is based on the difference between average annual contributions out to 2029 under the new pledge – around £2bn – and the £2.3bn average from the previous period.
+
+However, Carbon Brief analysis suggests that this straightforward approach makes the target seem more ambitious than it actually is.
+
+When the £11.6bn target [was set](https://www.gov.uk/government/news/uk-aid-to-double-efforts-to-tackle-climate-change) in 2019, only specific, climate-related projects funded directly by the UK government counted towards it. Then, in 2023, the Conservative government decided to loosen the criteria for the funds it counted towards the target.
+
+This included [relabelling](https://www.carbonbrief.org/revealed-uk-double-counting-500m-of-aid-for-war-torn-countries-as-climate-finance/) existing support for [multilateral development banks](https://www.investopedia.com/terms/m/multilateral_development_bank.asp) (MDBs), [humanitarian aid](https://www.carbonbrief.org/revealed-uk-double-counting-500m-of-aid-for-war-torn-countries-as-climate-finance/) and more [private-sector investments](https://www.carbonbrief.org/revealed-uk-development-body-still-has-700m-invested-overseas-in-fossil-fuel-assets/) as “climate finance”.
+
+This approach – which mirrors that of other [climate-finance donors](https://www.carbonbrief.org/cop29-six-key-reasons-why-international-climate-finance-is-a-wild-west/) – means the government is now [on track](https://www.carbonbrief.org/analysis-uk-climate-aid-to-hit-11-6bn-goal-but-only-due-to-accounting-rule-change/) to hit the £11.6bn target. (For more details, see [Carbon Brief’s](https://www.carbonbrief.org/analysis-uk-climate-aid-to-hit-11-6bn-goal-but-only-due-to-accounting-rule-change/) previous coverage.)
+
+NGOs [criticised](https://www.bond.org.uk/press-releases/2023/10/uks-international-climate-finance-commitments-are-weakening-over-70-csos-write-to-the-prime-minister/) this “creative accounting” at the time. Similarly, the UK’s [official aid watchdog](https://icai.independent.gov.uk/) [described](https://www.carbonbrief.org/revealed-uk-double-counting-500m-of-aid-for-war-torn-countries-as-climate-finance/) the changes as “moving the goalposts”, as they meant the government could meet its target without providing as much new money. Nevertheless, the current Labour government has retained the changes.
+
+The government [released](https://questions-statements.parliament.uk/written-statements/detail/2026-03-19/hcws1425) a list of specific aid allocations alongside Cooper’s recent announcement, which includes how much it plans to give to MDBs, as well as the UK-owned development body, [British International Investment](https://www.bii.co.uk/en/) (BII).
+
+Most of this money would not have been counted as climate finance under the old accounting system. Under the new system, a large portion of it will be.
+
+Carbon Brief estimates that £1.7bn of new climate finance over the next three years – roughly 28% of the total – would not have counted as climate finance before the government’s accounting changes.
+
+![Projected international climate finance from the UK](https://www.carbonbrief.org/wp-content/uploads/2026/03/more-than-3-quarters-climate-finance-pledge-results-from-accounting-changes.png)
+
+Projected international climate finance from the UK, between 2026-27 and 2028-29. The blue areas indicate contributions that Carbon Brief estimates would not have counted as climate finance before the government’s accounting changes. Source: UK government, OECD, BII, Carbon Brief analysis.
+
+As the chart above shows, much of the money reclassified as climate aid will derive from automatically counting a fixed share of UK funding for MDBs as “climate-relevant”.
+
+MDBs, including the World Bank and the African Development Bank, are major contributors to global climate finance. Member states, such as the UK, pay money into these banks, which then use their financial resources to support development projects.
+
+Notably, while virtually all of the UK’s traditional climate finance has been provided as grants to developing countries, MDBs provide most of their support as loans. The [prevalence of loans](https://www.carbonbrief.org/analysis-seven-charts-showing-how-the-100bn-climate-finance-goal-was-met/) in global climate finance is a long-standing point of contention for developing countries.
+
+## Including inflation
+
+The second key factor that influences the comparison between the UK’s old and new climate-finance targets is inflation. Experts have [highlighted](https://liu.diva-portal.org/smash/get/diva2:1696860/FULLTEXT01.pdf) the importance of correcting for inflation when considering long-term finance targets.
+
+This issue is particularly important now, as in recent years there has been [significant inflation](https://commonslibrary.parliament.uk/research-briefings/sn02792/) in the UK and around the world. This means the finance that the UK committed to give back in 2019 would not go as far today as it did then.
+
+[Adjusting](https://www.gov.uk/government/collections/gdp-deflators-at-market-prices-and-money-gdp) for this inflation, Carbon Brief estimates that the £11.6bn target would equate to £14.3bn today, using 2021-22 – the start of the £11.6bn target – as the base year.
+
+This means the government would have to pledge £14.3bn over five years – or £2.86bn a year – just to match the spending power of its previous goal. This new goal of £2bn a year is effectively a 30% real-terms cut in annual climate finance from the UK.
+
+As the chart below shows, the previous climate target from five years ago is roughly twice as large per year as the new 2026 target, after correcting for inflation and once accounting changes have been removed.
+
+![Average annual international climate finance spend by the UK](https://www.carbonbrief.org/wp-content/uploads/2026/03/uk-new-climate-finance-pledge-50-percent-lower.png)
+
+Average annual international climate finance spend by the UK under its 2021-2026 and 2026-2029 targets. Highlighted sections show the impact of inflation since 2021-22 (left) and of recent accounting changes (right). Source: UK Treasury, Carbon Brief analysis.
+
+Of course, ultimately, the government [relied](https://www.carbonbrief.org/analysis-uk-climate-aid-to-hit-11-6bn-goal-but-only-due-to-accounting-rule-change/) on accounting changes to meet the previous £11.6bn target as well.
+
+Nevertheless, this comparison shows the significant backsliding in ambition, from 2021 when the plan was an £11.6bn goal, relying on a narrow range of sources – to a 2026 target that is lower in real terms, while drawing from a wider range of sources.
+
+## Global cuts
+
+In 2024, developed countries such as the UK collectively agreed to [raise](https://www.carbonbrief.org/analysis-why-the-300bn-climate-finance-goal-is-even-less-ambitious-than-it-seems/) their global climate-finance contributions to $300bn a year by 2035, as part of their Paris Agreement obligations.
+
+This international target replaced the [previous goal](https://www.carbonbrief.org/analysis-seven-charts-showing-how-the-100bn-climate-finance-goal-was-met/) of $100bn per year by 2020, which was belatedly met in 2022.
+
+While the new target [will include](https://www.carbonbrief.org/analysis-why-the-300bn-climate-finance-goal-is-even-less-ambitious-than-it-seems/) large contributions from the private sector and MDBs, there is an expectation that a significant portion of it will still come directly from developed countries.
+
+In this context, it is clear that the trajectory of UK climate finance is going in the wrong direction – falling, rather than increasing
+
+The UK is certainly not alone in this regard. [Speaking](https://www.gov.uk/government/speeches/foreign-secretary-statement-on-international-development-19-march) in parliament, Cooper told MPs that “allies such as Germany, France and Sweden have made similar choices” to cut aid in order to fund military spending.
+
+[Very few](https://unfccc.int/Art.9.5-biennial-communications) developed countries – and none of the biggest donors – have officially announced new or updated climate-finance targets for the coming years.
+
+However, [analysis](https://careclimatechange.org/hollow-commitments-2025/) by aid organisation [CARE International](https://careclimatechange.org/) last year concluded that other major climate-finance donors, including Germany and France, will also see their climate finance fall over the coming year, following cuts to their aid budgets.
+
+The most significant drop has come from the US, which has [effectively cut](https://www.carbonbrief.org/analysis-nearly-a-tenth-of-global-climate-finance-threatened-by-trump-aid-cuts/) its international climate finance from several billion dollars a year to zero, under the Trump administration.
+
+In addition to cutting its overall contribution, the UK is [signalling](https://questions-statements.parliament.uk/written-statements/detail/2026-03-19/hcws1425) that it will focus less on grant-based climate finance from government spending and more on “unlocking” billions of pounds in private-sector finance for climate action, as well as on “reform of the international development system”.
+
+Such approaches may end up playing a major role in nations hitting the $300bn target by 2035.
+
+However, this is highly contentious, with many developing countries [arguing](https://www.carbonbrief.org/cop30-key-outcomes-agreed-at-the-un-climate-talks-in-belem/) at UN negotiations that developed countries are reneging on their responsibilities to directly “provide” climate finance.
+
+## Methodology
+
+The UK has announced that it will spend “around £6bn” on international climate finance between 2026-27 and 2028-29. Alongside this [announcement](https://questions-statements.parliament.uk/written-statements/detail/2026-03-19/hcws1425), it released a list of “official development assistance (ODA) programme allocations 2026-27-2028-29”. These include details of “planned multilateral ODA programming” – covering MDBs – and spending on “arm’s-length bodies, private sector investments, subscriptions”, including BII.
+
+Carbon Brief calculated the climate-related shares of core MDB finance – which the UK now counts as climate finance – using the climate shares for each MDB [identified](https://www.oecd.org/en/topics/sub-issues/development-finance-for-climate-and-the-environment.html) by the Organisation for Economic Co-operation and Development (OECD) in 2023. These estimates may be conservative, as MDBs have committed to increasing the shares of their projects that are climate-related.
+
+Carbon Brief calculated the extra BII contributions that the UK will count as climate finance by assuming, based on the most recent BII [annual accounts](https://ar2024.bii.co.uk/wp-content/uploads/2025/07/BII_Annual_Accounts_24_.pdf), that 41% of its commitments each year will be climate-related. Previously, only 30% of BII contributions were counted as climate finance, so Carbon Brief assumed the difference between these shares would be additional.
+
+The government has also said it now automatically counts 30% of all humanitarian assistance provided to the 10% most climate-vulnerable countries as climate finance. Based on figures provided to Carbon Brief via freedom of information request, this amounts to roughly 10% of all humanitarian assistance in recent years. The government has said it will “spend approximately £1.4bn each year in the places with the highest humanitarian need over the next three years”. Carbon Brief assumed that 10% of this – £140m each year – would count as climate finance.
+
+To calculate the impact of inflation on the £11.6bn target, Carbon Brief used the UK Treasury’s [GDP deflator](https://www.gov.uk/government/collections/gdp-deflators-at-market-prices-and-money-gdp), with 2021-22 as the baseline year.
+
+The figures in this analysis are estimates based on the data released by the government so far. Climate-finance data is subject to various accounting changes and the final figures – when they are released – are likely to be different.
+
+[![](https://www.carbonbrief.org/wp-content/uploads/2026/03/cover-montage-300x200.png)](https://www.carbonbrief.org/factcheck-nine-false-or-misleading-myths-about-north-sea-oil-and-gas/)
+
+[Factcheck: Nine false or misleading myths about North Sea oil and gas](https://www.carbonbrief.org/factcheck-nine-false-or-misleading-myths-about-north-sea-oil-and-gas/)
+
+Energy
+
+|
+
+25.03.26
+
+[![](https://www.carbonbrief.org/wp-content/uploads/2026/03/3DJE64C-1-300x200.jpg)](https://www.carbonbrief.org/analysis-co2-from-uk-data-centres-could-be-hundreds-of-times-higher-than-thought/)
+
+[Analysis: CO2 from UK data centres could be ‘hundreds of times’ higher than thought](https://www.carbonbrief.org/analysis-co2-from-uk-data-centres-could-be-hundreds-of-times-higher-than-thought/)
+
+Emissions
+
+|
+
+23.03.26
+
+[![](https://www.carbonbrief.org/wp-content/uploads/2026/03/3CM9W72-300x200.jpg)](https://www.carbonbrief.org/qa-what-englands-new-land-use-framework-means-for-climate-nature-and-food/)
+
+[Q&A: What England’s new ‘land-use framework’ means for climate, nature and food](https://www.carbonbrief.org/qa-what-englands-new-land-use-framework-means-for-climate-nature-and-food/)
+
+Nature policy
+
+|
+
+20.03.26
+
+[![](https://www.carbonbrief.org/wp-content/uploads/2026/03/2M8GAJP-300x200.jpg)](https://www.carbonbrief.org/guest-post-how-changes-to-coal-mining-have-affected-chinas-methane-emissions/)
+
+[Guest post: How changes to coal mining have affected China’s methane emissions](https://www.carbonbrief.org/guest-post-how-changes-to-coal-mining-have-affected-chinas-methane-emissions/)
+
+China energy
+
+|
+
+19.03.26
+
+The post [Analysis: UK is ‘halving’ its climate finance for developing countries](https://www.carbonbrief.org/analysis-uk-is-halving-its-climate-finance-for-developing-countries/) appeared first on [Carbon Brief](https://www.carbonbrief.org/).
+
+---
+
+*From [Carbon Brief](https://www.carbonbrief.org/) via [this RSS feed](https://www.carbonbrief.org/feed/)*
+
+--- https://reddthat.com/post/54373286 · 2025-11-17 · score 1 · comments 0
+Medios públicos y pluralismo informativo
+# Medios públicos y pluralismo informativo
+
+La investigación más reciente confirma que medios públicos fuertes y pluralismo informativo contribuyen a democracias más sanas. Por ejemplo, un estudio que compara 33 países concluye que **“países con sistemas públicos de radiodifusión independientes y bien financiados tienen democracias consistentemente más fuertes”** (asc.upenn.edu). El Director General de la Unión Europea de Radiodifusión señala que en países donde los medios públicos (PSM) gozan de buena financiación y amplia audiencia hay **“más estabilidad política y la corrupción bajo control”** (ebu.ch).
+
+Además, se observa una **alta correlación entre financiación de PSM y participación política**: los ciudadanos en esos países tienden a involucrarse más en política (ebu.ch). Por ejemplo, Estados Unidos invierte solo **0.002 % de su PIB** en medios públicos (~USD 1.40 per cápita), mientras países como Suecia, Noruega o Reino Unido destinan cerca de **USD 100 per cápita** (asc.upenn.edu).
+
+En la práctica, donde los medios públicos son débiles suele resentirse la satisfacción ciudadana con la democracia y proliferar *desiertos informativos* locales. En cambio, la literatura señala que una prensa plural y bien financiada favorece ciudadanos mejor informados, culturas políticas críticas, apoyo a procesos democráticos y mayor compromiso cívico (asc.upenn.edu; ebu.ch).
+
+---
+
+# Educación cívica y participación electoral
+
+La educación ciudadana es considerada clave para una democracia robusta. Los teóricos clásicos (Lipset, Bryce) sostienen que aunque la escolaridad alta no garantiza por sí sola la democracia, sí parece **“casi condición necesaria”** para sostenerla (v-dem.net).
+
+En la práctica, poblaciones con mayor conocimiento cívico tienden a votar e involucrarse más. En los países nórdicos, las escuelas imparten educación cívica sistemática, generando electorados informados y alta participación. Aunque la calidad del voto importa más que el porcentaje, la participación electoral alta es vista como indicador de legitimidad democrática.
+
+Estudios de la OEA muestran que en América Latina la participación promedio ha caído algunos puntos en dos décadas, lo que preocupa a expertos por la desafección electoral. Asimismo, experiencias cívicas tempranas (debates escolares, voluntariado) potencian el capital democrático.
+
+En síntesis, **mayor educación cívica está vinculada a ciudadanía activa, legitimidad política y mejor salud democrática** (v-dem.net).
+
+---
+
+# Acceso a información veraz vs. desinformación
+
+La integridad del espacio informativo es crítica. Informar debates basados en hechos refuerza la democracia, mientras la desinformación la erosiona. Un informe de la OCDE destaca que **“la rápida difusión de información falsa o engañosa genera confusión, intensifica la polarización, distorsiona debates públicos y deteriora la confianza ciudadana”** (oecd.org).
+
+Oleadas de noticias falsas siembran desconfianza y socavan procesos democráticos, como se observó en elecciones polémicas recientes (p. ej., EE. UU. 2020, referendos europeos). Por el contrario, entornos informativos plurales y gobiernos transparentes tienden a recuperar la confianza.
+
+En la práctica, estrategias como revisar redes sociales educativas o fortalecer medios públicos buscan contrarrestar el riesgo informativo (oecd.org).
+
+---
+
+# Desigualdad económica e instituciones
+
+Existe consenso creciente en que la alta desigualdad socava la democracia. La investigación encuentra una asociación robusta: **las democracias con distribuciones de ingresos muy desiguales son más propensas a retrocesos democráticos** (socialsciences.uchicago.edu; v-dem.net).
+
+Susan Stokes et al. (2025) muestran que la desigualdad es uno de los principales predictores del *backsliding* democrático, incluso en democracias ricas. El mecanismo central es que la brecha socioeconómica genera polarización y resentimiento, permitiendo ascenso de líderes populistas que erosionan instituciones (tribunales, prensa, etc.).
+
+V-Dem enfatiza que la igualdad política deriva de la igualdad material: **“las desigualdades sistemáticas en derechos y recursos limitan la participación política… una distribución más equitativa de recursos… da como resultado igualdad política y, por tanto, democracia”** (v-dem.net).
+
+Países con baja desigualdad (Suecia, Noruega, Alemania) combinan cohesión social, derechos sociales fuertes e instituciones estables. Por el contrario, crisis de desigualdad en países como Brasil o Chile han coincidido con protestas masivas y debates sobre reformas democráticas.
+
+---
+
+# Corrupción e impunidad
+
+La corrupción pública debilita la democracia al minar la rendición de cuentas. Datos de V-Dem muestran que **los países más democráticos tienden a ser menos corruptos**, aunque las diferencias no son enormes (v-dem.net). Más importante que tener elecciones libres es contar con **controles efectivos** (parlamentos y sistemas judiciales independientes).
+
+V-Dem señala que los niveles más bajos de corrupción se encuentran en países con puntajes altos en el *componente liberal* (Estado de derecho, límites al Ejecutivo), como Escandinavia y Nueva Zelanda.
+
+En países con corrupción crónica se observa baja confianza en el gobierno, clientelismo y abuso de poder. Transiciones o consolidaciones democráticas tienden a acompañarse de mejoras en transparencia y lucha anticorrupción.
+
+---
+
+# Redes sociales y polarización
+
+El papel de las redes sociales es complejo. Investigaciones como las de Pablo Barberá indican que pueden **polarizar incluso a ciudadanos más informados**. Barberá señala que **“los más sofisticados políticamente son más propensos a aceptar acríticamente argumentos afines y rechazar los contrarios… lo que lleva a la polarización de actitudes”** (idea.int).
+
+Las creencias erróneas resultan más difíciles de corregir entre los mejor educados. Las cámaras de eco refuerzan sesgos cognitivos, reducen el diálogo y facilitan la radicalización.
+
+Estudios documentan que altos niveles de desinformación en redes coinciden con caídas en la confianza mutua y deterioro del apoyo a normas democráticas (filtraciones y campañas externas). La evidencia es incipiente pero consistente: **el uso problemático de redes sin regulación adecuada está correlacionado con el auge de populismos y erosión de consensos democráticos**.
+
+---
+
+# Confianza institucional y social
+
+La confianza en instituciones públicas es a la vez un factor y un indicador de la salud democrática. Encuestas de la OCDE muestran confianza global históricamente baja: solo **39 % confía moderada/altamente** en su gobierno, mientras **44 % confía poco o nada** (oecd.org).
+
+Esta crisis de confianza afecta la política: en 2023, una mayoría (53 %) afirmó que el sistema político **“no permite gente como ellos influir”** (oecd.org). Quienes sienten que no tienen voz confían menos en las instituciones.
+
+Bajos niveles de confianza se asocian con menor cumplimiento legal, protestas y rechazo a resultados electorales. Democracias con instituciones fuertes —tribunales independientes, fuerzas policiales imparciales, burocracias profesionales— exhiben mayor respaldo ciudadano.
+
+La confianza tarda en recuperarse: tras la crisis de 2008 tomó casi una década (oecd.org).
+
+---
+
+# Conclusión
+
+Los estudios demuestran que la salud democrática es **multidimensional**. No existe un único factor determinante, sino la interacción entre:
+
+* Medios públicos robustos y acceso a información veraz.
+* Educación cívica y participación ciudadana.
+* Igualdad económica y bajos niveles de corrupción.
+* Espacio digital saludable.
+* Confianza institucional y social.
+
+Las democracias más sólidas (Escandinavia, Canadá, Costa Rica) combinan prensa plural, educación universal de calidad, Estado de derecho fuerte y baja desigualdad. Los casos de retroceso democrático (Polonia, Hungría, Venezuela) muestran patrones opuestos: acoso mediático, desinformación, polarización y corrupción.
+
+En suma, **la salud democrática es holística**: fortalecer cualquiera de estos elementos contribuye al fortalecimiento general del sistema. La evidencia sugiere que debilidades en un área —desigualdad, desinformación, falta de confianza— suelen traducirse en erosión democrática, mientras que esfuerzos coordinados elevan la resiliencia institucional.
+
+---
+
+# Fuentes
+
+Reportes académicos y organismos internacionales (V-Dem, OCDE, universidades), que documentan cuantitativamente estas correlaciones:
+
+* socialsciences.uchicago.edu
+* oecd.org
+* ebu.ch
+* v-dem.net
+* asc.upenn.edu
+
+Cada afirmación está respaldada por su referencia correspondiente.
+
+---
+
+# Citations
+
+Public Media Can Improve Our ‘Flawed’ Democracy | Annenberg
+https://www.asc.upenn.edu/news-events/news/public-media-can-improve-our-flawed-democracy
+
+Public service media crucial to democracy | EBU
+https://www.ebu.ch/news/2019/09/public-service-media-crucial-to-democracy
+
+Public service media crucial to democracy | EBU
+https://www.ebu.ch/news/2019/09/public-service-media-crucial-to-democracy
+
+Public Media Can Improve Our ‘Flawed’ Democracy | Annenberg
+https://www.asc.upenn.edu/news-events/news/public-media-can-improve-our-flawed-democracy
+
+Public Media Can Improve Our ‘Flawed’ Democracy | Annenberg
+https://www.asc.upenn.edu/news-events/news/public-media-can-improve-our-flawed-democracy
+
+https://v-dem.net/media/publications/WP_151.pdf
+
+Hechos frente a falsedades: Fortaleciendo la democracia a través de la integridad de la información (ES)
+https://www.oecd.org/content/dam/oecd/es/publications/reports/2024/03/facts-not-fakes-tackling-disinformation-strengthening-information-integrity_ff96d19f/06f8ca41-es.pdf
+
+Hechos frente a falsedades: Fortaleciendo la democracia a través de la integridad de la información (ES)
+https://www.oecd.org/content/dam/oecd/es/publications/reports/2024/03/facts-not-fakes-tackling-disinformation-strengthening-information-integrity_ff96d19f/06f8ca41-es.pdf
+
+Hechos frente a falsedades: Fortaleciendo la democracia a través de la integridad de la información (ES)
+https://www.oecd.org/content/dam/oecd/es/publications/reports/2024/03/facts-not-fakes-tackling-disinformation-strengthening-information-integrity_ff96d19f/06f8ca41-es.pdf
+
+Income inequality has led to an erosion of democracy in countries around the world | The University of Chicago Division of the Social Sciences
+https://socialsciences.uchicago.edu/news/income-inequality-has-led-erosion-democracy-countries-around-world
+
+V-DEM Democracy Report 2025
+https://www.v-dem.net/documents/62/V-Dem_Democracy_Report_2025_spanish_lowres.pdf
+
+Income inequality has led to an erosion of democracy in countries around the world | The University of Chicago Division of the Social Sciences
+https://socialsciences.uchicago.edu/news/income-inequality-has-led-erosion-democracy-countries-around-world
+
+Graph of the Week – V-Dem
+https://v-dem.net/weekly_graph/the-relationship-between-liberal-democracy-an
+
+Polarización, redes sociales y democracia: la alerta del elitismo
+https://www.idea.int/es/news/polarizacion-redes-sociales-y-democracia-la-alerta-del-elitismo
+
+Trust in government | OECD
+https://www.oecd.org/en/topics/sub-issues/trust-in-government.html
+
+Trust in government | OECD
+https://www.oecd.org/en/topics/sub-issues/trust-in-government.html
+
+https://www.oecd.org/content/dam/oecd/en/publications/support-materials/2022/07/building-trust-to-reinforce-democracy_1a87cc66/oecd-trust-survey-main-findings-es.pdf
+
+Public Media Can Improve Our ‘Flawed’ Democracy | Annenberg
+https://www.asc.upenn.edu/news-events/news/public-media-can-improve-our-flawed-democracy
+
+--- https://mander.xyz/post/37910802 · 2025-09-13 · score 1 · comments 0
+A REST API for GitHub Projects, sub-issues improvements, and more
+
+
+--- https://rss.ponder.cat/post/203074 · 2025-06-10 · score 1 · comments 0
+Republicans Have a Revenue Problem
+Congressional Republicans love to talk about the deficit and federal spending, particularly when Democrats are in power. Before he became House speaker, Mike Johnson argued in his 2018 statement titled [“7 Core Principles of Conservatism](https://mikejohnson.house.gov/7-core-principles-of-conservatism/#%3A%7E%3Atext=Government+often+stands+as+the%2Cgenius+of+the+American+economy.)” that America was facing “an unprecedented debt and spending crisis.” In Johnson’s view, Congress had “a moral and constitutional duty” to bring expenditure under control. In 2023, before he became the Senate majority leader, [John Thune](https://www.thune.senate.gov/public/index.cfm/2023/5/thune-reckless-out-of-control-government-spending-must-end#%3A%7E%3Atext=We+have+to+find+a%2CSocial+Security+and+national+defense.) inveighed against “reckless, out-of-control government spending” and argued that if spending reform is a priority for the GOP alone, then there is “something seriously wrong with the Democrat Party.”
+
+They had a point. Aside from the brief period from 1998 to 2001, the federal government has run deficits for more than 50 years. When Ronald Reagan entered office, the federal debt-to-GDP ratio—a standard metric economists use to measure government indebtedness—stood at just 32.5 percent. It currently stands [at 121 percent](https://fred.stlouisfed.org/series/GFDEGDQ188S), an extraordinary level for peacetime. In President Joe Biden’s last year in office, the government brought in revenues of $4.9 trillion against outlays of $6.75 trillion, resulting in a deficit of $1.8 trillion, or about 6.4 percent of GDP. And President Donald Trump’s One Big, Beautiful Bill Act will only compound the problem: The [Congressional Budget Office estimates](https://www.washingtonpost.com/politics/2025/06/04/cbo-deficits-tax-cuts-trumps-big-beautiful-bill/cf00b0f8-414e-11f0-b78e-5ddff7eb1e49_story.html) that its proposed extension of his 2017 tax cuts for another 10 years will add more than $2.4 trillion to the national debt.
+
+The United States is now experiencing a structural deficit with potentially dire fiscal consequences. Serious efforts to curb spending—which [DOGE is not](https://www.civitasinstitute.org/research/doge-is-a-dodge)—are desperately needed. Yet the task of closing the huge gap in our government finances has another dimension besides cost-cutting: Raising revenue, too, is desperately needed.
+
+*[[Jonathan Chait: Why DOGE could actually increase the deficit](https://www.theatlantic.com/ideas/archive/2025/03/doge-deficit-trump-elon/682227/)]*
+
+The Republicans’ focus on spending—when they’re not responsible for it—obscures the fact that the U.S. collects significantly less money as a share of GDP than comparable countries, and less than it has taken in historically. Among OECD countries in 2023, the United States [ranked](https://www.oecd.org/content/dam/oecd/en/topics/policy-sub-issues/global-tax-revenues/revenue-statistics-united-states.pdf) 32nd out of 38 for the revenue it collects as a share of GDP. Among advanced industrial democracies, only Ireland and Chile collect less. And at 17 percent of GDP in 2024, federal revenues are well below their peak of nearly 20 percent in 2000, at the end of the Clinton administration. The following year, the United States enjoyed a $128 billion *surplus*, and the Congressional Budget Office projected that the national debt would be paid off by 2009.
+
+Instead, tax cuts under George W. Bush in 2001 [added $8 trillion](https://www.americanprogress.org/article/tax-cuts-are-primarily-responsible-for-the-increasing-debt-ratio/#%3A%7E%3Atext=While+one-time+costs%2C+such%2C16) to the deficit; a further round of cuts by Trump in 2017 [contributed](https://www.crfb.org/blogs/2017-tax-cuts-continue-lose-revenue#%3A%7E%3Atext=The+Congressional+Budget+Office+%28CBO%29+estimated+the%2Cthe+dynamic+effects+of+faster+economic+growth) another $1.8 trillion. Spending went up as well, but the nonpartisan [Committee for a Responsible Federal Budget](https://www.crfb.org/papers/riches-rags-causes-fiscal-deterioration-2001) estimates that 37 percent of the current deficit can be attributed to these tax cuts.
+
+For the Republican Party, tax cuts are now divorced from any specific fiscal context and have become a way of life. In a fusion of ideology and self-interest, a powerful nexus of monied interests, lobbying groups, members of Congress, conservative intellectuals, and media worked together to enforce anti-tax orthodoxy and stamp out dissent. Tax cuts were one of the few policy areas that the party’s disparate factions—Wall Street Republicans, Main Street Republicans, Silicon Valley libertarians, and social conservatives—could all agree upon.
+
+Yet this long-established anti-tax consensus now confronts several looming challenges. The first is the party’s shifting composition. The Republican base has become more populist in temperament and more working class in character, and low-income voters are less sympathetic to tax cuts that mainly favor their high-income peers. Recent polling by the Pew Research Center reveals that a plurality of Republicans and Republican leaners actually prefer *raising* taxes on households with incomes greater than $400,000, by a margin of 43 to 27 percent. (Among all Americans, 58 percent favor raising taxes on those with high incomes, whereas only 19 percent favor lowering them and 21 percent would keep them level.) [Treasury Secretary Scott Bessent’s](https://www.rev.com/transcripts/scott-bessent-confirmation-hearing) claim during his confirmation hearing that high-income “job creators” need the incentive of tax cuts may have been welcome to the GOP’s wealthy donors and “starve the beast” enthusiasts, but such views are now a minority in the party.
+
+A second challenge is the distributional impact of the new bill’s tax-cutting measures. Many [commentators wonder](https://www.theatlantic.com/ideas/archive/2025/05/big-beautiful-transfer-of-wealth/682885/) why, during a time of record deficits and debt, a further round of upper-income tax cuts is necessary. Analysis from the [Tax Policy Center](https://taxpolicycenter.org/taxvox/effective-income-tax-rates-have-fallen-top-one-percent-world-war-ii-0) notes that while average effective tax rates barely changed from 1945 to 2015 for most Americans, the rates for high-income households have fallen sharply. [Tax Policy Center scholars](https://taxpolicycenter.org/taxvox/those-making-450000-and-would-get-nearly-half-benefit-extending-tcja#%3A%7E%3Atext=This+barely+would+matter+to%2Cthose+making+%24450%2C000+or+more.) have also noted that nearly half the benefits of an extension of the Trump cuts would go to the top 5 percent of households (those making $450,000 or more). Democrats have been quick to seize on the inequity of cutting Medicaid and SNAP benefits to finance this upper-income giveaway.
+
+The third challenge is that, by taking revenue increases off of the table, Republicans have saddled themselves with an unsolvable fiscal conundrum. Cuts on the order of 27 percent across the entire federal budget would be needed to bring spending in line with revenue. If major categories of expenditure such as Social Security, Medicare, defense, and debt servicing are exempted, spending cuts alone cannot tackle the deficit. Acknowledging the magnitude of this gap, a few fiscal hawks in Congress, such as Senator Rand Paul and the House Freedom Caucus, have called for even deeper cuts. But many Republicans fear with justification that such a course would bring grave political risk.
+
+What Republicans are not grappling with, but should, is the disconnect between their intellectual justifications and economic and fiscal reality. Their first rationale is that tax cuts ultimately pay for themselves in higher government revenues through increased economic growth. To be blunt, no persuasive evidence exists for this contention at either the [federal](https://www.urban.org/sites/default/files/publication/104871/20210628_tpc_galehaldeman_tcjasupplysideeffectsreport_final.pdf) or the [state](https://www.cbpp.org/research/kansas-provides-compelling-evidence-of-failure-of-supply-side-tax-cuts#%3A%7E%3Atext=In+2012+and+2013%2C+at%2Cof+Kansas%27+neighbors+except+Missouri.) level, including in the [record of the 2017 cuts](https://www.chicagobooth.edu/review/trump-tax-cuts-benefits-outweighed-lost-revenue) now proposed for extension. Republicans’ second rationale makes a more nuanced assertion that higher taxes will depress economic growth, reducing jobs and inhibiting the downward distribution of income. Yet rigorous comparative analyses across multiple countries have found no serious [evidence](https://eprints.lse.ac.uk/107919/1/Hope_economic_consequences_of_major_tax_cuts_published.pdf) to support this [contention](https://democracyjournal.org/magazine/29/burying-supply-side-once-and-for-all/). The economist Paul Krugman has referred to such arguments as “[zombie](https://www.promarket.org/2020/02/23/the-most-persistent-of-all-zombie-ideas-that-taxing-the-wealthy-is-destructive-to-the-economy/)” ideas that keep “eating people’s brains” long after their intellectual credibility is dead and buried.
+
+Buffeted by these forces, cracks are starting to appear in the GOP’s anti-tax orthodoxy. Some MAGA voices, such as [Steve Bannon](https://thehill.com/homenews/administration/5269176-steven-bannon-donald-trump-millionaire-tax-hike/), have recently come out in favor of a tax hike on the wealthy to finance cuts for the middle class. Others, such as Vice President J. D. Vance and [Project 2025 eminence Russell Vought](https://www.theatlantic.com/politics/archive/2025/05/russell-vought-trump-doge/682821/), have expressed interest in raising taxes on those [earning more than $1 million a year](https://www.washingtonpost.com/business/2025/04/22/trump-millionaire-tax-rich-gop-vance/). They met fierce resistance from Republican luminaries such as Newt Gingrich, Larry Kudlow, Sean Hannity, Mike Johnson, and Ted Cruz. And the ultimate enforcer of tax-cutting orthodoxy, Grover Norquist, recently compared any Republicans willing to consider tax increases to a “[little cancer cell in the party](https://www.washingtonpost.com/business/2025/05/28/gop-tax-bill-trump-millionaire-tax/).”
+
+Trump himself has tried to have it both ways, [toying with the idea of raising taxes](https://www.nytimes.com/2025/05/09/us/politics/trump-taxes-carried-interest.html) on the wealthy to cater to his populist base without actually doing anything to forestall his tax-cut extensions. His gesture toward putting America on a sounder financial footing is to argue that his tariffs can play an important role in replacing income-tax revenues. The [Congressional Budget Office](https://www.cbo.gov/publication/61389) has calculated that, under certain configurations, tariffs could raise significant additional revenues over the next decade. But all [credible projections](https://www.cfr.org/blog/could-trumps-tariffs-replace-income-tax-bottom-90) suggest that [tariffs will be unable to compensate](https://taxpolicycenter.org/taxvox/trumps-tariffs-will-raise-much-less-he-expects#%3A%7E%3Atext=President+Trump%27s+tariffs+will+generate%2Covertime%2C+and+Social+Security+benefits.&text=But+Trump%27s+tariffs+are+likely%2Cretaliation+for+Trump%27s+import+taxes.) for the lost income tax. They are also a highly regressive form of taxation that may spark retaliation by other countries, result in higher inflation, and reduce both economic growth and the [tax revenues](https://www.piie.com/research/piie-charts/2025/trumps-tariffs-could-bring-new-revenue-would-also-reduce-other-tax#%3A%7E%3Atext=topics+and+regions.-%2CTrump%27s+tariffs+could+bring+new+revenue+but+would+also+reduce%2CMcKibbin+Software+Group+Pty+Ltd.)) that flow from it.
+
+*[[Read: Republicans still can’t say no to Trump](https://www.theatlantic.com/politics/archive/2025/05/congress-bill-trump-republicans/682881/)]*
+
+Republicans who are serious about the deficit have several options. The most obvious one would be to close the gap between the tax revenues owed to the government and what it actually collects. The[IRS estimates](https://www.irs.gov/statistics/irs-the-tax-gap) that in 2022, about 13 percent of taxes, totaling $606 billion, owed to the federal government under our existing tax code were not paid. [Many analyses](https://www.washingtonpost.com/opinions/2024/12/12/elon-musk-irs-taxes/) of federal tax policy and enforcement—[including some by conservative scholars](https://www.washingtonpost.com/opinions/2023/12/19/irs-defunding-not-conservative/)—have argued for beefing up the IRS, with a focus on [high-net-worth individuals and households](https://www.washingtonpost.com/opinions/interactive/2023/irs-enforcement-costs-congress-funding/). Few investment opportunities [yield a higher rate of return](https://policyimpacts.org/research/a-welfare-analysis-of-tax-audits-across-the-income-distribution/?itid=lk_inline_enhanced-template) than IRS audits on upper-income filers, yet the Trump administration and congressional Republicans have moved in the other direction and sought to cut the agency’s staff and funding.
+
+Other steps Republicans could take would aim to end tax breaks for the über-rich. Sunsetting the 2017 bill’s higher estate-tax deductions, which now stand at $14 million for individuals and $28 million for married couples, would bring in [an estimated $201 billion](https://bipartisanpolicy.org/explainer/the-2025-tax-debate-individual-estate-and-gift-taxes-in-tcja/) over the next 10 years. The state and local tax (better known as SALT) deduction changes in the proposed bill are extremely regressive, with [much of the benefit](https://taxfoundation.org/blog/salt-deduction-cap-increase-proposal-analysis/) flowing to upper-income households; they are another loophole that could be closed. Republicans could also raise revenue specifically for transportation infrastructure by increasing road-user fees and gas or mileage taxes. (The gasoline tax has been frozen at 18.4 cents a gallon for more than 30 years.)
+
+None of the above will be easy, or even possible, to achieve in this Congress. The Republican Party has come a long way from the days when Ronald Reagan raised taxes four times after his 1981 tax cuts led to higher projected deficits. The official posture of fiscal rectitude continues, but the GOP’s $10 trillion secret—the [amount that tax cuts have contributed](https://www.americanprogress.org/article/tax-cuts-are-primarily-responsible-for-the-increasing-debt-ratio/) to the national debt—is that, if forced to choose, many on the anti-tax right would prefer bigger deficits to higher taxes.
+
+The United States no longer has that luxury. The government’s interest payments have become larger than its defense expenditures, debt-rating agencies are downgrading the U.S., bond traders are demanding higher yields on U.S. treasuries, and risks to the dollar as the world’s reserve currency are piling up. To redeploy Thune’s phrase, something is “seriously wrong” with a party that worries about running deficits yet refuses to consider any sustainable way to pay for them—and instead slashes services to its rural and working-class constituents. Rigid principle must give way to pragmatism: Any genuine deficit-reduction conversation needs to include not just spending cuts but higher revenues.
+
+---
+
+*From [The Atlantic](https://www.theatlantic.com/) via [this RSS feed](https://www.theatlantic.com/feed/all/)*
+
+--- https://rss.ponder.cat/post/199177 · 2025-06-05 · score 1 · comments 0
+June 4, 2025
+Just hours after President Donald J. Trump posted on social media yesterday that “[b]ecause of Tariffs, our Economy is BOOMING!” a new report from the Organization for Economic Cooperation and Development (OECD) said the opposite. Founded in 1961, the OECD is a forum in which 38 market-based democracies cooperate to promote sustainable economic growth.
+
+The OECD’s economic outlook reports that economic growth around the globe is slowing because of Trump’s trade war. It projects global growth slowing from 3.3% in 2024 to 2.9% in 2025 and 2026. That economic slowdown is concentrated primarily in the United States, Canada, Mexico, and China.
+
+The OECD predicts that growth in the United States will decline from 2.8% in 2024 to 1.6% in 2025 and 1.5% in 2026.
+
+The nonpartisan Congressional Budget Office (CBO) released two analyses today of Trump’s policies that add more detail to that report. The CBO’s estimate for the effect of Trump’s current tariffs—which are unlikely to stay as they are—is that they will raise inflation and slow economic growth as consumers bear their costs. The CBO says it is hard to anticipate how the tariffs will change purchasing behavior, but it estimates that the tariffs will reduce the deficit by $2.8 trillion over ten years.
+
+Also today, the CBO’s analysis of the Republicans’ “One Big, Beautiful Bill” is that it will add $2.4 trillion to the deficit over the next decade because the $1.2 trillion in spending cuts in the measure do not fully offset the $3.7 trillion in tax cuts for the wealthy and corporations. Republicans have met this CBO score with attacks on the CBO, but its estimate is in keeping with those of a wide range of economists and think tanks.
+
+Taken together, these studies illustrate how Trump’s economic policies are designed to transfer wealth from consumers to the wealthy and corporations. From 1981 to 2021, American policies moved $50 trillion from the bottom 90% of Americans to the top 1%. After Biden stopped that upward transfer, the Trump administration is restarting it again, on steroids.
+
+Just how these policies are affecting Americans is no longer clear, though. Matt Grossman of the *Wall Street Journal* reported today that economists no longer trust the accuracy of the government’s inflation data. Officials from the Bureau of Labor Statistics, which compiles a huge monthly survey of employment and costs, told economists that staffing shortages and a hiring freeze have forced them to cut back on their research and use less precise methods for figuring out price changes. Grossman reports that the bureau has also cut back on the number of places where it collects data and that the administration has gotten rid of committees of external experts that worked to improve government statistics.
+
+There is more than money at stake in the administration’s policies. The administration's gutting of the government seeks to decimate the modern government that regulates business, provides a basic social safety net, promotes infrastructure, and protects civil rights and to replace it with a government that permits a few wealthy men to rule.
+
+The CBO score for the Republicans’ omnibus bill projects that if it is enacted, 16 million people will lose access to healthcare insurance over the next decade in what is essentially an assault on the Affordable Care Act, also known as Obamacare. The bill also dramatically cuts Supplemental Nutrition Assistance Plan (SNAP) benefits, clean energy credits, aid for student borrowers, benefits for federal workers, and consumer protection services, while requiring the sale of public natural resources.
+
+These cuts continue those the administration has made since Trump took office, many of which fell under the hand of the “Department of Government Efficiency.” But, while billionaire Elon Musk was the figurehead for that group, it appears his main interest was in collecting data. His understudy, Office of Management and Budget director Russell Vought, appears to have determined the direction of the cuts, which did not save money so much as decimate the parts of the government that the authors of Project 2025 wanted to destroy.
+
+Vought was a key author of Project 2025, whose aim is to disrupt and destroy the United States government in order to center a Christian, heteronormative, male-dominated family as the primary element of society. To do so, the plan calls for destroying the administrative state, withdrawing the United States from global affairs, and ending environmental and business regulations.
+
+Yesterday the White House asked Congress to cancel $9.4 billion in already-appropriated spending that the Department of Government Efficiency identified as wasteful, a procedure known as “rescission.” Trump aides say the money funds programs that promote what they consider inappropriate ideologies, including public media networks PBS and NPR; the United States Agency for International Development (USAID), which provides food and basic medical care globally; and PEPFAR, the U.S. President's Emergency Plan for AIDS Relief that was established under President George W. Bush to combat HIV/AIDS in more than 50 countries and is currently credited with saving about 26 million lives.
+
+Vought appeared today before the House Appropriations Committee, where members scolded him for neglecting to provide a budget for the year, which they need to do their jobs. But Vought had plenty to say about the things he *is* doing. According to ProPublica’s Andy Kroll, he claimed that under Biden “every agency became a tool of the Left.” He said the White House will continue to ask for rescissions, but also noted that, as Project 2025 laid out, he does not believe that the 1974 Impoundment Control Act, which requires the executive branch to spend the money that Congress has appropriated, is constitutional, despite court decisions saying it is.
+
+Representative Rosa DeLauro (D-CT) told Vought: “Be honest, this is never about government efficiency. In fact, an efficient government, a government that capably serves the American people and proves good government is achievable is what you fear the most. You want a government so broken, so dysfunctional, so starved of resources, so full of incompetent political lackeys and bereft of experts and professionals that its departments and agencies cannot feasibly achieve the goals and the missions to which they are lawfully directed. Your goal is privatization, for the biggest companies to have unchecked power, for an economy that does not work for the middle class, for working and vulnerable families. You want the American people to have no one to turn to, but to the billionaires and the corporations this administration has put in charge. Waste, fraud, and abuse are not the targets of this administration. They are your primary objectives.”
+
+The use of the government to impose evangelical beliefs on the country, even at the expense of lives, also appears to be an administration goal. Yesterday, the administration announced it is ending the Biden administration’s 2022 guidance to hospital emergency rooms that accept Medicare—which is virtually all of them—requiring that under the Emergency Medical Treatment and Active Labor Act they must perform an abortion in an emergency if the procedure is necessary to prevent a patient’s organ failure or severe hemorrhaging. The Emergency Medical Treatment and Active Labor Act requires emergency rooms to stabilize patients.
+
+The Trump administration will no longer enforce that policy. Last year, an investigation by the Associated Press found that even when the Biden administration policy was being enforced, dozens of pregnant women, some of whom needed emergency abortions, were turned away from emergency rooms with advice to “let nature take its course.”
+
+Finally tonight, in what seems likely to be an attempt to distract attention from the omnibus bill and all the controversy surrounding it, Trump banned Harvard from hosting foreign students. He also banned nationals from a dozen countries—Afghanistan, Chad, Republic of Congo, Equatorial Guinea, Eritrea, Haiti, Iran, Libya, Myanmar, Somalia, Sudan, and Yemen—from entering the United States, an echo of the travel ban of his first term that threw the country into chaos.
+
+Trump justified his travel ban by citing the attack Sunday in Boulder, Colorado, on peaceful demonstrators marching to support Israeli hostages in Gaza. An Egyptian national who had overstayed a tourist visa hurled Molotov cocktails at the marchers, injuring 15 people.
+
+Egypt is not on the list of countries whose nationals Trump has banned from the United States.
+
+—
+
+Notes:
+
+<https://www.oecd.org/en/about/news/press-releases/2025/06/global-economic-outlook-shifts-as-trade-policy-uncertainty-weakens-growth.html>
+
+<https://www.oecd.org/en/topics/sub-issues/economic-surveys/united-states-economic-snapshot.html>
+
+<https://abcnews.go.com/Politics/trumps-big-beautiful-bill-projected-add-24-trillion/story?id=122488067>
+
+<https://www.cbo.gov/system/files/2025-06/61389-Tariff-Effects.pdf>
+
+<https://www.cnbc.com/2025/06/04/trump-tax-bill-debt.html>
+
+<https://www.nytimes.com/2025/06/04/us/politics/trump-budget-bill-republicans-tax-cuts.html>
+
+<https://www.cbsnews.com/news/trumps-one-big-beautiful-bill-gop-budget-obamacare/>
+
+<https://www.nytimes.com/interactive/2025/05/23/upshot/budget-table.html>
+
+<https://newrepublic.com/article/196092/elon-musk-puppetmaster-russell-vought>
+
+<https://apnews.com/article/abortion-emtala-biden-trump-emergency-hospital-3640bff165dac1d28b91e8adee7e47dd>
+
+<https://apnews.com/article/pregnant-women-emergency-room-ectopic-er-edd66276d2f6c412c988051b618fb8f9>
+
+<https://www.wsj.com/economy/cpi-inflation-data-accuracy-8bd2a8ae?st=tL7FGd&reflink=desktopwebshare_permalink>
+
+<https://www.politico.com/live-updates/2025/06/04/congress/russ-vought-budget-house-appropriations-00386466>
+
+<https://www.cbsnews.com/news/white-house-asks-congress-claw-back-funding-rescission-package/>
+
+<https://www.pbs.org/newshour/politics/trump-formally-asks-congress-to-claw-back-approved-spending-targeted-by-doge>
+
+<https://www.state.gov/pepfar/>
+
+<https://www.nbcnews.com/politics/trump-administration/trump-announces-new-travel-restrictions-19-countries-12-outright-bans-rcna211073>
+
+<https://www.theguardian.com/us-news/2025/jun/04/trump-restricts-harvard-student-visas>
+
+<https://www.cbsnews.com/news/boulder-colorado-attack-suspect-molotov-cocktails-israeli-hostage-march/>
+
+<https://time.com/5888024/50-trillion-income-inequality-america/>
+
+Bluesky:
+
+[atrupar.com/post/3lqshetkn6s2t](https://bsky.app/profile/atrupar.com/post/3lqshetkn6s2t)
+
+[andykroll.bsky.social/post/3lqslqkqck22g](https://bsky.app/profile/andykroll.bsky.social/post/3lqslqkqck22g)
+
+[andykroll.bsky.social/post/3lqsgskxvxc2m](https://bsky.app/profile/andykroll.bsky.social/post/3lqsgskxvxc2m)
+
+[Share](https://heathercoxrichardson.substack.com/p/june-4-2025?action=share)
+
+---
+
+*From [Letters from an American](https://heathercoxrichardson.substack.com/) via [this RSS feed](https://heathercoxrichardson.substack.com/feed)*
+
+--- https://lemmy.durstig.online/post/59555 · 2026-09-12 · score -1 · comments 0
+How I keep track of ~100 parallel Claude Code sessions: Beads as a private work graph between GitHub and my agents
+[Original Reddit post](https://www.reddit.com/r/ClaudeCode/comments/1wdrgz0/how_i_keep_track_of_100_parallel_claude_code/)
+
+I run four tmux sessions with 20-30 Claude Code chats each, across 30-plus Go services, a mobile app, infra repos and a data pipeline. The agents cope fine. I didn't. Long efforts branch into many PRs and sub-issues, ops work pulls me sideways, and after a few weeks nobody holds the whole picture, including me.
+When I pulled "losing track" apart, it was three separate problems:
+What's blocked on what, and what's ready now?
+This lived only in my head.
+Which session did what, and why?
+I found a PR stuck for weeks where the reasoning only ever existed in a chat that was long gone.
+What do we know?
+Facts and gotchas. Claude Code's auto-memory already covered this one.
+Things I ruled out:
+GitHub only:
+issues are read by colleagues and product. Session URLs, "blocked until I decide X" and "sitting in dev waiting for a soak" are scratch state, and a comment per agent session turns an issue into noise.
+A knowledge base
+(gbrain, Karpathy-style LLM wiki): good for question 3, but a wiki page has no notion of ready versus blocked.
+A custom dashboard:
+brittle, and either every chat has to remember to update it, or it only reads GitHub and can't show what I deliberately keep off GitHub.
+What fit was
+Beads
+(
+bd
+), Steve Yegge's issue tracker for coding agents: dependencies,
+bd ready
+/
+bd blocked
+, external refs to GitHub issues and PRs, free-form notes.
+How it's wired:
+One shared database:
+I start sessions from an umbrella directory that isn't a git repo, so I set
+BEADS_DIR
+in the Claude Code settings. Every session, subagent and worktree hits the same local database.
+Efforts and tasks:
+long-running efforts are top-level beads. Tasks hang under them with a
+repo:<name>
+label and an external ref to the GitHub issue or PR.
+Every agent run is bookended.
+At the start it finds the bead, checks
+bd blocked
+and claims it with
+bd update --claim
+. At the end it writes what happened into the notes and closes it or marks it blocked. There's no persistent "agent in charge" in Claude Code; the database is what survives.
+GitHub gets one comment
+per issue, with a hidden marker, edited in place.
+Gotchas I hit:
+bd init
+injects a block into
+CLAUDE.md
+telling agents to use Beads instead of other memory, and writes an
+AGENTS.md
+. I removed both.
+bd show --json
+hides closed dependencies, so blocker checks use
+bd blocked
+.
+Children inherit parent labels by default, and making an effort depend on its last child creates a cycle.
+Claims are keyed to the user, not the session, so two parallel sessions can claim the same bead.
+On top I use
+mardi-gras
+(
+mg
+) as a read-only TUI: I browse, pick a bead, and hand its ID to a Claude session. Gas Town is on my radar for unattended runs, but not yet.
+It's been running for about a week, with ten efforts and ~130 beads. Longer write-up with the reasoning here:
+https://tskulbru.dev/posts/beads-local-shadow-for-agent-work
+I'm not affiliated with Beads, mardi-gras or Gas Town in any way. I'm just a user, and the only link to something of mine is the blog post.
+How are others handling in-flight state across many agent sessions?
+submitted by
+/u/serrghi
+
+Originally posted by u/serrghi on r/ClaudeCode

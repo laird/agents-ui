@@ -1,0 +1,157 @@
+url: https://hn.algolia.com/api/v1/search?query=know%20when%20feature%20deployed%20production&tags=comment&hitsPerPage=10
+rung: 2 (hackernews_comments)
+accessed: 2026-11-02
+truncated: no (full comment_text of each hit; HTML tags removed, entities decoded)
+
+nbHits: 113
+
+--- objectID 44509425 · created 2025-07-09 · story: Claude Pro Max hallucinated a $270 Notion feature that doesn't exist · https://news.ycombinator.com/item?id=44509425
+There is an acute lack of agency here
+
+LLMs telling you to do something, when we know that they hallucinate, in no way frees you from the responsibility that you have to do your own due diligence.
+
+Take a lesson from defense & space and adopt a TRL mindset towards LLM advice in verifying…
+
+TRL 1: You’ve got a basic idea for a new software feature or tool, backed by some research. It’s just a spark, like reading about a new algorithm and thinking it could solve a problem.
+
+TRL 2: You sketch out how the idea could work in an app or system, but it’s still on paper or a whiteboard—no code yet, just a rough plan.
+
+TRL 3: You write some experimental code or a small script in a test environment to see if the core idea holds up, like a proof-of-concept for a new feature.
+
+TRL 4: You build and test individual pieces of the software (like modules or functions) in a controlled setting, ensuring they work together in a lab-like environment.
+
+TRL 5: Your code is tested in a setup that feels closer to the real world, like running it on a staging server with simulated user data.
+
+TRL 6: You’ve got a working prototype of the software that runs in a realistic environment, like a beta version tested with actual user workflows.
+
+TRL 7: The software is nearly complete and tested in a real-world-like setting, such as a pilot project with actual users or live data.
+
+TRL 8: The software is fully built, tested, and debugged, ready to be deployed to production after passing all checks, like a release candidate.
+
+TRL 9: The software is live, running successfully in production, and reliably handling real users or tasks, like a fully launched app.
+
+Generic advice:
+
+Verify with primary sources
+
+Ensure features exist before payment
+
+Cross-check examples
+
+Expect LLM errors
+
+Consider prompt & context engineering
+
+--- objectID 4330095 · created 2012-08-02 · story: Why Programmers Are Bad at Estimating Time · https://news.ycombinator.com/item?id=4330095
+Most people don't even know what they are actually asking for when they ask 'how long will this take?'. I always try to tease out whether the person asking is looking to find out 'when will this be done by?' or 'how much effort is this?'. Even when you've figured that out, you need to understand what they think they mean by 'done'. code is changed on my machine? I've checked it in? code deployed to QA and tested in multiple browsers and run through the regression suite? code deployed to pre-production for approval by the client? code approved by client, deployed to production and live? Also, do you want me to take into account the time I'll spend waiting for decisions to be made about how this feature has to work, or just tell you how long it will take me to do it once you've got me the answers to these questions?
+
+One thing I've noticed is that organisations can only normally operate at a certain number of 'decisions per day' (and the larger the organisation, the lower this number). For estimating anything where requirements are not yet firm, or will be discovered during development, that rate is usually the constraining factor, not the development effort.
+
+--- objectID 9739262 · created 2015-06-18 · story: Google listening in to your room shows importance of privacy defense in depth · https://news.ycombinator.com/item?id=9739262
+Okay, I'm going to put on my tin foil hat for a bit here.
+
+Think of the corporate boardrooms with Chromebox for meetings, listening in even when not actively used for meetings. An exec at the Better Business Bureau [0] who chose Chromebox because they were excited to, "[reduce] the time [they spend] ... worrying about security concerns," is discussing the growing complaints the BBB has received about a competitor to a company owned by Google. He says, "Ok, Google owns their primary competitor, and they may have insight to offer us."
+
+Wait, that's just my tin foil beanie. Let me put on the tin foil balaclava.
+
+The U.S. Department of State [1] is in an all-hands-on-deck crisis meeting over a deeply divisive political situation involving a first-world ally. Chrome is updated with the eavesdropping feature (remember, it's just my tin foil that's making me choose that word, I know it's hyperbole), and it's already been "deployed to production immediately, bypassing cumbersome testing." Someone in the meeting says, "OK, Google News has been trending a lot of stories about this issue." Sensitive things are then said about this ally, things that are now being heard by an enemy of the state, because they were able to use their previously embedded network sniffers to capture and forward interesting network traffic.
+
+It's frightening that a feature is enabled by default, and difficult to disable, that could capture sensitive conversations without the knowledge of the parties speaking because they innocently started a sentence with, "OK, Google." Certainly this violates wiretapping laws?
+
+Let's pile on. Hospitals and medical centers are using this too, according to the Chrome for Work pages. A doctor says, "Ok, Google had a lot of results about new HLA-B27 research," when discussing a patient's arthritic concerns, while proceeding to outline the patient's symptoms and how treatment should proceed and now we're looking at a potential HIPAA Privacy Rule violation.
+
+As I type this, I look over at my Amazon Echo, and I'm reminded of something I heard once. If you're not paying, you're not the customer, you're the product. Is that hypocritical of me to accept my Amazon Echo but not the behavior of Google Chrome?
+
+[0]: https://www.google.com/work/chrome/resources/customer-storie...
+
+[1]: https://www.google.com/work/chrome/resources/customer-storie...
+
+--- objectID 4368758 · created 2012-08-10 · story: Russ Olsen: The Best Programming Advice I Ever Got · https://news.ycombinator.com/item?id=4368758
+It's not always a political problem.
+
+What happens when the change you've just demoed to the boss breaks an important feature that you didn't know about?
+
+In the case of the absurdly slow client/server architecture, what if this was a defense against a chunk of code prone to locking up or crashing? What do you do when your new, faster program suddenly crashes every five minutes after its deployed to production?
+
+--- objectID 41768312 · created 2024-10-07 · story: What's New in Ruby on Rails 8 · https://news.ycombinator.com/item?id=41768312
+There's various PRs where Fiber adapters are making their way into the Rails stack. Rails 8 added a ton of support for Fibers, with the exception of ActionCable. There's a PR open for that, which I assume will land sometime soon.
+
+Rails has been really slow to pick-up async/http-2. They don't know it yet, but Falcon and all async libraries Samuel is working on will probably be a huge them 1-2 years out when more people find out it means less infra has to be deployed to production environments. Right now folks are happy to deploy without Redis™ with the Solid stack, but a lot of that won't be needed if proper async support is baked into Rails.
+
+There's been a lot of Fiber features being committed into the Ruby language that I barely understand, but have improved all of these async libraries over the past few years. That's finally starting to bear some fruit for people like myself who don't really understand all of those details, but understand the benefits.
+
+It will happen, but these things tend to play out more slowly in Ruby, which is a feature or a bug depending on how you look at it.
+
+--- objectID 37110006 · created 2023-08-13 · story: Rust vs. Go in 2023 · https://news.ycombinator.com/item?id=37110006
+I disagree here. Anvd also disagree with grandparent.
+
+It's fine to explore with- and write proofs of concepts in- Rust.
+
+In many ways, it's better suited than Python, Ruby, JS or PHP for this, for several reasons. I have too little production experience with go to know how it does here.
+
+The Rust type checker, and easy, built-in test framework, make refactoring easy and certain. Much more than the common "fingers crossed let's deploy" refactoring I've experienced with Ruby and Python. And way more than the Yolo methodology commonly employed in JS and PHP.
+And fearless refactoring is a requirement for me to experiment and explore. Because once I know what and how I want it, refactoring is needed.
+
+A good, fast testing framework helps me explore. Efficient and iterative. Rust (and Go) have much to offer here, whereas in Python, Ruby and even more so in PHP or JS, testing is an afterthought, third party, bring your own setup. In rust I can start writing a test immediately after 'cargo init experiment'. But I understand not for everyone exploration==tests.
+
+The rediculous ease of deployment of both Rust and Go compared to Python, JS, PHP and worst, Ruby, is crucial when I'm figuring out if people need what I'm building. 'cargo build --release && scp target/build/foo example.com:/use/bin' and I'm hosted and deployed. It's less work than getting a Heroku connected to GitHub. For me, releasing fast, early and often is a crucial feature when exploring. Rust (and Go) have solved this. In fact, this is my main reason to build in Rust: I'm just fed up managing complex and ever breaking runtimes, (pip-, rb-, nv) envs, complex and ever breaking CI.
+
+With rust, my initial versions just have ARCs, Box-es, unwrap()s and clone()s all over the place. It's how I circumvent the frustration, yet know the app is 'correct'. All those clones, unwraps, boxes, Arcs etc act as TODO's, bit without the "this will probably cause corrupted data, fix me!", that my TODOs in Ruby or Python came with when exploring.
+
+--- objectID 9744787 · created 2015-06-19 · story: GitFlow considered harmful · https://news.ycombinator.com/item?id=9744787
+So let me get this straight.
+
+He is suggesting to use 90% of what GitFlow suggests (feature/hotfix/release branches) but doesn't like the suggestion of non-fast-forward merge and master/Dev and that makes GitFlow harmful? I don't think I agree.
+
+I think having the Dev branch is useful. Consider this actual scenario at my current workplace.
+
+1. We have 4 developers. Nature of the project is such that we can all work independently on different features/changes.
+
+2. We have Production/QA/Dev environment.
+
+3. When we are working on our individual features, we do the work in individual branches and merge in to Dev branch (which is continuously deployed).This lets us know of potential code conflicts between developers in advance.
+
+4. When a particular feature is 'developer tested', he/she merges it into a rolling release branch (Release-1.1, Release-1.2 etc) and this is continuously deployed to QA environment. Business user does their testing in QA environment and provides sign off.
+
+5. We deploy the artifacts of the signed off release branch to Production and then merge it in to the master and tag it.
+
+Without the development branch, the only place to find out code conflicts will be in the release branch. I and others on my team personally prefer the early feedback we can get thanks to the development branch.
+
+Advantages of an explicit merge commit:
+
+1. Creating the merge commit makes it trivial to revert your merge. [Yes, I know it is possible to revert the merge but it's not exactly a one step process.]
+
+2. Being able to visually see that set of commits belongs to a feature branch. This is more important to me (and my team) than a 'linear history' that the author loves.
+
+We have diverted from GitFlow in only one way, we create all feature/release/bugfix branches from 'master' and not 'develop'.
+
+Now, don't get me wrong, GitFlow is not simple but it's not as complicated as author seems to suggest. I think the author was better served with article title like 'What I don't like in GitFlow'.
+
+--- objectID 812842 · created 2009-09-09 · story: Reverse Proxy Performance – Varnish vs. Squid (Part 2)  · https://news.ycombinator.com/item?id=812842
+Yes, I do have some experience in the area.  I was a core Squid developer for several years, and my previous startup was a proxy caching appliance vendor.  I have been aware of Varnish for years, and have experimented with it several times over those years.
+
+Varnish has narrowed the feature gap quite a bit over the years, but it's still not particularly narrow, and Squid hasn't been standing still.
+
+I will admit that I have never deployed Varnish in production, while my experience with Squid spans thousands of servers, so I know a lot more about Squid than Varnish.  And, it's been three years since I worked in the field at all.  Both products have evolved quite a bit in that time (including a major rewrite in C++ for Squid).
+
+Nonetheless, after a quick perusal of the docs for Varnish, I can say that for pretty much everything Varnish can do, Squid generally has three or four different tactics built in for approaching the same problem.  Caching policies, ACLs, source selection (whether load balancing, hash-based source selection, etc.), logging, authentication, encryption (Squid supports SSL on either side, Varnish doesn't support SSL in any form, as far as I know), other protocols (I once deployed Squid for a top three computer manufacturer across several worldwide offices to allow their customers to access formerly FTP only support resources via HTTP; not possible with Varnish), etc.
+
+Actually a luxury sedan vs. a Ferrari isn't really appropriate...Squid is more of a Winnebago filled with goodies, while Varnish is a stripped down (but very, very fast) race car.  Both have their place.  If all you need is what Varnish can do, then you should use Varnish.  My metaphors were not indignant, they were intended to be illustrative of the difference in design goals of the two projects.  One seeks to solve a wide variety of web caching and website acceleration problems with excellent platform compatibility, good performance, good security, good reliability, and reasonable configuration.  The other seeks to solve a very small set of website acceleration problems with excellent performance; performance is, and always has been, the primary motivation driving Varnish, and it is very successful by that metric.
+
+My point was not to criticize Varnish, but to point out that it is a solution to a very specific set of problems, and that in my seven years of working in the website acceleration industry, I rarely came upon a deployment that would have been well-served by those particular features; if I had, I very likely would have deployed Varnish instead of Squid.  I am agnostic when it comes to Open Source software, as long as the quality is high, and in this case quality is high for both projects.  But most of the time, the customer needed several of those other features of Squid, and performance was only third or fourth on the priority list.
+
+--- objectID 39805963 · created 2024-03-24 · story: Linux Crisis Tools · https://news.ycombinator.com/item?id=39805963
+I'm sure someone could find a way to start from ChatGPT generated stuff and do good work knowing full well the risks and the consequences.
+
+But posting something you just generated on HN without any refinement is not very helpful and it is obvious at a first glance that the script as posted will not help you at the task it tries to tackle and I'm not even a proper sysadmin.
+
+> why does it matter how a script was generated if it does the job?
+
+It doesn't here, and that's the point: it's all too easy to believe that ChatGPT does the job. It probably sometimes does, but here it is obvious it didn't. It should have told the user that they should carefully pick the tools they will likely need depending on what their production runs, learn to use them focusing on the features that matter to the situation, and install them the way their production is setup, and that ChatGPT can't really generate a script for this because it would need to know how production is deployed, and what if the prod is setup using immutable images for instance, as the article cites?
+
+ChatGPT will answer in a convincing way, before you notice that no proper answer can really be found given the lack of context. And when you have the answer before your nose, it's even more difficult to notice.
+
+--- objectID 49691585 · created 2026-09-14 · story: Writing code by hand is not an option anymore · https://news.ycombinator.com/item?id=49691585
+The point is that it is hard to prove that that 5 days code will never break. In the eyes of a customer a feature ready in one morning and in production before evening is a truly great thing and they know that even before AIs developers were shipping a lot of bugs. Some of them were evident only weeks, months or even years after the commit that added them. A customer of mine got a few hours of downtime a few Saturdays ago because some code from 2021 did some potentially long operation in the threads serving requests instead of doing them in a background job.
+
+So what can one do when they expect that you use an AI to speed up development and they manually check features before they are deployed? You develop with an AI, check that it works, deploy to preprod, let the customer do its tests, business as usual.

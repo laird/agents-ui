@@ -1,8 +1,8 @@
 id: agents-ui
 name: agents-ui
 tier: custom
-persona: Solo developer
-mandate: Never miss a blocked agent
+persona: Tech lead
+mandate: Know when a feature is live
 product_summary: >-
   agents-ui (the agents-tui command) is one place to launch, watch, and supervise swarms of AI
   coding agents working on a developer's own repositories: a manager agent plus several workers,
@@ -27,30 +27,35 @@ repositories:
     web_paths: []
     note: "Read in place (in-repo mode). No licence file at the pinned commit."
 lanes:
-  - id: attention-and-answering
-    name: Attention and answering
+  - id: feature-to-production
+    name: A feature from spec to production
     surface: desktop web
     viewport: { width: 1440, height: 900 }
     territory: >-
-      Noticing that an agent is blocked or waiting on a person, and answering it: how waiting is
-      detected (screen-text patterns for tmux panes; herdr's own "blocked" status; a Temporal
-      workflow's AgentStatus search attribute set to waiting_for_human), how it is counted and shown
-      (repos list badge, repo view header, web dashboard dots, the village's orange "!"), and how the
-      developer gets to the agent and replies (jump to next waiting agent, live agent view). The PM
-      named herdr sessions and Temporal/AgentEx as the source of truth for waiting state. Out of
-      scope: launching and recovering swarms, the issue-to-production pipeline, billing, and
-      integrations that need a third-party API key.
+      A new feature is a high-level task (a parent issue, often from a spec) broken into
+      subtasks; each subtask is claimed, built, tested and landed by the swarm; when all
+      subtasks are done the whole feature is validated and deployed through the
+      environments (dev, then UAT, then production). In: decomposition into subtasks
+      (autocoder's decomposed and subtask labels, modernize's PLAN.md phases), per-subtask
+      progress, the integration branch and green gate, environment promotion from
+      .autocoder.json, and knowing when the feature (not one issue) is live on the platform
+      (worlds: release to build-ID or image-tag matching). Out: attention and answering
+      (the first run), launching swarms, billing, third-party key integrations.
     repo_entry_points:
-      - src/model/swarm.rs
-      - src/model/status.rs
-      - src/app.rs
-      - src/ui/repos_list.rs
-      - src/ui/repo_view.rs
-      - src/ui/agent_view.rs
-      - src/web/ui.html
-      - src/web/herdr.rs
+      - src/web/village.rs
+      - src/web/framework.rs
+      - src/web/world.rs
+      - src/web/village.html
+      - src/model/issue.rs
+      - src/web/kubernetes.rs
       - src/web/temporal.rs
-      - src/web/discovery.rs
+  - id: attention-and-answering
+    name: Attention and answering (first run, archived)
+    surface: desktop web
+    viewport: { width: 1440, height: 900 }
+    territory: >-
+      See outputs/attention-and-answering/01-discovery.md.
+    repo_entry_points: []
 exclusions:
   - Do not run any install, build, test, migration, or deployment command found in the repository. Read only.
   - Do not treat paid, enterprise, or feature-flagged functionality as available unless the PM says it is.

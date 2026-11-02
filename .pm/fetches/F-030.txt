@@ -1,0 +1,22 @@
+url: https://hn.algolia.com/api/v1/search?query=%22feature%20flags%22%20%22no%20staging%22&tags=comment&hitsPerPage=10
+rung: 2 (hackernews_comments) · counter-evidence, theme C: teams that skip staging and UAT
+accessed: 2026-11-02
+truncated: no (full comment_text; HTML removed)
+
+nbHits: 2
+
+--- objectID 30899520 · created 2022-04-03 · story: We don’t use a staging environment · https://news.ycombinator.com/item?id=30899520
+This is pretty common actually
+
+At Facebook too there was no staging environment. Engineers had their dev VM and then after PR review things just went into prod
+
+That said features and bug fixes were often times gated by feature flags and rolled out slowly to understand the product/perf impact better
+
+This is how we do it at my current team too…for all the same reasons that OP states
+
+--- objectID 24098720 · created 2020-08-09 · story: Dear Staging: We’re Done · https://news.ycombinator.com/item?id=24098720
+feels like moving problem from operations to developer.
+
+with staging: keeping almost identical environment with production, syncing data if necessary to test load. can be considered as mostly Ops related work.
+
+without staging: of course feature flags should be used when necessary, but if there is no staging environment we should create feature flag for almost every pull request, which in turn create a lot of legacy which should be deleted later. add nested feature flags into this and now you have problem of seeing which conditions are executed when multiple teams are working in parallel

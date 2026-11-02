@@ -1,0 +1,7 @@
+url: https://github.com/laird/agents/issues/146
+rung: 1 (extra: laird-agents-issues)
+accessed: 2026-11-02
+truncated: yes (the fetch tool returned a summary; no verbatim quotes available from this file)
+
+Title: Add dependency edges to the issue contract (Beads-lite graph model) · #146 · open · opened Sep 17, 2026 by the maintainer · labels enhancement, needs-design, proposal · no comments
+Summary: cites an essay arguing an issue tracker should be a knowledge graph rather than a queue. Current state: autocoder's issue contract has nine verbs and no link verb; parent/child relationships are simulated with decomposed and subtask labels, and discovered-from lineage is lost; the fix-loop gate can't order work by dependency, so workers can claim subtasks whose prerequisites are still open. Proposes a link verb and deps query (blocks, blocked-by, parent, discovered-from) on all four backends; the gate skips issues with open blockers; decomposition creates real parent/child edges. The author rates it the highest-leverage item in the set.

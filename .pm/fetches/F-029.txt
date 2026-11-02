@@ -1,0 +1,44 @@
+url: https://hn.algolia.com/api/v1/search?query=%22github%20deployments%22%20environment&tags=comment&hitsPerPage=10
+rung: 2 (hackernews_comments) · counter-evidence, theme B: tools that already show what is deployed where
+accessed: 2026-11-02
+truncated: no (full comment_text; HTML removed)
+
+nbHits: 2
+
+--- objectID 18430525 · created 2018-11-12 · story: Google Kubernetes Engine's third consecutive day of service disruption · https://news.ycombinator.com/item?id=18430525
+As someone whose daily work happens on k8s, I'd say you better be paining a lot before you move to k8s. I take great care to avoid this, but if you aren't careful, you can end up "feeling" productive on k8s without actually being productive. K8s gives a lot of room for one to tweak workflows, discuss deployment strategies, security, "best practices", etc. And you can get things done reasonably fast. But that's like a developer working all day on fine tuning their editor and comparing and writing plugins and claiming that they are getting productive.
+
+The key issue here is that k8s was written with very large goals in mind. That a small business can easily spin it up quickly and run a few microservices or even a monolith + some workers is just coincidental. It is NOT the design goal. And the result of that is that a lot of the tooling and writing around k8s reflects that. A lot of the advice around practices like observability and service meshes comes from people who've worked in the top 1% (or less) of companies in terms of computing complexity. What I'm personally seeing is that this advice is starting to trickle down into the mainstream as gospel. Which strangely makes sense. No one else has the ability to preach with such assurance because not many people in small companies have actually been in the scenarios of the big guns. The only problem is that it's gospel without considering context.
+
+So at what point does k8s make sense? Only when you have answers to the following:
+
+* Getting started is easy, maintaining and keeping up with the going ons is a full time job - Do you have at least 1 engineer at least that you can spare to work on maintaining k8s as their primary job? It doesn't mean full time. But if they have to drop everything else to go work on k8s and investigate strange I/O performance issues, are you ready to allow that?
+
+* The k8s eco system is like the JS framework ecosystem right now - There are no set ways of doing anything. You want to do CICD? Should you use helm charts? Helm charts inherited from a chart folder? Or are you fine using the PATCH API/kubectl patch commands to upgrade deployments. Who's going to maintain the pipeline? Who's going to write the custom code for your github deployments or your brigade scripts or your custom in house tool? Who's going to think about securing this stuff and the UX around it. That's just CICD mind you. We aren't anywhere close to the weeds about deciding if you want to use ingresses vs Load balancers and how you are going to run into service provider limits on certain resources. Are you ready to have at minimum 1 developer working on this stuff and taking time to talk to the team about it?
+
+* Speaking about the team, k8s and Docker in general is a shift in thinking - This might sound surprising but the fact that Jessie Frazelle (y'all should all follow her btw) is occasionally seen reiterating the point that containers are NOT VM's is a decent indicator that people don't understand k8s or Docker at a conceptual level. When you adopt k8s, you are going to pass that complexity to your developers at some point. Either that or your dev ops team takes on that full complexity and that's a fair amount to abstract away from the developers which will likely increase the work load of devops and/or their team size. Are you prepared for either path?
+
+* Oh also, what do your development environments start to look like? This is partly related to microservices but are you dockerizing your applications to work on the local dev environment? Who's responsible for that transition? As much as one tries to resist it, once you are on k8s you'll want to take advantage of it. Someone will build a small thing as a microservice or  a worker that the monolith or other services depend on. How are you going to set that up locally? And again, who's going to help the devs accumulate that knowledge while they are busy trying to build the product. (Please don't put your hopes on devs wanting to learn that after hours. That's just cruel).
+
+I can't write everything else I have in mind on this topic. It'd go on for a long long time. But the common theme here is that the choice around adopting k8s is generally put on a table of technical pros and cons. I'd argue that there's a significant hidden cost of human impact as well. Not all these decisions are upfront but it is the pain that you will adopt and have to decide on at some point.
+
+Again, at what point does k8s make sense? Like I said, you ideally should be paining before you start to consider k8s because for nearly every feature of k8s, there is a well documented, well established, well secured parallel that already exists in the myriad of service providers. It's a matter of taking careful stock of how much upfront pain you are trading away for pain that you WILL accumulate later.
+
+PS - If anyone claims that adopting a newer technology is going to make things outright less painful , that's a good sign of immaturity. I've been there and I picture myself smashing my head into a table every now and then when I think of how immature I used to be. Apologies to people I've worked with at past jobs.
+
+PPS - From the k8s site, "Designed on the same principles that allows Google to run billions of containers a week, Kubernetes can scale without increasing your ops team." <-- is the kind of claim that we need to take flamethrowers to. On paper, 1 dev with the kubectl+kops CLI can scale services to run with 1000's of nodes and millions of containers. But realistically, you don't get there without having incurred significantly more complex use cases. So no, nothing scales independently.
+
+--- objectID 12160930 · created 2016-07-25 · story: Ask HN: What are you working on? · https://news.ycombinator.com/item?id=12160930
+I'm trying to make web service testing better with Assertible (https://assertible.com). Our motivations:
+
+- For many small-medium sized organizations,developers manually test changes deployed to production and staging environments even if automated testing is already in place.
+
+- Automated testing of a web service is much quicker and less error-prone then testing many workflows separately.
+
+- Automating checks for security (coming soon), data validation (JSON, HTML), response times, and other assertions which are difficult for developers to test manually on every deployment.
+
+- Scheduled health checks which let you know when the service is down (email, Slack, integrations)
+
+Currently, we are focusing on automated post-deployment testing. Our primary goal is to connect into your current CI pipeline in a turn-key fashion; similar to how TravisCI and CircleCI work. We have support for GitHub deployments which can be used by services like Heroku, CircleCI, etc.
+
+Here are some of the latest pictures of our GitHub status integrations coming soon: https://twitter.com/AssertibleApp/status/755115483209228288

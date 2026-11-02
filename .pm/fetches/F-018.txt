@@ -1,0 +1,113 @@
+url: https://hn.algolia.com/api/v1/search?query=breaking%20features%20into%20tasks%20coding%20agents&tags=comment&hitsPerPage=10
+rung: 2 (hackernews_comments)
+accessed: 2026-11-02
+truncated: no (full comment_text of each hit; HTML tags removed, entities decoded)
+
+nbHits: 6
+
+--- objectID 44354700 · created 2025-06-23 · story: Claude Code for VSCode · https://news.ycombinator.com/item?id=44354700
+One feature that is still exclusive to Cursor is the Cursor Tab feature. It almost always accurately predicts your next edit with high accuracy, based on your recent edits and cursor navigation.
+
+But from an agent perspective, Claude Code is much more tuned to understanding the task, breaking it down into small steps, and executing those steps with precision.
+
+Overall, IMO agentic coding is great for well defined tasks, especially when they're backed by tests. It still lacks though in deep technical discussions and being opinionated about architectural decisions, unless specifically nudged in a certain direction. This is an area where Gemini Pro excels at, but it sucks at as a coding agent. So I use both: Gemini Pro for high-level picture design, and Claude Code for executing the plan by giving it clear requirements. All while making some edits myself using Cursor Tab.
+
+--- objectID 47248147 · created 2026-03-04 · story: Show HN: P0 – Yes, AI can ship complex features into real codebases · https://news.ycombinator.com/item?id=47248147
+We've started to be an early user in December and have since adopted it in a brown field codebase. I'd describe this as Lovable 2.0 or vibe coding 2.0.
+The p0 workflow allowed us to delegate medium to complex full features to Claude Code while staying in lane with our standards. It allows us to go from idea to fully working prototype and PR within half and hour to hour, most of the time fully hands off.
+PRs still need to be reviewed for production. However p0 allowed to drastically improve per engineer velocity, AI code quality and iterate faster with working prototypes and refinements.
+
+Compared to Claude Code directly, which we also use heavily, p0 keeps very strong coherence from user story, spec planning, architecting, engineering and QA - across many several agents and subagents. Breaking down the work into sequential and parallel task. With Claude Code alone this would be usually requiring lots of hand holding, or be be only partially focussed, rest lost in the woods.
+Also, we attempted to replicate some of p0 ideas with home grown software dev personas and workflows which fell apart. I think the strong point of p0 is that they really nailed the decomposition and software dev cycle with agents.
+
+Really recommend to try, and at the very minimum you get to make your codebase agent ready if you haven't already.
+
+--- objectID 49894805 · created 2026-09-29 · story: Show HN: ProgressCove, calm and smart to-do app with Home Assistant integration · https://news.ycombinator.com/item?id=49894805
+I’m a network engineer in my day job, have two school age kids, I volunteer for my kids scouting troop and have many hobbies (astronomy, electronics, gaming, home server lab to name a few) and I always added tasks faster than I can finish them. I started writing projects and tasks on paper, which quickly became unsustainable. I could see everything ongoing at a glance, but it became useless as I complete and add tasks. Eventually I decided to try some of the popular apps.
+
+Many apps are great at what they do, but I just couldn't find one that fit my needs. Some were based on Kanban/Scrum like approach and I really didn’t want something that reminded me of my day job in my free time. Some would not let me create tasks without due dates. I do my personal projects whenever I have free time, not on a fixed schedule . Others had platform limitations, missing web or mobile app, and some did not let family members create their own projects unless they have their own subscription. I eventually settled on one, decided to write a middleware that would read tasks with API, calculate a completion percentage for each project, generate and upload a status image to Amazon photo gallery to show as slideshow on Echo Show screen. The goal was to keep an eye on what projects I am closer to finishing and which tasks are my next goals. It felt like trying to fit a square into a round hole with an app that wasn't designed for how I think. I decided to ditch the whole middleware approach and started building something I truly wanted to use.
+
+I started with a working title of calmprogress. I aimed for an app where every field except name is optional, and no overdues. Everything that would normally be past due is simply due until done, and ongoing is a valid state. For me and I think for many others, red past due warnings are only a cause for anxiety which leads to procrastination, so I skipped red text (except for very few irreversible actions) completely. Smart Home integrations, no platform lock in, open API, access for whole family as first class users (all family members can create their own tasks, separate from the account holder), offline first with online sync were non negotiables. Making progress towards goals while not causing distress is the main goal of the app, so I decided on the final name of ProgressCove.
+
+Architecture Choices
+
+Backend: Python FastAPI was an easy decision, since an open and accessible API was a nonnegotiable of this project. Nginx proxy to accept connections, PostgreSQL with PgBouncer on a Hetzner VPS. Database is backed up to separate attached disk and periodically dumped, encrypted and backed up off cloud. Everything is built with containers, so I can scale it up without too much trouble. I started with one proxy VPS and one backend VPS and Mikrotik CHR to secure all traffic from proxy to the backend. I was spreading the load across more VPS, prices increased by 300% around this time, so I decided to leave most of it consolidated on a shared VPS until user base growth calls for the expansion.
+
+Frontend: All logic, including smart features of the apps run on the server. The only way to read data from the server is through the API. This allows me to host a lightweight React web app on a Cloudflare worker for the web app. Mobile apps use React Native with Expo. This keeps adding features to both web and mobile versions relatively simple.
+
+AI coding without the slop: I could eventually write everything by hand, but it would take significantly longer. It does not make sense to penalize myself for pride; I used Claude Code to write the code while I provided heavy guidance. If you let Claude write your whole codebase without oversight, it’s more than happy to write 80+ lines of useEffect hooks you can get lost in and throw a single page into a single file instead of breaking into reusable components, negating biggest advantages of React. I followed an iterative process, where I write requirements and explain details such as expected classes, attributes, objects, let Claude write the initial version, then go over it and fine tune, telling Claude exactly what needs to be changed. Once that’s done, then have it write tests, do a security review, and adversarial review where it hands it off to several sub agents to find exploits.
+
+Offline first, PIN protected databases for the whole family: Since offline usage is a must, I used WatermelonDB for mobile app versions to store data locally, with a sync function triggered automatically on save and periodically on a timer to the server, and SSE triggered from the server, as long as there’s internet connection.  To keep data secure for family devices, each user gets their own PIN protected database. When a different user is selected, app will ask for the user’s PIN, relaunch the app with that user’s database, and lock switching back to the account holder with their PIN. Database picking is limited to app launch, which helps avoid most user/database selection type of bugs. Current family implementation gives only the account holder log in credentials, so account holder needs to log in and switch to the user to give family members their own app installation. I am working on a family based log in system, so all family members can log in directly. Sharing anything with family is already in the app, and with this family log in implementation, task assignments will be added as well.
+
+How to write for different platforms while keeping it sustainable: Flow of the app logic is always same regardless of platform. For example, non mobile clients & integrations follow same sync model as mobile, but they assume always online and skip the code components that write to offline database and sync immediately. I also avoided mixing platform specific code and shared code, which allowed me to minimize the former as much as possible. Keeping all code blocks like lego pieces in the monorepo, I could impor only the relevant blocks for the platform.  So far, I have released Android, iOS (and their Widget & Speech integrations, having Google or Siri add your tasks) and Web app from this monorepo and a Home Assistant integration from a separate repo, since it uses MIT license and is fully open. Echo Show and Google Home integrations are on the way, and anyone can write their own for any platform if they desire. (I still need to write and host API documentation, but no additional work required to make it available to everyone, and one could easily figure it out from Home Assistant Integration code).
+
+A contract file is also shared across different platforms, which contains value limits accepted by the API. Clients will check the contract to ensure they send correctly shaped and sized data, but server does not blindly trust the client and also does its own checks on incoming data.
+
+Continued on first reply
+
+--- objectID 43894292 · created 2025-05-05 · story: AI Meets WinDBG · https://news.ycombinator.com/item?id=43894292
+This is exactly what frameworks like Claude Code, OpenAI Codex, Cursor agent mode, OpenHands, SWE-Agent, Devin, and others do.
+
+It definitely does allow models to do more.
+
+However, the high-level planning, reflection and executive function still aren't there. LLMs can nowadays navigate very complex tasks using "intuition": just ask them to do the task, give them tools, and they do a good job. But if the task is too long or requires too much information, the context length deteriorates the performance significantly, so you have to switch to a multi-step pipeline with multiple levels of execution.
+
+This is, perhaps unexpectedly, where things start breaking down. Having the LLM write down a plan lossily compresses the "intuition", and LLMs (yes, even Gemini 2.5 Pro) cannot understand what's important to include in such a grand plan, how to predict possible externalities, etc. This is a managerial skill and seems distinct from closed-form coding, which you can always RL towards.
+
+Errors, omissions, and assumptions baked into the plan get multiplied many times over by the subsequent steps that follow the plan. Sometimes, the plan heavily depends on the outcome of some of the execution steps ("investigate if we can..."). Allowing the "execution" LLM to go back and alter the plan results in total chaos, but following the plan rigidly leads to unexpectedly stupid issues, where the execution LLM is trying to follow flawed steps, sometimes even recognizing that they are flawed and trying to self-correct inappropriately.
+
+In short, we're still waiting for an LLM which can keep track of high-level task context and effectively steer and schedule lower-level agents to complete a general task on a larger time horizon.
+
+For a more intuitive example, see how current agentic browser use tools break down when they need to complete a complex, multi-step task. Or just ask Claude Code to do a feature in your existing codebase (that is not simple CRUD) the way you'd tell a junior dev.
+
+--- objectID 45238553 · created 2025-09-14 · story: How to use Claude Code subagents to parallelize development · https://news.ycombinator.com/item?id=45238553
+I found a study a while ago that measured the effect of defining personas, and the effect was significant, but not very big. I like defining roles because I think it makes setting boundaries a bit easier. When I assign the role of architect for brainstorming, I expect the model to be a bit less eager to immediately jump into implementation. I'll still tell it explicitly to not do that, so the effect is probably extremely small.
+
+So far, I find it much more important to define task scope and boundaries. If I want to implement a non-trivial feature, I'll have one role for analyzing the problem and coming up with a high-level plan, and then another role for breaking that plan down into very small atomic steps. I'll then pass each step to an implementation role and give it both the high-level plan and the whole list of individual steps as context, while making it clear that the scope is only to implement that one specific step.
+
+I've had very good results with this so far, and once the two main documents are done, I can automate this with a small orchestration script (that does not depend on an LLM and is completely deterministic) going through the list and passing each item to an implementation agent sequentially, even letting the agent create a commit message after every step so I can trace its work afterwards. I've had very clean long-running tasks this way with minimal need for fixing things afterwards. I can go to bed in the evening and launch it and wake up to a long list of commits.
+
+With the new 6 dollar subscription by Z.ai which includes 120 prompts (around 2000 requests) every 5 hours, I can pretty much let this run without having to worry about exceeding my limits.
+
+--- objectID 50241019 · created 2026-10-26 · story: No signs of AI payoff outside the tech sector · https://news.ycombinator.com/item?id=50241019
+>Debugging can be done by writing/deleting/modifying code (e.g., write a test and run it, or add log statements, or remove a line and re-run the program, etc.), or by running shell tools
+
+We can end with things like "drinking cofee is an essential part of debugging for me". Debugging is an integration work, just like architecture planning, so it's somehow tied to plain english skills, reading docs, running whatever existing commands there are, parsing tools output is very important thing.
+
+Another point on which we should reach an agreement is the definition of debugging, as I suspect you may have your own definition. Fixing compiler error is not debugging. Glancing over source code is not debugging. Debugging is characterized by running a program and comparing the actual outcome with the expected one — implying finding the exact part of the source code responsible for the problem. Meatbags often do not read the full related code, and sometimes are not even experts in that particular programming language, or simply don't own the code and have hard time digging into it.
+
+Countrary, LLM-s excel at bruteforce code sifting and spitting two more 200-lines python scripts each minute. Still, even with AI debugging is not just "read and write code" — it's rather a high level skill with code read-writing being the largest hammer in the belt. Hammer so large AI will write several large scripts rather than use existing simple command.
+
+>It's also fun to write your own debugging tools by the way - just imagine any debugging workflow you think is good, write the tool, give the agent some tips how to use it, and they'll do great. It's so good, you should really try it.
+
+You conflate crutches with features. LLM-s absolutely suck at interactive tools, so they have to compensate with their strongest side: writing-reading code. Not because that's the absolutely most efficient way to debug, but because the economy is shaped differently in the world of AI. Running application manually, manually collecting logs, and then feeding them into AI is not "debugging made by AI" — it's the debugging made by human while AI doing the "code sifting" part of the debugging process.
+
+>> The fact that you personally do both things does not mean everybody and everything does it this way.
+
+>I don't, but LLMs certainly do.
+
+When I look at my agent doing 1000 characters one-line python script for testing/debugging, I do realize there is no way it could be a common code-writing skill, regular python code does not look like this, the skill requires some special understanding of agentic loops, it cannot be from pre-training dataset. And you definitely cannot say that "being able to write code" automatically enabled "being able to debug" — just try any pre-2025 model that is decent at code writing but not trained for modern tools/harness (I'm pretty sure some newer models also lack this ability, but such models are harder to spot). I'm pretty sure everybody here tested pre-2025 models, it's really nothing to argue about.
+
+>Programming and debugging is self-evidently part of the same training loop. Agents write code, validate it and adjust trajectory.
+
+I would suggest you to re-examine some fundamental explanation of how LLM training actually happens, because it seems to me you don't differentiate pre-training and post-training stages (and post-training has lots of flavors in it). Trying to train LLM for agentic coding and debugging before it learns basic code patterns is a huge waste of resources. "Never say never" — if you manage to generate dozens of billions of agentic training sets, you can probably end up doing "coding+debugging pre-training", but so far neither Anthropic nor Google have resources to do that, rather they employ millions of fine-tuning samples. And I heart those companies have lots of money.
+
+It is true that modern LLM-s are trained to do basic chain-of-thoughts/agentic loops at the very begginning of fine-tuning (i.e. after pre-training), but it should be noted that LLM can do implicit chain of thought and code writing BEFORE any fine-tuning. Just the base model can do that, but the format of input and output does not correspond to what humans and harness expect. And that's basically how the chain of thoughts was discovered: researchers asked LLM to solve some task step by step — and it did. Nobody trained LLM to do that, it just reproduced some patterns from pre-training sets. And then researches started training LLM-s to specifically optimize agentic loops.
+
+> I don't know what to tell ya, it's how the LLM sausage is made.
+
+Even small Phi-4 was pre-trained on only 40% synthetic data, despite Phi-1 employing 99%+ synthetic data. Once again, you should split pre-training and post-training.
+
+On modern super-large LLM-s the large corpus of agentic loops for fine-tuning is indeed generated via external expert agentic loops, but it never becomes 100% as the model collapse is real and well known. Just in case the wording "model collapse" is not clear: the model starts using extremely limited set of tools to solve every task, even when much more efficient tools are available. I can see the tendency for model collapse on Grok 4.7 and Sonnet 5.5 I often use, and their engineers definitely partially counteracted this tendency.
+
+>I usually see this in people who are struggling to downplay LLM capabilities, and their strategy is to pretend that everything LLMs are good at was trivially accessible in the training data all along.
+
+I tried feeding non-canonical Tarjan bridge-finding implementation into AI approx year ago, and it went totally crazy: it says the implementation is incorrect, then traces it via supposed counter-example and finds it correct, then tries to give new explanation and once again suggests the implementation is bugged... The fact we put lots of crutches beneath the same pattern-matcher does not make it a completely different mechanism.
+
+Most people never leave their sit during the AI ride so AI drives them through the pre-defined happy path. But once you try to deliberately leave this road, LLM-s often mark the code "wrong/unoptimal/poorly formatted". That's particularly a reason why older agents used to agressively introduce completely unrelated refactoring/formatting changes — because they just did not like how many spaces you've used in your code — and modern LLM-s still suffer from this problem, but their harness and agentic loops usually hide at least part of those meaningless changes.
+
+The phenomena is long-known, LLM-s strongly prefer their own ideomatic code: https://openreview.net/forum?id=4NJBV6Wp0h
+
+>I said "LLMs are capable of learning and extrapolating knowledge to new problems". You can throw a novel problem at an LLM and you'll get a novel solution.
+
+My experience is quite the opposite: I give a novel problem and LLM suggests 10-years old solution using libraries that are long deprecated. My whole life's hobby is about finding rare stuff, and I have very broad experience in this area. I particularly like LLM-s for finding some rare old thing I've never heard about, but in terms of making up something totally novel LLM-s totally sucks. Arguably, an ant is more intelligent when dealing with novel conditions than the most sophisticated modern LLM is.

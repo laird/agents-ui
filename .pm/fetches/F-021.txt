@@ -1,0 +1,14 @@
+url: https://github.com/orgs/community/discussions/184225
+rung: 1 (extra: GitHub community discussions)
+accessed: 2026-11-02
+truncated: yes (the fetch tool returned a summary with paraphrase; no verbatim quotes available from this file)
+
+Thread: "Hierarchy view in GitHub Projects [Public Preview] #184225" (GitHub Community, Projects and Issues)
+Original post: Jan 13, 2026, by a GitHub maintainer, 69 total votes. Announces hierarchy view, which shows sub-issues up to eight levels deep in project tables.
+Most upvoted replies (paraphrased by the fetch tool):
+- Jan 16, 2026, 21 votes: asks for sub-issues to be filterable (e.g., excluding Completed/Aborted) and for expanded state to persist after reload.
+- Jan 19, 2026, 20 votes: sub-issues appear both nested under their parent and as separate top-level rows.
+- Jan 17, 2026, 10 votes: asks why this shipped before "sort by last updated/created."
+- Jan 23, 2026, 10 votes: requests the same hierarchy display for roadmap views.
+- Jan 19, 2026, 9 votes: asks for hierarchy view on roadmaps as well.
+Relevant: the thread doesn't discuss parent progress indicators or roll-up percentages. Apr 21, 2026: closed and Done items still appear in nested views, and epics are rarely closed, so filtering them out matters. Apr 20, 2026: an Epic → Feature → Story hierarchy where "slice by issue type" stopped matching the flat view. Filters like -is:closed and -status:Done don't apply to nested items. Maintainer, Feb 2, 2026: the team is "currently working on de-duplicating the items by default."

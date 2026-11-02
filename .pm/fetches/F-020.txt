@@ -1,0 +1,12 @@
+url: https://github.com/laird/agents/issues?q=is%3Aissue%20decompose
+rung: 1 (extra: laird-agents-issues)
+accessed: 2026-11-02
+truncated: no (text as returned by the fetch tool)
+
+Total result count: 6 (filter: is:issue decompose)
+1. "Formalize crew/fleet handoff: decomposer attaches specs to subtask issues". #148, open, opened on Sep 17, 2026
+2. "Add dependency edges to the issue contract (Beads-lite graph model)". #146, open, opened on Sep 17, 2026
+3. "autocoder /fix reads issue .body only — comment-borne spec corrections are structurally invisible to workers". #134, open, opened on Aug 30, 2026
+4. "Triage silently applies no labels at all when a blocking label is missing (tracked marker file permanently skips label setup)". #36, closed on Jul 28, 2026, 1 comment
+5. "Merge the /dev line (feat/autocoder-planning-pipeline) to master — 11 conflicts, rename collision mapped". #30, open, opened on Jul 28, 2026, 10 comments
+6. "autocoder: regression suite reports a false green on macOS — every grep -oP stat parser silently yields 0". #20, closed on Jul 28, 2026, 5 comments

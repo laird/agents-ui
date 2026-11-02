@@ -1,0 +1,6 @@
+url: https://hn.algolia.com/api/v1/search?query=sub-issues%20epic%20progress%20tracking&tags=comment&hitsPerPage=10
+rung: 2 (hackernews_comments)
+accessed: 2026-11-02
+truncated: no (full comment_text of each hit; HTML tags removed, entities decoded)
+
+nbHits: 0

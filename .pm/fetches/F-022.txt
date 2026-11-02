@@ -1,0 +1,7 @@
+url: https://github.com/laird/agents/issues/148
+rung: 1 (extra: laird-agents-issues)
+accessed: 2026-11-02
+truncated: yes (the fetch tool returned a summary; no verbatim quotes available from this file)
+
+Title: Formalize crew/fleet handoff: decomposer attaches specs to subtask issues · #148 · open · opened Sep 17, 2026 by the maintainer · labels enhancement, needs-design, proposal · no comments
+Summary: autocoder's task-scope gate in fix.md splits large issues into subtasks, but those subtasks carry only raw issue text; each worker rebuilds context on its own, wasting tokens and risking inconsistent interpretations and interface drift across siblings. Proposes: a short spec per subtask (interfaces, expected files, acceptance criteria, sibling constraints); a shared parent design note linked from every subtask; workers start from the spec and report spec/reality conflicts to the parent; with dependency edges (#146) subtasks become safe to run in parallel.

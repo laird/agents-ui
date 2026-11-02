@@ -1,0 +1,66 @@
+url: https://hn.algolia.com/api/v1/search?query=%22sub-issues%22%20github&tags=comment&hitsPerPage=10
+rung: 2 (hackernews_comments)
+accessed: 2026-11-02
+truncated: no (full comment_text of each hit; HTML tags removed, entities decoded)
+
+nbHits: 16
+
+--- objectID 42761753 · created 2025-01-19 · story: GitHub introduces sub-issues, issue types and advanced search · https://news.ycombinator.com/item?id=42761753
+I like GitHub precisely because it didn't try to capture the entire market of issue trackers and code search too aggressively.
+
+If GitHub sub-issues had existed even in an inferior form back in 2019, developer-targeted trackers like Linear and Shortcut would have had a hard time existing, and all of their ideas (some of which have advised the UX of today's GitHub sub-issues release!) would have been lost to time.
+
+Now, perhaps this was not value-maximizing to Microsoft, or value-maximizing to companies who now need an extra license for Linear - but I would argue that for actual developer experience, GitHub fostering a spirit of innovation through its own stagnation has created a vibrant ecosystem better than anything any company could do themselves.
+
+--- objectID 41659624 · created 2024-09-26 · story: The Slow, Painful Death of Agile and Jira · https://news.ycombinator.com/item?id=41659624
+My biggest gripes are mostly Atlassian's fault, in that their products seem to take AGES to load (wasting my time) while also providing a UX that seems designed to force as many page loads as possible (wasting even MORE of my time). They keep hiring product people from the Marquis de Sade School of User Interface Design, and it shows.
+
+I also have a huge dislike for all the horrible things so many companies do with Atlassian products, and although that is not necessarily their fault it is still somewhat related to those products. Want a guaranteed raise next time? Just chop your code up into a zillion commits, and write a crapton of sub-issues. SMH
+
+GitHub issues/projects are great for small teams, but can't remotely stand up feature-wise in a larger organization (and assumes everyone is a developer) so as much as I love their stuff, it cannot really compete in the Enterprise space by design.
+
+--- objectID 46198912 · created 2025-12-08 · story: GitHub no longer uses Toasts · https://news.ycombinator.com/item?id=46198912
+I am lucky in that I haven't used Jira in many years, so here are some examples of how GitHub does it:
+
+- create an issue: redirect to the created issue
+
+- create an issue from a project view (kanban board): close the creation modal, stay on the view, and let the newly created issue show up in the list
+
+- create a sub-issue from within an issue open in a side panel of project view: close the creation modal, stay on the parent issue and render the newly created sub-issue in the section called "sub-issues"
+
+Within the awkward constraints where GitHub projects clash with the old UX of issues this is works very well and I know way beyond any reasonable doubt that the desired action has indeed been performed. Error states like failure to create an issue can be rendered in the modal and I can retry right in context too. I fail to see how toasts would add anything.
+
+In a product based on different principles this might not be possible but then the GitHub doc is internal guidance and not a universal rule.
+
+As an aside, GitHub's issue creation modal used in the project view is well executed.
+
+--- objectID 47913092 · created 2026-04-26 · story: Issue links now open in a popup · https://news.ycombinator.com/item?id=47913092
+I was responsible for this going out. The goal was to provide a more consistent user experience in that what happens when you click an issue would be the same in more places where we use the issue viewer (sub-issues on an issue, our dedicated issues dashboard (https://github.com/issues), GitHub Projects, and others). Like you mentioned, you also wouldn't lose your place when clicking an issue reference when reading a discussion. There were some performance improvements that came with the change too. It was well intentioned, but we hear you, and thanks for the feedback. We missed the mark on this one and it's been rolled back.
+
+--- objectID 42906483 · created 2025-02-02 · story: [dead] · https://news.ycombinator.com/item?id=42906483
+GitAuto can now reference the parent issue’s number, title, and body (description) when triggered from a sub-issue. GitHub introduced issue parent-child relationships in October 2024 (beta). Since the REST API does not yet support this feature, GraphQL is used instead.
+
+With this update, users can create a main issue for tasks like unit test creation, integration test creation, or external specification writing, and then create sub-issues for specific files or functions. Common requirements—such as using functions instead of classes, using Jest for JavaScript, or specifying a test constants file—can be documented in the parent issue’s body. This eliminates the need to repeatedly open requirement documents when writing sub-issues, allowing sub-issue bodies to focus only on sub-issue specific details, making the process more efficient.
+
+--- objectID 42786547 · created 2025-01-21 · story: I'll think twice before using GitHub Actions again · https://news.ycombinator.com/item?id=42786547
+This month's rollout of sub-issues and issue types would be most of what my organization thinks it needs to shift to GH Issues, I believe, barring however long it would take to rewrite some sync up automation with ServiceNow based on those issue types. Of course it will take another 6 months to a year before those kinds of features make it to GitHub Enterprise, so it is still not happening any time soon. (Though that gets back to my "weird" mixes. I don't entirely know why my company is using AzDO SaaS for Issue Tracking but decided GHE over "normal" cloud GH for Repos. But that's not the weirdest mix I've seen.)
+
+I definitely get the backwards compatibility thing and "don't break someone's automation", but at the same time, Microsoft could at least mark AzDO's official Roadmap as "Maintenance Only" and send the message that feels obvious as a user that GitHub is getting far more attention than AzDO can, but is hard to convince management and infosec that a move to GitHub is not just "the future" but "the present" (and also maybe "the past", now, given AzDO seems to have been frozen ~2020).
+
+--- objectID 42761674 · created 2025-01-19 · story: GitHub introduces sub-issues, issue types and advanced search · https://news.ycombinator.com/item?id=42761674
+FWIW, this specific feature - what they are now calling sub-issues - is actually better described as a framework for modeling proper parent-child relationships in their system, which is something quite hard to get right, mainly because it has to work somehow with the existing issues feature set. People building this feature from scratch (e.g. Linear) have it trivial to solve, because they didn't have any backwards compatibility issue to worry about. This is, of course, absolutely Github's fault for not designing it to accomodate such a thing easily in the first place, but the people who built this feature are probably not the same people who made that original decision.
+
+They've been working on some version of this feature for several years now in various iterations. I believe this is either their third or fourth attempt to get it right - I was trialing a beta of some previous iteration of it a few years ago and it was incomplete/not fully well thought out which must be why they dropped it. I'd trust the feature here at least to be decent now, because of how many attempts they've had at it.
+
+But yeah if I was a company like Zenhub I would be probably a bit worried at this announcement since it is almost inevitable that this specific feature is going to be enough for people to no longer need third party management of issues. I know in a previous company I worked for that specific feature (proper parent-child relationships) was the reason they used Zenhub, and same for my current company using Linear.
+
+--- objectID 42759814 · created 2025-01-19 · story: GitHub introduces sub-issues, issue types and advanced search · https://news.ycombinator.com/item?id=42759814
+I was excited to see this feature pop up in beta, specifically sub issues. VS code organizes their work with parent sprint issues ("iteration plan", see [1]). I started using this pattern on my own project and once i adapted, now prefer it. Now rather than using markdown bullet points, i can use first class sub issues which are slightly less awkward. Ultimately a minor feature addition, but if it pushes more people to use then pattern, i think it would be nice. Lighter weight than proper tools, and imho all you need for moderately complex projects if the suits dont have too many needs / influence.
+
+[1]: https://github.com/microsoft/vscode/issues/237297
+
+--- objectID 42757187 · created 2025-01-19 · story: GitHub introduces sub-issues, issue types and advanced search · https://news.ycombinator.com/item?id=42757187
+A lot of this will seem trivial if you haven't used Github for an organization's management of issues. This also lets you start off with a markdown checklist, and convert items to sub-issues.
+
+--- objectID 42755748 · created 2025-01-19 · story: GitHub introduces sub-issues, issue types and advanced search · https://news.ycombinator.com/item?id=42755748
+In other words, GitHub introduces "endless discussions if we're going to use subtasks or sub-issues in our WoW"
