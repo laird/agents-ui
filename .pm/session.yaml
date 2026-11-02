@@ -40,21 +40,35 @@ sources:
     archive_ref: null
     dirty_at_start: false
     baseline: ""
-    moved_to: null
+    moved_to: 45ee978
     clean_at_start: true
-    clean_at_end: null
+    clean_at_end: true
 
 stage:
-  current: discovery
-  status: in-progress
+  current: prototype
+  status: not-started
 
 stages:
   discovery:
-    status: in-progress
+    status: approved
     output: outputs/01-discovery.md
     started_at: "2026-11-02T00:29:14Z"
+    revision: 1
+    approved_at: "2026-11-02T01:46:00Z"
+    selected_opportunity: OPP-003
+    provisional: false
+    review: outputs/01-discovery-review.md
     fetches: .pm/fetches
-
+    summary: "Discovery complete · 77 min · fetches 15/20 · searches 0/8 · items 16 · quotes 10/10 verified · gaps 5 · findings 13, blocking 0, all resolved · approved"
+  prototype:
+    status: not-started
+    output: outputs/02-prototype.md
+    html: outputs/prototype/index.html
+    path: null
+    brief: .pm/design-brief.md
+    revision: 0
+    approved_at: null
+    summary: null
 stale: []
 decisions:
   - id: D-001
@@ -71,6 +85,20 @@ decisions:
     pm_decided: "One more fetch: Temporal"
     reason: "Temporal is one source, along with herdr, and GitHub issues."
     at: "2026-11-02T01:31:00Z"
+  - id: D-003
+    stage: discovery
+    checkin: evidence-review
+    claude_recommended: "none given; RV-008 asked whether OPP-001 may read GitHub issues through the PM's own signed-in gh, given the third-party key exclusion"
+    pm_decided: "Yes, gh is fine"
+    reason: "Your own signed-in gh is not a new integration; agents-ui already uses it."
+    at: "2026-11-02T01:44:00Z"
+  - id: D-004
+    stage: discovery
+    checkin: priority-check
+    claude_recommended: "Now OPP-001 One waiting list, Next OPP-002, Later OPP-003; fit with the brief tipped the order."
+    pm_decided: "Now: Trust the signal (OPP-003)"
+    reason: "Cleanest more reliable signals."
+    at: "2026-11-02T01:46:00Z"
 notes:
   - "Sources: PM ticked Community only; rungs 3 to 7 dropped. PM named herdr, claude-squad, Claude Code's own agent views and laird/agents; added as rung 1 community sources (issue pages)."
   - "GitHub API refused for repositories other than laird/agents-ui from this cloud machine; neighbouring tools are read through their public HTML issue pages."

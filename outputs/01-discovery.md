@@ -2,18 +2,34 @@
 
 | Field | Value |
 |---|---|
-| Status | draft |
+| Status | approved |
 | Product · focus area | agents-ui · attention-and-answering |
 | User you design for · your brief | Solo developer · Never miss a blocked agent |
 | Code snapshot | laird/agents-ui @ 0019fe8 (primary; read in place, working tree clean) |
-| Research window | 2026-11-02T00:29Z to (open) · fetches 15/20 · searches 0/8 |
-| Chosen opportunity | (pending priority check-in) |
-| Evidence review | (pending) |
-| Run summary | (written at close) |
+| Research window | 2026-11-02T00:29Z to 2026-11-02T01:46Z · fetches 15/20 · searches 0/8 |
+| Chosen opportunity | OPP-003 Trust the waiting signal |
+| Evidence review | 13 findings · 0 blocking · 8 major and 5 minor, all dispositioned · quotes 10/10 verified · floor met · outputs/01-discovery-review.md |
+| Run summary | Discovery complete · 77 min · fetches 15/20 · searches 0/8 · items 16 · quotes 10/10 verified · gaps 5 · findings 13, blocking 0, all resolved · approved |
 
 ## 1. The decision
 
-(Written last, after the priority check-in.)
+### Chosen: OPP-003 Trust the waiting signal
+- What it is: today agents-ui guesses that a tmux agent is waiting from a fixed list of phrases on its screen, which misses some prompts and raises false alarms. Reading the state each source reports itself (herdr's `blocked`, Temporal's `waiting_for_human`, GitHub's blocking labels) would make the "needs you" marker one the solo developer can believe.
+- Why you chose it: "Cleanest more reliable signals."
+- What tipped the recommendation: fit with the brief put OPP-001 first in Claude's recommendation; you chose OPP-003 instead, putting signal quality first, so that a waiting list or an alert built later rests on states the sources report rather than guesses.
+- Evidence: 4 signals (3 Evidence), 2 source types · strongest: 26-thumbs-up issue (SIG-003) · counter-evidence: SIG-006 and SIG-011 (herdr's pattern matching works well enough for some users, looked F-013) · constraints: CON-003 hurts
+
+### Considered and placed later
+- **Next, OPP-001 One waiting list across herdr, Temporal and GitHub.** Everything waiting on the developer in one list, oldest first. Evidence: 6 signals (5 Evidence), 2 source types · strongest: 56-thumbs-up issue (SIG-001) · counter-evidence: SIG-002, looked F-011 · constraints: CON-001, CON-004. Why not now: it is only as good as the states it lists, which OPP-003 makes trustworthy first.
+- **Later, OPP-002 An alert that names the agent and lets you answer from where you are.** Evidence: 5 signals (4 Evidence), 2 source types · strongest: 59-thumbs-up issue (SIG-002) · counter-evidence: SIG-009, looked F-012 · constraints: CON-002, CON-004, CON-005. Why not now: it needs answer paths into herdr and Temporal that do not exist, and an alert on unreliable signals becomes noise.
+
+Main trade-off between the top two: OPP-001 delivers the brief directly and visibly; OPP-003 is invisible when it works but makes everything built on it believable.
+
+| Slot | Opportunity | Reasoning (one sentence) |
+|---|---|---|
+| Now | OPP-003 Trust the waiting signal | The PM's choice: reliable signals first, so later features rest on reported states. |
+| Next | OPP-001 One waiting list | Delivers "never miss" directly once the states it lists are trustworthy. |
+| Later | OPP-002 Alert and answer from anywhere | Highest single signal but needs write paths and risks noise on weak signals. |
 
 ## 2. What we learned
 
@@ -22,8 +38,9 @@ learn that an agent is waiting on them by going to look. An agent that stops for
 prompt or a question (a "blocked" agent: it can do nothing until a person answers) sits silent
 until someone checks, and the people who notice this build their own fixes: notification
 hooks (small scripts Claude Code runs on events), phone apps, Telegram bots, kanban boards. The
-platform vendors are closing the single-session case (Claude Code shipped tmux-aware terminal
-notifications and phone pushes for its Remote Control mode in August 2026), but nothing in the
+platform vendors are closing the single-session case (Claude Code released tmux-aware terminal
+notifications by March 2026, with mixed reports that they work, and phone pushes for its Remote
+Control mode in August 2026), but nothing in the
 public record covers a swarm: several agents across several hosts, where the question is which
 one needs you and whether you can answer it from where you are. When notifications do arrive
 they turn into noise fast for people with five or more sessions, and detecting "waiting" from
@@ -31,22 +48,22 @@ screen text is itself unreliable.
 
 Themes:
 - Theme A, nobody tells you an agent is waiting: one sentence: agents block silently and people
-  check back by hand or build their own alerts · who says so: 6 GitHub issues on Claude Code's
-  tracker (largest 59 and 56 thumbs-up), 2 Hacker News comments, 1 Lemmy post · fixed or open:
-  fixed for a single Claude Code session (tmux passthrough, Remote Control pushes, both August
-  2026), open for anything spanning several agents or tools · why it matters: a solo developer
+  check back by hand or build their own alerts · who says so: 3 Claude Code issues read in full (59, 56 and 26 thumbs-up) and a
+  title listing with more like them, 2 Hacker News comments, 1 Lemmy post · fixed or open:
+  partly fixed for a single Claude Code session (tmux passthrough released by March 2026 with mixed
+  reports, issue closed August 2026; Remote Control pushes August 2026), open for anything spanning several agents or tools · why it matters: a solo developer
   running a swarm loses agent-hours every time a prompt waits unseen.
 - Theme B, tell me which one and let me answer from here: once alerted, people want the alert to
   name the agent, take them straight to it, and let them reply without going back to the desk ·
-  who says so: 3 GitHub issues (Claude Code), 2 Hacker News comments, 3 agents-ui issues filed by
-  its maintainer · fixed or open: agents-ui already names the blocked role and deep-links from
+  who says so: 2 Claude Code issues, 2 Hacker News comments, 4 agents-ui issues filed by
+  its maintainer (#340, #343, #344, #345) · fixed or open: agents-ui already names the blocked role and deep-links from
   its Omarchy alert (#344, #340, both closed); answering herdr and Temporal agents from agents-ui
   is not possible today (CON-002, CON-005); counter-evidence: alerts become noise beyond five
   sessions (SIG-009) · why it matters: the brief is "never miss", and an alert that is ignored or
   leads two screens away is a miss.
 - Theme C, is it waiting or just thinking: detecting a waiting agent from screen text or silence
   is guesswork, and hook-based signals miss some prompts · who says so: 1 Hacker News comment,
-  2 GitHub issues, herdr's own README · fixed or open: sources disagree; herdr reports good
+  1 Claude Code issue (#19976, two of its comments), herdr's own README · fixed or open: sources disagree; herdr reports good
   results from pattern matching but says "there will be rough edges" · why it matters: a missed
   detection is a missed agent, and a false one trains the developer to ignore alerts.
 
@@ -63,33 +80,33 @@ platform users, and anyone who supervises agents without being a heavy terminal 
 - For: solo developer · Job: see everything that is waiting on me, wherever it waits, oldest first
 - Supported by: SIG-001, SIG-005, SIG-006, SIG-008, SIG-010, SIG-016 · CON-001, CON-004
 - In their words: QUO-001, QUO-002, QUO-005
-- Evidence: 6 signals, 4 source types · strongest: 56-thumbs-up issue (SIG-001) · counter-evidence: SIG-002 (Claude Code shipped pushes for one session, looked F-011) · constraints: CON-001 hurts, CON-004 hurts
+- Evidence: 6 signals (5 Evidence), 2 source types · strongest: 56-thumbs-up issue (SIG-001) · counter-evidence: SIG-002 (Claude Code shipped pushes for one session, looked F-011) · constraints: CON-001 hurts, CON-004 hurts
 - Evidence strength: good across GitHub, Hacker News, Lemmy and the Temporal forum, but no agents-ui user besides its maintainer / user impact: high, it answers "which agent is waiting on me" in one look / fit with the brief: direct, and matches the PM's three sources / delivery constraints: the alert path reads tmux and herdr only, Temporal waits never reach it (CON-001), and no alert outside Omarchy (CON-004) / uncertainty: whether blocked issues belong in the same list as blocked agents
-- Exclusions check: none triggered (no third-party keys; browser and desktop notifications only)
+- Exclusions check: tested against all seven case exclusions: no install, build or test command run (none); paid or feature-flagged functionality (none); billing or seats (none); third-party key or OAuth integrations (allowed by the PM (D-003): GitHub issues are read through the PM's own signed-in `gh`, which agents-ui already uses); legal or compliance claims (none); PM: billing and paid tiers (none); PM: third-party key integrations (allowed by the PM (D-003): GitHub issues are read through the PM's own signed-in `gh`, which agents-ui already uses); browser and desktop notifications only
 
 ### OPP-002: An alert that names the agent and lets you answer from where you are
 - For: solo developer · Job: unblock a waiting agent without going back to the desk or the right pane
 - Supported by: SIG-002, SIG-004, SIG-005, SIG-010, SIG-012 · CON-002, CON-004, CON-005
 - In their words: QUO-003, QUO-004, QUO-009
-- Evidence: 5 signals, 2 source types · strongest: 59-thumbs-up issue (SIG-002) · counter-evidence: SIG-009 (alerts become noise beyond five sessions, looked F-012) · constraints: CON-002 hurts, CON-004 hurts, CON-005 hurts
+- Evidence: 5 signals (4 Evidence), 2 source types · strongest: 59-thumbs-up issue (SIG-002) · counter-evidence: SIG-009 (alerts become noise beyond five sessions, looked F-012) · constraints: CON-002 hurts, CON-004 hurts, CON-005 hurts
 - Evidence strength: strongest single items in the record, mostly from one crowd (Claude Code issue filers) / user impact: high, unblocking from anywhere saves the trip back / fit with the brief: strong, but "answer" goes beyond "never miss" / delivery constraints: herdr agents cannot be answered from agents-ui (CON-002), Temporal has no signal path and read-only mode refuses writes (CON-005) / uncertainty: how much answering from a phone needs authentication the product does not have
-- Exclusions check: a Slack or SMS channel would trigger "third-party key integrations"; the opportunity is scoped to browser and desktop notifications and agents-ui's own pages
+- Exclusions check: tested against all seven case exclusions: no install, build or test command run (none); paid or feature-flagged functionality (none); billing or seats (none); third-party key or OAuth integrations (a Slack or SMS channel would trigger it; scoped to browser and desktop notifications and agents-ui's own pages); legal or compliance claims (none); PM: billing and paid tiers (none); PM: third-party key integrations (a Slack or SMS channel would trigger it; scoped to browser and desktop notifications and agents-ui's own pages)
 
 ### OPP-003: Trust the waiting signal
 - For: solo developer · Job: believe the "needs you" marker, so a missed or false alarm doesn't train them to ignore it
-- Supported by: SIG-003, SIG-007, SIG-011, SIG-013, SIG-014 · CON-003
+- Supported by: SIG-003, SIG-007, SIG-013 (Evidence; SIG-003 and SIG-013 are the same issue), SIG-014 (Inference) · CON-003
 - In their words: QUO-007
-- Evidence: 5 signals, 3 source types · strongest: 26-thumbs-up issue (SIG-003) · counter-evidence: SIG-006 and SIG-011 (herdr's pattern matching works well enough for some users, looked F-013) · constraints: CON-003 hurts
-- Evidence strength: moderate; sources disagree, and the 144-thumbs-up item (SIG-014) is a title only / user impact: medium, invisible when it works / fit with the brief: supports it rather than delivering it / delivery constraints: tmux detection is a fixed phrase list (CON-003); herdr and Temporal report state directly / uncertainty: how often detection actually misses, which nothing here measures
-- Exclusions check: none triggered
+- Evidence: 4 signals (3 Evidence), 2 source types · strongest: 26-thumbs-up issue (SIG-003) · counter-evidence: SIG-006 and SIG-011 (herdr's pattern matching works well enough for some users, looked F-013) · constraints: CON-003 hurts
+- Evidence strength: thin; 3 Evidence items from 2 rungs, one of them a single Hacker News comment, and sources disagree / user impact: medium, invisible when it works / fit with the brief: supports it rather than delivering it / delivery constraints: tmux detection is a fixed phrase list (CON-003); herdr and Temporal report state directly / uncertainty: how often detection actually misses, which nothing here measures
+- Exclusions check: tested against all seven case exclusions: no install, build or test command run (none); paid or feature-flagged functionality (none); billing or seats (none); third-party key or OAuth integrations (none); legal or compliance claims (none); PM: billing and paid tiers (none); PM: third-party key integrations (none)
 
 ## 4. Evidence
 
 ### 4a. Coverage
 | Kind | Target | Logged | Channels used | Who those channels mostly hear from |
 |---|---|---|---|---|
-| Customer or community signals | 3 | 13 | GitHub issues (rung 1), Hacker News, Lemmy (rung 2) | power users who file bugs; tool builders and comparison shoppers |
-| Market or competitor observations | 2 | 2 (SIG-011 herdr, SIG-015 claude-squad), no Wayback or adoption number | competitor README and issue list (rung 1, read as community) | what makers choose to publish |
+| Customer or community signals | 3 | 9 Evidence + 3 Inference | GitHub issues (rung 1), Hacker News, Lemmy (rung 2) | power users who file bugs; tool builders and comparison shoppers |
+| Market or competitor observations | 2 | 2 (SIG-011 herdr, Evidence; SIG-015 claude-squad, Inference), no Wayback or adoption number | competitor README and issue list (rung 1, read as community) | what makers choose to publish |
 | Official product or release signal | 1 | 2 (vendor replies in SIG-002, SIG-003) | Anthropic staff replies on GitHub | the maker's own framing |
 | Repository constraints | 2 | 5 | agents-ui source at 0019fe8 | the code |
 
@@ -107,9 +124,9 @@ Added by the PM: herdr, claude-squad, Claude Code, laird/agents issue trackers a
 Triangulation (at most three decision-relevant themes):
 | Theme | Forum, GitHub | Lemmy, Mastodon, HN | Reviews | Numbers, competitors, official | Recurrence | Same crowd? | Counter-evidence |
 |---|---|---|---|---|---|---|---|
-| A. Nobody tells you an agent is waiting | SIG-002 (59 👍), SIG-001, SIG-003, SIG-004, SIG-014 | SIG-005, SIG-012 (HN), SIG-008 (Lemmy) | none | SIG-002 vendor reply: shipped for Remote Control | recurring | no: GitHub filers and HN tool builders differ | SIG-002 (shipped Aug 2026 for one session), looked (F-011) |
+| A. Nobody tells you an agent is waiting | SIG-002 (59 👍), SIG-001, SIG-003, SIG-004, SIG-014 | SIG-005, SIG-012 (HN), SIG-008 (Lemmy) | none | none | recurring | no: GitHub filers and HN tool builders differ | SIG-002's vendor reply (shipped Aug 2026 for one session), looked (F-011); also the theme's lead item |
 | B. Tell me which one and let me answer from here | SIG-002 (comment), SIG-001 (comment), SIG-010 (own) | SIG-005, SIG-006 (HN) | none | none | recurring | partly | SIG-009 (alerts become noise), looked (F-012) |
-| C. Is it waiting or thinking | SIG-013, SIG-003 | SIG-007 (HN) | none | SIG-011 (herdr README) | recurring, sources disagree | no | SIG-011 and SIG-006 (herdr detection praised), looked (F-013) |
+| C. Is it waiting or thinking | SIG-013, SIG-003 (same issue); SIG-011 (herdr README, maker documentation) | SIG-007 (HN) | none | none | recurring, sources disagree | no | SIG-011 and SIG-006 (herdr detection praised), looked (F-013); SIG-011 also cited as support |
 
 Gaps:
 - GAP: herdr issues, maxjendrall/herdr has issues disabled and appears to be a fork of ogulcancelik/herdr (F-004, F-013).
@@ -185,22 +202,26 @@ SIG-003 · Evidence · customer/community · GitHub issue, Claude Code (rung 1)
   Weight: 26 thumbs-up, 12 comments
   Saved: F-005
 
-SIG-004 · Evidence · customer/community · GitHub issue search, Claude Code (rung 1)
-  Claim: 989 Claude Code issues carry "notification" in the title; page 1 includes requests for system notifications when Claude needs attention (#26581), a configurable idle-prompt timeout (#13922), and a 10-second Notification hook delay (#5186, open).
+SIG-004 · Inference (titles only, from a search listing) · customer/community · GitHub issue search, Claude Code (rung 1)
+  Claim: 989 Claude Code issues carry "notification" in the title; page 1 lists requests for system notifications when Claude needs attention (#26581), a configurable idle-prompt timeout (#13922), and a 10-second Notification hook delay (#5186, open). Bodies not read.
   Source: https://github.com/anthropics/claude-code/issues?q=is%3Aissue%20in%3Atitle%20notification%20sort%3Areactions-%2B1-desc · accessed 2026-11-02
-  Weight: 989 results in a tracker of 5,000+ issues; top items 9 to 49 reactions
+  Weight: 989 issues with "notification" in the title, against 5,794 with the word anywhere (F-001); the per-row numbers on the listing are not thumbs-up counts (#29438 shows 15 there, 59 on its page) and are not used
   Saved: F-002
 
 SIG-005 · Evidence · customer/community · Hacker News comment (rung 2)
   Claim: A maker built a dashboard after missing permission prompts across six tmux panes, with no idea which agent was waiting; wanted to approve from a phone.
   Source: https://news.ycombinator.com/item?id=47901927 · published 2026-04-25 · accessed 2026-11-02
   Weight: comment on a Show HN; points not shown
+  Fetched as: https://hn.algolia.com/api/v1/search?query=claude%20code%20parallel%20agents%20permission%20prompt&tags=comment&hitsPerPage=10 (full text saved)
+  Fetched as: https://hn.algolia.com/api/v1/search?query=claude%20code%20parallel%20agents%20permission%20prompt&tags=comment&hitsPerPage=10 (full text saved)
   Saved: F-008
 
 SIG-006 · Evidence · customer/community · Hacker News comment (rung 2)
   Claim: A long-time tmux user switched to herdr first for its visual indication of which agent is working and which is waiting.
   Source: https://news.ycombinator.com/item?id=50302116 · published 2026-10-30 · accessed 2026-11-02
   Weight: comment; points not shown
+  Fetched as: https://hn.algolia.com/api/v1/search?query=agents%20waiting%20for%20input%20tmux&tags=comment&hitsPerPage=10 (full text saved)
+  Fetched as: https://hn.algolia.com/api/v1/search?query=agents%20waiting%20for%20input%20tmux&tags=comment&hitsPerPage=10 (full text saved)
   Saved: F-007
 
 SIG-007 · Evidence · customer/community · Hacker News comment (rung 2)
@@ -213,6 +234,7 @@ SIG-008 · Evidence · customer/community · Lemmy post (rung 2)
   Claim: A developer running Claude Code and Gemini CLI in parallel says the hardest part was tracking which agent waits for an answer; built a kanban that moves a task to PENDING when the agent asks.
   Source: https://lemmy.durstig.online/post/6108 · published 2026-02-22 · accessed 2026-11-02
   Weight: score 1, 0 comments (cross-posted from Reddit)
+  Fetched as: https://lemmy.world/api/v3/search?q=coding%20agents%20notification&type_=Posts&sort=TopYear&limit=10 (full text saved)
   Saved: F-009
 
 SIG-009 · Evidence · customer/community · GitHub issue, Claude Code (rung 1) · counter-evidence
@@ -224,7 +246,8 @@ SIG-009 · Evidence · customer/community · GitHub issue, Claude Code (rung 1) 
 SIG-010 · Evidence · customer/community (maintainer) · GitHub issues, agents-ui (rung 1)
   Claim: The maintainer filed and closed: alerts should name the blocked role (#344), alert click should deep-link to the blocked agent (#340), and the web view's text field cannot answer arrow-key pickers or numbered prompts (#345, #343).
   Source: https://github.com/laird/agents-ui/issues?q=is%3Aissue · published 2026-09-01 to 2026-09-02 · accessed 2026-11-02
-  Weight: 0 reactions each; 80 issues in the repository, all states
+  Weight: 0 reactions each; 80 issues among the first 100 items the API returned (the repository's total is not known from this page)
+  Fetched as: https://api.github.com/repos/laird/agents-ui/issues?state=all&per_page=100 (full text saved)
   Saved: F-010
   Note: the product's own maintainer, the only agents-ui user in the record
 
@@ -249,19 +272,19 @@ SIG-013 · Evidence · customer/community · GitHub comment, Claude Code (rung 1
 SIG-014 · Inference (title only) · customer/community · GitHub issue, Claude Code (rung 1)
   Claim: An AskUserQuestion left unanswered for 60 seconds lets the agent continue without the answer (title only; body not read).
   Source: https://github.com/anthropics/claude-code/issues/73125 · 2026-07-04 · accessed 2026-11-02
-  Weight: 144 thumbs-up, closed
+  Weight: unknown; the listing shows 144 beside it, but listing numbers are not thumbs-up counts (see SIG-004); closed
   Saved: F-001
 
-SIG-016 · Evidence · customer/community · Temporal community forum search (rung 1, PM's extra fetch)
-  Claim: Temporal users model a human wait as a workflow paused for a signal (or async activity completion) that carries the person's decision; several build their own UI for the people who approve, because those people will not use the Temporal Web UI. 18 matching posts since 2020, none about being notified that a workflow is waiting; engagement is low (0 to 1 likes per post).
+SIG-016 · Inference (forum search blurbs, not full posts) · customer/community · Temporal community forum search (rung 1, PM's extra fetch)
+  Claim: Temporal users model a human wait as a workflow paused for a signal (or async activity completion) that carries the person's decision; one post (19653) builds its own UI for business users who will not use the Temporal Web UI; one (758) asks how to request a human approval by email. 18 matching posts since 2020; engagement is low (0 to 1 likes per post).
   Source: https://community.temporal.io/search.json?q=human%20approval · posts 2020-10-30 to 2026-07-08 · accessed 2026-11-02
   Weight: 18 posts, top 1 like
   Saved: F-015 (F-014 was the same search with a longer query and returned nothing)
 
-SIG-015 · Evidence · market/competitor · GitHub issues, claude-squad (rung 1)
+SIG-015 · Inference (titles only, from a search listing) · market/competitor · GitHub issues, claude-squad (rung 1)
   Claim: claude-squad's top 25 issues by reactions are about pane capture, worktrees and sessions; none is about noticing a waiting agent; one asks to fix auto-approve ("yolo mode").
   Source: https://github.com/smtg-ai/claude-squad/issues?q=is%3Aissue%20sort%3Areactions-%2B1-desc · accessed 2026-11-02
-  Weight: 134 issues; top item 18 thumbs-up
+  Weight: 134 issues; per-row numbers on the listing are not used (see SIG-004)
   Saved: F-003
 ```
 
@@ -301,6 +324,7 @@ CON-005 · Constraint · repository · Status: to confirm with engineering
 
 ## 5. Assumptions and open questions
 - ASSUMPTION: the solo developer runs agents-ui on a machine they are not always looking at (laptop asleep, other window, away from desk).
+- OPEN-002: should GitHub blocking labels (needs-design and the rest) count as "waiting on you" in the same signal model as agent states, or stay a separate kind? (PM; changes the scope of OPP-003 and OPP-001.)
 - OPEN-001: what does "answering" a waiting Temporal workflow mean: a signal with a typed reply, an approve/deny, or opening AgentEx? (PM and engineering; changes scope.)
 
 ## 6. Decision record
@@ -308,5 +332,5 @@ CON-005 · Constraint · repository · Status: to confirm with engineering
 |---|---|---|---|
 | Case check | Confirm the case, web surface fed by herdr and Temporal waiting states | Confirm | "Source of truth is herdr sessions and temporal/agentex" |
 | Research check | Continue to opportunities | One more fetch: Temporal | "Temporal is one source, along with herdr, and GitHub issues." |
-| Evidence review (only if a finding needed your call) | | | |
-| Priority check | | | |
+| Evidence review (RV-008) | (asked without a recommendation) | Yes, gh is fine | "Your own signed-in gh is not a new integration; agents-ui already uses it." (the option chosen) |
+| Priority check | Now OPP-001, Next OPP-002, Later OPP-003 (fit with the brief tipped it) | Now OPP-003 Trust the signal | "Cleanest more reliable signals." |
