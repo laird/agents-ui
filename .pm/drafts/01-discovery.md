@@ -2,18 +2,25 @@
 
 | Field | Value |
 |---|---|
-| Status | draft |
+| Status | provisional (coverage floor not met; the PM kept it provisional) |
 | Product · focus area | agents-ui · feature-to-production (run 2; run 1 archived in outputs/attention-and-answering/) |
 | User you design for · your brief | Tech lead · Know when a feature is live |
 | Code snapshot | laird/agents-ui @ e4422c5 (read in place, working tree clean; moved on from run 1's 0019fe8; cited lines re-checked at 913843f) |
-| Research window | 2026-11-02T03:59Z to (open) · fetches 17/20 · searches 0/8 |
-| Chosen opportunity | (pending priority check-in) |
+| Research window | 2026-11-02T03:59Z to 2026-11-02T04:40Z · fetches 17/20 · searches 0/8 |
+| Chosen opportunity | OPP-005: "Live" per feature and per environment (provisional) |
 | Evidence review | 18 findings (RV-001 to RV-018); all fixed in the brief except RV-001 (coverage floor), which is the PM's call; all three opportunities provisional |
-| Run summary | (written at close) |
+| Run summary | 17 fetches, 0 searches; 18 Evidence signals, 21 quotes in total across both runs' banks, 5 repository constraints; 3 opportunities, all provisional; OPP-005 chosen |
 
 ## 1. The decision
 
-(Written last, after the priority check-in.)
+Take OPP-005 forward: show, per feature and per environment, whether the whole feature
+has reached dev, UAT and production. It answers the brief directly. GitHub already records
+which commit reached which environment (SIG-030), and worlds already match a release
+against what the platform runs (CON-009). It depends on part of OPP-004 underneath: the
+village has to know which subtasks make a feature (CON-007) before it can say the feature is
+live. The brief stays provisional. Only one market observation was found, and the PM chose
+not to waive that target, so a later run should look at how Linear, Jira or GitHub show
+deployments per feature.
 
 ## 2. What we learned
 
@@ -340,5 +347,5 @@ CON-010 · Constraint · repository · Status: to confirm with engineering
 |---|---|---|---|
 | Case check (run 2) | Confirm the focus area and plan | Confirm | "A new feature is a high level task, often broken into subtracts to get build, then when all subtracts are done, the whole thing gets validated and deployed." |
 | Research check | Continue to opportunities | Fold GitHub's own SDLC data into the brief, with one official check | "Yes" (to folding it in and checking GitHub's documentation) |
-| Evidence review (only if a finding needed your call) | | | |
-| Priority check | | | |
+| Evidence review (only if a finding needed your call) | RV-001: waive the market target, or keep the brief provisional | Keep provisional | not given |
+| Priority check | OPP-005 | OPP-005 | not given (took the recommendation) |

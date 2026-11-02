@@ -48,11 +48,13 @@ sources:
 
 stage:
   current: discovery
-  status: in-progress
+  status: provisional
 
 stages:
   discovery:
-    status: in-progress
+    status: provisional
+    chosen: OPP-005
+    closed_at: "2026-11-02T04:40:00Z"
     output: outputs/01-discovery.md
     started_at: "2026-11-02T03:59:32Z"
     revision: 1
@@ -119,6 +121,20 @@ decisions:
     pm_decided: "Yes (to folding GitHub's own SDLC data into Scout, with one official-source check of GitHub's Deployments and sub-issues docs)"
     reason: "not given; the PM's question was: Can the SDLC be monitored for projects in gh?"
     at: "2026-11-02T04:14:00Z"
+  - id: D-008
+    stage: discovery
+    checkin: evidence-review
+    claude_recommended: "Decide RV-001: waive the market target or keep provisional."
+    pm_decided: "Keep provisional"
+    reason: "not given"
+    at: "2026-11-02T04:38:00Z"
+  - id: D-009
+    stage: discovery
+    checkin: priority
+    claude_recommended: "OPP-005"
+    pm_decided: "OPP-005"
+    reason: "not given"
+    at: "2026-11-02T04:38:00Z"
 notes:
   - "Sources: PM ticked Community only; rungs 3 to 7 dropped. PM named herdr, claude-squad, Claude Code's own agent views and laird/agents; added as rung 1 community sources (issue pages)."
   - "GitHub API refused for repositories other than laird/agents-ui from this cloud machine; neighbouring tools are read through their public HTML issue pages."
