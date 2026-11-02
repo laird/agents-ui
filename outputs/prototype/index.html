@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prototype: agents-ui · Attention and answering</title>
+<style>
+  /* Tokens verified in src/web/ui.html lines 9 to 22 (commit 0019fe8). */
+  :root {
+    --bg: #0d1117; --surface: #161b22; --card: #21262d; --border: #30363d;
+    --accent: #58a6ff; --text: #e6edf3; --text-dim: #9aa4af; --success: #3fb950;
+    --warning: #d29922; --error: #f85149; --idle: #8b949e; --radius: 6px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #05070a; color: var(--text); min-height: 100vh; display: grid; place-items: center; padding: 16px 16px 72px; }
+  .frame { width: min(1440px, 100%); height: 900px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; position: relative; display: flex; flex-direction: column; }
+  .proto { position: absolute; top: 10px; right: 12px; font-size: 11px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px; background: var(--surface); z-index: 5; }
+  .topbar { display: flex; align-items: center; gap: 16px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--surface); }
+  .topbar .brand { font-weight: 600; }
+  .topbar .crumb { color: var(--text-dim); font-size: 14px; }
+  .screen { display: none; flex: 1; min-height: 0; }
+  .screen.active { display: flex; }
+  .main { flex: 1; padding: 24px; overflow: auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h1:focus { outline: none; }
+  .lead { color: var(--text-dim); margin: 0 0 20px; font-size: 14px; }
+  .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; min-width: 0; overflow: hidden; }
+  .card.down { opacity: .75; border-style: dashed; }
+  .card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .name { font-weight: 600; font-size: 15px; }
+  .pill { font-size: 11px; padding: 2px 8px; border-radius: 2em; background: rgba(88,166,255,.12); color: var(--accent); border: 1px solid rgba(88,166,255,.25); white-space: nowrap; }
+  .path { font-size: 12px; color: var(--text-dim); margin-bottom: 12px; }
+  ul.agents { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  .agent { display: flex; align-items: center; gap: 8px; font-size: 13px; min-height: 30px; min-width: 0; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .d-work { background: var(--success); } .d-idle { background: var(--idle); } .d-wait { background: var(--warning); } .d-unk { background: transparent; border: 1px dashed var(--idle); }
+  .who { width: 82px; flex-shrink: 0; }
+  .what { color: var(--text-dim); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* The marker: names its source, how sure it is, and how long the agent has waited. */
+  .marker { display: inline-flex; align-items: center; gap: 6px; font: inherit; font-size: 12px; font-weight: 600; color: #1b1300; background: var(--warning); border: 2px solid var(--warning); border-radius: 2em; padding: 2px 10px; cursor: pointer; white-space: nowrap; }
+  .marker.guess { background: transparent; color: var(--warning); border-style: dashed; }
+  .marker .src { font-weight: 500; }
+  .badge-rep { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 2em; background: var(--warning); color: #1b1300; }
+  .badge-guess { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 2em; border: 2px dashed var(--warning); color: var(--warning); }
+  .faded { opacity: .55; }
+  .banner { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border: 1px solid var(--error); background: rgba(248,81,73,.1); border-radius: var(--radius); margin-bottom: 20px; font-size: 14px; }
+  .banner b { color: #ffb4ae; }
+  /* Why panel: a side panel over the dashboard. */
+  .why { width: 420px; flex-shrink: 0; background: var(--surface); border-left: 1px solid var(--border); padding: 24px; display: flex; flex-direction: column; gap: 16px; overflow: auto; }
+  .ph { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; color: var(--text-dim); }
+  dl { margin: 0; display: grid; gap: 14px; }
+  dt { font-size: 12px; color: var(--text-dim); margin-bottom: 3px; }
+  dd { margin: 0; font-size: 14px; }
+  code, pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
+  dd code { background: var(--card); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; }
+  .note { font-size: 13px; color: var(--text-dim); border-left: 3px solid var(--warning); padding-left: 10px; }
+  .actions { display: flex; gap: 10px; margin-top: auto; }
+  button { font: inherit; }
+  .primary { background: #238636; color: #fff; border: 1px solid #2ea043; border-radius: var(--radius); padding: 9px 16px; font-weight: 600; cursor: pointer; }
+  .secondary { background: var(--card); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 9px 16px; cursor: pointer; }
+  button:focus-visible { outline: 3px solid #ffbf47; outline-offset: 2px; }
+  .term { background: #010409; border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; font-size: 13px; line-height: 1.55; color: #c9d1d9; white-space: pre-wrap; margin: 0 0 16px; }
+  .term .ask { color: var(--warning); font-weight: 600; }
+  .demo { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; padding: 8px; background: #11161d; border: 1px solid var(--border); border-radius: 999px; }
+  .demo span { font-size: 12px; color: var(--text-dim); align-self: center; padding: 0 6px; }
+  .demo button { font-size: 12px; border-radius: 999px; padding: 6px 12px; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+</style>
+</head>
+<body>
+<div class="frame">
+  <span class="proto">Prototype · synthetic data</span>
+  <div class="topbar"><span class="brand">Agents UI</span><span class="crumb">Larkspur Labs · 2 swarms · 1 app</span></div>
+
+  <!-- 1. Dashboard: the marker names its source and waiting time. -->
+  <section class="screen active" id="dash" aria-labelledby="h-dash">
+    <div class="main">
+      <h1 id="h-dash" tabindex="-1">Swarms</h1>
+      <p class="lead">3 agents need you. Each marker says who reported it and how long it has waited.</p>
+      <div class="grid" data-cards="normal"></div>
+    </div>
+  </section>
+
+  <!-- 2. Why panel, reported state. -->
+  <section class="screen" id="why" aria-labelledby="h-why">
+    <div class="main faded" aria-hidden="true"><h1>Swarms</h1><p class="lead">3 agents need you.</p><div class="grid" data-cards="static"></div></div>
+    <aside class="why">
+      <div class="ph">Why this agent needs you</div>
+      <h1 id="h-why" tabindex="-1">shop · worker-2</h1>
+      <div><span class="badge-rep">Reported</span> <span style="font-size:13px;color:var(--text-dim)">by the source itself, not guessed</span></div>
+      <dl>
+        <div><dt>Source</dt><dd>herdr reports <code>blocked</code></dd></div>
+        <div><dt>What it asked</dt><dd><code>Allow `npm publish`? (y/n)</code></dd></div>
+        <div><dt>Waiting since</dt><dd>14:02 · 3 min</dd></div>
+        <div><dt>Other sources</dt><dd>✓ Screen also shows a prompt</dd></div>
+      </dl>
+      <div class="actions">
+        <button class="primary" data-go="agent">Open agent</button>
+        <button class="secondary" data-go="dash">Close</button>
+      </div>
+    </aside>
+  </section>
+
+  <!-- 3. Agent session: the ask is on screen, ready to answer. -->
+  <section class="screen" id="agent" aria-labelledby="h-agent">
+    <div class="main">
+      <h1 id="h-agent" tabindex="-1">shop · worker-2 · live session</h1>
+      <p class="lead">Issue #43 Checkout 500 on empty basket · worktree shop-wt-2 · waiting 3 min</p>
+<pre class="term">✓ 214 tests passed
+Bash(npm publish --dry-run)
+  ⎿  package size 48.2 kB, 112 files
+
+<span class="ask">Allow `npm publish`? (y/n)</span> ▌</pre>
+      <p class="lead">Type <code>y</code> or <code>n</code> to answer. Answering is out of this prototype's scope.</p>
+      <button class="secondary" data-go="dash">Back to swarms</button>
+    </div>
+  </section>
+
+  <!-- State A: the source can't be read. -->
+  <section class="screen" id="down" aria-labelledby="h-down">
+    <div class="main">
+      <h1 id="h-down" tabindex="-1">Swarms</h1>
+      <div class="banner" role="alert"><b>herdr can't be reached</b> since 14:05. The shop swarm's states are unknown; last known states are shown faded.
+        <span style="margin-left:auto;display:flex;gap:8px"><button class="secondary" data-go="dash">Retry</button></span></div>
+      <div class="grid" data-cards="down"></div>
+    </div>
+  </section>
+
+  <!-- State B: no source reports this agent's state; the marker is a guess. -->
+  <section class="screen" id="guess" aria-labelledby="h-guess">
+    <div class="main faded" aria-hidden="true"><h1>Swarms</h1><p class="lead">3 agents need you.</p><div class="grid" data-cards="static"></div></div>
+    <aside class="why">
+      <div class="ph">Why this agent needs you</div>
+      <h1 id="h-guess" tabindex="-1">billing · worker-1</h1>
+      <div><span class="badge-guess">Guessed from screen</span> <span style="font-size:13px;color:var(--text-dim)">this may be wrong</span></div>
+      <dl>
+        <div><dt>Source</dt><dd>None. This swarm runs in plain tmux, which reports no state.</dd></div>
+        <div><dt>What matched</dt><dd><code>Allow? (y/n)</code> in the last 15 lines, seen 40 s ago</dd></div>
+        <div><dt>Waiting since</dt><dd>about 14:04 · under 1 min</dd></div>
+        <div><dt>Other sources</dt><dd>No reported state to compare</dd></div>
+      </dl>
+      <p class="note">Run this swarm under herdr to get reported states.</p>
+      <div class="actions">
+        <button class="primary" data-go="agent">Open agent</button>
+        <button class="secondary" data-go="dash">Close</button>
+      </div>
+    </aside>
+  </section>
+</div>
+
+<div class="demo" role="group" aria-label="Demo controls">
+  <span>Demo:</span>
+  <button class="secondary" data-go="dash">Main path</button>
+  <button class="secondary" data-go="down">Source unreachable</button>
+  <button class="secondary" data-go="guess">Guess only</button>
+</div>
+
+<script>
+  /* Synthetic swarms. A marker is either reported by a source (solid) or guessed from the screen (dashed). */
+  const SWARMS = [
+    { name: 'shop', pill: 'herdr', path: '~/src/shop', agents: [
+      ['manager', 'd-work', 'Working: dispatching #44'],
+      ['worker-1', 'd-work', 'Working #41 Saved carts survive logout'],
+      ['worker-2', 'd-wait', null, { src: 'herdr', wait: '3 min', go: 'why', reported: true }],
+      ['worker-3', 'd-idle', 'Idle'] ] },
+    { name: 'billing', pill: 'tmux', path: '~/src/billing', agents: [
+      ['manager', 'd-idle', 'Idle'],
+      ['worker-1', 'd-wait', null, { src: 'screen guess', wait: '40 s', go: 'guess', reported: false }],
+      ['worker-2', 'd-work', 'Working #12 Retry failed invoices'] ] },
+    { name: 'support', pill: 'Temporal', path: 'temporal: support (prod)', agents: [
+      ['refund-8812', 'd-wait', null, { src: 'Temporal', wait: '6 min', go: 'why', reported: true }],
+      ['research-31', 'd-work', 'Working: searching'] ] }
+  ];
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  function agentRow([who, dot, what, m], mode, swarm) {
+    const down = mode === 'down' && swarm === 'shop';
+    let right;
+    if (down) right = `<span class="what">Unknown · <span class="faded">last known: ${m ? 'Needs you (herdr, 14:02)' : esc(what)}</span></span>`;
+    else if (m) {
+      const label = `Needs you · ${m.src} · ${m.wait}`;
+      right = mode === 'static'
+        ? `<span class="marker${m.reported ? '' : ' guess'}">${esc(label)}</span>`
+        : `<button class="marker${m.reported ? '' : ' guess'}" data-go="${m.go}" aria-label="${esc(who)} ${esc(label)}${m.reported ? ', reported' : ', guessed'}. Show why.">Needs you <span class="src">· ${esc(m.src)} · ${esc(m.wait)}</span></button>`;
+    } else right = `<span class="what">${esc(what)}</span>`;
+    return `<li class="agent"><span class="dot ${down ? 'd-unk' : dot}" aria-hidden="true"></span><span class="who">${esc(who)}</span>${right}</li>`;
+  }
+  function cards(mode) {
+    return SWARMS.map(s => {
+      const down = mode === 'down' && s.name === 'shop';
+      return `<article class="card${down ? ' down' : ''}"><div class="card-head"><span class="name">${esc(s.name)}</span><span class="pill">${down ? 'herdr · unreachable' : esc(s.pill)}</span></div><div class="path">${esc(s.path)}</div><ul class="agents">${s.agents.map(a => agentRow(a, mode, s.name)).join('')}</ul>${down ? '<div class="actions" style="margin-top:12px"><button class="secondary" data-go="agent">Open agent anyway</button></div>' : ''}</article>`;
+    }).join('');
+  }
+  document.querySelectorAll('[data-cards]').forEach(g => { g.innerHTML = cards(g.dataset.cards); });
+  function go(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.id === id));
+    const h = document.querySelector('#' + id + ' h1[tabindex]'); if (h) h.focus();
+  }
+  document.addEventListener('click', e => { const t = e.target.closest('[data-go]'); if (t) go(t.getAttribute('data-go')); });
+</script>
+</body>
+</html>

@@ -46,7 +46,7 @@ sources:
 
 stage:
   current: prototype
-  status: not-started
+  status: in-progress
 
 stages:
   discovery:
@@ -61,10 +61,11 @@ stages:
     fetches: .pm/fetches
     summary: "Discovery complete · 77 min · fetches 15/20 · searches 0/8 · items 16 · quotes 10/10 verified · gaps 5 · findings 13, blocking 0, all resolved · approved"
   prototype:
-    status: not-started
+    status: in-progress
+    started_at: "2026-11-02T01:48:32Z"
     output: outputs/02-prototype.md
     html: outputs/prototype/index.html
-    path: null
+    path: html-fallback
     brief: .pm/design-brief.md
     revision: 0
     approved_at: null
@@ -99,6 +100,13 @@ decisions:
     pm_decided: "Now: Trust the signal (OPP-003)"
     reason: "Cleanest more reliable signals."
     at: "2026-11-02T01:46:00Z"
+  - id: D-005
+    stage: prototype
+    checkin: flow-check
+    claude_recommended: "Approve: solo developer believes the needs-you marker; main path dashboard card, Why panel (source, ask, since, agreement), Reported badge, Open agent; states Source unreachable and Guess only; cut dismiss-a-false-alarm."
+    pm_decided: "Approve"
+    reason: "not given (decision matched the recommendation)"
+    at: "2026-11-02T01:50:00Z"
 notes:
   - "Sources: PM ticked Community only; rungs 3 to 7 dropped. PM named herdr, claude-squad, Claude Code's own agent views and laird/agents; added as rung 1 community sources (issue pages)."
   - "GitHub API refused for repositories other than laird/agents-ui from this cloud machine; neighbouring tools are read through their public HTML issue pages."
