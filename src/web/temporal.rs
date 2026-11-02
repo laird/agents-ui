@@ -24,7 +24,7 @@ use serde_json::Value;
 
 use super::SwarmSnapshot;
 use super::source::{Reading, TtlCache, VillageSource};
-use super::framework::{Agent, AgentState, Plane, Report, ReportPipeline, Stage, Task, TaskState, Workstream, to_village};
+use super::framework::{Agent, AgentState, Link, Plane, Report, ReportPipeline, Stage, Task, TaskState, Workstream, to_village};
 use super::village::{Action, HouseKind, HouseStatus, Note, VillageSnapshot, house_kind, name_action};
 use crate::transport::ServerTransport;
 
@@ -52,6 +52,16 @@ fn pending_action(p: Option<&Pending>) -> Option<Action> {
 pub struct TemporalSource {
     pub namespace: String,
     pub http_url: String,
+    /// Temporal's web UI, e.g. `http://localhost:8233`; workflows link to it.
+    pub ui_url: Option<String>,
+}
+
+impl TemporalSource {
+    /// A workflow's page in Temporal's web UI.
+    pub fn workflow_link(&self, id: &str) -> Option<Link> {
+        let ui = self.ui_url.as_deref()?.trim_end_matches('/');
+        Some(Link { label: "Temporal UI".to_string(), url: format!("{ui}/namespaces/{}/workflows/{}", encode(&self.namespace), encode(id)) })
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -324,6 +334,7 @@ pub fn report(
                 action: pending_action(pending.get(&root.id)),
                 agents: vec![Agent { name: root.type_name.clone(), state, ..Agent::default() }],
                 helpers,
+                links: source.workflow_link(&root.id).into_iter().collect(),
                 ..Workstream::default()
             }
         })
@@ -366,7 +377,7 @@ pub fn report(
         workstreams,
         tasks: failed
             .iter()
-            .map(|w| Task { id: w.id.clone(), title: format!("{} {}", w.type_name, w.id), state: TaskState::Failed, ..Task::default() })
+            .map(|w| Task { id: w.id.clone(), title: format!("{} {}", w.type_name, w.id), state: TaskState::Failed, url: source.workflow_link(&w.id).map(|l| l.url), ..Task::default() })
             .collect(),
         pipeline: ReportPipeline {
             gate: "green".to_string(),
@@ -385,6 +396,7 @@ fn unreachable(source: &TemporalSource) -> VillageSnapshot {
         number: 0,
         title: format!("Can't reach Temporal's HTTP API at {}", source.http_url),
         label: "unreachable".to_string(),
+        url: source.ui_url.clone(),
     });
     v
 }
@@ -489,7 +501,7 @@ mod tests {
     use super::*;
 
     fn src() -> TemporalSource {
-        TemporalSource { namespace: "agents".into(), http_url: DEFAULT_HTTP_URL.into() }
+        TemporalSource { namespace: "agents".into(), http_url: DEFAULT_HTTP_URL.into(), ui_url: Some("http://localhost:8233".into()) }
     }
 
     fn wf(id: &str, ty: &str, parent: Option<&str>, root: Option<&str>) -> Workflow {
@@ -618,6 +630,13 @@ mod tests {
         let v = build_village(&src(), &[wf("w", "Workstream", None, None), wf("w/c", "Notifier", Some("w"), Some("w"))], &pending, &HashMap::new(), &[]);
         assert_eq!(v.houses[0].action, Some(Action::Thinking));
         assert_eq!(v.houses[0].subagents[0].action, Some(Action::Messaging));
+    }
+
+    #[test]
+    fn workflows_link_to_the_temporal_ui() {
+        let l = src().workflow_link("refund 88/12").unwrap();
+        assert_eq!(l.url, "http://localhost:8233/namespaces/agents/workflows/refund%2088%2F12");
+        assert!(TemporalSource { ui_url: None, ..src() }.workflow_link("x").is_none());
     }
 
     #[test]

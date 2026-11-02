@@ -121,6 +121,14 @@ impl AgentState {
     }
 }
 
+/// Where to drill in from the picture: an agent's session, an issue, a
+/// workflow in its platform's UI, a CI run.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct Link {
+    pub label: String,
+    pub url: String,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Agent {
     /// Role or id: `worker-2`, `modernize:coder`, a child workflow's id.
@@ -165,6 +173,10 @@ pub struct Workstream {
     /// Sub-agents or child workflows working for it.
     #[serde(default)]
     pub helpers: Vec<Agent>,
+    /// Where to drill in: its session, its workflow page. The task's own
+    /// `url` is added after these.
+    #[serde(default)]
+    pub links: Vec<Link>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -350,6 +362,10 @@ fn house(id: String, ws: &Workstream, tasks: &HashMap<&str, &Task>) -> House {
         (None, _, None) => HouseKind::Cottage,
     };
     let crew: Vec<String> = ws.agents.iter().map(|a| a.name.clone()).collect();
+    let mut links = ws.links.clone();
+    if let Some(url) = found.and_then(|t| t.url.clone()) {
+        links.push(Link { label: task_link_label(&url, ws.task.as_deref().unwrap_or_default()), url });
+    }
     House {
         id,
         role: if ws.name.is_empty() { crew.first().cloned().unwrap_or_default() } else { ws.name.clone() },
@@ -361,6 +377,18 @@ fn house(id: String, ws: &Workstream, tasks: &HashMap<&str, &Task>) -> House {
         crew: if crew.is_empty() { vec![ws.name.clone()] } else { crew },
         subagents: ws.helpers.iter().map(helper).collect(),
         action: if status == HouseStatus::Working { ws.action } else { None },
+        links,
+    }
+}
+
+/// "GitHub issue #43" for a GitHub URL, "Issue PROJ-12" otherwise.
+fn task_link_label(url: &str, id: &str) -> String {
+    let id = id.trim_start_matches('#');
+    let numeric = !id.is_empty() && id.chars().all(|c| c.is_ascii_digit());
+    match (url.contains("github.com"), numeric) {
+        (true, true) => format!("GitHub issue #{id}"),
+        (_, true) => format!("Issue #{id}"),
+        _ => format!("Issue {id}"),
     }
 }
 
@@ -406,8 +434,8 @@ pub fn to_village(report: &Report) -> Reading {
             continue;
         }
         match t.state {
-            TaskState::Blocked | TaskState::Failed => board.push(Note { number: n, title: t.title.clone(), label: note_label(t) }),
-            TaskState::Open => backlog.push(Crate { number: n, title: t.title.clone(), kind: house_kind(&t.labels), priority: priority(&t.priority) }),
+            TaskState::Blocked | TaskState::Failed => board.push(Note { number: n, title: t.title.clone(), label: note_label(t), url: t.url.clone() }),
+            TaskState::Open => backlog.push(Crate { number: n, title: t.title.clone(), kind: house_kind(&t.labels), priority: priority(&t.priority), url: t.url.clone() }),
             TaskState::Claimed | TaskState::Done => {}
         }
     }
@@ -486,8 +514,15 @@ fn swarm_issue(agent: &super::AgentSnapshot) -> Option<u32> {
     })
 }
 
-fn swarm_workstream(id: String, crew: &[&super::AgentSnapshot]) -> Workstream {
+/// The dashboard's view of an agent's live session.
+pub fn session_link(project: &str, role: &str) -> Link {
+    let enc = |s: &str| s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect::<String>();
+    Link { label: "Agent session".to_string(), url: format!("/#/swarm/{}/agent/{}", enc(project), enc(role)) }
+}
+
+fn swarm_workstream(id: String, crew: &[&super::AgentSnapshot], project: &str) -> Workstream {
     Workstream {
+        links: crew.first().map(|a| vec![session_link(project, &a.role)]).unwrap_or_default(),
         id,
         name: crew.first().map(|a| a.role.clone()).unwrap_or_default(),
         task: crew.iter().find_map(|a| swarm_issue(a)).map(|n| n.to_string()),
@@ -515,10 +550,10 @@ pub fn swarm_report(swarm: &SwarmSnapshot, issues: &[IssueSnapshot], pipeline: &
         }
         crews.entry(key).or_default().push(worker);
     }
-    let mut coordinator = swarm_workstream("manager".to_string(), &[&swarm.manager]);
+    let mut coordinator = swarm_workstream("manager".to_string(), &[&swarm.manager], &swarm.project_name);
     // A house's title falls back to its agent's; a found issue's title wins.
     let known: HashSet<u32> = issues.iter().map(|i| i.number).collect();
-    let mut workstreams: Vec<Workstream> = order.into_iter().map(|key| { let crew = &crews[&key]; swarm_workstream(key, crew) }).collect();
+    let mut workstreams: Vec<Workstream> = order.into_iter().map(|key| { let crew = &crews[&key]; swarm_workstream(key, crew, &swarm.project_name) }).collect();
     for ws in std::iter::once(&mut coordinator).chain(workstreams.iter_mut()) {
         if ws.task.as_deref().and_then(|t| t.parse().ok()).is_some_and(|n: u32| known.contains(&n)) {
             ws.title = None;
@@ -670,7 +705,7 @@ impl ReportVillages {
     fn broken(&self, why: &str) -> Reading {
         let mut r = to_village(&Report { project: self.spec.label(), framework: "unknown".into(), ..Report::default() });
         r.village.manager.status = HouseStatus::Unknown;
-        r.village.board.push(Note { number: 0, title: format!("Can't read {}: {why}", self.spec.label()), label: "unreachable".to_string() });
+        r.village.board.push(Note { number: 0, title: format!("Can't read {}: {why}", self.spec.label()), label: "unreachable".to_string(), url: None });
         r
     }
 }
@@ -789,6 +824,24 @@ mod tests {
         assert_eq!(v.pipeline.quay, vec![1], "#2 is already placed by git");
         assert_eq!(v.backlog.iter().map(|c| c.number).collect::<Vec<_>>(), vec![4]);
         assert_eq!(v.board.iter().map(|n| (n.number, n.label.as_str())).collect::<Vec<_>>(), vec![(5, "needs-feedback")]);
+    }
+
+    #[test]
+    fn houses_link_to_their_session_and_issue() {
+        let report = Report {
+            project: "shop".into(),
+            tasks: vec![
+                Task { id: "43".into(), title: "Checkout 500".into(), url: Some("https://github.com/acme/shop/issues/43".into()), ..Task::default() },
+                Task { id: "45".into(), title: "Which provider?".into(), labels: vec!["needs-design".into()], state: TaskState::Blocked, url: Some("https://github.com/acme/shop/issues/45".into()), ..Task::default() },
+            ],
+            workstreams: vec![Workstream { id: "/src/shop-wt-2".into(), task: Some("43".into()), links: vec![session_link("shop", "worker-2")], agents: vec![agent("worker-2", "blocked")], ..Workstream::default() }],
+            ..Report::default()
+        };
+        let v = to_village(&report).village;
+        let links: Vec<(&str, &str)> = v.houses[0].links.iter().map(|l| (l.label.as_str(), l.url.as_str())).collect();
+        assert_eq!(links, vec![("Agent session", "/#/swarm/shop/agent/worker-2"), ("GitHub issue #43", "https://github.com/acme/shop/issues/43")]);
+        assert_eq!(v.board[0].url.as_deref(), Some("https://github.com/acme/shop/issues/45"));
+        assert_eq!(session_link("my repo", "worker-1").url, "/#/swarm/my%20repo/agent/worker-1");
     }
 
     #[test]

@@ -27,6 +27,21 @@ world (`#world:shop`): failed workstreams file incident issues in the dev
 swarm, and its prod releases roll out to the platform's workers. See the
 header of `tools/mock/demo.sh`.
 
+## Drilling in
+
+The village is for watching; when something needs a response, select it and
+jump to the tool that handles it, in a new tab:
+
+| Select | Opens |
+|---|---|
+| A house or the castle | the agent's live session in the dashboard; its issue on GitHub (or the tracker its adapter names) |
+| A Temporal house | the workflow in Temporal's web UI (`--temporal-ui`) |
+| The notice board | the blocked issues and proposals, each linked |
+| The docks | the backlog, highest priority first, each linked |
+
+Outside adapters add their own links per house (`links` in the report,
+see [village-protocol.md](village-protocol.md)).
+
 ## What people are doing
 
 Every agent's current action is acted out:
@@ -71,7 +86,8 @@ agents-tui --headless --temporal agents --temporal-url http://temporal:7243
 
 `--temporal <namespace>` (repeatable) adds a village per namespace, read from
 the frontend's HTTP API (`--temporal-url`, default `http://localhost:7243`)
-with `curl`. It turns on the web view by itself.
+with `curl`. It turns on the web view by itself. Add `--temporal-ui
+http://temporal:8233` and each workflow links to its page in Temporal's web UI.
 
 | What you see | Where it comes from |
 |---|---|

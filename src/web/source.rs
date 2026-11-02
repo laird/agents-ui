@@ -465,6 +465,7 @@ mod tests {
                 crew: Vec::new(),
                 subagents: Vec::new(),
                 action: None,
+                links: Vec::new(),
             };
             let village = VillageSnapshot {
                 project: "ops".into(),

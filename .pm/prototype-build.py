@@ -2,16 +2,22 @@
 import json, re, sys
 src = open('/home/user/agents-ui/src/web/village.html').read()
 
-def house(id, role, kind, status, issue=None, title=None, pr=None, crew=None, subs=None, action=None, att=None):
+GH = 'https://github.com/larkspur-labs/'
+def house(id, role, kind, status, issue=None, title=None, pr=None, crew=None, subs=None, action=None, att=None, links=None, project=None):
+    if links is None and project:
+        links = [dict(label='Agent session', url='/#/swarm/%s/agent/%s' % (project, role))]
+        if issue: links.append(dict(label='GitHub issue #%d' % issue, url=GH + project + '/issues/%d' % issue))
     h = dict(id=id, role=role, kind=kind, status=status, issue=issue, issue_title=title, priority=pr,
-             crew=crew or [role], subagents=subs or [], action=action)
+             crew=crew or [role], subagents=subs or [], action=action, links=links or [])
     if att: h['attention'] = att
     return h
 def village(project, framework, plane, manager, houses, backlog=(), board=(), stops=(), workflow=None):
     return dict(project=project, plane=plane, framework=framework, workflow=workflow, repo_path='~/src/' + project,
                 manager=manager, houses=houses, backlog=list(backlog), board=list(board),
                 pipeline=dict(integration='main', sentinel='green', quay=[], stops=list(stops), release=None), builds=[])
-crate = lambda n, t, k, p=None: dict(number=n, title=t, kind=k, priority=p)
+crate = lambda n, t, k, p=None, repo='shop': dict(number=n, title=t, kind=k, priority=p, url=GH + repo + '/issues/%d' % n)
+TUI = 'http://localhost:8233/namespaces/support/workflows/'
+
 stop = lambda n, i: dict(name=n, issues=i)
 
 W2 = dict(reported=True, source='herdr', state='blocked', ask='Allow `npm publish`? (y/n)', since='14:02', wait='3 min',
@@ -24,26 +30,26 @@ R1 = dict(reported=True, source='Temporal', state='AgentStatus = waiting_for_hum
           session=['RefundCheck refund-8812/check', '  policy: amount over $200 needs a person', '  waiting for signal: approve_refund'])
 
 shop = village('shop', 'herdr', 'development',
-  house('manager', 'manager', 'cottage', 'working', action='messaging'),
-  [house('/src/shop-wt-1', 'worker-1', 'feature', 'working', 41, 'Saved carts survive logout', 'P1', action='writing'),
-   house('/src/shop-wt-2', 'worker-2', 'bug', 'blocked', 43, 'Checkout 500 on empty basket', 'P0', att=W2),
-   house('/src/shop-wt-3', 'worker-3', 'cottage', 'idle'),
-   house('/src/shop-wt-4', 'worker-4', 'security', 'working', 44, 'Bump openssl', 'P1', action='running')],
+  house('manager', 'manager', 'cottage', 'working', action='messaging', project='shop'),
+  [house('/src/shop-wt-1', 'worker-1', 'feature', 'working', 41, 'Saved carts survive logout', 'P1', action='writing', project='shop'),
+   house('/src/shop-wt-2', 'worker-2', 'bug', 'blocked', 43, 'Checkout 500 on empty basket', 'P0', att=W2, project='shop'),
+   house('/src/shop-wt-3', 'worker-3', 'cottage', 'idle', project='shop'),
+   house('/src/shop-wt-4', 'worker-4', 'security', 'working', 44, 'Bump openssl', 'P1', action='running', project='shop')],
   [crate(45, 'Search is slow on mobile', 'perf', 'P2'), crate(46, 'Typo in footer', 'docs', 'P3')],
-  [dict(number=47, title='Which payment provider?', label='needs-design')],
+  [dict(number=47, title='Which payment provider?', label='needs-design', url=GH + 'shop/issues/47')],
   [stop('main-green', [39]), stop('staging', []), stop('prod', [37])], 'Autocoder')
 billing = village('billing', 'tmux', 'development',
-  house('manager', 'manager', 'cottage', 'idle'),
-  [house('/src/billing-wt-1', 'worker-1', 'refactor', 'blocked', 12, 'Retry failed invoices', 'P1', att=B1),
-   house('/src/billing-wt-2', 'worker-2', 'tests', 'working', 13, 'Flaky ledger test', 'P2', action='running')],
-  [crate(14, 'Tax rounding', 'bug', 'P1')], [], [stop('main-green', []), stop('prod', [9])], 'Autocoder')
+  house('manager', 'manager', 'cottage', 'idle', project='billing'),
+  [house('/src/billing-wt-1', 'worker-1', 'refactor', 'blocked', 12, 'Retry failed invoices', 'P1', att=B1, project='billing'),
+   house('/src/billing-wt-2', 'worker-2', 'tests', 'working', 13, 'Flaky ledger test', 'P2', action='running', project='billing')],
+  [crate(14, 'Tax rounding', 'bug', 'P1', 'billing')], [], [stop('main-green', []), stop('prod', [9])], 'Autocoder')
 support = village('temporal:support', 'temporal', 'runtime',
   house('manager', 'workers', 'cottage', 'working', title='3 workers polling 1 task queue', crew=['workers'],
         subs=[dict(agent_type='worker', description='worker@pod-%s' % p, status='working', action=None) for p in 'abc']),
   [house('refund-8812', 'SupportAgent', 'workshop', 'blocked', title='refund-8812', crew=['SupportAgent'],
-         subs=[dict(agent_type='RefundCheck', description='refund-8812/check', status='blocked', action=None)], att=R1),
-   house('research-31', 'ResearchAgent', 'research', 'working', title='research-31', crew=['ResearchAgent'], action='searching'),
-   house('triage-77', 'TriageAgent', 'workshop', 'working', title='triage-77', crew=['TriageAgent'], action='thinking')],
+         subs=[dict(agent_type='RefundCheck', description='refund-8812/check', status='blocked', action=None)], att=R1, links=[dict(label='Temporal UI', url=TUI + 'refund-8812')]),
+   house('research-31', 'ResearchAgent', 'research', 'working', title='research-31', crew=['ResearchAgent'], action='searching', links=[dict(label='Temporal UI', url=TUI + 'research-31')]),
+   house('triage-77', 'TriageAgent', 'workshop', 'working', title='triage-77', crew=['TriageAgent'], action='thinking', links=[dict(label='Temporal UI', url=TUI + 'triage-77')])],
   [], [], [stop('completed (24h)', [8801, 8802, 8803])], 'Temporal')
 down = json.loads(json.dumps(shop))
 for h in down['houses'] + [down['manager']]:
@@ -84,13 +90,17 @@ src = src.replace('<title>Worktree Hollow</title>', '<title>Prototype: agents-ui
 src = src.replace('<body>', '<body>\n  <span class="proto">Prototype · synthetic data</span>\n  <div class="banner" id="banner" role="alert" hidden></div>', 1)
 src = src.replace('<div class="flow" id="flow"></div>', '<div class="flow" id="flow"></div>', 1)
 src = src.replace('<div class="empty" id="empty">Looking for swarms…</div>', '<div class="empty" id="empty">Looking for swarms…</div>\n      <div class="signs" id="signs"></div>', 1)
-src = src.replace('''    <h2 id="d-title"></h2>
+dialog_old = '''    <h2 id="d-title"></h2>
     <p id="d-line"></p>
     <p class="dim" id="d-meta"></p>
-  </div>''', '''    <h2 id="d-title" tabindex="-1"></h2>
+    <div class="links" id="d-links"></div>
+  </div>'''
+assert dialog_old in src, 'village dialog markup changed: update the prototype build'
+src = src.replace(dialog_old, '''    <h2 id="d-title" tabindex="-1"></h2>
     <p id="d-line"></p>
     <p class="dim" id="d-meta"></p>
     <div id="d-why" class="why"></div>
+    <div class="links" id="d-links"></div>
   </div>
   <div class="win demo" role="group" aria-label="Demo controls"><span>Demo:</span>
     <button data-demo="main" data-at="shop">Main path</button>
@@ -131,6 +141,7 @@ new_show = '''  const escH = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&a
       document.getElementById('d-title').focus();
     };
     const c2 = document.getElementById('d-close2'); if (c2) c2.onclick = () => { dialog.hidden = true; };
+    links(house.links);
     dialog.hidden = false;
     document.getElementById('d-title').focus();
   }
@@ -166,7 +177,7 @@ src = src.replace("if (ICONS[st]) bubbles.push([lot.x + 4, lot.y - (st === 'bloc
 src = src.replace("    fit();\n    if (reduce) draw(0);\n  }", "    fit();\n    if (reduce) draw(0);\n    requestAnimationFrame(placeSigns);\n  }", 1)
 src = src.replace("  window.addEventListener('resize', fit);", "  window.addEventListener('resize', () => { fit(); placeSigns(); });\n  window.addEventListener('hashchange', () => { dialog.hidden = true; const n = decodeURIComponent(location.hash.slice(1)); if ([...pick.options].some(o => o.value === n)) pick.value = n; });\n  document.querySelectorAll('[data-demo]').forEach(b => b.addEventListener('click', () => { protoScenario = b.dataset.demo; dialog.hidden = true; location.hash = b.dataset.at; poll(); }));", 1)
 src = src.replace("    setTimeout(poll, 3000);\n", "", 1)
-for must in ['placeSigns()', 'protoScenario', 'd-why', 'data-demo']:
+for must in ['placeSigns()', 'protoScenario', 'id="d-why"', 'data-demo="down"']:
     assert must in src, must
 open(sys.argv[1], 'w').write(src)
 print('built', len(src))

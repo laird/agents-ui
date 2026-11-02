@@ -34,6 +34,8 @@ struct CliOptions {
     temporal: Vec<String>,
     /// Temporal frontend HTTP API (`--temporal-url`).
     temporal_url: Option<String>,
+    /// Temporal's web UI, for links from the village (`--temporal-ui`).
+    temporal_ui: Option<String>,
     /// Address the web UI listens on (`--web-bind`); loopback by default.
     web_bind: Option<std::net::IpAddr>,
     /// Refuse every request that would change something (`--read-only`).
@@ -63,6 +65,7 @@ where
     let mut headless = false;
     let mut temporal = Vec::new();
     let mut temporal_url = None;
+    let mut temporal_ui = None;
     let mut web_bind = None;
     let mut read_only = false;
     let mut worlds = Vec::new();
@@ -176,6 +179,13 @@ where
                     anyhow::anyhow!("--web-bind value '{raw}' is not an IP address")
                 })?);
             }
+            "--temporal-ui" => {
+                let Some(value) = iter.next() else {
+                    anyhow::bail!("--temporal-ui requires a URL, e.g. http://localhost:8233");
+                };
+                temporal_ui = Some(value.as_ref().to_string());
+            }
+            value if value.starts_with("--temporal-ui=") => temporal_ui = Some(value.trim_start_matches("--temporal-ui=").to_string()),
             "--temporal-url" => {
                 let Some(value) = iter.next() else {
                     anyhow::bail!("--temporal-url requires a URL, e.g. http://localhost:7243");
@@ -230,7 +240,7 @@ where
         web_port = Some(web::server::DEFAULT_PORT);
     }
 
-    Ok(CliOptions { agent_type, server, web_port, headless, temporal, temporal_url, web_bind, read_only, worlds, incident_label, sources, frameworks })
+    Ok(CliOptions { agent_type, server, web_port, headless, temporal, temporal_url, temporal_ui, web_bind, read_only, worlds, incident_label, sources, frameworks })
 }
 
 /// Where the web UI listens: loopback unless `--web-bind` says otherwise.
@@ -251,7 +261,7 @@ fn village_cache(cli: &CliOptions) -> web::source::Villages {
         &cli.sources,
         cli.temporal
             .iter()
-            .map(|namespace| web::temporal::TemporalSource { namespace: namespace.clone(), http_url: url.clone() })
+            .map(|namespace| web::temporal::TemporalSource { namespace: namespace.clone(), http_url: url.clone(), ui_url: cli.temporal_ui.clone() })
             .collect(),
         cli.frameworks.iter().filter_map(|spec| web::framework::ReportSpec::parse(spec)).collect(),
         cli.worlds.iter().filter_map(|spec| web::world::WorldConfig::parse(spec, label)).collect(),
@@ -474,6 +484,7 @@ mod tests {
                 headless: false,
                 temporal: Vec::new(),
                 temporal_url: None,
+                temporal_ui: None,
                 web_bind: None,
                 read_only: false,
                 worlds: Vec::new(),
@@ -584,6 +595,7 @@ mod tests {
                 headless: false,
                 temporal: Vec::new(),
                 temporal_url: None,
+                temporal_ui: None,
                 web_bind: None,
                 read_only: false,
                 worlds: Vec::new(),
@@ -603,6 +615,7 @@ mod tests {
                 headless: false,
                 temporal: Vec::new(),
                 temporal_url: None,
+                temporal_ui: None,
                 web_bind: None,
                 read_only: false,
                 worlds: Vec::new(),

@@ -144,6 +144,7 @@ mod tests {
             crew: vec![role.into()],
             subagents: Vec::new(),
             action: None,
+            links: Vec::new(),
         }
     }
 

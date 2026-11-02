@@ -48,6 +48,12 @@
   .dialog h2 { margin: 0 0 4px; font: 700 14px var(--mono); color: var(--gold); letter-spacing: .04em; }
   .dialog p { margin: 4px 0; font: 15px/1.4 var(--mono); }
   .dialog .dim { color: var(--ink-dim); font-size: 13px; }
+  .dialog .links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .dialog .links a { font: 700 13px var(--mono); color: #241400; background: var(--gold); border-radius: 4px; padding: 5px 10px; text-decoration: none; }
+  .dialog .links a:hover { filter: brightness(1.1); }
+  .dialog ul { list-style: none; margin: 6px 0 0; padding: 0; max-height: 40vh; overflow: auto; }
+  .dialog li { font: 14px/1.5 var(--mono); }
+  .dialog li a { color: var(--gold); }
   .dialog button { position: absolute; top: 8px; right: 10px; background: none; border: 0; color: var(--ink); font: 700 16px var(--mono); cursor: pointer; }
   :focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
 </style>
@@ -69,6 +75,7 @@
     <h2 id="d-title"></h2>
     <p id="d-line"></p>
     <p class="dim" id="d-meta"></p>
+    <div class="links" id="d-links"></div>
   </div>
 
 <script>
@@ -1263,6 +1270,22 @@
 
   const dialog = document.getElementById('dialog');
   document.getElementById('close').addEventListener('click', () => { dialog.hidden = true; });
+  /* Drill in: each link opens the tool behind the picture (the agent's session,
+   * its issue, its workflow) in a new tab. */
+  function links(list) {
+    document.getElementById('d-links').innerHTML = (list || [])
+      .map(l => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)} ↗</a>`).join('');
+  }
+  /* The notice board and the docks list their issues, each linked. */
+  function showList(title, sub, items) {
+    document.getElementById('d-title').textContent = title;
+    document.getElementById('d-line').textContent = sub;
+    document.getElementById('d-meta').innerHTML = items.length
+      ? `<ul>${items.slice(0, 40).map(i => `<li>${i.url ? `<a href="${esc(i.url)}" target="_blank" rel="noopener">#${i.number}</a>` : '#' + i.number} ${esc(i.title)}${i.label ? ' · ' + esc(i.label) : ''}${i.priority ? ' · ' + esc(i.priority) : ''}</li>`).join('')}</ul>`
+      : 'Nothing here.';
+    links([]);
+    dialog.hidden = false;
+  }
   function show(house, isManager, v, theme) {
     document.getElementById('d-title').textContent = isManager ? `${theme.labels.hall} · manager` : `${house.role} · ${house.kind}`;
     document.getElementById('d-line').textContent = house.issue ? `#${house.issue} ${house.issue_title || ''}` : (house.issue_title || 'No issue claimed');
@@ -1270,11 +1293,14 @@
       `Status: ${house.status}${house.priority ? ' · ' + house.priority : ''} · Crew: ${house.crew.join(', ') || '—'}` +
       ((house.subagents || []).length ? ` · ${v.plane === 'runtime' ? 'Agents' : 'Sub-agents'}: ${house.subagents.map(sa => sa.agent_type + (sa.description ? ' (' + sa.description + ')' : '') + (sa.status === 'blocked' ? ' waiting on you' : sa.action ? ' ' + sa.action : '')).join(', ')}` : '') +
       (house.action ? ` · Now: ${house.action}` : '');
+    links(house.links);
     dialog.hidden = false;
   }
   function hit(sc, x, y, theme) {
     const lay = sc.L, v = sc.v;
     if (x >= lay.hallX - 4 && x < lay.hallX + 36 && y >= 6 && y < 42) return show(v.manager, true, v, theme);
+    if (x >= lay.hallX + 42 && x < lay.hallX + 60 && y >= 28 && y < 44) return showList(theme.labels.board, v.plane === 'runtime' ? 'Failed in the last 24 hours' : 'Blocked issues and proposals waiting on you', v.board);
+    if (x >= 6 && x < 62 && y >= 8 && y < 52) return showList(theme.labels.docks, v.plane === 'runtime' ? 'Waiting work' : 'The backlog, highest priority first', v.backlog);
     const i = lay.lots.findIndex((lot, k) => k < v.houses.length && x >= lot.x && x < lot.x + 16 && y >= lot.y - 4 && y < lot.y + 21);
     if (i >= 0) show(v.houses[i], false, v, theme);
   }

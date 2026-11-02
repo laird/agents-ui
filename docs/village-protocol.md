@@ -89,6 +89,7 @@ An adapter may print one report, a list of reports, or `{"reports": [...]}`. Onl
 - `state`: the house's state. Set it when the framework knows better than its agents do (a Temporal workflow that is retrying, for example). By default the crew decides: anyone waiting wins, then any work at all, and a running helper makes an idle house busy.
 - `action`: what the house is doing now (see below).
 - `agents`, `helpers`: lists of agents.
+- `links`: where to drill in, each `{label, url}`: the agent's session, the run in its platform's UI, a CI job. Shown as buttons when the house is selected, before the task's own link.
 
 **Agent**
 
@@ -117,7 +118,7 @@ Matching ignores case. Anything else counts as `unknown`.
 **Task**
 
 - `id` (required): `412`, `#412`, `PROJ-12`, or a workflow id. Numeric ids keep their number; other ids are hashed to a stable one.
-- `title`, `labels`, `priority` (`P0` to `P3`), `url`.
+- `title`, `labels`, `priority` (`P0` to `P3`), `url`: the task in its tracker. Its house, crate or note links to it.
 - `state`:
   - `open` (the default): a crate at the docks;
   - `claimed`: taken, so not in the backlog;
@@ -141,7 +142,7 @@ Matching ignores case. Anything else counts as `unknown`.
 |---|---|---|
 | autocoder, modernize (tmux) | development | tmux panes, status files, the issue tracker, autocoder's git refs, Claude Code transcripts |
 | herdr | development | `herdr agent list`; the issue comes from the branch name |
-| Temporal | runtime | the frontend HTTP API: running and closed workflows, pending activities, task-queue pollers and their build IDs |
+| Temporal | runtime | the frontend HTTP API: running and closed workflows, pending activities, task-queue pollers and their build IDs; with `--temporal-ui <url>`, each workflow links to its page in Temporal's web UI |
 
 The `--source` layers (see `village.md`) choose which of these run. AgentEx runs its agents as Temporal workflows, so `--temporal <namespace>` already shows them. Use an adapter for anything AgentEx keeps outside Temporal, such as task messages.
 

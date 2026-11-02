@@ -147,6 +147,9 @@ pub struct House {
     /// What the house's own agent is doing, when known.
     #[serde(default)]
     pub action: Option<Action>,
+    /// Where to drill in: the agent's session, its issue, its workflow.
+    #[serde(default)]
+    pub links: Vec<super::framework::Link>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -168,6 +171,9 @@ pub struct Crate {
     pub title: String,
     pub kind: HouseKind,
     pub priority: Option<String>,
+    /// The issue in its tracker.
+    #[serde(default)]
+    pub url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -176,6 +182,8 @@ pub struct Note {
     pub title: String,
     /// The blocking label that pinned it, e.g. `needs-design` or `proposal`.
     pub label: String,
+    #[serde(default)]
+    pub url: Option<String>,
 }
 
 /// One lock on the canal: issues whose pushed work has reached this stop but
