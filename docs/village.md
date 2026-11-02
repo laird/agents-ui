@@ -7,7 +7,8 @@ http://127.0.0.1:7878/village.
 Pick a style in the title bar: **Medieval village** or **Modern business
 district**. The choice is remembered per browser; `?theme=modern` or
 `?theme=medieval` in a link overrides it. Styles change the art, never the
-meaning: lit windows mean working, an open door and an orange `!` mean an
+meaning: lit windows mean working, an open door, an orange `!` and a villager
+waving at you (arm up, hand swinging) mean an
 agent is waiting on you, dust means stalled, fog means unknown.
 
 The server listens on 127.0.0.1 only. To watch a swarm on another machine,

@@ -147,6 +147,8 @@ window.fetch = async () => ({ ok: true, json: async () => JSON.parse(JSON.string
     return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
   }
   const blink = (t, ms) => Math.floor(t / ms) % 2 === 1;
+  /* Someone who needs you waves: arm up, hand swinging. Reduced motion keeps the arm up, still. */
+  const waveFrame = t => blink(t, 220) ? 'wave2' : 'wave';
   /* Light comes from the upper left: shadows fall right and down. */
   const SHADE = 'rgba(12,20,36,.28)', SHINE = 'rgba(255,255,240,.22)';
   const shadow = (c, x, y, w, h) => R(c, x, y, w, h, SHADE);
@@ -817,7 +819,8 @@ window.fetch = async () => ({ ok: true, json: async () => JSON.parse(JSON.string
   const setAt = (row, i, ch) => row.slice(0, i) + ch + row.slice(i + 1);
   function pose(rows, kind) {
     const r = rows.slice();
-    if (kind === 'wave') { r[6] = setAt(r[6], 7, 's'); r[8] = setAt(r[8], 7, '.'); }
+    // Waving: the right arm is raised (drawn in person()), so its hand leaves the side.
+    if (kind === 'wave' || kind === 'wave2') { r[7] = setAt(r[7], 7, '.'); r[8] = setAt(r[8], 7, '.'); }
     if (kind === 'carry' || kind === 'carrystep') {
       r[5] = setAt(setAt(r[5], 0, 's'), 7, 's');
       r[8] = setAt(setAt(r[8], 0, '.'), 7, '.');
@@ -843,6 +846,19 @@ window.fetch = async () => ({ ok: true, json: async () => JSON.parse(JSON.string
     x = Math.round(x); y = Math.round(y);
     shadow(c, x + 1, y + 11, 7, 1);
     for (let r = 0; r < rows.length; r++) for (let k = 0; k < 8; k++) { const ch = rows[r][k]; if (ch !== '.') R(c, x + k, y + r, 1, 1, map[ch]); }
+    if (kind === 'wave' || kind === 'wave2') {
+      // An arm raised above the head, swinging between upright and tilted out,
+      // with motion ticks on the outswing: readable at a glance.
+      R(c, x + 7, y + 6, 2, 2, P.o); R(c, x + 7, y + 6, 1, 1, map.C);
+      if (kind === 'wave') {
+        R(c, x + 8, y + 1, 2, 6, P.o); R(c, x + 8, y + 2, 1, 5, map.c);
+        R(c, x + 7, y - 2, 4, 4, P.o); R(c, x + 8, y - 1, 2, 2, map.s);
+      } else {
+        R(c, x + 9, y + 4, 2, 3, P.o); R(c, x + 10, y + 2, 2, 3, P.o); R(c, x + 9, y + 5, 1, 1, map.c); R(c, x + 10, y + 3, 1, 2, map.c);
+        R(c, x + 10, y - 1, 4, 4, P.o); R(c, x + 11, y, 2, 2, map.s);
+        R(c, x + 14, y - 1, 1, 1, P.white); R(c, x + 15, y + 1, 1, 1, P.white); R(c, x + 14, y + 3, 1, 1, P.white);
+      }
+    }
   }
 
   /* ---------- Actions ----------
@@ -1022,7 +1038,7 @@ window.fetch = async () => ({ ok: true, json: async () => JSON.parse(JSON.string
     T.hall(c, hallX, 18, v.manager.status);
     T.board(c, hallX + 42, 28, v.board);
     if (v.manager.status !== 'working' && v.manager.status !== 'stopped') {
-      person(c, hallX + 26, 30, 'manager:' + v.project, v.manager.status === 'blocked' && blink(t, 200) ? 'wave' : 'stand', { mayor: true });
+      person(c, hallX + 26, 30, 'manager:' + v.project, v.manager.status === 'blocked' ? waveFrame(t) : 'stand', { mayor: true });
     }
     // The manager's sub-agents (a modernize coordinator's specialists) work in the plaza.
     (v.manager.subagents || []).slice(0, 4).forEach((sa, k) => {
@@ -1049,7 +1065,7 @@ window.fetch = async () => ({ ok: true, json: async () => JSON.parse(JSON.string
       if (!away) {
         if (st === 'idle') person(c, lot.x + 4, lot.y + 9, h.id);
         if (st === 'done') person(c, lot.x + 4, lot.y + 8, h.id);
-        if (st === 'blocked') { const b = blink(t, 200) ? -1 : 0; person(c, lot.x + 4, lot.y + 10 + b, h.id, b ? 'wave' : 'stand'); }
+        if (st === 'blocked') person(c, lot.x + 4, lot.y + 10, h.id, waveFrame(t + i * 90));
       }
       if (h.crew.length > 1 && st !== 'working') person(c, lot.x + 12, lot.y + 11, h.id + '#crew');
       if (h.crew.length > 1 && st === 'working' && !reduce) puffs(c, lot.x + 3, lot.y - 3, tt + 700, ...T.steam);
@@ -1061,7 +1077,7 @@ window.fetch = async () => ({ ok: true, json: async () => JSON.parse(JSON.string
         const bob = !reduce && blink(t + k * 190, 210) ? -1 : 0;
         const waiting = sa.status === 'blocked', seed = `${h.id}/${sa.description || k}`;
         const px = lot.x + (k ? 9 : -1) + (reduce ? 0 : wander(sa.action, t, seed)), py = lot.y + 12 + bob;
-        person(c, px, py, seed, waiting && bob ? 'wave' : 'stand', { accent: subHat(sa) });
+        person(c, px, waiting ? lot.y + 12 : py, seed, waiting ? waveFrame(t + k * 110) : 'stand', { accent: subHat(sa) });
         if (!waiting) drawAction(c, px, py, sa.action, t + k * 97);
       });
       if (st === 'working' && h.action) actionSign(c, lot.x + 4, lot.y - 4, h.action);

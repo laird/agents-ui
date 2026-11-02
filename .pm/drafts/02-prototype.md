@@ -114,6 +114,8 @@ This is a design critique, not customer validation. Revision 0 was a conventiona
 - Tied to: the PM's walkthrough finding (section 8, Labels) and SIG-007, SIG-013, CON-003 (show whether a wait is reported or guessed).
 - Before and after: a three-card dashboard with pill markers → the village with signs over the houses that need you.
 
+- Revision 2 (PM request: "If an agents needs my attention have them wave at me and show an exclamation point."): everyone waiting on a person waves unmistakably (arm raised above the head, hand swinging between upright and tilted out with motion ticks, every 220 ms) under the orange "!". Made in the product's village renderer (`src/web/village.html`) and carried into the prototype; reduced motion keeps the arm up, still.
+
 ## 10. Remaining limitations
 - Static data per scenario; waits do not tick and agents do not move between states.
 - The real village page's picker does not follow a link change (found here; fixed only in the prototype).
