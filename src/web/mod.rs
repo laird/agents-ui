@@ -1,4 +1,5 @@
 pub mod discovery;
+pub mod framework;
 pub mod herdr;
 pub mod server;
 pub mod source;

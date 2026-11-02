@@ -132,6 +132,8 @@ Without build IDs the village can't tell, and says so in the counters.
 
 ## Sources
 
+Every village is drawn from one neutral report. Any framework can provide one through an adapter (`--framework`); see [village-protocol.md](village-protocol.md).
+
 The village reads its data in layers, and each layer's source can be swapped
 without touching the others (`src/web/source.rs`):
 

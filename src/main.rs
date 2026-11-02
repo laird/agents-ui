@@ -44,6 +44,8 @@ struct CliOptions {
     incident_label: Option<String>,
     /// Which source runs at each layer (`--source <layer>=<name>`).
     sources: web::source::SourceConfig,
+    /// Outside adapters printing agents-village reports (`--framework exec:<cmd>|<url>|<file>`).
+    frameworks: Vec<String>,
 }
 
 fn parse_cli_options<I, S>(args: I) -> Result<CliOptions>
@@ -66,6 +68,7 @@ where
     let mut worlds = Vec::new();
     let mut incident_label = None;
     let mut sources = web::source::SourceConfig::default();
+    let mut frameworks = Vec::new();
 
     let mut iter = args.into_iter().skip(1);
     while let Some(arg) = iter.next() {
@@ -142,6 +145,13 @@ where
             value if value.starts_with("--incident-label=") => {
                 incident_label = Some(value.trim_start_matches("--incident-label=").to_string());
             }
+            "--framework" => {
+                let Some(value) = iter.next() else {
+                    anyhow::bail!("--framework requires exec:<command>, a URL, or a .json file");
+                };
+                frameworks.push(value.as_ref().to_string());
+            }
+            value if value.starts_with("--framework=") => frameworks.push(value.trim_start_matches("--framework=").to_string()),
             "--source" => {
                 let Some(value) = iter.next() else {
                     anyhow::bail!("--source requires <layer>=<name>, e.g. issues=none");
@@ -209,12 +219,18 @@ where
         }
     }
 
-    // Temporal villages and worlds only exist in the web view, so asking for one serves it.
-    if (!temporal.is_empty() || !worlds.is_empty()) && web_port.is_none() {
+    for spec in &frameworks {
+        if web::framework::ReportSpec::parse(spec).is_none() {
+            anyhow::bail!("--framework value '{spec}' is not exec:<command>, an http(s) URL, file:<path>, or a .json file");
+        }
+    }
+
+    // Temporal villages, outside frameworks and worlds only exist in the web view, so asking for one serves it.
+    if (!temporal.is_empty() || !worlds.is_empty() || !frameworks.is_empty()) && web_port.is_none() {
         web_port = Some(web::server::DEFAULT_PORT);
     }
 
-    Ok(CliOptions { agent_type, server, web_port, headless, temporal, temporal_url, web_bind, read_only, worlds, incident_label, sources })
+    Ok(CliOptions { agent_type, server, web_port, headless, temporal, temporal_url, web_bind, read_only, worlds, incident_label, sources, frameworks })
 }
 
 /// Where the web UI listens: loopback unless `--web-bind` says otherwise.
@@ -237,6 +253,7 @@ fn village_cache(cli: &CliOptions) -> web::source::Villages {
             .iter()
             .map(|namespace| web::temporal::TemporalSource { namespace: namespace.clone(), http_url: url.clone() })
             .collect(),
+        cli.frameworks.iter().filter_map(|spec| web::framework::ReportSpec::parse(spec)).collect(),
         cli.worlds.iter().filter_map(|spec| web::world::WorldConfig::parse(spec, label)).collect(),
     );
     tracing::info!("Village sources: {}", villages.source_names().join("; "));
@@ -462,6 +479,7 @@ mod tests {
                 worlds: Vec::new(),
                 incident_label: None,
                 sources: Default::default(),
+                frameworks: Vec::new(),
             }
         );
     }
@@ -502,6 +520,14 @@ mod tests {
         assert_eq!(cli.sources.pipeline, "autocoder");
         assert!(parse_cli_options(["agents-tui", "--source", "issues=jira"]).is_err());
         assert!(parse_cli_options(["agents-tui", "--source"]).is_err());
+    }
+
+    #[test]
+    fn frameworks_read_outside_reports() {
+        let cli = parse_cli_options(["agents-tui", "--framework", "exec:./adapter.py", "--framework=https://agentex.local/village"]).unwrap();
+        assert_eq!(cli.frameworks.len(), 2);
+        assert_eq!(cli.web_port, Some(crate::web::server::DEFAULT_PORT));
+        assert!(parse_cli_options(["agents-tui", "--framework", "shop"]).is_err());
     }
 
     #[test]
@@ -563,6 +589,7 @@ mod tests {
                 worlds: Vec::new(),
                 incident_label: None,
                 sources: Default::default(),
+                frameworks: Vec::new(),
             }
         );
 
@@ -581,6 +608,7 @@ mod tests {
                 worlds: Vec::new(),
                 incident_label: None,
                 sources: Default::default(),
+                frameworks: Vec::new(),
             }
         );
     }

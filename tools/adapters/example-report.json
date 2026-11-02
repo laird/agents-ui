@@ -1,0 +1,95 @@
+{
+  "reports": [
+    {
+      "schema": "agents-village/v1",
+      "project": "larkspur",
+      "plane": "development",
+      "framework": "claude-squad",
+      "location": "/src/larkspur",
+      "coordinator": {
+        "id": "manager",
+        "name": "manager",
+        "agents": [{ "name": "manager", "state": "working", "action": "messaging" }]
+      },
+      "workstreams": [
+        {
+          "id": "/src/larkspur-wt-1",
+          "task": "#41",
+          "agents": [{ "name": "worker-1", "state": "working", "action": "writing" }],
+          "action": "writing"
+        },
+        {
+          "id": "/src/larkspur-wt-2",
+          "task": "#43",
+          "agents": [{ "name": "worker-2", "state": "blocked", "detail": "Allow `npm publish`?" }]
+        },
+        {
+          "id": "/src/larkspur-wt-3",
+          "agents": [{ "name": "worker-3", "state": "idle" }],
+          "helpers": [
+            { "name": "a7", "kind": "modernize:security", "state": "running", "detail": "audit dependencies", "action": "searching" }
+          ]
+        }
+      ],
+      "tasks": [
+        { "id": "41", "title": "Saved carts survive logout", "labels": ["enhancement"], "priority": "P1" },
+        { "id": "43", "title": "Checkout 500 on empty basket", "labels": ["bug"], "priority": "P0" },
+        { "id": "44", "title": "Bump openssl", "labels": ["security"], "priority": "P1" },
+        { "id": "45", "title": "Which payment provider?", "labels": ["needs-design"], "state": "blocked" },
+        { "id": "38", "title": "Faster search", "labels": ["performance"], "state": "done" }
+      ],
+      "pipeline": {
+        "integration": "main",
+        "gate": "green",
+        "landed": ["40"],
+        "stages": [
+          { "name": "main-green", "tasks": ["39"] },
+          { "name": "staging", "tasks": [] },
+          { "name": "prod", "tasks": ["37"] }
+        ],
+        "release": "1f2e3d4c5b6a7980"
+      }
+    },
+    {
+      "schema": "agents-village/v1",
+      "project": "agentex:larkspur",
+      "plane": "runtime",
+      "framework": "agentex",
+      "location": "https://agentex.example.com",
+      "coordinator": {
+        "id": "workers",
+        "name": "workers",
+        "kind": "cottage",
+        "state": "working",
+        "title": "2 workers polling 1 task queue",
+        "helpers": [
+          { "name": "worker@pod-a", "kind": "worker", "state": "working" },
+          { "name": "worker@pod-b", "kind": "worker", "state": "working" }
+        ]
+      },
+      "workstreams": [
+        {
+          "id": "task-8812",
+          "name": "SupportAgent",
+          "title": "task-8812",
+          "state": "working",
+          "action": "thinking",
+          "helpers": [{ "name": "refund-check-1", "kind": "RefundCheck", "state": "waiting_for_human" }]
+        },
+        {
+          "id": "task-8815",
+          "name": "ResearchAgent",
+          "title": "task-8815",
+          "kind": "research",
+          "state": "running",
+          "action": "searching"
+        }
+      ],
+      "tasks": [
+        { "id": "task-8790", "title": "SupportAgent task-8790", "state": "failed" }
+      ],
+      "pipeline": { "gate": "green", "stages": [{ "name": "completed (24h)", "tasks": ["task-8801", "task-8802"] }] },
+      "builds": ["1f2e3d4c5b6a"]
+    }
+  ]
+}

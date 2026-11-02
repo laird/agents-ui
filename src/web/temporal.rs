@@ -24,7 +24,8 @@ use serde_json::Value;
 
 use super::SwarmSnapshot;
 use super::source::{Reading, TtlCache, VillageSource};
-use super::village::{Action, House, HouseKind, HouseStatus, Note, Pipeline, Stop, Subagent, VillageSnapshot, house_kind, name_action};
+use super::framework::{Agent, AgentState, Plane, Report, ReportPipeline, Stage, Task, TaskState, Workstream, to_village};
+use super::village::{Action, HouseKind, HouseStatus, Note, VillageSnapshot, house_kind, name_action};
 use crate::transport::ServerTransport;
 
 pub const DEFAULT_HTTP_URL: &str = "http://localhost:7243";
@@ -233,12 +234,6 @@ fn type_words(name: &str) -> Vec<String> {
     words
 }
 
-/// Stable small number for a workflow id, used where the village model wants
-/// an issue number (crates and notes) to tell items apart between refreshes.
-fn id_number(id: &str) -> u32 {
-    id.bytes().fold(2166136261u32, |h, b| (h ^ b as u32).wrapping_mul(16777619))
-}
-
 fn is_failed(status: &str) -> bool {
     let s = status.to_ascii_uppercase();
     ["FAILED", "TIMED_OUT", "TIMEDOUT", "TERMINATED"].iter().any(|f| s.contains(f))
@@ -273,6 +268,18 @@ pub fn build_village(
     pollers: &HashMap<String, Vec<String>>,
     closed: &[Workflow],
 ) -> VillageSnapshot {
+    to_village(&report(source, running, pending, pollers, closed)).village
+}
+
+/// A namespace's report: top-level workflows are workstreams, their running
+/// descendants are helpers, and the worker fleet is the coordinator.
+pub fn report(
+    source: &TemporalSource,
+    running: &[Workflow],
+    pending: &HashMap<String, Pending>,
+    pollers: &HashMap<String, Vec<String>>,
+    closed: &[Workflow],
+) -> Report {
     let by_id: HashMap<&str, &Workflow> = running.iter().map(|w| (w.id.as_str(), w)).collect();
     let mut people: HashMap<&str, Vec<&Workflow>> = HashMap::new();
     for wf in running.iter().filter(|w| w.parent.is_some()) {
@@ -280,44 +287,44 @@ pub fn build_village(
     }
     let unserved = |queue: &str| pollers.get(queue).is_some_and(Vec::is_empty);
 
-    let houses: Vec<House> = running
+    let workstreams: Vec<Workstream> = running
         .iter()
         .filter(|w| w.parent.is_none())
         .map(|root| {
             let crew = people.get(root.id.as_str()).cloned().unwrap_or_default();
-            let subagents: Vec<Subagent> = crew
+            let helpers: Vec<Agent> = crew
                 .iter()
-                .map(|p| Subagent {
-                    agent_type: p.type_name.clone(),
-                    description: p.id.clone(),
-                    status: Some(if p.waiting() { HouseStatus::Blocked } else { HouseStatus::Working }),
-                    action: if p.waiting() { None } else { pending_action(pending.get(&p.id)) },
+                .map(|p| Agent {
+                    name: p.id.clone(),
+                    kind: Some(p.type_name.clone()),
+                    state: if p.waiting() { AgentState::Waiting } else { AgentState::Working },
+                    action: pending_action(pending.get(&p.id)),
+                    detail: Some(p.id.clone()),
                 })
                 .collect();
-            let status = if root.waiting() || crew.iter().any(|p| p.waiting()) {
-                HouseStatus::Blocked
+            let state = if root.waiting() {
+                AgentState::Waiting
             } else if unserved(&root.task_queue) {
-                HouseStatus::Stopped
+                AgentState::Stopped
             } else {
                 match pending.get(&root.id) {
-                    Some(p) if p.retrying > 0 => HouseStatus::Stalled,
-                    Some(p) if p.activities > 0 || p.children > 0 => HouseStatus::Working,
-                    _ if !crew.is_empty() => HouseStatus::Working,
-                    Some(_) => HouseStatus::Idle,
-                    None => HouseStatus::Unknown,
+                    Some(p) if p.retrying > 0 => AgentState::Stalled,
+                    Some(p) if p.activities > 0 || p.children > 0 => AgentState::Working,
+                    _ if !crew.is_empty() => AgentState::Working,
+                    Some(_) => AgentState::Idle,
+                    None => AgentState::Unknown,
                 }
             };
-            House {
+            Workstream {
                 id: root.id.clone(),
-                role: root.type_name.clone(),
-                kind: house_kind(&type_words(&root.type_name)),
-                status,
-                issue: None,
-                issue_title: Some(root.id.clone()),
-                priority: None,
-                crew: vec![root.type_name.clone()],
-                subagents,
-                action: if status == HouseStatus::Working { pending_action(pending.get(&root.id)) } else { None },
+                name: root.type_name.clone(),
+                title: Some(root.id.clone()),
+                kind: Some(house_kind(&type_words(&root.type_name))),
+                state: Some(state),
+                action: pending_action(pending.get(&root.id)),
+                agents: vec![Agent { name: root.type_name.clone(), state, ..Agent::default() }],
+                helpers,
+                ..Workstream::default()
             }
         })
         .collect();
@@ -325,50 +332,48 @@ pub fn build_village(
     // The hall is the worker fleet.
     let mut workers: Vec<String> = pollers.values().flatten().cloned().collect::<HashSet<_>>().into_iter().collect();
     workers.sort();
-    let hall_status = if pollers.values().any(Vec::is_empty) {
-        HouseStatus::Stalled
-    } else if houses.iter().any(|h| h.status == HouseStatus::Working) {
-        HouseStatus::Working
+    let busy = workstreams.iter().any(|w| w.state == Some(AgentState::Working) && w.helpers.iter().all(|h| h.state != AgentState::Waiting));
+    let hall = if pollers.values().any(Vec::is_empty) {
+        AgentState::Stalled
+    } else if busy {
+        AgentState::Working
     } else {
-        HouseStatus::Idle
+        AgentState::Idle
     };
-    let manager = House {
+    let coordinator = Workstream {
         id: "manager".to_string(),
-        role: "workers".to_string(),
-        kind: HouseKind::Cottage,
-        status: hall_status,
-        issue: None,
-        issue_title: Some(format!("{} workers polling {} task queues", workers.len(), pollers.len())),
-        priority: None,
-        crew: vec!["workers".to_string()],
-        subagents: workers
+        name: "workers".to_string(),
+        title: Some(format!("{} workers polling {} task queues", workers.len(), pollers.len())),
+        kind: Some(HouseKind::Cottage),
+        state: Some(hall),
+        agents: vec![Agent { name: "workers".to_string(), state: hall, ..Agent::default() }],
+        helpers: workers
             .into_iter()
-            .map(|identity| Subagent { agent_type: "worker".to_string(), description: identity, status: Some(HouseStatus::Working), action: None })
+            .map(|identity| Agent { name: identity, kind: Some("worker".to_string()), state: AgentState::Working, ..Agent::default() })
             .collect(),
-        action: None,
+        ..Workstream::default()
     };
 
     let top_closed = closed.iter().filter(|w| w.parent.is_none());
     let (failed, completed): (Vec<&Workflow>, Vec<&Workflow>) = top_closed.partition(|w| is_failed(&w.status));
-    VillageSnapshot {
+    Report {
         project: format!("temporal:{}", source.namespace),
+        plane: Plane::Runtime,
+        framework: "temporal".to_string(),
         workflow: Some("Temporal".to_string()),
-        repo_path: source.http_url.clone(),
-        manager,
-        houses,
-        backlog: Vec::new(),
-        board: failed
+        location: source.http_url.clone(),
+        coordinator: Some(coordinator),
+        workstreams,
+        tasks: failed
             .iter()
-            .map(|w| Note { number: id_number(&w.id), title: format!("{} {}", w.type_name, w.id), label: "failed".to_string() })
+            .map(|w| Task { id: w.id.clone(), title: format!("{} {}", w.type_name, w.id), state: TaskState::Failed, ..Task::default() })
             .collect(),
-        pipeline: Pipeline {
-            integration: String::new(),
-            sentinel: "green".to_string(),
-            quay: Vec::new(),
-            stops: vec![Stop { name: "completed (24h)".to_string(), issues: completed.iter().map(|w| id_number(&w.id)).collect() }],
-            release: None,
+        pipeline: ReportPipeline {
+            gate: "green".to_string(),
+            stages: vec![Stage { name: "completed (24h)".to_string(), tasks: completed.iter().map(|w| w.id.clone()).collect() }],
+            ..ReportPipeline::default()
         },
-        builds: Vec::new(),
+        ..Report::default()
     }
 }
 

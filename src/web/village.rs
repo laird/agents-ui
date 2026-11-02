@@ -204,6 +204,12 @@ pub struct Pipeline {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct VillageSnapshot {
     pub project: String,
+    /// The swarm that writes the system, or the platform that runs it.
+    #[serde(default)]
+    pub plane: super::framework::Plane,
+    /// The framework it came from: `autocoder`, `herdr`, `temporal`, ...
+    #[serde(default)]
+    pub framework: String,
     /// `Autocoder` or `Modernize`: from the swarm, or inferred from a
     /// `modernize:*` sub-agent.
     pub workflow: Option<String>,
@@ -249,94 +255,7 @@ pub fn house_kind(labels: &[String]) -> HouseKind {
 }
 
 pub fn agent_status(agent: &AgentSnapshot) -> HouseStatus {
-    if agent.waiting_for_input {
-        return HouseStatus::Blocked;
-    }
-    match agent.health.as_str() {
-        "Dead" => return HouseStatus::Stopped,
-        "Restarting" => return HouseStatus::Building,
-        "Stalled" => return HouseStatus::Stalled,
-        _ => {}
-    }
-    let state = agent.state.as_str();
-    if state.starts_with("Working") {
-        HouseStatus::Working
-    } else if state == "Idle" {
-        HouseStatus::Idle
-    } else if state.starts_with("Done") {
-        HouseStatus::Done
-    } else if state == "Starting" {
-        HouseStatus::Building
-    } else if state == "Stopped" {
-        HouseStatus::Stopped
-    } else {
-        HouseStatus::Unknown
-    }
-}
-
-/// The status a whole crew shows: anyone blocked wins, then any work at all.
-fn crew_status(statuses: &[HouseStatus]) -> HouseStatus {
-    const ORDER: &[HouseStatus] = &[
-        HouseStatus::Blocked,
-        HouseStatus::Stalled,
-        HouseStatus::Working,
-        HouseStatus::Building,
-        HouseStatus::Done,
-        HouseStatus::Idle,
-        HouseStatus::Stopped,
-    ];
-    ORDER
-        .iter()
-        .find(|s| statuses.contains(s))
-        .copied()
-        .unwrap_or(HouseStatus::Unknown)
-}
-
-fn issue_number(agent: &AgentSnapshot) -> Option<u32> {
-    agent.current_issue.or_else(|| {
-        let rest = agent.state.strip_prefix("Working #")?;
-        rest.chars()
-            .take_while(char::is_ascii_digit)
-            .collect::<String>()
-            .parse()
-            .ok()
-    })
-}
-
-fn priority(issue: &IssueSnapshot) -> Option<String> {
-    issue.priority.starts_with('P').then(|| issue.priority.clone())
-}
-
-fn priority_rank(p: &Option<String>) -> u8 {
-    p.as_deref()
-        .and_then(|p| p.strip_prefix('P'))
-        .and_then(|n| n.parse().ok())
-        .unwrap_or(9)
-}
-
-fn house_for(id: String, crew: &[&AgentSnapshot], issues: &HashMap<u32, &IssueSnapshot>) -> House {
-    let statuses: Vec<HouseStatus> = crew.iter().map(|a| agent_status(a)).collect();
-    let issue = crew.iter().find_map(|a| issue_number(a));
-    let found = issue.and_then(|n| issues.get(&n));
-    let kind = match (issue, found) {
-        (None, _) => HouseKind::Cottage,
-        (Some(_), Some(i)) => house_kind(&i.labels),
-        (Some(_), None) => HouseKind::Workshop,
-    };
-    House {
-        id,
-        role: crew.first().map(|a| a.role.clone()).unwrap_or_default(),
-        kind,
-        status: crew_status(&statuses),
-        issue,
-        issue_title: found
-            .map(|i| i.title.clone())
-            .or_else(|| crew.iter().find_map(|a| a.current_issue_title.clone())),
-        priority: found.and_then(|i| priority(i)),
-        crew: crew.iter().map(|a| a.role.clone()).collect(),
-        subagents: Vec::new(),
-        action: None,
-    }
+    super::framework::swarm_agent_state(agent).status()
 }
 
 /// Build the village for one swarm.
@@ -344,82 +263,7 @@ fn house_for(id: String, crew: &[&AgentSnapshot], issues: &HashMap<u32, &IssueSn
 /// `issues` overrides `swarm.issues` when the snapshot came from tmux
 /// discovery, which doesn't fetch issues.
 pub fn build(swarm: &SwarmSnapshot, issues: &[IssueSnapshot], pipeline: Pipeline) -> VillageSnapshot {
-    let by_number: HashMap<u32, &IssueSnapshot> = issues.iter().map(|i| (i.number, i)).collect();
-
-    // Group workers into houses by worktree, keeping first-seen order so a
-    // house never changes lot while the village is on screen.
-    let mut order: Vec<String> = Vec::new();
-    let mut crews: HashMap<String, Vec<&AgentSnapshot>> = HashMap::new();
-    for worker in &swarm.workers {
-        let key = if worker.worktree_path.is_empty() {
-            worker.role.clone()
-        } else {
-            worker.worktree_path.clone()
-        };
-        if !crews.contains_key(&key) {
-            order.push(key.clone());
-        }
-        crews.entry(key).or_default().push(worker);
-    }
-    let houses: Vec<House> = order
-        .into_iter()
-        .map(|key| {
-            let crew = &crews[&key];
-            house_for(key, crew, &by_number)
-        })
-        .collect();
-
-    let in_houses: HashSet<u32> = houses.iter().filter_map(|h| h.issue).collect();
-    let in_transit: HashSet<u32> = pipeline
-        .quay
-        .iter()
-        .chain(pipeline.stops.iter().flat_map(|s| s.issues.iter()))
-        .copied()
-        .collect();
-
-    let mut backlog: Vec<Crate> = Vec::new();
-    let mut board: Vec<Note> = Vec::new();
-    for issue in issues.iter().filter(|i| i.state == "open") {
-        if in_houses.contains(&issue.number) || in_transit.contains(&issue.number) {
-            continue;
-        }
-        if let Some(label) = issue
-            .labels
-            .iter()
-            .find(|l| crate::model::issue::BLOCKING_LABELS.contains(&l.as_str()))
-        {
-            board.push(Note {
-                number: issue.number,
-                title: issue.title.clone(),
-                label: label.clone(),
-            });
-        } else if !issue.is_working {
-            backlog.push(Crate {
-                number: issue.number,
-                title: issue.title.clone(),
-                kind: house_kind(&issue.labels),
-                priority: priority(issue),
-            });
-        }
-    }
-    backlog.sort_by_key(|c| (priority_rank(&c.priority), c.number));
-    board.sort_by_key(|n| n.number);
-
-    VillageSnapshot {
-        project: swarm.project_name.clone(),
-        workflow: swarm.workflow.clone(),
-        repo_path: swarm.repo_path.clone(),
-        manager: house_for(
-            "manager".to_string(),
-            &[&swarm.manager],
-            &by_number,
-        ),
-        houses,
-        backlog,
-        board,
-        pipeline,
-        builds: Vec::new(),
-    }
+    super::framework::to_village(&super::framework::swarm_report(swarm, issues, &pipeline)).village
 }
 
 // ---------------------------------------------------------------------------
@@ -537,21 +381,6 @@ pub fn active_subagents(project_dir: &Path, now: SystemTime) -> Vec<Subagent> {
 }
 
 /// The house a specialist sub-agent builds when its session has no issue.
-fn specialist_kind(agent_type: &str) -> Option<HouseKind> {
-    let t = agent_type.to_ascii_lowercase();
-    let role = t.rsplit(':').next().unwrap_or(&t);
-    [
-        ("architect", HouseKind::Research),
-        ("security", HouseKind::Security),
-        ("test", HouseKind::Tests),
-        ("doc", HouseKind::Docs),
-        ("coder", HouseKind::Feature),
-    ]
-    .iter()
-    .find(|(name, _)| role.contains(name))
-    .map(|(_, kind)| *kind)
-}
-
 /// Move a house's sub-agents in: any running sub-agent makes the house busy,
 /// and with no issue of its own the house takes its first specialist's shape.
 pub fn apply_subagents(house: &mut House, subagents: Vec<Subagent>) {
@@ -569,7 +398,7 @@ pub fn apply_subagents(house: &mut House, subagents: Vec<Subagent>) {
     if house.issue.is_none() {
         house.kind = subagents
             .iter()
-            .find_map(|s| specialist_kind(&s.agent_type))
+            .find_map(|s| super::framework::specialist_kind(&s.agent_type))
             .unwrap_or(HouseKind::Workshop);
     }
     house.subagents = subagents;
@@ -874,6 +703,7 @@ impl VillageSource for SwarmVillages {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::web::framework::specialist_kind;
 
     fn agent(role: &str, state: &str, worktree: &str) -> AgentSnapshot {
         AgentSnapshot {

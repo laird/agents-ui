@@ -1,0 +1,839 @@
+//! Frameworks: the neutral report any agent framework can produce, and the
+//! one mapping from it to a village.
+//!
+//! Every framework says the same few things in its own words. A coding swarm
+//! (autocoder, modernize, claude-squad, herdr) has a manager, sessions per
+//! worktree and issues; a runtime (Temporal, AgentEx, a LangGraph or CrewAI
+//! deployment) has a worker fleet, top-level workflows and their children.
+//! A [`Report`] says it once, in neutral words:
+//!
+//! ```text
+//! coordinator   the manager, or the worker fleet       → the town hall or castle
+//! workstreams   one per worktree or top-level workflow → houses
+//!   agents      the sessions or workflow on it         → the house's crew
+//!   helpers     sub-agents or child workflows          → villagers working for it
+//! tasks         issues, tickets, failed runs           → crates, notes on the board
+//! pipeline      stages work passes on its way out      → the canal and its locks
+//! builds        versions the workers run               → what a world matches releases against
+//! plane         development or runtime                 → which half of a world it is
+//! ```
+//!
+//! Built-in sources (tmux, herdr, Temporal) build a report in Rust. Anything
+//! else prints one as JSON (`agents-village/v1`, see `docs/village-protocol.md`)
+//! from a command, a URL or a file, and `--framework` reads it, so a new
+//! framework needs no change here.
+
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
+use std::time::Duration;
+
+use futures::future::BoxFuture;
+use serde::{Deserialize, Serialize};
+
+use super::source::{Reading, TtlCache, VillageSource};
+use super::village::{Action, Crate, House, HouseKind, HouseStatus, Note, Pipeline, Stop, Subagent, VillageSnapshot, house_kind};
+use super::{IssueSnapshot, SwarmSnapshot};
+use crate::transport::ServerTransport;
+
+pub const SCHEMA: &str = "agents-village/v1";
+
+/// Which half of the loop a village is: the swarm that writes the system, or
+/// the platform that runs it.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Plane {
+    #[default]
+    Development,
+    Runtime,
+}
+
+/// What an agent is doing, in words every framework has.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(from = "String", into = "String")]
+pub enum AgentState {
+    Starting,
+    Working,
+    Idle,
+    /// Waiting on a person: a permission prompt, a question, an approval.
+    Waiting,
+    /// Supposed to be working but not moving: no output, retrying.
+    Stalled,
+    Done,
+    Stopped,
+    #[default]
+    Unknown,
+}
+
+impl From<String> for AgentState {
+    /// Accepts the words frameworks use: herdr's `blocked`, Temporal's
+    /// `RUNNING`, a status file's `Working #412`.
+    fn from(s: String) -> Self {
+        let s = s.trim().to_ascii_lowercase();
+        let first = s.split(|c: char| !c.is_ascii_alphanumeric() && c != '_').next().unwrap_or("");
+        // `AWAITING_APPROVAL`, `RUN_STATE_RUNNING`: try the whole word, then its parts.
+        std::iter::once(first).chain(first.split('_')).map(Self::word).find(|s| *s != Self::Unknown).unwrap_or(Self::Unknown)
+    }
+}
+
+impl AgentState {
+    fn word(w: &str) -> Self {
+        match w {
+            "starting" | "start" | "launching" | "pending" | "scheduled" | "restarting" | "building" => Self::Starting,
+            "working" | "running" | "busy" | "active" | "thinking" | "executing" | "in_progress" => Self::Working,
+            "idle" | "ready" | "available" | "sleeping" => Self::Idle,
+            "waiting" | "blocked" | "needs_input" | "input" | "waiting_for_human" | "awaiting" | "approval" | "paused" => Self::Waiting,
+            "stalled" | "stuck" | "retrying" | "backoff" => Self::Stalled,
+            "done" | "completed" | "complete" | "finished" | "succeeded" | "success" => Self::Done,
+            "stopped" | "dead" | "exited" | "terminated" | "cancelled" | "canceled" | "failed" | "timed_out" | "crashed" => Self::Stopped,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+impl From<AgentState> for String {
+    fn from(s: AgentState) -> String {
+        match s {
+            AgentState::Starting => "starting",
+            AgentState::Working => "working",
+            AgentState::Idle => "idle",
+            AgentState::Waiting => "waiting",
+            AgentState::Stalled => "stalled",
+            AgentState::Done => "done",
+            AgentState::Stopped => "stopped",
+            AgentState::Unknown => "unknown",
+        }
+        .to_string()
+    }
+}
+
+impl AgentState {
+    pub fn status(self) -> HouseStatus {
+        match self {
+            Self::Starting => HouseStatus::Building,
+            Self::Working => HouseStatus::Working,
+            Self::Idle => HouseStatus::Idle,
+            Self::Waiting => HouseStatus::Blocked,
+            Self::Stalled => HouseStatus::Stalled,
+            Self::Done => HouseStatus::Done,
+            Self::Stopped => HouseStatus::Stopped,
+            Self::Unknown => HouseStatus::Unknown,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct Agent {
+    /// Role or id: `worker-2`, `modernize:coder`, a child workflow's id.
+    pub name: String,
+    /// Agent or workflow type, when it differs from the name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub state: AgentState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<Action>,
+    /// What it is on, in a few words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct Workstream {
+    /// Stable key: a worktree path, a workflow id. A house keeps its lot
+    /// while its key stays the same.
+    pub id: String,
+    /// Shown as the house's role; defaults to its first agent's name.
+    #[serde(default)]
+    pub name: String,
+    /// The task it is on, by `Task::id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<String>,
+    /// Shown in place of the task's title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// The building, when the task's labels don't say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<HouseKind>,
+    /// The house's state, when the framework knows it better than its agents'.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<AgentState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<Action>,
+    /// The sessions or workflow working this stream: the crew.
+    #[serde(default)]
+    pub agents: Vec<Agent>,
+    /// Sub-agents or child workflows working for it.
+    #[serde(default)]
+    pub helpers: Vec<Agent>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TaskState {
+    /// In the backlog, free to take.
+    #[default]
+    Open,
+    /// Taken, but by nobody this report shows.
+    Claimed,
+    /// Waiting on a decision; pinned to the board.
+    Blocked,
+    /// Failed; pinned to the board.
+    Failed,
+    Done,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct Task {
+    /// `412`, `#412`, `PROJ-12`, a workflow id.
+    pub id: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub labels: Vec<String>,
+    /// `P0` to `P3`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<String>,
+    #[serde(default)]
+    pub state: TaskState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct Stage {
+    pub name: String,
+    /// Tasks whose work has reached this stage but not the next.
+    #[serde(default)]
+    pub tasks: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct ReportPipeline {
+    /// The branch or queue finished work lands on.
+    #[serde(default)]
+    pub integration: String,
+    /// `green`, `pending` or `unknown`: whether the gate has passed the latest work.
+    #[serde(default)]
+    pub gate: String,
+    /// Landed, not yet through the first stage.
+    #[serde(default)]
+    pub landed: Vec<String>,
+    #[serde(default)]
+    pub stages: Vec<Stage>,
+    /// The version at the last stage: what is released.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct Report {
+    #[serde(default = "schema")]
+    pub schema: String,
+    pub project: String,
+    #[serde(default)]
+    pub plane: Plane,
+    /// `autocoder`, `modernize`, `herdr`, `temporal`, `agentex`, ...
+    #[serde(default)]
+    pub framework: String,
+    /// A finer name for what the swarm runs, e.g. `Modernize`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow: Option<String>,
+    /// Where it lives: a repository path, a server URL.
+    #[serde(default)]
+    pub location: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coordinator: Option<Workstream>,
+    #[serde(default)]
+    pub workstreams: Vec<Workstream>,
+    #[serde(default)]
+    pub tasks: Vec<Task>,
+    #[serde(default)]
+    pub pipeline: ReportPipeline,
+    #[serde(default)]
+    pub builds: Vec<String>,
+}
+
+fn schema() -> String {
+    SCHEMA.to_string()
+}
+
+// ---------------------------------------------------------------------------
+// Report → village
+// ---------------------------------------------------------------------------
+
+/// A task id as the number crates and notes are keyed by: the digits of
+/// `412` or `#412`, otherwise a stable hash of the id.
+pub fn task_number(id: &str) -> u32 {
+    let digits = id.trim().trim_start_matches('#');
+    if !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()) {
+        if let Ok(n) = digits.parse() {
+            return n;
+        }
+    }
+    id.bytes().fold(2166136261u32, |h, b| (h ^ b as u32).wrapping_mul(16777619))
+}
+
+/// The status a whole crew shows: anyone waiting wins, then any work at all.
+pub fn crew_status(statuses: &[HouseStatus]) -> HouseStatus {
+    const ORDER: &[HouseStatus] = &[
+        HouseStatus::Blocked,
+        HouseStatus::Stalled,
+        HouseStatus::Working,
+        HouseStatus::Building,
+        HouseStatus::Done,
+        HouseStatus::Idle,
+        HouseStatus::Stopped,
+    ];
+    ORDER.iter().find(|s| statuses.contains(s)).copied().unwrap_or(HouseStatus::Unknown)
+}
+
+/// A specialist sub-agent's building, from its type (`modernize:security`).
+pub fn specialist_kind(agent_type: &str) -> Option<HouseKind> {
+    let t = agent_type.to_ascii_lowercase();
+    let role = t.rsplit(':').next().unwrap_or(&t);
+    [
+        ("architect", HouseKind::Research),
+        ("security", HouseKind::Security),
+        ("test", HouseKind::Tests),
+        ("doc", HouseKind::Docs),
+        ("coder", HouseKind::Feature),
+    ]
+    .iter()
+    .find(|(name, _)| role.contains(name))
+    .map(|(_, kind)| *kind)
+}
+
+fn priority(p: &Option<String>) -> Option<String> {
+    p.as_ref().filter(|p| p.starts_with('P')).cloned()
+}
+
+fn priority_rank(p: &Option<String>) -> u8 {
+    p.as_deref().and_then(|p| p.strip_prefix('P')).and_then(|n| n.parse().ok()).unwrap_or(9)
+}
+
+fn helper(a: &Agent) -> Subagent {
+    Subagent {
+        agent_type: a.kind.clone().unwrap_or_else(|| a.name.clone()),
+        description: a.detail.clone().unwrap_or_else(|| a.name.clone()),
+        status: Some(a.state.status()),
+        action: if a.state == AgentState::Waiting { None } else { a.action },
+    }
+}
+
+fn house(id: String, ws: &Workstream, tasks: &HashMap<&str, &Task>) -> House {
+    let found = ws.task.as_deref().and_then(|t| tasks.get(t.trim_start_matches('#')).or_else(|| tasks.get(t)));
+    let helper_waiting = ws.helpers.iter().any(|h| h.state == AgentState::Waiting);
+    let mut status = match ws.state {
+        Some(s) => s.status(),
+        None => {
+            let derived = crew_status(&ws.agents.iter().map(|a| a.state.status()).collect::<Vec<_>>());
+            // A crew with helpers running is busy, whatever its own sessions show.
+            if !ws.helpers.is_empty()
+                && matches!(derived, HouseStatus::Idle | HouseStatus::Done | HouseStatus::Unknown | HouseStatus::Stalled)
+            {
+                HouseStatus::Working
+            } else {
+                derived
+            }
+        }
+    };
+    if helper_waiting {
+        status = HouseStatus::Blocked;
+    }
+    let kind = match (&ws.task, found, ws.kind) {
+        (Some(_), Some(t), _) => house_kind(&t.labels),
+        (_, _, Some(hint)) => hint,
+        (Some(_), None, None) => HouseKind::Workshop,
+        (None, _, None) if !ws.helpers.is_empty() => {
+            ws.helpers.iter().find_map(|h| specialist_kind(h.kind.as_deref().unwrap_or(&h.name))).unwrap_or(HouseKind::Workshop)
+        }
+        (None, _, None) => HouseKind::Cottage,
+    };
+    let crew: Vec<String> = ws.agents.iter().map(|a| a.name.clone()).collect();
+    House {
+        id,
+        role: if ws.name.is_empty() { crew.first().cloned().unwrap_or_default() } else { ws.name.clone() },
+        kind,
+        status,
+        issue: ws.task.as_deref().map(task_number),
+        issue_title: ws.title.clone().or_else(|| found.map(|t| t.title.clone())),
+        priority: found.and_then(|t| priority(&t.priority)),
+        crew: if crew.is_empty() { vec![ws.name.clone()] } else { crew },
+        subagents: ws.helpers.iter().map(helper).collect(),
+        action: if status == HouseStatus::Working { ws.action } else { None },
+    }
+}
+
+/// The note label a blocked or failed task is pinned with.
+fn note_label(t: &Task) -> String {
+    t.labels
+        .iter()
+        .find(|l| crate::model::issue::BLOCKING_LABELS.contains(&l.as_str()))
+        .cloned()
+        .unwrap_or_else(|| if t.state == TaskState::Failed { "failed" } else { "blocked" }.to_string())
+}
+
+/// Draw a report as a village, with the open tasks as issues for worlds.
+pub fn to_village(report: &Report) -> Reading {
+    let tasks: HashMap<&str, &Task> = report.tasks.iter().map(|t| (t.id.trim_start_matches('#'), t)).collect();
+    let houses: Vec<House> = report.workstreams.iter().map(|ws| house(ws.id.clone(), ws, &tasks)).collect();
+    let manager = match &report.coordinator {
+        Some(c) => house("manager".to_string(), c, &tasks),
+        None => house(
+            "manager".to_string(),
+            &Workstream { name: "manager".into(), agents: vec![Agent { name: "manager".into(), ..Agent::default() }], ..Workstream::default() },
+            &tasks,
+        ),
+    };
+
+    let p = &report.pipeline;
+    let numbers = |ids: &[String]| ids.iter().map(|i| task_number(i)).collect::<Vec<u32>>();
+    let pipeline = Pipeline {
+        integration: p.integration.clone(),
+        sentinel: if p.gate.is_empty() { "unknown".to_string() } else { p.gate.clone() },
+        quay: numbers(&p.landed),
+        stops: p.stages.iter().map(|s| Stop { name: s.name.clone(), issues: numbers(&s.tasks) }).collect(),
+        release: p.release.clone(),
+    };
+
+    let in_houses: HashSet<u32> = houses.iter().chain(std::iter::once(&manager)).filter_map(|h| h.issue).collect();
+    let in_transit: HashSet<u32> = pipeline.quay.iter().chain(pipeline.stops.iter().flat_map(|s| s.issues.iter())).copied().collect();
+    let mut backlog = Vec::new();
+    let mut board = Vec::new();
+    for t in &report.tasks {
+        let n = task_number(&t.id);
+        if t.state == TaskState::Done || in_houses.contains(&n) || in_transit.contains(&n) {
+            continue;
+        }
+        match t.state {
+            TaskState::Blocked | TaskState::Failed => board.push(Note { number: n, title: t.title.clone(), label: note_label(t) }),
+            TaskState::Open => backlog.push(Crate { number: n, title: t.title.clone(), kind: house_kind(&t.labels), priority: priority(&t.priority) }),
+            TaskState::Claimed | TaskState::Done => {}
+        }
+    }
+    backlog.sort_by_key(|c: &Crate| (priority_rank(&c.priority), c.number));
+    board.sort_by_key(|n: &Note| n.number);
+
+    let issues = report
+        .tasks
+        .iter()
+        .filter(|t| t.state != TaskState::Done)
+        .map(|t| IssueSnapshot {
+            number: task_number(&t.id),
+            title: t.title.clone(),
+            state: "open".to_string(),
+            priority: t.priority.clone().unwrap_or_default(),
+            labels: t.labels.clone(),
+            is_blocked: t.state == TaskState::Blocked,
+            is_working: t.state == TaskState::Claimed,
+            assigned_worker: None,
+            url: t.url.clone().unwrap_or_default(),
+        })
+        .collect();
+
+    let village = VillageSnapshot {
+        project: report.project.clone(),
+        plane: report.plane,
+        framework: report.framework.clone(),
+        workflow: report.workflow.clone(),
+        repo_path: report.location.clone(),
+        manager,
+        houses,
+        backlog,
+        board,
+        pipeline,
+        builds: report.builds.clone(),
+    };
+    Reading { village, issues }
+}
+
+// ---------------------------------------------------------------------------
+// Coding swarms (tmux, herdr) → report
+// ---------------------------------------------------------------------------
+
+/// An agent's state from a swarm snapshot: waiting first, then health, then
+/// what its pane or status file says.
+pub fn swarm_agent_state(agent: &super::AgentSnapshot) -> AgentState {
+    if agent.waiting_for_input {
+        return AgentState::Waiting;
+    }
+    match agent.health.as_str() {
+        "Dead" => return AgentState::Stopped,
+        "Restarting" => return AgentState::Starting,
+        "Stalled" => return AgentState::Stalled,
+        _ => {}
+    }
+    let s = agent.state.as_str();
+    if s.starts_with("Working") {
+        AgentState::Working
+    } else if s == "Idle" {
+        AgentState::Idle
+    } else if s.starts_with("Done") {
+        AgentState::Done
+    } else if s == "Starting" {
+        AgentState::Starting
+    } else if s == "Stopped" {
+        AgentState::Stopped
+    } else {
+        AgentState::Unknown
+    }
+}
+
+fn swarm_issue(agent: &super::AgentSnapshot) -> Option<u32> {
+    agent.current_issue.or_else(|| {
+        let rest = agent.state.strip_prefix("Working #")?;
+        rest.chars().take_while(char::is_ascii_digit).collect::<String>().parse().ok()
+    })
+}
+
+fn swarm_workstream(id: String, crew: &[&super::AgentSnapshot]) -> Workstream {
+    Workstream {
+        id,
+        name: crew.first().map(|a| a.role.clone()).unwrap_or_default(),
+        task: crew.iter().find_map(|a| swarm_issue(a)).map(|n| n.to_string()),
+        title: crew.iter().find_map(|a| a.current_issue_title.clone()),
+        agents: crew
+            .iter()
+            .map(|a| Agent { name: a.role.clone(), state: swarm_agent_state(a), ..Agent::default() })
+            .collect(),
+        ..Workstream::default()
+    }
+}
+
+/// autocoder's labels for an issue whose fix has left the worker.
+pub const HANDED_OFF_LABELS: &[&str] = &["merging", "awaiting-integration"];
+
+/// A coding swarm's report. Agents sharing a worktree are one workstream;
+/// `issues` are the swarm's open issues and `pipeline` where pushed work is.
+pub fn swarm_report(swarm: &SwarmSnapshot, issues: &[IssueSnapshot], pipeline: &Pipeline) -> Report {
+    let mut order: Vec<String> = Vec::new();
+    let mut crews: HashMap<String, Vec<&super::AgentSnapshot>> = HashMap::new();
+    for worker in &swarm.workers {
+        let key = if worker.worktree_path.is_empty() { worker.role.clone() } else { worker.worktree_path.clone() };
+        if !crews.contains_key(&key) {
+            order.push(key.clone());
+        }
+        crews.entry(key).or_default().push(worker);
+    }
+    let mut coordinator = swarm_workstream("manager".to_string(), &[&swarm.manager]);
+    // A house's title falls back to its agent's; a found issue's title wins.
+    let known: HashSet<u32> = issues.iter().map(|i| i.number).collect();
+    let mut workstreams: Vec<Workstream> = order.into_iter().map(|key| { let crew = &crews[&key]; swarm_workstream(key, crew) }).collect();
+    for ws in std::iter::once(&mut coordinator).chain(workstreams.iter_mut()) {
+        if ws.task.as_deref().and_then(|t| t.parse().ok()).is_some_and(|n: u32| known.contains(&n)) {
+            ws.title = None;
+        }
+    }
+    let ids = |v: &[u32]| v.iter().map(u32::to_string).collect::<Vec<_>>();
+    // autocoder hands an issue to a merge job (`merging`) and parks it once
+    // landed but not yet proven green (`awaiting-integration`): either way it
+    // has left the worker and waits at the quay, if git hasn't placed it yet.
+    let placed: HashSet<u32> = pipeline.quay.iter().chain(pipeline.stops.iter().flat_map(|s| s.issues.iter())).copied().collect();
+    let mut landed = ids(&pipeline.quay);
+    landed.extend(
+        issues
+            .iter()
+            .filter(|i| i.state == "open" && !placed.contains(&i.number))
+            .filter(|i| i.labels.iter().any(|l| HANDED_OFF_LABELS.contains(&l.as_str())))
+            .map(|i| i.number.to_string()),
+    );
+    Report {
+        schema: schema(),
+        project: swarm.project_name.clone(),
+        plane: Plane::Development,
+        framework: swarm.workflow.clone().unwrap_or_else(|| "autocoder".to_string()).to_ascii_lowercase(),
+        workflow: swarm.workflow.clone(),
+        location: swarm.repo_path.clone(),
+        coordinator: Some(coordinator),
+        workstreams,
+        tasks: issues
+            .iter()
+            .filter(|i| i.state == "open")
+            .map(|i| Task {
+                id: i.number.to_string(),
+                title: i.title.clone(),
+                labels: i.labels.clone(),
+                priority: Some(i.priority.clone()).filter(|p| !p.is_empty()),
+                state: if i.labels.iter().any(|l| crate::model::issue::BLOCKING_LABELS.contains(&l.as_str())) {
+                    TaskState::Blocked
+                } else if i.is_working || i.labels.iter().any(|l| l == "decomposed") {
+                    TaskState::Claimed
+                } else {
+                    TaskState::Open
+                },
+                url: Some(i.url.clone()).filter(|u| !u.is_empty()),
+            })
+            .collect(),
+        pipeline: ReportPipeline {
+            integration: pipeline.integration.clone(),
+            gate: pipeline.sentinel.clone(),
+            landed,
+            stages: pipeline.stops.iter().map(|s| Stage { name: s.name.clone(), tasks: ids(&s.issues) }).collect(),
+            release: pipeline.release.clone(),
+        },
+        builds: Vec::new(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Reports from outside: a command, a URL, a file
+// ---------------------------------------------------------------------------
+
+/// Where `--framework` reads reports from.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReportSpec {
+    /// `exec:<command>`: run it; it prints reports on stdout.
+    Command(String),
+    /// `http://` or `https://`: GET it.
+    Url(String),
+    /// `file:<path>`, or a path ending `.json`.
+    File(PathBuf),
+}
+
+impl ReportSpec {
+    pub fn parse(spec: &str) -> Option<Self> {
+        let spec = spec.trim();
+        if let Some(cmd) = spec.strip_prefix("exec:") {
+            return (!cmd.trim().is_empty()).then(|| Self::Command(cmd.trim().to_string()));
+        }
+        if spec.starts_with("http://") || spec.starts_with("https://") {
+            return Some(Self::Url(spec.to_string()));
+        }
+        if let Some(path) = spec.strip_prefix("file:") {
+            return (!path.is_empty()).then(|| Self::File(PathBuf::from(path)));
+        }
+        spec.ends_with(".json").then(|| Self::File(PathBuf::from(spec)))
+    }
+
+    fn label(&self) -> String {
+        match self {
+            Self::Command(c) => format!("exec:{c}"),
+            Self::Url(u) => u.clone(),
+            Self::File(p) => format!("file:{}", p.display()),
+        }
+    }
+}
+
+/// Reports from JSON: one report, a list of them, or `{"reports": [...]}`.
+pub fn parse_reports(json: &str) -> Result<Vec<Report>, String> {
+    let v: serde_json::Value = serde_json::from_str(json).map_err(|e| format!("not JSON: {e}"))?;
+    let list = match v {
+        serde_json::Value::Array(items) => items,
+        serde_json::Value::Object(ref m) if m.contains_key("reports") => match m.get("reports") {
+            Some(serde_json::Value::Array(items)) => items.clone(),
+            _ => return Err("\"reports\" is not a list".to_string()),
+        },
+        other => vec![other],
+    };
+    list.into_iter()
+        .map(|item| {
+            let r: Report = serde_json::from_value(item).map_err(|e| format!("not an {SCHEMA} report: {e}"))?;
+            if !r.schema.starts_with("agents-village/") {
+                return Err(format!("unknown schema {}", r.schema));
+            }
+            Ok(r)
+        })
+        .collect()
+}
+
+/// How long reports from outside are reused before reading them again.
+const REPORT_TTL: Duration = Duration::from_secs(5);
+
+/// Villages from an outside adapter, read through the transport, so a
+/// command or file on a `--server` host is read there.
+pub struct ReportVillages {
+    spec: ReportSpec,
+    cache: TtlCache<(), Vec<Reading>>,
+}
+
+impl ReportVillages {
+    pub fn new(spec: ReportSpec) -> Self {
+        Self { spec, cache: TtlCache::new(REPORT_TTL) }
+    }
+
+    async fn fetch(&self, transport: &ServerTransport) -> Result<String, String> {
+        let (program, args): (&str, Vec<String>) = match &self.spec {
+            ReportSpec::Command(c) => ("sh", vec!["-c".to_string(), c.clone()]),
+            ReportSpec::Url(u) => ("curl", ["-sS", "--fail", "--max-time", "10", "-H", "Accept: application/json", u].iter().map(|s| s.to_string()).collect()),
+            ReportSpec::File(p) => ("cat", vec![p.to_string_lossy().into_owned()]),
+        };
+        let out = transport.output(program, &args, None).await.map_err(|e| format!("{e:#}"))?;
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr);
+            return Err(err.lines().last().unwrap_or("failed").trim().to_string());
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+
+    /// Shown in place of the adapter's villages when it can't be read, so a
+    /// broken adapter is visible instead of silently missing.
+    fn broken(&self, why: &str) -> Reading {
+        let mut r = to_village(&Report { project: self.spec.label(), framework: "unknown".into(), ..Report::default() });
+        r.village.manager.status = HouseStatus::Unknown;
+        r.village.board.push(Note { number: 0, title: format!("Can't read {}: {why}", self.spec.label()), label: "unreachable".to_string() });
+        r
+    }
+}
+
+impl VillageSource for ReportVillages {
+    fn name(&self) -> String {
+        format!("reports from {}", self.spec.label())
+    }
+    fn read<'a>(&'a self, transport: &'a ServerTransport, _: &'a [SwarmSnapshot]) -> BoxFuture<'a, Vec<Reading>> {
+        Box::pin(async move {
+            self.cache
+                .get_or((), || async {
+                    match self.fetch(transport).await.and_then(|json| parse_reports(&json)) {
+                        Ok(reports) => reports.iter().map(to_village).collect(),
+                        Err(why) => vec![self.broken(&why)],
+                    }
+                })
+                .await
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const EXAMPLE: &str = include_str!("../../tools/adapters/example-report.json");
+
+    fn agent(name: &str, state: &str) -> Agent {
+        Agent { name: name.into(), state: AgentState::from(state.to_string()), ..Agent::default() }
+    }
+
+    #[test]
+    fn states_accept_every_frameworks_words() {
+        for (word, want) in [
+            ("blocked", AgentState::Waiting),
+            ("waiting_for_human", AgentState::Waiting),
+            ("RUNNING", AgentState::Working),
+            ("Working #412", AgentState::Working),
+            ("COMPLETED", AgentState::Done),
+            ("retrying", AgentState::Stalled),
+            ("TIMED_OUT", AgentState::Stopped),
+            ("pending", AgentState::Starting),
+            ("AWAITING_APPROVAL", AgentState::Waiting),
+            ("RUN_STATE_RUNNING", AgentState::Working),
+            ("whatever", AgentState::Unknown),
+        ] {
+            assert_eq!(AgentState::from(word.to_string()), want, "{word}");
+        }
+        assert_eq!(serde_json::to_string(&AgentState::Waiting).unwrap(), "\"waiting\"");
+    }
+
+    #[test]
+    fn task_numbers_keep_issue_numbers_and_hash_the_rest() {
+        assert_eq!(task_number("412"), 412);
+        assert_eq!(task_number("#412"), 412);
+        assert_eq!(task_number("PROJ-12"), task_number("PROJ-12"));
+        assert_ne!(task_number("PROJ-12"), 12);
+    }
+
+    #[test]
+    fn workstreams_become_houses() {
+        let report = Report {
+            project: "shop".into(),
+            tasks: vec![
+                Task { id: "7".into(), title: "Fix login".into(), labels: vec!["bug".into()], priority: Some("P1".into()), ..Task::default() },
+                Task { id: "8".into(), title: "Dark mode".into(), labels: vec!["enhancement".into()], ..Task::default() },
+                Task { id: "9".into(), title: "Pick a queue".into(), labels: vec!["needs-design".into()], state: TaskState::Blocked, ..Task::default() },
+                Task { id: "10".into(), title: "Old".into(), state: TaskState::Done, ..Task::default() },
+            ],
+            workstreams: vec![
+                Workstream { id: "/src/shop-wt-1".into(), task: Some("#7".into()), agents: vec![agent("worker-1", "working"), agent("worker-1b", "blocked")], ..Workstream::default() },
+                Workstream { id: "/src/shop-wt-2".into(), agents: vec![agent("worker-2", "idle")], helpers: vec![Agent { name: "a1".into(), kind: Some("modernize:security".into()), state: AgentState::Working, ..Agent::default() }], ..Workstream::default() },
+                Workstream { id: "wf-1".into(), name: "PaymentWorkflow".into(), kind: Some(HouseKind::Perf), state: Some(AgentState::Stalled), ..Workstream::default() },
+            ],
+            ..Report::default()
+        };
+        let r = to_village(&report);
+        let v = &r.village;
+        assert_eq!(v.houses[0].role, "worker-1");
+        assert_eq!((v.houses[0].kind, v.houses[0].status, v.houses[0].issue), (HouseKind::Bug, HouseStatus::Blocked, Some(7)));
+        assert_eq!(v.houses[0].issue_title.as_deref(), Some("Fix login"));
+        assert_eq!(v.houses[0].priority.as_deref(), Some("P1"));
+        assert_eq!((v.houses[1].kind, v.houses[1].status), (HouseKind::Security, HouseStatus::Working), "helpers make an idle house busy and shape it");
+        assert_eq!((v.houses[2].kind, v.houses[2].status, v.houses[2].crew.clone()), (HouseKind::Perf, HouseStatus::Stalled, vec!["PaymentWorkflow".to_string()]));
+        assert_eq!(v.backlog.iter().map(|c| c.number).collect::<Vec<_>>(), vec![8], "a task in a house is not in the backlog");
+        assert_eq!((v.board[0].number, v.board[0].label.as_str()), (9, "needs-design"));
+        assert_eq!(r.issues.len(), 3, "done tasks aren't open issues");
+        assert_eq!(v.manager.status, HouseStatus::Unknown, "no coordinator: an empty hall");
+    }
+
+    #[test]
+    fn handed_off_issues_wait_at_the_quay_and_decomposed_ones_leave_the_backlog() {
+        let issue = |n: u32, labels: &[&str]| IssueSnapshot {
+            number: n,
+            title: format!("#{n}"),
+            state: "open".into(),
+            priority: "P2".into(),
+            labels: labels.iter().map(|l| l.to_string()).collect(),
+            is_blocked: false,
+            is_working: false,
+            assigned_worker: None,
+            url: String::new(),
+        };
+        let swarm: SwarmSnapshot = serde_json::from_value(serde_json::json!({
+            "project_name": "shop", "repo_path": "", "agent_type": "claude", "workflow": null, "tmux_session": "",
+            "stopped": false, "busy_count": 0, "idle_count": 0, "attention_count": 0, "workers": [], "issues": [],
+            "manager": {"id": "m", "role": "manager", "state": "Idle", "is_manager": true, "waiting_for_input": false,
+                "current_issue": null, "current_issue_title": null, "pane_content": "", "tmux_target": "", "health": "Healthy",
+                "completed_issue_count": 0, "resurrection_attempts": 0, "status_timestamp": null}
+        }))
+        .unwrap();
+        let issues = vec![issue(1, &["merging"]), issue(2, &["awaiting-integration"]), issue(3, &["decomposed"]), issue(4, &["bug"]), issue(5, &["needs-feedback"])];
+        let pipeline = Pipeline { stops: vec![Stop { name: "main-green".into(), issues: vec![2] }], ..Pipeline::default() };
+        let v = to_village(&swarm_report(&swarm, &issues, &pipeline)).village;
+        assert_eq!(v.pipeline.quay, vec![1], "#2 is already placed by git");
+        assert_eq!(v.backlog.iter().map(|c| c.number).collect::<Vec<_>>(), vec![4]);
+        assert_eq!(v.board.iter().map(|n| (n.number, n.label.as_str())).collect::<Vec<_>>(), vec![(5, "needs-feedback")]);
+    }
+
+    #[test]
+    fn the_example_report_parses_and_draws() {
+        let reports = parse_reports(EXAMPLE).expect("example parses");
+        assert_eq!(reports.len(), 2);
+        let dev = to_village(&reports[0]).village;
+        assert_eq!(dev.plane, Plane::Development);
+        assert!(dev.houses.iter().any(|h| h.status == HouseStatus::Blocked));
+        let run = to_village(&reports[1]).village;
+        assert_eq!(run.plane, Plane::Runtime);
+        assert_eq!(run.builds, vec!["1f2e3d4c5b6a"]);
+        assert!(!run.manager.subagents.is_empty());
+    }
+
+    #[test]
+    fn reports_come_singly_listed_or_wrapped() {
+        let one = r#"{"project":"a"}"#;
+        assert_eq!(parse_reports(one).unwrap()[0].schema, SCHEMA);
+        assert_eq!(parse_reports(r#"[{"project":"a"},{"project":"b"}]"#).unwrap().len(), 2);
+        assert_eq!(parse_reports(r#"{"reports":[{"project":"a"}]}"#).unwrap().len(), 1);
+        assert!(parse_reports("nope").is_err());
+        assert!(parse_reports(r#"{"schema":"other/v9","project":"a"}"#).is_err());
+        assert!(parse_reports(r#"{"workstreams":[]}"#).is_err(), "a report names its project");
+    }
+
+    #[test]
+    fn report_specs() {
+        assert_eq!(ReportSpec::parse("exec:./adapter.py --json"), Some(ReportSpec::Command("./adapter.py --json".into())));
+        assert_eq!(ReportSpec::parse("https://agentex.local/village"), Some(ReportSpec::Url("https://agentex.local/village".into())));
+        assert_eq!(ReportSpec::parse("file:/tmp/r"), Some(ReportSpec::File("/tmp/r".into())));
+        assert_eq!(ReportSpec::parse("/tmp/r.json"), Some(ReportSpec::File("/tmp/r.json".into())));
+        assert_eq!(ReportSpec::parse("exec:"), None);
+        assert_eq!(ReportSpec::parse("shop"), None);
+    }
+
+    #[tokio::test]
+    async fn a_command_adapter_is_read_and_a_broken_one_shows() {
+        let ok = ReportVillages::new(ReportSpec::Command(r#"printf '{"project":"crew","plane":"runtime","workstreams":[{"id":"w","agents":[{"name":"a","state":"blocked"}]}]}'"#.into()));
+        let got = ok.read(&ServerTransport::default(), &[]).await;
+        assert_eq!(got[0].village.project, "crew");
+        assert_eq!(got[0].village.houses[0].status, HouseStatus::Blocked);
+
+        let bad = ReportVillages::new(ReportSpec::Command("echo nope".into()));
+        let got = bad.read(&ServerTransport::default(), &[]).await;
+        assert_eq!(got[0].village.board[0].label, "unreachable");
+    }
+}

@@ -7,6 +7,8 @@
 #   * "billing": a modernize swarm under herdr whose manager runs specialist
 #     sub-agents;
 #   * "temporal:agents": a Temporal namespace of agentic workstreams;
+#   * "larkspur", "agentex:larkspur", "crew:my-crew": villages from outside
+#     adapters (tools/adapters), drawn from agents-village reports.
 #   * "world:shop": the two together. Workstreams that fail on the platform
 #     file incident issues that flow down to "shop", and every prod release
 #     of "shop" rolls out to the platform's workers.
@@ -43,5 +45,7 @@ echo "Village:    http://127.0.0.1:$PORT/village"
 echo "World:      http://127.0.0.1:$PORT/village#world:shop"
 echo "Demo files: $DEMO"
 HOME="$DEMO/home" PATH="$HERE/bin:$PATH" "$BIN" --headless --web-port "$PORT" \
-  --temporal agents --temporal-url "http://127.0.0.1:$TEMPORAL_PORT" --world shop=temporal:agents "$@" & pids+=($!)
+  --temporal agents --temporal-url "http://127.0.0.1:$TEMPORAL_PORT" --world shop=temporal:agents \
+  --framework "$ROOT/tools/adapters/example-report.json" \
+  --framework "exec:$ROOT/tools/adapters/adapter-template.py" "$@" & pids+=($!)
 wait

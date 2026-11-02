@@ -2,7 +2,8 @@
 //! swapped without touching the others.
 //!
 //! ```text
-//! villages   VillageSource   swarm villages (built from the layers below), temporal
+//! villages   VillageSource   swarm villages (built from the layers below), temporal,
+//!                            any framework's agents-village reports (framework.rs)
 //!   swarms   SwarmSource     who is working:            tmux, herdr, saved
 //!   issues   IssueTracker    the backlog:               github, none
 //!   pipeline PipelineSource  where pushed work is:      autocoder, none
@@ -320,11 +321,17 @@ impl Villages {
         Self { sources: Arc::new(sources), worlds: Arc::new(worlds) }
     }
 
-    /// Swarm villages from `config`, a village per Temporal namespace, and a
-    /// world per pairing.
-    pub fn from_config(config: &SourceConfig, temporal: Vec<TemporalSource>, worlds: Vec<WorldConfig>) -> Self {
+    /// Swarm villages from `config`, a village per Temporal namespace, the
+    /// villages each outside framework reports, and a world per pairing.
+    pub fn from_config(
+        config: &SourceConfig,
+        temporal: Vec<TemporalSource>,
+        frameworks: Vec<super::framework::ReportSpec>,
+        worlds: Vec<WorldConfig>,
+    ) -> Self {
         let mut sources: Vec<Box<dyn VillageSource>> = vec![Box::new(config.swarm_villages())];
         sources.extend(temporal.into_iter().map(|t| Box::new(TemporalVillages::new(t)) as Box<dyn VillageSource>));
+        sources.extend(frameworks.into_iter().map(|f| Box::new(super::framework::ReportVillages::new(f)) as Box<dyn VillageSource>));
         Self::new(sources, worlds)
     }
 
@@ -461,6 +468,8 @@ mod tests {
             };
             let village = VillageSnapshot {
                 project: "ops".into(),
+                plane: crate::web::framework::Plane::Runtime,
+                framework: "fixed".into(),
                 workflow: None,
                 repo_path: String::new(),
                 manager: house("workers"),

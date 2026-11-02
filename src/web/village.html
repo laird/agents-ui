@@ -1054,7 +1054,7 @@
 
   /* ---------- Panels ---------- */
   function renderFlow(v) {
-    if (v.workflow === 'Temporal') return renderTemporalFlow(v);
+    if (v.plane === 'runtime') return renderRuntimeFlow(v);
     const stops = v.pipeline.stops;
     const working = v.houses.filter(h => h.status === 'working').length;
     const items = [
@@ -1068,16 +1068,16 @@
     document.getElementById('flow').innerHTML = items.map(([l, s, n], i) =>
       `<div class="step"><b>${n}</b><span>${esc(l)}<br>${esc(s)}</span></div>`).join('');
   }
-  /* Temporal villages count workstreams and agents, not issues and pushes. */
-  function renderTemporalFlow(v) {
+  /* Runtime villages (Temporal, AgentEx, ...) count workstreams and agents, not issues and pushes. */
+  function renderRuntimeFlow(v) {
     const count = st => v.houses.filter(h => h.status === st).length;
     const shipped = v.pipeline.stops.reduce((n, s) => n + s.issues.length, 0);
     const items = [
       [T.labels.houses, 'top-level workstreams', v.houses.length],
       ['Working', 'workstreams busy', count('working')],
-      ['Waiting on you', 'agent set AgentStatus', count('blocked')],
+      ['Waiting on you', 'an agent asked a person', count('blocked')],
       ['Retrying', 'activity failing', count('stalled')],
-      ['Agents', 'child workflows running', v.houses.reduce((n, h) => n + (h.subagents || []).length, 0)],
+      ['Agents', 'working for workstreams', v.houses.reduce((n, h) => n + (h.subagents || []).length, 0)],
       ['Workers', v.manager.status === 'stalled' ? 'a task queue has none' : 'polling task queues', (v.manager.subagents || []).length],
       [T.labels.board, 'failed in 24h', v.board.filter(n => n.label === 'failed').length],
       [T.labels.castle, 'completed in 24h', shipped]
@@ -1112,7 +1112,7 @@
     document.getElementById('d-line').textContent = house.issue ? `#${house.issue} ${house.issue_title || ''}` : (house.issue_title || 'No issue claimed');
     document.getElementById('d-meta').textContent =
       `Status: ${house.status}${house.priority ? ' · ' + house.priority : ''} · Crew: ${house.crew.join(', ') || '—'}` +
-      ((house.subagents || []).length ? ` · ${v.workflow === 'Temporal' ? 'Agents' : 'Sub-agents'}: ${house.subagents.map(sa => sa.agent_type + (sa.description ? ' (' + sa.description + ')' : '') + (sa.status === 'blocked' ? ' waiting on you' : sa.action ? ' ' + sa.action : '')).join(', ')}` : '') +
+      ((house.subagents || []).length ? ` · ${v.plane === 'runtime' ? 'Agents' : 'Sub-agents'}: ${house.subagents.map(sa => sa.agent_type + (sa.description ? ' (' + sa.description + ')' : '') + (sa.status === 'blocked' ? ' waiting on you' : sa.action ? ' ' + sa.action : '')).join(', ')}` : '') +
       (house.action ? ` · Now: ${house.action}` : '');
     dialog.hidden = false;
   }
@@ -1143,6 +1143,11 @@
   }
   window.addEventListener('resize', fit);
 
+  /* `· autocoder · development`, `· agentex · runtime`: which framework drew it, and which half of the loop it is. */
+  function describe(v) {
+    const fw = v.workflow || v.framework;
+    return [fw, v.plane].filter(Boolean).map(x => '· ' + x).join(' ');
+  }
   /* Show a village (`shop`) or a world (`world:shop`). */
   function select(name) {
     const w = worlds.find(x => x.name === name);
@@ -1155,7 +1160,7 @@
       renderWorldFlow(w);
     } else {
       const sc = scenes[view.village];
-      document.getElementById('workflow').textContent = sc.v.workflow ? `· ${sc.v.workflow} swarm` : '';
+      document.getElementById('workflow').textContent = describe(sc.v);
       if (cv.width !== sc.L.W || cv.height !== sc.L.H) { cv.width = sc.L.W; cv.height = sc.L.H; }
       renderFlow(sc.v);
     }

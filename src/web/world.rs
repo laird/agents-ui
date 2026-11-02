@@ -150,6 +150,8 @@ mod tests {
     fn village(project: &str, houses: Vec<House>) -> VillageSnapshot {
         VillageSnapshot {
             project: project.into(),
+            plane: Default::default(),
+            framework: String::new(),
             workflow: None,
             repo_path: String::new(),
             manager: house("manager", "manager", None),
