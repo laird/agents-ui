@@ -178,9 +178,12 @@ pub fn agent_needs_input(pane_content: &str) -> bool {
         return false;
     }
     let stripped = strip_ansi(pane_content);
+    // The last 12 lines with text: a prompt near the top of a mostly empty
+    // pane is followed by a screen's worth of blank lines.
     let tail: String = stripped
         .lines()
         .rev()
+        .filter(|l| !l.trim().is_empty())
         .take(12)
         .collect::<Vec<_>>()
         .into_iter()
@@ -529,6 +532,12 @@ mod tests {
             "agents-ui-status-{name}-{}-{nanos}",
             std::process::id()
         ))
+    }
+
+    #[test]
+    fn needs_input_above_a_screen_of_blank_lines() {
+        let pane = format!("Run the migration now? Allow? (y/n) {}", "\n".repeat(24));
+        assert!(agent_needs_input(&pane));
     }
 
     #[test]

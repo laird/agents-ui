@@ -285,6 +285,44 @@ pub enum InputItem {
     Text { text: String },
 }
 
+/// Body for answering a structured question from the village.
+#[derive(Debug, Deserialize)]
+struct AnswerBody {
+    /// The question the page showed, so a stale click sends nothing.
+    prompt: String,
+    /// Index into the question's options.
+    option: usize,
+}
+
+/// Answer an agent's structured question (a numbered menu or y/n) from the
+/// village. The pane is read again first: only if the same question is
+/// still showing are the keys that pick the option sent.
+async fn api_answer_handler(
+    Path((project, role)): Path<(String, String)>,
+    State(state): State<WebServerState>,
+    Json(body): Json<AnswerBody>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let fail = |code: StatusCode, msg: &str| (code, Json(json!({ "error": msg })));
+    let target = lookup_tmux_target(&state, &project, &role).map_err(|c| fail(c, "no such agent"))?;
+    let pane = crate::tmux::proxy::capture_pane(&state.transport, &target, 60)
+        .await
+        .map_err(|_| fail(StatusCode::BAD_GATEWAY, "could not read the agent's pane"))?;
+    let question = super::framework::parse_question(&pane)
+        .ok_or_else(|| fail(StatusCode::CONFLICT, "the agent is no longer asking a question"))?;
+    if question.prompt != body.prompt {
+        return Err(fail(StatusCode::CONFLICT, "the question changed; look again"));
+    }
+    let keys = super::framework::answer_keys(&question, body.option)
+        .ok_or_else(|| fail(StatusCode::UNPROCESSABLE_ENTITY, "no such option"))?;
+    for key in &keys {
+        crate::tmux::proxy::send_keys_no_enter(&state.transport, &target, key).await.map_err(|e| {
+            tracing::warn!("tmux send-keys failed for {target}: {e}");
+            fail(StatusCode::INTERNAL_SERVER_ERROR, "could not send the answer")
+        })?;
+    }
+    Ok(Json(json!({ "ok": true, "answered": question.options[body.option].label })))
+}
+
 /// Body for the batched send-keys endpoint.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SendKeysBatchBody {
@@ -1122,6 +1160,10 @@ pub async fn run(addr: SocketAddr, read_only: bool, state: WebServerState) -> Re
         .route(
             "/api/swarms/{project}/agents/{role}/keys",
             post(api_keys_batch_handler),
+        )
+        .route(
+            "/api/swarms/{project}/agents/{role}/answer",
+            post(api_answer_handler),
         )
         .route(
             "/api/swarms/{project}/agents/{role}/pane/stream",

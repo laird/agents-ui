@@ -118,6 +118,8 @@ This is a design critique, not customer validation. Revision 0 was a conventiona
 
 - Revision 3 (PM, on the goal: "The goal is a fun visualization to watch the status of the app dev process or the app running or both. When there are events to respond to we can drill into other tools, such as opening a gh issue, or click into an agentic session, etc."): every house now carries drill-in links (the agent's session in the dashboard, its GitHub issue, a Temporal workflow's page in Temporal's web UI), and the notice board and docks list their issues, each linked. Made in the product (report `links`, `--temporal-ui`) and carried into the prototype.
 
+- Revision 4 (PM: "If the agent asked a structured question we can show clickable buttons for responses. For example y/n or numbered options."): a waiting agent's dialog shows its question with one button per option. The server re-reads the pane and answers only if the same question is still showing. Made in the product (question parsing, `/answer` endpoint, village dialog) and tested live against a tmux pane; the prototype answers locally and turns the agent back to working. The in-page session preview is gone: open-ended answers go through the Agent session link, since the village is not a management console. Live testing also found both waiting detectors ignored a prompt followed by a screen of blank lines; fixed.
+
 ## 10. Remaining limitations
 - Static data per scenario; waits do not tick and agents do not move between states.
 - The real village page's picker does not follow a link change (found here; fixed only in the prototype).

@@ -285,8 +285,10 @@ pub struct AgentInfo {
 
 /// Detect if pane content indicates the session is waiting for user input.
 pub fn detect_waiting_for_input(content: &str) -> bool {
-    // Look at the last ~15 lines for waiting indicators
-    let tail: Vec<&str> = content.lines().rev().take(15).collect();
+    // Look at the last ~15 lines with text for waiting indicators. Blank
+    // lines don't count: a prompt near the top of a mostly empty pane is
+    // followed by a screen's worth of them.
+    let tail: Vec<&str> = content.lines().rev().filter(|l| !l.trim().is_empty()).take(15).collect();
     let tail_text = tail.iter().rev().copied().collect::<Vec<_>>().join("\n");
 
     // Permission prompts
@@ -915,6 +917,12 @@ mod tests {
         assert!(!detect_waiting_for_input(
             "Running cargo build...\nCompiling foo v1.0\nFinished"
         ));
+    }
+
+    #[test]
+    fn waiting_detected_above_a_screen_of_blank_lines() {
+        let pane = format!("Run the migration now? Allow? (y/n) {}", "\n".repeat(24));
+        assert!(detect_waiting_for_input(&pane));
     }
 
     #[test]

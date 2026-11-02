@@ -29,6 +29,9 @@ R1 = dict(reported=True, source='Temporal', state='AgentStatus = waiting_for_hum
           agree='Child workflow RefundCheck is paused on the approval signal',
           session=['RefundCheck refund-8812/check', '  policy: amount over $200 needs a person', '  waiting for signal: approve_refund'])
 
+MENU = dict(prompt='Do you want to proceed?', kind='menu', selected=0, options=[
+    dict(key='1', label='Yes'), dict(key='2', label="Yes, and don't ask again for npm publish"), dict(key='3', label='No, and tell Claude what to do differently')])
+YN = dict(prompt='Run the migration now? Allow? (y/n)', kind='yes_no', selected=0, options=[dict(key='y', label='Yes'), dict(key='n', label='No')])
 shop = village('shop', 'herdr', 'development',
   house('manager', 'manager', 'cottage', 'working', action='messaging', project='shop'),
   [house('/src/shop-wt-1', 'worker-1', 'feature', 'working', 41, 'Saved carts survive logout', 'P1', action='writing', project='shop'),
@@ -57,6 +60,10 @@ for h in down['houses'] + [down['manager']]:
     h['status'] = 'unknown'; h['action'] = None; h.pop('attention', None)
 down['unreachable'] = dict(source='herdr', since='14:05')
 
+for v, role, q in [(shop, 'worker-2', MENU), (billing, 'worker-1', YN)]:
+    for h in v['houses']:
+        if h['role'] == role:
+            h['question'] = q; h['answer_url'] = '/api/swarms/%s/agents/%s/answer' % (v['project'], role)
 data = dict(main=dict(villages=[shop, billing, support], worlds=[]),
             down=dict(villages=[down, billing, support], worlds=[]))
 
@@ -93,6 +100,7 @@ src = src.replace('<div class="empty" id="empty">Looking for swarms…</div>', '
 dialog_old = '''    <h2 id="d-title"></h2>
     <p id="d-line"></p>
     <p class="dim" id="d-meta"></p>
+    <div id="d-q"></div>
     <div class="links" id="d-links"></div>
   </div>'''
 assert dialog_old in src, 'village dialog markup changed: update the prototype build'
@@ -100,6 +108,7 @@ src = src.replace(dialog_old, '''    <h2 id="d-title" tabindex="-1"></h2>
     <p id="d-line"></p>
     <p class="dim" id="d-meta"></p>
     <div id="d-why" class="why"></div>
+    <div id="d-q"></div>
     <div class="links" id="d-links"></div>
   </div>
   <div class="win demo" role="group" aria-label="Demo controls"><span>Demo:</span>
@@ -111,7 +120,19 @@ src = src.replace(dialog_old, '''    <h2 id="d-title" tabindex="-1"></h2>
 # Synthetic data instead of the server, switchable by the demo bar.
 src = src.replace('<script>\n(() => {', '<script>\nconst PROTO = ' + json.dumps(data) + ''';
 let protoScenario = 'main';
-window.fetch = async () => ({ ok: true, json: async () => JSON.parse(JSON.stringify(PROTO[protoScenario])) });
+window.fetch = async (url, opts) => {
+  if (opts && opts.method === 'POST') {
+    const body = JSON.parse(opts.body);
+    let answered = null;
+    for (const v of PROTO[protoScenario].villages) for (const h of v.houses) if (h.answer_url === url) {
+      answered = h.question.options[body.option].label;
+      h.status = 'working'; h.action = 'running'; delete h.question; delete h.attention; delete h.answer_url;
+    }
+    setTimeout(() => window.dispatchEvent(new Event('proto-refresh')), 1300);
+    return { ok: true, status: 200, json: async () => ({ ok: true, answered }) };
+  }
+  return { ok: true, json: async () => JSON.parse(JSON.stringify(PROTO[protoScenario])) };
+};
 </script>
 <script>
 (() => {''', 1)
@@ -127,20 +148,12 @@ new_show = '''  const escH = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&a
     document.getElementById('d-meta').textContent = house.last_known ? `State unknown: ${v.unreachable.source} unreachable since ${v.unreachable.since} · last known: ${house.last_known}` : `Status: ${house.status}${house.priority ? ' · ' + house.priority : ''}`;
     why.innerHTML = a ? `<p>${a.reported ? '<span class="tag">Reported</span> by the source itself, not guessed' : '<span class="tag guess">Guessed from screen</span> this may be wrong'}</p>
       <dl><dt>Source</dt><dd>${a.reported ? escH(a.source) + ' reports <code>' + escH(a.state) + '</code>' : 'None. Matched ' + escH(a.state)}</dd>
-      <dt>What it asked</dt><dd><code>${escH(a.ask)}</code></dd>
+      ${house.question ? '' : `<dt>What it asked</dt><dd><code>${escH(a.ask)}</code></dd>`}
       <dt>Waiting since</dt><dd>${escH(a.since)} · ${escH(a.wait)}</dd>
       <dt>Other sources</dt><dd>${a.reported ? '✓ ' : ''}${escH(a.agree)}</dd></dl>
       ${a.hint ? `<p class="dim">${escH(a.hint)}</p>` : ''}
-      <div class="acts"><button class="go" id="d-open">Open agent</button><button id="d-close2">Close</button></div>` :
-      (house.last_known ? '<div class="acts"><button class="go" id="d-open">Open agent anyway</button></div>' : '');
-    const open = document.getElementById('d-open');
-    if (open) open.onclick = () => {
-      document.getElementById('d-title').textContent = `${who} · live session`;
-      why.innerHTML = `<pre class="term">${(a ? a.session : ['(no output since herdr went quiet)']).map((l, i, all) => i === all.length - 1 && a ? '<span class="ask">' + escH(l) + '</span> ▌' : escH(l)).join('\\n')}</pre><p class="dim">Answering is out of this prototype's scope.</p><div class="acts"><button id="d-close2">Back to the village</button></div>`;
-      document.getElementById('d-close2').onclick = () => { dialog.hidden = true; };
-      document.getElementById('d-title').focus();
-    };
-    const c2 = document.getElementById('d-close2'); if (c2) c2.onclick = () => { dialog.hidden = true; };
+      ` : '';
+    ask(house);
     links(house.links);
     dialog.hidden = false;
     document.getElementById('d-title').focus();
@@ -175,7 +188,7 @@ src = src.replace("if (ICONS[st]) bubbles.push([lot.x + 4, lot.y - (st === 'bloc
                   "if (ICONS[st]) bubbles.push([lot.x + 4, lot.y - (st === 'blocked' ? 1 : 3) + (st === 'blocked' && blink(t, 200) ? -1 : 0), st, h.attention && !h.attention.reported]);", 1)
 # Re-place signs whenever the view or size changes, and wire the demo bar.
 src = src.replace("    fit();\n    if (reduce) draw(0);\n  }", "    fit();\n    if (reduce) draw(0);\n    requestAnimationFrame(placeSigns);\n  }", 1)
-src = src.replace("  window.addEventListener('resize', fit);", "  window.addEventListener('resize', () => { fit(); placeSigns(); });\n  window.addEventListener('hashchange', () => { dialog.hidden = true; const n = decodeURIComponent(location.hash.slice(1)); if ([...pick.options].some(o => o.value === n)) pick.value = n; });\n  document.querySelectorAll('[data-demo]').forEach(b => b.addEventListener('click', () => { protoScenario = b.dataset.demo; dialog.hidden = true; location.hash = b.dataset.at; poll(); }));", 1)
+src = src.replace("  window.addEventListener('resize', fit);", "  window.addEventListener('resize', () => { fit(); placeSigns(); });\n  window.addEventListener('proto-refresh', poll);\n  window.addEventListener('hashchange', () => { dialog.hidden = true; const n = decodeURIComponent(location.hash.slice(1)); if ([...pick.options].some(o => o.value === n)) pick.value = n; });\n  document.querySelectorAll('[data-demo]').forEach(b => b.addEventListener('click', () => { protoScenario = b.dataset.demo; dialog.hidden = true; location.hash = b.dataset.at; poll(); }));", 1)
 src = src.replace("    setTimeout(poll, 3000);\n", "", 1)
 for must in ['placeSigns()', 'protoScenario', 'id="d-why"', 'data-demo="down"']:
     assert must in src, must

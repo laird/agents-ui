@@ -54,6 +54,11 @@
   .dialog ul { list-style: none; margin: 6px 0 0; padding: 0; max-height: 40vh; overflow: auto; }
   .dialog li { font: 14px/1.5 var(--mono); }
   .dialog li a { color: var(--gold); }
+  .dialog .q { font: 700 15px/1.4 var(--mono); color: var(--ink); margin: 10px 0 6px; }
+  .dialog .opts { display: flex; flex-wrap: wrap; gap: 8px; }
+  .dialog .opts button { position: static; font: 700 14px var(--mono); color: var(--ink); background: var(--win-bot); border: 2px solid var(--gold); border-radius: 4px; padding: 6px 12px; cursor: pointer; }
+  .dialog .opts button:hover:not(:disabled) { background: var(--gold); color: #241400; }
+  .dialog .opts button:disabled { opacity: .5; cursor: default; }
   .dialog button { position: absolute; top: 8px; right: 10px; background: none; border: 0; color: var(--ink); font: 700 16px var(--mono); cursor: pointer; }
   :focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
 </style>
@@ -75,6 +80,7 @@
     <h2 id="d-title"></h2>
     <p id="d-line"></p>
     <p class="dim" id="d-meta"></p>
+    <div id="d-q"></div>
     <div class="links" id="d-links"></div>
   </div>
 
@@ -1283,8 +1289,31 @@
     document.getElementById('d-meta').innerHTML = items.length
       ? `<ul>${items.slice(0, 40).map(i => `<li>${i.url ? `<a href="${esc(i.url)}" target="_blank" rel="noopener">#${i.number}</a>` : '#' + i.number} ${esc(i.title)}${i.label ? ' · ' + esc(i.label) : ''}${i.priority ? ' · ' + esc(i.priority) : ''}</li>`).join('')}</ul>`
       : 'Nothing here.';
+    ask({});
     links([]);
     dialog.hidden = false;
+  }
+  /* A structured question the agent is waiting on (a numbered menu or y/n):
+   * one button per option. The server checks the same question is still on
+   * screen before it types the answer; anything open-ended goes through the
+   * agent's session link instead. */
+  function ask(house) {
+    const box = document.getElementById('d-q'), q = house.question;
+    if (!q || !house.answer_url) { box.innerHTML = ''; return; }
+    box.innerHTML = `<p class="q">${esc(q.prompt)}</p><div class="opts">${q.options.map((o, i) =>
+      `<button data-opt="${i}">${q.kind === 'menu' ? esc(o.key) + '. ' : ''}${esc(o.label)}</button>`).join('')}</div><p class="dim" id="d-q-msg" role="status"></p>`;
+    const buttons = [...box.querySelectorAll('[data-opt]')], msg = document.getElementById('d-q-msg');
+    const busy = on => buttons.forEach(b => { b.disabled = on; });
+    buttons.forEach(b => b.addEventListener('click', async () => {
+      busy(true); msg.textContent = 'Sending…';
+      try {
+        const res = await fetch(house.answer_url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: q.prompt, option: Number(b.dataset.opt) }) });
+        const body = await res.json().catch(() => ({}));
+        if (res.ok) { msg.textContent = `Answered: ${body.answered || b.textContent}`; setTimeout(() => { dialog.hidden = true; }, 1200); return; }
+        msg.textContent = res.status === 403 ? 'This dashboard is read-only: answer in the agent session.' : (body.error || `Could not answer (${res.status})`);
+      } catch (e) { msg.textContent = "Can't reach agents-tui."; }
+      busy(false);
+    }));
   }
   function show(house, isManager, v, theme) {
     document.getElementById('d-title').textContent = isManager ? `${theme.labels.hall} · manager` : `${house.role} · ${house.kind}`;
@@ -1293,6 +1322,7 @@
       `Status: ${house.status}${house.priority ? ' · ' + house.priority : ''} · Crew: ${house.crew.join(', ') || '—'}` +
       ((house.subagents || []).length ? ` · ${v.plane === 'runtime' ? 'Agents' : 'Sub-agents'}: ${house.subagents.map(sa => sa.agent_type + (sa.description ? ' (' + sa.description + ')' : '') + (sa.status === 'blocked' ? ' waiting on you' : sa.action ? ' ' + sa.action : '')).join(', ')}` : '') +
       (house.action ? ` · Now: ${house.action}` : '');
+    ask(house);
     links(house.links);
     dialog.hidden = false;
   }

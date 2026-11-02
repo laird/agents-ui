@@ -145,6 +145,8 @@ mod tests {
             subagents: Vec::new(),
             action: None,
             links: Vec::new(),
+                question: None,
+                answer_url: None,
         }
     }
 

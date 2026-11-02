@@ -42,6 +42,21 @@ jump to the tool that handles it, in a new tab:
 Outside adapters add their own links per house (`links` in the report,
 see [village-protocol.md](village-protocol.md)).
 
+### Quick answers
+
+The one thing you can do without leaving the village: when a waiting agent
+asked a structured question, its dialog shows the question with one button
+per option.
+
+- A numbered menu (Claude Code's "Do you want to proceed? ❯ 1. Yes / 2. … /
+  3. No") becomes buttons 1, 2, 3; a `(y/n)` prompt becomes Yes and No.
+- On a click, agents-tui reads the pane again and sends the keys only if the
+  same question is still on screen: arrow keys to the option and Enter for a
+  menu, `y` or `n` and Enter for a prompt. A changed question sends nothing.
+- Anything open-ended is answered in the agent's session (its link).
+- Not available with `--read-only`, or for herdr and Temporal agents, which
+  agents-tui can't type into yet.
+
 ## What people are doing
 
 Every agent's current action is acted out:

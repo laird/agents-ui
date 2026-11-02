@@ -89,6 +89,7 @@ An adapter may print one report, a list of reports, or `{"reports": [...]}`. Onl
 - `state`: the house's state. Set it when the framework knows better than its agents do (a Temporal workflow that is retrying, for example). By default the crew decides: anyone waiting wins, then any work at all, and a running helper makes an idle house busy.
 - `action`: what the house is doing now (see below).
 - `agents`, `helpers`: lists of agents.
+- `question`, `answer_url`: a structured question the house's agent is waiting on (`{prompt, kind: menu | yes_no, options: [{key, label}], selected}`) and where to POST `{prompt, option}` to answer it. The dialog shows one button per option. Built-in tmux swarms fill these in; an outside adapter may too, if it serves the answer endpoint itself.
 - `links`: where to drill in, each `{label, url}`: the agent's session, the run in its platform's UI, a CI job. Shown as buttons when the house is selected, before the task's own link.
 
 **Agent**

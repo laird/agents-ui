@@ -150,6 +150,12 @@ pub struct House {
     /// Where to drill in: the agent's session, its issue, its workflow.
     #[serde(default)]
     pub links: Vec<super::framework::Link>,
+    /// A structured question its agent is waiting on, shown as buttons.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub question: Option<super::framework::Question>,
+    /// Where those buttons send the answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

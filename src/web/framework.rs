@@ -129,6 +129,142 @@ pub struct Link {
     pub url: String,
 }
 
+/// A structured question an agent is waiting on: a numbered menu or a y/n
+/// prompt. The village shows its options as buttons; anything open-ended is
+/// answered in the agent's session instead.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Question {
+    pub prompt: String,
+    pub kind: QuestionKind,
+    pub options: Vec<QuestionOption>,
+    /// The menu option the cursor is on now.
+    #[serde(default)]
+    pub selected: usize,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum QuestionKind {
+    /// Pick with the arrow keys, confirm with Enter (Claude Code's menus).
+    Menu,
+    /// Type `y` or `n`, then Enter.
+    YesNo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct QuestionOption {
+    /// `1`, `2`, ... for a menu; `y` or `n`.
+    pub key: String,
+    pub label: String,
+}
+
+/// Screen text without terminal escapes: colours (`ESC [ … m`) and titles
+/// (`ESC ] … BEL`), as `tmux capture-pane -e` returns them.
+fn strip_escapes(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\u{1b}' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('[') => {
+                for c in chars.by_ref() {
+                    if ('@'..='~').contains(&c) {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                while let Some(c) = chars.next() {
+                    if c == '\u{7}' || (c == '\u{1b}' && chars.peek() == Some(&'\\')) {
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Strip a TUI box's borders and a menu's cursor from a screen line.
+fn screen_line(line: &str) -> &str {
+    line.trim().trim_matches(|c: char| "│|╭╮╰╯─┃".contains(c) || c.is_whitespace())
+}
+
+/// `❯ 2. Yes, and don't ask again` → (true, 2, "Yes, and don't ask again").
+fn menu_option(line: &str) -> Option<(bool, usize, String)> {
+    let l = screen_line(line);
+    let (cursor, rest) = match l.strip_prefix('❯').or_else(|| l.strip_prefix('>')) {
+        Some(r) => (true, r.trim_start()),
+        None => (false, l),
+    };
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    let label = rest[digits.len()..].strip_prefix(". ")?.trim();
+    let label = label.strip_suffix("(esc)").unwrap_or(label).trim();
+    if label.is_empty() {
+        return None;
+    }
+    Some((cursor, digits.parse().ok()?, label.to_string()))
+}
+
+/// The structured question at the bottom of a pane, if any: a numbered menu
+/// under a line ending in `?`, or a `(y/n)` prompt.
+pub fn parse_question(pane: &str) -> Option<Question> {
+    let pane = strip_escapes(pane);
+    let lines: Vec<&str> = pane.lines().map(screen_line).filter(|l| !l.is_empty()).collect();
+    let tail = &lines[lines.len().saturating_sub(20)..];
+    // A menu: skip up to four hint lines under it, then read options upward.
+    for skip in 0..=4.min(tail.len()) {
+        let mut options: Vec<(bool, usize, String)> = Vec::new();
+        let mut i = tail.len() - skip;
+        while i > 0 {
+            match menu_option(tail[i - 1]) {
+                Some(o) => {
+                    options.insert(0, o);
+                    i -= 1;
+                }
+                None => break,
+            }
+        }
+        let numbered = options.iter().enumerate().all(|(k, (_, n, _))| *n == k + 1);
+        if options.len() >= 2 && numbered {
+            let prompt = tail[i.saturating_sub(3)..i].iter().rev().find(|l| l.ends_with('?'))?;
+            return Some(Question {
+                prompt: prompt.to_string(),
+                kind: QuestionKind::Menu,
+                selected: options.iter().position(|(c, _, _)| *c).unwrap_or(0),
+                options: options.into_iter().map(|(_, n, label)| QuestionOption { key: n.to_string(), label }).collect(),
+            });
+        }
+    }
+    let yn = tail[tail.len().saturating_sub(4)..].iter().rev().find(|l| {
+        let l = l.to_ascii_lowercase();
+        ["(y/n)", "[y/n]"].iter().any(|p| l.contains(p))
+    })?;
+    Some(Question {
+        prompt: yn.to_string(),
+        kind: QuestionKind::YesNo,
+        selected: 0,
+        options: vec![QuestionOption { key: "y".into(), label: "Yes".into() }, QuestionOption { key: "n".into(), label: "No".into() }],
+    })
+}
+
+/// The tmux keys that pick option `choice`: arrows to it and Enter for a
+/// menu, the letter and Enter for y/n.
+pub fn answer_keys(q: &Question, choice: usize) -> Option<Vec<String>> {
+    let opt = q.options.get(choice)?;
+    Some(match q.kind {
+        QuestionKind::YesNo => vec![opt.key.clone(), "Enter".to_string()],
+        QuestionKind::Menu => {
+            let (key, steps) = if choice >= q.selected { ("Down", choice - q.selected) } else { ("Up", q.selected - choice) };
+            std::iter::repeat_n(key.to_string(), steps).chain(std::iter::once("Enter".to_string())).collect()
+        }
+    })
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Agent {
     /// Role or id: `worker-2`, `modernize:coder`, a child workflow's id.
@@ -177,6 +313,11 @@ pub struct Workstream {
     /// `url` is added after these.
     #[serde(default)]
     pub links: Vec<Link>,
+    /// A structured question it is waiting on, with where to send the answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub question: Option<Question>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -378,6 +519,8 @@ fn house(id: String, ws: &Workstream, tasks: &HashMap<&str, &Task>) -> House {
         subagents: ws.helpers.iter().map(helper).collect(),
         action: if status == HouseStatus::Working { ws.action } else { None },
         links,
+        question: if status == HouseStatus::Blocked { ws.question.clone() } else { None },
+        answer_url: ws.answer_url.clone(),
     }
 }
 
@@ -516,12 +659,20 @@ fn swarm_issue(agent: &super::AgentSnapshot) -> Option<u32> {
 
 /// The dashboard's view of an agent's live session.
 pub fn session_link(project: &str, role: &str) -> Link {
-    let enc = |s: &str| s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect::<String>();
-    Link { label: "Agent session".to_string(), url: format!("/#/swarm/{}/agent/{}", enc(project), enc(role)) }
+    Link { label: "Agent session".to_string(), url: format!("/#/swarm/{}/agent/{}", url_part(project), url_part(role)) }
+}
+
+fn url_part(s: &str) -> String {
+    s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
 }
 
 fn swarm_workstream(id: String, crew: &[&super::AgentSnapshot], project: &str) -> Workstream {
+    // Only a waiting tmux agent can be answered from the village: herdr panes
+    // carry no screen text, and tmux is what the answer endpoint types into.
+    let asking = crew.iter().find(|a| a.waiting_for_input).and_then(|a| parse_question(&a.pane_content).map(|q| (a, q)));
     Workstream {
+        answer_url: asking.as_ref().map(|(a, _)| format!("/api/swarms/{}/agents/{}/answer", url_part(project), url_part(&a.role))),
+        question: asking.map(|(_, q)| q),
         links: crew.first().map(|a| vec![session_link(project, &a.role)]).unwrap_or_default(),
         id,
         name: crew.first().map(|a| a.role.clone()).unwrap_or_default(),
@@ -842,6 +993,38 @@ mod tests {
         assert_eq!(links, vec![("Agent session", "/#/swarm/shop/agent/worker-2"), ("GitHub issue #43", "https://github.com/acme/shop/issues/43")]);
         assert_eq!(v.board[0].url.as_deref(), Some("https://github.com/acme/shop/issues/45"));
         assert_eq!(session_link("my repo", "worker-1").url, "/#/swarm/my%20repo/agent/worker-1");
+    }
+
+    const PERMISSION: &str = "\u{1b}[2m✓ 214 tests passed\u{1b}[0m\n╭──────────────────────────────╮\n│ Bash command                 │\n│   npm publish                │\n│ Do you want to proceed?      │\n│ \u{1b}[36m❯ 1. Yes\u{1b}[0m                    │\n│   2. Yes, and don't ask again │\n│   3. No, and tell Claude what to do differently (esc) │\n╰──────────────────────────────╯\n";
+
+    #[test]
+    fn reads_a_numbered_menu_through_colours_and_box_borders() {
+        let q = parse_question(PERMISSION).expect("a menu");
+        assert_eq!(q.prompt, "Do you want to proceed?");
+        assert_eq!(q.kind, QuestionKind::Menu);
+        assert_eq!(q.selected, 0);
+        let labels: Vec<&str> = q.options.iter().map(|o| o.label.as_str()).collect();
+        assert_eq!(labels, vec!["Yes", "Yes, and don't ask again", "No, and tell Claude what to do differently"]);
+        assert_eq!(answer_keys(&q, 2).unwrap(), vec!["Down", "Down", "Enter"]);
+        assert_eq!(answer_keys(&q, 0).unwrap(), vec!["Enter"]);
+        assert!(answer_keys(&q, 3).is_none());
+    }
+
+    #[test]
+    fn reads_a_yes_no_prompt_and_the_cursor_position() {
+        let q = parse_question("Running migration 0042\nApply it now? (y/n) ").expect("y/n");
+        assert_eq!((q.kind, q.prompt.as_str()), (QuestionKind::YesNo, "Apply it now? (y/n)"));
+        assert_eq!(answer_keys(&q, 1).unwrap(), vec!["n", "Enter"]);
+        let q = parse_question("Which store?\n  1. Postgres\n❯ 2. SQLite\n  3. Files\nEnter to select · Esc to cancel").unwrap();
+        assert_eq!(q.selected, 1);
+        assert_eq!(answer_keys(&q, 0).unwrap(), vec!["Up", "Enter"]);
+    }
+
+    #[test]
+    fn ignores_lists_that_are_not_questions() {
+        assert!(parse_question("Plan:\n1. Read the code\n2. Fix the bug\n3. Test").is_none(), "no question above the list");
+        assert!(parse_question("Steps?\n2. second\n3. third").is_none(), "not numbered from 1");
+        assert!(parse_question("All 214 tests passed.").is_none());
     }
 
     #[test]
