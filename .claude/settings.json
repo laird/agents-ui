@@ -1,5 +1,14 @@
 {
+  "extraKnownMarketplaces": {
+    "nlyu-pm": {
+      "source": {
+        "source": "github",
+        "repo": "niancilyu-2/nlyu-pm"
+      }
+    }
+  },
   "enabledPlugins": {
-    "autocoder@plugin-marketplace": true
+    "autocoder@plugin-marketplace": true,
+    "nlyu-pm@nlyu-pm": true
   }
 }
