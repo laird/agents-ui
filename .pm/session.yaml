@@ -64,6 +64,13 @@ decisions:
     pm_decided: "Confirm"
     reason: "Source of truth is herdr sessions and temporal/agentex"
     at: "2026-11-02T00:29:00Z"
+  - id: D-002
+    stage: discovery
+    checkin: research-check
+    claude_recommended: "Continue to drafting opportunities; theme 2 matches the herdr and Temporal answer and its code limits are clear."
+    pm_decided: "One more fetch: Temporal"
+    reason: "Temporal is one source, along with herdr, and GitHub issues."
+    at: "2026-11-02T01:31:00Z"
 notes:
   - "Sources: PM ticked Community only; rungs 3 to 7 dropped. PM named herdr, claude-squad, Claude Code's own agent views and laird/agents; added as rung 1 community sources (issue pages)."
   - "GitHub API refused for repositories other than laird/agents-ui from this cloud machine; neighbouring tools are read through their public HTML issue pages."

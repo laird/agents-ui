@@ -59,7 +59,29 @@ platform users, and anyone who supervises agents without being a heavy terminal 
 
 ## 3. The three opportunities in detail
 
-(Drafted after the research check-in.)
+### OPP-001: One waiting list across herdr, Temporal and GitHub
+- For: solo developer · Job: see everything that is waiting on me, wherever it waits, oldest first
+- Supported by: SIG-001, SIG-005, SIG-006, SIG-008, SIG-010, SIG-016 · CON-001, CON-004
+- In their words: QUO-001, QUO-002, QUO-005
+- Evidence: 6 signals, 4 source types · strongest: 56-thumbs-up issue (SIG-001) · counter-evidence: SIG-002 (Claude Code shipped pushes for one session, looked F-011) · constraints: CON-001 hurts, CON-004 hurts
+- Evidence strength: good across GitHub, Hacker News, Lemmy and the Temporal forum, but no agents-ui user besides its maintainer / user impact: high, it answers "which agent is waiting on me" in one look / fit with the brief: direct, and matches the PM's three sources / delivery constraints: the alert path reads tmux and herdr only, Temporal waits never reach it (CON-001), and no alert outside Omarchy (CON-004) / uncertainty: whether blocked issues belong in the same list as blocked agents
+- Exclusions check: none triggered (no third-party keys; browser and desktop notifications only)
+
+### OPP-002: An alert that names the agent and lets you answer from where you are
+- For: solo developer · Job: unblock a waiting agent without going back to the desk or the right pane
+- Supported by: SIG-002, SIG-004, SIG-005, SIG-010, SIG-012 · CON-002, CON-004, CON-005
+- In their words: QUO-003, QUO-004, QUO-009
+- Evidence: 5 signals, 2 source types · strongest: 59-thumbs-up issue (SIG-002) · counter-evidence: SIG-009 (alerts become noise beyond five sessions, looked F-012) · constraints: CON-002 hurts, CON-004 hurts, CON-005 hurts
+- Evidence strength: strongest single items in the record, mostly from one crowd (Claude Code issue filers) / user impact: high, unblocking from anywhere saves the trip back / fit with the brief: strong, but "answer" goes beyond "never miss" / delivery constraints: herdr agents cannot be answered from agents-ui (CON-002), Temporal has no signal path and read-only mode refuses writes (CON-005) / uncertainty: how much answering from a phone needs authentication the product does not have
+- Exclusions check: a Slack or SMS channel would trigger "third-party key integrations"; the opportunity is scoped to browser and desktop notifications and agents-ui's own pages
+
+### OPP-003: Trust the waiting signal
+- For: solo developer · Job: believe the "needs you" marker, so a missed or false alarm doesn't train them to ignore it
+- Supported by: SIG-003, SIG-007, SIG-011, SIG-013, SIG-014 · CON-003
+- In their words: QUO-007
+- Evidence: 5 signals, 3 source types · strongest: 26-thumbs-up issue (SIG-003) · counter-evidence: SIG-006 and SIG-011 (herdr's pattern matching works well enough for some users, looked F-013) · constraints: CON-003 hurts
+- Evidence strength: moderate; sources disagree, and the 144-thumbs-up item (SIG-014) is a title only / user impact: medium, invisible when it works / fit with the brief: supports it rather than delivering it / delivery constraints: tmux detection is a fixed phrase list (CON-003); herdr and Temporal report state directly / uncertainty: how often detection actually misses, which nothing here measures
+- Exclusions check: none triggered
 
 ## 4. Evidence
 
@@ -285,6 +307,6 @@ CON-005 · Constraint · repository · Status: to confirm with engineering
 | Check-in | Recommendation | Your decision | Reason |
 |---|---|---|---|
 | Case check | Confirm the case, web surface fed by herdr and Temporal waiting states | Confirm | "Source of truth is herdr sessions and temporal/agentex" |
-| Research check | | | |
+| Research check | Continue to opportunities | One more fetch: Temporal | "Temporal is one source, along with herdr, and GitHub issues." |
 | Evidence review (only if a finding needed your call) | | | |
 | Priority check | | | |
