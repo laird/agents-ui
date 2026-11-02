@@ -17,6 +17,7 @@ readiness:
   design: available
   stopped_after_setup: false
   notes:
+  - "2026-11-02T03:59Z: PM started a second Scout run on a new focus area (a feature flowing through the SDLC to production). The attention-and-answering run is archived in outputs/attention-and-answering/ (discovery approved, prototype at revision 4, not approved); its prototype is marked stale for this lane. IDs continue from the first run (SIG-017, QUO-011, CON-006, OPP-004, D-006, F-016 onward)."
     - "Cloud session: no local browser to open a test file; prototypes are viewed by publishing or downloading them."
 
 case:
@@ -45,24 +46,20 @@ sources:
     clean_at_end: true
 
 stage:
-  current: prototype
+  current: discovery
   status: in-progress
 
 stages:
   discovery:
-    status: approved
-    output: outputs/01-discovery.md
-    started_at: "2026-11-02T00:29:14Z"
-    revision: 1
-    approved_at: "2026-11-02T01:46:00Z"
-    selected_opportunity: OPP-003
-    provisional: false
-    review: outputs/01-discovery-review.md
-    fetches: .pm/fetches
-    summary: "Discovery complete · 77 min · fetches 15/20 · searches 0/8 · items 16 · quotes 10/10 verified · gaps 5 · findings 13, blocking 0, all resolved · approved"
-  prototype:
     status: in-progress
-    started_at: "2026-11-02T01:48:32Z"
+    output: outputs/01-discovery.md
+    started_at: "2026-11-02T03:59:32Z"
+    revision: 1
+    lane_run: 2
+    previous_lane: "attention-and-answering (approved OPP-003, archived in outputs/attention-and-answering/)"
+    fetches: .pm/fetches
+  prototype:
+    status: stale
     output: outputs/02-prototype.md
     html: outputs/prototype/index.html
     path: html-fallback
@@ -70,7 +67,7 @@ stages:
     revision: 0
     approved_at: null
     summary: null
-stale: []
+stale: [prototype]
 decisions:
   - id: D-001
     stage: discovery

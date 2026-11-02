@@ -1,0 +1,1518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prototype: agents-ui · Attention and answering (village)</title>
+<style>
+  /* SNES-style menu windows around a pixel-art canvas. One dark look on purpose. */
+  :root {
+    color-scheme: dark;
+    --night: #0c1028;
+    --win-top: #2c44a8;
+    --win-bot: #101850;
+    --win-inner: #6878c8;
+    --frame: #f8f8f8;
+    --frame-shadow: #060814;
+    --rule: #2a3470;
+    --ink: #eef0fa;
+    --ink-dim: #a8b0d8;
+    --gold: #f8d040;
+    --orange: #f07020;
+    --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--night); color: var(--ink); font: 14px/1.5 var(--sans); }
+  body { padding: 12px max(12px, env(safe-area-inset-right)) 24px max(12px, env(safe-area-inset-left)); }
+  a { color: var(--ink-dim); }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin: 0 auto 10px; max-width: 1400px; }
+  .title { font: 700 16px/1.2 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--gold); display: flex; gap: 12px; align-items: center; }
+  .title a { font-weight: 400; font-size: 12px; text-transform: none; letter-spacing: 0; }
+  select { background: var(--win-bot); color: var(--ink); border: 2px solid var(--win-inner); border-radius: 4px; font: 13px var(--mono); padding: 4px 6px; }
+  .status { font: 12px var(--mono); color: var(--ink-dim); }
+  .win {
+    background: linear-gradient(180deg, var(--win-top), var(--win-bot));
+    border: 3px solid var(--frame); border-radius: 6px;
+    box-shadow: 0 0 0 3px var(--frame-shadow), inset 0 0 0 2px var(--win-inner);
+  }
+  .stage { max-width: 1400px; margin: 0 auto; padding: 8px; }
+  .viewport { overflow: auto; display: flex; justify-content: center; background: var(--frame-shadow); border-radius: 2px; min-height: 200px; align-items: center; }
+  canvas { image-rendering: pixelated; image-rendering: crisp-edges; display: block; cursor: pointer; }
+  .flow { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .step { flex: 1 1 90px; padding: 6px 8px; background: rgba(6,8,20,.45); border: 2px solid var(--rule); border-radius: 4px; }
+  .step b { display: block; font: 700 18px/1.1 var(--mono); font-variant-numeric: tabular-nums; }
+  .step span { font: 12px var(--mono); color: var(--ink-dim); }
+  .empty { padding: 48px 16px; text-align: center; color: var(--ink-dim); font: 14px var(--mono); }
+  .dialog { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); width: min(560px, calc(100vw - 32px)); padding: 14px 16px; z-index: 10; }
+  .dialog h2 { margin: 0 0 4px; font: 700 14px var(--mono); color: var(--gold); letter-spacing: .04em; }
+  .dialog p { margin: 4px 0; font: 15px/1.4 var(--mono); }
+  .dialog .dim { color: var(--ink-dim); font-size: 13px; }
+  .dialog .links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .dialog .links a { font: 700 13px var(--mono); color: #241400; background: var(--gold); border-radius: 4px; padding: 5px 10px; text-decoration: none; }
+  .dialog .links a:hover { filter: brightness(1.1); }
+  .dialog ul { list-style: none; margin: 6px 0 0; padding: 0; max-height: 40vh; overflow: auto; }
+  .dialog li { font: 14px/1.5 var(--mono); }
+  .dialog li a { color: var(--gold); }
+  .dialog .q { font: 700 15px/1.4 var(--mono); color: var(--ink); margin: 10px 0 6px; }
+  .dialog .opts { display: flex; flex-wrap: wrap; gap: 8px; }
+  .dialog .opts button { position: static; font: 700 14px var(--mono); color: var(--ink); background: var(--win-bot); border: 2px solid var(--gold); border-radius: 4px; padding: 6px 12px; cursor: pointer; }
+  .dialog .opts button:hover:not(:disabled) { background: var(--gold); color: #241400; }
+  .dialog .opts button:disabled { opacity: .5; cursor: default; }
+  .dialog button { position: absolute; top: 8px; right: 10px; background: none; border: 0; color: var(--ink); font: 700 16px var(--mono); cursor: pointer; }
+  :focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+
+  .proto { position: fixed; top: 8px; right: 12px; font: 11px var(--mono); color: var(--ink-dim); border: 2px solid var(--rule); border-radius: 4px; padding: 2px 8px; background: var(--win-bot); z-index: 20; }
+  .viewport { position: relative; }
+  .signs { position: absolute; inset: 0; pointer-events: none; }
+  /* A sign over each house that needs you: who reported it and how long it has waited. Solid = reported, dashed = guessed. */
+  .sign { position: absolute; transform: translate(-50%, -100%); pointer-events: auto; font: 700 12px/1.2 var(--mono); color: #241400; background: var(--gold); border: 3px solid #241400; border-radius: 4px; padding: 3px 7px; white-space: nowrap; cursor: pointer; box-shadow: 0 2px 0 #241400; }
+  .sign.guess { background: var(--win-bot); color: var(--gold); border: 3px dashed var(--gold); box-shadow: none; }
+  .sign.lost { background: #3a3e58; color: var(--ink); border-color: var(--ink-dim); }
+  .sign small { font-weight: 400; }
+  .banner { max-width: 1400px; margin: 0 auto 10px; padding: 10px 14px; font: 14px var(--mono); border: 3px solid var(--orange); background: rgba(240,112,32,.15); border-radius: 6px; }
+  .why dt { font: 12px var(--mono); color: var(--ink-dim); margin-top: 8px; }
+  .why dd { margin: 2px 0 0; font: 14px/1.4 var(--mono); }
+  .why code, .term { font-family: var(--mono); }
+  .tag { display: inline-block; font: 700 12px var(--mono); padding: 1px 8px; border-radius: 4px; background: var(--gold); color: #241400; }
+  .tag.guess { background: none; color: var(--gold); border: 2px dashed var(--gold); }
+  .acts { display: flex; gap: 10px; margin-top: 12px; }
+  .acts button, .demo button { position: static; background: var(--win-bot); color: var(--ink); border: 2px solid var(--win-inner); border-radius: 4px; font: 700 13px var(--mono); padding: 6px 12px; cursor: pointer; }
+  .acts .go { background: var(--gold); color: #241400; border-color: var(--gold); }
+  .term { background: #050814; border: 2px solid var(--rule); border-radius: 4px; padding: 10px; font-size: 13px; white-space: pre-wrap; margin: 8px 0 0; color: var(--ink); }
+  .term .ask { color: var(--gold); font-weight: 700; }
+  .dialog { bottom: 76px; max-height: calc(100vh - 100px); overflow: auto; }
+  .demo { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; padding: 8px 10px; z-index: 15; }
+  .demo span { font: 12px var(--mono); color: var(--ink-dim); align-self: center; }
+</style>
+</head>
+<body>
+  <span class="proto">Prototype · synthetic data</span>
+  <div class="banner" id="banner" role="alert" hidden></div>
+  <div class="bar">
+    <div class="title">Worktree Hollow <span id="workflow" class="status"></span> <select id="pick" aria-label="Village" hidden></select> <select id="theme" aria-label="Style"><option value="medieval">Medieval village</option><option value="modern">Modern business district</option></select> <a href="/">Dashboard</a></div>
+    <div class="status" id="status" aria-live="polite">Connecting…</div>
+  </div>
+  <div class="win stage">
+    <div class="viewport" id="viewport">
+      <div class="empty" id="empty">Looking for swarms…</div>
+      <div class="signs" id="signs"></div>
+      <canvas id="map" width="320" height="180" hidden aria-label="The swarm drawn as a village. Select a house to see its crew and issue."></canvas>
+    </div>
+    <div class="flow" id="flow"></div>
+  </div>
+  <div class="win dialog" id="dialog" hidden role="dialog" aria-live="polite">
+    <button id="close" aria-label="Close">×</button>
+    <h2 id="d-title" tabindex="-1"></h2>
+    <p id="d-line"></p>
+    <p class="dim" id="d-meta"></p>
+    <div id="d-why" class="why"></div>
+    <div id="d-q"></div>
+    <div class="links" id="d-links"></div>
+  </div>
+  <div class="win demo" role="group" aria-label="Demo controls"><span>Demo:</span>
+    <button data-demo="main" data-at="shop">Main path</button>
+    <button data-demo="down" data-at="shop">Source unreachable</button>
+    <button data-demo="main" data-at="billing">Guess only</button>
+  </div>
+
+<script>
+const PROTO = {"main": {"villages": [{"project": "shop", "plane": "development", "framework": "herdr", "workflow": "Autocoder", "repo_path": "~/src/shop", "manager": {"id": "manager", "role": "manager", "kind": "cottage", "status": "working", "issue": null, "issue_title": null, "priority": null, "crew": ["manager"], "subagents": [], "action": "messaging", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/manager"}]}, "houses": [{"id": "/src/shop-wt-1", "role": "worker-1", "kind": "feature", "status": "working", "issue": 41, "issue_title": "Saved carts survive logout", "priority": "P1", "crew": ["worker-1"], "subagents": [], "action": "writing", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-1"}, {"label": "GitHub issue #41", "url": "https://github.com/larkspur-labs/shop/issues/41"}]}, {"id": "/src/shop-wt-2", "role": "worker-2", "kind": "bug", "status": "blocked", "issue": 43, "issue_title": "Checkout 500 on empty basket", "priority": "P0", "crew": ["worker-2"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-2"}, {"label": "GitHub issue #43", "url": "https://github.com/larkspur-labs/shop/issues/43"}], "attention": {"reported": true, "source": "herdr", "state": "blocked", "ask": "Allow `npm publish`? (y/n)", "since": "14:02", "wait": "3 min", "agree": "Screen also shows a prompt", "session": ["\u2713 214 tests passed", "Bash(npm publish --dry-run)", "  \u23bf  package size 48.2 kB, 112 files", "", "Allow `npm publish`? (y/n)"]}, "question": {"prompt": "Do you want to proceed?", "kind": "menu", "selected": 0, "options": [{"key": "1", "label": "Yes"}, {"key": "2", "label": "Yes, and don't ask again for npm publish"}, {"key": "3", "label": "No, and tell Claude what to do differently"}]}, "answer_url": "/api/swarms/shop/agents/worker-2/answer"}, {"id": "/src/shop-wt-3", "role": "worker-3", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-3"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-3"}]}, {"id": "/src/shop-wt-4", "role": "worker-4", "kind": "security", "status": "working", "issue": 44, "issue_title": "Bump openssl", "priority": "P1", "crew": ["worker-4"], "subagents": [], "action": "running", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-4"}, {"label": "GitHub issue #44", "url": "https://github.com/larkspur-labs/shop/issues/44"}]}], "backlog": [{"number": 45, "title": "Search is slow on mobile", "kind": "perf", "priority": "P2", "url": "https://github.com/larkspur-labs/shop/issues/45"}, {"number": 46, "title": "Typo in footer", "kind": "docs", "priority": "P3", "url": "https://github.com/larkspur-labs/shop/issues/46"}], "board": [{"number": 47, "title": "Which payment provider?", "label": "needs-design", "url": "https://github.com/larkspur-labs/shop/issues/47"}], "pipeline": {"integration": "main", "sentinel": "green", "quay": [], "stops": [{"name": "main-green", "issues": [39]}, {"name": "staging", "issues": []}, {"name": "prod", "issues": [37]}], "release": null}, "builds": []}, {"project": "billing", "plane": "development", "framework": "tmux", "workflow": "Autocoder", "repo_path": "~/src/billing", "manager": {"id": "manager", "role": "manager", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["manager"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/billing/agent/manager"}]}, "houses": [{"id": "/src/billing-wt-1", "role": "worker-1", "kind": "refactor", "status": "blocked", "issue": 12, "issue_title": "Retry failed invoices", "priority": "P1", "crew": ["worker-1"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/billing/agent/worker-1"}, {"label": "GitHub issue #12", "url": "https://github.com/larkspur-labs/billing/issues/12"}], "attention": {"reported": false, "source": "screen guess", "state": "\"Allow? (y/n)\" in the last 15 lines", "ask": "Allow? (y/n)", "since": "about 14:04", "wait": "40 s", "agree": "No reported state to compare: this swarm runs in plain tmux", "hint": "Run this swarm under herdr to get reported states.", "session": ["Edit(src/invoices/retry.ts)", "  \u23bf  Updated with 12 additions", "", "Run the migration now? Allow? (y/n)"]}, "question": {"prompt": "Run the migration now? Allow? (y/n)", "kind": "yes_no", "selected": 0, "options": [{"key": "y", "label": "Yes"}, {"key": "n", "label": "No"}]}, "answer_url": "/api/swarms/billing/agents/worker-1/answer"}, {"id": "/src/billing-wt-2", "role": "worker-2", "kind": "tests", "status": "working", "issue": 13, "issue_title": "Flaky ledger test", "priority": "P2", "crew": ["worker-2"], "subagents": [], "action": "running", "links": [{"label": "Agent session", "url": "/#/swarm/billing/agent/worker-2"}, {"label": "GitHub issue #13", "url": "https://github.com/larkspur-labs/billing/issues/13"}]}], "backlog": [{"number": 14, "title": "Tax rounding", "kind": "bug", "priority": "P1", "url": "https://github.com/larkspur-labs/billing/issues/14"}], "board": [], "pipeline": {"integration": "main", "sentinel": "green", "quay": [], "stops": [{"name": "main-green", "issues": []}, {"name": "prod", "issues": [9]}], "release": null}, "builds": []}, {"project": "temporal:support", "plane": "runtime", "framework": "temporal", "workflow": "Temporal", "repo_path": "~/src/temporal:support", "manager": {"id": "manager", "role": "workers", "kind": "cottage", "status": "working", "issue": null, "issue_title": "3 workers polling 1 task queue", "priority": null, "crew": ["workers"], "subagents": [{"agent_type": "worker", "description": "worker@pod-a", "status": "working", "action": null}, {"agent_type": "worker", "description": "worker@pod-b", "status": "working", "action": null}, {"agent_type": "worker", "description": "worker@pod-c", "status": "working", "action": null}], "action": null, "links": []}, "houses": [{"id": "refund-8812", "role": "SupportAgent", "kind": "workshop", "status": "blocked", "issue": null, "issue_title": "refund-8812", "priority": null, "crew": ["SupportAgent"], "subagents": [{"agent_type": "RefundCheck", "description": "refund-8812/check", "status": "blocked", "action": null}], "action": null, "links": [{"label": "Temporal UI", "url": "http://localhost:8233/namespaces/support/workflows/refund-8812"}], "attention": {"reported": true, "source": "Temporal", "state": "AgentStatus = waiting_for_human", "ask": "Approve a refund of $240 for order 5531?", "since": "13:59", "wait": "6 min", "agree": "Child workflow RefundCheck is paused on the approval signal", "session": ["RefundCheck refund-8812/check", "  policy: amount over $200 needs a person", "  waiting for signal: approve_refund"]}}, {"id": "research-31", "role": "ResearchAgent", "kind": "research", "status": "working", "issue": null, "issue_title": "research-31", "priority": null, "crew": ["ResearchAgent"], "subagents": [], "action": "searching", "links": [{"label": "Temporal UI", "url": "http://localhost:8233/namespaces/support/workflows/research-31"}]}, {"id": "triage-77", "role": "TriageAgent", "kind": "workshop", "status": "working", "issue": null, "issue_title": "triage-77", "priority": null, "crew": ["TriageAgent"], "subagents": [], "action": "thinking", "links": [{"label": "Temporal UI", "url": "http://localhost:8233/namespaces/support/workflows/triage-77"}]}], "backlog": [], "board": [], "pipeline": {"integration": "main", "sentinel": "green", "quay": [], "stops": [{"name": "completed (24h)", "issues": [8801, 8802, 8803]}], "release": null}, "builds": []}], "worlds": []}, "down": {"villages": [{"project": "shop", "plane": "development", "framework": "herdr", "workflow": "Autocoder", "repo_path": "~/src/shop", "manager": {"id": "manager", "role": "manager", "kind": "cottage", "status": "unknown", "issue": null, "issue_title": null, "priority": null, "crew": ["manager"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/manager"}], "last_known": "working"}, "houses": [{"id": "/src/shop-wt-1", "role": "worker-1", "kind": "feature", "status": "unknown", "issue": 41, "issue_title": "Saved carts survive logout", "priority": "P1", "crew": ["worker-1"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-1"}, {"label": "GitHub issue #41", "url": "https://github.com/larkspur-labs/shop/issues/41"}], "last_known": "working"}, {"id": "/src/shop-wt-2", "role": "worker-2", "kind": "bug", "status": "unknown", "issue": 43, "issue_title": "Checkout 500 on empty basket", "priority": "P0", "crew": ["worker-2"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-2"}, {"label": "GitHub issue #43", "url": "https://github.com/larkspur-labs/shop/issues/43"}], "last_known": "blocked \u00b7 herdr, since 14:02"}, {"id": "/src/shop-wt-3", "role": "worker-3", "kind": "cottage", "status": "unknown", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-3"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-3"}], "last_known": "idle"}, {"id": "/src/shop-wt-4", "role": "worker-4", "kind": "security", "status": "unknown", "issue": 44, "issue_title": "Bump openssl", "priority": "P1", "crew": ["worker-4"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-4"}, {"label": "GitHub issue #44", "url": "https://github.com/larkspur-labs/shop/issues/44"}], "last_known": "working"}], "backlog": [{"number": 45, "title": "Search is slow on mobile", "kind": "perf", "priority": "P2", "url": "https://github.com/larkspur-labs/shop/issues/45"}, {"number": 46, "title": "Typo in footer", "kind": "docs", "priority": "P3", "url": "https://github.com/larkspur-labs/shop/issues/46"}], "board": [{"number": 47, "title": "Which payment provider?", "label": "needs-design", "url": "https://github.com/larkspur-labs/shop/issues/47"}], "pipeline": {"integration": "main", "sentinel": "green", "quay": [], "stops": [{"name": "main-green", "issues": [39]}, {"name": "staging", "issues": []}, {"name": "prod", "issues": [37]}], "release": null}, "builds": [], "unreachable": {"source": "herdr", "since": "14:05"}}, {"project": "billing", "plane": "development", "framework": "tmux", "workflow": "Autocoder", "repo_path": "~/src/billing", "manager": {"id": "manager", "role": "manager", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["manager"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/billing/agent/manager"}]}, "houses": [{"id": "/src/billing-wt-1", "role": "worker-1", "kind": "refactor", "status": "blocked", "issue": 12, "issue_title": "Retry failed invoices", "priority": "P1", "crew": ["worker-1"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/billing/agent/worker-1"}, {"label": "GitHub issue #12", "url": "https://github.com/larkspur-labs/billing/issues/12"}], "attention": {"reported": false, "source": "screen guess", "state": "\"Allow? (y/n)\" in the last 15 lines", "ask": "Allow? (y/n)", "since": "about 14:04", "wait": "40 s", "agree": "No reported state to compare: this swarm runs in plain tmux", "hint": "Run this swarm under herdr to get reported states.", "session": ["Edit(src/invoices/retry.ts)", "  \u23bf  Updated with 12 additions", "", "Run the migration now? Allow? (y/n)"]}, "question": {"prompt": "Run the migration now? Allow? (y/n)", "kind": "yes_no", "selected": 0, "options": [{"key": "y", "label": "Yes"}, {"key": "n", "label": "No"}]}, "answer_url": "/api/swarms/billing/agents/worker-1/answer"}, {"id": "/src/billing-wt-2", "role": "worker-2", "kind": "tests", "status": "working", "issue": 13, "issue_title": "Flaky ledger test", "priority": "P2", "crew": ["worker-2"], "subagents": [], "action": "running", "links": [{"label": "Agent session", "url": "/#/swarm/billing/agent/worker-2"}, {"label": "GitHub issue #13", "url": "https://github.com/larkspur-labs/billing/issues/13"}]}], "backlog": [{"number": 14, "title": "Tax rounding", "kind": "bug", "priority": "P1", "url": "https://github.com/larkspur-labs/billing/issues/14"}], "board": [], "pipeline": {"integration": "main", "sentinel": "green", "quay": [], "stops": [{"name": "main-green", "issues": []}, {"name": "prod", "issues": [9]}], "release": null}, "builds": []}, {"project": "temporal:support", "plane": "runtime", "framework": "temporal", "workflow": "Temporal", "repo_path": "~/src/temporal:support", "manager": {"id": "manager", "role": "workers", "kind": "cottage", "status": "working", "issue": null, "issue_title": "3 workers polling 1 task queue", "priority": null, "crew": ["workers"], "subagents": [{"agent_type": "worker", "description": "worker@pod-a", "status": "working", "action": null}, {"agent_type": "worker", "description": "worker@pod-b", "status": "working", "action": null}, {"agent_type": "worker", "description": "worker@pod-c", "status": "working", "action": null}], "action": null, "links": []}, "houses": [{"id": "refund-8812", "role": "SupportAgent", "kind": "workshop", "status": "blocked", "issue": null, "issue_title": "refund-8812", "priority": null, "crew": ["SupportAgent"], "subagents": [{"agent_type": "RefundCheck", "description": "refund-8812/check", "status": "blocked", "action": null}], "action": null, "links": [{"label": "Temporal UI", "url": "http://localhost:8233/namespaces/support/workflows/refund-8812"}], "attention": {"reported": true, "source": "Temporal", "state": "AgentStatus = waiting_for_human", "ask": "Approve a refund of $240 for order 5531?", "since": "13:59", "wait": "6 min", "agree": "Child workflow RefundCheck is paused on the approval signal", "session": ["RefundCheck refund-8812/check", "  policy: amount over $200 needs a person", "  waiting for signal: approve_refund"]}}, {"id": "research-31", "role": "ResearchAgent", "kind": "research", "status": "working", "issue": null, "issue_title": "research-31", "priority": null, "crew": ["ResearchAgent"], "subagents": [], "action": "searching", "links": [{"label": "Temporal UI", "url": "http://localhost:8233/namespaces/support/workflows/research-31"}]}, {"id": "triage-77", "role": "TriageAgent", "kind": "workshop", "status": "working", "issue": null, "issue_title": "triage-77", "priority": null, "crew": ["TriageAgent"], "subagents": [], "action": "thinking", "links": [{"label": "Temporal UI", "url": "http://localhost:8233/namespaces/support/workflows/triage-77"}]}], "backlog": [], "board": [], "pipeline": {"integration": "main", "sentinel": "green", "quay": [], "stops": [{"name": "completed (24h)", "issues": [8801, 8802, 8803]}], "release": null}, "builds": []}], "worlds": []}};
+let protoScenario = 'main';
+window.fetch = async (url, opts) => {
+  if (opts && opts.method === 'POST') {
+    const body = JSON.parse(opts.body);
+    let answered = null;
+    for (const v of PROTO[protoScenario].villages) for (const h of v.houses) if (h.answer_url === url) {
+      answered = h.question.options[body.option].label;
+      h.status = 'working'; h.action = 'running'; delete h.question; delete h.attention; delete h.answer_url;
+    }
+    setTimeout(() => window.dispatchEvent(new Event('proto-refresh')), 1300);
+    return { ok: true, status: 200, json: async () => ({ ok: true, answered }) };
+  }
+  return { ok: true, json: async () => JSON.parse(JSON.stringify(PROTO[protoScenario])) };
+};
+</script>
+<script>
+(() => {
+  /* ---------- Palette (15-bit, outline #202030) ---------- */
+  const P = {
+    o: '#202030', skin: '#f8c898', skinS: '#d09068',
+    grass: '#58a048', grassD: '#386830', grassL: '#88c858',
+    path: '#d8b878', pathS: '#b08858', pathL: '#e8d098',
+    wood: '#a06030', woodD: '#683818', woodL: '#c88848', plank: '#e0b070',
+    stone: '#9898a8', stoneD: '#606078', stoneL: '#c8c8d8',
+    roofB: '#4868b8', roofBD: '#283878',
+    leaf: '#308838', leafD: '#205028', leafL: '#58b050',
+    white: '#f8f8f8', gold: '#f8d040', glass: '#a8d0f0', lamp: '#f8e080', dark: '#383850',
+    red: '#c04838', redD: '#802828', thatch: '#c8a048', thatchD: '#907028',
+    teal: '#2878a0', tealD: '#185070', parch: '#e8dcc0',
+    purple: '#7848a8', purpleD: '#503078', copper: '#d08840',
+    slate: '#6878a0', slateD: '#485878', barn: '#a83028', barnD: '#701818',
+    bug: '#e03838', fizzA: '#e070d0', fizzB: '#60e0c8', shield: '#3058b0', mill: '#d8c8a8', millD: '#a89878', sail: '#f0e8d8',
+    dome: '#e0e4f0', domeD: '#a8b0c8', water: '#3870c0', waterD: '#2850a0', waterL: '#80b8f0',
+    p0: '#e02828', seal: '#38c848', web: '#d8d8e8'
+  };
+  const STATE = { blocked: '#f07020', done: '#3878e0', unknown: '#585870', stalled: '#8088a8' };
+  const KINDCOL = { bug: '#e03838', feature: '#40b8e8', tests: '#e070d0', security: '#3058b0', research: '#c0a8f0', perf: '#d8c8a8', refactor: '#6878a0', docs: '#2878a0', chores: '#a83028', workshop: '#c88848', cottage: '#c8a048' };
+  const NOTECOL = { 'needs-design': '#f8c800', 'needs-clarification': '#d0c0f8', 'needs-approval': '#e89890', 'too-complex': '#b02010', 'future': '#8088a8', 'proposal': '#c0a8f0', 'failed': '#e02828', 'unreachable': '#585870' };
+  const STOPCOL = ['#38c848', '#f8d040', '#f8f8f8', '#4868e8', '#e070d0'];
+  /* A sub-agent's accent (tie, apron, belt) matches the building its specialty would build. */
+  const SPECIALTIES = [['architect', 'research'], ['security', 'security'], ['test', 'tests'], ['doc', 'docs'], ['coder', 'feature']];
+  const subHat = s => {
+    const role = s.agent_type.toLowerCase().split(':').pop();
+    const hit = SPECIALTIES.find(([name]) => role.includes(name));
+    return hit ? KINDCOL[hit[1]] : P.white;
+  };
+
+  const R = (c, x, y, w, h, col) => { c.fillStyle = col; c.fillRect(Math.round(x), Math.round(y), w, h); };
+  function hash(x, y) {
+    let n = (Math.imul(x, 374761393) + Math.imul(y, 668265263)) | 0;
+    n = Math.imul(n ^ (n >>> 13), 1274126177);
+    return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
+  }
+  const blink = (t, ms) => Math.floor(t / ms) % 2 === 1;
+  /* Someone who needs you waves: arm up, hand swinging. Reduced motion keeps the arm up, still. */
+  const waveFrame = t => blink(t, 220) ? 'wave2' : 'wave';
+  /* Light comes from the upper left: shadows fall right and down. */
+  const SHADE = 'rgba(12,20,36,.28)', SHINE = 'rgba(255,255,240,.22)';
+  const shadow = (c, x, y, w, h) => R(c, x, y, w, h, SHADE);
+  const lit = st => st === 'working';
+  const glassOf = st => st === 'working' ? P.lamp : (st === 'unknown' || st === 'stopped') ? P.dark : P.glass;
+  function win(c, x, y, st) {
+    R(c, x, y, 4, 4, P.woodD); R(c, x + 1, y + 1, 2, 2, glassOf(st));
+    if (st === 'working') R(c, x + 1, y + 1, 1, 1, P.white);
+    // A flower box under every window.
+    R(c, x, y + 4, 4, 1, P.woodL); R(c, x, y + 3, 1, 1, '#e05050'); R(c, x + 3, y + 3, 1, 1, P.gold);
+  }
+  function door(c, x, y, st) {
+    if (st === 'blocked') { R(c, x, y, 4, 5, P.o); return; }
+    R(c, x, y, 4, 5, P.woodD); R(c, x + 2, y + 2, 1, 1, P.gold);
+  }
+  function gable(c, x, y, w, h, a, d) {
+    R(c, x, y, w, h, P.o);
+    for (let r = 1; r < h - 1; r++) R(c, x + 1, y + r, w - 2, 1, (r % 3 === 0) ? d : a);
+    R(c, x + 1, y + 1, w - 2, 1, d);
+    // Shingles on the lit slope, shade on the far one, a sunlit ridge.
+    for (let r = 2; r < h - 1; r += 3) for (let k = x + 2 + (r % 2) * 2; k < x + w - 2; k += 4) R(c, k, y + r, 1, 1, d);
+    R(c, x + 1 + Math.ceil((w - 2) * 0.62), y + 1, Math.floor((w - 2) * 0.38), h - 2, SHADE);
+    R(c, x + 1, y + 1, Math.ceil((w - 2) * 0.62), 1, SHINE);
+    R(c, x + 1, y + h - 1, w - 2, 1, SHADE);
+  }
+  function wall(c, x, y, w, h, col) {
+    R(c, x, y, w, h, P.o); R(c, x + 1, y, w - 2, h - 1, col);
+    R(c, x + 1, y + h - 2, w - 2, 1, P.stoneD);
+    R(c, x + w - 3, y, 2, h - 2, SHADE);
+  }
+  function puffs(c, x, y, t, a, b) {
+    for (let k = 0; k < 3; k++) {
+      const p = ((t / 110) + k * 7) % 21;
+      const s = p < 9 ? 2 : 1;
+      R(c, x + Math.round(Math.sin((p + k * 2) / 3)), y - Math.floor(p * 0.6), s, s, p < 12 ? a : b);
+    }
+  }
+
+  /* ---------- Houses: each draws in x..x+15, y-4..y+16 ---------- */
+  const B = {
+    cottage(c, x, y, st, t, roof = P.thatch, roofD = P.thatchD) {
+      R(c, x + 11, y - 2, 4, 5, P.o); R(c, x + 12, y - 1, 2, 4, P.stone);
+      gable(c, x, y + 1, 16, 9, roof, roofD);
+      wall(c, x + 1, y + 9, 14, 7, P.wood); R(c, x + 2, y + 9, 12, 1, P.woodD);
+      win(c, x + 2, y + 10, st); win(c, x + 10, y + 10, st); door(c, x + 6, y + 11, st);
+      if (lit(st)) puffs(c, x + 12, y - 4, t, P.white, P.stoneL);
+    },
+    workshop(c, x, y, st, t) {
+      B.cottage(c, x, y, st, t, P.red, P.redD);
+      R(c, x + 4, y + 4, 6, 3, P.o); R(c, x + 5, y + 4, 4, 1, P.stoneL); R(c, x + 6, y + 5, 2, 1, P.stoneL);
+    },
+    feature(c, x, y, st, t) {
+      gable(c, x, y + 1, 11, 9, P.red, P.redD);
+      wall(c, x + 1, y + 9, 10, 7, P.wood); R(c, x + 2, y + 9, 8, 1, P.woodD);
+      win(c, x + 2, y + 10, st); door(c, x + 6, y + 11, st);
+      R(c, x + 11, y + 2, 1, 14, P.plank); R(c, x + 15, y + 2, 1, 14, P.plank);
+      R(c, x + 10, y + 2, 6, 1, P.plank); R(c, x + 11, y + 7, 5, 1, P.plank);
+      for (let k = 0; k < 4; k++) R(c, x + 12 + k, y + 3 + k, 1, 1, P.woodL);
+      R(c, x + 11, y + 12, 5, 1, P.plank); R(c, x + 11, y + 13, 5, 1, P.woodD); R(c, x + 11, y + 14, 5, 1, P.plank); R(c, x + 11, y + 15, 5, 1, P.o);
+      if (lit(st) && blink(t, 140)) { R(c, x + 12 + (Math.floor(t / 280) % 3), y + 6, 1, 1, P.white); R(c, x + 13, y + 5, 1, 1, P.gold); }
+    },
+    bug(c, x, y, st, t) {
+      gable(c, x, y + 1, 16, 9, P.thatch, P.thatchD);
+      R(c, x + 3, y + 3, 5, 4, P.woodD); R(c, x + 4, y + 4, 3, 2, P.plank); R(c, x + 5, y + 4, 1, 2, P.woodD);
+      wall(c, x + 1, y + 9, 14, 7, P.wood); R(c, x + 2, y + 9, 12, 1, P.woodD);
+      win(c, x + 2, y + 10, st); door(c, x + 6, y + 11, st);
+      R(c, x + 11, y + 2, 1, 14, P.woodL); R(c, x + 14, y + 2, 1, 14, P.woodL);
+      for (let yy = y + 3; yy < y + 16; yy += 3) R(c, x + 11, yy, 4, 1, P.woodD);
+      R(c, x + 9, y - 1, 1, 2, P.o);
+      R(c, x + 6, y - 4, 7, 4, P.o); R(c, x + 7, y - 3, 5, 2, P.bug); R(c, x + 8, y - 3, 1, 1, P.o); R(c, x + 10, y - 2, 1, 1, P.o); R(c, x + 9, y - 3, 1, 2, P.o);
+      if (lit(st)) R(c, x + 2 + Math.floor(t / 160) % 8, y + 7, 2, 1, P.o);
+    },
+    security(c, x, y, st, t) {
+      R(c, x, y + 10, 4, 6, P.o); R(c, x + 1, y + 11, 2, 4, P.stone);
+      R(c, x + 12, y + 10, 4, 6, P.o); R(c, x + 13, y + 11, 2, 4, P.stone);
+      R(c, x + 3, y - 2, 10, 18, P.o); R(c, x + 4, y - 1, 8, 16, P.stone); R(c, x + 4, y - 1, 8, 1, P.stoneL);
+      for (let yy = y + 1; yy < y + 14; yy += 3) for (let xx = x + 5 + ((yy - y) % 2 ? 2 : 0); xx < x + 11; xx += 4) R(c, xx, yy, 1, 1, P.stoneD);
+      [3, 7, 11].forEach(dx => R(c, x + dx, y - 4, 2, 2, P.o));
+      R(c, x + 5, y + 1, 1, 3, glassOf(st)); R(c, x + 10, y + 1, 1, 3, glassOf(st));
+      R(c, x + 6, y + 4, 4, 4, P.gold); R(c, x + 7, y + 5, 2, 2, P.shield); R(c, x + 7, y + 8, 2, 1, P.gold);
+      door(c, x + 6, y + 11, st);
+      if (lit(st)) R(c, x + 7, y - 5, 2, 1, blink(t, 160) ? P.gold : P.lamp);
+    },
+    tests(c, x, y, st, t) {
+      gable(c, x, y + 1, 16, 9, P.purple, P.purpleD);
+      R(c, x + 2, y - 2, 5, 1, P.o); R(c, x + 3, y - 1, 3, 3, P.o); R(c, x + 4, y - 1, 1, 3, P.copper);
+      R(c, x + 9, y + 2, 2, 1, P.o); R(c, x + 8, y + 3, 4, 4, P.o); R(c, x + 9, y + 4, 2, 2, lit(st) ? (blink(t, 300) ? P.fizzA : P.fizzB) : P.glass);
+      wall(c, x + 1, y + 9, 14, 7, P.wood); R(c, x + 2, y + 9, 12, 1, P.woodD);
+      win(c, x + 2, y + 10, st); win(c, x + 10, y + 10, st); door(c, x + 6, y + 11, st);
+      if (lit(st)) puffs(c, x + 4, y - 4, t, P.fizzA, P.fizzB);
+    },
+    research(c, x, y, st, t) {
+      for (let dy = -7; dy <= 0; dy++) for (let dx = -7; dx <= 7; dx++) {
+        const d = dx * dx + dy * dy; if (d > 49) continue;
+        R(c, x + 8 + dx, y + 9 + dy, 1, 1, d > 36 ? P.o : dx < -1 ? P.dome : P.domeD);
+      }
+      R(c, x + 8, y + 3, 2, 6, P.dark);
+      const a = -Math.PI / 4 + (lit(st) ? Math.sin(t / 900) * 0.35 : 0);
+      for (let d = 0; d < 8; d++) {
+        const px = Math.round(x + 9 + Math.cos(a) * d), py = Math.round(y + 6 + Math.sin(a) * d);
+        R(c, px, py, 2, 2, P.o); if (d > 1) R(c, px, py, 1, 1, P.stoneD);
+      }
+      wall(c, x + 1, y + 9, 14, 7, P.stone);
+      win(c, x + 2, y + 10, st); win(c, x + 10, y + 10, st); door(c, x + 6, y + 11, st);
+    },
+    docs(c, x, y, st, t) {
+      for (let r = 0; r < 7; r++) R(c, x + 7 - r, y + r, 2 + 2 * r, 1, P.o);
+      for (let r = 1; r < 7; r++) R(c, x + 8 - r, y + r, 2 * r, 1, r % 2 ? P.teal : P.tealD);
+      R(c, x + 7, y + 3, 2, 2, P.gold);
+      R(c, x, y + 7, 16, 2, P.o); R(c, x + 1, y + 7, 14, 1, P.stoneL);
+      wall(c, x + 1, y + 9, 14, 7, P.parch);
+      const books = ['#c04838', '#3870c0', '#58a048', '#f8d040'];
+      [x + 2, x + 10].forEach((wx, i) => {
+        R(c, wx, y + 9, 4, 6, P.woodD); R(c, wx + 1, y + 10, 2, 4, glassOf(st));
+        R(c, wx + 1, y + 12, 1, 2, books[i * 2]); R(c, wx + 2, y + 12, 1, 2, books[i * 2 + 1]);
+      });
+      door(c, x + 6, y + 11, st);
+    },
+    refactor(c, x, y, st, t) {
+      gable(c, x, y + 1, 16, 9, P.red, P.redD);
+      for (let r = 1; r < 8; r++) R(c, x + 8, y + 1 + r, 7, 1, (r % 3 === 0) ? P.slateD : P.slate);
+      wall(c, x + 1, y + 9, 14, 7, P.wood); R(c, x + 2, y + 9, 12, 1, P.woodD);
+      win(c, x + 2, y + 10, st); door(c, x + 6, y + 11, st);
+      R(c, x + 11, y + 12, 5, 4, P.o); R(c, x + 12, y + 13, 1, 2, P.stoneL); R(c, x + 14, y + 13, 1, 2, P.stoneL);
+      R(c, x + 14, y - 4, 1, 6, P.woodD); R(c, x + 9, y - 4, 6, 1, P.woodD);
+      const drop = lit(st) ? Math.round((Math.sin(t / 300) + 1) * 1.5) : 0;
+      R(c, x + 10, y - 3, 1, 1 + drop, P.stoneD);
+      R(c, x + 9, y - 2 + drop, 3, 2, P.o); R(c, x + 10, y - 2 + drop, 1, 1, P.stoneL);
+    },
+    perf(c, x, y, st, t) {
+      for (let r = 0; r < 13; r++) {
+        const hw = 3 + Math.floor(r / 4);
+        R(c, x + 8 - hw - 1, y + 3 + r, 2 * hw + 2, 1, P.o);
+        R(c, x + 8 - hw, y + 3 + r, 2 * hw, 1, r === 12 ? P.o : (r % 4 === 3 ? P.millD : P.mill));
+      }
+      R(c, x + 4, y + 1, 8, 3, P.o); R(c, x + 5, y + 1, 6, 2, P.red);
+      win(c, x + 6, y + 5, st); door(c, x + 6, y + 10, st);
+      const a = lit(st) ? t / 260 : Math.PI / 4, hx = x + 8, hy = y + 3;
+      for (let k = 0; k < 4; k++) {
+        const ang = a + k * Math.PI / 2, cs = Math.cos(ang), sn = Math.sin(ang);
+        for (let d = 2; d <= 7; d++) {
+          const px = Math.round(hx + cs * d), py = Math.round(hy + sn * d);
+          if (d > 2) R(c, Math.round(px - sn * 1.2), Math.round(py + cs * 1.2), 1, 1, P.sail);
+          R(c, px, py, 1, 1, P.woodD);
+        }
+      }
+      R(c, hx - 1, hy - 1, 2, 2, P.o);
+    },
+    chores(c, x, y, st, t) {
+      for (let r = 0; r < 9; r++) { const i = Math.max(0, 3 - r); R(c, x + i, y + 1 + r, 16 - 2 * i, 1, P.o); }
+      for (let r = 1; r < 8; r++) { const i = Math.max(0, 3 - r) + 1; R(c, x + i, y + 1 + r, 16 - 2 * i, 1, r % 3 === 0 ? P.barnD : P.barn); }
+      R(c, x + 6, y + 3, 4, 4, P.white); R(c, x + 7, y + 4, 2, 2, glassOf(st));
+      wall(c, x + 1, y + 9, 14, 7, P.barn); R(c, x + 2, y + 9, 12, 1, P.barnD);
+      if (st === 'blocked') R(c, x + 4, y + 10, 8, 6, P.o);
+      else {
+        R(c, x + 4, y + 10, 8, 6, P.white); R(c, x + 5, y + 11, 6, 4, P.woodL);
+        for (let k = 0; k < 4; k++) { R(c, x + 5 + k, y + 11 + k, 1, 1, P.white); R(c, x + 10 - k, y + 11 + k, 1, 1, P.white); }
+      }
+    }
+  };
+  function scaffold(c, x, y, t) {
+    R(c, x + 1, y + 2, 1, 14, P.woodL); R(c, x + 14, y + 2, 1, 14, P.woodL);
+    for (let yy = y + 3; yy < y + 16; yy += 5) R(c, x + 1, yy, 14, 1, P.woodL);
+    for (let k = 0; k < 12; k++) R(c, x + 2 + k, y + 15 - k, 1, 1, P.woodD);
+    if (blink(t, 90)) R(c, x + 4 + Math.floor(hash(Math.floor(t / 90), 3) * 8), y + 4, 1, 1, P.gold);
+  }
+  function cobwebs(c, x, y) {
+    [[x + 1, y + 9], [x + 12, y + 9]].forEach(([wx, wy]) => {
+      R(c, wx, wy, 3, 1, P.web); R(c, wx, wy, 1, 3, P.web); R(c, wx + 1, wy + 1, 1, 1, P.web);
+    });
+  }
+  function pennant(c, x, y, pr, t) {
+    if (!pr || pr === 'P3') return;
+    R(c, x - 1, y - 5, 1, 9, P.stoneD);
+    if (pr === 'P0') { const w = blink(t, 300) ? 1 : 0; R(c, x, y - 5, 5, 4, P.o); R(c, x, y - 4, 4 + w, 2, P.p0); }
+    else { R(c, x, y - 5, 4, 3, P.o); R(c, x, y - 4, 3, 1, pr === 'P1' ? P.gold : P.white); }
+  }
+
+  /* ---------- People and things ---------- */
+  const ICONS = {
+    blocked: ['..#..', '..#..', '..#..', '.....', '..#..'],
+    done: ['.....', '....#', '...#.', '#.#..', '.#...'],
+    unknown: ['.###.', '#...#', '..##.', '.....', '..#..'],
+    stalled: ['.....', '.....', '#.#.#', '.....', '.....']
+  };
+  function bubble(c, x, y, icon) {
+    const o = P.o, w = P.white, m = ICONS[icon], col = STATE[icon];
+    R(c, x + 1, y, 7, 1, o); R(c, x + 1, y + 8, 7, 1, o); R(c, x, y + 1, 1, 7, o); R(c, x + 8, y + 1, 1, 7, o);
+    R(c, x + 1, y + 1, 7, 7, w); R(c, x + 4, y + 8, 1, 2, w); R(c, x + 3, y + 9, 1, 1, o); R(c, x + 5, y + 9, 1, 1, o); R(c, x + 4, y + 10, 1, 1, o);
+    for (let r = 0; r < 5; r++) for (let k = 0; k < 5; k++) if (m[r][k] === '#') R(c, x + 2 + k, y + 2 + r, 1, 1, col);
+  }
+  function crate(c, x, y, kind, pr, sealed) {
+    x = Math.round(x); y = Math.round(y);
+    R(c, x, y, 5, 5, P.o); R(c, x + 1, y + 1, 3, 3, P.woodL);
+    R(c, x + 1, y + 1, 3, 1, KINDCOL[kind] || P.woodD);
+    if (pr === 'P0') R(c, x + 2, y + 3, 1, 1, P.p0);
+    if (sealed) R(c, x + 2, y + 2, 1, 1, P.seal);
+  }
+
+  /* ---------- Scenery ---------- */
+  const FLOWERS = ['#f8f8f8', '#f8d040', '#e070d0', '#e05050', '#a8c8f8'];
+  function grass(c, x0, y0, w, h) {
+    R(c, x0, y0, w, h, P.grass);
+    // Soft, dithered variation in the grass, then tufts and the odd flower.
+    for (let y = y0; y < y0 + h; y += 2) for (let x = x0 + (y >> 1) % 2; x < x0 + w; x += 2) {
+      const v = hash(x >> 3, y >> 3) * 0.6 + hash(x >> 2, y >> 2) * 0.4;
+      if (v < 0.2) R(c, x, y, 1, 1, '#62a850'); else if (v > 0.82) R(c, x, y, 1, 1, '#4c9040');
+    }
+    for (let y = y0; y < y0 + h; y += 3) for (let x = x0; x < x0 + w; x += 3) {
+      const v = hash(x, y);
+      if (v < 0.05) { R(c, x, y, 1, 1, P.grassL); R(c, x + 2, y, 1, 1, P.grassL); R(c, x + 1, y - 1, 1, 1, P.grassL); }
+      else if (v < 0.1) R(c, x, y, 1, 1, P.grassD);
+      else if (v > 0.985) { R(c, x, y + 1, 1, 1, P.leafD); R(c, x, y, 1, 1, FLOWERS[Math.floor(hash(y, x) * FLOWERS.length)]); }
+    }
+  }
+  function path(c, x0, y0, w, h) {
+    R(c, x0, y0, w, h, P.path);
+    for (let y = y0; y < y0 + h; y += 2) for (let x = x0; x < x0 + w; x += 2) {
+      const v = hash(x + 7, y + 3);
+      if (v < 0.07) R(c, x, y, 1, 1, P.pathS); else if (v < 0.11) R(c, x, y, 1, 1, P.pathL);
+    }
+    // Worn edges where the path meets the grass.
+    if (w > h) { R(c, x0, y0, w, 1, P.pathL); R(c, x0, y0 + h - 1, w, 1, P.pathS); }
+    else { R(c, x0, y0, 1, h, P.pathL); R(c, x0 + w - 1, y0, 1, h, P.pathS); }
+  }
+  function water(c, x0, y0, w, h, t, flow) {
+    R(c, x0, y0, w, h, P.water);
+    R(c, x0, y0 + 1, w, 2, P.waterD);
+    R(c, x0, y0, w, 1, P.pathS); R(c, x0, y0 + h - 1, w, 1, P.pathL);
+    const off = Math.floor(t / 120 * flow);
+    for (let y = y0 + 3; y < y0 + h - 2; y += 3) for (let x = x0; x < x0 + w; x += 7) {
+      if (hash(x, y) < 0.35) R(c, x0 + (((x - x0 + off) % w) + w) % w, y, 2, 1, P.waterL);
+    }
+    // Reeds on the near bank and the odd lily pad.
+    for (let x = x0 + 2; x < x0 + w - 2; x += 5) {
+      const v = hash(x, y0 + h);
+      if (v < 0.22) { R(c, x, y0 + h - 3, 1, 2, P.leafD); R(c, x + 1, y0 + h - 4, 1, 3, P.leaf); }
+      else if (v > 0.93 && h > 9) { R(c, x, y0 + (h >> 1), 3, 1, P.leaf); R(c, x + 1, y0 + (h >> 1), 1, 1, '#e070d0'); }
+    }
+  }
+  function tree(c, x, y) {
+    shadow(c, x + 4, y + 11, 9, 2);
+    R(c, x + 5, y + 8, 2, 4, P.woodD); R(c, x + 5, y + 8, 1, 4, P.wood);
+    const cx = x + 6, cy = y + 5, r = 5;
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      const d = dx * dx + dy * dy; if (d > r * r) continue;
+      R(c, cx + dx, cy + dy, 1, 1, d > (r - 1) * (r - 1) ? P.o : dx + dy > 3 ? P.leafD : dx + dy < -3 ? P.leafL : P.leaf);
+    }
+    // Leaf clusters and, on some trees, fruit.
+    [[-2, -1], [1, 1], [2, -2]].forEach(([dx, dy]) => { R(c, cx + dx, cy + dy, 2, 1, P.leafL); R(c, cx + dx + 1, cy + dy + 1, 1, 1, P.leafD); });
+    if (hash(x, y) < 0.3) { R(c, cx - 2, cy + 1, 1, 1, '#e05050'); R(c, cx + 2, cy - 1, 1, 1, '#e05050'); }
+  }
+  /* The manager's castle: a keep with banners between two round-roofed
+   * towers, behind a crenellated curtain wall. 40 wide, centred on the
+   * 32-wide hall slot; the gate opens when the manager waits on you. */
+  function hall(c, x, y, st) {
+    const x0 = x - 4, gy = y + 22, lit = glassOf(st);
+    R(c, x0 + 12, y - 2, 16, 20, P.o); R(c, x0 + 13, y - 1, 14, 18, P.stoneL);
+    for (let k = 0; k < 16; k += 3) R(c, x0 + 12 + k, y - 4, 2, 2, P.o);
+    R(c, x0 + 16, y + 3, 2, 4, lit); R(c, x0 + 22, y + 3, 2, 4, lit);
+    [x0 + 14, x0 + 25].forEach(bx => { R(c, bx, y + 1, 2, 7, '#804098'); R(c, bx, y + 1, 2, 1, P.gold); R(c, bx, y + 8, 1, 1, '#804098'); });
+    R(c, x0 + 20, y - 11, 1, 7, P.stoneD); R(c, x0 + 21, y - 11, 5, 3, P.o); R(c, x0 + 21, y - 10, 4, 1, P.gold);
+    R(c, x0, gy - 12, 40, 12, P.o); R(c, x0 + 1, gy - 11, 38, 10, P.stone);
+    for (let k = 0; k < 40; k += 4) R(c, x0 + k, gy - 14, 2, 2, P.o);
+    for (let yy = gy - 9; yy < gy - 1; yy += 3) for (let xx = x0 + 2 + ((yy % 2) ? 2 : 0); xx < x0 + 38; xx += 5) R(c, xx, yy, 1, 1, P.stoneD);
+    [x0, x0 + 32].forEach(tx => {
+      R(c, tx, y - 4, 8, gy - y + 4, P.o); R(c, tx + 1, y - 3, 6, gy - y + 2, P.stoneL);
+      R(c, tx + 3, y + 3, 2, 3, lit);
+      for (let r = 0; r < 4; r++) { R(c, tx + 3 - r, y - 8 + r, 2 + 2 * r, 1, P.o); if (r) R(c, tx + 4 - r, y - 8 + r, 2 * r, 1, r % 2 ? P.red : P.redD); }
+    });
+    R(c, x0 + 16, gy - 9, 8, 9, P.o);
+    if (st === 'blocked') R(c, x0 + 17, gy - 8, 6, 8, P.o);
+    else { R(c, x0 + 17, gy - 8, 6, 8, P.woodD); for (let k = 0; k < 6; k += 2) R(c, x0 + 17 + k, gy - 8, 1, 8, P.stoneD); }
+  }
+  function board(c, x, y, notes) {
+    R(c, x + 1, y + 9, 1, 6, P.woodD); R(c, x + 16, y + 9, 1, 6, P.woodD);
+    R(c, x, y, 18, 11, P.o); R(c, x + 1, y + 1, 16, 9, P.wood);
+    notes.slice(0, 8).forEach((n, i) => R(c, x + 2 + (i % 4) * 4, y + 2 + Math.floor(i / 4) * 4, 3, 3, NOTECOL[n.label] || P.white));
+  }
+  function lock(c, x, cy, open, flag) {
+    R(c, x - 1, cy - 4, 8, 4, P.o); R(c, x, cy - 3, 6, 2, P.stone);
+    R(c, x - 1, cy + 14, 8, 4, P.o); R(c, x, cy + 15, 6, 2, P.stone);
+    if (!open) { R(c, x + 1, cy, 1, 14, P.woodD); R(c, x + 4, cy, 1, 14, P.woodD); R(c, x + 2, cy, 2, 14, P.wood); }
+    R(c, x - 4, cy - 15, 12, 10, P.o); R(c, x - 3, cy - 13, 10, 7, P.stone);
+    R(c, x - 5, cy - 18, 14, 5, P.o); R(c, x - 4, cy - 17, 12, 3, P.red);
+    R(c, x, cy - 10, 3, 4, P.woodD);
+    R(c, x + 8, cy - 25, 1, 10, P.stoneD); R(c, x + 9, cy - 25, 5, 4, P.o); R(c, x + 9, cy - 24, 4, 2, flag);
+  }
+  /* Where finished work ships out: a harbour with a lighthouse and a ship
+   * at the end of the canal. Its lamp flares when new work arrives. */
+  function harbour(c, x, cy, t, fw) {
+    R(c, x, cy - 20, 38, 20, P.o); R(c, x + 1, cy - 19, 36, 18, P.stone);
+    for (let yy = cy - 17; yy < cy - 2; yy += 3) for (let xx = x + 2 + ((yy % 2) ? 2 : 0); xx < x + 36; xx += 5) R(c, xx, yy, 1, 1, P.stoneD);
+    [x + 3, x + 12, x + 21].forEach(bx => { R(c, bx, cy - 4, 3, 3, P.o); R(c, bx + 1, cy - 3, 1, 1, P.stoneD); });
+    const lx = x + 27;
+    R(c, lx, cy - 50, 9, 32, P.o);
+    for (let yy = cy - 49; yy < cy - 19; yy++) R(c, lx + 1, yy, 7, 1, Math.floor((yy - cy) / 5) % 2 ? P.white : P.red);
+    R(c, lx - 1, cy - 56, 11, 7, P.o); R(c, lx, cy - 55, 9, 4, blink(t, 700) || t - fw < 1600 ? P.lamp : P.glass);
+    R(c, lx + 1, cy - 59, 7, 3, P.o); R(c, lx + 2, cy - 58, 5, 1, P.red);
+    R(c, x + 2, cy + 3, 22, 9, P.o); R(c, x + 3, cy + 4, 20, 6, P.wood); R(c, x + 3, cy + 4, 20, 1, P.woodL); R(c, x + 5, cy + 10, 16, 1, P.woodD);
+    R(c, x + 12, cy - 14, 1, 18, P.woodD);
+    R(c, x + 6, cy - 12, 13, 12, P.o); R(c, x + 7, cy - 11, 11, 10, P.sail); R(c, x + 12, cy - 11, 1, 10, P.millD);
+    R(c, x + 13, cy - 17, 5, 3, P.o); R(c, x + 13, cy - 16, 4, 1, '#804098');
+    const ft = t - fw;
+    if (ft >= 0 && ft < 1600) {
+      const p = ft / 1600;
+      [[x + 8, P.gold], [x + 20, P.fizzA], [lx + 4, P.fizzB]].forEach(([fx, col], i) => {
+        const fy = cy - 62 - p * 18 - i * 3;
+        for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; R(c, fx + Math.cos(a) * p * 9, fy + Math.sin(a) * p * 9, 1, 1, col); }
+      });
+    }
+  }
+
+  /* ---------- Themes ----------
+   * A theme decides how things look, never what they mean: every theme draws
+   * the same slots (ground, roads, buildings per kind, stations) in the same
+   * places, and keeps the shared status language -- lit windows for working,
+   * an open door and an orange "!" for blocked, dust for stalled, fog for
+   * unknown -- so switching themes never means relearning the map. */
+  /* ---------- Decoration ----------
+   * Free ground is never left bare: bushes, flowerbeds, rocks, hay and
+   * logs in the village; planters, benches, lamps and bike racks downtown.
+   * Placed once per layout on a grid of free cells (layout().decor). */
+  const DECOR = {
+    medieval(c, x, y, k, t) {
+      switch (k) {
+        case 0: // bush
+          shadow(c, x + 1, y + 5, 7, 1);
+          R(c, x, y + 1, 7, 4, P.o); R(c, x + 1, y, 5, 1, P.o);
+          R(c, x + 1, y + 1, 5, 3, P.leaf); R(c, x + 1, y + 1, 2, 1, P.leafL); R(c, x + 4, y + 3, 2, 1, P.leafD);
+          R(c, x + 2, y + 2, 1, 1, '#e05050'); break;
+        case 1: // flowerbed
+          R(c, x, y + 3, 8, 2, P.woodD); R(c, x + 1, y + 2, 6, 1, '#6a4a2a');
+          for (let i = 0; i < 4; i++) { R(c, x + 1 + i * 2, y + 1, 1, 1, P.leaf); R(c, x + 1 + i * 2, y, 1, 1, FLOWERS[(i + Math.floor(hash(x, y) * 5)) % FLOWERS.length]); } break;
+        case 2: // rocks
+          shadow(c, x + 1, y + 4, 6, 1);
+          R(c, x, y + 1, 5, 3, P.o); R(c, x + 1, y + 1, 3, 2, P.stone); R(c, x + 1, y + 1, 2, 1, P.stoneL);
+          R(c, x + 4, y + 2, 3, 2, P.o); R(c, x + 5, y + 2, 1, 1, P.stone); break;
+        case 3: // haystack
+          shadow(c, x + 2, y + 6, 7, 1);
+          R(c, x + 1, y, 5, 1, P.o); R(c, x, y + 1, 7, 5, P.o); R(c, x + 1, y + 1, 5, 4, P.thatch); R(c, x + 1, y + 1, 3, 1, P.gold);
+          R(c, x + 2, y + 3, 1, 1, P.thatchD); R(c, x + 4, y + 2, 1, 1, P.thatchD); break;
+        case 4: // log with a mushroom
+          R(c, x, y + 2, 7, 3, P.o); R(c, x + 1, y + 3, 5, 1, P.wood); R(c, x + 5, y + 2, 2, 3, P.plank); R(c, x + 6, y + 3, 1, 1, P.woodD);
+          R(c, x + 1, y, 2, 1, '#e05050'); R(c, x + 2, y + 1, 1, 1, P.white); break;
+        default: // fence
+          for (let i = 0; i < 8; i += 3) R(c, x + i, y + 1, 1, 4, P.woodD);
+          R(c, x, y + 2, 8, 1, P.woodL); R(c, x, y + 4, 8, 1, P.woodL);
+      }
+    },
+    modern(c, x, y, k, t) {
+      switch (k) {
+        case 0: // planter
+          shadow(c, x + 1, y + 6, 7, 1);
+          R(c, x, y + 3, 7, 3, P.o); R(c, x + 1, y + 3, 5, 2, M.concreteL);
+          R(c, x + 1, y, 5, 3, P.o); R(c, x + 2, y, 3, 3, P.leaf); R(c, x + 2, y, 1, 1, P.leafL); break;
+        case 1: // bench
+          shadow(c, x, y + 5, 8, 1);
+          R(c, x, y + 1, 8, 2, P.o); R(c, x + 1, y + 1, 6, 1, M.box); R(c, x, y + 3, 8, 1, M.boxD);
+          R(c, x + 1, y + 4, 1, 1, P.o); R(c, x + 6, y + 4, 1, 1, P.o); break;
+        case 2: // lamp post, lit at night-blue intervals
+          shadow(c, x + 3, y + 7, 3, 1);
+          R(c, x + 2, y + 1, 1, 7, M.steelD); R(c, x + 1, y, 3, 2, P.o); R(c, x + 2, y, 1, 1, blink(t + x * 37, 1800) ? P.lamp : M.glassL); break;
+        case 3: // bike rack
+          for (let i = 0; i < 3; i++) { R(c, x + i * 3, y + 2, 1, 3, M.steel); R(c, x + i * 3, y + 2, 2, 1, M.steel); }
+          R(c, x, y + 5, 8, 1, M.concreteD); break;
+        case 4: // fountain
+          shadow(c, x + 1, y + 6, 8, 1);
+          R(c, x, y + 3, 8, 3, P.o); R(c, x + 1, y + 3, 6, 2, M.concreteL); R(c, x + 2, y + 3, 4, 1, M.glassL);
+          R(c, x + 3, y + 1, 2, 2, M.glassL); if (blink(t + y * 13, 300)) R(c, x + 3, y, 1, 1, P.white); break;
+        default: // hedge strip
+          R(c, x, y + 2, 8, 3, P.o); R(c, x + 1, y + 2, 6, 2, P.leaf); R(c, x + 1, y + 2, 3, 1, P.leafL);
+      }
+    }
+  };
+  /* A hedge around the village, a low fence downtown, as in the mockups. */
+  const BORDER = {
+    medieval(c, W, H) {
+      const leaf = (x, y, w, h) => { R(c, x, y, w, h, P.leafD); for (let yy = y; yy < y + h; yy += 2) for (let xx = x + ((yy >> 1) % 2); xx < x + w; xx += 2) R(c, xx, yy, 1, 1, P.leaf); };
+      leaf(0, H - 3, W, 3); leaf(0, 11, 3, H - 11); leaf(W - 3, 11, 3, H - 11);
+      R(c, 3, H - 3, W - 6, 1, P.o); R(c, 3, 11, 1, H - 14, P.o); R(c, W - 4, 11, 1, H - 14, P.o);
+    },
+    modern(c, W, H) {
+      R(c, 0, H - 2, W, 2, M.concreteD); R(c, 0, 11, 2, H - 11, M.concreteD); R(c, W - 2, 11, 2, H - 11, M.concreteD);
+      for (let x = 2; x < W - 2; x += 6) R(c, x, H - 3, 1, 1, M.steel);
+    }
+  };
+
+  const MEDIEVAL = {
+    name: 'Medieval village',
+    labels: { docks: 'Docks', board: 'Notice board', houses: 'Houses', quay: 'Quay', castle: 'Harbour', hall: 'Castle' },
+    ground: grass, road: path, yard: path, channel: water,
+    dock(c, x, y, w) { R(c, x, y, w, 7, P.o); R(c, x + 1, y, w - 2, 6, P.plank); },
+    tree, hall, board, crate, B, scaffold, gate: lock, destination: harbour, decor: DECOR.medieval, border: BORDER.medieval,
+    people: 'medieval', steam: [P.white, P.stoneL], sign: [P.woodD, P.parch, P.woodD]
+  };
+
+  const M = {
+    lawn: '#68b050', lawnD: '#58a040', asphalt: '#505868', asphaltD: '#383c48', dash: '#f0d850',
+    concrete: '#c0c0c8', concreteD: '#9898a8', concreteL: '#e0e0e8',
+    glass: '#5890c8', glassD: '#386898', glassL: '#a8d0f0', brick: '#a85840', brickD: '#783828',
+    steel: '#8890a0', steelD: '#586070', crane: '#f0c020', box: '#c89858', boxD: '#987040',
+    tarp: '#48a068', tarpD: '#307848', awnA: '#f8f8f8', awnB: '#2890a0', led: '#58e878'
+  };
+  const mWin = st => st === 'working' ? P.lamp : (st === 'unknown' || st === 'stopped') ? P.dark : M.glassL;
+  /* Flat-roofed block: parapet roof, facade, a row of windows, glass door. */
+  function block(c, x, y, st, o) {
+    const top = o.top ?? 1;
+    R(c, x, y + top, 16, 16 - top, P.o);
+    R(c, x + 1, y + top + 1, 14, 3, o.roof || M.concreteD); R(c, x + 1, y + top + 1, 14, 1, o.roofL || M.concrete);
+    R(c, x + 1, y + top + 4, 14, 11 - top, o.wall);
+    if (o.rows !== 0) for (let wy = y + top + 6; wy < y + 10; wy += 3) [x + 2, x + 6, x + 10].forEach(wx => R(c, wx, wy, 3, 2, mWin(st)));
+    if (o.door !== false) {
+      R(c, x + 6, y + 11, 4, 5, st === 'blocked' ? P.o : M.glassD);
+      if (st !== 'blocked') R(c, x + 8, y + 11, 1, 5, P.o);
+    }
+  }
+  const MB = {
+    cottage(c, x, y, st, t) {
+      block(c, x, y, st, { wall: M.concreteL, rows: 0, top: 3 });
+      R(c, x + 1, y + 9, 14, 3, P.o);
+      for (let k = 0; k < 7; k++) R(c, x + 2 + k * 2, y + 10, 2, 1, k % 2 ? M.awnA : M.awnB);
+      R(c, x + 2, y + 13, 3, 2, mWin(st)); R(c, x + 11, y + 13, 3, 2, mWin(st));
+      if (st === 'working') puffs(c, x + 12, y - 1, t, P.white, M.concreteL);
+    },
+    workshop(c, x, y, st, t) {
+      block(c, x, y, st, { wall: M.brick });
+      for (let yy = y + 6; yy < y + 16; yy += 3) R(c, x + 1, yy, 14, 1, M.brickD);
+      [x + 2, x + 10].forEach(wx => { R(c, wx, y + 6, 4, 2, mWin(st)); R(c, wx, y + 9, 4, 1, mWin(st)); });
+    },
+    feature(c, x, y, st, t) {
+      block(c, x, y, st, { wall: M.concrete, top: 4, rows: 0 });
+      R(c, x + 2, y + 10, 3, 2, mWin(st));
+      for (let yy = y + 5; yy < y + 16; yy += 4) R(c, x + 9, yy, 7, 1, M.steel);
+      R(c, x + 9, y + 5, 1, 11, M.steelD); R(c, x + 15, y + 5, 1, 11, M.steelD);
+      R(c, x + 13, y - 4, 2, 20, M.crane); R(c, x + 13, y - 4, 1, 20, P.o);
+      R(c, x + 3, y - 4, 13, 2, M.crane); R(c, x + 3, y - 3, 13, 1, P.o);
+      const hook = st === 'working' ? 5 + Math.floor((Math.sin(t / 400) + 1) * 2) : 6;
+      R(c, x + 5 + (st === 'working' ? Math.floor(t / 700) % 3 : 0), y - 2, 1, hook, P.o);
+    },
+    bug(c, x, y, st, t) {
+      block(c, x, y, st, { wall: M.concreteL, rows: 0 });
+      R(c, x + 2, y + 6, 12, 4, P.o); R(c, x + 3, y + 7, 10, 2, mWin(st));
+      R(c, x + 4, y - 3, 8, 5, P.o); R(c, x + 5, y - 2, 6, 3, P.white);
+      R(c, x + 6, y - 2, 4, 3, P.bug); R(c, x + 7, y - 2, 1, 1, P.o); R(c, x + 8, y - 1, 1, 1, P.o); R(c, x + 8, y - 2, 1, 3, P.o);
+      R(c, x + 6, y + 2, 1, 2, P.o); R(c, x + 9, y + 2, 1, 2, P.o);
+      if (st === 'working') R(c, x + 3 + Math.floor(t / 160) % 9, y + 7, 1, 1, P.o);
+    },
+    security(c, x, y, st, t) {
+      block(c, x, y, st, { wall: M.concreteD, rows: 0, top: 2, roof: M.steelD, roofL: M.steel });
+      [x + 3, x + 11].forEach(wx => R(c, wx, y + 8, 2, 1, mWin(st)));
+      R(c, x + 6, y + 6, 4, 4, P.gold); R(c, x + 7, y + 7, 2, 2, P.shield);
+      R(c, x + 3, y - 2, 1, 5, P.o);
+      const a = st === 'working' ? t / 300 : 0.6;
+      for (let d = 1; d < 5; d++) R(c, x + 3 + Math.round(Math.cos(a) * d), y - 2 + Math.round(Math.sin(a) * d * 0.5), 1, 1, M.steelD);
+      R(c, x + 12, y - 1, 3, 2, P.o); R(c, x + 13, y - 1, 1, 1, st === 'working' && blink(t, 400) ? P.p0 : M.steel);
+    },
+    tests(c, x, y, st, t) {
+      block(c, x, y, st, { wall: M.glass, rows: 0 });
+      for (let wy = y + 5; wy < y + 11; wy += 2) R(c, x + 1, wy, 14, 1, st === 'working' ? P.fizzB : M.glassL);
+      R(c, x + 2, y + 6, 1, 4, M.glassD); R(c, x + 13, y + 6, 1, 4, M.glassD);
+      R(c, x + 3, y - 2, 3, 3, P.o); R(c, x + 4, y - 1, 1, 2, P.copper);
+      R(c, x + 10, y - 2, 3, 3, P.o); R(c, x + 11, y - 1, 1, 2, P.copper);
+      if (st === 'working') { puffs(c, x + 4, y - 3, t, P.fizzA, P.fizzB); puffs(c, x + 11, y - 3, t + 500, P.fizzB, P.fizzA); }
+    },
+    research(c, x, y, st, t) {
+      block(c, x, y, st, { wall: P.white, top: 2 });
+      const a = -2.2 + (st === 'working' ? Math.sin(t / 900) * 0.5 : 0);
+      for (let dy = -4; dy <= 0; dy++) for (let dx = -4; dx <= 4; dx++) {
+        if (dx * dx + dy * dy > 16) continue;
+        R(c, x + 8 + dx, y + 2 + dy, 1, 1, dx * dx + dy * dy > 9 ? P.o : M.concreteL);
+      }
+      R(c, x + 8 + Math.round(Math.cos(a) * 4), y + 1 + Math.round(Math.sin(a) * 4), 1, 1, P.gold);
+      R(c, x + 8, y + 2, 1, 2, P.o);
+    },
+    docs(c, x, y, st, t) {
+      block(c, x, y, st, { wall: P.parch, rows: 0 });
+      R(c, x + 2, y + 6, 4, 4, mWin(st)); R(c, x + 10, y + 6, 4, 4, mWin(st));
+      ['#c04838', '#3870c0', '#58a048', '#f8d040'].forEach((col, k) => R(c, x + 4 + k * 2, y - 2, 2, 4, col));
+      R(c, x + 3, y + 2, 10, 1, P.o);
+    },
+    refactor(c, x, y, st, t) {
+      block(c, x, y, st, { wall: M.brick });
+      R(c, x + 8, y + 1, 8, 15, P.o); R(c, x + 9, y + 2, 6, 13, M.tarp);
+      for (let yy = y + 4; yy < y + 15; yy += 4) R(c, x + 9, yy, 6, 1, M.tarpD);
+      for (let yy = y + 2; yy < y + 16; yy += 5) R(c, x + 7, yy, 9, 1, M.steel);
+      if (st === 'working' && blink(t, 140)) R(c, x + 11, y + 6 + Math.floor(t / 280) % 6, 1, 1, P.white);
+    },
+    perf(c, x, y, st, t) {
+      block(c, x, y, st, { wall: M.steelD, rows: 0, top: 2, roof: M.steel, roofL: M.concrete });
+      [x + 4, x + 11].forEach((fx, k) => {
+        R(c, fx - 3, y - 1, 7, 6, P.o); R(c, fx - 2, y, 5, 4, M.steelD);
+        const a = st === 'working' ? t / 90 + k : 0.3;
+        for (let d = -2; d <= 2; d++) R(c, fx + Math.round(Math.cos(a) * d), y + 2 + Math.round(Math.sin(a) * d * 0.7), 1, 1, M.concreteL);
+      });
+      for (let k = 0; k < 6; k++) R(c, x + 2 + k * 2, y + 9, 1, 1, st === 'working' && hash(k, Math.floor(t / 200)) < 0.6 ? M.led : P.dark);
+    },
+    chores(c, x, y, st, t) {
+      R(c, x, y + 3, 16, 13, P.o); R(c, x + 1, y + 4, 14, 11, M.steel);
+      for (let xx = x + 2; xx < x + 15; xx += 2) R(c, xx, y + 4, 1, 11, M.steelD);
+      R(c, x + 1, y + 4, 14, 2, M.concreteD);
+      R(c, x + 4, y + 8, 8, 8, P.o); R(c, x + 5, y + 9, 6, 7, st === 'blocked' ? P.o : M.concreteL);
+      if (st !== 'blocked') for (let yy = y + 10; yy < y + 16; yy += 2) R(c, x + 5, yy, 6, 1, M.concreteD);
+      if (st === 'working') R(c, x + 5, y + 9, 6, 1, P.lamp);
+      R(c, x + 12, y + 12, 4, 4, P.o); R(c, x + 13, y + 13, 2, 2, M.box);
+    }
+  };
+  const MODERN = {
+    name: 'Modern business district',
+    labels: { docks: 'Mailroom', board: 'Whiteboard', houses: 'Offices', quay: 'Loading bay', castle: 'Launch pad', hall: 'Headquarters' },
+    ground(c, x0, y0, w, h) {
+      for (let y = y0; y < y0 + h; y += 4) R(c, x0, y, w, Math.min(4, y0 + h - y), (y >> 2) % 2 ? M.lawn : M.lawnD);
+    },
+    road(c, x0, y0, w, h) {
+      R(c, x0, y0, w, h, M.asphalt);
+      if (w > h && h >= 6) for (let x = x0 + 1; x < x0 + w - 2; x += 6) R(c, x, y0 + (h >> 1), 3, 1, M.dash);
+      if (h > w && w >= 6) for (let y = y0 + 1; y < y0 + h - 2; y += 6) R(c, x0 + (w >> 1), y, 1, 3, M.dash);
+    },
+    yard(c, x0, y0, w, h) {
+      R(c, x0, y0, w, h, M.concrete);
+      for (let x = x0 + 3; x < x0 + w; x += 4) R(c, x, y0, 1, h, M.concreteD);
+      for (let y = y0 + 3; y < y0 + h; y += 4) R(c, x0, y, w, 1, M.concreteD);
+    },
+    /* Rivers and canals become roads with moving traffic markings. */
+    channel(c, x0, y0, w, h, t, flow) {
+      R(c, x0, y0, w, h, M.asphaltD);
+      R(c, x0, y0, w, 1, M.concreteD); R(c, x0, y0 + h - 1, w, 1, M.concreteD);
+      const off = Math.floor(t / 60 * flow) % 8;
+      for (let x = x0 - 8 + off; x < x0 + w; x += 8) if (x >= x0) R(c, x, y0 + (h >> 1), 4, 1, P.white);
+    },
+    dock(c, x, y, w) {
+      R(c, x, y, w, 7, P.o); R(c, x + 1, y, w - 2, 6, M.concrete);
+      for (let k = 0; k < w - 2; k += 4) R(c, x + 1 + k, y + 5, 2, 1, M.dash);
+    },
+    tree(c, x, y) {
+      R(c, x + 3, y + 9, 6, 3, P.o); R(c, x + 4, y + 9, 4, 2, M.concrete);
+      const cx = x + 6, cy = y + 5, r = 4;
+      for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+        const d = dx * dx + dy * dy; if (d > r * r) continue;
+        R(c, cx + dx, cy + dy, 1, 1, d > (r - 1) * (r - 1) ? P.o : dx + dy > 2 ? P.leafD : dx + dy < -2 ? P.leafL : P.leaf);
+      }
+    },
+    /* Headquarters: a glass tower with a gold crown over a colonnaded
+     * podium, flags out front. The lobby doors go dark when the manager
+     * waits on you. */
+    hall(c, x, y, st) {
+      const x0 = x - 4, gy = y + 22;
+      R(c, x0 + 9, y - 8, 22, 22, P.o); R(c, x0 + 10, y - 7, 20, 20, M.glassD);
+      for (let wy = y - 6; wy < y + 12; wy += 3) for (let wx = x0 + 11; wx < x0 + 29; wx += 3) R(c, wx, wy, 2, 2, mWin(st));
+      for (let wx = x0 + 13; wx < x0 + 29; wx += 6) R(c, wx, y - 7, 1, 20, M.glassL);
+      R(c, x0 + 9, y - 11, 22, 4, P.o); R(c, x0 + 10, y - 10, 20, 2, P.gold);
+      R(c, x0 + 14, y - 13, 12, 2, P.o); R(c, x0 + 15, y - 13, 10, 1, P.gold);
+      R(c, x0 + 19, y - 17, 2, 4, P.gold);
+      R(c, x0, gy - 9, 40, 9, P.o); R(c, x0 + 1, gy - 8, 38, 7, M.concreteL);
+      R(c, x0 + 1, gy - 8, 38, 1, P.gold);
+      for (let k = 3; k < 38; k += 5) R(c, x0 + k, gy - 7, 2, 6, M.concrete);
+      R(c, x0 + 15, gy - 7, 10, 7, P.o); R(c, x0 + 16, gy - 6, 8, 6, st === 'blocked' ? P.o : M.glassL);
+      if (st !== 'blocked') R(c, x0 + 20, gy - 6, 1, 6, P.o);
+      [[x0 - 2, P.gold], [x0 + 40, '#3878e0']].forEach(([fx, col]) => { R(c, fx, gy - 22, 1, 22, M.steelD); R(c, fx + 1, gy - 22, 4, 3, P.o); R(c, fx + 1, gy - 21, 3, 1, col); });
+    },
+    board(c, x, y, notes) {
+      R(c, x + 2, y + 9, 1, 6, M.steelD); R(c, x + 15, y + 9, 1, 6, M.steelD);
+      R(c, x, y, 18, 11, P.o); R(c, x + 1, y + 1, 16, 9, P.white);
+      notes.slice(0, 8).forEach((n, i) => R(c, x + 2 + (i % 4) * 4, y + 2 + Math.floor(i / 4) * 4, 3, 3, NOTECOL[n.label] || P.gold));
+    },
+    crate(c, x, y, kind, pr, sealed) {
+      x = Math.round(x); y = Math.round(y);
+      R(c, x, y, 5, 5, P.o); R(c, x + 1, y + 1, 3, 3, M.box);
+      R(c, x + 2, y + 1, 1, 3, KINDCOL[kind] || M.boxD);
+      if (pr === 'P0') R(c, x + 1, y + 3, 1, 1, P.p0);
+      if (sealed) R(c, x + 3, y + 1, 1, 1, P.seal);
+    },
+    B: MB,
+    scaffold(c, x, y, t) {
+      for (let yy = y + 2; yy < y + 16; yy += 4) R(c, x + 1, yy, 14, 1, M.steel);
+      R(c, x + 1, y + 2, 1, 14, M.steelD); R(c, x + 14, y + 2, 1, 14, M.steelD);
+      R(c, x + 7, y - 4, 2, 20, M.crane); R(c, x + 2, y - 4, 13, 2, M.crane);
+      if (blink(t, 90)) R(c, x + 4 + Math.floor(hash(Math.floor(t / 90), 5) * 8), y + 6, 1, 1, P.white);
+    },
+    /* Toll booth with a boom barrier across the road. */
+    gate(c, x, cy, open, flag) {
+      R(c, x - 4, cy - 15, 12, 10, P.o); R(c, x - 3, cy - 14, 10, 8, M.concreteL);
+      R(c, x - 2, cy - 12, 8, 3, M.glassL); R(c, x - 5, cy - 16, 14, 2, M.steelD);
+      R(c, x + 1, cy - 20, 4, 4, P.o); R(c, x + 2, cy - 19, 2, 2, flag);
+      R(c, x + 2, cy - 4, 2, 4, P.o);
+      if (!open) for (let k = 0; k < 14; k += 2) R(c, x + 2, cy + k, 2, 2, (k / 2) % 2 ? P.white : P.p0);
+    },
+    /* Launch pad: shipped work lifts off. The engines fire and the sky
+     * lights up when new work arrives. */
+    destination(c, x, cy, t, fw) {
+      R(c, x, cy - 8, 38, 8, P.o); R(c, x + 1, cy - 7, 36, 6, M.concrete);
+      for (let k = 2; k < 36; k += 6) R(c, x + k, cy - 4, 3, 1, M.dash);
+      R(c, x + 4, cy - 50, 4, 42, P.o); R(c, x + 5, cy - 49, 2, 40, P.red);
+      for (let yy = cy - 46; yy < cy - 8; yy += 6) R(c, x + 8, yy, 6, 1, M.steelD);
+      const rx = x + 16;
+      R(c, rx, cy - 44, 10, 36, P.o); R(c, rx + 1, cy - 42, 8, 33, P.white); R(c, rx + 1, cy - 42, 2, 33, M.concreteL);
+      R(c, rx + 2, cy - 48, 6, 4, P.o); R(c, rx + 3, cy - 47, 4, 4, P.red); R(c, rx + 4, cy - 50, 2, 2, P.red);
+      R(c, rx + 3, cy - 34, 4, 3, P.o); R(c, rx + 4, cy - 33, 2, 1, M.glassL);
+      R(c, rx - 3, cy - 16, 3, 8, P.o); R(c, rx - 2, cy - 15, 2, 6, P.red);
+      R(c, rx + 10, cy - 16, 3, 8, P.o); R(c, rx + 10, cy - 15, 2, 6, P.red);
+      R(c, rx + 2, cy - 18, 6, 1, M.steelD);
+      const ft = t - fw;
+      if (ft >= 0 && ft < 1600) {
+        for (let k = 0; k < 4; k++) R(c, rx + 2 + k * 2, cy - 8 + (blink(t + k * 60, 80) ? 1 : 0), 2, 3, k % 2 ? P.gold : '#f8f8f8');
+        const p = ft / 1600;
+        [[x + 6, P.gold], [x + 21, P.fizzA], [x + 34, P.fizzB]].forEach(([fx, col], i) => {
+          const fy = cy - 58 - p * 18 - i * 3;
+          for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; R(c, fx + Math.cos(a) * p * 9, fy + Math.sin(a) * p * 9, 1, 1, col); }
+        });
+      }
+      R(c, x + 8, cy - 2, 20, 18, P.o); R(c, x + 9, cy, 18, 15, P.dark);
+    },
+    decor: DECOR.modern, border: BORDER.modern,
+    people: 'modern',
+    steam: [P.white, M.concreteL], sign: [P.o, P.dark, M.led]
+  };
+
+  const THEMES = { medieval: MEDIEVAL, modern: MODERN };
+  const themeFromUrl = new URLSearchParams(location.search).get('theme');
+  let themeName = THEMES[themeFromUrl] ? themeFromUrl : (() => {
+    try { return THEMES[localStorage.getItem('village-theme')] ? localStorage.getItem('village-theme') : 'medieval'; } catch { return 'medieval'; }
+  })();
+  let T = THEMES[themeName];
+
+  /* ---------- People ----------
+   * Four body templates per theme, two women and two men, alternating so a
+   * village is a mix. Letters: o outline, h hair, s/S skin and its shade,
+   * c/C clothing and its shade, t accent (belt, apron, tie), w shirt, p legs
+   * or skirt. Who a villager is (template, skin, hair, clothes) comes from a
+   * hash of their agent, so a person looks the same on every refresh. */
+  const BODY = {
+    medieval: [
+      // man in a belted tunic
+      ['..oooo..', '.ohhhho.', 'ohhhhhho', 'ohssssho', 'osossoso', '.oSssSo.', '.occcco.', 'oCccccCo', 'sCttttCs', '.occcco.', '.opoopo.', '.oo..oo.'],
+      // woman with long hair in a dress
+      ['..oooo..', '.ohhhho.', 'ohhhhhho', 'ohssssho', 'hsossosh', 'hoSssSoh', 'hoctccoh', 'oCccccCo', 'sCccccCs', 'oCccccCo', 'oCCCCCCo', '.oo..oo.'],
+      // bearded man in a hood
+      ['..oooo..', '.occcco.', 'occcccco', 'ocssssco', 'osossoso', 'ochhhhco', '.ochhco.', 'oCccccCo', 'sCttttCs', '.occcco.', '.opoopo.', '.oo..oo.'],
+      // woman with a bun and an apron
+      ['...oo...', '..ohho..', '.ohhhho.', 'ohssssho', 'osossoso', '.oSssSo.', '.occcco.', 'oCttttCo', 'sCttttCs', 'oCttttCo', 'oCCCCCCo', '.oo..oo.']
+    ],
+    modern: [
+      // man in a suit and tie
+      ['..oooo..', '.ohhhho.', 'ohhhhhho', 'ohssssho', 'osossoso', '.oSssSo.', '.owttwo.', 'oCcttcCo', 'sCcttcCs', '.occcco.', '.opoopo.', '.oo..oo.'],
+      // woman with long hair in a blazer and skirt
+      ['..oooo..', '.ohhhho.', 'ohhhhhho', 'ohssssho', 'hsossosh', 'hoSssSoh', 'hocwwcoh', 'oCcwwcCo', 'sCccccCs', '.oppppo.', '.os..so.', '.oo..oo.'],
+      // woman with a bob in a trouser suit
+      ['..oooo..', '.ohhhho.', 'ohhhhhho', 'hhssssho', 'hsossosh', '.hSssSh.', '.ocwwco.', 'oCcwwcCo', 'sCccccCs', '.occcco.', '.opoopo.', '.oo..oo.'],
+      // bearded man in a jacket, open collar
+      ['..oooo..', '.ohhhho.', 'ohhhhhho', 'ohssssho', 'osossoso', '.ohhhho.', '.ocwwco.', 'oCcwwcCo', 'sCccccCs', '.occcco.', '.opoopo.', '.oo..oo.']
+    ]
+  };
+  const SKIN = [['#f8d0a8', '#d8a880'], ['#e8b088', '#c08860'], ['#c88858', '#a06838'], ['#94603c', '#704428'], ['#603c28', '#482818']];
+  const HAIR = ['#302018', '#704830', '#c89040', '#a03820', '#181820', '#d0c8c0', '#583828'];
+  const DRESS = {
+    medieval: { cloth: [['#a87848', '#785030'], ['#4878a0', '#305878'], ['#7a8a3a', '#56622a'], ['#8a4a6a', '#62324a'], ['#a85838', '#783a24']], accent: ['#e8dcc0', '#583820', '#f8f8f8'], legs: ['#585060', '#685038'],
+      mayor: { c: '#804098', C: '#582868', t: '#f8d040', p: '#302838' } },
+    modern: { cloth: [['#283048', '#181c30'], ['#3a3a44', '#262630'], ['#4a3a30', '#33281f'], ['#5a6070', '#40465a'], ['#2a4a70', '#1c3450']], accent: ['#c03838', '#3878c8', '#f8d040', '#48a878'], legs: ['#262630', '#383850'],
+      mayor: { c: '#1c2030', C: '#101420', t: '#f8d040', p: '#181c28' } }
+  };
+  function strHash(s) {
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+    return h >>> 0;
+  }
+  /* Poses are edits of the standing body: a raised hand, both hands up under
+   * a crate, a foot lifted mid-step. */
+  const setAt = (row, i, ch) => row.slice(0, i) + ch + row.slice(i + 1);
+  function pose(rows, kind) {
+    const r = rows.slice();
+    // Waving: the right arm is raised (drawn in person()), so its hand leaves the side.
+    if (kind === 'wave' || kind === 'wave2') { r[7] = setAt(r[7], 7, '.'); r[8] = setAt(r[8], 7, '.'); }
+    if (kind === 'carry' || kind === 'carrystep') {
+      r[5] = setAt(setAt(r[5], 0, 's'), 7, 's');
+      r[8] = setAt(setAt(r[8], 0, '.'), 7, '.');
+    }
+    if (kind === 'carrystep') r[11] = '.oo...o.';
+    return r;
+  }
+  /* Draw a person. `seed` names who they are; `accent` (a specialist's color)
+   * overrides their tie, apron or belt; `mayor` dresses them for the hall. */
+  function person(c, x, y, seed, kind = 'stand', opts = {}) {
+    const style = T.people, h = strHash(seed + '|' + style);
+    const bodies = BODY[style], dress = DRESS[style];
+    const rows = pose(bodies[h % bodies.length], kind);
+    const [skin, skinS] = SKIN[(h >>> 3) % SKIN.length];
+    const cloth = opts.mayor ? [dress.mayor.c, dress.mayor.C] : dress.cloth[(h >>> 7) % dress.cloth.length];
+    const map = {
+      o: P.o, s: skin, S: skinS, w: P.white,
+      h: HAIR[(h >>> 11) % HAIR.length],
+      c: cloth[0], C: cloth[1],
+      t: opts.accent || (opts.mayor ? dress.mayor.t : dress.accent[(h >>> 15) % dress.accent.length]),
+      p: opts.mayor ? dress.mayor.p : dress.legs[(h >>> 19) % dress.legs.length]
+    };
+    x = Math.round(x); y = Math.round(y);
+    shadow(c, x + 1, y + 11, 7, 1);
+    for (let r = 0; r < rows.length; r++) for (let k = 0; k < 8; k++) { const ch = rows[r][k]; if (ch !== '.') R(c, x + k, y + r, 1, 1, map[ch]); }
+    if (kind === 'wave' || kind === 'wave2') {
+      // An arm raised above the head, swinging between upright and tilted out,
+      // with motion ticks on the outswing: readable at a glance.
+      R(c, x + 7, y + 6, 2, 2, P.o); R(c, x + 7, y + 6, 1, 1, map.C);
+      if (kind === 'wave') {
+        R(c, x + 8, y + 1, 2, 6, P.o); R(c, x + 8, y + 2, 1, 5, map.c);
+        R(c, x + 7, y - 2, 4, 4, P.o); R(c, x + 8, y - 1, 2, 2, map.s);
+      } else {
+        R(c, x + 9, y + 4, 2, 3, P.o); R(c, x + 10, y + 2, 2, 3, P.o); R(c, x + 9, y + 5, 1, 1, map.c); R(c, x + 10, y + 3, 1, 2, map.c);
+        R(c, x + 10, y - 1, 4, 4, P.o); R(c, x + 11, y, 2, 2, map.s);
+        R(c, x + 14, y - 1, 1, 1, P.white); R(c, x + 15, y + 1, 1, 1, P.white); R(c, x + 14, y + 3, 1, 1, P.white);
+      }
+    }
+  }
+
+  /* ---------- Actions ----------
+   * What an agent is doing right now, acted out with a prop: a thought cloud,
+   * a book, a swinging hammer, a terminal, a magnifying glass, a letter.
+   * Searching and messaging also walk a few steps back and forth. */
+  const wander = (action, t, seed) =>
+    action === 'searching' || action === 'messaging' ? Math.round(Math.sin(t / 520 + (strHash(seed) % 7)) * 3) : 0;
+  function drawAction(c, x, y, action, t) {
+    const up = blink(t, 240);
+    switch (action) {
+      case 'thinking':
+        [[8, -2, 1], [10, -4, 1], [12, -7, 2]].forEach(([dx, dy, sz], k) => {
+          if (blink(t + k * 160, 480) || reduce) { R(c, x + dx - 1, y + dy - 1, sz + 2, sz + 2, P.o); R(c, x + dx, y + dy, sz, sz, P.white); }
+        });
+        break;
+      case 'reading':
+        R(c, x + 1, y + 7, 6, 3, P.o); R(c, x + 2, y + 7, 2, 2, P.white); R(c, x + 4, y + 7, 2, 2, P.parch);
+        break;
+      case 'writing':
+        if (up) { R(c, x + 8, y + 4, 1, 4, P.woodD); R(c, x + 7, y + 3, 3, 2, P.stoneD); }
+        else { R(c, x + 8, y + 7, 3, 1, P.woodD); R(c, x + 10, y + 6, 2, 3, P.stoneD); R(c, x + 12, y + 10, 1, 1, P.gold); }
+        break;
+      case 'running':
+        R(c, x + 8, y + 8, 5, 4, P.o); R(c, x + 9, y + 9, 3, 2, up ? '#58e878' : P.dark);
+        break;
+      case 'searching':
+        R(c, x + 7, y + 1, 4, 4, P.o); R(c, x + 8, y + 2, 2, 2, P.glass); R(c, x + 10, y + 5, 1, 1, P.o); R(c, x + 11, y + 6, 1, 1, P.o);
+        break;
+      case 'messaging':
+        R(c, x + 6, y + 7, 4, 3, P.o); R(c, x + 7, y + 8, 2, 1, P.white); R(c, x + 8, y + 8, 1, 1, P.p0);
+        break;
+    }
+  }
+  const ACTION_ICONS = {
+    thinking: ['.###.', '#####', '.###.', '.....', '#....'],
+    reading: ['##.##', '#.#.#', '#.#.#', '##.##', '.....'],
+    writing: ['###..', '###..', '.#...', '.#...', '.#...'],
+    running: ['#.#.#', '.###.', '##.##', '.###.', '#.#.#'],
+    searching: ['.##..', '#..#.', '.##..', '...#.', '....#'],
+    messaging: ['#####', '##.##', '#.#.#', '#...#', '#####']
+  };
+  /* A small sign over a busy house naming what its own agent is doing. */
+  function actionSign(c, x, y, action) {
+    const icon = ACTION_ICONS[action]; if (!icon) return;
+    const [frame, face, ink] = T.sign;
+    R(c, x, y, 7, 7, frame); R(c, x + 1, y + 1, 5, 5, face);
+    for (let r = 0; r < 5; r++) for (let k = 0; k < 5; k++) if (icon[r][k] === '#') R(c, x + 1 + k, y + 1 + r, 1, 1, ink);
+  }
+
+  /* ---------- Layout ---------- */
+  const LW = 20, LH = 26, RD = 6, DOCK_W = 64;
+  function layout(v) {
+    const n = v.houses.length;
+    const per = Math.max(1, Math.ceil(Math.sqrt(Math.max(n, 1) / 2)));
+    const rows = Math.max(1, Math.ceil(n / (2 * per)));
+    const cx0 = DOCK_W + 8;
+    const vw = Math.max(per * LW * 2 + RD, 72);
+    const roadX = cx0 + Math.floor((vw - RD) / 2);
+    const hallX = roadX + RD / 2 - 16;
+    const top = 60;
+    const lots = [];
+    for (let i = 0; i < rows * 2 * per; i++) {
+      const r = Math.floor(i / (2 * per)), j = i % (2 * per), side = j % 2, pos = Math.floor(j / 2);
+      const x = side === 0 ? roadX - (pos + 1) * LW + 2 : roadX + RD + pos * LW + 2;
+      lots.push({ x, y: top + r * LH, lane: top + r * LH + 18 });
+    }
+    const quayY = top + rows * LH + 4;
+    const canalY = quayY + 8;
+    // Every stop but the last is a lock; the last stop is the castle.
+    const locks = Math.max(0, v.pipeline.stops.length - 1);
+    const lockStart = roadX + 40;
+    const castleX = lockStart + locks * 34 + 6;
+    const W = Math.max(cx0 + vw + 40, roadX + 70, castleX + 46);
+    const H = canalY + 34;
+    const forestX = Math.max(cx0 + vw + 6, hallX + 64);
+    // What's built on: river, docks, plaza, roads, house rows, canal and its
+    // stations. Every free 9×8 cell may get a decoration.
+    const taken = [
+      [0, 0, W, 14], [4, 8, 62, 46], [4, 46, cx0 + vw, 14], [hallX - 10, 4, 74, 46],
+      [roadX - 2, 46, RD + 4, quayY - 40], [roadX - 18, quayY - 12, W, H],
+      [forestX - 2, 12, W, canalY - 46]
+    ];
+    for (let r = 0; r < rows; r++) {
+      const left = roadX - per * LW, right = roadX + RD + per * LW;
+      taken.push([left - 4, top + r * LH - 10, right - left + 8, LH + 4]);
+    }
+    const free = (x, y, w, h) => !taken.some(([tx, ty, tw, th]) => x < tx + tw && x + w > tx && y < ty + th && y + h > ty);
+    // Big free ground grows small groves; what's left gets a few props. The
+    // prop kind drifts slowly across the map, so neighbours form a garden
+    // (flowerbeds together, rocks together) instead of random clutter.
+    const decor = [];
+    for (let y = 16; y < H - 18; y += 15) for (let x = 6; x < W - 16; x += 14) {
+      if (!free(x, y, 14, 15) || hash(x * 7, y * 3) > 0.45) continue;
+      decor.push({ x: x + Math.floor(hash(y, x) * 3), y: y + Math.floor(hash(x, y) * 2), tree: true });
+      taken.push([x, y, 14, 15]);
+    }
+    for (let y = 16; y < H - 10; y += 9) for (let x = 6; x < W - 14; x += 11) {
+      if (!free(x, y, 11, 9) || hash(x * 3, y * 5) > 0.2) continue;
+      const zone = Math.floor(hash(x >> 5, y >> 5) * 6), k = hash(x + 11, y + 7) < 0.7 ? zone : Math.floor(hash(y, x + 3) * 6);
+      decor.push({ x: x + Math.floor(hash(y, x) * 4), y: y + Math.floor(hash(x, y + 1) * 3), k });
+    }
+    return { per, rows, cx0, vw, roadX, hallX, top, lots, quayY, canalY, lockStart, castleX, W, H, decor };
+  }
+
+  /* ---------- State ---------- */
+  const cv = document.getElementById('map'), ctx = cv.getContext('2d');
+  const pick = document.getElementById('pick');
+  let villages = [], worlds = [], view = null;
+  /* One scene per village: its model, layout and the animations in flight.
+   * `current`, `L`, `porters` and `fireworks` hold the scene being drawn
+   * while paint() runs, so the drawing code reads them as before. */
+  const scenes = {};
+  let current = null, L = null, porters = [], fireworks = -1e9;
+  /* Per world: the incidents and landing seen last poll, and crates afloat. */
+  const worldState = {};
+  const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const slotPos = i => ({ x: 10 + (i % 8) * 6, y: 22 + Math.floor(i / 8) * 6 });
+
+  /* Animate crates that moved since the last snapshot. */
+  function diff(old, now, lay, t) {
+    if (!old || old.project !== now.project) return;
+    const oldBacklog = old.backlog.map(c => c.number);
+    now.houses.forEach((h, i) => {
+      const before = old.houses.find(o => o.id === h.id);
+      if (!h.issue || (before && before.issue === h.issue)) return;
+      const slot = oldBacklog.indexOf(h.issue);
+      if (slot < 0) return;
+      const s = slotPos(slot), lot = lay.lots[i];
+      porters.push({ t0: t, speed: 0.05, seed: h.id, kind: (old.backlog[slot] || {}).kind, pr: h.priority,
+        pts: [[s.x + 2, s.y + 6], [s.x + 2, 53], [lay.roadX + 3, 53], [lay.roadX + 3, lot.lane], [lot.x + 8, lot.lane]] });
+    });
+    const oldQuay = new Set(old.pipeline.quay);
+    now.pipeline.quay.forEach(n => {
+      if (oldQuay.has(n)) return;
+      const i = old.houses.findIndex(h => h.issue === n);
+      if (i < 0) return;
+      const lot = lay.lots[now.houses.findIndex(h => h.id === old.houses[i].id)] || lay.lots[i];
+      if (!lot) return;
+      porters.push({ t0: t, speed: 0.05, seed: old.houses[i].id, kind: old.houses[i].kind, pr: old.houses[i].priority, sealed: true, issue: n,
+        pts: [[lot.x + 8, lot.lane], [lay.roadX + 3, lot.lane], [lay.roadX + 3, lay.quayY]] });
+    });
+  }
+  function porterPos(p, t) {
+    let d = (t - p.t0) * p.speed;
+    for (let k = 0; k < p.pts.length - 1; k++) {
+      const [ax, ay] = p.pts[k], [bx, by] = p.pts[k + 1], len = Math.hypot(bx - ax, by - ay);
+      if (d <= len) return [ax + (bx - ax) * d / len, ay + (by - ay) * d / len];
+      d -= len;
+    }
+    return null;
+  }
+
+  function paint(c, t) {
+    const v = current, lay = L;
+    const { W, H, roadX, hallX, lots, quayY, canalY, cx0, vw } = lay;
+    T.ground(c, 0, 0, W, H);
+    if (T.border) T.border(c, W, H);
+    T.channel(c, 0, 0, W, 11, t, 1);
+    T.dock(c, 14, 10, 40);
+    T.yard(c, 6, 18, 56, 34);
+    T.road(c, 4, 50, cx0 + vw - 4, 6);
+    T.road(c, roadX, 50, RD, quayY - 50 + 2);
+    T.yard(c, hallX - 8, 42, 48, 9);
+    for (let r = 0; r < lay.rows; r++) {
+      const left = roadX - lay.per * LW + 2, right = roadX + RD + lay.per * LW - 2;
+      T.road(c, left - 1, lay.top + r * LH + 17, right - left + 2, 4);
+    }
+    T.channel(c, roadX - 16, canalY, W - roadX + 16, 14, t, 0.6);
+    T.dock(c, roadX - 4, quayY + 1, 22);
+
+    for (let x = Math.max(cx0 + vw + 6, hallX + 64); x < W - 14; x += 15) for (let y = 16; y < canalY - 38; y += 16) if (hash(x, y) < 0.55) T.tree(c, x + Math.floor(hash(y, x) * 4), y);
+    lay.decor.forEach(d => d.tree ? T.tree(c, d.x, d.y) : T.decor && T.decor(c, d.x, d.y, d.k, reduce ? 0 : t));
+    shadow(c, hallX - 2, 40, 42, 2);
+
+    T.hall(c, hallX, 18, v.manager.status);
+    T.board(c, hallX + 42, 28, v.board);
+    if (v.manager.status !== 'working' && v.manager.status !== 'stopped') {
+      person(c, hallX + 26, 30, 'manager:' + v.project, v.manager.status === 'blocked' ? waveFrame(t) : 'stand', { mayor: true });
+    }
+    // The manager's sub-agents (a modernize coordinator's specialists) work in the plaza.
+    (v.manager.subagents || []).slice(0, 4).forEach((sa, k) => {
+      const bob = !reduce && blink(t + k * 170, 220) ? -1 : 0;
+      const seed = `manager:${v.project}/${sa.description || k}`, px = hallX - 2 + k * 10 + (reduce ? 0 : wander(sa.action, t, seed));
+      person(c, px, 39 + bob, seed, 'stand', { accent: subHat(sa) });
+      drawAction(c, px, 39 + bob, sa.action, t + k * 131);
+    });
+
+    v.backlog.slice(0, 40).forEach((cr, i) => { const s = slotPos(i); T.crate(c, s.x, s.y, cr.kind, cr.priority); });
+
+    const bubbles = [];
+    if (['blocked', 'done', 'unknown', 'stalled'].includes(v.manager.status)) bubbles.push([hallX + 26, 18, v.manager.status]);
+    v.houses.forEach((h, i) => {
+      const lot = lots[i]; if (!lot) return;
+      const st = h.status, tt = t + i * 311;
+      shadow(c, lot.x + 2, lot.y + 16, 16, 2); shadow(c, lot.x + 16, lot.y + 4, 2, 12);
+      if (st === 'building') T.scaffold(c, lot.x, lot.y, tt);
+      else (T.B[h.kind] || T.B.workshop)(c, lot.x, lot.y, st, reduce ? 0 : tt);
+      pennant(c, lot.x, lot.y, h.priority, tt);
+      if (st === 'stalled') cobwebs(c, lot.x, lot.y);
+      if (st === 'unknown') R(c, lot.x - 1, lot.y - 6, 18, 23, 'rgba(32,34,60,.6)');
+      const away = porters.some(p => p.seed === h.id);
+      if (!away) {
+        if (st === 'idle') person(c, lot.x + 4, lot.y + 9, h.id);
+        if (st === 'done') person(c, lot.x + 4, lot.y + 8, h.id);
+        if (st === 'blocked') person(c, lot.x + 4, lot.y + 10, h.id, waveFrame(t + i * 90));
+      }
+      if (h.crew.length > 1 && st !== 'working') person(c, lot.x + 12, lot.y + 11, h.id + '#crew');
+      if (h.crew.length > 1 && st === 'working' && !reduce) puffs(c, lot.x + 3, lot.y - 3, tt + 700, ...T.steam);
+      // Sub-agents keep the house busy: they work out front, two at most shown.
+      const subs = h.subagents || [];
+      if (subs.length && !reduce) puffs(c, lot.x + 3, lot.y - 3, tt + 400, ...T.steam);
+      // Anyone waiting on a person is shown first, waving.
+      [...subs].sort((a, b) => (b.status === 'blocked') - (a.status === 'blocked')).slice(0, 2).forEach((sa, k) => {
+        const bob = !reduce && blink(t + k * 190, 210) ? -1 : 0;
+        const waiting = sa.status === 'blocked', seed = `${h.id}/${sa.description || k}`;
+        const px = lot.x + (k ? 9 : -1) + (reduce ? 0 : wander(sa.action, t, seed)), py = lot.y + 12 + bob;
+        person(c, px, waiting ? lot.y + 12 : py, seed, waiting ? waveFrame(t + k * 110) : 'stand', { accent: subHat(sa) });
+        if (!waiting) drawAction(c, px, py, sa.action, t + k * 97);
+      });
+      if (st === 'working' && h.action) actionSign(c, lot.x + 4, lot.y - 4, h.action);
+      if (subs.length > 2) R(c, lot.x + 16, lot.y + 13, 2, 2, P.gold);
+      if (ICONS[st]) bubbles.push([lot.x + 4, lot.y - (st === 'blocked' ? 1 : 3) + (st === 'blocked' && blink(t, 200) ? -1 : 0), st, h.attention && !h.attention.reported]);
+    });
+
+    const carried = new Set(porters.filter(p => p.issue).map(p => p.issue));
+    v.pipeline.quay.filter(n => !carried.has(n)).slice(0, 6).forEach((n, k) => T.crate(c, roadX + 6 + (k % 3) * 6, quayY - 3 - Math.floor(k / 3) * 6, 'workshop', null, true));
+
+    // The sentinel's flag is grey while it still has newer work to test.
+    const flagOf = i => i === 0 && v.pipeline.sentinel !== 'green' ? P.stoneD : STOPCOL[i] || P.white;
+    const stops = v.pipeline.stops;
+    stops.slice(0, -1).forEach((s, i) => {
+      const lx = lay.lockStart + i * 34;
+      T.gate(c, lx, canalY, false, flagOf(i));
+      s.issues.slice(0, 4).forEach((n, k) => T.crate(c, lx + 8 + (k % 2) * 6, canalY + 18 + Math.floor(k / 2) * 6, 'workshop', null, true));
+    });
+    T.destination(c, lay.castleX, canalY, t, fireworks);
+    if (stops.length) stops[stops.length - 1].issues.slice(0, 6).forEach((n, k) => T.crate(c, lay.castleX + 6 + (k % 4) * 6, canalY + 18 + Math.floor(k / 4) * 6, 'workshop', null, true));
+
+    porters = porters.filter(p => {
+      const pos = porterPos(p, t);
+      if (!pos) return false;
+      person(c, pos[0] - 4, pos[1] - 11, p.seed, blink(t, 140) ? 'carrystep' : 'carry');
+      T.crate(c, pos[0] - 2, pos[1] - 16, p.kind, p.pr, p.sealed);
+      return true;
+    });
+    bubbles.forEach(([x, y, s, guess]) => { bubble(c, x, y, s); if (guess) for (let k = 0; k < 9; k += 2) { R(c, x + k, y, 1, 1, P.white); R(c, x + k, y + 8, 1, 1, P.white); R(c, x, y + k, 1, 1, P.white); R(c, x + 8, y + k, 1, 1, P.white); } });
+  }
+
+  function drawVillage(c, sc, t) {
+    current = sc.v; L = sc.L; porters = sc.porters; fireworks = sc.fireworks;
+    paint(c, t);
+    sc.porters = porters;
+  }
+
+  /* Fold a new model into its village's scene, starting the animations its
+   * changes call for. */
+  function updateScene(v, t) {
+    const sc = scenes[v.project] || (scenes[v.project] = { v: null, porters: [], fireworks: -1e9, lastDelivered: null });
+    const lay = layout(v);
+    porters = sc.porters;
+    diff(sc.v, v, lay, t);
+    sc.porters = porters;
+    const delivered = v.pipeline.stops.length ? v.pipeline.stops[v.pipeline.stops.length - 1].issues.join(',') : '';
+    if (sc.lastDelivered !== null && sc.v && delivered !== sc.lastDelivered && delivered) sc.fireworks = t;
+    sc.lastDelivered = delivered;
+    sc.v = v; sc.L = lay;
+    return sc;
+  }
+
+  /* ---------- Worlds ----------
+   * A world stacks the platform village (what runs) over the dev village
+   * (what builds it). Issues the platform raises leave the building they
+   * came from and float down the river on the left to the dev village's
+   * docks; releases leave the dev village's harbour and climb the road on
+   * the right to the platform, until its workers run them. The platform is
+   * drawn in the other style, so the two read apart at a glance. */
+  const SIDE = 24, GAP = 28;
+  const otherTheme = () => (T === MEDIEVAL ? MODERN : MEDIEVAL);
+  function worldGeom(Ps, Ds) {
+    const W = Math.max(Ps.L.W, Ds.L.W) + 2 * SIDE, devTop = Ps.L.H + GAP;
+    return { W, H: devTop + Ds.L.H, devTop, srcY: Ps.L.top, roadY: 53 };
+  }
+  function offscreen(sc) {
+    if (!sc.canvas) { sc.canvas = document.createElement('canvas'); sc.cx = sc.canvas.getContext('2d'); }
+    if (sc.canvas.width !== sc.L.W || sc.canvas.height !== sc.L.H) { sc.canvas.width = sc.L.W; sc.canvas.height = sc.L.H; }
+    return sc.cx;
+  }
+  /* A channel that flows down: water in the village, a conveyor road in the district. */
+  function downstream(c, x, y, w, h, t) {
+    const modern = T === MODERN;
+    R(c, x, y, w, h, modern ? M.asphaltD : P.water);
+    R(c, x, y, 1, h, modern ? M.concreteD : P.waterD); R(c, x + w - 1, y, 1, h, modern ? M.concreteD : P.waterD);
+    const off = Math.floor(t / 70) % 8;
+    for (let yy = y - 8 + off; yy < y + h; yy += 8) if (yy >= y) {
+      if (modern) R(c, x + (w >> 1), yy, 1, 4, P.white);
+      else { R(c, x + 3, yy, 1, 2, P.waterL); R(c, x + w - 5, yy + 4, 1, 2, P.waterL); }
+    }
+  }
+  function cart(c, x, y, loads) {
+    const modern = T === MODERN;
+    x = Math.round(x); y = Math.round(y);
+    R(c, x, y, 14, 8, P.o); R(c, x + 1, y + 1, 12, 5, modern ? P.white : P.wood);
+    if (modern) { R(c, x + 10, y - 3, 4, 4, P.o); R(c, x + 11, y - 2, 2, 2, M.glassL); }
+    R(c, x + 2, y + 7, 3, 3, P.o); R(c, x + 9, y + 7, 3, 3, P.o);
+    for (let k = 0; k < Math.min(loads, modern ? 1 : 2); k++) T.crate(c, x + 2 + k * 5, y - 4, 'workshop', null, true);
+  }
+  function updateWorld(w, t) {
+    const st = worldState[w.name] || (worldState[w.name] = { seen: null, floaters: [], landed: undefined, upgradedAt: -1e9 });
+    const now = new Set(w.incidents.map(i => i.number));
+    if (st.seen) w.incidents.forEach(i => { if (!st.seen.has(i.number)) st.floaters.push({ n: i.number, origin: i.origin, t0: t }); });
+    st.seen = now;
+    if (st.landed === false && w.landed === true) {
+      st.upgradedAt = t;
+      if (scenes[w.platform]) scenes[w.platform].fireworks = t;
+    }
+    st.landed = w.landed;
+  }
+  function originPoint(Ps, id) {
+    const i = Ps.v.houses.findIndex(h => h.id === id), lot = i >= 0 ? Ps.L.lots[i] : null;
+    return lot ? [SIDE + lot.x + 8, lot.y + 8] : [12, Ps.L.top - 6];
+  }
+  function drawWorld(t, w) {
+    const Ps = scenes[w.platform], Ds = scenes[w.dev];
+    if (!Ps || !Ps.v || !Ds || !Ds.v) return;
+    const g = worldGeom(Ps, Ds), st = worldState[w.name] || { floaters: [], upgradedAt: -1e9 };
+    if (cv.width !== g.W || cv.height !== g.H) { cv.width = g.W; cv.height = g.H; fit(); }
+    const devTheme = T;
+    T.ground(ctx, 0, 0, g.W, g.H);
+
+    T = otherTheme();
+    T.ground(ctx, 0, 0, g.W, Ps.L.H);
+    drawVillage(offscreen(Ps), Ps, t);
+    ctx.drawImage(Ps.canvas, SIDE, 0);
+    // Platform buildings with an open incident against them are on fire.
+    w.damaged.forEach(id => {
+      const i = Ps.v.houses.findIndex(h => h.id === id), lot = Ps.L.lots[i];
+      if (!lot) return;
+      const x = SIDE + lot.x, y = lot.y;
+      R(ctx, x, y - 1, 16, 17, 'rgba(40,24,24,.35)');
+      for (let k = 0; k < 3; k++) {
+        puffs(ctx, x + 4 + k * 4, y - 6, t + k * 450, '#484858', '#282830');
+        puffs(ctx, x + 5 + k * 4, y - 12, t + k * 450 + 900, '#585870', '#383848');
+      }
+      const f = blink(t, 140) ? 1 : 0;
+      R(ctx, x + 4, y + 2 - f, 3, 3 + f, P.p0); R(ctx, x + 5, y + 1 - f, 1, 2, P.gold);
+      R(ctx, x + 10, y + 3 + f, 3, 3 - f, P.p0); R(ctx, x + 11, y + 2 + f, 1, 2, P.gold);
+    });
+    if (t - st.upgradedAt < 2400) Ps.v.houses.forEach((h, i) => {
+      const lot = Ps.L.lots[i]; if (lot && blink(t + i * 90, 160)) R(ctx, SIDE + lot.x + 2 + (i * 5) % 12, lot.y - 2, 1, 1, P.gold);
+    });
+    T = devTheme;
+
+    drawVillage(offscreen(Ds), Ds, t);
+    ctx.drawImage(Ds.canvas, SIDE, g.devTop);
+
+    // The river down: from the platform's gate to the dev village's river.
+    downstream(ctx, 5, g.srcY, 14, g.devTop + 11 - g.srcY, t);
+    R(ctx, 2, g.srcY - 8, 20, 8, P.o); R(ctx, 3, g.srcY - 7, 18, 6, T === MODERN ? M.concrete : P.stone); R(ctx, 9, g.srcY - 6, 6, 5, P.dark);
+    // The road up: from the dev village's harbour to the platform's main road.
+    const ry = g.devTop + Ds.L.canalY + 4;
+    T.road(ctx, g.W - 20, g.roadY - 3, 16, ry - g.roadY + 9);
+    T.road(ctx, SIDE + Ds.L.castleX + 36, ry, g.W - 20 - (SIDE + Ds.L.castleX + 36), 6);
+    const roadEnd = SIDE + Ps.L.cx0 + Ps.L.vw - 4;
+    T.road(ctx, roadEnd, g.roadY - 3, g.W - 20 - roadEnd, 6);
+
+    // Released work on its way up, until the platform's workers run it.
+    if (w.shipping.length) {
+      const pts = [[SIDE + Ds.L.castleX + 34, ry], [g.W - 12, ry], [g.W - 12, g.roadY], [roadEnd, g.roadY]];
+      const len = pts.slice(1).reduce((n, p, k) => n + Math.hypot(p[0] - pts[k][0], p[1] - pts[k][1]), 0);
+      const d = reduce ? len / 2 : (t / 30) % len;
+      const at = porterPos({ t0: 0, speed: 1, pts }, d) || pts[0];
+      cart(ctx, at[0] - 7, at[1] - 6, w.shipping.length);
+    }
+    // New incidents leave their building and float down to the docks.
+    st.floaters = st.floaters.filter(f => {
+      const [ox, oy] = originPoint(Ps, f.origin);
+      const pts = [[ox, oy], [12, oy], [12, g.devTop + 6], [SIDE + 30, g.devTop + 6]];
+      const at = porterPos({ t0: f.t0, speed: 0.04, pts }, t);
+      if (!at) return false;
+      T.crate(ctx, at[0] - 2, at[1] - 2, 'bug', 'P0');
+      return true;
+    });
+  }
+
+  /* ---------- Panels ---------- */
+  function renderFlow(v) {
+    if (v.plane === 'runtime') return renderRuntimeFlow(v);
+    const stops = v.pipeline.stops;
+    const working = v.houses.filter(h => h.status === 'working').length;
+    const items = [
+      [T.labels.docks, 'backlog', v.backlog.length],
+      [T.labels.board, 'blocked · proposals', v.board.length],
+      [T.labels.houses, `${working} of ${v.houses.length} working`, v.houses.filter(h => h.issue).length],
+      ['Sub-agents', 'running in sessions', [v.manager, ...v.houses].reduce((n, h) => n + (h.subagents || []).length, 0)],
+      [T.labels.quay, `pushed to ${v.pipeline.integration || 'integration'}`, v.pipeline.quay.length],
+      ...stops.map((s, i) => [i === stops.length - 1 ? `${T.labels.castle} · ${s.name}` : s.name, i === 0 ? `sentinel: ${v.pipeline.sentinel}` : 'environment', s.issues.length])
+    ];
+    document.getElementById('flow').innerHTML = items.map(([l, s, n], i) =>
+      `<div class="step"><b>${n}</b><span>${esc(l)}<br>${esc(s)}</span></div>`).join('');
+  }
+  /* Runtime villages (Temporal, AgentEx, ...) count workstreams and agents, not issues and pushes. */
+  function renderRuntimeFlow(v) {
+    const count = st => v.houses.filter(h => h.status === st).length;
+    const shipped = v.pipeline.stops.reduce((n, s) => n + s.issues.length, 0);
+    const items = [
+      [T.labels.houses, 'top-level workstreams', v.houses.length],
+      ['Working', 'workstreams busy', count('working')],
+      ['Waiting on you', 'an agent asked a person', count('blocked')],
+      ['Retrying', 'activity failing', count('stalled')],
+      ['Agents', 'working for workstreams', v.houses.reduce((n, h) => n + (h.subagents || []).length, 0)],
+      ['Workers', v.manager.status === 'stalled' ? 'a task queue has none' : 'polling task queues', (v.manager.subagents || []).length],
+      [T.labels.board, 'failed in 24h', v.board.filter(n => n.label === 'failed').length],
+      [T.labels.castle, 'completed in 24h', shipped]
+    ];
+    document.getElementById('flow').innerHTML = items.map(([l, s, n]) =>
+      `<div class="step"><b>${n}</b><span>${esc(l)}<br>${esc(s)}</span></div>`).join('');
+  }
+  /* World counters follow the loop: raised, being fixed, released, running. */
+  function renderWorldFlow(w) {
+    const Ds = scenes[w.dev], Ps = scenes[w.platform];
+    const open = w.incidents.filter(i => !i.in_progress).length, fixing = w.incidents.length - open;
+    const short = s => (s ? s.slice(0, 7) : '—');
+    const landed = w.landed === null ? 'platform reports no build IDs' : w.landed ? 'running on the platform' : 'rolling out';
+    const items = [
+      ['Incidents', 'raised by the platform', open],
+      ['Being fixed', `claimed in ${w.dev}`, fixing],
+      ['Dev village', 'houses working', Ds && Ds.v ? Ds.v.houses.filter(h => h.status === 'working').length : 0],
+      ['Shipping', 'released, not yet running', w.shipping.length],
+      ['Release', landed, short(w.release)],
+      ['Platform', 'workstreams busy', Ps && Ps.v ? Ps.v.houses.filter(h => h.status === 'working').length : 0],
+      ['Platform builds', 'reported by workers', w.platform_builds.map(short).join(' ') || '—']
+    ];
+    document.getElementById('flow').innerHTML = items.map(([l, s, n]) =>
+      `<div class="step"><b>${esc(n)}</b><span>${esc(l)}<br>${esc(s)}</span></div>`).join('');
+  }
+  const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+
+  const dialog = document.getElementById('dialog');
+  document.getElementById('close').addEventListener('click', () => { dialog.hidden = true; });
+  /* Drill in: each link opens the tool behind the picture (the agent's session,
+   * its issue, its workflow) in a new tab. */
+  function links(list) {
+    document.getElementById('d-links').innerHTML = (list || [])
+      .map(l => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)} ↗</a>`).join('');
+  }
+  /* The notice board and the docks list their issues, each linked. */
+  function showList(title, sub, items) {
+    document.getElementById('d-title').textContent = title;
+    document.getElementById('d-line').textContent = sub;
+    document.getElementById('d-meta').innerHTML = items.length
+      ? `<ul>${items.slice(0, 40).map(i => `<li>${i.url ? `<a href="${esc(i.url)}" target="_blank" rel="noopener">#${i.number}</a>` : '#' + i.number} ${esc(i.title)}${i.label ? ' · ' + esc(i.label) : ''}${i.priority ? ' · ' + esc(i.priority) : ''}</li>`).join('')}</ul>`
+      : 'Nothing here.';
+    ask({});
+    links([]);
+    dialog.hidden = false;
+  }
+  /* A structured question the agent is waiting on (a numbered menu or y/n):
+   * one button per option. The server checks the same question is still on
+   * screen before it types the answer; anything open-ended goes through the
+   * agent's session link instead. */
+  function ask(house) {
+    const box = document.getElementById('d-q'), q = house.question;
+    if (!q || !house.answer_url) { box.innerHTML = ''; return; }
+    box.innerHTML = `<p class="q">${esc(q.prompt)}</p><div class="opts">${q.options.map((o, i) =>
+      `<button data-opt="${i}">${q.kind === 'menu' ? esc(o.key) + '. ' : ''}${esc(o.label)}</button>`).join('')}</div><p class="dim" id="d-q-msg" role="status"></p>`;
+    const buttons = [...box.querySelectorAll('[data-opt]')], msg = document.getElementById('d-q-msg');
+    const busy = on => buttons.forEach(b => { b.disabled = on; });
+    buttons.forEach(b => b.addEventListener('click', async () => {
+      busy(true); msg.textContent = 'Sending…';
+      try {
+        const res = await fetch(house.answer_url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: q.prompt, option: Number(b.dataset.opt) }) });
+        const body = await res.json().catch(() => ({}));
+        if (res.ok) { msg.textContent = `Answered: ${body.answered || b.textContent}`; setTimeout(() => { dialog.hidden = true; }, 1200); return; }
+        msg.textContent = res.status === 403 ? 'This dashboard is read-only: answer in the agent session.' : (body.error || `Could not answer (${res.status})`);
+      } catch (e) { msg.textContent = "Can't reach agents-tui."; }
+      busy(false);
+    }));
+  }
+  const escH = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+  function show(house, isManager, v, theme) {
+    const a = house.attention, why = document.getElementById('d-why');
+    const who = `${v.project} · ${isManager ? theme.labels.hall : house.role}`;
+    document.getElementById('d-title').textContent = a ? `Why ${who} needs you` : who;
+    document.getElementById('d-line').textContent = house.issue ? `#${house.issue} ${house.issue_title || ''}` : (house.issue_title || 'No issue claimed');
+    document.getElementById('d-meta').textContent = house.last_known ? `State unknown: ${v.unreachable.source} unreachable since ${v.unreachable.since} · last known: ${house.last_known}` : `Status: ${house.status}${house.priority ? ' · ' + house.priority : ''}`;
+    why.innerHTML = a ? `<p>${a.reported ? '<span class="tag">Reported</span> by the source itself, not guessed' : '<span class="tag guess">Guessed from screen</span> this may be wrong'}</p>
+      <dl><dt>Source</dt><dd>${a.reported ? escH(a.source) + ' reports <code>' + escH(a.state) + '</code>' : 'None. Matched ' + escH(a.state)}</dd>
+      ${house.question ? '' : `<dt>What it asked</dt><dd><code>${escH(a.ask)}</code></dd>`}
+      <dt>Waiting since</dt><dd>${escH(a.since)} · ${escH(a.wait)}</dd>
+      <dt>Other sources</dt><dd>${a.reported ? '✓ ' : ''}${escH(a.agree)}</dd></dl>
+      ${a.hint ? `<p class="dim">${escH(a.hint)}</p>` : ''}
+      ` : '';
+    ask(house);
+    links(house.links);
+    dialog.hidden = false;
+    document.getElementById('d-title').focus();
+  }
+  /* Signs over the houses that need you, placed from the scene's layout. */
+  function placeSigns() {
+    const box = document.getElementById('signs'); box.innerHTML = '';
+    const banner = document.getElementById('banner');
+    if (!view || !view.village) { banner.hidden = true; return; }
+    const sc = scenes[view.village]; if (!sc || !sc.v) return;
+    const v = sc.v, r = cv.getBoundingClientRect(), vr = document.getElementById('viewport').getBoundingClientRect(), s = r.width / cv.width;
+    banner.hidden = !v.unreachable;
+    if (v.unreachable) banner.innerHTML = `<b>${escH(v.unreachable.source)} can't be reached</b> since ${escH(v.unreachable.since)}. ${escH(v.project)}'s houses are in fog: their states are unknown. Select a house for its last known state.`;
+    const put = (h, x, y, isManager) => {
+      const a = h.attention; if (!a && !h.last_known) return;
+      const b = document.createElement('button');
+      b.className = 'sign' + (a ? (a.reported ? '' : ' guess') : ' lost');
+      b.innerHTML = a ? `${escH(a.source)} · ${escH(a.wait)}` : '?';
+      b.setAttribute('aria-label', a ? `${h.role} needs you: ${a.reported ? 'reported by' : 'guessed from'} ${a.source}, waiting ${a.wait}. Show why.` : `${h.role}: state unknown. Show last known.`);
+      b.style.left = (r.left - vr.left + x * s) + 'px'; b.style.top = (r.top - vr.top + y * s) + 'px';
+      b.onclick = () => show(h, isManager, v, T);
+      box.appendChild(b);
+    };
+    v.houses.forEach((h, i) => { const lot = sc.L.lots[i]; if (lot) put(h, lot.x + 8, lot.y - 6, false); });
+    put(v.manager, sc.L.hallX + 16, 12, true);
+  }
+  function hit(sc, x, y, theme) {
+    const lay = sc.L, v = sc.v;
+    if (x >= lay.hallX - 4 && x < lay.hallX + 36 && y >= 6 && y < 42) return show(v.manager, true, v, theme);
+    if (x >= lay.hallX + 42 && x < lay.hallX + 60 && y >= 28 && y < 44) return showList(theme.labels.board, v.plane === 'runtime' ? 'Failed in the last 24 hours' : 'Blocked issues and proposals waiting on you', v.board);
+    if (x >= 6 && x < 62 && y >= 8 && y < 52) return showList(theme.labels.docks, v.plane === 'runtime' ? 'Waiting work' : 'The backlog, highest priority first', v.backlog);
+    const i = lay.lots.findIndex((lot, k) => k < v.houses.length && x >= lot.x && x < lot.x + 16 && y >= lot.y - 4 && y < lot.y + 21);
+    if (i >= 0) show(v.houses[i], false, v, theme);
+  }
+  cv.addEventListener('click', e => {
+    if (!view) return;
+    const r = cv.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width * cv.width, y = (e.clientY - r.top) / r.height * cv.height;
+    if (!view.world) { const sc = scenes[view.village]; if (sc && sc.v) hit(sc, x, y, T); return; }
+    const w = worlds.find(x => x.name === view.world), Ps = w && scenes[w.platform], Ds = w && scenes[w.dev];
+    if (!Ps || !Ds || !Ps.v || !Ds.v) return;
+    const g = worldGeom(Ps, Ds);
+    if (y < Ps.L.H) hit(Ps, x - SIDE, y, otherTheme());
+    else if (y >= g.devTop) hit(Ds, x - SIDE, y - g.devTop, T);
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') dialog.hidden = true; });
+
+  /* ---------- Data ---------- */
+  function fit() {
+    const vp = document.getElementById('viewport'), W = cv.width, H = cv.height;
+    const s = Math.max(1, Math.min(8, Math.floor((vp.clientWidth - 8) / W), Math.floor((window.innerHeight - 190) / H) || 1));
+    cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
+  }
+  window.addEventListener('resize', () => { fit(); placeSigns(); });
+  window.addEventListener('proto-refresh', poll);
+  window.addEventListener('hashchange', () => { dialog.hidden = true; const n = decodeURIComponent(location.hash.slice(1)); if ([...pick.options].some(o => o.value === n)) pick.value = n; });
+  document.querySelectorAll('[data-demo]').forEach(b => b.addEventListener('click', () => { protoScenario = b.dataset.demo; dialog.hidden = true; location.hash = b.dataset.at; poll(); }));
+
+  /* `· autocoder · development`, `· agentex · runtime`: which framework drew it, and which half of the loop it is. */
+  function describe(v) {
+    const fw = v.workflow || v.framework;
+    return [fw, v.plane].filter(Boolean).map(x => '· ' + x).join(' ');
+  }
+  /* Show a village (`shop`) or a world (`world:shop`). */
+  function select(name) {
+    const w = worlds.find(x => x.name === name);
+    const v = villages.find(x => x.project === name);
+    if (w) view = { world: w.name };
+    else if (v || villages[0]) view = { village: (v || villages[0]).project };
+    else return;
+    if (view.world) {
+      document.getElementById('workflow').textContent = `· ${w.dev} builds ${w.platform}`;
+      renderWorldFlow(w);
+    } else {
+      const sc = scenes[view.village];
+      document.getElementById('workflow').textContent = describe(sc.v);
+      if (cv.width !== sc.L.W || cv.height !== sc.L.H) { cv.width = sc.L.W; cv.height = sc.L.H; }
+      renderFlow(sc.v);
+    }
+    fit();
+    if (reduce) draw(0);
+    requestAnimationFrame(placeSigns);
+  }
+  function draw(t) {
+    if (!view) return;
+    ctx.imageSmoothingEnabled = false;
+    if (view.world) { const w = worlds.find(x => x.name === view.world); if (w) drawWorld(t, w); return; }
+    const sc = scenes[view.village];
+    if (sc && sc.v) drawVillage(ctx, sc, t);
+  }
+  const themePick = document.getElementById('theme');
+  themePick.value = themeName;
+  themePick.addEventListener('change', () => {
+    themeName = themePick.value; T = THEMES[themeName];
+    try { localStorage.setItem('village-theme', themeName); } catch {}
+    if (view) select(view.world || view.village);
+  });
+  pick.addEventListener('change', () => { location.hash = pick.value; select(pick.value); });
+  window.addEventListener('hashchange', () => select(decodeURIComponent(location.hash.slice(1))));
+
+  async function poll() {
+    try {
+      const res = await fetch('/api/village');
+      if (!res.ok) throw new Error(res.status);
+      const data = await res.json();
+      villages = data.villages || [];
+      worlds = data.worlds || [];
+      const t = performance.now();
+      villages.forEach(v => updateScene(v, t));
+      worlds.forEach(w => updateWorld(w, t));
+      const names = [...worlds.map(w => w.name), ...villages.map(v => v.project)];
+      const label = n => { const w = worlds.find(x => x.name === n); return w ? `${w.dev} \u21c4 ${w.platform}` : n; };
+      pick.hidden = names.length < 2;
+      if (pick.options.length !== names.length || [...pick.options].some((o, i) => o.value !== names[i])) {
+        pick.innerHTML = names.map(n => `<option value="${esc(n)}">${esc(label(n))}</option>`).join('');
+      }
+      const want = decodeURIComponent(location.hash.slice(1)) || (view && (view.world || view.village)) || names[0];
+      if (names.includes(want)) pick.value = want;
+      document.getElementById('empty').hidden = villages.length > 0;
+      cv.hidden = villages.length === 0;
+      if (!villages.length) document.getElementById('empty').textContent = 'No swarms running. Start one from the dashboard or the agents-tui terminal.';
+      else select(pick.value || names[0]);
+      document.getElementById('status').textContent = 'Live · updated ' + new Date().toLocaleTimeString();
+    } catch (e) {
+      document.getElementById('status').textContent = "Can't reach agents-tui. Retrying…";
+    }
+  }
+  poll();
+
+  if (!reduce) {
+    const loop = t => { draw(t); requestAnimationFrame(loop); };
+    requestAnimationFrame(loop);
+  }
+})();
+</script>
+</body>
+</html>
