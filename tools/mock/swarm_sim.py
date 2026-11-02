@@ -25,6 +25,14 @@ in "shop" naming the workstream that failed.
 
     swarm_sim.py --dir DEMO setup     # create repos (idempotent)
     swarm_sim.py --dir DEMO run       # play it out, forever
+    swarm_sim.py --dir DEMO --story run   # the incident story: one bug, start to finish
+
+With --story the demo tells one story cleanly: an incident from the platform
+becomes a P0 bug, a worker fixes it (asking once for permission on the way),
+it lands and stays open as awaiting-integration (as autocoder parks it) until
+a prod release contains the fix; then it closes, and state/fixed names that
+release so the platform can stop failing on it. No red builds, a quieter
+backlog.
 """
 
 import argparse
@@ -36,6 +44,7 @@ import time
 from pathlib import Path
 
 SWARMS = [("shop", 5, "autocoder"), ("billing", 2, "modernize")]
+STORY = False
 LABELS = [["bug", "P1"], ["bug", "P0"], ["enhancement", "P2"], ["test-failure", "P1"], ["security", "P0"],
           ["documentation", "P3"], ["performance", "P2"], ["refactor", "P3"], ["enhancement", "P1"],
           ["bug", "P2"], ["dependencies", "P3"]]
@@ -120,7 +129,7 @@ class Swarm:
                             "opened": time.time()})
 
     def claimable(self):
-        blocking = {"needs-design", "needs-clarification", "needs-approval", "too-complex", "proposal", "working"}
+        blocking = {"needs-design", "needs-clarification", "needs-approval", "too-complex", "proposal", "working", "awaiting-integration"}
         rank = lambda i: next((int(l[1]) for l in i["labels"] if len(l) == 2 and l[0] == "P"), 9)
         return sorted((i for i in self.issues if not blocking & set(i["labels"])), key=lambda i: (rank(i), i["number"]))
 
@@ -142,7 +151,7 @@ class Swarm:
     def tick(self, t):
         if t >= self.next_arrival:
             self.new_issue()
-            self.next_arrival = t + random.uniform(10, 22)
+            self.next_arrival = t + (random.uniform(40, 60) if STORY else random.uniform(10, 22))
         for issue in self.issues:
             # Blocked issues get approved after a while.
             if t - issue["opened"] > 45 and {"needs-design", "needs-clarification", "proposal"} & set(issue["labels"]):
@@ -168,6 +177,9 @@ class Swarm:
                 issue["labels"].append("working")
                 w.update(issue=issue["number"], status="working", until=t + random.uniform(25, 45), next_tool=0)
                 w["block_at"] = t + random.uniform(8, 15) if random.random() < 0.3 else 0
+                if "incident" in issue["labels"]:
+                    # The story's fix: half a minute, with one stop to ask for permission.
+                    w.update(until=t + 32, block_at=t + 9)
                 git(w["path"], "checkout", "-q", "-B", f"feature/issue-{issue['number']}")
                 pool = MODERNIZE_SUBAGENTS if self.workflow == "modernize" else AUTOCODER_SUBAGENTS
                 w["subagents"] = [(f"w{w['i']}x{issue['number']}{k}", kind) for k, kind in enumerate(random.sample(pool, random.randint(0, 2)))]
@@ -198,7 +210,13 @@ class Swarm:
         sha = git(self.repo, "rev-parse", "HEAD")
         git(self.repo, "push", "-q", "origin", "master", f"{sha}:refs/autocoder/tips/master/{sha}-{n}")
         git(self.repo, "fetch", "-q", "origin")
-        self.issues = [i for i in self.issues if i["number"] != n]
+        issue = next((i for i in self.issues if i["number"] == n), None)
+        if issue and "incident" in issue["labels"]:
+            # Landed, not yet shipped: parked until a prod release carries it.
+            issue["labels"] = [l for l in issue["labels"] if l != "working"] + ["awaiting-integration"]
+            issue["fix"] = sha
+        else:
+            self.issues = [i for i in self.issues if i["number"] != n]
 
     def sentinel(self, red):
         if not red:
@@ -215,6 +233,12 @@ class Swarm:
         sha = git(self.repo, "rev-parse", "refs/remotes/origin/env/prod")
         self.state.mkdir(parents=True, exist_ok=True)
         (self.state / "release").write_text(sha + "\n")
+        # Parked incidents whose fix this release carries are shipped: close them.
+        for issue in [i for i in self.issues if i.get("fix")]:
+            shipped = subprocess.run(["git", "merge-base", "--is-ancestor", issue["fix"], sha], cwd=self.repo, env=GIT_ENV).returncode == 0
+            if shipped:
+                self.issues.remove(issue)
+                (self.state / "fixed").write_text(sha + "\n")
 
     def file_incidents(self, offset):
         """New lines from the platform's incident file become incident issues."""
@@ -233,7 +257,7 @@ class Swarm:
                 continue
             self.next_issue_no += 1
             self.issues.append({"number": self.next_issue_no, "title": f"{inc['type']} {inc['id']} failed: {inc['reason']}",
-                                "labels": ["incident", "bug", "P1"], "opened": time.time()})
+                                "labels": ["incident", "bug", "P0" if STORY else "P1"], "opened": time.time()})
         return offset
 
     # -- what the shims serve -----------------------------------------------
@@ -261,8 +285,11 @@ def main():
     ap.add_argument("--dir", required=True, type=Path)
     ap.add_argument("--home", type=Path, help="HOME whose ~/.claude gets transcripts (default <dir>/home)")
     ap.add_argument("--seed", type=int)
+    ap.add_argument("--story", action="store_true", help="tell the incident story cleanly (see the module docstring)")
     ap.add_argument("command", choices=["setup", "run"])
     args = ap.parse_args()
+    global STORY
+    STORY = args.story
     if args.seed is not None:
         random.seed(args.seed)
     root = args.dir.resolve()
@@ -273,8 +300,10 @@ def main():
     if args.command == "setup":
         return
     for s in swarms:
-        for _ in range(8):
+        for _ in range(3 if STORY else 8):
             s.new_issue()
+        if STORY:
+            s.next_arrival = time.time() + 60
     swarms[0].write_release()
     incident_offset = 0
     print(f"simulating {', '.join(s.name for s in swarms)} in {root}", flush=True)
@@ -284,7 +313,7 @@ def main():
         for s in swarms:
             s.tick(t)
         incident_offset = swarms[0].file_incidents(incident_offset)
-        if t >= next_red:
+        if t >= next_red and not STORY:
             red_until, next_red = t + 25, t + random.uniform(150, 240)
         if t >= next_green:
             for s in swarms:

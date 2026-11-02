@@ -16,8 +16,15 @@ tunnel to it: `ssh -L 7878:localhost:7878 swarm-host`.
 
 ## Try it without agents
 
-Watch a recording first: `python3 tools/mock/replay-build.py tools/mock/recordings/demo.json.gz replay.html`
-builds a self-contained page that replays six minutes of the demo, with Temporal or Kubernetes as the runtime.
+Watch a recording first. `python3 tools/mock/replay-build.py <recording> replay.html`
+builds a self-contained page that replays it through the real renderer:
+
+- `tools/mock/recordings/demo.json.gz`: six minutes of the demo, with Temporal or Kubernetes as the runtime.
+- `tools/mock/recordings/story.json.gz`: one bug from start to finish, with captions. A crash
+  loop in the prod cluster files an incident; a worker in the dev village fixes it (stopping
+  once to ask permission); the fix lands, goes green, then staging, then prod; the cluster rolls
+  out the new image and the crash stops. Record a new one with `STORY=1 RUNTIME=k8s tools/mock/demo.sh`
+  and `tools/mock/record.py`.
 
 ```bash
 tools/mock/demo.sh          # then open http://127.0.0.1:7878/village

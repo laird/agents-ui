@@ -12,6 +12,12 @@ CronJob, on three nodes, and things go wrong the way they do in a cluster:
   * a scale-up leaves a pod unschedulable until it gives up;
   * a node goes NotReady and comes back; a node is cordoned for a while;
   * the CronJob starts a Job every 40 s; now and then one fails.
+
+With --story it tells the incident story cleanly instead: 30 s in, the
+agent-worker pods on the running image start crash-looping (a bug in that
+release), and 15 s later the crash loop files one incident; every image released before the fix keeps
+crashing, and pods only recover once they run the release that carries the
+fix (named in <dir>/state/fixed by the swarm simulator). No other failures.
 """
 import argparse
 import json
@@ -36,8 +42,14 @@ def h(s):
 
 
 class Cluster:
-    def __init__(self, release_file, incident_file):
+    def __init__(self, release_file, incident_file, story=False, fixed_file=None):
         self.release_file, self.incident_file = release_file, incident_file
+        self.story, self.fixed_file = story, fixed_file
+        self.tags = []  # every tag seen, in order
+        self.bug_from = None  # the story's broken tag: it and later ones crash, until the fixed one
+        self.fixed_tag = None
+        self.story_at = time.time() + 30
+        self.story_filed = False
         self.tag, self.old_tag = "1f2e3d4c5b6a", None
         self.pods = {}  # name -> dict
         self.serial = 0
@@ -71,15 +83,46 @@ class Cluster:
             return
         if sha and sha != self.tag:
             self.old_tag, self.tag = self.tag, sha
+        if self.tag not in self.tags:
+            self.tags.append(self.tag)
 
     def incident(self, workload, pod, reason):
         if self.incident_file:
             with open(self.incident_file, "a") as f:
                 f.write(json.dumps({"type": workload, "id": pod, "reason": reason}) + "\n")
 
+    def story_crashing(self, p):
+        """In the story, agent-worker pods built from the broken image up to the fix crash-loop."""
+        if not self.story or self.bug_from is None or p["workload"] != "agent-worker":
+            return False
+        order = {tag: i for i, tag in enumerate(self.tags)}
+        i = order.get(p["tag"], 0)
+        broken = i >= order[self.bug_from] and (self.fixed_tag is None or i < order.get(self.fixed_tag, 10**9))
+        return broken and not p["deleting"]
+
     def tick(self):
         t = time.time()
         self.read_release()
+        if self.story:
+            if self.bug_from is None and t > self.story_at:
+                self.bug_from = self.tag
+            # The incident is filed once the crash loop has gone on for a while.
+            if self.bug_from is not None and not self.story_filed and t > self.story_at + 15:
+                self.story_filed = True
+                victim = next((p for p in self.pods.values() if p["workload"] == "agent-worker"), None)
+                self.incident("agent-worker", victim["name"] if victim else "agent-worker",
+                              "CrashLoopBackOff: refund handler panics on an empty basket")
+            if self.fixed_tag is None and self.fixed_file:
+                try:
+                    sha = open(self.fixed_file).read().strip()[:12]
+                    self.fixed_tag = sha or None
+                    if sha and sha not in self.tags:
+                        self.tags.append(sha)
+                except OSError:
+                    pass
+            for p in self.pods.values():
+                if self.story_crashing(p) and random.random() < 0.15:
+                    p["restarts"] += 1
         # Rolling update: one old pod per workload at a time, every 4 s.
         for name, kind, n in WORKLOADS:
             mine = [p for p in self.pods.values() if p["workload"] == name and not p["deleting"]]
@@ -93,7 +136,7 @@ class Cluster:
             if p["deleting"] and t - p["deleting"] > 3:
                 del self.pods[p["name"]]
         # A crash loop.
-        if not self.crash and t > self.next["crash"]:
+        if not self.crash and t > self.next["crash"] and not self.story:
             victims = [p for p in self.pods.values() if p["workload"] == "agent-worker" and not p["deleting"]]
             if victims:
                 v = random.choice(victims)
@@ -107,17 +150,17 @@ class Cluster:
             elif random.random() < 0.15:
                 pod["restarts"] += 1
         # A scale-up that doesn't fit.
-        if not self.pending and t > self.next["pending"]:
+        if not self.pending and t > self.next["pending"] and not self.story:
             self.pending = (self.add_pod("web", "Deployment", unschedulable=True), t + 20)
         if self.pending and t > self.pending[1]:
             self.pods.pop(self.pending[0], None)
             self.pending, self.next["pending"] = None, t + random.uniform(60, 100)
         # Nodes.
-        if not self.node_down and t > self.next["node"]:
+        if not self.node_down and t > self.next["node"] and not self.story:
             self.node_down = ("node-c", t + 18)
         if self.node_down and t > self.node_down[1]:
             self.node_down, self.next["node"] = None, t + random.uniform(90, 140)
-        if not self.cordoned and t > self.next["cordon"]:
+        if not self.cordoned and t > self.next["cordon"] and not self.story:
             self.cordoned = ("node-b", t + 25)
         if self.cordoned and t > self.cordoned[1]:
             self.cordoned, self.next["cordon"] = None, t + random.uniform(120, 180)
@@ -143,7 +186,7 @@ class Cluster:
             status = {"phase": "Pending", "conditions": [{"type": "PodScheduled", "status": "False", "reason": "Unschedulable",
                                                           "message": "0/3 nodes are available: 3 Insufficient memory."}]}
             cs = None
-        elif self.crash and self.crash[0] == p["name"]:
+        elif (self.crash and self.crash[0] == p["name"]) or self.story_crashing(p):
             cs.update(ready=False, state={"waiting": {"reason": "CrashLoopBackOff"}}, lastState={"terminated": {"reason": "OOMKilled"}})
         elif t < p["ready_at"]:
             status["phase"] = "Pending"
@@ -158,7 +201,7 @@ class Cluster:
         items = []
         for name, kind, n in WORKLOADS:
             mine = [p for p in self.pods.values() if p["workload"] == name and not p["deleting"] and not p["unschedulable"]]
-            ready = sum(1 for p in mine if t >= p["ready_at"] and not (self.crash and self.crash[0] == p["name"]))
+            ready = sum(1 for p in mine if t >= p["ready_at"] and not (self.crash and self.crash[0] == p["name"]) and not self.story_crashing(p))
             updated = sum(1 for p in mine if p["tag"] == self.tag)
             want = n + (1 if name == "web" and self.pending else 0)
             items.append({"kind": kind, "metadata": {"name": name, "namespace": NS}, "spec": {"replicas": want},
@@ -192,12 +235,13 @@ def main():
     ap.add_argument("--release-file")
     ap.add_argument("--incident-file")
     ap.add_argument("--seed", type=int)
+    ap.add_argument("--story", action="store_true", help="tell the incident story cleanly (see the module docstring)")
     args = ap.parse_args()
     if args.seed is not None:
         random.seed(args.seed)
     out = os.path.join(args.dir, "state", "k8s")
     os.makedirs(out, exist_ok=True)
-    c = Cluster(args.release_file, args.incident_file)
+    c = Cluster(args.release_file, args.incident_file, args.story, os.path.join(args.dir, "state", "fixed"))
     while True:
         c.tick()
         for fname, data in (("workloads.json", c.workloads_json()), ("nodes.json", c.nodes_json())):

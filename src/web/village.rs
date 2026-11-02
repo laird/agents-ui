@@ -29,8 +29,12 @@ use super::source::{ActivitySource, IssueTracker, PipelineSource, Reading, TtlCa
 use super::{AgentSnapshot, IssueSnapshot, SwarmSnapshot};
 use crate::transport::ServerTransport;
 
-/// How long fetched issues and pipeline refs are reused before refetching.
-const EXTRAS_TTL: Duration = Duration::from_secs(45);
+/// How long fetched issues and pipeline refs are reused before refetching:
+/// 45 s, or `AGENTS_UI_VILLAGE_REFRESH_SECS` (the demo uses 3 so a story
+/// plays out in step).
+fn extras_ttl() -> Duration {
+    std::env::var("AGENTS_UI_VILLAGE_REFRESH_SECS").ok().and_then(|s| s.parse().ok()).map(Duration::from_secs).unwrap_or(Duration::from_secs(45))
+}
 
 /// Commits of history searched when placing a pushed tip on a pipeline stop.
 const HISTORY_DEPTH: usize = 400;
@@ -673,7 +677,7 @@ pub struct SwarmVillages {
 
 impl SwarmVillages {
     pub fn new(issues: Box<dyn IssueTracker>, pipeline: Box<dyn PipelineSource>, activity: Box<dyn ActivitySource>) -> Self {
-        Self { issues, pipeline, activity, extras: TtlCache::new(EXTRAS_TTL) }
+        Self { issues, pipeline, activity, extras: TtlCache::new(extras_ttl()) }
     }
 
     async fn village(&self, transport: &ServerTransport, swarm: &SwarmSnapshot) -> Reading {

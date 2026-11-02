@@ -15,6 +15,7 @@
 #
 #   tools/mock/demo.sh                 # then open http://127.0.0.1:7878/village
 #   RUNTIME=k8s tools/mock/demo.sh     # the platform as a simulated Kubernetes namespace instead of Temporal
+#   STORY=1 RUNTIME=k8s tools/mock/demo.sh   # one incident from the cluster, fixed and released
 #   PORT=8080 tools/mock/demo.sh
 #   tools/mock/demo.sh --source issues=none   # extra flags go to agents-tui
 #
@@ -29,6 +30,8 @@ PORT=${PORT:-7878}
 TEMPORAL_PORT=${TEMPORAL_PORT:-7243}
 DEMO=${AGENTS_UI_DEMO_DIR:-$(mktemp -d -t agents-ui-demo.XXXXXX)}
 export AGENTS_UI_DEMO_DIR=$DEMO
+# Simulated repos are local and cheap to read: refresh issues and the pipeline every 3 s, not 45.
+export AGENTS_UI_VILLAGE_REFRESH_SECS=${AGENTS_UI_VILLAGE_REFRESH_SECS:-3}
 BIN=${AGENTS_TUI:-$ROOT/target/debug/agents-tui}
 if [ ! -x "$BIN" ]; then (cd "$ROOT" && cargo build); fi
 
@@ -37,11 +40,13 @@ cleanup() { kill "${pids[@]}" 2>/dev/null || true; wait 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
 
 python3 "$HERE/swarm_sim.py" --dir "$DEMO" setup
-python3 "$HERE/swarm_sim.py" --dir "$DEMO" run & pids+=($!)
+# STORY=1: one incident, start to finish (see swarm_sim.py and k8s_sim.py).
+story=(); [ -n "${STORY:-}" ] && story=(--story)
+python3 "$HERE/swarm_sim.py" --dir "$DEMO" "${story[@]}" run & pids+=($!)
 # One runtime source at a time: Temporal, or a Kubernetes namespace.
 RUNTIME=${RUNTIME:-temporal}
 if [ "$RUNTIME" = k8s ]; then
-  python3 "$HERE/k8s_sim.py" --dir "$DEMO" \
+  python3 "$HERE/k8s_sim.py" --dir "$DEMO" "${story[@]}" \
     --release-file "$DEMO/state/release" --incident-file "$DEMO/state/incidents.jsonl" & pids+=($!)
   runtime=(--runtime k8s:sim/shop-prod --world shop=k8s:shop-prod)
   platform=k8s:shop-prod

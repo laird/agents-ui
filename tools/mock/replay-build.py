@@ -28,11 +28,63 @@ for run in frames.values():
             for item in v["backlog"] + v["board"]:
                 item.pop("url", None)
 
+# A story recording (tools/mock/demo.sh with STORY=1) gets captions: each
+# frame's step, worked out from the frames themselves and never going back.
+STEPS = [
+    ("Quiet", "The shop swarm works its backlog. The app runs on a Kubernetes namespace, at the top."),
+    ("Crash", "In prod, agent-worker pods start crash-looping. Its house waves for attention."),
+    ("Incident", "The crash files incident #{n}. A crate floats down the river to the dev village."),
+    ("Fix", "{who} claims #{n} as a P0 and starts the fix."),
+    ("Ask", "{who} stops to ask for permission, and waves at you."),
+    ("Resume", "{who} has its answer and carries on with the fix."),
+    ("Landed", "The fix lands on master and waits at the quay."),
+    ("Green", "The sentinel tests master: its lock turns green."),
+    ("Staging", "Promoted to staging."),
+    ("Prod", "Released to prod. A cart carries the release up the road to the cluster."),
+    ("Fixed", "The cluster runs the fix. Agent-worker is healthy again and incident #{n} is closed."),
+]
+
+def story_captions(run):
+    out, stage, n, who = [], 0, None, "A worker"
+    for f in run:
+        dev = next((v for v in f["villages"] if v["plane"] == "development"), None)
+        plat = next((v for v in f["villages"] if v["plane"] == "runtime"), None)
+        world = (f["worlds"] or [{}])[0]
+        incidents = world.get("incidents", [])
+        if n is None and incidents:
+            n = incidents[0]["number"]
+        crashing = plat and any(h["role"] == "agent-worker" and h["status"] == "blocked" for h in plat["houses"])
+        house = next((h for h in dev["houses"] if n and h["issue"] == n), None) if dev else None
+        if house:
+            who = house["role"]
+        stops = {s["name"]: s["issues"] for s in dev["pipeline"]["stops"]} if dev else {}
+        now = 0
+        if crashing:
+            now = 1
+        if n:
+            now = 2
+        if house:
+            now = 4 if house["status"] == "blocked" else (5 if stage >= 4 else 3)
+        if n and dev and n in dev["pipeline"]["quay"]:
+            now = 6
+        if n and any(n in i for name, i in stops.items() if name.endswith("green")):
+            now = 7
+        if n and n in stops.get("staging", []):
+            now = 8
+        if n and n in stops.get("prod", []):
+            now = 10 if not crashing and world.get("landed") else 9
+        stage = max(stage, now)
+        title, text = STEPS[stage]
+        out.append({"step": stage, "title": title, "text": text.format(n=n or "?", who=who)})
+    return out
+
+captions = {k: story_captions(v) for k, v in frames.items() if k == "story"}
+
 src = (ROOT / "src/web/village.html").read_text()
 head = src[src.index("<head>") + 6:src.index("</head>")]
 body = src[src.index("<body>") + 6:src.index("</body>")]
 head = head.replace('<meta charset="utf-8">', "").replace('<meta name="viewport" content="width=device-width, initial-scale=1">', "")
-head = head.replace("<title>Worktree Hollow</title>", '<title>Worktree Hollow Simulation</title>\n<meta name="claude:viewport-fit-sides" content="cover">')
+head = head.replace("<title>Worktree Hollow</title>", '<title>' + ("Bug to Fix in Prod" if captions else "Worktree Hollow Simulation") + '</title>\n<meta name="claude:viewport-fit-sides" content="cover">')
 
 def must(old, new, where):
     assert old in where, old[:60]
@@ -40,6 +92,7 @@ def must(old, new, where):
 
 css = """
   :root { color-scheme: dark; }
+  [hidden] { display: none !important; }
   body { padding-block: 12px 24px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
   .player { max-width: 1400px; margin: 0 auto 10px; display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; padding: 10px 12px; }
   .player .seg { display: inline-flex; border: 2px solid var(--win-inner); border-radius: 4px; overflow: hidden; }
@@ -49,6 +102,12 @@ css = """
   .player input[type=range] { flex: 1 1 180px; min-width: 0; accent-color: var(--gold); }
   .player .clock { font: 13px var(--mono); color: var(--ink-dim); font-variant-numeric: tabular-nums; }
   .player .about { flex-basis: 100%; font: 13px/1.5 var(--sans); color: var(--ink-dim); margin: 0; }
+  .story { flex-basis: 100%; display: grid; gap: 8px; }
+  .steps { display: flex; flex-wrap: wrap; gap: 4px; list-style: none; margin: 0; padding: 0; }
+  .steps li { font: 700 11px var(--mono); color: var(--ink-dim); border: 2px solid var(--rule); border-radius: 4px; padding: 2px 7px; }
+  .steps li.done { color: var(--ink); border-color: var(--win-inner); }
+  .steps li.now { color: #241400; background: var(--gold); border-color: var(--gold); }
+  .caption { font: 700 16px/1.4 var(--mono); color: var(--gold); margin: 0; min-height: 2.8em; }
 """
 head = must("</style>", css + "</style>", head)
 
@@ -66,7 +125,8 @@ player = """
     </span>
     <input id="scrub" type="range" min="0" value="0" aria-label="Position in the recording">
     <span class="clock" id="clock">0:00 / 0:00</span>
-    <p class="about">Six minutes of agents-tui driven by its simulators: a coding swarm (the dev village) builds the app, and the app runs on Temporal or on a Kubernetes namespace. Failures raise incidents that float down to the swarm; releases ride up to the platform. Pick <b>shop ⇄</b> to see both, or one village alone.</p>
+    <div class="story" id="story" hidden><ol class="steps" id="steps"></ol><p class="caption" id="caption" aria-live="polite"></p></div>
+    <p class="about" id="about">Six minutes of agents-tui driven by its simulators: a coding swarm (the dev village) builds the app, and the app runs on Temporal or on a Kubernetes namespace. Failures raise incidents that float down to the swarm; releases ride up to the platform. Pick <b>shop ⇄</b> to see both, or one village alone.</p>
   </div>
 """
 body = must('  <div class="win stage">', player + '  <div class="win stage">', body)
@@ -76,7 +136,8 @@ replay_js = """<script type="application/json" id="recording">""" + json.dumps(f
 <script>
 /* Replay: the village asks /api/village every few seconds; answer with the next recorded snapshot. */
 const REC = JSON.parse(document.getElementById('recording').textContent);
-const replay = { run: 'temporal', i: 0, playing: true, speed: 1 };
+const CAPTIONS = """ + json.dumps(captions) + """;
+const replay = { run: REC.temporal ? 'temporal' : Object.keys(REC)[0], i: 0, playing: true, speed: 1 };
 window.__pollMs = 3000;
 window.fetch = async () => {
   const frames = REC[replay.run];
@@ -95,6 +156,24 @@ controls = """
   const scrub = document.getElementById('scrub'), clock = document.getElementById('clock'), play = document.getElementById('play');
   const showClock = () => { const n = REC[replay.run].length; scrub.max = n - 1; scrub.value = replay.i; clock.textContent = `${fmt(replay.i)} / ${fmt(n)}`; };
   window.addEventListener('replay-tick', showClock);
+  // A story recording: one run, captions instead of the runtime choice.
+  if (CAPTIONS[replay.run]) {
+    document.querySelector('[aria-label="Runtime"]').hidden = true;
+    document.getElementById('story').hidden = false;
+    document.getElementById('about').textContent = 'One bug from start to finish, recorded from agents-tui and its simulators: the app crashes in prod (the cluster, top), the dev village (below) fixes it, and the fix ships back up.';
+    const steps = document.getElementById('steps'), caption = document.getElementById('caption');
+    const titles = [...new Set(CAPTIONS[replay.run].map(c => c.step))].sort((a, b) => a - b);
+    const names = {}; CAPTIONS[replay.run].forEach(c => { names[c.step] = c.title; });
+    steps.innerHTML = titles.map(s => `<li data-step="${s}">${s}. ${names[s]}</li>`).join('');
+    const showCaption = () => {
+      const c = CAPTIONS[replay.run][Math.max(0, replay.i - 1)] || CAPTIONS[replay.run][0];
+      caption.textContent = c.text;
+      steps.querySelectorAll('li').forEach(li => { const s = Number(li.dataset.step); li.className = s === c.step ? 'now' : s < c.step ? 'done' : ''; });
+    };
+    window.addEventListener('replay-tick', showCaption);
+    scrub.addEventListener('input', showCaption);
+    showCaption();
+  }
   const press = (sel, on) => document.querySelectorAll(sel).forEach(b => b.setAttribute('aria-pressed', String(on(b))));
   document.querySelectorAll('[data-run]').forEach(b => b.addEventListener('click', () => {
     replay.run = b.dataset.run; replay.i = 0; press('[data-run]', x => x === b);
