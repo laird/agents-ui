@@ -1,0 +1,11 @@
+url: https://docs.github.com/en/rest/deployments/deployments
+rung: 6 (official; allowed by the PM for run 2, D-007)
+accessed: 2026-11-02
+truncated: yes (the fetch tool returned selected sentences, quoted)
+
+- "Deployments are requests to deploy a specific ref (branch, SHA, tag)."
+- "The ref parameter can be any named branch, tag, or SHA." Response schema: ref (required string), sha (required string), environment (required string), created_at (required date-time), statuses_url (required URI).
+- "The environment parameter allows deployments to be issued to different runtime environments."
+- GET /repos/{owner}/{repo}/deployments: "Simple filtering of deployments is available via query parameters." environment: "The name of the environment that was deployed to (e.g., staging or production)." sha: "The SHA recorded at creation time."
+- Deployment statuses: "error, failure, pending, in_progress, queued, or success"; inactive is documented separately.
+- "When you set the state of a deployment to success, then all prior non-transient" deployments in the same environment become inactive, unless auto_inactive is set to false.

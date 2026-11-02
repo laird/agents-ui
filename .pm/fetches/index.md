@@ -30,3 +30,5 @@ F-027 · https://hn.algolia.com/api/v1/search?query=%22what%27s%20in%20productio
 F-028 · https://lemmy.world/api/v3/search?q=sub-issues&type_=Posts&sort=TopAll&limit=10 · rung 2 · accessed 2026-11-02 · run 2
 F-029 · https://hn.algolia.com/api/v1/search?query=%22github%20deployments%22%20environment&tags=comment&hitsPerPage=10 · rung 2 · accessed 2026-11-02 · run 2 · counter-evidence, theme B: tools that already show what is deployed where
 F-030 · https://hn.algolia.com/api/v1/search?query=%22feature%20flags%22%20%22no%20staging%22&tags=comment&hitsPerPage=10 · rung 2 · accessed 2026-11-02 · run 2 · counter-evidence, theme C: teams that skip staging and UAT
+F-031 · https://docs.github.com/en/rest/deployments/deployments · rung 6 · accessed 2026-11-02 · run 2 · PM allowed official sources (D-007) · SIG-030
+F-032 · https://docs.github.com/en/rest/issues/sub-issues · rung 6 · accessed 2026-11-02 · run 2 · PM allowed official sources (D-007) · SIG-031

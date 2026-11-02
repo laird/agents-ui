@@ -1,0 +1,10 @@
+url: https://docs.github.com/en/rest/issues/sub-issues
+rung: 6 (official; allowed by the PM for run 2, D-007)
+accessed: 2026-11-02
+truncated: yes (the fetch tool returned selected sentences, quoted)
+
+- "Use the REST API to view, add, remove, and reprioritize sub-issues."
+- GET /repos/{owner}/{repo}/issues/{issue_number}/parent: "You can use the REST API to get the parent issue of a sub-issue."
+- GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues: "You can use the REST API to list the sub-issues on an issue."
+- POST .../sub_issues, DELETE .../sub_issue, PATCH .../sub_issues/priority (add, remove, reprioritize).
+- Issue responses include sub_issues_summary ("Sub-issues Summary"): "total: required, integer", "completed: required, integer", "percent_completed: required, integer".

@@ -112,6 +112,13 @@ decisions:
     pm_decided: "Confirm"
     reason: "A new feature is a high level task, often broken into subtracts to get build, then when all subtracts are done, the whole thing gets validated and deployed."
     at: "2026-11-02T04:06:00Z"
+  - id: D-007
+    stage: discovery
+    checkin: research-check
+    claude_recommended: "Continue to drafting opportunities."
+    pm_decided: "Yes (to folding GitHub's own SDLC data into Scout, with one official-source check of GitHub's Deployments and sub-issues docs)"
+    reason: "not given; the PM's question was: Can the SDLC be monitored for projects in gh?"
+    at: "2026-11-02T04:14:00Z"
 notes:
   - "Sources: PM ticked Community only; rungs 3 to 7 dropped. PM named herdr, claude-squad, Claude Code's own agent views and laird/agents; added as rung 1 community sources (issue pages)."
   - "GitHub API refused for repositories other than laird/agents-ui from this cloud machine; neighbouring tools are read through their public HTML issue pages."

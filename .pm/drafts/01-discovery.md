@@ -6,7 +6,7 @@
 | Product · focus area | agents-ui · feature-to-production (run 2; run 1 archived in outputs/attention-and-answering/) |
 | User you design for · your brief | Tech lead · Know when a feature is live |
 | Code snapshot | laird/agents-ui @ e4422c5 (read in place, working tree clean; moved on from run 1's 0019fe8) |
-| Research window | 2026-11-02T03:59Z to (open) · fetches 15/20 · searches 0/8 |
+| Research window | 2026-11-02T03:59Z to (open) · fetches 17/20 · searches 0/8 |
 | Chosen opportunity | (pending priority check-in) |
 | Evidence review | (pending) |
 | Run summary | (written at close) |
@@ -59,18 +59,18 @@ teams on Jira or Linear (no source read), and anyone running a UAT sign-off by h
 
 ### OPP-004: Features as one thing in the village
 - For: tech lead · Job: see where each feature stands at a glance, not just its parts
-- Supported by: SIG-017, SIG-018, SIG-019, SIG-020, SIG-021, SIG-022 · CON-006, CON-007, CON-008
+- Supported by: SIG-017, SIG-018, SIG-019, SIG-020, SIG-021, SIG-022, SIG-031 · CON-006, CON-007, CON-008
 - In their words: QUO-011, QUO-013, QUO-017
-- Evidence: 6 signals, 2 source types · strongest: 69-vote GitHub discussion (SIG-017) · counter-evidence: SIG-028 (sub-issues as "endless discussions", looked F-024) · constraints: CON-006, CON-007, CON-008 hurt
+- Evidence: 7 signals, 3 source types · strongest: 69-vote GitHub discussion (SIG-017) · counter-evidence: SIG-028 (sub-issues as "endless discussions", looked F-024) · constraints: CON-006, CON-007, CON-008 hurt; SIG-031 helps (GitHub already counts a parent's completed sub-issues)
 - Evidence strength: good, across GitHub discussions, the swarm's own maintainer, Hacker News and Lemmy / user impact: high, it changes what the picture is about / fit with the brief: indirect, a prerequisite for knowing when a feature is live / delivery constraints: parent and child aren't in the model at all; autocoder records them only as labels / uncertainty: whether the picture should group a feature's houses together or draw the feature as its own object
 - Exclusions check: tested against all seven case exclusions: no install, build or test command run (none); paid or feature-flagged functionality (none); billing or seats (none); third-party key or OAuth integrations (reads GitHub sub-issues through the PM's own signed-in gh, allowed in D-003); legal or compliance claims (none); PM: billing and paid tiers (none); PM: third-party key integrations (as above)
 
 ### OPP-005: "Live" per feature and per environment
 - For: tech lead · Job: know, without asking anyone, that a whole feature has reached production
-- Supported by: SIG-022, SIG-023, SIG-024, SIG-025 · CON-009, CON-010
+- Supported by: SIG-022, SIG-023, SIG-024, SIG-025, SIG-030 · CON-009, CON-010
 - In their words: QUO-012, QUO-014, QUO-016
-- Evidence: 4 signals, 1 source type · strongest: a 2024 Hacker News comment (SIG-023; points not shown) · counter-evidence: looked (F-029), none · constraints: CON-009 hurts, CON-010 helps
-- Evidence strength: moderate, concentrated in one kind of source / user impact: high, it is the brief / fit with the brief: direct / delivery constraints: worlds already match a release to the platform's builds (CON-009) and environments are already generic (CON-010), but a feature's subtasks are not linked (CON-007) / uncertainty: what "live" means with feature flags (SIG-026)
+- Evidence: 5 signals, 2 source types · strongest: a 2024 Hacker News comment (SIG-023; points not shown) · counter-evidence: looked (F-029), none · constraints: CON-009 hurts, CON-010 helps; SIG-030 helps (GitHub records which sha reached which environment)
+- Evidence strength: moderate; the demand is concentrated in one kind of source, and GitHub's own documentation shows the data exists (SIG-030) / user impact: high, it is the brief / fit with the brief: direct / delivery constraints: worlds already match a release to the platform's builds (CON-009) and environments are already generic (CON-010), but a feature's subtasks are not linked (CON-007); teams deploying through GitHub Environments record the sha per environment, others need the image-tag or build-ID match / uncertainty: what "live" means with feature flags (SIG-026)
 - Exclusions check: tested against all seven case exclusions: none triggered beyond the gh read already allowed (D-003)
 
 ### OPP-006: Validate the whole feature before production
@@ -88,7 +88,7 @@ teams on Jira or Linear (no source read), and anyone running a UAT sign-off by h
 |---|---|---|---|---|
 | Customer or community signals | 3 | 12 Evidence | GitHub discussions and issues (rung 1), Hacker News, Lemmy (rung 2) | people managing work in GitHub; the swarm's maintainer; engineers and tool builders |
 | Market or competitor observations | 2 | 1 (SIG-017: GitHub's own hierarchy view), no adoption or Wayback number | GitHub community | what a vendor chooses to ship |
-| Official product or release signal | 1 | 0 (official sources dropped by the PM in run 1) | none | none |
+| Official product or release signal | 1 | 2 (SIG-030, SIG-031; PM allowed official sources for run 2, D-007) | GitHub REST documentation (rung 6) | the maker's own framing |
 | Repository constraints | 2 | 5 | agents-ui source at e4422c5 | the code |
 
 Queries used:
@@ -96,7 +96,7 @@ Queries used:
 - GitHub: community discussions `sub-issues progress` (top); laird/agents issues `decompose`
 - Lemmy posts: `sub-issues`
 
-Sources reached: GitHub community discussions, laird/agents issues, Hacker News, Lemmy. Empty
+Sources reached: GitHub community discussions, laird/agents issues, Hacker News, Lemmy, and (D-007) GitHub's REST documentation for Deployments and sub-issues. Empty
 or off-topic: three Hacker News queries (F-016 empty; F-017, F-025 off-topic). The fetch tool
 returns summaries, not text, for GitHub pages (F-019 to F-023), so their claims are logged but
 not quotable. Dropped by the PM (run 1): app reviews, numbers and competitors, official and search.
@@ -105,14 +105,14 @@ Triangulation:
 | Theme | Forum, GitHub | Lemmy, Mastodon, HN | Reviews | Numbers, competitors, official | Recurrence | Same crowd? | Counter-evidence |
 |---|---|---|---|---|---|---|---|
 | A. A feature is a tree | SIG-017, SIG-018, SIG-019 | SIG-020, SIG-021, SIG-022 | none | none | recurring | partly: GitHub Projects users and agent builders differ | SIG-028, looked (F-024); GitHub shipped sub-issues and hierarchy view (SIG-017) |
-| B. What is live where | none | SIG-022, SIG-023, SIG-024, SIG-025 | none | none | concentrated (one rung) | yes | looked (F-029), none |
+| B. What is live where | none | SIG-022, SIG-023, SIG-024, SIG-025 | none | SIG-030 (official: the data exists) | concentrated (demand in one rung; the official rung shows supply, not demand) | yes | looked (F-029), none |
 | C. Validate the whole | SIG-019 | SIG-022, SIG-029 | none | none | recurring, sources disagree | no | SIG-026, looked (F-030) |
 
 Gaps:
 - GAP: GitHub page text, fetch tool returns summaries only (F-019 to F-023): claims logged, no quotes.
 - GAP: three Hacker News queries empty or off-topic (F-016, F-017, F-025).
 - GAP: Jira and Linear users, product managers, UAT owners: no source read.
-- GAP: official sources (GitHub docs on sub-issues and deployments): dropped by the PM.
+- Official sources: GitHub's Deployments and sub-issues docs read with the PM's permission for this run (D-007); nothing else official.
 
 Contradictions:
 - SIG-019 and SIG-022 (validate or soak the whole before production) against SIG-026 (no staging environment; feature flags gate the rollout instead).
@@ -228,6 +228,18 @@ SIG-027 · Inference (listing) · customer/community · GitHub community discuss
   Weight: 93 upvotes, 999 comments shown on the listing
   Saved: F-019
 
+SIG-030 · Evidence · official · GitHub REST docs, Deployments (rung 6, allowed by the PM for this run, D-007)
+  Claim: a GitHub deployment records the ref, the exact sha, the environment (e.g. staging or production) and when it was created; deployments can be listed by environment or by sha; statuses run error, failure, pending, in_progress, queued, success, and a success marks earlier deployments to that environment inactive.
+  Source: https://docs.github.com/en/rest/deployments/deployments · accessed 2026-11-02
+  Weight: official documentation
+  Saved: F-031
+
+SIG-031 · Evidence · official · GitHub REST docs, sub-issues (rung 6, allowed by the PM for this run, D-007)
+  Claim: sub-issues can be listed for a parent and the parent found for a sub-issue; every issue carries a sub_issues_summary with total, completed and percent_completed.
+  Source: https://docs.github.com/en/rest/issues/sub-issues · accessed 2026-11-02
+  Weight: official documentation
+  Saved: F-032
+
 SIG-028 · Evidence · customer/community · Hacker News comment (rung 2) · counter-evidence
   Claim: sub-issues invite endless debate about whether to use subtasks or sub-issues.
   Source: https://news.ycombinator.com/item?id=42755748 · published 2025-01-19 · accessed 2026-11-02
@@ -286,6 +298,6 @@ CON-010 · Constraint · repository · Status: to confirm with engineering
 | Check-in | Recommendation | Your decision | Reason |
 |---|---|---|---|
 | Case check (run 2) | Confirm the focus area and plan | Confirm | "A new feature is a high level task, often broken into subtracts to get build, then when all subtracts are done, the whole thing gets validated and deployed." |
-| Research check | | | |
+| Research check | Continue to opportunities | Fold GitHub's own SDLC data into the brief, with one official check | "Yes" (to folding it in and checking GitHub's documentation) |
 | Evidence review (only if a finding needed your call) | | | |
 | Priority check | | | |
