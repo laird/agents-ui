@@ -47,30 +47,34 @@ sources:
     clean_at_end: true
 
 stage:
-  current: discovery
-  status: provisional
+  current: prototype
+  status: in-progress
 
 stages:
   discovery:
-    status: provisional
-    chosen: OPP-005
-    closed_at: "2026-11-02T04:40:00Z"
+    status: approved
+    approved_at: "2026-11-02T04:40:00Z"
+    selected_opportunity: OPP-005
+    provisional: true
+    review: outputs/01-discovery-review.md
     output: outputs/01-discovery.md
     started_at: "2026-11-02T03:59:32Z"
-    revision: 1
+    revision: 2
     lane_run: 2
     previous_lane: "attention-and-answering (approved OPP-003, archived in outputs/attention-and-answering/)"
     fetches: .pm/fetches
   prototype:
-    status: stale
+    status: in-progress
     output: outputs/02-prototype.md
     html: outputs/prototype/index.html
-    path: html-fallback
+    path: null
     brief: .pm/design-brief.md
+    started_at: "2026-11-05T16:27:05Z"
+    lane_run: 2
     revision: 0
     approved_at: null
     summary: null
-stale: [prototype]
+stale: []
 decisions:
   - id: D-001
     stage: discovery
