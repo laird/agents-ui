@@ -1,76 +1,93 @@
-# Prototype notes: agents-ui · Attention and answering
+# Prototype notes: agents-ui · A feature from spec to production
 
 | Field | Value |
 |---|---|
 | Status | draft |
-| Based on | outputs/01-discovery.md rev 1 · OPP-003 |
-| Path used | HTML fallback, on the product's own village renderer (Claude Design available, but its export would land outside this cloud session; PM chose HTML) |
+| Started | 2026-11-05T16:27:05Z |
+| Based on | outputs/01-discovery.md rev 2 · OPP-005 (provisional) |
+| Path used | (step 5) |
 | File | outputs/prototype/index.html |
 | Surface · viewport | desktop web · 1440×900 |
 | Run summary | (written at close) |
 
 ## 1. Actor, job, and user story
-- Actor: solo developer · Job: believe the "needs you" marker
-- As a solo developer, when an agent is marked as needing me, I want to see which source reported it, what it asked and since when, so that I trust the marker and open the right agent.
+- Actor: the tech lead running the swarm · Job: "Is feature X live in production yet, and if not, where is it?"
+- As a tech lead, when a feature's spec has been broken into subtasks for the swarm, I want to follow the whole feature through dev, UAT and production so that I know it is live without asking anyone, and see where it is stuck when it is not.
 
 ## 2. Approved flow and states
-- Starts when / ends when: a worker card turns amber with "Needs you" / the developer knows why and opens the agent's session
-- Main path: 1. Dashboard card "Needs you · herdr · 3 min". 2. Why panel: source, the ask, since, agreement. 3. Solid "Reported" badge. 4. Open agent.
-- Alternate state A (error): Source unreachable: grey card, "State unknown · herdr unreachable since 14:05", last known state faded, Retry and Open agent anyway.
-- Alternate state B (recovery): Guess only: dashed "Guessed from screen" badge with the matched line and its age.
+- Starts when / ends when: the feature's spec arrives as a parent issue / the whole feature is marked "Live in prod"
+- Main path:
+  1. Spec: "Saved carts" (#460) arrives as a banner with a spec scroll, split into 4 subtasks (#461 to #464).
+  2. Follow: the tech lead clicks the banner; a trail links it to its subtasks; a strip reads Spec, Build 0/4, Dev, UAT, Prod.
+  3. Build: workers claim and land the subtasks; Build counts to 4/4.
+  4. Validate and promote: all landed and green, the feature moves as one barge through the dev lock, then the UAT lock, then the castle (prod).
+  5. Live: prod runs a release containing all 4; the banner reads "Live in prod".
+- Alternate state A (error, Stuck): #463 needs design; red pennant on the banner, the trail leads to the waving worker, the strip reads "Build 3/4: #463 needs design".
+- Alternate state B (loading, Can't tell): no deployment record for UAT; the UAT lock is fogged with "?", the strip reads "UAT: unknown", not "not live".
+- PM's answers in step 1: actor "Tech lead: is it live?"; start and end "Spec to 'live'" (reason: "Whole lifecycle"); main action, in the PM's words: "I want to view the overall flow from spec to feature in prod, or bug report to fix in prod." Narrowed to one flow: "Feature: spec to prod"; states "Can't tell" and "Stuck".
 
 ## 3. Linked discovery evidence
 | Flow element | Evidence or constraint |
 |---|---|
-| Source named on every marker (Reported vs Guessed) | SIG-007, SIG-013, CON-003 |
-| Waiting time on the marker | SIG-009 (stale "Ready for input" alerts) |
-| Agreement line (other sources agree) | SIG-006, SIG-011 (herdr detection works for some, guessing for others) |
-| Source unreachable state | CON-001 (Temporal and herdr reach alerts differently), SIG-003 |
-| Guess only state | CON-003 (tmux detection is a fixed phrase list) |
+| The feature as one banner with its subtasks | SIG-022, SIG-031 · CON-006, CON-007 |
+| Strip: Spec, Build n/4, Dev, UAT, Prod | SIG-023, SIG-033 |
+| Promotion through locks per environment | SIG-032, SIG-034 · CON-010 |
+| "Live in prod" from what prod runs | SIG-030 · CON-009 |
+| Can't tell (unknown, not false) | SIG-024, SIG-030 |
+| Stuck (blocked subtask holds the feature) | SIG-018, SIG-034 · CON-008 |
 
 ## 4. Scope boundaries
-- In: the dashboard marker, the Why panel, opening the agent, the two states.
-- Out: answering from the alert, notifications, the single waiting list (OPP-001), alert-and-answer (OPP-002), the village view, settings.
+- In: one feature from spec to live; its subtasks; the integration gate; dev, UAT and prod; the two states.
+- Out: attention and answering (run 1); the bug-to-fix loop (already the story replay; the PM asked for it, kept for another run); approving or promoting (not a console); launching swarms; writing specs; billing; third-party keys.
 
 ## 5. Design brief
 <details>
 <summary>Design brief as used to build the prototype</summary>
 
-#### Design brief: agents-ui · Attention and answering
+#### Design brief: agents-ui · A feature from spec to production
 
 ##### Context
-- Product: agents-ui, one place to launch, watch and supervise swarms of AI coding agents (terminal UI, web dashboard, village view).
-- Persona: Solo developer · Mandate: Never miss a blocked agent
-- Selected opportunity: OPP-003: make the "needs you" marker trustworthy by showing the state each source reports itself, not a guess from screen text.
-- Discovery evidence this flow answers: SIG-007 (silence can't tell waiting from thinking), SIG-013 (hook-based alerts miss some prompts), SIG-003 (notifications through tmux broke and were patched), SIG-009 (stale "Ready for input" alerts flood people with many sessions), CON-003 (tmux waiting is a fixed phrase list).
+- Product: agents-ui watches swarms of AI coding agents, drawn as a 16-bit village.
+- Persona: Tech lead · Mandate: Know when a feature is live
+- Selected opportunity: OPP-005: "Live" per feature and per environment: know, without asking anyone, that a whole feature has reached production.
+- Discovery evidence this flow answers: SIG-023 ("what's in production" is hard across environments), SIG-033 ("done" means many things), SIG-022 (environment state lives nowhere), SIG-030 (GitHub records the sha per environment), CON-007, CON-009.
 
 ##### The flow
-- Actor: solo developer running two swarms (shop, billing)
-- Job: "Tell me which agent really needs me, and why, so I can believe the marker."
-- Starts when: a worker card on the dashboard turns amber with "Needs you"
-- Ends when: the developer knows which source reported it, what the agent asked and since when, and opens that agent's session
-- Main action: Open agent
-- Main path: 1. Dashboard: worker-2 in shop reads "Needs you · herdr · 3 min". 2. Select the marker: a "Why" panel opens with four facts: source ("herdr reports blocked"), the ask ("Allow `npm publish`? (y/n)"), since (14:02), agreement ("Screen also shows a prompt"). 3. A solid "Reported" badge marks a state the source reported itself. 4. Select "Open agent": the agent's session view opens, prompt visible, ready to answer.
-- Alternate state A (error): Source unreachable. herdr can't be read: the card goes grey, "State unknown · herdr unreachable since 14:05", last known state shown faded, with "Retry" and "Open agent anyway".
-- Alternate state B (recovery): Guess only. No reported state: a dashed "Guessed from screen" badge, the matched line ("Allow? (y/n)" seen 40 s ago), and a note that it may be wrong.
+- Actor: the tech lead running the swarm
+- Job: "Is feature X live in production yet, and if not, where is it?"
+- Starts when: a feature's spec arrives as a parent issue
+- Ends when: the whole feature is marked "Live in prod"
+- Main action: follow one feature through the village by its banner
+- Main path:
+  1. Spec: "Saved carts" (#460) arrives as a banner with a spec scroll, split into 4 subtask crates (#461 to #464).
+  2. Follow: the tech lead clicks the banner. A trail links it to its subtasks; a strip reads Spec, Build 0/4, Dev, UAT, Prod.
+  3. Build: workers claim the subtasks; each lands on the canal; Build counts to 4/4.
+  4. Promote: all 4 landed and green, the feature moves as one barge through the dev lock, the UAT lock, then the castle (prod).
+  5. Live: prod runs a release containing all 4; the banner reads "Live in prod".
+- Alternate state A (error, Stuck): #463 is blocked (needs design). Red pennant on the banner, trail to the worker waving "!", strip reads "Build 3/4: #463 needs design".
+- Alternate state B (loading, Can't tell): no deployment record for UAT. The UAT lock is fogged with "?"; strip reads "UAT: unknown", not "not live".
 
 ##### Surface
-- Surface: desktop web · Viewport: 1440×900
-- Screens: Dashboard (swarm cards), Why panel (side panel over the dashboard), Agent session view
+- Surface: desktop web
+- Viewport: 1440×900
+- Screens: village with the feature banner; feature followed (trail and strip); stuck; can't tell; live
 
 ##### Look and feel
-- Follow the dashboard's dark theme: background #0d1117, surface #161b22, card #21262d, border #30363d, accent #58a6ff, text #e6edf3, dim #8b949e, warning #d29922, error #f85149, radius 6px, system sans font.
-- Swarm cards with a header, path line and one coloured dot per agent; amber dot = waiting; pill badges; uppercase panel headers.
-- Repository references read (paths, pinned commit 0019fe8): src/web/ui.html lines 9 to 22 (tokens), 129 to 190 (cards, badges), 335 to 360 (panels), 455 to 467 (agent dots).
-- Public UI references: https://primer.style (GitHub's dark palette the dashboard follows)
-- Deliberate departures from the current UI: a source badge (Reported, solid / Guessed, dashed) and a waiting-time label on every marker; a Why side panel.
+- Follow the product's established patterns:
+  - pixel-art village canvas, medieval or modern theme;
+  - orange "!" and a waving arm when an agent needs a person;
+  - canal with one lock per environment, castle last;
+  - counters strip above the canvas; dialog with link buttons.
+- Repository references read (pinned e4422c5): src/web/village.html, docs/village.md.
+- Public UI references: https://github.com/maxjendrall/herdr
+- Deliberate departures: a feature banner and trail (the product has no feature object, CON-007); a per-feature strip; a fogged lock for unknown.
 
 ##### Data
-- All names, records, images, and media are synthetic. Placeholder imagery: neutral blocks or simple shapes.
-- Example records: Larkspur Labs; swarm "shop" (manager, worker-1 working #41, worker-2 waiting via herdr, worker-3 idle); swarm "billing" (worker-1 guessed waiting from screen, worker-2 working); Temporal app "support" (run refund-8812 waiting_for_human 6 min).
+- All names and records are synthetic (Larkspur Labs, repository `shop`). Placeholder imagery: the village's own pixel art.
+- Example records: #460 Saved carts with #461 cart table, #462 save on logout, #463 restore banner, #464 tests; worker-1 to worker-4; environments dev, uat, prod; release 3f9c2a1.
 
 ##### Out of scope
-- Answering from the alert, notifications, the single waiting list (OPP-001, OPP-002), launching swarms, the village view, settings.
+- Attention and answering, the bug-to-fix loop, approving or promoting, launching swarms, spec authoring, billing, third-party keys.
 
 ##### Output contract
 - One standalone file at `outputs/prototype/index.html`
@@ -84,50 +101,9 @@
 ## 6. Repository UI references
 | What | Path at pinned commit | Used for |
 |---|---|---|
-| Colour, radius and shadow tokens | src/web/ui.html lines 9 to 22 (Verified) | page palette |
-| Swarm cards and pill badges | src/web/ui.html lines 129 to 190 (Verified) | dashboard cards, badges |
-| Panels with uppercase headers | src/web/ui.html lines 335 to 360 (Verified) | Why panel |
-| Agent dots (amber = waiting) | src/web/ui.html lines 455 to 467 (Verified) | agent markers |
-
-## 7. Where the prototype differs from the product UI
-- Built on the product's own village renderer (`src/web/village.html`, the Worktree Hollow page), fed with synthetic data instead of `/api/village`; regenerate with `python3 .pm/prototype-build.py outputs/prototype/index.html` (deliberate).
-- A sign over each house that needs you names who reported it and how long it has waited: solid gold for reported ("herdr · 3 min", "Temporal · 6 min"), dashed for guessed ("screen guess · 40 s"); the product shows an orange "!" with no source (deliberate).
-- A guessed wait also gets a dashed rim on its "!" bubble (deliberate).
-- Selecting a sign or a house opens a "Why" dialog: source, what it asked, since when, other sources, with Open agent; the product's dialog shows only issue and status (deliberate).
-- An unreachable source puts that village's houses in fog with "?" signs and a banner; the product shows nothing (deliberate).
-- Open agent shows a static session excerpt; answering is out of scope (limitation).
-- The demo bar switches scenarios; the picker also shows a Temporal app, "temporal:support", drawn as a runtime village (deliberate).
-
-## 8. Walkthrough findings
-This is a design critique, not customer validation. Revision 0 was a conventional dashboard; the PM's click-through led to revision 1, the village.
-| Area | Claude's check | PM's click-through | Severity |
-|---|---|---|---|
-| Labels | Pass (rev 1): signs read "source · wait"; dialog buttons say Open agent, Close, Back to the village | "The data model looks fine, but it needs to be visualized as a village, not a traditional app gui." | major (rev 0), fixed in rev 1 |
-| Navigation | Pass: dialog closes with ×, Close or Esc; changing village closes it (fixed in rev 1: a stale dialog stayed open) | as above | minor (fixed) |
-| Keyboard (Tab order, Enter and Space, focus moves to the new screen's heading) | Pass: the canvas cannot take focus, so each waiting house has a real button sign; Tab reaches it, Enter opens the dialog, focus lands on its title | as above | |
-| State clarity (each state visibly different, each offers a next step, error uses role="alert") | Pass: unreachable = fog, "?" signs and a role="alert" banner; guess = dashed sign, dashed bubble rim and "this may be wrong"; each offers Open agent | as above | |
-| Contrast (body text and primary buttons at least 4.5 to 1) | Pass: gold signs with dark text, dialog text on the menu blue; faded fog is deliberate | as above | |
-| Scope (nothing from another focus area) | Pass: no answering, notifications or waiting list | as above | |
-
-## 9. Revision made
-- Change: rebuilt the prototype as the 16-bit village instead of a conventional dashboard: source-and-wait signs over waiting houses (solid reported, dashed guessed), a Why dialog with Open agent, fog for an unreachable source.
-- Tied to: the PM's walkthrough finding (section 8, Labels) and SIG-007, SIG-013, CON-003 (show whether a wait is reported or guessed).
-- Before and after: a three-card dashboard with pill markers → the village with signs over the houses that need you.
-
-- Revision 2 (PM request: "If an agents needs my attention have them wave at me and show an exclamation point."): everyone waiting on a person waves unmistakably (arm raised above the head, hand swinging between upright and tilted out with motion ticks, every 220 ms) under the orange "!". Made in the product's village renderer (`src/web/village.html`) and carried into the prototype; reduced motion keeps the arm up, still.
-
-- Revision 3 (PM, on the goal: "The goal is a fun visualization to watch the status of the app dev process or the app running or both. When there are events to respond to we can drill into other tools, such as opening a gh issue, or click into an agentic session, etc."): every house now carries drill-in links (the agent's session in the dashboard, its GitHub issue, a Temporal workflow's page in Temporal's web UI), and the notice board and docks list their issues, each linked. Made in the product (report `links`, `--temporal-ui`) and carried into the prototype.
-
-- Revision 4 (PM: "If the agent asked a structured question we can show clickable buttons for responses. For example y/n or numbered options."): a waiting agent's dialog shows its question with one button per option. The server re-reads the pane and answers only if the same question is still showing. Made in the product (question parsing, `/answer` endpoint, village dialog) and tested live against a tmux pane; the prototype answers locally and turns the agent back to working. The in-page session preview is gone: open-ended answers go through the Agent session link, since the village is not a management console. Live testing also found both waiting detectors ignored a prompt followed by a screen of blank lines; fixed.
-
-## 10. Remaining limitations
-- Static data per scenario; waits do not tick and agents do not move between states.
-- The real village page's picker does not follow a link change (found here; fixed only in the prototype).
-- Answering, freshness ("checked 5 s ago") and the single waiting list are not shown.
-- Only the medieval style was checked; the modern style draws the same signs.
-
-## 11. Decision record
-| Check-in | Claude recommended | PM decided | Reason / trade-off |
-|---|---|---|---|
-| Flow check | Approve the flow with Source unreachable and Guess only; cut dismiss-a-false-alarm | Approve | matched the recommendation |
-| Prototype check | | | |
+| Village layout: lots, quay, canal, locks, castle | src/web/village.html `layout()` (Verified) | where the banner, trail and barge go |
+| Canal locks and their crates per stop | src/web/village.html `paint()`, the stops loop (Verified) | dev and UAT locks, castle as prod |
+| Counters strip | src/web/village.html `renderFlow()` (Verified) | the per-feature strip |
+| Waving and "!" for a waiting worker | src/web/village.html `bubble()`, wave poses (Verified) | the Stuck state |
+| Dialog with link buttons | src/web/village.html `show()`, `links()` (Verified) | the feature's detail |
+| Worlds: dev village with its platform | src/web/village.html `drawWorld()` (Verified) | prod running the release |

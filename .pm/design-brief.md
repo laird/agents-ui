@@ -1,38 +1,47 @@
-# Design brief: agents-ui · Attention and answering
+# Design brief: agents-ui · A feature from spec to production
 
 ## Context
-- Product: agents-ui, one place to launch, watch and supervise swarms of AI coding agents (terminal UI, web dashboard, village view).
-- Persona: Solo developer · Mandate: Never miss a blocked agent
-- Selected opportunity: OPP-003: make the "needs you" marker trustworthy by showing the state each source reports itself, not a guess from screen text.
-- Discovery evidence this flow answers: SIG-007 (silence can't tell waiting from thinking), SIG-013 (hook-based alerts miss some prompts), SIG-003 (notifications through tmux broke and were patched), SIG-009 (stale "Ready for input" alerts flood people with many sessions), CON-003 (tmux waiting is a fixed phrase list).
+- Product: agents-ui watches swarms of AI coding agents, drawn as a 16-bit village.
+- Persona: Tech lead · Mandate: Know when a feature is live
+- Selected opportunity: OPP-005: "Live" per feature and per environment: know, without asking anyone, that a whole feature has reached production.
+- Discovery evidence this flow answers: SIG-023 ("what's in production" is hard across environments), SIG-033 ("done" means many things), SIG-022 (environment state lives nowhere), SIG-030 (GitHub records the sha per environment), CON-007, CON-009.
 
 ## The flow
-- Actor: solo developer running two swarms (shop, billing)
-- Job: "Tell me which agent really needs me, and why, so I can believe the marker."
-- Starts when: a worker card on the dashboard turns amber with "Needs you"
-- Ends when: the developer knows which source reported it, what the agent asked and since when, and opens that agent's session
-- Main action: Open agent
-- Main path: 1. Dashboard: worker-2 in shop reads "Needs you · herdr · 3 min". 2. Select the marker: a "Why" panel opens with four facts: source ("herdr reports blocked"), the ask ("Allow `npm publish`? (y/n)"), since (14:02), agreement ("Screen also shows a prompt"). 3. A solid "Reported" badge marks a state the source reported itself. 4. Select "Open agent": the agent's session view opens, prompt visible, ready to answer.
-- Alternate state A (error): Source unreachable. herdr can't be read: the card goes grey, "State unknown · herdr unreachable since 14:05", last known state shown faded, with "Retry" and "Open agent anyway".
-- Alternate state B (recovery): Guess only. No reported state: a dashed "Guessed from screen" badge, the matched line ("Allow? (y/n)" seen 40 s ago), and a note that it may be wrong.
+- Actor: the tech lead running the swarm
+- Job: "Is feature X live in production yet, and if not, where is it?"
+- Starts when: a feature's spec arrives as a parent issue
+- Ends when: the whole feature is marked "Live in prod"
+- Main action: follow one feature through the village by its banner
+- Main path:
+  1. Spec: "Saved carts" (#460) arrives as a banner with a spec scroll, split into 4 subtask crates (#461 to #464).
+  2. Follow: the tech lead clicks the banner. A trail links it to its subtasks; a strip reads Spec, Build 0/4, Dev, UAT, Prod.
+  3. Build: workers claim the subtasks; each lands on the canal; Build counts to 4/4.
+  4. Promote: all 4 landed and green, the feature moves as one barge through the dev lock, the UAT lock, then the castle (prod).
+  5. Live: prod runs a release containing all 4; the banner reads "Live in prod".
+- Alternate state A (error, Stuck): #463 is blocked (needs design). Red pennant on the banner, trail to the worker waving "!", strip reads "Build 3/4: #463 needs design".
+- Alternate state B (loading, Can't tell): no deployment record for UAT. The UAT lock is fogged with "?"; strip reads "UAT: unknown", not "not live".
 
 ## Surface
-- Surface: desktop web · Viewport: 1440×900
-- Screens: Dashboard (swarm cards), Why panel (side panel over the dashboard), Agent session view
+- Surface: desktop web
+- Viewport: 1440×900
+- Screens: village with the feature banner; feature followed (trail and strip); stuck; can't tell; live
 
 ## Look and feel
-- Follow the dashboard's dark theme: background #0d1117, surface #161b22, card #21262d, border #30363d, accent #58a6ff, text #e6edf3, dim #8b949e, warning #d29922, error #f85149, radius 6px, system sans font.
-- Swarm cards with a header, path line and one coloured dot per agent; amber dot = waiting; pill badges; uppercase panel headers.
-- Repository references read (paths, pinned commit 0019fe8): src/web/ui.html lines 9 to 22 (tokens), 129 to 190 (cards, badges), 335 to 360 (panels), 455 to 467 (agent dots).
-- Public UI references: https://primer.style (GitHub's dark palette the dashboard follows)
-- Deliberate departures from the current UI: a source badge (Reported, solid / Guessed, dashed) and a waiting-time label on every marker; a Why side panel.
+- Follow the product's established patterns:
+  - pixel-art village canvas, medieval or modern theme;
+  - orange "!" and a waving arm when an agent needs a person;
+  - canal with one lock per environment, castle last;
+  - counters strip above the canvas; dialog with link buttons.
+- Repository references read (pinned e4422c5): src/web/village.html, docs/village.md.
+- Public UI references: https://github.com/maxjendrall/herdr
+- Deliberate departures: a feature banner and trail (the product has no feature object, CON-007); a per-feature strip; a fogged lock for unknown.
 
 ## Data
-- All names, records, images, and media are synthetic. Placeholder imagery: neutral blocks or simple shapes.
-- Example records: Larkspur Labs; swarm "shop" (manager, worker-1 working #41, worker-2 waiting via herdr, worker-3 idle); swarm "billing" (worker-1 guessed waiting from screen, worker-2 working); Temporal app "support" (run refund-8812 waiting_for_human 6 min).
+- All names and records are synthetic (Larkspur Labs, repository `shop`). Placeholder imagery: the village's own pixel art.
+- Example records: #460 Saved carts with #461 cart table, #462 save on logout, #463 restore banner, #464 tests; worker-1 to worker-4; environments dev, uat, prod; release 3f9c2a1.
 
 ## Out of scope
-- Answering from the alert, notifications, the single waiting list (OPP-001, OPP-002), launching swarms, the village view, settings.
+- Attention and answering, the bug-to-fix loop, approving or promoting, launching swarms, spec authoring, billing, third-party keys.
 
 ## Output contract
 - One standalone file at `outputs/prototype/index.html`

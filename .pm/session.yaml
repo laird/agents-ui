@@ -139,6 +139,13 @@ decisions:
     pm_decided: "OPP-005"
     reason: "not given"
     at: "2026-11-02T04:38:00Z"
+  - id: D-010
+    stage: prototype
+    checkin: flow-check
+    claude_recommended: "Actor tech lead, job 'Is feature X live in production yet, and if not, where is it?'; start: the spec arrives as a parent issue; done: the whole feature marked live in prod; main action: follow one feature by its banner; path: spec, follow, build 0/4 to 4/4, validate and promote through dev and UAT locks, live; states: Stuck and Can't tell; cut any approve or promote button."
+    pm_decided: "Approve"
+    reason: "not needed (matched the recommendation)"
+    at: "2026-11-05T16:34:00Z"
 notes:
   - "Sources: PM ticked Community only; rungs 3 to 7 dropped. PM named herdr, claude-squad, Claude Code's own agent views and laird/agents; added as rung 1 community sources (issue pages)."
   - "GitHub API refused for repositories other than laird/agents-ui from this cloud machine; neighbouring tools are read through their public HTML issue pages."
