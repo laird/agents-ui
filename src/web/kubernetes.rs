@@ -321,7 +321,7 @@ pub fn report(source: &KubeSource, workloads: &Value, nodes: &Value) -> Report {
         coordinator: Some(coordinator),
         workstreams,
         tasks: failed,
-        pipeline: ReportPipeline { gate: "green".into(), stages: vec![Stage { name: "jobs completed".into(), tasks: completed }], ..ReportPipeline::default() },
+        pipeline: ReportPipeline { gate: "green".into(), stages: vec![Stage { name: "jobs completed".into(), tasks: completed, ..Stage::default() }], ..ReportPipeline::default() },
         builds: builds.into_iter().collect(),
         ..Report::default()
     }

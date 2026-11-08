@@ -225,7 +225,10 @@ mod tests {
         let mut dev = village("shop", vec![]);
         dev.pipeline = Pipeline {
             release: Some("9f3c2e1d8a7b".into()),
-            stops: vec![Stop { name: "master-green".into(), issues: vec![9] }, Stop { name: "prod".into(), issues: vec![7, 8] }],
+            stops: vec![
+                Stop { name: "master-green".into(), issues: vec![9], ..Stop::default() },
+                Stop { name: "prod".into(), issues: vec![7, 8], ..Stop::default() },
+            ],
             ..Pipeline::default()
         };
         let mut platform = village("temporal:agents", vec![]);

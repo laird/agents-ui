@@ -1,3 +1,4 @@
+pub mod deployments;
 pub mod discovery;
 pub mod framework;
 pub mod herdr;

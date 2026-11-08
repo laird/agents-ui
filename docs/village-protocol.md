@@ -134,8 +134,11 @@ Matching ignores case. Anything else counts as `unknown`.
 - `integration`: the branch or queue where finished work lands.
 - `gate`: `green`, `pending` or `unknown`.
 - `landed`: task ids that have landed but not yet reached the first stage. These wait at the quay.
-- `stages`: in order, each `{name, tasks}`. A task appears in the furthest stage it has reached.
+- `stages`: in order, each `{name, tasks}`. A task appears in the furthest stage it has reached. A stage may also give:
+  - `source`: what says what the stage runs: `deployment` (a deployment record), `branch` (a branch or ref, the default), or `unknown` (nothing does, so the village can't tell, which is not the same as "nothing has reached it");
+  - `sha`: the commit the stage runs, when a deployment names it.
 - `release`: the version at the last stage. A world compares it with the platform's `builds`, and either may be a prefix of the other (at least 7 characters).
+- `promotion`: `subtask` (the default: each task moves through the stages on its own) or `feature` (a feature's landed tasks wait at the quay and move together).
 
 ## Built-in adapters
 

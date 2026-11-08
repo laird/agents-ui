@@ -196,12 +196,44 @@ pub struct Note {
     pub url: Option<String>,
 }
 
+/// Where a stop's idea of "what runs here" comes from.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum StopSource {
+    /// The newest successful GitHub Deployment to the environment.
+    Deployment,
+    /// The environment's branch ref (or, for the first stop, the green ref).
+    /// Also what a report that doesn't say means.
+    #[default]
+    Branch,
+    /// Neither exists: the village can't tell what runs here, which is not
+    /// the same as nothing having reached it.
+    Unknown,
+}
+
 /// One lock on the canal: issues whose pushed work has reached this stop but
 /// not the next one.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Stop {
     pub name: String,
     pub issues: Vec<u32>,
+    #[serde(default)]
+    pub source: StopSource,
+    /// The commit this stop runs, when a deployment names it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha: Option<String>,
+}
+
+/// How landed work moves through the environments, from `.autocoder.json`'s
+/// `promotion`.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Promotion {
+    /// Each subtask moves on its own, so a feature can be part-way through.
+    #[default]
+    Subtask,
+    /// A feature's landed subtasks wait at the quay and move together.
+    Feature,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -217,6 +249,13 @@ pub struct Pipeline {
     /// The commit at the last stop: what is released.
     #[serde(default)]
     pub release: Option<String>,
+    #[serde(default)]
+    pub promotion: Promotion,
+    /// How many stops each placed issue has reached (0: still at the quay),
+    /// before the last stop is cut down to the crates the castle shows.
+    /// Counting a feature's subtasks in production needs all of them.
+    #[serde(skip)]
+    pub reached: HashMap<u32, usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -281,7 +320,10 @@ pub fn agent_status(agent: &AgentSnapshot) -> HouseStatus {
 /// `issues` overrides `swarm.issues` when the snapshot came from tmux
 /// discovery, which doesn't fetch issues.
 pub fn build(swarm: &SwarmSnapshot, issues: &[IssueSnapshot], pipeline: Pipeline) -> VillageSnapshot {
-    super::framework::to_village(&super::framework::swarm_report(swarm, issues, &pipeline)).village
+    let mut village = super::framework::to_village(&super::framework::swarm_report(swarm, issues, &pipeline)).village;
+    // Not part of the report: only git's placement has it.
+    village.pipeline.reached = pipeline.reached;
+    village
 }
 
 // ---------------------------------------------------------------------------
@@ -490,6 +532,15 @@ pub fn parse_environments(json: &str) -> Vec<Environment> {
         .unwrap_or_default()
 }
 
+/// Parse `promotion` from `.autocoder.json`: `subtask` unless it says `feature`.
+pub fn parse_promotion(json: &str) -> Promotion {
+    serde_json::from_str::<serde_json::Value>(json)
+        .ok()
+        .and_then(|v| v.get("promotion").cloned())
+        .and_then(|p| serde_json::from_value(p).ok())
+        .unwrap_or_default()
+}
+
 /// Parse `refs/autocoder/tips/<integration>/<sha>-<issue>`.
 pub fn parse_tip_ref(refname: &str, integration: &str) -> Option<(String, u32)> {
     let rest = refname.strip_prefix(&format!("refs/autocoder/tips/{integration}/"))?;
@@ -500,31 +551,65 @@ pub fn parse_tip_ref(refname: &str, integration: &str) -> Option<(String, u32)> 
     Some((sha.to_string(), issue.parse().ok()?))
 }
 
+/// What one stop runs, as far as placing tips goes.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct StopHistory {
+    pub source: StopSource,
+    pub sha: Option<String>,
+    /// The commits the stop contains, or `None` when nothing says (no
+    /// deployment, no ref): the stop is unknown.
+    pub commits: Option<HashSet<String>>,
+}
+
+/// Choose what a stop runs: the deployed commit's history when there is one,
+/// else the branch's, else unknown. Histories are newest first; the first
+/// element of the chosen one is the stop's head (what it releases).
+pub fn stop_history(deployed: Option<(String, Vec<String>)>, branch: Option<Vec<String>>) -> (StopHistory, Option<String>) {
+    let (source, sha, commits) = match (deployed, branch) {
+        (Some((sha, commits)), _) => (StopSource::Deployment, Some(sha), Some(commits)),
+        (None, Some(commits)) => (StopSource::Branch, None, Some(commits)),
+        (None, None) => (StopSource::Unknown, None, None),
+    };
+    let head = commits.as_ref().and_then(|v| v.first().cloned());
+    (StopHistory { source, sha, commits: commits.map(|v| v.into_iter().collect()) }, head)
+}
+
+/// Where each pushed tip ended up.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Placement {
+    pub quay: Vec<u32>,
+    pub stops: Vec<Stop>,
+    /// Stops reached per issue (0: the quay), with nothing truncated.
+    pub reached: HashMap<u32, usize>,
+}
+
 /// Place each pushed tip at the furthest stop that contains it.
 ///
-/// `tips` is newest first. `stops` holds, per stop in pipeline order, the set
-/// of commits that stop contains, or `None` when its ref doesn't exist. A tip
-/// only reaches a stop after reaching every stop before it, so a missing ref
-/// halts it there. Each issue appears once, at its newest tip.
-pub fn place_tips(
-    tips: &[(String, u32)],
-    stop_names: &[String],
-    stops: &[Option<HashSet<String>>],
-) -> (Vec<u32>, Vec<Stop>) {
+/// `tips` is newest first. `stops` holds, per stop in pipeline order, what it
+/// runs. A tip only reaches a stop after reaching every stop before it, so an
+/// unknown stop halts it there. Each issue appears once, at its newest tip.
+pub fn place_tips(tips: &[(String, u32)], stop_names: &[String], stops: &[StopHistory]) -> Placement {
     let mut quay = Vec::new();
     let mut placed: Vec<Stop> = stop_names
         .iter()
-        .map(|n| Stop { name: n.clone(), issues: Vec::new() })
+        .zip(stops)
+        .map(|(n, h)| Stop {
+            name: n.clone(),
+            issues: Vec::new(),
+            source: if h.commits.is_some() { h.source } else { StopSource::Unknown },
+            sha: h.sha.clone(),
+        })
         .collect();
-    let mut seen = HashSet::new();
+    let mut reached_by = HashMap::new();
     for (sha, issue) in tips {
-        if !seen.insert(*issue) {
+        if reached_by.contains_key(issue) {
             continue;
         }
         let reached = stops
             .iter()
-            .take_while(|s| s.as_ref().is_some_and(|set| set.contains(sha)))
+            .take_while(|s| s.commits.as_ref().is_some_and(|set| set.contains(sha)))
             .count();
+        reached_by.insert(*issue, reached);
         match reached {
             0 => quay.push(*issue),
             n => placed[n - 1].issues.push(*issue),
@@ -533,7 +618,7 @@ pub fn place_tips(
     if let Some(last) = placed.last_mut() {
         last.issues.truncate(DELIVERED_KEEP);
     }
-    (quay, placed)
+    Placement { quay, stops: placed, reached: reached_by }
 }
 
 async fn git_lines(transport: &ServerTransport, repo: &Path, args: &[&str]) -> Option<Vec<String>> {
@@ -580,6 +665,7 @@ pub async fn read_pipeline(transport: &ServerTransport, repo: &Path) -> Pipeline
         .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
         .unwrap_or_default();
     let envs = parse_environments(&config);
+    let promotion = parse_promotion(&config);
 
     let tip_glob = format!("refs/autocoder/tips/{integration}/*");
     let remote = git_lines(transport, repo, &["ls-remote", "origin", &tip_glob])
@@ -592,15 +678,14 @@ pub async fn read_pipeline(transport: &ServerTransport, repo: &Path) -> Pipeline
         .filter_map(|(oid, name)| parse_tip_ref(name.trim(), &integration).map(|(_, n)| (oid.to_string(), n)))
         .collect();
 
-    let history = |branch: String| async move {
-        let rev = format!("origin/{branch}");
+    let history = |rev: String| async move {
         let max = format!("--max-count={HISTORY_DEPTH}");
         git_lines(transport, repo, &["rev-list", &max, &rev])
             .await
             .filter(|l| !l.is_empty())
     };
-    let mainline = history(integration.clone()).await.unwrap_or_default();
-    let green_set = history(green.clone()).await;
+    let mainline = history(format!("origin/{integration}")).await.unwrap_or_default();
+    let green_set = history(format!("origin/{green}")).await;
 
     // Order tips newest first by their place on the integration branch. Tip
     // refs are never deleted, so a tip outside the recent window is old
@@ -621,15 +706,38 @@ pub async fn read_pipeline(transport: &ServerTransport, repo: &Path) -> Pipeline
 
     let mut names = vec![green];
     let mut release = green_set.as_ref().and_then(|v| v.first().cloned());
-    let mut sets = vec![green_set.map(|v| v.into_iter().collect::<HashSet<_>>())];
+    let mut stops = vec![StopHistory {
+        source: StopSource::Branch,
+        sha: None,
+        commits: green_set.map(|v| v.into_iter().collect::<HashSet<_>>()),
+    }];
     for env in &envs {
         names.push(env.name.clone());
-        let commits = history(env.branch.clone()).await;
-        release = commits.as_ref().and_then(|v| v.first().cloned());
-        sets.push(commits.map(|v| v.into_iter().collect()));
+        // A deployment says what the environment runs; its branch ref is the
+        // fallback. A deployed commit this clone hasn't fetched can't place
+        // anything, so it falls back too.
+        let deployed = match super::deployments::deployed_sha(transport, repo, &env.name).await {
+            Some(sha) => history(sha.clone()).await.map(|commits| (sha, commits)),
+            None => None,
+        };
+        let branch = match deployed {
+            Some(_) => None,
+            None => history(format!("origin/{}", env.branch)).await,
+        };
+        let (stop, head) = stop_history(deployed, branch);
+        release = head;
+        stops.push(stop);
     }
-    let (quay, stops) = place_tips(&tips, &names, &sets);
-    Pipeline { integration, sentinel, quay, stops, release }
+    let placement = place_tips(&tips, &names, &stops);
+    Pipeline {
+        integration,
+        sentinel,
+        quay: placement.quay,
+        stops: placement.stops,
+        release,
+        promotion,
+        reached: placement.reached,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -903,8 +1011,16 @@ mod tests {
         assert_eq!(parse_tip_ref("refs/autocoder/tips/master/abc-", "master"), None);
     }
 
-    fn set(items: &[&str]) -> Option<HashSet<String>> {
-        Some(items.iter().map(|s| s.to_string()).collect())
+    fn set(items: &[&str]) -> StopHistory {
+        StopHistory { source: StopSource::Branch, sha: None, commits: Some(items.iter().map(|s| s.to_string()).collect()) }
+    }
+
+    fn deployed(sha: &str, items: &[&str]) -> StopHistory {
+        StopHistory { source: StopSource::Deployment, sha: Some(sha.to_string()), ..set(items) }
+    }
+
+    fn unknown() -> StopHistory {
+        StopHistory { source: StopSource::Unknown, sha: None, commits: None }
     }
 
     #[test]
@@ -917,19 +1033,127 @@ mod tests {
         ];
         let names = vec!["master-green".to_string(), "staging".to_string(), "prod".to_string()];
         let stops = vec![set(&["c", "b", "a"]), set(&["b", "a"]), set(&["a"])];
-        let (quay, placed) = place_tips(&tips, &names, &stops);
+        let Placement { quay, stops: placed, reached } = place_tips(&tips, &names, &stops);
         assert_eq!(quay, vec![4]);
         assert_eq!(placed[0].issues, vec![3]);
         assert_eq!(placed[1].issues, vec![2]);
         assert_eq!(placed[2].issues, vec![1]);
+        assert!(placed.iter().all(|s| s.source == StopSource::Branch && s.sha.is_none()));
+        assert_eq!(reached, HashMap::from([(4, 0), (3, 1), (2, 2), (1, 3)]));
+    }
+
+    #[test]
+    fn a_deployment_places_tips_by_what_it_runs() {
+        // staging's branch has c, but what is deployed there is b.
+        let tips = vec![("c".to_string(), 3), ("b".to_string(), 2), ("a".to_string(), 1)];
+        let names = vec!["master-green".to_string(), "staging".to_string(), "prod".to_string()];
+        let stops = vec![set(&["c", "b", "a"]), deployed("b", &["b", "a"]), set(&["a"])];
+        let p = place_tips(&tips, &names, &stops);
+        assert_eq!(p.stops[0].issues, vec![3]);
+        assert_eq!(p.stops[1].issues, vec![2]);
+        assert_eq!(p.stops[1].source, StopSource::Deployment);
+        assert_eq!(p.stops[1].sha.as_deref(), Some("b"));
+        assert_eq!(p.stops[2].issues, vec![1]);
+        assert_eq!(p.stops[2].source, StopSource::Branch);
+    }
+
+    fn commits(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_deployment_beats_the_branch() {
+        let (stop, head) = stop_history(Some(("b".into(), commits(&["b", "a"]))), Some(commits(&["c", "b", "a"])));
+        assert_eq!(stop, deployed("b", &["b", "a"]));
+        assert_eq!(head.as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn the_branch_is_used_without_a_deployment() {
+        let (stop, head) = stop_history(None, Some(commits(&["c", "b"])));
+        assert_eq!(stop, set(&["c", "b"]));
+        assert_eq!(head.as_deref(), Some("c"));
+    }
+
+    #[test]
+    fn neither_deployment_nor_branch_is_unknown() {
+        let (stop, head) = stop_history(None, None);
+        assert_eq!(stop, unknown());
+        assert_eq!(head, None);
+    }
+
+    #[test]
+    fn an_unknown_environment_halts_tips_and_says_so() {
+        let tips = vec![("b".to_string(), 2), ("a".to_string(), 1)];
+        let names = vec!["master-green".to_string(), "uat".to_string(), "prod".to_string()];
+        let stops = vec![set(&["b", "a"]), unknown(), set(&["a"])];
+        let p = place_tips(&tips, &names, &stops);
+        assert_eq!(p.stops[0].issues, vec![2, 1], "halted before the unknown stop");
+        assert_eq!(p.stops[1].source, StopSource::Unknown);
+        assert!(p.stops[2].issues.is_empty());
+        assert_eq!(p.reached, HashMap::from([(2, 1), (1, 1)]));
+    }
+
+    #[test]
+    fn reached_counts_every_delivered_issue_the_castle_drops() {
+        let tips: Vec<(String, u32)> = (1..=20).map(|n| (format!("s{n}"), n)).collect();
+        let all: Vec<String> = tips.iter().map(|(s, _)| s.clone()).collect();
+        let all: Vec<&str> = all.iter().map(String::as_str).collect();
+        let names = vec!["master-green".to_string(), "prod".to_string()];
+        let p = place_tips(&tips, &names, &[set(&all), set(&all)]);
+        assert_eq!(p.stops[1].issues.len(), DELIVERED_KEEP);
+        assert_eq!(p.reached.len(), 20);
+        assert!(p.reached.values().all(|&n| n == 2));
+    }
+
+    #[test]
+    fn parses_promotion_with_a_default() {
+        assert_eq!(parse_promotion(r#"{"promotion":"feature"}"#), Promotion::Feature);
+        assert_eq!(parse_promotion(r#"{"promotion":"subtask"}"#), Promotion::Subtask);
+        assert_eq!(parse_promotion(r#"{"environments":[]}"#), Promotion::Subtask);
+        assert_eq!(parse_promotion(r#"{"promotion":"sideways"}"#), Promotion::Subtask);
+        assert_eq!(parse_promotion(""), Promotion::Subtask);
+    }
+
+    #[test]
+    fn stop_source_serializes_and_old_stops_still_parse() {
+        let stop = Stop { name: "uat".into(), issues: vec![461], source: StopSource::Unknown, sha: None };
+        let json = serde_json::to_value(&stop).unwrap();
+        assert_eq!(json, serde_json::json!({"name": "uat", "issues": [461], "source": "unknown"}));
+        let deployed = Stop { source: StopSource::Deployment, sha: Some("9b1e440".into()), ..stop.clone() };
+        assert_eq!(serde_json::to_value(&deployed).unwrap()["sha"], "9b1e440");
+
+        let old: Stop = serde_json::from_str(r#"{"name": "prod", "issues": [7]}"#).unwrap();
+        assert_eq!(old.source, StopSource::Branch);
+        assert_eq!(old.sha, None);
+        let old: Pipeline = serde_json::from_str(r#"{"integration": "main", "sentinel": "green", "quay": [], "stops": []}"#).unwrap();
+        assert_eq!(old.promotion, Promotion::Subtask);
+    }
+
+    #[test]
+    fn build_keeps_stop_sources_promotion_and_reached() {
+        let pipeline = Pipeline {
+            stops: vec![
+                Stop { name: "master-green".into(), issues: vec![], ..Stop::default() },
+                Stop { name: "uat".into(), issues: vec![3], source: StopSource::Deployment, sha: Some("abc1234".into()) },
+                Stop { name: "prod".into(), issues: vec![], source: StopSource::Unknown, sha: None },
+            ],
+            promotion: Promotion::Feature,
+            reached: HashMap::from([(3, 2)]),
+            ..Pipeline::default()
+        };
+        let v = build(&swarm(vec![]), &[], pipeline.clone());
+        assert_eq!(v.pipeline.stops, pipeline.stops);
+        assert_eq!(v.pipeline.promotion, Promotion::Feature);
+        assert_eq!(v.pipeline.reached, pipeline.reached);
     }
 
     #[test]
     fn missing_ref_halts_tips_and_issues_appear_once() {
         let tips = vec![("b".to_string(), 7), ("a".to_string(), 7), ("c".to_string(), 8)];
         let names = vec!["master-green".to_string(), "staging".to_string()];
-        let stops = vec![None, set(&["a", "b", "c"])];
-        let (quay, placed) = place_tips(&tips, &names, &stops);
+        let stops = vec![unknown(), set(&["a", "b", "c"])];
+        let Placement { quay, stops: placed, .. } = place_tips(&tips, &names, &stops);
         assert_eq!(quay, vec![7, 8], "no green ref: nothing passes the sentinel");
         assert!(placed.iter().all(|s| s.issues.is_empty()));
     }

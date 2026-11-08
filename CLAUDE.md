@@ -33,6 +33,7 @@ Tests are inline `#[cfg(test)]` modules in each source file:
 - `src/web/village.rs` — House kinds and statuses, crew grouping, backlog/board sorting, tip-ref and environment parsing, transcript actions
 - `src/web/framework.rs` — state words, task numbers, report → village mapping, autocoder labels, outside adapters (`tools/adapters/example-report.json`)
 - `src/web/source.rs` — `--source` parsing, swarm-source precedence, any village source as a world's platform
+- `src/web/deployments.rs` — newest successful GitHub Deployment per environment, from JSON fixtures
 - `src/web/kubernetes.rs` — runtime specs, pod states and why they need you, image versions, workloads → houses, from JSON fixtures
 - `src/web/herdr.rs`, `src/web/temporal.rs` — herdr and Temporal parsing and village building, from JSON fixtures
 - `src/web/world.rs` — world specs, build-ID matching, incident origins, shipping vs landed
