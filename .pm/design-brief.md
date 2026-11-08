@@ -11,7 +11,7 @@
 - **Feature**: a parent issue with subtasks. Subtasks are found from GitHub sub-issues when the parent has any; otherwise from issues whose body says `Sub-task of #N` (autocoder's convention, with its `decomposed` and `subtask` labels). Every such parent that is not yet live is a feature.
 - **Subtask total**: open subtasks plus those closed as completed. A subtask closed as not planned (won't fix, duplicate, folded into a sibling) leaves the total, so 4 becomes 3, and the feature's dialog names it.
 - **Reached an environment**: per subtask, its landed commit is in what the environment runs. Source, in order: the newest successful GitHub Deployment to that environment (its sha); else the environment's branch ref from `.autocoder.json`; else **unknown**. A feature reaches an environment when every subtask in the total has.
-- **Live**: the whole feature has reached prod; that is, all its code runs in production. Feature flags are out of scope for now (OPEN-003 deferred by the PM: "we can figure out feature flags later").
+- **Live**: the whole feature has reached prod; that is, all its code runs in production. Feature flags are out of scope: different apps use different flag mechanisms, so the feature view follows only which issues are deployed to dev, UAT and prod (D-011, D-013).
 - **Spec**: the parent issue's body, or a document that body links to. The spec scroll opens the linked document when there is one, else the issue.
 
 ## The flow

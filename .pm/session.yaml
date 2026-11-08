@@ -16,7 +16,21 @@ readiness:
   browser_test: unconfirmed
   design: available
   stopped_after_setup: false
-  notes:
+    - id: D-012
+    stage: prototype
+    checkin: follow-up
+    claude_recommended: "Keep feature flags; plant them around the castle rather than worker houses (worktrees are ephemeral); then, on the PM's suggestion, around the whole village: each flag takes a decoration cell so accumulation crowds out scenery, stale flags gather cobwebs, followed features highlight their flags; source swappable, repo-declared first."
+    pm_decided: "Keep feature flags, 'they just accumulate around the house', then 'or around the village perhaps?', then 'good'."
+    reason: "Reverses the deferral of OPEN-003 in D-011; 'live' still means code in prod. Flag source not given (OPEN-005)."
+    at: "2026-11-08T14:54:00Z"
+  - id: D-013
+    stage: prototype
+    checkin: follow-up
+    claude_recommended: "(none; the PM's call)"
+    pm_decided: "Drop feature flags again: 'different apps will use different feature flag mechanisms, for now let's just use the issues getting deployed to dev/uat/prod'."
+    reason: "Reverses D-012. Flag subtask #353 closed as not planned; live stays 'code in prod'."
+    at: "2026-11-08T14:55:00Z"
+notes:
   - "Run 2 case-check (D-006): lane feature-to-production, persona Tech lead, mandate Know when a feature is live; terms: sub-issues / epic progress, decompose tasks for agents, when is it deployed, UAT / staging promotion."
   - "2026-11-02T03:59Z: PM started a second Scout run on a new focus area (a feature flowing through the SDLC to production). The attention-and-answering run is archived in outputs/attention-and-answering/ (discovery approved, prototype at revision 4, not approved); its prototype is marked stale for this lane. IDs continue from the first run (SIG-017, QUO-011, CON-006, OPP-004, D-006, F-016 onward)."
     - "Cloud session: no local browser to open a test file; prototypes are viewed by publishing or downloading them."

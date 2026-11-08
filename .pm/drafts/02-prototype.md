@@ -32,7 +32,7 @@
 - Feature: a parent issue with subtasks, from GitHub sub-issues when present, else from issues whose body says `Sub-task of #N` (autocoder creates no sub-issues; it writes that line and labels the parent `decomposed`, the children `subtask`).
 - Subtask total: open plus closed-as-completed; closed as not planned leaves the total and is named in the dialog.
 - Reached an environment: the newest successful GitHub Deployment's sha, else the environment's branch ref from `.autocoder.json`, else unknown. A feature reaches a stage when every subtask in the total has.
-- Live: all the feature's code runs in prod. Feature flags deferred (OPEN-003).
+- Live: all the feature's code runs in prod. Feature flags out of scope: apps differ in flag mechanism; follow issues deployed to dev, UAT and prod (D-013).
 - Spec: the parent issue's body, or a document it links to (OPEN-004 answered).
 - Promotion mode: per subtask (default) or whole feature, set per project. The setting's name and home (likely `.autocoder.json` beside the environments) are for the PRD.
 
