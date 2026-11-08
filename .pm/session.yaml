@@ -146,6 +146,13 @@ decisions:
     pm_decided: "Approve"
     reason: "not needed (matched the recommendation)"
     at: "2026-11-05T16:34:00Z"
+  - id: D-011
+    stage: prototype
+    checkin: spec-review
+    claude_recommended: "Partial progress as counts per stage; subtasks from sub-issues, else 'Sub-task of #N'; environment from GitHub Deployments, then branch refs, else unknown; live = code in prod; one banner per feature; drop not-planned subtasks from the total; spec in the parent issue body; update the spec, then prototype."
+    pm_decided: "Partial progress 'Both, per project' (per subtask by default, whole-feature barge where a project releases in batches); the rest as recommended; spec 'could be either just in the issue body or in some cases a document linked from the issue body'."
+    reason: "Feature flags: 'we can figure out feature flags later' (OPEN-003 deferred)."
+    at: "2026-11-08T14:38:00Z"
 notes:
   - "Sources: PM ticked Community only; rungs 3 to 7 dropped. PM named herdr, claude-squad, Claude Code's own agent views and laird/agents; added as rung 1 community sources (issue pages)."
   - "GitHub API refused for repositories other than laird/agents-ui from this cloud machine; neighbouring tools are read through their public HTML issue pages."

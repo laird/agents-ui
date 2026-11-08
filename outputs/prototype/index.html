@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Prototype: agents-ui · Attention and answering (village)</title>
+<title>Prototype: agents-ui · A feature from spec to production (village)</title>
 <style>
   /* SNES-style menu windows around a pixel-art canvas. One dark look on purpose. */
   :root {
@@ -27,7 +27,8 @@
   body { padding: 12px max(12px, env(safe-area-inset-right)) 24px max(12px, env(safe-area-inset-left)); }
   a { color: var(--ink-dim); }
   .bar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin: 0 auto 10px; max-width: 1400px; }
-  .title { font: 700 16px/1.2 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--gold); display: flex; gap: 12px; align-items: center; }
+  .title { font: 700 16px/1.2 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--gold); display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; min-width: 0; }
+  .title select { max-width: 100%; }
   .title a { font-weight: 400; font-size: 12px; text-transform: none; letter-spacing: 0; }
   select { background: var(--win-bot); color: var(--ink); border: 2px solid var(--win-inner); border-radius: 4px; font: 13px var(--mono); padding: 4px 6px; }
   .status { font: 12px var(--mono); color: var(--ink-dim); }
@@ -64,31 +65,46 @@
 
   .proto { position: fixed; top: 8px; right: 12px; font: 11px var(--mono); color: var(--ink-dim); border: 2px solid var(--rule); border-radius: 4px; padding: 2px 8px; background: var(--win-bot); z-index: 20; }
   .viewport { position: relative; }
-  .signs { position: absolute; inset: 0; pointer-events: none; }
-  /* A sign over each house that needs you: who reported it and how long it has waited. Solid = reported, dashed = guessed. */
-  .sign { position: absolute; transform: translate(-50%, -100%); pointer-events: auto; font: 700 12px/1.2 var(--mono); color: #241400; background: var(--gold); border: 3px solid #241400; border-radius: 4px; padding: 3px 7px; white-space: nowrap; cursor: pointer; box-shadow: 0 2px 0 #241400; }
-  .sign.guess { background: var(--win-bot); color: var(--gold); border: 3px dashed var(--gold); box-shadow: none; }
-  .sign.lost { background: #3a3e58; color: var(--ink); border-color: var(--ink-dim); }
-  .sign small { font-weight: 400; }
-  .banner { max-width: 1400px; margin: 0 auto 10px; padding: 10px 14px; font: 14px var(--mono); border: 3px solid var(--orange); background: rgba(240,112,32,.15); border-radius: 6px; }
-  .why dt { font: 12px var(--mono); color: var(--ink-dim); margin-top: 8px; }
-  .why dd { margin: 2px 0 0; font: 14px/1.4 var(--mono); }
-  .why code, .term { font-family: var(--mono); }
-  .tag { display: inline-block; font: 700 12px var(--mono); padding: 1px 8px; border-radius: 4px; background: var(--gold); color: #241400; }
-  .tag.guess { background: none; color: var(--gold); border: 2px dashed var(--gold); }
-  .acts { display: flex; gap: 10px; margin-top: 12px; }
-  .acts button, .demo button { position: static; background: var(--win-bot); color: var(--ink); border: 2px solid var(--win-inner); border-radius: 4px; font: 700 13px var(--mono); padding: 6px 12px; cursor: pointer; }
-  .acts .go { background: var(--gold); color: #241400; border-color: var(--gold); }
-  .term { background: #050814; border: 2px solid var(--rule); border-radius: 4px; padding: 10px; font-size: 13px; white-space: pre-wrap; margin: 8px 0 0; color: var(--ink); }
-  .term .ask { color: var(--gold); font-weight: 700; }
-  .dialog { bottom: 76px; max-height: calc(100vh - 100px); overflow: auto; }
-  .demo { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; padding: 8px 10px; z-index: 15; }
-  .demo span { font: 12px var(--mono); color: var(--ink-dim); align-self: center; }
+  .fbanners { position: absolute; inset: 0; pointer-events: none; }
+  /* A label under each feature's banner: a real button, so Tab reaches it. */
+  .fb { position: absolute; transform: translateX(-50%); pointer-events: auto; max-width: 118px; font: 700 11px/1.25 var(--mono); color: var(--ink); background: rgba(6,8,20,.82); border: 2px solid var(--fc); border-radius: 4px; padding: 2px 6px; cursor: pointer; text-align: center; }
+  .fb small { display: block; font-weight: 400; color: var(--ink-dim); }
+  .fb[aria-pressed="true"] { background: var(--fc); color: #0c1028; }
+  .fb[aria-pressed="true"] small { color: #0c1028; }
+  .fb.live { border-color: var(--gold); }
+  .fb.stuck small { color: #ff8070; }
+  .fb.stuck[aria-pressed="true"] small { color: #600; }
+  .fstrip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 8px; padding: 6px 8px; border: 2px solid var(--fc, var(--rule)); border-radius: 4px; background: rgba(6,8,20,.55); font: 13px var(--mono); }
+  .fstrip h3 { margin: 0 6px 0 0; font: 700 13px var(--mono); color: var(--fc); }
+  .chip { padding: 2px 8px; border-radius: 4px; border: 2px solid var(--rule); color: var(--ink-dim); white-space: nowrap; }
+  .chip.done { border-color: #38c848; color: #b8f0b8; }
+  .chip.part { border-color: var(--gold); color: var(--gold); }
+  .chip.stuck { border-color: #e02828; color: #ffb0a8; background: rgba(224,40,40,.15); }
+  .chip.unknown { border-style: dashed; border-color: var(--ink-dim); color: var(--ink); background: rgba(208,212,232,.12); }
+  .chip.live { border-color: var(--gold); background: var(--gold); color: #241400; font-weight: 700; }
+  .fstrip .sep { color: var(--ink-dim); }
+  .fstrip .mode { margin-left: auto; color: var(--ink-dim); font-size: 12px; }
+  .fstrip button, .demo button { background: var(--win-bot); color: var(--ink); border: 2px solid var(--win-inner); border-radius: 4px; font: 700 12px var(--mono); padding: 3px 10px; cursor: pointer; }
+  .demo { position: fixed; bottom: 8px; left: 50%; transform: translateX(-50%); width: min(1400px, calc(100vw - 24px)); padding: 8px 10px; z-index: 15; display: grid; gap: 6px; }
+  .demo .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .demo .lbl { font: 12px var(--mono); color: var(--ink-dim); margin-right: 2px; }
+  .demo button[aria-pressed="true"] { background: var(--gold); color: #241400; border-color: var(--gold); }
+  .demo .alt { border-style: dashed; }
+  .demo .gap { width: 14px; }
+  .demo p { margin: 0; font: 13px/1.4 var(--mono); color: var(--ink); min-height: 2.8em; }
+  .dialog { bottom: 128px; max-height: calc(100vh - 160px); overflow: auto; }
+  .dialog .subs { margin-top: 6px; }
+  .dialog .subs li { display: flex; gap: 8px; }
+  .dialog .subs .w { color: var(--ink-dim); }
+  .dialog .subs .drop { text-decoration: line-through; color: var(--ink-dim); }
+  .dialog dl { margin: 8px 0 0; font: 13px/1.4 var(--mono); display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; }
+  .dialog dt { color: var(--ink-dim); }
+  .dialog dd { margin: 0; }
+  body { padding-bottom: 140px; }
 </style>
 </head>
 <body>
   <span class="proto">Prototype · synthetic data</span>
-  <div class="banner" id="banner" role="alert" hidden></div>
   <div class="bar">
     <div class="title">Worktree Hollow <span id="workflow" class="status"></span> <select id="pick" aria-label="Village" hidden></select> <select id="theme" aria-label="Style"><option value="medieval">Medieval village</option><option value="modern">Modern business district</option></select> <a href="/">Dashboard</a></div>
     <div class="status" id="status" aria-live="polite">Connecting…</div>
@@ -96,42 +112,66 @@
   <div class="win stage">
     <div class="viewport" id="viewport">
       <div class="empty" id="empty">Looking for swarms…</div>
-      <div class="signs" id="signs"></div>
+      <div class="fbanners" id="fbanners"></div>
       <canvas id="map" width="320" height="180" hidden aria-label="The swarm drawn as a village. Select a house to see its crew and issue."></canvas>
     </div>
+    <div class="fstrip" id="fstrip" hidden aria-live="polite"></div>
     <div class="flow" id="flow"></div>
   </div>
   <div class="win dialog" id="dialog" hidden role="dialog" aria-live="polite">
     <button id="close" aria-label="Close">×</button>
-    <h2 id="d-title" tabindex="-1"></h2>
+    <h2 id="d-title"></h2>
     <p id="d-line"></p>
     <p class="dim" id="d-meta"></p>
-    <div id="d-why" class="why"></div>
     <div id="d-q"></div>
     <div class="links" id="d-links"></div>
   </div>
-  <div class="win demo" role="group" aria-label="Demo controls"><span>Demo:</span>
-    <button data-demo="main" data-at="shop">Main path</button>
-    <button data-demo="down" data-at="shop">Source unreachable</button>
-    <button data-demo="main" data-at="billing">Guess only</button>
+  <div class="win demo" role="group" aria-label="Prototype controls">
+    <div class="row"><span class="lbl">Promotion:</span>
+      <button data-mode="sub" aria-pressed="true">Per subtask</button><button data-mode="whole" aria-pressed="false">Whole feature</button>
+      <span class="gap"></span><span class="lbl">Step:</span><button data-step="spec">1 · Spec arrives</button><button data-step="follow">2 · Follow</button><button data-step="build0">3 · Build</button><button data-step="build4">4 · Landed</button><button data-step="promote">5 · Promote</button><button data-step="live">6 · Live</button><span class="gap"></span><button data-step="stuck" class="alt">Stuck</button><button data-step="unknown" class="alt">Can't tell</button></div>
+    <p id="cap" aria-live="polite"></p>
   </div>
 
 <script>
-const PROTO = {"main": {"villages": [{"project": "shop", "plane": "development", "framework": "herdr", "workflow": "Autocoder", "repo_path": "~/src/shop", "manager": {"id": "manager", "role": "manager", "kind": "cottage", "status": "working", "issue": null, "issue_title": null, "priority": null, "crew": ["manager"], "subagents": [], "action": "messaging", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/manager"}]}, "houses": [{"id": "/src/shop-wt-1", "role": "worker-1", "kind": "feature", "status": "working", "issue": 41, "issue_title": "Saved carts survive logout", "priority": "P1", "crew": ["worker-1"], "subagents": [], "action": "writing", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-1"}, {"label": "GitHub issue #41", "url": "https://github.com/larkspur-labs/shop/issues/41"}]}, {"id": "/src/shop-wt-2", "role": "worker-2", "kind": "bug", "status": "blocked", "issue": 43, "issue_title": "Checkout 500 on empty basket", "priority": "P0", "crew": ["worker-2"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-2"}, {"label": "GitHub issue #43", "url": "https://github.com/larkspur-labs/shop/issues/43"}], "attention": {"reported": true, "source": "herdr", "state": "blocked", "ask": "Allow `npm publish`? (y/n)", "since": "14:02", "wait": "3 min", "agree": "Screen also shows a prompt", "session": ["\u2713 214 tests passed", "Bash(npm publish --dry-run)", "  \u23bf  package size 48.2 kB, 112 files", "", "Allow `npm publish`? (y/n)"]}, "question": {"prompt": "Do you want to proceed?", "kind": "menu", "selected": 0, "options": [{"key": "1", "label": "Yes"}, {"key": "2", "label": "Yes, and don't ask again for npm publish"}, {"key": "3", "label": "No, and tell Claude what to do differently"}]}, "answer_url": "/api/swarms/shop/agents/worker-2/answer"}, {"id": "/src/shop-wt-3", "role": "worker-3", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-3"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-3"}]}, {"id": "/src/shop-wt-4", "role": "worker-4", "kind": "security", "status": "working", "issue": 44, "issue_title": "Bump openssl", "priority": "P1", "crew": ["worker-4"], "subagents": [], "action": "running", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-4"}, {"label": "GitHub issue #44", "url": "https://github.com/larkspur-labs/shop/issues/44"}]}], "backlog": [{"number": 45, "title": "Search is slow on mobile", "kind": "perf", "priority": "P2", "url": "https://github.com/larkspur-labs/shop/issues/45"}, {"number": 46, "title": "Typo in footer", "kind": "docs", "priority": "P3", "url": "https://github.com/larkspur-labs/shop/issues/46"}], "board": [{"number": 47, "title": "Which payment provider?", "label": "needs-design", "url": "https://github.com/larkspur-labs/shop/issues/47"}], "pipeline": {"integration": "main", "sentinel": "green", "quay": [], "stops": [{"name": "main-green", "issues": [39]}, {"name": "staging", "issues": []}, {"name": "prod", "issues": [37]}], "release": null}, "builds": []}, {"project": "billing", "plane": "development", "framework": "tmux", "workflow": "Autocoder", "repo_path": "~/src/billing", "manager": {"id": "manager", "role": "manager", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["manager"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/billing/agent/manager"}]}, "houses": [{"id": "/src/billing-wt-1", "role": "worker-1", "kind": "refactor", "status": "blocked", "issue": 12, "issue_title": "Retry failed invoices", "priority": "P1", "crew": ["worker-1"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/billing/agent/worker-1"}, {"label": "GitHub issue #12", "url": "https://github.com/larkspur-labs/billing/issues/12"}], "attention": {"reported": false, "source": "screen guess", "state": "\"Allow? (y/n)\" in the last 15 lines", "ask": "Allow? (y/n)", "since": "about 14:04", "wait": "40 s", "agree": "No reported state to compare: this swarm runs in plain tmux", "hint": "Run this swarm under herdr to get reported states.", "session": ["Edit(src/invoices/retry.ts)", "  \u23bf  Updated with 12 additions", "", "Run the migration now? Allow? (y/n)"]}, "question": {"prompt": "Run the migration now? Allow? (y/n)", "kind": "yes_no", "selected": 0, "options": [{"key": "y", "label": "Yes"}, {"key": "n", "label": "No"}]}, "answer_url": "/api/swarms/billing/agents/worker-1/answer"}, {"id": "/src/billing-wt-2", "role": "worker-2", "kind": "tests", "status": "working", "issue": 13, "issue_title": "Flaky ledger test", "priority": "P2", "crew": ["worker-2"], "subagents": [], "action": "running", "links": [{"label": "Agent session", "url": "/#/swarm/billing/agent/worker-2"}, {"label": "GitHub issue #13", "url": "https://github.com/larkspur-labs/billing/issues/13"}]}], "backlog": [{"number": 14, "title": "Tax rounding", "kind": "bug", "priority": "P1", "url": "https://github.com/larkspur-labs/billing/issues/14"}], "board": [], "pipeline": {"integration": "main", "sentinel": "green", "quay": [], "stops": [{"name": "main-green", "issues": []}, {"name": "prod", "issues": [9]}], "release": null}, "builds": []}, {"project": "temporal:support", "plane": "runtime", "framework": "temporal", "workflow": "Temporal", "repo_path": "~/src/temporal:support", "manager": {"id": "manager", "role": "workers", "kind": "cottage", "status": "working", "issue": null, "issue_title": "3 workers polling 1 task queue", "priority": null, "crew": ["workers"], "subagents": [{"agent_type": "worker", "description": "worker@pod-a", "status": "working", "action": null}, {"agent_type": "worker", "description": "worker@pod-b", "status": "working", "action": null}, {"agent_type": "worker", "description": "worker@pod-c", "status": "working", "action": null}], "action": null, "links": []}, "houses": [{"id": "refund-8812", "role": "SupportAgent", "kind": "workshop", "status": "blocked", "issue": null, "issue_title": "refund-8812", "priority": null, "crew": ["SupportAgent"], "subagents": [{"agent_type": "RefundCheck", "description": "refund-8812/check", "status": "blocked", "action": null}], "action": null, "links": [{"label": "Temporal UI", "url": "http://localhost:8233/namespaces/support/workflows/refund-8812"}], "attention": {"reported": true, "source": "Temporal", "state": "AgentStatus = waiting_for_human", "ask": "Approve a refund of $240 for order 5531?", "since": "13:59", "wait": "6 min", "agree": "Child workflow RefundCheck is paused on the approval signal", "session": ["RefundCheck refund-8812/check", "  policy: amount over $200 needs a person", "  waiting for signal: approve_refund"]}}, {"id": "research-31", "role": "ResearchAgent", "kind": "research", "status": "working", "issue": null, "issue_title": "research-31", "priority": null, "crew": ["ResearchAgent"], "subagents": [], "action": "searching", "links": [{"label": "Temporal UI", "url": "http://localhost:8233/namespaces/support/workflows/research-31"}]}, {"id": "triage-77", "role": "TriageAgent", "kind": "workshop", "status": "working", "issue": null, "issue_title": "triage-77", "priority": null, "crew": ["TriageAgent"], "subagents": [], "action": "thinking", "links": [{"label": "Temporal UI", "url": "http://localhost:8233/namespaces/support/workflows/triage-77"}]}], "backlog": [], "board": [], "pipeline": {"integration": "main", "sentinel": "green", "quay": [], "stops": [{"name": "completed (24h)", "issues": [8801, 8802, 8803]}], "release": null}, "builds": []}], "worlds": []}, "down": {"villages": [{"project": "shop", "plane": "development", "framework": "herdr", "workflow": "Autocoder", "repo_path": "~/src/shop", "manager": {"id": "manager", "role": "manager", "kind": "cottage", "status": "unknown", "issue": null, "issue_title": null, "priority": null, "crew": ["manager"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/manager"}], "last_known": "working"}, "houses": [{"id": "/src/shop-wt-1", "role": "worker-1", "kind": "feature", "status": "unknown", "issue": 41, "issue_title": "Saved carts survive logout", "priority": "P1", "crew": ["worker-1"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-1"}, {"label": "GitHub issue #41", "url": "https://github.com/larkspur-labs/shop/issues/41"}], "last_known": "working"}, {"id": "/src/shop-wt-2", "role": "worker-2", "kind": "bug", "status": "unknown", "issue": 43, "issue_title": "Checkout 500 on empty basket", "priority": "P0", "crew": ["worker-2"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-2"}, {"label": "GitHub issue #43", "url": "https://github.com/larkspur-labs/shop/issues/43"}], "last_known": "blocked \u00b7 herdr, since 14:02"}, {"id": "/src/shop-wt-3", "role": "worker-3", "kind": "cottage", "status": "unknown", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-3"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-3"}], "last_known": "idle"}, {"id": "/src/shop-wt-4", "role": "worker-4", "kind": "security", "status": "unknown", "issue": 44, "issue_title": "Bump openssl", "priority": "P1", "crew": ["worker-4"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-4"}, {"label": "GitHub issue #44", "url": "https://github.com/larkspur-labs/shop/issues/44"}], "last_known": "working"}], "backlog": [{"number": 45, "title": "Search is slow on mobile", "kind": "perf", "priority": "P2", "url": "https://github.com/larkspur-labs/shop/issues/45"}, {"number": 46, "title": "Typo in footer", "kind": "docs", "priority": "P3", "url": "https://github.com/larkspur-labs/shop/issues/46"}], "board": [{"number": 47, "title": "Which payment provider?", "label": "needs-design", "url": "https://github.com/larkspur-labs/shop/issues/47"}], "pipeline": {"integration": "main", "sentinel": "green", "quay": [], "stops": [{"name": "main-green", "issues": [39]}, {"name": "staging", "issues": []}, {"name": "prod", "issues": [37]}], "release": null}, "builds": [], "unreachable": {"source": "herdr", "since": "14:05"}}, {"project": "billing", "plane": "development", "framework": "tmux", "workflow": "Autocoder", "repo_path": "~/src/billing", "manager": {"id": "manager", "role": "manager", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["manager"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/billing/agent/manager"}]}, "houses": [{"id": "/src/billing-wt-1", "role": "worker-1", "kind": "refactor", "status": "blocked", "issue": 12, "issue_title": "Retry failed invoices", "priority": "P1", "crew": ["worker-1"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/billing/agent/worker-1"}, {"label": "GitHub issue #12", "url": "https://github.com/larkspur-labs/billing/issues/12"}], "attention": {"reported": false, "source": "screen guess", "state": "\"Allow? (y/n)\" in the last 15 lines", "ask": "Allow? (y/n)", "since": "about 14:04", "wait": "40 s", "agree": "No reported state to compare: this swarm runs in plain tmux", "hint": "Run this swarm under herdr to get reported states.", "session": ["Edit(src/invoices/retry.ts)", "  \u23bf  Updated with 12 additions", "", "Run the migration now? Allow? (y/n)"]}, "question": {"prompt": "Run the migration now? Allow? (y/n)", "kind": "yes_no", "selected": 0, "options": [{"key": "y", "label": "Yes"}, {"key": "n", "label": "No"}]}, "answer_url": "/api/swarms/billing/agents/worker-1/answer"}, {"id": "/src/billing-wt-2", "role": "worker-2", "kind": "tests", "status": "working", "issue": 13, "issue_title": "Flaky ledger test", "priority": "P2", "crew": ["worker-2"], "subagents": [], "action": "running", "links": [{"label": "Agent session", "url": "/#/swarm/billing/agent/worker-2"}, {"label": "GitHub issue #13", "url": "https://github.com/larkspur-labs/billing/issues/13"}]}], "backlog": [{"number": 14, "title": "Tax rounding", "kind": "bug", "priority": "P1", "url": "https://github.com/larkspur-labs/billing/issues/14"}], "board": [], "pipeline": {"integration": "main", "sentinel": "green", "quay": [], "stops": [{"name": "main-green", "issues": []}, {"name": "prod", "issues": [9]}], "release": null}, "builds": []}, {"project": "temporal:support", "plane": "runtime", "framework": "temporal", "workflow": "Temporal", "repo_path": "~/src/temporal:support", "manager": {"id": "manager", "role": "workers", "kind": "cottage", "status": "working", "issue": null, "issue_title": "3 workers polling 1 task queue", "priority": null, "crew": ["workers"], "subagents": [{"agent_type": "worker", "description": "worker@pod-a", "status": "working", "action": null}, {"agent_type": "worker", "description": "worker@pod-b", "status": "working", "action": null}, {"agent_type": "worker", "description": "worker@pod-c", "status": "working", "action": null}], "action": null, "links": []}, "houses": [{"id": "refund-8812", "role": "SupportAgent", "kind": "workshop", "status": "blocked", "issue": null, "issue_title": "refund-8812", "priority": null, "crew": ["SupportAgent"], "subagents": [{"agent_type": "RefundCheck", "description": "refund-8812/check", "status": "blocked", "action": null}], "action": null, "links": [{"label": "Temporal UI", "url": "http://localhost:8233/namespaces/support/workflows/refund-8812"}], "attention": {"reported": true, "source": "Temporal", "state": "AgentStatus = waiting_for_human", "ask": "Approve a refund of $240 for order 5531?", "since": "13:59", "wait": "6 min", "agree": "Child workflow RefundCheck is paused on the approval signal", "session": ["RefundCheck refund-8812/check", "  policy: amount over $200 needs a person", "  waiting for signal: approve_refund"]}}, {"id": "research-31", "role": "ResearchAgent", "kind": "research", "status": "working", "issue": null, "issue_title": "research-31", "priority": null, "crew": ["ResearchAgent"], "subagents": [], "action": "searching", "links": [{"label": "Temporal UI", "url": "http://localhost:8233/namespaces/support/workflows/research-31"}]}, {"id": "triage-77", "role": "TriageAgent", "kind": "workshop", "status": "working", "issue": null, "issue_title": "triage-77", "priority": null, "crew": ["TriageAgent"], "subagents": [], "action": "thinking", "links": [{"label": "Temporal UI", "url": "http://localhost:8233/namespaces/support/workflows/triage-77"}]}], "backlog": [], "board": [], "pipeline": {"integration": "main", "sentinel": "green", "quay": [], "stops": [{"name": "completed (24h)", "issues": [8801, 8802, 8803]}], "release": null}, "builds": []}], "worlds": []}};
-let protoScenario = 'main';
-window.fetch = async (url, opts) => {
-  if (opts && opts.method === 'POST') {
-    const body = JSON.parse(opts.body);
-    let answered = null;
-    for (const v of PROTO[protoScenario].villages) for (const h of v.houses) if (h.answer_url === url) {
-      answered = h.question.options[body.option].label;
-      h.status = 'working'; h.action = 'running'; delete h.question; delete h.attention; delete h.answer_url;
-    }
-    setTimeout(() => window.dispatchEvent(new Event('proto-refresh')), 1300);
-    return { ok: true, status: 200, json: async () => ({ ok: true, answered }) };
-  }
-  return { ok: true, json: async () => JSON.parse(JSON.stringify(PROTO[protoScenario])) };
-};
+const PROTO = {"sub": {"spec": {"villages": [{"project": "shop", "plane": "development", "framework": "herdr", "workflow": "Autocoder", "repo_path": "~/src/shop", "manager": {"id": "manager", "role": "manager", "kind": "cottage", "status": "working", "issue": null, "issue_title": null, "priority": null, "crew": ["manager"], "subagents": [], "action": "messaging", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/manager"}]}, "houses": [{"id": "/src/shop-wt-1", "role": "worker-1", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-1"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-1"}]}, {"id": "/src/shop-wt-2", "role": "worker-2", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-2"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-2"}]}, {"id": "/src/shop-wt-3", "role": "worker-3", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-3"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-3"}]}, {"id": "/src/shop-wt-4", "role": "worker-4", "kind": "feature", "status": "working", "issue": 473, "issue_title": "Redeem at checkout", "priority": "P2", "crew": ["worker-4"], "subagents": [], "action": "writing", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-4"}, {"label": "GitHub issue #473", "url": "https://github.com/larkspur-labs/shop/issues/473"}]}], "backlog": [{"number": 461, "title": "Cart table", "kind": "feature", "priority": "P1", "url": "https://github.com/larkspur-labs/shop/issues/461"}, {"number": 462, "title": "Save on logout", "kind": "feature", "priority": "P1", "url": "https://github.com/larkspur-labs/shop/issues/462"}, {"number": 463, "title": "Restore banner", "kind": "feature", "priority": "P1", "url": "https://github.com/larkspur-labs/shop/issues/463"}, {"number": 464, "title": "Tests", "kind": "tests", "priority": "P1", "url": "https://github.com/larkspur-labs/shop/issues/464"}, {"number": 480, "title": "Search is slow on mobile", "kind": "perf", "priority": "P2", "url": "https://github.com/larkspur-labs/shop/issues/480"}, {"number": 481, "title": "Typo in footer", "kind": "docs", "priority": "P3", "url": "https://github.com/larkspur-labs/shop/issues/481"}], "board": [{"number": 482, "title": "Which payment provider?", "label": "needs-design", "url": "https://github.com/larkspur-labs/shop/issues/482"}], "pipeline": {"integration": "main", "sentinel": "green", "quay": [], "stops": [{"name": "dev", "issues": []}, {"name": "uat", "issues": [471]}, {"name": "prod", "issues": [440, 441]}], "release": "3f9c2a1"}, "builds": []}], "worlds": [], "unknown": [], "env": {"dev": "branch `dev` in .autocoder.json", "uat": "GitHub Deployment to uat \u00b7 9b1e440", "prod": "GitHub Deployment to production \u00b7 3f9c2a1"}}, "follow": {"villages": [{"project": "shop", "plane": "development", "framework": "herdr", "workflow": "Autocoder", "repo_path": "~/src/shop", "manager": {"id": "manager", "role": "manager", "kind": "cottage", "status": "working", "issue": null, "issue_title": null, "priority": null, "crew": ["manager"], "subagents": [], "action": "messaging", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/manager"}]}, "houses": [{"id": "/src/shop-wt-1", "role": "worker-1", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-1"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-1"}]}, {"id": "/src/shop-wt-2", "role": "worker-2", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-2"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-2"}]}, {"id": "/src/shop-wt-3", "role": "worker-3", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-3"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-3"}]}, {"id": "/src/shop-wt-4", "role": "worker-4", "kind": "feature", "status": "working", "issue": 473, "issue_title": "Redeem at checkout", "priority": "P2", "crew": ["worker-4"], "subagents": [], "action": "writing", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-4"}, {"label": "GitHub issue #473", "url": "https://github.com/larkspur-labs/shop/issues/473"}]}], "backlog": [{"number": 461, "title": "Cart table", "kind": "feature", "priority": "P1", "url": "https://github.com/larkspur-labs/shop/issues/461"}, {"number": 462, "title": "Save on logout", "kind": "feature", "priority": "P1", "url": "https://github.com/larkspur-labs/shop/issues/462"}, {"number": 463, "title": "Restore banner", "kind": "feature", "priority": "P1", "url": "https://github.com/larkspur-labs/shop/issues/463"}, {"number": 464, "title": "Tests", "kind": "tests", "priority": "P1", "url": "https://github.com/larkspur-labs/shop/issues/464"}, {"number": 480, "title": "Search is slow on mobile", "kind": "perf", "priority": "P2", "url": "https://github.com/larkspur-labs/shop/issues/480"}, {"number": 481, "title": "Typo in footer", "kind": "docs", "priority": "P3", "url": "https://github.com/larkspur-labs/shop/issues/481"}], "board": [{"number": 482, "title": "Which payment provider?", "label": "needs-design", "url": "https://github.com/larkspur-labs/shop/issues/482"}], "pipeline": {"integration": "main", "sentinel": "green", "quay": [], "stops": [{"name": "dev", "issues": []}, {"name": "uat", "issues": [471]}, {"name": "prod", "issues": [440, 441]}], "release": "3f9c2a1"}, "builds": []}], "worlds": [], "unknown": [], "env": {"dev": "branch `dev` in .autocoder.json", "uat": "GitHub Deployment to uat \u00b7 9b1e440", "prod": "GitHub Deployment to production \u00b7 3f9c2a1"}}, "build0": {"villages": [{"project": "shop", "plane": "development", "framework": "herdr", "workflow": "Autocoder", "repo_path": "~/src/shop", "manager": {"id": "manager", "role": "manager", "kind": "cottage", "status": "working", "issue": null, "issue_title": null, "priority": null, "crew": ["manager"], "subagents": [], "action": "messaging", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/manager"}]}, "houses": [{"id": "/src/shop-wt-1", "role": "worker-1", "kind": "feature", "status": "working", "issue": 461, "issue_title": "Cart table", "priority": "P1", "crew": ["worker-1"], "subagents": [], "action": "writing", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-1"}, {"label": "GitHub issue #461", "url": "https://github.com/larkspur-labs/shop/issues/461"}]}, {"id": "/src/shop-wt-2", "role": "worker-2", "kind": "feature", "status": "working", "issue": 462, "issue_title": "Save on logout", "priority": "P1", "crew": ["worker-2"], "subagents": [], "action": "running", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-2"}, {"label": "GitHub issue #462", "url": "https://github.com/larkspur-labs/shop/issues/462"}]}, {"id": "/src/shop-wt-3", "role": "worker-3", "kind": "feature", "status": "working", "issue": 463, "issue_title": "Restore banner", "priority": "P1", "crew": ["worker-3"], "subagents": [], "action": "thinking", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-3"}, {"label": "GitHub issue #463", "url": "https://github.com/larkspur-labs/shop/issues/463"}]}, {"id": "/src/shop-wt-4", "role": "worker-4", "kind": "feature", "status": "working", "issue": 473, "issue_title": "Redeem at checkout", "priority": "P2", "crew": ["worker-4"], "subagents": [], "action": "writing", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-4"}, {"label": "GitHub issue #473", "url": "https://github.com/larkspur-labs/shop/issues/473"}]}], "backlog": [{"number": 464, "title": "Tests", "kind": "tests", "priority": "P1", "url": "https://github.com/larkspur-labs/shop/issues/464"}, {"number": 480, "title": "Search is slow on mobile", "kind": "perf", "priority": "P2", "url": "https://github.com/larkspur-labs/shop/issues/480"}, {"number": 481, "title": "Typo in footer", "kind": "docs", "priority": "P3", "url": "https://github.com/larkspur-labs/shop/issues/481"}], "board": [{"number": 482, "title": "Which payment provider?", "label": "needs-design", "url": "https://github.com/larkspur-labs/shop/issues/482"}], "pipeline": {"integration": "main", "sentinel": "green", "quay": [], "stops": [{"name": "dev", "issues": []}, {"name": "uat", "issues": [471]}, {"name": "prod", "issues": [440, 441]}], "release": "3f9c2a1"}, "builds": []}], "worlds": [], "unknown": [], "env": {"dev": "branch `dev` in .autocoder.json", "uat": "GitHub Deployment to uat \u00b7 9b1e440", "prod": "GitHub Deployment to production \u00b7 3f9c2a1"}}, "build4": {"villages": [{"project": "shop", "plane": "development", "framework": "herdr", "workflow": "Autocoder", "repo_path": "~/src/shop", "manager": {"id": "manager", "role": "manager", "kind": "cottage", "status": "working", "issue": null, "issue_title": null, "priority": null, "crew": ["manager"], "subagents": [], "action": "messaging", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/manager"}]}, "houses": [{"id": "/src/shop-wt-1", "role": "worker-1", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-1"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-1"}]}, {"id": "/src/shop-wt-2", "role": "worker-2", "kind": "perf", "status": "working", "issue": 480, "issue_title": "Search is slow on mobile", "priority": "P2", "crew": ["worker-2"], "subagents": [], "action": "reading", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-2"}, {"label": "GitHub issue #480", "url": "https://github.com/larkspur-labs/shop/issues/480"}]}, {"id": "/src/shop-wt-3", "role": "worker-3", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-3"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-3"}]}, {"id": "/src/shop-wt-4", "role": "worker-4", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-4"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-4"}]}], "backlog": [{"number": 481, "title": "Typo in footer", "kind": "docs", "priority": "P3", "url": "https://github.com/larkspur-labs/shop/issues/481"}], "board": [{"number": 482, "title": "Which payment provider?", "label": "needs-design", "url": "https://github.com/larkspur-labs/shop/issues/482"}], "pipeline": {"integration": "main", "sentinel": "green", "quay": [464], "stops": [{"name": "dev", "issues": [461, 462, 463, 473]}, {"name": "uat", "issues": [471]}, {"name": "prod", "issues": [440, 441]}], "release": "3f9c2a1"}, "builds": []}], "worlds": [], "unknown": [], "env": {"dev": "branch `dev` in .autocoder.json", "uat": "GitHub Deployment to uat \u00b7 9b1e440", "prod": "GitHub Deployment to production \u00b7 3f9c2a1"}}, "promote": {"villages": [{"project": "shop", "plane": "development", "framework": "herdr", "workflow": "Autocoder", "repo_path": "~/src/shop", "manager": {"id": "manager", "role": "manager", "kind": "cottage", "status": "working", "issue": null, "issue_title": null, "priority": null, "crew": ["manager"], "subagents": [], "action": "messaging", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/manager"}]}, "houses": [{"id": "/src/shop-wt-1", "role": "worker-1", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-1"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-1"}]}, {"id": "/src/shop-wt-2", "role": "worker-2", "kind": "perf", "status": "working", "issue": 480, "issue_title": "Search is slow on mobile", "priority": "P2", "crew": ["worker-2"], "subagents": [], "action": "running", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-2"}, {"label": "GitHub issue #480", "url": "https://github.com/larkspur-labs/shop/issues/480"}]}, {"id": "/src/shop-wt-3", "role": "worker-3", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-3"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-3"}]}, {"id": "/src/shop-wt-4", "role": "worker-4", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-4"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-4"}]}], "backlog": [{"number": 481, "title": "Typo in footer", "kind": "docs", "priority": "P3", "url": "https://github.com/larkspur-labs/shop/issues/481"}], "board": [{"number": 482, "title": "Which payment provider?", "label": "needs-design", "url": "https://github.com/larkspur-labs/shop/issues/482"}], "pipeline": {"integration": "main", "sentinel": "green", "quay": [], "stops": [{"name": "dev", "issues": [463, 464, 473]}, {"name": "uat", "issues": [461, 462, 471]}, {"name": "prod", "issues": [440, 441]}], "release": "3f9c2a1"}, "builds": []}], "worlds": [], "unknown": [], "env": {"dev": "branch `dev` in .autocoder.json", "uat": "GitHub Deployment to uat \u00b7 9b1e440", "prod": "GitHub Deployment to production \u00b7 3f9c2a1"}}, "live": {"villages": [{"project": "shop", "plane": "development", "framework": "herdr", "workflow": "Autocoder", "repo_path": "~/src/shop", "manager": {"id": "manager", "role": "manager", "kind": "cottage", "status": "working", "issue": null, "issue_title": null, "priority": null, "crew": ["manager"], "subagents": [], "action": "messaging", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/manager"}]}, "houses": [{"id": "/src/shop-wt-1", "role": "worker-1", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-1"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-1"}]}, {"id": "/src/shop-wt-2", "role": "worker-2", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-2"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-2"}]}, {"id": "/src/shop-wt-3", "role": "worker-3", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-3"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-3"}]}, {"id": "/src/shop-wt-4", "role": "worker-4", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-4"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-4"}]}], "backlog": [{"number": 481, "title": "Typo in footer", "kind": "docs", "priority": "P3", "url": "https://github.com/larkspur-labs/shop/issues/481"}], "board": [{"number": 482, "title": "Which payment provider?", "label": "needs-design", "url": "https://github.com/larkspur-labs/shop/issues/482"}], "pipeline": {"integration": "main", "sentinel": "green", "quay": [], "stops": [{"name": "dev", "issues": [473]}, {"name": "uat", "issues": [471]}, {"name": "prod", "issues": [440, 441, 461, 462, 463, 464]}], "release": "3f9c2a1"}, "builds": []}], "worlds": [], "unknown": [], "env": {"dev": "branch `dev` in .autocoder.json", "uat": "GitHub Deployment to uat \u00b7 9b1e440", "prod": "GitHub Deployment to production \u00b7 3f9c2a1"}}, "stuck": {"villages": [{"project": "shop", "plane": "development", "framework": "herdr", "workflow": "Autocoder", "repo_path": "~/src/shop", "manager": {"id": "manager", "role": "manager", "kind": "cottage", "status": "working", "issue": null, "issue_title": null, "priority": null, "crew": ["manager"], "subagents": [], "action": "messaging", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/manager"}]}, "houses": [{"id": "/src/shop-wt-1", "role": "worker-1", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-1"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-1"}]}, {"id": "/src/shop-wt-2", "role": "worker-2", "kind": "perf", "status": "working", "issue": 480, "issue_title": "Search is slow on mobile", "priority": "P2", "crew": ["worker-2"], "subagents": [], "action": "reading", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-2"}, {"label": "GitHub issue #480", "url": "https://github.com/larkspur-labs/shop/issues/480"}]}, {"id": "/src/shop-wt-3", "role": "worker-3", "kind": "feature", "status": "blocked", "issue": 463, "issue_title": "Restore banner", "priority": "P1", "crew": ["worker-3"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-3"}, {"label": "GitHub issue #463", "url": "https://github.com/larkspur-labs/shop/issues/463"}]}, {"id": "/src/shop-wt-4", "role": "worker-4", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-4"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-4"}]}], "backlog": [{"number": 481, "title": "Typo in footer", "kind": "docs", "priority": "P3", "url": "https://github.com/larkspur-labs/shop/issues/481"}], "board": [{"number": 482, "title": "Which payment provider?", "label": "needs-design", "url": "https://github.com/larkspur-labs/shop/issues/482"}, {"number": 463, "title": "Restore banner", "label": "needs-design", "url": "https://github.com/larkspur-labs/shop/issues/463"}], "pipeline": {"integration": "main", "sentinel": "green", "quay": [464], "stops": [{"name": "dev", "issues": [461, 462, 473]}, {"name": "uat", "issues": [471]}, {"name": "prod", "issues": [440, 441]}], "release": "3f9c2a1"}, "builds": []}], "worlds": [], "unknown": [], "env": {"dev": "branch `dev` in .autocoder.json", "uat": "GitHub Deployment to uat \u00b7 9b1e440", "prod": "GitHub Deployment to production \u00b7 3f9c2a1"}}, "unknown": {"villages": [{"project": "shop", "plane": "development", "framework": "herdr", "workflow": "Autocoder", "repo_path": "~/src/shop", "manager": {"id": "manager", "role": "manager", "kind": "cottage", "status": "working", "issue": null, "issue_title": null, "priority": null, "crew": ["manager"], "subagents": [], "action": "messaging", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/manager"}]}, "houses": [{"id": "/src/shop-wt-1", "role": "worker-1", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-1"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-1"}]}, {"id": "/src/shop-wt-2", "role": "worker-2", "kind": "perf", "status": "working", "issue": 480, "issue_title": "Search is slow on mobile", "priority": "P2", "crew": ["worker-2"], "subagents": [], "action": "running", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-2"}, {"label": "GitHub issue #480", "url": "https://github.com/larkspur-labs/shop/issues/480"}]}, {"id": "/src/shop-wt-3", "role": "worker-3", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-3"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-3"}]}, {"id": "/src/shop-wt-4", "role": "worker-4", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-4"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-4"}]}], "backlog": [{"number": 481, "title": "Typo in footer", "kind": "docs", "priority": "P3", "url": "https://github.com/larkspur-labs/shop/issues/481"}], "board": [{"number": 482, "title": "Which payment provider?", "label": "needs-design", "url": "https://github.com/larkspur-labs/shop/issues/482"}], "pipeline": {"integration": "main", "sentinel": "green", "quay": [], "stops": [{"name": "dev", "issues": [463, 464, 473]}, {"name": "uat", "issues": [461, 462, 471]}, {"name": "prod", "issues": [440, 441]}], "release": "3f9c2a1"}, "builds": []}], "worlds": [], "unknown": ["uat"], "env": {"dev": "branch `dev` in .autocoder.json", "uat": "no Deployment to uat and no `uat` branch", "prod": "GitHub Deployment to production \u00b7 3f9c2a1"}}}, "whole": {"spec": {"villages": [{"project": "shop", "plane": "development", "framework": "herdr", "workflow": "Autocoder", "repo_path": "~/src/shop", "manager": {"id": "manager", "role": "manager", "kind": "cottage", "status": "working", "issue": null, "issue_title": null, "priority": null, "crew": ["manager"], "subagents": [], "action": "messaging", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/manager"}]}, "houses": [{"id": "/src/shop-wt-1", "role": "worker-1", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-1"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-1"}]}, {"id": "/src/shop-wt-2", "role": "worker-2", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-2"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-2"}]}, {"id": "/src/shop-wt-3", "role": "worker-3", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-3"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-3"}]}, {"id": "/src/shop-wt-4", "role": "worker-4", "kind": "feature", "status": "working", "issue": 473, "issue_title": "Redeem at checkout", "priority": "P2", "crew": ["worker-4"], "subagents": [], "action": "writing", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-4"}, {"label": "GitHub issue #473", "url": "https://github.com/larkspur-labs/shop/issues/473"}]}], "backlog": [{"number": 461, "title": "Cart table", "kind": "feature", "priority": "P1", "url": "https://github.com/larkspur-labs/shop/issues/461"}, {"number": 462, "title": "Save on logout", "kind": "feature", "priority": "P1", "url": "https://github.com/larkspur-labs/shop/issues/462"}, {"number": 463, "title": "Restore banner", "kind": "feature", "priority": "P1", "url": "https://github.com/larkspur-labs/shop/issues/463"}, {"number": 464, "title": "Tests", "kind": "tests", "priority": "P1", "url": "https://github.com/larkspur-labs/shop/issues/464"}, {"number": 480, "title": "Search is slow on mobile", "kind": "perf", "priority": "P2", "url": "https://github.com/larkspur-labs/shop/issues/480"}, {"number": 481, "title": "Typo in footer", "kind": "docs", "priority": "P3", "url": "https://github.com/larkspur-labs/shop/issues/481"}], "board": [{"number": 482, "title": "Which payment provider?", "label": "needs-design", "url": "https://github.com/larkspur-labs/shop/issues/482"}], "pipeline": {"integration": "main", "sentinel": "green", "quay": [471], "stops": [{"name": "dev", "issues": []}, {"name": "uat", "issues": []}, {"name": "prod", "issues": [440, 441]}], "release": "3f9c2a1"}, "builds": []}], "worlds": [], "unknown": [], "env": {"dev": "branch `dev` in .autocoder.json", "uat": "GitHub Deployment to uat \u00b7 9b1e440", "prod": "GitHub Deployment to production \u00b7 3f9c2a1"}}, "follow": {"villages": [{"project": "shop", "plane": "development", "framework": "herdr", "workflow": "Autocoder", "repo_path": "~/src/shop", "manager": {"id": "manager", "role": "manager", "kind": "cottage", "status": "working", "issue": null, "issue_title": null, "priority": null, "crew": ["manager"], "subagents": [], "action": "messaging", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/manager"}]}, "houses": [{"id": "/src/shop-wt-1", "role": "worker-1", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-1"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-1"}]}, {"id": "/src/shop-wt-2", "role": "worker-2", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-2"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-2"}]}, {"id": "/src/shop-wt-3", "role": "worker-3", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-3"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-3"}]}, {"id": "/src/shop-wt-4", "role": "worker-4", "kind": "feature", "status": "working", "issue": 473, "issue_title": "Redeem at checkout", "priority": "P2", "crew": ["worker-4"], "subagents": [], "action": "writing", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-4"}, {"label": "GitHub issue #473", "url": "https://github.com/larkspur-labs/shop/issues/473"}]}], "backlog": [{"number": 461, "title": "Cart table", "kind": "feature", "priority": "P1", "url": "https://github.com/larkspur-labs/shop/issues/461"}, {"number": 462, "title": "Save on logout", "kind": "feature", "priority": "P1", "url": "https://github.com/larkspur-labs/shop/issues/462"}, {"number": 463, "title": "Restore banner", "kind": "feature", "priority": "P1", "url": "https://github.com/larkspur-labs/shop/issues/463"}, {"number": 464, "title": "Tests", "kind": "tests", "priority": "P1", "url": "https://github.com/larkspur-labs/shop/issues/464"}, {"number": 480, "title": "Search is slow on mobile", "kind": "perf", "priority": "P2", "url": "https://github.com/larkspur-labs/shop/issues/480"}, {"number": 481, "title": "Typo in footer", "kind": "docs", "priority": "P3", "url": "https://github.com/larkspur-labs/shop/issues/481"}], "board": [{"number": 482, "title": "Which payment provider?", "label": "needs-design", "url": "https://github.com/larkspur-labs/shop/issues/482"}], "pipeline": {"integration": "main", "sentinel": "green", "quay": [471], "stops": [{"name": "dev", "issues": []}, {"name": "uat", "issues": []}, {"name": "prod", "issues": [440, 441]}], "release": "3f9c2a1"}, "builds": []}], "worlds": [], "unknown": [], "env": {"dev": "branch `dev` in .autocoder.json", "uat": "GitHub Deployment to uat \u00b7 9b1e440", "prod": "GitHub Deployment to production \u00b7 3f9c2a1"}}, "build0": {"villages": [{"project": "shop", "plane": "development", "framework": "herdr", "workflow": "Autocoder", "repo_path": "~/src/shop", "manager": {"id": "manager", "role": "manager", "kind": "cottage", "status": "working", "issue": null, "issue_title": null, "priority": null, "crew": ["manager"], "subagents": [], "action": "messaging", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/manager"}]}, "houses": [{"id": "/src/shop-wt-1", "role": "worker-1", "kind": "feature", "status": "working", "issue": 461, "issue_title": "Cart table", "priority": "P1", "crew": ["worker-1"], "subagents": [], "action": "writing", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-1"}, {"label": "GitHub issue #461", "url": "https://github.com/larkspur-labs/shop/issues/461"}]}, {"id": "/src/shop-wt-2", "role": "worker-2", "kind": "feature", "status": "working", "issue": 462, "issue_title": "Save on logout", "priority": "P1", "crew": ["worker-2"], "subagents": [], "action": "running", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-2"}, {"label": "GitHub issue #462", "url": "https://github.com/larkspur-labs/shop/issues/462"}]}, {"id": "/src/shop-wt-3", "role": "worker-3", "kind": "feature", "status": "working", "issue": 463, "issue_title": "Restore banner", "priority": "P1", "crew": ["worker-3"], "subagents": [], "action": "thinking", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-3"}, {"label": "GitHub issue #463", "url": "https://github.com/larkspur-labs/shop/issues/463"}]}, {"id": "/src/shop-wt-4", "role": "worker-4", "kind": "feature", "status": "working", "issue": 473, "issue_title": "Redeem at checkout", "priority": "P2", "crew": ["worker-4"], "subagents": [], "action": "writing", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-4"}, {"label": "GitHub issue #473", "url": "https://github.com/larkspur-labs/shop/issues/473"}]}], "backlog": [{"number": 464, "title": "Tests", "kind": "tests", "priority": "P1", "url": "https://github.com/larkspur-labs/shop/issues/464"}, {"number": 480, "title": "Search is slow on mobile", "kind": "perf", "priority": "P2", "url": "https://github.com/larkspur-labs/shop/issues/480"}, {"number": 481, "title": "Typo in footer", "kind": "docs", "priority": "P3", "url": "https://github.com/larkspur-labs/shop/issues/481"}], "board": [{"number": 482, "title": "Which payment provider?", "label": "needs-design", "url": "https://github.com/larkspur-labs/shop/issues/482"}], "pipeline": {"integration": "main", "sentinel": "green", "quay": [471], "stops": [{"name": "dev", "issues": []}, {"name": "uat", "issues": []}, {"name": "prod", "issues": [440, 441]}], "release": "3f9c2a1"}, "builds": []}], "worlds": [], "unknown": [], "env": {"dev": "branch `dev` in .autocoder.json", "uat": "GitHub Deployment to uat \u00b7 9b1e440", "prod": "GitHub Deployment to production \u00b7 3f9c2a1"}}, "build4": {"villages": [{"project": "shop", "plane": "development", "framework": "herdr", "workflow": "Autocoder", "repo_path": "~/src/shop", "manager": {"id": "manager", "role": "manager", "kind": "cottage", "status": "working", "issue": null, "issue_title": null, "priority": null, "crew": ["manager"], "subagents": [], "action": "messaging", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/manager"}]}, "houses": [{"id": "/src/shop-wt-1", "role": "worker-1", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-1"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-1"}]}, {"id": "/src/shop-wt-2", "role": "worker-2", "kind": "perf", "status": "working", "issue": 480, "issue_title": "Search is slow on mobile", "priority": "P2", "crew": ["worker-2"], "subagents": [], "action": "reading", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-2"}, {"label": "GitHub issue #480", "url": "https://github.com/larkspur-labs/shop/issues/480"}]}, {"id": "/src/shop-wt-3", "role": "worker-3", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-3"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-3"}]}, {"id": "/src/shop-wt-4", "role": "worker-4", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-4"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-4"}]}], "backlog": [{"number": 481, "title": "Typo in footer", "kind": "docs", "priority": "P3", "url": "https://github.com/larkspur-labs/shop/issues/481"}], "board": [{"number": 482, "title": "Which payment provider?", "label": "needs-design", "url": "https://github.com/larkspur-labs/shop/issues/482"}], "pipeline": {"integration": "main", "sentinel": "green", "quay": [461, 462, 463, 464, 471, 473], "stops": [{"name": "dev", "issues": []}, {"name": "uat", "issues": []}, {"name": "prod", "issues": [440, 441]}], "release": "3f9c2a1"}, "builds": []}], "worlds": [], "unknown": [], "env": {"dev": "branch `dev` in .autocoder.json", "uat": "GitHub Deployment to uat \u00b7 9b1e440", "prod": "GitHub Deployment to production \u00b7 3f9c2a1"}}, "promote": {"villages": [{"project": "shop", "plane": "development", "framework": "herdr", "workflow": "Autocoder", "repo_path": "~/src/shop", "manager": {"id": "manager", "role": "manager", "kind": "cottage", "status": "working", "issue": null, "issue_title": null, "priority": null, "crew": ["manager"], "subagents": [], "action": "messaging", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/manager"}]}, "houses": [{"id": "/src/shop-wt-1", "role": "worker-1", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-1"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-1"}]}, {"id": "/src/shop-wt-2", "role": "worker-2", "kind": "perf", "status": "working", "issue": 480, "issue_title": "Search is slow on mobile", "priority": "P2", "crew": ["worker-2"], "subagents": [], "action": "running", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-2"}, {"label": "GitHub issue #480", "url": "https://github.com/larkspur-labs/shop/issues/480"}]}, {"id": "/src/shop-wt-3", "role": "worker-3", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-3"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-3"}]}, {"id": "/src/shop-wt-4", "role": "worker-4", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-4"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-4"}]}], "backlog": [{"number": 481, "title": "Typo in footer", "kind": "docs", "priority": "P3", "url": "https://github.com/larkspur-labs/shop/issues/481"}], "board": [{"number": 482, "title": "Which payment provider?", "label": "needs-design", "url": "https://github.com/larkspur-labs/shop/issues/482"}], "pipeline": {"integration": "main", "sentinel": "green", "quay": [471, 473], "stops": [{"name": "dev", "issues": []}, {"name": "uat", "issues": [461, 462, 463, 464]}, {"name": "prod", "issues": [440, 441]}], "release": "3f9c2a1"}, "builds": []}], "worlds": [], "unknown": [], "env": {"dev": "branch `dev` in .autocoder.json", "uat": "GitHub Deployment to uat \u00b7 9b1e440", "prod": "GitHub Deployment to production \u00b7 3f9c2a1"}}, "live": {"villages": [{"project": "shop", "plane": "development", "framework": "herdr", "workflow": "Autocoder", "repo_path": "~/src/shop", "manager": {"id": "manager", "role": "manager", "kind": "cottage", "status": "working", "issue": null, "issue_title": null, "priority": null, "crew": ["manager"], "subagents": [], "action": "messaging", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/manager"}]}, "houses": [{"id": "/src/shop-wt-1", "role": "worker-1", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-1"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-1"}]}, {"id": "/src/shop-wt-2", "role": "worker-2", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-2"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-2"}]}, {"id": "/src/shop-wt-3", "role": "worker-3", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-3"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-3"}]}, {"id": "/src/shop-wt-4", "role": "worker-4", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-4"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-4"}]}], "backlog": [{"number": 481, "title": "Typo in footer", "kind": "docs", "priority": "P3", "url": "https://github.com/larkspur-labs/shop/issues/481"}], "board": [{"number": 482, "title": "Which payment provider?", "label": "needs-design", "url": "https://github.com/larkspur-labs/shop/issues/482"}], "pipeline": {"integration": "main", "sentinel": "green", "quay": [], "stops": [{"name": "dev", "issues": [471, 473]}, {"name": "uat", "issues": []}, {"name": "prod", "issues": [440, 441, 461, 462, 463, 464]}], "release": "3f9c2a1"}, "builds": []}], "worlds": [], "unknown": [], "env": {"dev": "branch `dev` in .autocoder.json", "uat": "GitHub Deployment to uat \u00b7 9b1e440", "prod": "GitHub Deployment to production \u00b7 3f9c2a1"}}, "stuck": {"villages": [{"project": "shop", "plane": "development", "framework": "herdr", "workflow": "Autocoder", "repo_path": "~/src/shop", "manager": {"id": "manager", "role": "manager", "kind": "cottage", "status": "working", "issue": null, "issue_title": null, "priority": null, "crew": ["manager"], "subagents": [], "action": "messaging", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/manager"}]}, "houses": [{"id": "/src/shop-wt-1", "role": "worker-1", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-1"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-1"}]}, {"id": "/src/shop-wt-2", "role": "worker-2", "kind": "perf", "status": "working", "issue": 480, "issue_title": "Search is slow on mobile", "priority": "P2", "crew": ["worker-2"], "subagents": [], "action": "reading", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-2"}, {"label": "GitHub issue #480", "url": "https://github.com/larkspur-labs/shop/issues/480"}]}, {"id": "/src/shop-wt-3", "role": "worker-3", "kind": "feature", "status": "blocked", "issue": 463, "issue_title": "Restore banner", "priority": "P1", "crew": ["worker-3"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-3"}, {"label": "GitHub issue #463", "url": "https://github.com/larkspur-labs/shop/issues/463"}]}, {"id": "/src/shop-wt-4", "role": "worker-4", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-4"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-4"}]}], "backlog": [{"number": 481, "title": "Typo in footer", "kind": "docs", "priority": "P3", "url": "https://github.com/larkspur-labs/shop/issues/481"}], "board": [{"number": 482, "title": "Which payment provider?", "label": "needs-design", "url": "https://github.com/larkspur-labs/shop/issues/482"}, {"number": 463, "title": "Restore banner", "label": "needs-design", "url": "https://github.com/larkspur-labs/shop/issues/463"}], "pipeline": {"integration": "main", "sentinel": "green", "quay": [461, 462, 464, 471, 473], "stops": [{"name": "dev", "issues": []}, {"name": "uat", "issues": []}, {"name": "prod", "issues": [440, 441]}], "release": "3f9c2a1"}, "builds": []}], "worlds": [], "unknown": [], "env": {"dev": "branch `dev` in .autocoder.json", "uat": "GitHub Deployment to uat \u00b7 9b1e440", "prod": "GitHub Deployment to production \u00b7 3f9c2a1"}}, "unknown": {"villages": [{"project": "shop", "plane": "development", "framework": "herdr", "workflow": "Autocoder", "repo_path": "~/src/shop", "manager": {"id": "manager", "role": "manager", "kind": "cottage", "status": "working", "issue": null, "issue_title": null, "priority": null, "crew": ["manager"], "subagents": [], "action": "messaging", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/manager"}]}, "houses": [{"id": "/src/shop-wt-1", "role": "worker-1", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-1"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-1"}]}, {"id": "/src/shop-wt-2", "role": "worker-2", "kind": "perf", "status": "working", "issue": 480, "issue_title": "Search is slow on mobile", "priority": "P2", "crew": ["worker-2"], "subagents": [], "action": "running", "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-2"}, {"label": "GitHub issue #480", "url": "https://github.com/larkspur-labs/shop/issues/480"}]}, {"id": "/src/shop-wt-3", "role": "worker-3", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-3"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-3"}]}, {"id": "/src/shop-wt-4", "role": "worker-4", "kind": "cottage", "status": "idle", "issue": null, "issue_title": null, "priority": null, "crew": ["worker-4"], "subagents": [], "action": null, "links": [{"label": "Agent session", "url": "/#/swarm/shop/agent/worker-4"}]}], "backlog": [{"number": 481, "title": "Typo in footer", "kind": "docs", "priority": "P3", "url": "https://github.com/larkspur-labs/shop/issues/481"}], "board": [{"number": 482, "title": "Which payment provider?", "label": "needs-design", "url": "https://github.com/larkspur-labs/shop/issues/482"}], "pipeline": {"integration": "main", "sentinel": "green", "quay": [471, 473], "stops": [{"name": "dev", "issues": []}, {"name": "uat", "issues": [461, 462, 463, 464]}, {"name": "prod", "issues": [440, 441]}], "release": "3f9c2a1"}, "builds": []}], "worlds": [], "unknown": ["uat"], "env": {"dev": "branch `dev` in .autocoder.json", "uat": "no Deployment to uat and no `uat` branch", "prod": "GitHub Deployment to production \u00b7 3f9c2a1"}}}};
+const FEATURES = [{"number": 460, "title": "Saved carts", "color": "#40b8e8", "url": "https://github.com/larkspur-labs/shop/issues/460", "linked_by": "GitHub sub-issues", "spec": {"kind": "issue", "label": "Spec: #460 issue body", "url": "https://github.com/larkspur-labs/shop/issues/460"}, "subtasks": [{"n": 461, "title": "Cart table"}, {"n": 462, "title": "Save on logout"}, {"n": 463, "title": "Restore banner"}, {"n": 464, "title": "Tests"}]}, {"number": 470, "title": "Gift cards", "color": "#e070d0", "url": "https://github.com/larkspur-labs/shop/issues/470", "linked_by": "\"Sub-task of #470\" in each body (autocoder)", "spec": {"kind": "doc", "label": "Spec: docs/specs/gift-cards.md", "url": "https://github.com/larkspur-labs/shop/blob/main/docs/specs/gift-cards.md"}, "subtasks": [{"n": 471, "title": "Gift card ledger"}, {"n": 472, "title": "Gift card PDF", "dropped": "closed as not planned (folded into #471)"}, {"n": 473, "title": "Redeem at checkout"}]}];
+const STEPS = [{"key": "spec", "label": "1 \u00b7 Spec arrives", "cap": "A feature arrives: \"Saved carts\" (#460) is split into 4 subtasks, #461 to #464, waiting at the docks. Its banner stands east of the village, with the spec scroll at its foot. A second feature, Gift cards, is already under way."}, {"key": "follow", "label": "2 \u00b7 Follow", "cap": "Following #460: the trail leads from its banner to each subtask, and the strip reads Spec, Build 0/4, Dev, UAT, Prod."}, {"key": "build0", "label": "3 \u00b7 Build", "cap": "Workers claim three subtasks; #464 still waits at the docks. Nothing has landed: Build 0/4."}, {"key": "build4", "label": "4 \u00b7 Landed", "cap": "All 4 subtasks have landed: Build 4/4. In per-subtask projects they are already moving through the locks one by one; in whole-feature projects they wait at the quay as one barge."}, {"key": "promote", "label": "5 \u00b7 Promote", "cap": "Per subtask: Dev 4/4, UAT 2/4. The feature is partly in UAT, and the trail shows which two. Whole feature: the barge has passed the UAT lock together, UAT 4/4."}, {"key": "live", "label": "6 \u00b7 Live", "cap": "Prod runs code containing all 4 subtasks: the banner turns gold and reads \"Live in prod\". Later it fades."}, {"key": "stuck", "label": "Stuck", "cap": "#463 is blocked (needs design). The banner flies a red pennant, the trail leads to worker-3 waving at you, and the strip reads \"Build 3/4: #463 needs design\"."}, {"key": "unknown", "label": "Can't tell", "cap": "There is no Deployment record and no branch for UAT. The UAT lock is in fog with a \"?\", and the strip reads \"UAT: unknown\", not \"not live\"."}];
+const PF = { mode: 'sub', step: 'spec', followed: null };
+(() => { const q = new URLSearchParams(location.search);
+  if (PROTO[q.get('mode')]) PF.mode = q.get('mode');
+  if (STEPS.some(s => s.key === q.get('step'))) PF.step = q.get('step');
+  if (q.get('follow')) PF.followed = Number(q.get('follow'));
+  else if (!['spec'].includes(PF.step)) PF.followed = 460; })();
+PF.snap = () => PROTO[PF.mode][PF.step];
+const counted = f => f.subtasks.filter(s => !s.dropped);
+const STAGE_NAME = { dev: 'Dev', uat: 'UAT', prod: 'Prod' };
+/* Where a subtask is: null = not landed, -1 = landed at the quay, i = reached stop i. */
+function posOf(n, v) {
+  if (v.pipeline.quay.includes(n)) return -1;
+  const i = v.pipeline.stops.findIndex(s => s.issues.includes(n));
+  return i >= 0 ? i : null;
+}
+/* D-011: a feature reaches a stage when every counted subtask has; an environment
+ * with no Deployment and no branch is unknown, never "not live". */
+function featureStatus(f, v, snap) {
+  const subs = counted(f), total = subs.length, unknown = new Set(snap.unknown || []);
+  const landed = subs.filter(s => posOf(s.n, v) !== null).length;
+  const stages = v.pipeline.stops.map((s, i) => ({ name: s.name, label: STAGE_NAME[s.name] || s.name, unknown: unknown.has(s.name),
+    n: subs.filter(x => { const p = posOf(x.n, v); return p !== null && p >= i; }).length, total }));
+  const blocked = subs.filter(x => v.board.some(b => b.number === x.n) || v.houses.some(h => h.issue === x.n && h.status === 'blocked'))
+    .map(x => ({ ...x, label: (v.board.find(b => b.number === x.n) || {}).label || 'blocked' }));
+  const last = stages[stages.length - 1];
+  return { total, landed, stages, blocked, stuck: blocked.length > 0, live: !!last && !last.unknown && last.n === total };
+}
+function featureSummary(st) {
+  if (st.live) return 'Live in prod';
+  if (st.stuck) return `Stuck · #${st.blocked[0].n} ${st.blocked[0].label}`;
+  if (st.landed < st.total) return `Build ${st.landed}/${st.total}`;
+  const s = st.stages.find(s => s.unknown || s.n < s.total);
+  return s ? (s.unknown ? `${s.label}: unknown` : `${s.label} ${s.n}/${s.total}`) : 'Live in prod';
+}
+window.fetch = async () => ({ ok: true, json: async () => JSON.parse(JSON.stringify(PF.snap())) });
 </script>
 <script>
 (() => {
@@ -1040,6 +1080,8 @@ window.fetch = async (url, opts) => {
 
   function paint(c, t) {
     const v = current, lay = L;
+    curBarges = v.project === 'shop' ? bargesFor(v, lay) : [];
+    const hid = new Set(curBarges.flatMap(b => b.issues));
     const { W, H, roadX, hallX, lots, quayY, canalY, cx0, vw } = lay;
     T.ground(c, 0, 0, W, H);
     if (T.border) T.border(c, W, H);
@@ -1056,7 +1098,7 @@ window.fetch = async (url, opts) => {
     T.channel(c, roadX - 16, canalY, W - roadX + 16, 14, t, 0.6);
     T.dock(c, roadX - 4, quayY + 1, 22);
 
-    for (let x = Math.max(cx0 + vw + 6, hallX + 64); x < W - 14; x += 15) for (let y = 16; y < canalY - 38; y += 16) if (hash(x, y) < 0.55) T.tree(c, x + Math.floor(hash(y, x) * 4), y);
+    for (let x = Math.max(cx0 + vw + 6, hallX + 64); x < W - 14; x += 15) for (let y = 16; y < canalY - 38; y += 16) if (hash(x, y) < 0.55 && !protoClear(x, y)) T.tree(c, x + Math.floor(hash(y, x) * 4), y);
     lay.decor.forEach(d => d.tree ? T.tree(c, d.x, d.y) : T.decor && T.decor(c, d.x, d.y, d.k, reduce ? 0 : t));
     shadow(c, hallX - 2, 40, 42, 2);
 
@@ -1107,11 +1149,11 @@ window.fetch = async (url, opts) => {
       });
       if (st === 'working' && h.action) actionSign(c, lot.x + 4, lot.y - 4, h.action);
       if (subs.length > 2) R(c, lot.x + 16, lot.y + 13, 2, 2, P.gold);
-      if (ICONS[st]) bubbles.push([lot.x + 4, lot.y - (st === 'blocked' ? 1 : 3) + (st === 'blocked' && blink(t, 200) ? -1 : 0), st, h.attention && !h.attention.reported]);
+      if (ICONS[st]) bubbles.push([lot.x + 4, lot.y - (st === 'blocked' ? 1 : 3) + (st === 'blocked' && blink(t, 200) ? -1 : 0), st]);
     });
 
     const carried = new Set(porters.filter(p => p.issue).map(p => p.issue));
-    v.pipeline.quay.filter(n => !carried.has(n)).slice(0, 6).forEach((n, k) => T.crate(c, roadX + 6 + (k % 3) * 6, quayY - 3 - Math.floor(k / 3) * 6, 'workshop', null, true));
+    v.pipeline.quay.filter(n => !carried.has(n) && !hid.has(n)).slice(0, 6).forEach((n, k) => T.crate(c, roadX + 6 + (k % 3) * 6, quayY - 3 - Math.floor(k / 3) * 6, 'workshop', null, true));
 
     // The sentinel's flag is grey while it still has newer work to test.
     const flagOf = i => i === 0 && v.pipeline.sentinel !== 'green' ? P.stoneD : STOPCOL[i] || P.white;
@@ -1119,10 +1161,10 @@ window.fetch = async (url, opts) => {
     stops.slice(0, -1).forEach((s, i) => {
       const lx = lay.lockStart + i * 34;
       T.gate(c, lx, canalY, false, flagOf(i));
-      s.issues.slice(0, 4).forEach((n, k) => T.crate(c, lx + 8 + (k % 2) * 6, canalY + 18 + Math.floor(k / 2) * 6, 'workshop', null, true));
+      s.issues.filter(n => !hid.has(n)).slice(0, 4).forEach((n, k) => T.crate(c, lx + 8 + (k % 2) * 6, canalY + 18 + Math.floor(k / 2) * 6, 'workshop', null, true));
     });
     T.destination(c, lay.castleX, canalY, t, fireworks);
-    if (stops.length) stops[stops.length - 1].issues.slice(0, 6).forEach((n, k) => T.crate(c, lay.castleX + 6 + (k % 4) * 6, canalY + 18 + Math.floor(k / 4) * 6, 'workshop', null, true));
+    if (stops.length) stops[stops.length - 1].issues.filter(n => !hid.has(n)).slice(0, 6).forEach((n, k) => T.crate(c, lay.castleX + 6 + (k % 4) * 6, canalY + 18 + Math.floor(k / 4) * 6, 'workshop', null, true));
 
     porters = porters.filter(p => {
       const pos = porterPos(p, t);
@@ -1131,9 +1173,103 @@ window.fetch = async (url, opts) => {
       T.crate(c, pos[0] - 2, pos[1] - 16, p.kind, p.pr, p.sealed);
       return true;
     });
-    bubbles.forEach(([x, y, s, guess]) => { bubble(c, x, y, s); if (guess) for (let k = 0; k < 9; k += 2) { R(c, x + k, y, 1, 1, P.white); R(c, x + k, y + 8, 1, 1, P.white); R(c, x, y + k, 1, 1, P.white); R(c, x + 8, y + k, 1, 1, P.white); } });
+    bubbles.forEach(([x, y, s]) => bubble(c, x, y, s));
+    featureLayer(c, t, v, lay);
   }
 
+
+  /* ---------- Prototype: features ----------
+   * Banners stand in a cleared strip east of the village; following one draws a
+   * marching trail to each of its subtasks. Whole-feature projects carry a
+   * feature's landed subtasks on one barge; an unknown environment is in fog. */
+  let curBarges = [];
+  function bannerSpots(lay) {
+    const fx = Math.max(lay.cx0 + lay.vw + 6, lay.hallX + 64);
+    return FEATURES.map((f, k) => ({ f, x: fx + 12 + k * 30, y: 14 }));
+  }
+  function protoClear(x, y) {
+    if (!L || !current || current.project !== 'shop') return false;
+    const g = bannerSpots(L);
+    return y < 48 && x >= g[0].x - 14 && x <= g[g.length - 1].x + 22;
+  }
+  function bargesFor(v, lay) {
+    if (PF.mode !== 'whole') return [];
+    const last = v.pipeline.stops.length - 1;
+    return FEATURES.map(f => {
+      const ns = counted(f).map(s => s.n), at = ns.map(n => posOf(n, v));
+      if (!ns.length || at.some(a => a === null || a !== at[0])) return null;
+      const i = at[0];
+      const x = i === -1 ? lay.roadX - 26 : i === last ? lay.castleX - 26 : lay.lockStart + i * 34 + 8;
+      return { f, issues: ns, stop: i, x, y: lay.canalY + 1 };
+    }).filter(Boolean);
+  }
+  function whereIs(n, v, lay) {
+    const hi = v.houses.findIndex(h => h.issue === n);
+    if (hi >= 0) { const lot = lay.lots[hi]; return lot && { x: lot.x + 8, y: lot.y + 18 }; }
+    const bi = v.backlog.findIndex(c => c.number === n);
+    if (bi >= 0) { const s = slotPos(bi); return { x: s.x + 2, y: s.y + 2 }; }
+    const b = curBarges.find(b => b.issues.includes(n));
+    if (b) { const k = b.issues.indexOf(n); return { x: b.x + 4 + k * 5, y: b.y + 3 }; }
+    const hid = new Set(curBarges.flatMap(b => b.issues));
+    const qi = v.pipeline.quay.filter(m => !hid.has(m)).indexOf(n);
+    if (qi >= 0) return { x: lay.roadX + 8 + (qi % 3) * 6, y: lay.quayY - 1 - Math.floor(qi / 3) * 6 };
+    const stops = v.pipeline.stops;
+    for (let i = 0; i < stops.length; i++) {
+      const k = stops[i].issues.filter(m => !hid.has(m)).indexOf(n);
+      if (k < 0) continue;
+      return i < stops.length - 1
+        ? { x: lay.lockStart + i * 34 + 10 + (k % 2) * 6, y: lay.canalY + 20 + Math.floor(k / 2) * 6 }
+        : { x: lay.castleX + 8 + (k % 4) * 6, y: lay.canalY + 20 + Math.floor(k / 4) * 6 };
+    }
+    return null;
+  }
+  function drawBarge(c, b, t) {
+    const x = b.x, y = b.y + (!reduce && blink(t, 700) ? 1 : 0), col = b.f.color;
+    R(c, x, y + 6, 24, 5, P.o); R(c, x + 1, y + 6, 22, 3, P.wood); R(c, x + 1, y + 6, 22, 1, P.woodL); R(c, x + 3, y + 9, 18, 1, P.woodD);
+    b.issues.slice(0, 4).forEach((n, k) => T.crate(c, x + 2 + k * 5, y + 1, 'workshop', null, true));
+    R(c, x + 22, y - 6, 1, 8, P.o); R(c, x + 23, y - 6, 5, 4, P.o); R(c, x + 23, y - 5, 4, 2, col);
+  }
+  function fogStop(c, v, i, lay, t) {
+    const last = v.pipeline.stops.length - 1, x = i === last ? lay.castleX - 4 : lay.lockStart + i * 34 - 7;
+    R(c, x, lay.canalY - 28, 32, lay.H - lay.canalY + 28, 'rgba(206,210,230,.72)');
+    if (!reduce) for (let k = 0; k < 5; k++) puffs(c, x + 4 + k * 6, lay.canalY - 18 + (k % 2) * 22, t + k * 330, '#e0e4f0', '#b8c0d8');
+    bubble(c, x + 12, lay.canalY - 6, 'unknown');
+  }
+  function drawBanner(c, g, st, on, t) {
+    const { x, y, f } = g, col = st.live ? P.gold : f.color, wave = !reduce && blink(t + f.number * 7, 320) ? 1 : 0;
+    const top = st.stuck ? y - 7 : y - 1;
+    R(c, x - 2, y + 23, 5, 2, P.o); R(c, x - 1, y + 23, 3, 1, P.stoneD);
+    R(c, x, top, 1, y + 23 - top, P.o); R(c, x, top - 1, 1, 1, P.gold);
+    // Cloth with a swallowtail, rippling.
+    R(c, x + 1, y, 14, 10, P.o); R(c, x + 1, y + 1, 13, 8, col); R(c, x + 1, y + 1, 13, 1, P.white);
+    R(c, x + 12, y + 4 + wave, 3, 2, P.o); R(c, x + 4, y + 4, 6, 1, st.live ? P.o : P.white); R(c, x + 4, y + 6, 4, 1, st.live ? P.o : P.white);
+    // Stuck: a red pennant above the cloth.
+    if (st.stuck) { const w = blink(t, 260) ? 1 : 0; R(c, x + 1, y - 7, 7 + w, 4, P.o); R(c, x + 1, y - 6, 6 + w, 2, P.p0); }
+    // The spec scroll at its foot.
+    R(c, x + 3, y + 19, 8, 5, P.o); R(c, x + 4, y + 20, 6, 3, P.parch); R(c, x + 5, y + 21, 4, 1, P.pathS);
+    if (st.live && !reduce) for (let k = 0; k < 3; k++) if (blink(t + k * 170, 220)) R(c, x + 3 + k * 5, y - 3 - (k % 2) * 2, 1, 1, P.gold);
+    if (on) { const o = blink(t, 400) ? col : P.white; R(c, x - 3, y - 3, 20, 1, o); R(c, x - 3, y + 26, 20, 1, o); R(c, x - 3, y - 3, 1, 30, o); R(c, x + 16, y - 3, 1, 30, o); }
+  }
+  function drawTrail(c, x0, y0, x1, y1, col, t) {
+    const off = reduce ? 0 : Math.floor(t / 110) % 4, pts = [];
+    x1 = Math.round(x1); y1 = Math.round(y1);
+    for (let y = y0; y !== y1; y += Math.sign(y1 - y0)) pts.push([x0, y]);
+    for (let x = x0; x !== x1; x += Math.sign(x1 - x0)) pts.push([x, y1]);
+    pts.forEach(([px, py], i) => { if ((i + off) % 4 < 2) { R(c, px, py + 1, 1, 1, P.o); R(c, px, py, 1, 1, col); } });
+    const o = blink(t, 300) ? col : P.white;
+    R(c, x1 - 4, y1 - 4, 9, 1, o); R(c, x1 - 4, y1 + 4, 9, 1, o); R(c, x1 - 4, y1 - 4, 1, 9, o); R(c, x1 + 4, y1 - 4, 1, 9, o);
+  }
+  function featureLayer(c, t, v, lay) {
+    if (v.project !== 'shop') return;
+    const snap = PF.snap();
+    curBarges.forEach(b => drawBarge(c, b, t));
+    (snap.unknown || []).forEach(name => { const i = v.pipeline.stops.findIndex(s => s.name === name); if (i >= 0) fogStop(c, v, i, lay, t); });
+    bannerSpots(lay).forEach(g => {
+      const st = featureStatus(g.f, v, snap), on = PF.followed === g.f.number;
+      if (on) counted(g.f).forEach(s => { const w = whereIs(s.n, v, lay); if (w) drawTrail(c, g.x, g.y + 25, w.x, w.y, g.f.color, t); });
+      drawBanner(c, g, st, on, t);
+    });
+  }
   function drawVillage(c, sc, t) {
     current = sc.v; L = sc.L; porters = sc.porters; fireworks = sc.fireworks;
     paint(c, t);
@@ -1364,46 +1500,16 @@ window.fetch = async (url, opts) => {
       busy(false);
     }));
   }
-  const escH = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
   function show(house, isManager, v, theme) {
-    const a = house.attention, why = document.getElementById('d-why');
-    const who = `${v.project} · ${isManager ? theme.labels.hall : house.role}`;
-    document.getElementById('d-title').textContent = a ? `Why ${who} needs you` : who;
+    document.getElementById('d-title').textContent = isManager ? `${theme.labels.hall} · manager` : `${house.role} · ${house.kind}`;
     document.getElementById('d-line').textContent = house.issue ? `#${house.issue} ${house.issue_title || ''}` : (house.issue_title || 'No issue claimed');
-    document.getElementById('d-meta').textContent = house.last_known ? `State unknown: ${v.unreachable.source} unreachable since ${v.unreachable.since} · last known: ${house.last_known}` : `Status: ${house.status}${house.priority ? ' · ' + house.priority : ''}`;
-    why.innerHTML = a ? `<p>${a.reported ? '<span class="tag">Reported</span> by the source itself, not guessed' : '<span class="tag guess">Guessed from screen</span> this may be wrong'}</p>
-      <dl><dt>Source</dt><dd>${a.reported ? escH(a.source) + ' reports <code>' + escH(a.state) + '</code>' : 'None. Matched ' + escH(a.state)}</dd>
-      ${house.question ? '' : `<dt>What it asked</dt><dd><code>${escH(a.ask)}</code></dd>`}
-      <dt>Waiting since</dt><dd>${escH(a.since)} · ${escH(a.wait)}</dd>
-      <dt>Other sources</dt><dd>${a.reported ? '✓ ' : ''}${escH(a.agree)}</dd></dl>
-      ${a.hint ? `<p class="dim">${escH(a.hint)}</p>` : ''}
-      ` : '';
+    document.getElementById('d-meta').textContent =
+      `Status: ${house.status}${house.priority ? ' · ' + house.priority : ''} · Crew: ${house.crew.join(', ') || '—'}` +
+      ((house.subagents || []).length ? ` · ${v.plane === 'runtime' ? 'Agents' : 'Sub-agents'}: ${house.subagents.map(sa => sa.agent_type + (sa.description ? ' (' + sa.description + ')' : '') + (sa.status === 'blocked' ? ' waiting on you' : sa.action ? ' ' + sa.action : '')).join(', ')}` : '') +
+      (house.action ? ` · Now: ${house.action}` : '');
     ask(house);
     links(house.links);
     dialog.hidden = false;
-    document.getElementById('d-title').focus();
-  }
-  /* Signs over the houses that need you, placed from the scene's layout. */
-  function placeSigns() {
-    const box = document.getElementById('signs'); box.innerHTML = '';
-    const banner = document.getElementById('banner');
-    if (!view || !view.village) { banner.hidden = true; return; }
-    const sc = scenes[view.village]; if (!sc || !sc.v) return;
-    const v = sc.v, r = cv.getBoundingClientRect(), vr = document.getElementById('viewport').getBoundingClientRect(), s = r.width / cv.width;
-    banner.hidden = !v.unreachable;
-    if (v.unreachable) banner.innerHTML = `<b>${escH(v.unreachable.source)} can't be reached</b> since ${escH(v.unreachable.since)}. ${escH(v.project)}'s houses are in fog: their states are unknown. Select a house for its last known state.`;
-    const put = (h, x, y, isManager) => {
-      const a = h.attention; if (!a && !h.last_known) return;
-      const b = document.createElement('button');
-      b.className = 'sign' + (a ? (a.reported ? '' : ' guess') : ' lost');
-      b.innerHTML = a ? `${escH(a.source)} · ${escH(a.wait)}` : '?';
-      b.setAttribute('aria-label', a ? `${h.role} needs you: ${a.reported ? 'reported by' : 'guessed from'} ${a.source}, waiting ${a.wait}. Show why.` : `${h.role}: state unknown. Show last known.`);
-      b.style.left = (r.left - vr.left + x * s) + 'px'; b.style.top = (r.top - vr.top + y * s) + 'px';
-      b.onclick = () => show(h, isManager, v, T);
-      box.appendChild(b);
-    };
-    v.houses.forEach((h, i) => { const lot = sc.L.lots[i]; if (lot) put(h, lot.x + 8, lot.y - 6, false); });
-    put(v.manager, sc.L.hallX + 16, 12, true);
   }
   function hit(sc, x, y, theme) {
     const lay = sc.L, v = sc.v;
@@ -1426,16 +1532,93 @@ window.fetch = async (url, opts) => {
   });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') dialog.hidden = true; });
 
+
+  /* ---------- Prototype: banner labels, strip, dialog, controls ---------- */
+  const fbox = document.getElementById('fbanners'), fstrip = document.getElementById('fstrip');
+  function placeBanners() {
+    fbox.innerHTML = '';
+    const sc = view && view.village && scenes[view.village];
+    if (!sc || !sc.v || sc.v.project !== 'shop') { fstrip.hidden = true; return; }
+    const v = sc.v, snap = PF.snap(), r = cv.getBoundingClientRect(), vr = document.getElementById('viewport').getBoundingClientRect(), s = r.width / cv.width;
+    bannerSpots(sc.L).forEach(g => {
+      const st = featureStatus(g.f, v, snap), b = document.createElement('button');
+      b.className = 'fb' + (st.live ? ' live' : '') + (st.stuck ? ' stuck' : '');
+      b.style.setProperty('--fc', st.live ? 'var(--gold)' : g.f.color);
+      b.setAttribute('aria-pressed', String(PF.followed === g.f.number));
+      b.innerHTML = `#${g.f.number} ${esc(g.f.title)}<small>${esc(featureSummary(st))}</small>`;
+      b.setAttribute('aria-label', `Feature #${g.f.number} ${g.f.title}: ${featureSummary(st)}. ${PF.followed === g.f.number ? 'Stop following' : 'Follow'}.`);
+      b.style.left = (r.left - vr.left + (g.x + 7) * s) + 'px';
+      b.style.top = (r.top - vr.top + (g.y + 27) * s) + 'px';
+      b.onclick = () => { PF.followed = PF.followed === g.f.number ? null : g.f.number; placeBanners(); };
+      fbox.appendChild(b);
+    });
+    renderStrip(v, snap);
+  }
+  function renderStrip(v, snap) {
+    const f = FEATURES.find(f => f.number === PF.followed);
+    fstrip.hidden = !f;
+    if (!f) return;
+    const st = featureStatus(f, v, snap);
+    fstrip.style.setProperty('--fc', f.color);
+    const chip = (cls, text) => `<span class="chip ${cls}">${esc(text)}</span>`;
+    const build = st.stuck ? chip('stuck', `Build ${st.landed}/${st.total}: #${st.blocked[0].n} ${st.blocked[0].label}`)
+      : chip(st.landed === st.total ? 'done' : st.landed ? 'part' : '', `Build ${st.landed}/${st.total}`);
+    const stages = st.stages.map(s => s.unknown ? chip('unknown', `${s.label}: unknown`)
+      : chip(s.n === s.total ? 'done' : s.n ? 'part' : '', `${s.label} ${s.n}/${s.total}`));
+    fstrip.innerHTML = `<h3>Following #${f.number} ${esc(f.title)}</h3>` +
+      [chip('done', 'Spec ✓'), build, ...stages].join('<span class="sep">›</span>') +
+      (st.live ? ' ' + chip('live', '★ Live in prod') : '') +
+      `<span class="mode">${PF.mode === 'whole' ? 'Promotes as a whole feature' : 'Promotes per subtask'}</span>` +
+      `<button id="f-details">Details</button><button id="f-stop">Stop following</button>`;
+    document.getElementById('f-details').onclick = () => showFeature(f, v, snap);
+    document.getElementById('f-stop').onclick = () => { PF.followed = null; placeBanners(); };
+  }
+  function whereWords(n, v, snap) {
+    const h = v.houses.find(h => h.issue === n);
+    if (h) return h.status === 'blocked' ? `blocked · ${h.role} is waiting on you` : `being built by ${h.role}`;
+    if (v.backlog.some(c => c.number === n)) return 'waiting at the docks';
+    const p = posOf(n, v), stops = v.pipeline.stops;
+    if (p === -1) return PF.mode === 'whole' ? 'landed · waiting at the quay for the rest' : 'landed · waiting for dev';
+    if (p === null) return 'not started';
+    const s = stops[p];
+    if ((snap.unknown || []).includes(s.name)) return `past ${STAGE_NAME[stops[p - 1].name]} · ${STAGE_NAME[s.name]} unknown`;
+    return p === stops.length - 1 ? 'in prod' : `in ${STAGE_NAME[s.name]}`;
+  }
+  function showFeature(f, v, snap) {
+    const st = featureStatus(f, v, snap);
+    document.getElementById('d-title').textContent = `#${f.number} ${f.title} · feature`;
+    document.getElementById('d-line').textContent = featureSummary(st) + ` · ${st.total} subtasks counted`;
+    document.getElementById('d-meta').innerHTML =
+      `<ul class="subs">${f.subtasks.map(s => s.dropped
+        ? `<li><a href="https://github.com/larkspur-labs/shop/issues/${s.n}" target="_blank" rel="noopener" class="drop">#${s.n}</a><span class="drop">${esc(s.title)}</span><span class="w">${esc(s.dropped)} · not counted</span></li>`
+        : `<li><a href="https://github.com/larkspur-labs/shop/issues/${s.n}" target="_blank" rel="noopener">#${s.n}</a><span>${esc(s.title)}</span><span class="w">${esc(whereWords(s.n, v, snap))}</span></li>`).join('')}</ul>
+      <dl><dt>Subtasks from</dt><dd>${esc(f.linked_by)}</dd>
+      ${v.pipeline.stops.map(s => `<dt>${STAGE_NAME[s.name]}</dt><dd>${esc(snap.env[s.name])}</dd>`).join('')}
+      <dt>Live means</dt><dd>all counted subtasks' code runs in prod</dd></dl>`;
+    document.getElementById('d-q').innerHTML = '';
+    links([f.spec, { label: `GitHub issue #${f.number}`, url: f.url }]);
+    dialog.hidden = false;
+  }
+  function protoGo() {
+    document.querySelectorAll('[data-mode]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === PF.mode)));
+    document.querySelectorAll('[data-step]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.step === PF.step)));
+    document.getElementById('cap').textContent = STEPS.find(s => s.key === PF.step).cap;
+    dialog.hidden = true;
+    poll();
+  }
+  document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => { PF.mode = b.dataset.mode; protoGo(); }));
+  document.querySelectorAll('[data-step]').forEach(b => b.addEventListener('click', () => {
+    PF.step = b.dataset.step;
+    if (PF.step === 'spec') PF.followed = null; else if (PF.step === 'follow' || PF.followed === null) PF.followed = 460;
+    protoGo();
+  }));
   /* ---------- Data ---------- */
   function fit() {
     const vp = document.getElementById('viewport'), W = cv.width, H = cv.height;
-    const s = Math.max(1, Math.min(8, Math.floor((vp.clientWidth - 8) / W), Math.floor((window.innerHeight - 190) / H) || 1));
+    const s = Math.max(1, Math.min(8, Math.floor((vp.clientWidth - 8) / W), Math.floor((window.innerHeight - 340) / H) || 1));
     cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
   }
-  window.addEventListener('resize', () => { fit(); placeSigns(); });
-  window.addEventListener('proto-refresh', poll);
-  window.addEventListener('hashchange', () => { dialog.hidden = true; const n = decodeURIComponent(location.hash.slice(1)); if ([...pick.options].some(o => o.value === n)) pick.value = n; });
-  document.querySelectorAll('[data-demo]').forEach(b => b.addEventListener('click', () => { protoScenario = b.dataset.demo; dialog.hidden = true; location.hash = b.dataset.at; poll(); }));
+  window.addEventListener('resize', () => { fit(); placeBanners(); });
 
   /* `· autocoder · development`, `· agentex · runtime`: which framework drew it, and which half of the loop it is. */
   function describe(v) {
@@ -1460,7 +1643,7 @@ window.fetch = async (url, opts) => {
     }
     fit();
     if (reduce) draw(0);
-    requestAnimationFrame(placeSigns);
+    requestAnimationFrame(placeBanners);
   }
   function draw(t) {
     if (!view) return;
@@ -1506,7 +1689,7 @@ window.fetch = async (url, opts) => {
       document.getElementById('status').textContent = "Can't reach agents-tui. Retrying…";
     }
   }
-  poll();
+  protoGo();
 
   if (!reduce) {
     const loop = t => { draw(t); requestAnimationFrame(loop); };
