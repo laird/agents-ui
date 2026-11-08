@@ -34,6 +34,8 @@ Tests are inline `#[cfg(test)]` modules in each source file:
 - `src/web/framework.rs` — state words, task numbers, report → village mapping, autocoder labels, outside adapters (`tools/adapters/example-report.json`)
 - `src/web/source.rs` — `--source` parsing, swarm-source precedence, any village source as a world's platform
 - `src/web/deployments.rs` — newest successful GitHub Deployment per environment, from JSON fixtures
+- `src/web/feature.rs` — features from links and the village: where each subtask is, Build/stage counts, not-planned leaves the total, stuck, live, one-day retention, report tasks with a `parent`
+- `src/model/issue.rs` — feature links: sub-issues else `Sub-task of #N` bodies, spec links in the parent body
 - `src/web/kubernetes.rs` — runtime specs, pod states and why they need you, image versions, workloads → houses, from JSON fixtures
 - `src/web/herdr.rs`, `src/web/temporal.rs` — herdr and Temporal parsing and village building, from JSON fixtures
 - `src/web/world.rs` — world specs, build-ID matching, incident origins, shipping vs landed
@@ -82,6 +84,8 @@ src/
     temporal.rs     # Temporal namespaces as villages, via the frontend HTTP API
     kubernetes.rs   # A Kubernetes namespace as a runtime village (alternative to Temporal), via kubectl JSON
     village.rs      # Village model: houses per worktree, issue crates, pipeline from git
+    deployments.rs  # What each environment runs: newest successful GitHub Deployment (else its branch ref)
+    feature.rs      # Features: a parent issue's subtasks followed from spec to production
     world.rs        # Worlds: a dev village paired with the platform it builds (incidents down, releases up)
     village.html    # /village: the swarm as a 16-bit village (canvas renderer, themes, worlds)
 tools/mock/         # Simulated herdr/Temporal/Kubernetes for the village: demo.sh (RUNTIME=k8s), record.py + replay-build.py

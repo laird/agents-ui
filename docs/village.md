@@ -52,6 +52,7 @@ jump to the tool that handles it, in a new tab:
 | A Temporal house | the workflow in Temporal's web UI (`--temporal-ui`) |
 | The notice board | the blocked issues and proposals, each linked |
 | The docks | the backlog, highest priority first, each linked |
+| A feature's banner, then Details | the feature's spec (the document its issue links to, else the issue) and its issue; each subtask is linked too |
 
 Outside adapters add their own links per house (`links` in the report,
 see [village-protocol.md](village-protocol.md)).
@@ -105,7 +106,132 @@ session is a house, and agents sharing a worktree are one house.
 | Crates at the docks | Open, unclaimed, unblocked issues, highest priority first |
 | Notes on the board | Issues with a blocking label (`needs-design`, `proposal`, ...) |
 | Crates at the quay | `refs/autocoder/tips/<integration>/<sha>-<issue>` not yet green |
-| Locks, then the harbour or launch pad | `<integration>-green`, then each environment in `.autocoder.json` |
+| Locks, then the harbour or launch pad | `<integration>-green`, then each environment in `.autocoder.json` (see [Environments](#environments)) |
+| Banners east of the houses | Features: parent issues split into subtasks (see [Following a feature](#following-a-feature)) |
+
+### Environments
+
+The canal's first lock is the sentinel's `<integration>-green` ref. After it
+comes one lock per environment listed in `.autocoder.json`, in order; the
+last is the harbour (medieval) or launch pad (modern).
+
+```json
+{
+  "environments": [
+    { "name": "dev" },
+    { "name": "uat", "ref": "release/uat" },
+    { "name": "prod" }
+  ],
+  "promotion": "subtask"
+}
+```
+
+For each environment the village works out what it runs, in this order:
+
+1. **A GitHub Deployment.** It takes the newest deployment to an environment
+   with that `name` whose latest status is `success`, checking up to 10. A
+   deployment later marked `inactive`, failed or still pending doesn't count.
+   This needs `gh` signed in. If the deployed commit hasn't been fetched into
+   the clone yet, the village uses the branch instead.
+2. **Else its branch.** This is `origin/<ref>`, where `ref` defaults to
+   `env/<name>`.
+3. **Else unknown.** With neither, the village can't tell what the
+   environment runs. It fogs the lock with a "?" rather than call it empty.
+
+Work only reaches a lock after reaching every lock before it, so crates never
+pass an unknown environment. A feature's Details dialog says where each
+answer came from: `GitHub Deployment · 9b1e440`, `its branch ref`, or `no
+Deployment and no branch`.
+
+`promotion` says how your project moves landed work through the environments.
+It is `subtask` (the default) or `feature`; see below.
+
+## Following a feature
+
+A **feature** is a parent issue split into subtasks. The village answers "is
+feature X live in production yet, and if not, where is it?" without asking
+anyone.
+
+**Which issues are features.** Every open issue that has GitHub sub-issues is
+a feature, and so is every open issue labelled `decomposed`. A parent with
+sub-issues uses them as its subtasks. A `decomposed` parent's subtasks are the
+issues whose body says `Sub-task of #N`: autocoder writes that line and the
+label when it splits an issue, but it doesn't create sub-issues. Outside
+adapters get features by setting `parent` on their tasks
+([village-protocol.md](village-protocol.md)).
+
+**Banners.** Each feature has a banner in the strip cleared east of the
+houses, in its own colour. Its spec lies at its foot: a scroll in the
+village, a clipboard downtown. The spec is the first document in the same
+repository that the parent's body links to (a `…/blob/…/*.md` URL, or a
+relative `docs/…` link). Without one, the parent issue's body is the spec. The
+label under each banner is a button that names the feature and how far it has
+got:
+
+| Label | Means |
+|---|---|
+| `Build 1/4` | 1 of the 4 counted subtasks has landed (at the quay or any lock) |
+| `UAT 2/4` | all have landed; 2 have reached UAT, the first stage not everyone has reached |
+| `UAT: unknown` | all have reached the stage before, and nothing says what UAT runs |
+| `Stuck · #463 needs design` | a counted subtask is blocked (see below) |
+| `Live in prod` | every counted subtask has reached the last stop |
+
+**Following.** Select a banner or its label (Tab to it, then Enter or Space).
+A marching trail runs from the banner to each counted subtask, wherever it
+is: a crate at the docks, a note on the board, a house, the quay, a lock, the
+harbour, or a barge. A strip appears above the counters:
+
+`Spec ✓ › Build 4/4 › Master-green 4/4 › Dev 4/4 › UAT 2/4 › Prod 0/4`
+
+The strip has one chip per pipeline stop, starting with the green ref. A chip
+is green when every counted subtask has reached that stop, gold when some
+have, and plain when none have. **Details** opens the feature's dialog, and
+**Stop following** clears the trail. Selecting the banner again also stops.
+
+**Counting.** A feature's total is its open subtasks plus those closed as
+completed. A subtask closed as **not planned** leaves the total, so 4 becomes
+3. The dialog lists it struck through, marked "closed as not planned · not
+counted". A subtask closed as completed counts as landed only once the
+village finds its landed commit.
+
+**Promotion.** Set by `promotion` in `.autocoder.json`:
+
+- `subtask` (the default): each subtask's crate moves through the locks on
+  its own, so a feature can read `UAT 2/4`.
+- `feature`: landed subtasks wait at the quay and move together. When every
+  counted subtask is at the same stop, the village draws them as one barge (a
+  flatbed truck downtown) flying the feature's colour, instead of loose
+  crates.
+
+**Stuck.** A counted subtask is stuck when it has a blocking label (it is a
+note on the board) or when its worker is waiting on a person. The banner flies
+a red pennant, and the strip's Build chip turns red: `Build 3/4: #463 needs
+design`. A waiting worker reads `#463 waiting`, and the trail leads to the
+house where the worker waves at you.
+
+**Can't tell.** When nothing says what an environment runs (see
+[Environments](#environments)), its lock is in fog with a "?" and its chip
+reads `UAT: unknown` with a dashed border. The village never says "not live"
+when it can't tell. A feature whose last stop is unknown is never shown as
+live.
+
+**Live.** A feature is live when every counted subtask's landed commit is in
+what the last stop runs. The banner turns gold and sparkles, and the strip
+adds `★ Live in prod`. This means the code runs in production. Feature flags
+are out of scope, so it doesn't mean users can see it. Two timers clear live
+banners away. The server keeps listing a live feature for a day after its
+parent issue closes. Independently, an open page fades a banner over the
+first hour after that page saw it go live, and hides it after two hours
+unless you're following it.
+
+**Details.** The dialog lists each subtask and where it is: being built by a
+worker, waiting at the docks, on the board, landed and waiting at the quay,
+in a stage, or closed. It also says where the feature's subtasks came from
+(GitHub sub-issues, or `"Sub-task of #N"` in each body), where each
+environment's answer came from, and the promotion mode. Its buttons open the
+spec and the parent issue. Escape closes it.
+
+Villages without features look exactly as they did.
 
 ## Kubernetes
 
