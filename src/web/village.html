@@ -62,6 +62,36 @@
   .dialog .opts button:disabled { opacity: .5; cursor: default; }
   .dialog button { position: absolute; top: 8px; right: 10px; background: none; border: 0; color: var(--ink); font: 700 16px var(--mono); cursor: pointer; }
   :focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+  /* Features: a label under each banner (a real button, so Tab reaches it),
+   * and the strip above the counters for the feature being followed. */
+  .viewport { position: relative; }
+  .fbanners { position: absolute; inset: 0; pointer-events: none; }
+  .fb { position: absolute; transform: translateX(-50%); pointer-events: auto; max-width: 118px; font: 700 11px/1.25 var(--mono); color: var(--ink); background: rgba(6,8,20,.82); border: 2px solid var(--fc); border-radius: 4px; padding: 2px 6px; cursor: pointer; text-align: center; }
+  .fb small { display: block; font-weight: 400; color: var(--ink-dim); }
+  .fb[aria-pressed="true"] { background: var(--fc); color: #0c1028; }
+  .fb[aria-pressed="true"] small { color: #0c1028; }
+  .fb.live { border-color: var(--gold); }
+  .fb.stuck small { color: #ff8070; }
+  .fb.stuck[aria-pressed="true"] small { color: #600; }
+  .fstrip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 8px; padding: 6px 8px; border: 2px solid var(--fc, var(--rule)); border-radius: 4px; background: rgba(6,8,20,.55); font: 13px var(--mono); }
+  .fstrip[hidden] { display: none; }
+  .fstrip h3 { margin: 0 6px 0 0; font: 700 13px var(--mono); color: var(--fc); }
+  .fstrip .chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+  .chip { padding: 2px 8px; border-radius: 4px; border: 2px solid var(--rule); color: var(--ink-dim); white-space: nowrap; }
+  .chip.done { border-color: #38c848; color: #b8f0b8; }
+  .chip.part { border-color: var(--gold); color: var(--gold); }
+  .chip.stuck { border-color: #e02828; color: #ffb0a8; background: rgba(224,40,40,.15); }
+  .chip.unknown { border-style: dashed; border-color: var(--ink-dim); color: var(--ink); background: rgba(208,212,232,.12); }
+  .chip.live { border-color: var(--gold); background: var(--gold); color: #241400; font-weight: 700; }
+  .fstrip .sep { color: var(--ink-dim); }
+  .fstrip .mode { margin-left: auto; color: var(--ink-dim); font-size: 12px; }
+  .fstrip button { background: var(--win-bot); color: var(--ink); border: 2px solid var(--win-inner); border-radius: 4px; font: 700 12px var(--mono); padding: 3px 10px; cursor: pointer; }
+  .dialog .subs li { display: flex; flex-wrap: wrap; gap: 0 8px; }
+  .dialog .subs .w { color: var(--ink-dim); }
+  .dialog .subs .drop { text-decoration: line-through; color: var(--ink-dim); }
+  .dialog dl { margin: 8px 0 0; font: 13px/1.4 var(--mono); display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; }
+  .dialog dt { color: var(--ink-dim); }
+  .dialog dd { margin: 0; }
 </style>
 </head>
 <body>
@@ -73,6 +103,13 @@
     <div class="viewport" id="viewport">
       <div class="empty" id="empty">Looking for swarms…</div>
       <canvas id="map" width="320" height="180" hidden aria-label="The swarm drawn as a village. Select a house to see its crew and issue."></canvas>
+      <div class="fbanners" id="fbanners"></div>
+    </div>
+    <div class="fstrip" id="fstrip" hidden>
+      <h3 id="fs-title"></h3>
+      <span class="chips" id="fs-chips" aria-live="polite"></span>
+      <span class="mode" id="fs-mode"></span>
+      <button id="fs-details">Details</button><button id="fs-stop">Stop following</button>
     </div>
     <div class="flow" id="flow"></div>
   </div>
@@ -109,6 +146,8 @@
   const KINDCOL = { bug: '#e03838', feature: '#40b8e8', tests: '#e070d0', security: '#3058b0', research: '#c0a8f0', perf: '#d8c8a8', refactor: '#6878a0', docs: '#2878a0', chores: '#a83028', workshop: '#c88848', cottage: '#c8a048' };
   const NOTECOL = { 'needs-design': '#f8c800', 'needs-clarification': '#d0c0f8', 'needs-approval': '#e89890', 'too-complex': '#b02010', 'future': '#8088a8', 'proposal': '#c0a8f0', 'failed': '#e02828', 'unreachable': '#585870' };
   const STOPCOL = ['#38c848', '#f8d040', '#f8f8f8', '#4868e8', '#e070d0'];
+  /* One cloth colour per feature banner, in the order the server lists them. */
+  const FEATURE_COLS = ['#40b8e8', '#e070d0', '#60e0c8', '#f07020', '#c0a8f0', '#a8c8f8'];
   /* A sub-agent's accent (tie, apron, belt) matches the building its specialty would build. */
   const SPECIALTIES = [['architect', 'research'], ['security', 'security'], ['test', 'tests'], ['doc', 'docs'], ['coder', 'feature']];
   const subHat = s => {
@@ -909,9 +948,12 @@
     const locks = Math.max(0, v.pipeline.stops.length - 1);
     const lockStart = roadX + 40;
     const castleX = lockStart + locks * 34 + 6;
-    const W = Math.max(cx0 + vw + 40, roadX + 70, castleX + 46);
-    const H = canalY + 34;
     const forestX = Math.max(cx0 + vw + 6, hallX + 64);
+    // Feature banners stand in a strip cleared out of the forest, east of the
+    // houses; the map widens if they need the room. No features, no strip.
+    const banners = (v.features || []).map((f, k) => ({ f, x: forestX + 12 + k * 30, y: 14, col: FEATURE_COLS[k % FEATURE_COLS.length] }));
+    const W = Math.max(cx0 + vw + 40, roadX + 70, castleX + 46, banners.length ? forestX + 12 + banners.length * 30 : 0);
+    const H = canalY + 34;
     // What's built on: river, docks, plaza, roads, house rows, canal and its
     // stations. Every free 9×8 cell may get a decoration.
     const taken = [
@@ -938,7 +980,7 @@
       const zone = Math.floor(hash(x >> 5, y >> 5) * 6), k = hash(x + 11, y + 7) < 0.7 ? zone : Math.floor(hash(y, x + 3) * 6);
       decor.push({ x: x + Math.floor(hash(y, x) * 4), y: y + Math.floor(hash(x, y + 1) * 3), k });
     }
-    return { per, rows, cx0, vw, roadX, hallX, top, lots, quayY, canalY, lockStart, castleX, W, H, decor };
+    return { per, rows, cx0, vw, roadX, hallX, top, lots, quayY, canalY, lockStart, castleX, W, H, decor, banners };
   }
 
   /* ---------- State ---------- */
@@ -993,6 +1035,8 @@
   function paint(c, t) {
     const v = current, lay = L;
     const { W, H, roadX, hallX, lots, quayY, canalY, cx0, vw } = lay;
+    // A whole-feature barge carries its subtasks' crates: they are not drawn loose.
+    const barges = bargesFor(v, lay), hid = new Set(barges.flatMap(b => b.issues));
     T.ground(c, 0, 0, W, H);
     if (T.border) T.border(c, W, H);
     T.channel(c, 0, 0, W, 11, t, 1);
@@ -1008,7 +1052,7 @@
     T.channel(c, roadX - 16, canalY, W - roadX + 16, 14, t, 0.6);
     T.dock(c, roadX - 4, quayY + 1, 22);
 
-    for (let x = Math.max(cx0 + vw + 6, hallX + 64); x < W - 14; x += 15) for (let y = 16; y < canalY - 38; y += 16) if (hash(x, y) < 0.55) T.tree(c, x + Math.floor(hash(y, x) * 4), y);
+    for (let x = Math.max(cx0 + vw + 6, hallX + 64); x < W - 14; x += 15) for (let y = 16; y < canalY - 38; y += 16) if (hash(x, y) < 0.55 && !inBannerStrip(lay, x, y)) T.tree(c, x + Math.floor(hash(y, x) * 4), y);
     lay.decor.forEach(d => d.tree ? T.tree(c, d.x, d.y) : T.decor && T.decor(c, d.x, d.y, d.k, reduce ? 0 : t));
     shadow(c, hallX - 2, 40, 42, 2);
 
@@ -1063,7 +1107,7 @@
     });
 
     const carried = new Set(porters.filter(p => p.issue).map(p => p.issue));
-    v.pipeline.quay.filter(n => !carried.has(n)).slice(0, 6).forEach((n, k) => T.crate(c, roadX + 6 + (k % 3) * 6, quayY - 3 - Math.floor(k / 3) * 6, 'workshop', null, true));
+    v.pipeline.quay.filter(n => !carried.has(n) && !hid.has(n)).slice(0, 6).forEach((n, k) => T.crate(c, roadX + 6 + (k % 3) * 6, quayY - 3 - Math.floor(k / 3) * 6, 'workshop', null, true));
 
     // The sentinel's flag is grey while it still has newer work to test.
     const flagOf = i => i === 0 && v.pipeline.sentinel !== 'green' ? P.stoneD : STOPCOL[i] || P.white;
@@ -1071,10 +1115,10 @@
     stops.slice(0, -1).forEach((s, i) => {
       const lx = lay.lockStart + i * 34;
       T.gate(c, lx, canalY, false, flagOf(i));
-      s.issues.slice(0, 4).forEach((n, k) => T.crate(c, lx + 8 + (k % 2) * 6, canalY + 18 + Math.floor(k / 2) * 6, 'workshop', null, true));
+      s.issues.filter(n => !hid.has(n)).slice(0, 4).forEach((n, k) => T.crate(c, lx + 8 + (k % 2) * 6, canalY + 18 + Math.floor(k / 2) * 6, 'workshop', null, true));
     });
     T.destination(c, lay.castleX, canalY, t, fireworks);
-    if (stops.length) stops[stops.length - 1].issues.slice(0, 6).forEach((n, k) => T.crate(c, lay.castleX + 6 + (k % 4) * 6, canalY + 18 + Math.floor(k / 4) * 6, 'workshop', null, true));
+    if (stops.length) stops[stops.length - 1].issues.filter(n => !hid.has(n)).slice(0, 6).forEach((n, k) => T.crate(c, lay.castleX + 6 + (k % 4) * 6, canalY + 18 + Math.floor(k / 4) * 6, 'workshop', null, true));
 
     porters = porters.filter(p => {
       const pos = porterPos(p, t);
@@ -1084,6 +1128,123 @@
       return true;
     });
     bubbles.forEach(([x, y, s]) => bubble(c, x, y, s));
+    featureLayer(c, t, v, lay, barges);
+  }
+
+
+  /* ---------- Features ----------
+   * A feature (a parent issue split into subtasks) is a banner in the strip
+   * cleared east of the houses, with its spec scroll at its foot. Following
+   * one draws a marching trail to each counted subtask. In whole-feature
+   * projects a feature's subtasks ride one barge (a truck downtown) once
+   * they are all at the same stop; an environment nobody can answer for is
+   * in fog. The server works out every count; the renderer only draws them. */
+  let followed = null; // { project, number }
+  const isFollowed = (v, f) => !!followed && followed.project === v.project && followed.number === f.number;
+  const counted = f => (f.subtasks || []).filter(s => !s.dropped);
+  function inBannerStrip(lay, x, y) {
+    const b = lay.banners;
+    return b.length > 0 && y < 48 && x >= b[0].x - 14 && x <= b[b.length - 1].x + 22;
+  }
+  /* Where a subtask is on the map: -1 the quay, i stop i, null elsewhere. */
+  function placeOf(n, v) {
+    if (v.pipeline.quay.includes(n)) return -1;
+    const i = v.pipeline.stops.findIndex(s => s.issues.includes(n));
+    return i >= 0 ? i : null;
+  }
+  function bargesFor(v, lay) {
+    const last = v.pipeline.stops.length - 1, queued = {};
+    return lay.banners.map(g => {
+      if (g.f.promotion !== 'feature') return null;
+      const ns = counted(g.f).map(s => s.number), at = ns.map(n => placeOf(n, v));
+      if (!ns.length || at.some(a => a === null || a !== at[0])) return null;
+      // Barges at the same stop queue up: off the quay they line up downstream,
+      // at a lock or the harbour they wait upstream of it.
+      const i = at[0], k = queued[i] = (queued[i] ?? -1) + 1;
+      const x = i === -1 ? lay.roadX - 14 + k * 26
+        : Math.max(lay.roadX - 14, (i === last ? lay.castleX - 26 : lay.lockStart + i * 34 + 8) - k * 26);
+      return { f: g.f, col: g.col, issues: ns, stop: i, x, y: lay.canalY + 1 };
+    }).filter(Boolean);
+  }
+  /* The map point a trail leads to for subtask n: its house, its crate, or its barge. */
+  function whereIs(n, v, lay, barges) {
+    const hi = v.houses.findIndex(h => h.issue === n);
+    if (hi >= 0) { const lot = lay.lots[hi]; if (lot) return { x: lot.x + 8, y: lot.y + 18 }; }
+    const bi = v.backlog.findIndex(c => c.number === n);
+    if (bi >= 0) { const s = slotPos(Math.min(bi, 39)); return { x: s.x + 2, y: s.y + 2 }; }
+    const ni = v.board.findIndex(b => b.number === n);
+    if (ni >= 0) { const k = Math.min(ni, 7); return { x: lay.hallX + 45 + (k % 4) * 4, y: 31 + Math.floor(k / 4) * 4 }; }
+    const b = barges.find(b => b.issues.includes(n));
+    if (b) { const k = Math.min(b.issues.indexOf(n), 3); return { x: b.x + 4 + k * 5, y: b.y + 3 }; }
+    const hid = new Set(barges.flatMap(b => b.issues));
+    const qi = v.pipeline.quay.filter(m => !hid.has(m)).indexOf(n);
+    if (qi >= 0) { const k = Math.min(qi, 5); return { x: lay.roadX + 8 + (k % 3) * 6, y: lay.quayY - 1 - Math.floor(k / 3) * 6 }; }
+    const stops = v.pipeline.stops;
+    for (let i = 0; i < stops.length; i++) {
+      let k = stops[i].issues.filter(m => !hid.has(m)).indexOf(n);
+      if (k < 0) continue;
+      return i < stops.length - 1
+        ? (k = Math.min(k, 3), { x: lay.lockStart + i * 34 + 10 + (k % 2) * 6, y: lay.canalY + 20 + Math.floor(k / 2) * 6 })
+        : (k = Math.min(k, 5), { x: lay.castleX + 8 + (k % 4) * 6, y: lay.canalY + 20 + Math.floor(k / 4) * 6 });
+    }
+    return null;
+  }
+  /* A barge on the canal, or a flatbed truck on the district's road. */
+  function drawBarge(c, b, t) {
+    const x = b.x, y = b.y + (!reduce && blink(t, 700) ? 1 : 0);
+    if (T === MODERN) {
+      R(c, x, y + 6, 20, 4, P.o); R(c, x + 1, y + 6, 18, 2, M.steel); R(c, x + 1, y + 6, 18, 1, b.col);
+      R(c, x + 19, y + 1, 6, 9, P.o); R(c, x + 20, y + 2, 4, 6, P.white); R(c, x + 21, y + 3, 3, 2, M.glassL);
+      [x + 3, x + 14, x + 21].forEach(wx => { R(c, wx, y + 9, 3, 3, P.o); R(c, wx + 1, y + 10, 1, 1, M.steel); });
+    } else {
+      R(c, x, y + 6, 24, 5, P.o); R(c, x + 1, y + 6, 22, 3, P.wood); R(c, x + 1, y + 6, 22, 1, P.woodL); R(c, x + 3, y + 9, 18, 1, P.woodD);
+      R(c, x + 22, y - 6, 1, 8, P.o); R(c, x + 23, y - 6, 5, 4, P.o); R(c, x + 23, y - 5, 4, 2, b.col);
+    }
+    b.issues.slice(0, 4).forEach((n, k) => T.crate(c, x + 2 + k * 5, y + 1, 'workshop', null, true));
+  }
+  /* Fog over a stop with neither a Deployment nor a branch: "?", never "not live". */
+  function fogStop(c, v, i, lay, t) {
+    const last = v.pipeline.stops.length - 1, x = i === last ? lay.castleX - 4 : lay.lockStart + i * 34 - 7, w = i === last ? 46 : 32;
+    R(c, x, lay.canalY - 28, w, lay.H - lay.canalY + 28, T === MODERN ? 'rgba(170,176,196,.75)' : 'rgba(206,210,230,.72)');
+    if (!reduce) for (let k = 0; k < w / 6 - 1; k++) puffs(c, x + 4 + k * 6, lay.canalY - 18 + (k % 2) * 22, t + k * 330, '#e0e4f0', '#b8c0d8');
+    bubble(c, x + (w >> 1) - 4, lay.canalY - 6, 'unknown');
+  }
+  /* A flag on a pole: swallowtail cloth in the feature's colour, a red pennant
+   * when a subtask is stuck, gold and sparkling once live. The spec lies at
+   * its foot: a scroll in the village, a clipboard downtown. */
+  function drawBanner(c, g, on, t) {
+    const { x, y, f } = g, col = f.live ? P.gold : g.col, wave = !reduce && blink(t + f.number * 7, 320) ? 1 : 0;
+    const stuck = (f.stuck || []).length > 0, top = stuck ? y - 7 : y - 1, modern = T === MODERN;
+    R(c, x - 2, y + 23, 5, 2, P.o); R(c, x - 1, y + 23, 3, 1, modern ? M.concrete : P.stoneD);
+    R(c, x, top, 1, y + 23 - top, modern ? M.steelD : P.o); R(c, x, top - 1, 1, 1, P.gold);
+    R(c, x + 1, y, 14, 10, P.o); R(c, x + 1, y + 1, 13, 8, col); R(c, x + 1, y + 1, 13, 1, P.white);
+    if (!modern) R(c, x + 12, y + 4 + wave, 3, 2, P.o);
+    R(c, x + 4, y + 4, 6, 1, f.live ? P.o : P.white); R(c, x + 4, y + 6, 4, 1, f.live ? P.o : P.white);
+    if (stuck) { const w = !reduce && blink(t, 260) ? 1 : 0; R(c, x + 1, y - 7, 7 + w, 4, P.o); R(c, x + 1, y - 6, 6 + w, 2, P.p0); }
+    if (modern) { R(c, x + 4, y + 18, 7, 7, P.o); R(c, x + 5, y + 19, 5, 5, P.white); R(c, x + 6, y + 18, 3, 1, M.steel); R(c, x + 6, y + 21, 3, 1, M.concreteD); R(c, x + 6, y + 23, 2, 1, M.concreteD); }
+    else { R(c, x + 3, y + 19, 8, 5, P.o); R(c, x + 4, y + 20, 6, 3, P.parch); R(c, x + 5, y + 21, 4, 1, P.pathS); }
+    if (f.live && !reduce) for (let k = 0; k < 3; k++) if (blink(t + k * 170, 220)) R(c, x + 3 + k * 5, y - 3 - (k % 2) * 2, 1, 1, P.gold);
+    if (on) { const o = !reduce && blink(t, 400) ? col : P.white; R(c, x - 3, y - 9, 20, 1, o); R(c, x - 3, y + 26, 20, 1, o); R(c, x - 3, y - 9, 1, 36, o); R(c, x + 16, y - 9, 1, 36, o); }
+  }
+  function drawTrail(c, x0, y0, x1, y1, col, t) {
+    const off = reduce ? 0 : Math.floor(t / 110) % 4, pts = [];
+    x1 = Math.round(x1); y1 = Math.round(y1);
+    for (let y = y0; y !== y1; y += Math.sign(y1 - y0)) pts.push([x0, y]);
+    for (let x = x0; x !== x1; x += Math.sign(x1 - x0)) pts.push([x, y1]);
+    pts.forEach(([px, py], i) => { if ((i + off) % 4 < 2) { R(c, px, py + 1, 1, 1, P.o); R(c, px, py, 1, 1, col); } });
+    const o = !reduce && blink(t, 300) ? col : P.white;
+    R(c, x1 - 4, y1 - 4, 9, 1, o); R(c, x1 - 4, y1 + 4, 9, 1, o); R(c, x1 - 4, y1 - 4, 1, 9, o); R(c, x1 + 4, y1 - 4, 1, 9, o);
+  }
+  function featureLayer(c, t, v, lay, barges) {
+    if (!lay.banners.length && !v.pipeline.stops.some(s => s.source === 'unknown')) return;
+    barges.forEach(b => drawBarge(c, b, t));
+    v.pipeline.stops.forEach((s, i) => { if (s.source === 'unknown') fogStop(c, v, i, lay, t); });
+    const fade = (scenes[v.project] || {}).fade || {};
+    lay.banners.forEach(g => {
+      const on = isFollowed(v, g.f), a = on ? 1 : (fade[g.f.number] ?? 1);
+      if (on) counted(g.f).forEach(s => { const w = whereIs(s.number, v, lay, barges); if (w) drawTrail(c, g.x, g.y + 25, w.x, w.y, g.f.live ? P.gold : g.col, t); });
+      c.globalAlpha = a; drawBanner(c, g, on, t); c.globalAlpha = 1;
+    });
   }
 
   function drawVillage(c, sc, t) {
@@ -1092,10 +1253,27 @@
     sc.porters = porters;
   }
 
+  /* A live banner has done its job: it fades over the first hour after this
+   * page saw it go live and is gone after LIVE_GONE, unless it is being
+   * followed. (The server also stops listing a feature a day after it went live.) */
+  const LIVE_FADE = 10 * 60e3, LIVE_DIM = 60 * 60e3, LIVE_GONE = 2 * 60 * 60e3;
+  function fadeLive(sc, v) {
+    const now = Date.now(), seen = {};
+    sc.fade = {};
+    v.features = (v.features || []).filter(f => {
+      if (!f.live) return true;
+      const since = seen[f.number] = sc.liveSince[f.number] ?? now, age = now - since;
+      if (age > LIVE_GONE && !isFollowed(v, f)) return false;
+      sc.fade[f.number] = age <= LIVE_FADE ? 1 : Math.max(0.35, 1 - 0.65 * (age - LIVE_FADE) / (LIVE_DIM - LIVE_FADE));
+      return true;
+    });
+    sc.liveSince = seen;
+  }
   /* Fold a new model into its village's scene, starting the animations its
    * changes call for. */
   function updateScene(v, t) {
-    const sc = scenes[v.project] || (scenes[v.project] = { v: null, porters: [], fireworks: -1e9, lastDelivered: null });
+    const sc = scenes[v.project] || (scenes[v.project] = { v: null, porters: [], fireworks: -1e9, lastDelivered: null, liveSince: {}, fade: {} });
+    fadeLive(sc, v);
     const lay = layout(v);
     porters = sc.porters;
     diff(sc.v, v, lay, t);
@@ -1329,6 +1507,8 @@
   }
   function hit(sc, x, y, theme) {
     const lay = sc.L, v = sc.v;
+    const g = lay.banners.find(g => x >= g.x - 3 && x < g.x + 17 && y >= g.y - 9 && y < g.y + 27);
+    if (g) return toggleFollow(v.project, g.f.number);
     if (x >= lay.hallX - 4 && x < lay.hallX + 36 && y >= 6 && y < 42) return show(v.manager, true, v, theme);
     if (x >= lay.hallX + 42 && x < lay.hallX + 60 && y >= 28 && y < 44) return showList(theme.labels.board, v.plane === 'runtime' ? 'Failed in the last 24 hours' : 'Blocked issues and proposals waiting on you', v.board);
     if (x >= 6 && x < 62 && y >= 8 && y < 52) return showList(theme.labels.docks, v.plane === 'runtime' ? 'Waiting work' : 'The backlog, highest priority first', v.backlog);
@@ -1348,13 +1528,150 @@
   });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') dialog.hidden = true; });
 
+
+  /* ---------- Features: banner labels, strip, dialog ---------- */
+  const fbox = document.getElementById('fbanners'), fstrip = document.getElementById('fstrip');
+  const STAGE_LABEL = { dev: 'Dev', development: 'Dev', uat: 'UAT', qa: 'QA', staging: 'Staging', prod: 'Prod', production: 'Prod' };
+  const stageLabel = name => STAGE_LABEL[String(name).toLowerCase()] || String(name).charAt(0).toUpperCase() + String(name).slice(1);
+  const blockedWords = b => typeof b === 'string' && b ? b.replace(/-/g, ' ') : 'blocked';
+  function stuckWords(f) {
+    const n = f.stuck[0], s = (f.subtasks || []).find(s => s.number === n);
+    return `#${n} ${blockedWords(s && s.blocked)}`;
+  }
+  /* The furthest state a feature has reached, as its banner label reads it. */
+  function featureSummary(f) {
+    if (f.live) return 'Live in prod';
+    if ((f.stuck || []).length) return `Stuck · ${stuckWords(f)}`;
+    const b = f.build || { landed: 0, total: counted(f).length }, stages = f.stages || [];
+    if (b.landed < b.total) return `Build ${b.landed}/${b.total}`;
+    const s = stages.find(s => s.unknown || s.reached < s.total) || stages[stages.length - 1];
+    if (!s) return `Build ${b.landed}/${b.total}`;
+    return s.unknown ? `${stageLabel(s.name)}: unknown` : `${stageLabel(s.name)} ${s.reached}/${s.total}`;
+  }
+  /* The scenes on screen and where each sits on the canvas. */
+  function shownScenes() {
+    if (!view) return [];
+    if (!view.world) { const sc = scenes[view.village]; return sc && sc.v ? [[sc, 0, 0]] : []; }
+    const w = worlds.find(x => x.name === view.world), Ps = w && scenes[w.platform], Ds = w && scenes[w.dev];
+    if (!Ps || !Ds || !Ps.v || !Ds.v) return [];
+    return [[Ps, SIDE, 0], [Ds, SIDE, worldGeom(Ps, Ds).devTop]];
+  }
+  /* One button per banner, kept across polls so keyboard focus survives a refresh. */
+  const fbuttons = new Map();
+  function placeBanners() {
+    const vp = document.getElementById('viewport'), r = cv.getBoundingClientRect(), vr = vp.getBoundingClientRect();
+    const s = r.width / cv.width, keep = new Set();
+    let strip = null;
+    if (!cv.hidden) shownScenes().forEach(([sc, ox, oy]) => sc.L.banners.forEach((g, k) => {
+      const f = g.f, key = `${sc.v.project}#${f.number}`, on = isFollowed(sc.v, f), col = f.live ? 'var(--gold)' : g.col;
+      if (on) strip = { sc, g };
+      keep.add(key);
+      let b = fbuttons.get(key);
+      if (!b) {
+        b = document.createElement('button');
+        b.addEventListener('click', () => toggleFollow(b.project, b.number));
+        fbuttons.set(key, b); fbox.appendChild(b);
+      }
+      b.project = sc.v.project; b.number = f.number;
+      b.className = 'fb' + (f.live ? ' live' : '') + ((f.stuck || []).length ? ' stuck' : '');
+      b.style.setProperty('--fc', col);
+      b.setAttribute('aria-pressed', String(on));
+      const sum = featureSummary(f);
+      b.innerHTML = `#${f.number} ${esc(f.title)}<small>${esc(sum)}</small>`;
+      b.setAttribute('aria-label', `Feature #${f.number} ${f.title}: ${sum}. ${on ? 'Following; press to stop' : 'Press to follow'}.`);
+      b.style.opacity = on ? 1 : (sc.fade[f.number] ?? 1);
+      // Labels sit under their banners; when the map is drawn small they alternate rows.
+      const lift = 30 * s < 120 && k % 2 ? 36 : 0;
+      b.style.left = (r.left - vr.left + vp.scrollLeft + (ox + g.x + 7) * s) + 'px';
+      b.style.top = (r.top - vr.top + vp.scrollTop + (oy + g.y + 28) * s + lift) + 'px';
+    }));
+    for (const [key, b] of fbuttons) if (!keep.has(key)) { b.remove(); fbuttons.delete(key); }
+    renderStrip(strip);
+  }
+  function renderStrip(on) {
+    fstrip.hidden = !on;
+    if (!on) return;
+    const { sc, g } = on, f = g.f, b = f.build || { landed: 0, total: counted(f).length };
+    fstrip.style.setProperty('--fc', f.live ? 'var(--gold)' : g.col);
+    const chip = (cls, text) => `<span class="chip ${cls}">${esc(text)}</span>`;
+    const build = (f.stuck || []).length ? chip('stuck', `Build ${b.landed}/${b.total}: ${stuckWords(f)}`)
+      : chip(b.landed === b.total ? 'done' : b.landed ? 'part' : '', `Build ${b.landed}/${b.total}`);
+    const stages = (f.stages || []).map(s => s.unknown ? chip('unknown', `${stageLabel(s.name)}: unknown`)
+      : chip(s.reached === s.total ? 'done' : s.reached ? 'part' : '', `${stageLabel(s.name)} ${s.reached}/${s.total}`));
+    document.getElementById('fs-title').textContent = `Following #${f.number} ${f.title}`;
+    const chips = [chip('done', 'Spec ✓'), build, ...stages].join('<span class="sep">›</span>') + (f.live ? ' ' + chip('live', '★ Live in prod') : '');
+    // Only touch the live region when the reading changes, so a poll is not re-announced.
+    const box = document.getElementById('fs-chips');
+    if (box.innerHTML !== chips) box.innerHTML = chips;
+    document.getElementById('fs-mode').textContent = f.promotion === 'feature' ? 'Promotes as a whole feature' : 'Promotes per subtask';
+    fstrip.feature = { project: sc.v.project, number: f.number };
+  }
+  function toggleFollow(project, number) {
+    followed = followed && followed.project === project && followed.number === number ? null : { project, number };
+    placeBanners();
+    if (reduce) draw(0);
+  }
+  document.getElementById('fs-stop').addEventListener('click', () => { followed = null; placeBanners(); if (reduce) draw(0); });
+  document.getElementById('fs-details').addEventListener('click', () => {
+    const k = fstrip.feature, sc = k && scenes[k.project], f = sc && sc.v && (sc.v.features || []).find(f => f.number === k.number);
+    if (f) showFeature(f, sc.v);
+  });
+  /* Where an environment's answer comes from. */
+  function sourceWords(s) {
+    const sha = s.sha ? ' · ' + String(s.sha).slice(0, 7) : '';
+    if (s.source === 'deployment') return `GitHub Deployment${sha}`;
+    if (s.source === 'branch') return `branch ${s.branch || s.name}${sha}`;
+    if (s.source === 'unknown') return 'no Deployment and no branch';
+    return 'not reported';
+  }
+  function whereWords(s, v, f) {
+    const extra = s.blocked ? ` · ${blockedWords(s.blocked)}` : '', stops = v.pipeline.stops;
+    switch (s.where) {
+      case 'house': {
+        const h = v.houses.find(h => h.issue === s.number);
+        if (!h) return 'being built' + extra;
+        return h.status === 'blocked' ? `blocked · ${h.role} is waiting on you` : `being built by ${h.role}${extra}`;
+      }
+      case 'backlog': return `waiting at the ${T.labels.docks.toLowerCase()}${extra}`;
+      case 'board': return `on the ${T.labels.board.toLowerCase()}${extra}`;
+      case 'quay': return f.promotion === 'feature' ? `landed · waiting at the ${T.labels.quay.toLowerCase()} for the rest` : `landed · waiting for ${stops.length ? stageLabel(stops[0].name) : 'release'}`;
+      case 'stop': {
+        const st = stops.find(x => x.name === s.stop);
+        return st && st.source === 'unknown' ? `${stageLabel(s.stop)}: unknown` : `in ${stageLabel(s.stop || '?')}`;
+      }
+      case 'closed': return 'closed';
+      default: return s.where || '';
+    }
+  }
+  function showFeature(f, v) {
+    const subs = f.subtasks || [], url = n => (f.url || '').replace(/\/issues\/\d+$/, '/issues/' + n);
+    const issueLink = (n, cls) => f.url ? `<a href="${esc(url(n))}" target="_blank" rel="noopener"${cls ? ` class="${cls}"` : ''}>#${n}</a>` : `<span${cls ? ` class="${cls}"` : ''}>#${n}</span>`;
+    document.getElementById('d-title').textContent = `#${f.number} ${f.title} · feature`;
+    document.getElementById('d-line').textContent = `${featureSummary(f)} · ${counted(f).length} subtasks counted`;
+    document.getElementById('d-meta').innerHTML =
+      `<ul class="subs">${subs.map(s => s.dropped
+        ? `<li>${issueLink(s.number, 'drop')}<span class="drop">${esc(s.title || '')}</span><span class="w">closed as not planned · not counted</span></li>`
+        : `<li>${issueLink(s.number)}<span>${esc(s.title || '')}</span><span class="w">${esc(whereWords(s, v, f))}</span></li>`).join('')}</ul>
+      <dl><dt>Subtasks from</dt><dd>${f.linked_by === 'body' ? `"Sub-task of #${f.number}" in each body` : 'GitHub sub-issues'}</dd>
+      ${v.pipeline.stops.map(s => `<dt>${esc(stageLabel(s.name))}</dt><dd>${esc(sourceWords(s))}</dd>`).join('')}
+      <dt>Promotion</dt><dd>${f.promotion === 'feature' ? 'as a whole feature' : 'per subtask'}</dd>
+      <dt>Live means</dt><dd>every counted subtask's code runs in ${esc(v.pipeline.stops.length ? stageLabel(v.pipeline.stops[v.pipeline.stops.length - 1].name) : 'prod')}</dd></dl>`;
+    ask({});
+    links([
+      f.spec_url ? { label: `Spec: ${f.spec_url.split('/').pop()}`, url: f.spec_url } : f.url && { label: `Spec: #${f.number} issue body`, url: f.url },
+      f.url && { label: `GitHub issue #${f.number}`, url: f.url }
+    ].filter(Boolean));
+    dialog.hidden = false;
+    document.getElementById('close').focus();
+  }
+
   /* ---------- Data ---------- */
   function fit() {
     const vp = document.getElementById('viewport'), W = cv.width, H = cv.height;
     const s = Math.max(1, Math.min(8, Math.floor((vp.clientWidth - 8) / W), Math.floor((window.innerHeight - 190) / H) || 1));
     cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
   }
-  window.addEventListener('resize', fit);
+  window.addEventListener('resize', () => { fit(); placeBanners(); });
 
   /* `· autocoder · development`, `· agentex · runtime`: which framework drew it, and which half of the loop it is. */
   function describe(v) {
@@ -1378,6 +1695,7 @@
       renderFlow(sc.v);
     }
     fit();
+    placeBanners();
     if (reduce) draw(0);
   }
   function draw(t) {
