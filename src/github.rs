@@ -4,8 +4,8 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::model::issue::{
-    FEATURE_LINK_QUERY, FeatureLink, GhIssueJson, GitHubIssue, feature_link_from_json,
-    subtask_search_query,
+    FEATURE_LINK_QUERY, FEATURE_PARENTS_QUERY, FeatureLink, GhIssueJson, GitHubIssue,
+    feature_link_from_json, feature_parents_from_json, subtask_search_query,
 };
 use crate::project_management::ProjectManagementClient;
 use crate::transport::ServerTransport;
@@ -363,7 +363,6 @@ fn feature_link_args(parent: u32) -> Vec<String> {
 /// Which subtasks make the feature whose parent issue is `parent`. `None` when
 /// the parent has no subtasks, or when `gh` fails for any reason: a feature
 /// that can't be read is left out, never an error.
-#[allow(dead_code)] // wired into the village by #350
 pub async fn fetch_feature_link(
     transport: &ServerTransport,
     repo_path: &Path,
@@ -383,14 +382,41 @@ pub async fn fetch_feature_link(
     feature_link_from_json(&output.stdout)
 }
 
+/// The repository's open feature parents: issues with sub-issues, or labelled
+/// `decomposed`. One GraphQL round trip; none when `gh` fails.
+pub async fn fetch_feature_parents(transport: &ServerTransport, repo_path: &Path) -> Vec<u32> {
+    let args: Vec<String> = [
+        "api",
+        "graphql",
+        "-F",
+        "owner={owner}",
+        "-F",
+        "name={repo}",
+        "-f",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .chain(std::iter::once(format!("query={FEATURE_PARENTS_QUERY}")))
+    .collect();
+    match gh_repo_output(transport, repo_path, &args).await {
+        Ok(o) if o.status.success() => feature_parents_from_json(&o.stdout),
+        Ok(o) => {
+            tracing::debug!("feature parents: {}", String::from_utf8_lossy(&o.stderr).trim());
+            Vec::new()
+        }
+        Err(e) => {
+            tracing::debug!("feature parents: {e}");
+            Vec::new()
+        }
+    }
+}
+
 /// Feature links reused for a TTL, so each parent costs at most one `gh`
 /// round trip per TTL however often the village asks.
-#[allow(dead_code)] // wired into the village by #350
 pub struct FeatureLinks {
     cache: crate::web::source::TtlCache<(std::path::PathBuf, u32), Option<FeatureLink>>,
 }
 
-#[allow(dead_code)]
 impl FeatureLinks {
     pub fn new(ttl: Duration) -> Self {
         Self { cache: crate::web::source::TtlCache::new(ttl) }

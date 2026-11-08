@@ -350,6 +350,10 @@ pub struct Task {
     pub state: TaskState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// The task this one is a subtask of, by id. Tasks sharing a parent make
+    /// a feature, followed from spec to production.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -618,7 +622,7 @@ pub fn to_village(report: &Report) -> Reading {
         })
         .collect();
 
-    let village = VillageSnapshot {
+    let mut village = VillageSnapshot {
         project: report.project.clone(),
         plane: report.plane,
         framework: report.framework.clone(),
@@ -630,7 +634,9 @@ pub fn to_village(report: &Report) -> Reading {
         board,
         pipeline,
         builds: report.builds.clone(),
+        features: Vec::new(),
     };
+    village.features = super::feature::build(&village, &super::feature::links_from_tasks(&report.tasks));
     Reading { village, issues }
 }
 
@@ -764,6 +770,7 @@ pub fn swarm_report(swarm: &SwarmSnapshot, issues: &[IssueSnapshot], pipeline: &
                     TaskState::Open
                 },
                 url: Some(i.url.clone()).filter(|u| !u.is_empty()),
+                parent: None,
             })
             .collect(),
         pipeline: ReportPipeline {
@@ -1059,6 +1066,26 @@ mod tests {
         assert_eq!(run.plane, Plane::Runtime);
         assert_eq!(run.builds, vec!["1f2e3d4c5b6a"]);
         assert!(!run.manager.subagents.is_empty());
+    }
+
+    #[test]
+    fn report_tasks_with_a_parent_become_features() {
+        let json = r#"{"project":"shop","tasks":[
+            {"id":"PROJ-1","title":"Saved carts","state":"claimed"},
+            {"id":"PROJ-2","title":"Cart table","parent":"PROJ-1","state":"done"},
+            {"id":"PROJ-3","title":"Cart API","parent":"PROJ-1"}
+        ],"pipeline":{"stages":[{"name":"prod","tasks":["PROJ-2"]}]}}"#;
+        let v = to_village(&parse_reports(json).unwrap()[0]).village;
+        assert_eq!(v.features.len(), 1);
+        let f = &v.features[0];
+        assert_eq!((f.number, f.title.as_str()), (task_number("PROJ-1"), "Saved carts"));
+        assert_eq!((f.build.landed, f.build.total), (1, 2));
+        assert_eq!(f.stages[0].reached, 1);
+        assert!(!f.live);
+        // Reports without parents draw no features, and serialize without the field.
+        let plain = to_village(&parse_reports(r#"{"project":"a","tasks":[{"id":"1"}]}"#).unwrap()[0]).village;
+        assert!(plain.features.is_empty());
+        assert!(serde_json::to_value(&plain).unwrap().get("features").is_none());
     }
 
     #[test]

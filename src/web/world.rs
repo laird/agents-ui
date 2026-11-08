@@ -163,6 +163,7 @@ mod tests {
             board: Vec::new(),
             pipeline: Pipeline::default(),
             builds: Vec::new(),
+            features: Vec::new(),
         }
     }
 

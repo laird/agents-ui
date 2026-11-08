@@ -373,9 +373,8 @@ pub async fn fetch_issues(repo_path: &Path) -> anyhow::Result<Vec<GitHubIssue>> 
 // ---------------------------------------------------------------------------
 
 /// How a feature's subtasks were found.
-#[allow(dead_code)] // read by the village once #350 wires features in
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum LinkedBy {
     /// GitHub sub-issues of the parent.
     SubIssues,
@@ -384,7 +383,6 @@ pub enum LinkedBy {
 }
 
 /// One subtask of a feature.
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Child {
     pub number: u32,
@@ -396,7 +394,6 @@ pub struct Child {
 }
 
 /// A parent issue and the subtasks that make it up.
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct FeatureLink {
     pub parent: u32,
@@ -413,22 +410,50 @@ pub struct FeatureLink {
 /// The GraphQL query `crate::github::fetch_feature_link` sends: the parent
 /// with its sub-issues, plus a search for `Sub-task of #N` bodies, so both
 /// sources cost one round trip.
-#[allow(dead_code)]
 pub const FEATURE_LINK_QUERY: &str = "query($owner:String!,$name:String!,$number:Int!,$q:String!){\
 repository(owner:$owner,name:$name){issue(number:$number){number title url body \
 subIssues(first:100){nodes{number title url state stateReason}}}}\
 search(query:$q,type:ISSUE,first:100){nodes{... on Issue{number title url state stateReason body}}}}";
 
+/// The GraphQL query `crate::github::fetch_feature_parents` sends: the
+/// repository's open issues with their sub-issue counts and labels.
+pub const FEATURE_PARENTS_QUERY: &str = "query($owner:String!,$name:String!){\
+repository(owner:$owner,name:$name){issues(states:OPEN,first:100,orderBy:{field:UPDATED_AT,direction:DESC}){\
+nodes{number subIssuesSummary{total} labels(first:30){nodes{name}}}}}}";
+
+/// Open issues that are feature parents: they have sub-issues, or carry
+/// autocoder's `decomposed` label. Sorted; empty when the JSON can't be read.
+pub fn feature_parents_from_json(bytes: &[u8]) -> Vec<u32> {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+        return Vec::new();
+    };
+    let nodes = v.pointer("/data/repository/issues/nodes").and_then(|n| n.as_array());
+    let mut parents: Vec<u32> = nodes
+        .into_iter()
+        .flatten()
+        .filter(|n| {
+            let subs = n.pointer("/subIssuesSummary/total").and_then(|t| t.as_u64()).unwrap_or(0);
+            let decomposed = n
+                .pointer("/labels/nodes")
+                .and_then(|l| l.as_array())
+                .is_some_and(|l| l.iter().any(|l| l["name"] == "decomposed"));
+            subs > 0 || decomposed
+        })
+        .filter_map(|n| n["number"].as_u64().and_then(|x| u32::try_from(x).ok()))
+        .collect();
+    parents.sort_unstable();
+    parents.dedup();
+    parents
+}
+
 /// The search string that finds candidate `Sub-task of #N` children. GitHub's
 /// search is loose, so results are re-checked with [`body_names_parent`].
-#[allow(dead_code)]
 pub fn subtask_search_query(owner_repo: &str, parent: u32) -> String {
     format!("repo:{owner_repo} is:issue \"Sub-task of #{parent}\"")
 }
 
 /// Whether an issue body carries autocoder's `Sub-task of #N` line for this
 /// parent (`#34` does not match `#346`).
-#[allow(dead_code)]
 pub fn body_names_parent(body: &str, parent: u32) -> bool {
     let needle = format!("sub-task of #{parent}");
     let lower = body.to_lowercase();
@@ -440,7 +465,6 @@ pub fn body_names_parent(body: &str, parent: u32) -> bool {
 /// The first link in a parent's body to a document in the same repository:
 /// a `…/blob/…/*.md` URL, or a markdown link to a relative `docs/…` path
 /// (made absolute against the repository). `None` means the issue is the spec.
-#[allow(dead_code)]
 pub fn spec_link(body: &str, issue_url: &str) -> Option<String> {
     let repo = issue_url.split("/issues/").next().filter(|r| *r != issue_url)?;
     let blob_prefix = format!("{repo}/blob/");
@@ -518,7 +542,6 @@ impl GqlIssue {
 /// response. Sub-issues win when the parent has any; otherwise children are
 /// the search hits whose body names the parent. `None` when the JSON can't be
 /// read, the parent is missing, or it has no subtasks (it isn't a feature).
-#[allow(dead_code)]
 pub fn feature_link_from_json(bytes: &[u8]) -> Option<FeatureLink> {
     let v: serde_json::Value = serde_json::from_slice(bytes).ok()?;
     let data = v.get("data")?;
@@ -893,6 +916,25 @@ mod tests {
             None
         );
         assert_eq!(spec_link("", &url), None);
+    }
+
+    #[test]
+    fn feature_parents_have_sub_issues_or_are_decomposed() {
+        let json = br#"{"data":{"repository":{"issues":{"nodes":[
+            {"number":346,"subIssuesSummary":{"total":6},"labels":{"nodes":[{"name":"enhancement"}]}},
+            {"number":12,"subIssuesSummary":{"total":0},"labels":{"nodes":[{"name":"decomposed"}]}},
+            {"number":9,"subIssuesSummary":{"total":0},"labels":{"nodes":[{"name":"bug"}]}},
+            {"number":5}
+        ]}}}}"#;
+        assert_eq!(feature_parents_from_json(json), vec![12, 346]);
+        assert!(feature_parents_from_json(b"oops").is_empty());
+        assert!(feature_parents_from_json(br#"{"errors":[]}"#).is_empty());
+    }
+
+    #[test]
+    fn linked_by_serializes_as_the_contract_says() {
+        assert_eq!(serde_json::to_string(&LinkedBy::SubIssues).unwrap(), r#""sub-issues""#);
+        assert_eq!(serde_json::to_string(&LinkedBy::Body).unwrap(), r#""body""#);
     }
 
     #[test]

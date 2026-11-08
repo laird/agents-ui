@@ -30,6 +30,7 @@ use super::temporal::{TemporalSource, TemporalVillages};
 use super::village::{Pipeline, SwarmVillages, VillageSnapshot};
 use super::world::{WorldConfig, WorldSnapshot, build_world};
 use super::{IssueSnapshot, SwarmSnapshot};
+use crate::model::issue::FeatureLink;
 use crate::transport::ServerTransport;
 
 // ---------------------------------------------------------------------------
@@ -63,6 +64,11 @@ pub trait IssueTracker: Send + Sync {
     fn name(&self) -> &'static str;
     /// Open issues for the repository at `repo`; none when it can't be read.
     fn issues<'a>(&'a self, transport: &'a ServerTransport, repo: &'a Path, project: &'a str) -> BoxFuture<'a, Vec<IssueSnapshot>>;
+    /// Which subtasks make each open feature (a parent issue split into
+    /// subtasks); none when the tracker can't say.
+    fn features<'a>(&'a self, _transport: &'a ServerTransport, _repo: &'a Path) -> BoxFuture<'a, Vec<FeatureLink>> {
+        Box::pin(async { Vec::new() })
+    }
 }
 
 /// Where pushed work has got to on its way to production.
@@ -109,8 +115,17 @@ impl ActivitySource for Nothing {
     fn attach(&self, _: &ServerTransport, _: &mut VillageSnapshot) {}
 }
 
-/// GitHub issues, through `gh`.
-pub struct GitHubIssues;
+/// GitHub issues, through `gh`. Feature links are cached per parent, so each
+/// costs at most one `gh` round trip per refresh.
+pub struct GitHubIssues {
+    links: crate::github::FeatureLinks,
+}
+
+impl Default for GitHubIssues {
+    fn default() -> Self {
+        Self { links: crate::github::FeatureLinks::new(super::village::extras_ttl()) }
+    }
+}
 
 impl IssueTracker for GitHubIssues {
     fn name(&self) -> &'static str {
@@ -122,6 +137,12 @@ impl IssueTracker for GitHubIssues {
                 .await
                 .map(|list| list.iter().map(|i| IssueSnapshot::from_issue(i, project)).collect())
                 .unwrap_or_default()
+        })
+    }
+    fn features<'a>(&'a self, transport: &'a ServerTransport, repo: &'a Path) -> BoxFuture<'a, Vec<FeatureLink>> {
+        Box::pin(async move {
+            let parents = crate::github::fetch_feature_parents(transport, repo).await;
+            self.links.get(transport, repo, &parents).await
         })
     }
 }
@@ -176,7 +197,7 @@ fn swarm_source(name: &str) -> Option<Box<dyn SwarmSource>> {
 
 fn issue_tracker(name: &str) -> Option<Box<dyn IssueTracker>> {
     match name {
-        "github" => Some(Box::new(GitHubIssues)),
+        "github" => Some(Box::new(GitHubIssues::default())),
         "none" => Some(Box::new(Nothing)),
         _ => None,
     }
@@ -483,6 +504,7 @@ mod tests {
                 board: Vec::new(),
                 pipeline: Pipeline::default(),
                 builds: vec!["abcdef1".into()],
+                features: Vec::new(),
             };
             Box::pin(async move { vec![Reading { village, issues: Vec::new() }] })
         }

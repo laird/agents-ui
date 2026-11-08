@@ -27,12 +27,13 @@ use serde::{Deserialize, Serialize};
 
 use super::source::{ActivitySource, IssueTracker, PipelineSource, Reading, TtlCache, VillageSource};
 use super::{AgentSnapshot, IssueSnapshot, SwarmSnapshot};
+use crate::model::issue::FeatureLink;
 use crate::transport::ServerTransport;
 
 /// How long fetched issues and pipeline refs are reused before refetching:
 /// 45 s, or `AGENTS_UI_VILLAGE_REFRESH_SECS` (the demo uses 3 so a story
 /// plays out in step).
-fn extras_ttl() -> Duration {
+pub(crate) fn extras_ttl() -> Duration {
     std::env::var("AGENTS_UI_VILLAGE_REFRESH_SECS").ok().and_then(|s| s.parse().ok()).map(Duration::from_secs).unwrap_or(Duration::from_secs(45))
 }
 
@@ -279,6 +280,9 @@ pub struct VillageSnapshot {
     /// Build IDs the village's workers report running (Temporal pollers).
     #[serde(default)]
     pub builds: Vec<String>,
+    /// Parent issues split into subtasks, followed from spec to production.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub features: Vec<super::feature::Feature>,
 }
 
 /// Labels checked in order; the first that matches decides the house.
@@ -780,18 +784,19 @@ pub struct SwarmVillages {
     issues: Box<dyn IssueTracker>,
     pipeline: Box<dyn PipelineSource>,
     activity: Box<dyn ActivitySource>,
-    extras: TtlCache<PathBuf, (Vec<IssueSnapshot>, Pipeline)>,
+    extras: TtlCache<PathBuf, (Vec<IssueSnapshot>, Pipeline, Vec<FeatureLink>)>,
+    live: super::feature::LiveMemory,
 }
 
 impl SwarmVillages {
     pub fn new(issues: Box<dyn IssueTracker>, pipeline: Box<dyn PipelineSource>, activity: Box<dyn ActivitySource>) -> Self {
-        Self { issues, pipeline, activity, extras: TtlCache::new(extras_ttl()) }
+        Self { issues, pipeline, activity, extras: TtlCache::new(extras_ttl()), live: Default::default() }
     }
 
     async fn village(&self, transport: &ServerTransport, swarm: &SwarmSnapshot) -> Reading {
         let repo = PathBuf::from(&swarm.repo_path);
-        let (fetched, pipeline) = if swarm.repo_path.is_empty() {
-            (Vec::new(), Pipeline::default())
+        let (fetched, pipeline, links) = if swarm.repo_path.is_empty() {
+            (Vec::new(), Pipeline::default(), Vec::new())
         } else {
             self.extras
                 .get_or(repo.clone(), || async {
@@ -800,12 +805,15 @@ impl SwarmVillages {
                         true => self.issues.issues(transport, &repo, &swarm.project_name).await,
                         false => Vec::new(),
                     };
-                    (issues, self.pipeline.pipeline(transport, &repo).await)
+                    let pipeline = self.pipeline.pipeline(transport, &repo).await;
+                    (issues, pipeline, self.issues.features(transport, &repo).await)
                 })
                 .await
         };
         let issues = if swarm.issues.is_empty() { fetched } else { swarm.issues.clone() };
         let mut village = build(swarm, &issues, pipeline);
+        let features = super::feature::build(&village, &links);
+        village.features = self.live.keep(&swarm.repo_path, features, std::time::Instant::now());
         self.activity.attach(transport, &mut village);
         Reading { village, issues }
     }

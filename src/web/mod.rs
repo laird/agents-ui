@@ -1,5 +1,6 @@
 pub mod deployments;
 pub mod discovery;
+pub mod feature;
 pub mod framework;
 pub mod herdr;
 pub mod kubernetes;
