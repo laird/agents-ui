@@ -3,7 +3,10 @@ use std::path::Path;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-use crate::model::issue::{GhIssueJson, GitHubIssue};
+use crate::model::issue::{
+    FEATURE_LINK_QUERY, FeatureLink, GhIssueJson, GitHubIssue, feature_link_from_json,
+    subtask_search_query,
+};
 use crate::project_management::ProjectManagementClient;
 use crate::transport::ServerTransport;
 
@@ -343,6 +346,79 @@ pub fn spawn_issue_fetcher(
     })
 }
 
+/// The `gh` arguments that read one parent's feature link: a single GraphQL
+/// round trip returning its sub-issues and the `Sub-task of #N` search hits.
+/// `gh` fills in `{owner}` and `{repo}` from the repository it runs in.
+fn feature_link_args(parent: u32) -> Vec<String> {
+    let field = |k: &str, v: String| ["-F".to_string(), format!("{k}={v}")];
+    let mut args = vec!["api".to_string(), "graphql".to_string()];
+    args.extend(field("owner", "{owner}".into()));
+    args.extend(field("name", "{repo}".into()));
+    args.extend(field("number", parent.to_string()));
+    args.extend(field("q", subtask_search_query("{owner}/{repo}", parent)));
+    args.extend(["-f".to_string(), format!("query={FEATURE_LINK_QUERY}")]);
+    args
+}
+
+/// Which subtasks make the feature whose parent issue is `parent`. `None` when
+/// the parent has no subtasks, or when `gh` fails for any reason: a feature
+/// that can't be read is left out, never an error.
+#[allow(dead_code)] // wired into the village by #350
+pub async fn fetch_feature_link(
+    transport: &ServerTransport,
+    repo_path: &Path,
+    parent: u32,
+) -> Option<FeatureLink> {
+    let output = gh_repo_output(transport, repo_path, &feature_link_args(parent))
+        .await
+        .map_err(|e| tracing::debug!("feature link #{parent}: {e}"))
+        .ok()?;
+    if !output.status.success() {
+        tracing::debug!(
+            "feature link #{parent}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+        return None;
+    }
+    feature_link_from_json(&output.stdout)
+}
+
+/// Feature links reused for a TTL, so each parent costs at most one `gh`
+/// round trip per TTL however often the village asks.
+#[allow(dead_code)] // wired into the village by #350
+pub struct FeatureLinks {
+    cache: crate::web::source::TtlCache<(std::path::PathBuf, u32), Option<FeatureLink>>,
+}
+
+#[allow(dead_code)]
+impl FeatureLinks {
+    pub fn new(ttl: Duration) -> Self {
+        Self { cache: crate::web::source::TtlCache::new(ttl) }
+    }
+
+    /// Feature links for these parents, skipping any that aren't features or
+    /// couldn't be read.
+    pub async fn get(
+        &self,
+        transport: &ServerTransport,
+        repo_path: &Path,
+        parents: &[u32],
+    ) -> Vec<FeatureLink> {
+        let mut out = Vec::new();
+        for &parent in parents {
+            let key = (repo_path.to_path_buf(), parent);
+            if let Some(link) = self
+                .cache
+                .get_or(key, || fetch_feature_link(transport, repo_path, parent))
+                .await
+            {
+                out.push(link);
+            }
+        }
+        out
+    }
+}
+
 fn parse_issues_json(bytes: &[u8]) -> Result<Vec<GitHubIssue>> {
     let raw: Vec<GhIssueJson> =
         serde_json::from_slice(bytes).context("Failed to parse gh issue list JSON")?;
@@ -352,7 +428,9 @@ fn parse_issues_json(bytes: &[u8]) -> Result<Vec<GitHubIssue>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{GhError, classify_gh_error, parse_issues_json, repo_owner_from_remote};
+    use super::{
+        GhError, classify_gh_error, feature_link_args, parse_issues_json, repo_owner_from_remote,
+    };
     use crate::model::issue::IssueState;
 
     #[test]
@@ -455,5 +533,16 @@ mod tests {
             repo_owner_from_remote("ssh://git.example.com/acme/widgets"),
             None
         );
+    }
+
+    #[test]
+    fn feature_link_args_are_one_graphql_call_scoped_to_the_repo() {
+        let args = feature_link_args(346);
+        assert_eq!(&args[..2], ["api", "graphql"]);
+        assert!(args.contains(&"owner={owner}".to_string()));
+        assert!(args.contains(&"name={repo}".to_string()));
+        assert!(args.contains(&"number=346".to_string()));
+        assert!(args.contains(&"q=repo:{owner}/{repo} is:issue \"Sub-task of #346\"".to_string()));
+        assert!(args.iter().any(|a| a.starts_with("query=query(") && a.contains("subIssues")));
     }
 }
