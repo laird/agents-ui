@@ -110,13 +110,17 @@ This section configures the `/fix` command for autonomous issue resolution.
 
 ### Regression Test Suite
 ```bash
-cargo test
+source "$HOME/.cargo/env" && cargo test
 ```
 
 ### Build Verification
 ```bash
-cargo build
+source "$HOME/.cargo/env" && cargo build
 ```
+
+The `source` matters: merge gates and other non-interactive shells do not have
+`~/.cargo/bin` on `PATH`, and without it the gate fails with
+`cargo: command not found` before any test runs.
 
 ### Test Framework Details
 
