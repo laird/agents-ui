@@ -31,7 +31,7 @@ use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 
 use super::source::{Reading, TtlCache, VillageSource};
-use super::village::{Action, Crate, House, HouseKind, HouseStatus, Note, Pipeline, Stop, Subagent, VillageSnapshot, house_kind};
+use super::village::{Action, Crate, House, HouseKind, HouseStatus, Note, Pipeline, Promotion, Stop, StopSource, Subagent, VillageSnapshot, house_kind};
 use super::{IssueSnapshot, SwarmSnapshot};
 use crate::transport::ServerTransport;
 
@@ -358,6 +358,12 @@ pub struct Stage {
     /// Tasks whose work has reached this stage but not the next.
     #[serde(default)]
     pub tasks: Vec<String>,
+    /// `deployment`, `branch` (the default) or `unknown`: what says what this stage runs.
+    #[serde(default)]
+    pub source: StopSource,
+    /// The commit this stage runs, when a deployment names it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -376,6 +382,10 @@ pub struct ReportPipeline {
     /// The version at the last stage: what is released.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release: Option<String>,
+    /// `subtask` (the default) or `feature`: whether a feature's tasks move
+    /// through the stages one by one or together.
+    #[serde(default)]
+    pub promotion: Promotion,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -563,8 +573,14 @@ pub fn to_village(report: &Report) -> Reading {
         integration: p.integration.clone(),
         sentinel: if p.gate.is_empty() { "unknown".to_string() } else { p.gate.clone() },
         quay: numbers(&p.landed),
-        stops: p.stages.iter().map(|s| Stop { name: s.name.clone(), issues: numbers(&s.tasks) }).collect(),
+        stops: p
+            .stages
+            .iter()
+            .map(|s| Stop { name: s.name.clone(), issues: numbers(&s.tasks), source: s.source, sha: s.sha.clone() })
+            .collect(),
         release: p.release.clone(),
+        promotion: p.promotion,
+        ..Pipeline::default()
     };
 
     let in_houses: HashSet<u32> = houses.iter().chain(std::iter::once(&manager)).filter_map(|h| h.issue).collect();
@@ -754,8 +770,13 @@ pub fn swarm_report(swarm: &SwarmSnapshot, issues: &[IssueSnapshot], pipeline: &
             integration: pipeline.integration.clone(),
             gate: pipeline.sentinel.clone(),
             landed,
-            stages: pipeline.stops.iter().map(|s| Stage { name: s.name.clone(), tasks: ids(&s.issues) }).collect(),
+            stages: pipeline
+                .stops
+                .iter()
+                .map(|s| Stage { name: s.name.clone(), tasks: ids(&s.issues), source: s.source, sha: s.sha.clone() })
+                .collect(),
             release: pipeline.release.clone(),
+            promotion: pipeline.promotion,
         },
         builds: Vec::new(),
     }
@@ -970,7 +991,7 @@ mod tests {
         }))
         .unwrap();
         let issues = vec![issue(1, &["merging"]), issue(2, &["awaiting-integration"]), issue(3, &["decomposed"]), issue(4, &["bug"]), issue(5, &["needs-feedback"])];
-        let pipeline = Pipeline { stops: vec![Stop { name: "main-green".into(), issues: vec![2] }], ..Pipeline::default() };
+        let pipeline = Pipeline { stops: vec![Stop { name: "main-green".into(), issues: vec![2], ..Stop::default() }], ..Pipeline::default() };
         let v = to_village(&swarm_report(&swarm, &issues, &pipeline)).village;
         assert_eq!(v.pipeline.quay, vec![1], "#2 is already placed by git");
         assert_eq!(v.backlog.iter().map(|c| c.number).collect::<Vec<_>>(), vec![4]);

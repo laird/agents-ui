@@ -381,7 +381,7 @@ pub fn report(
             .collect(),
         pipeline: ReportPipeline {
             gate: "green".to_string(),
-            stages: vec![Stage { name: "completed (24h)".to_string(), tasks: completed.iter().map(|w| w.id.clone()).collect() }],
+            stages: vec![Stage { name: "completed (24h)".to_string(), tasks: completed.iter().map(|w| w.id.clone()).collect(), ..Stage::default() }],
             ..ReportPipeline::default()
         },
         ..Report::default()
