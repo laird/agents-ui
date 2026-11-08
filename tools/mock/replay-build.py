@@ -3,10 +3,12 @@
 
     python3 tools/mock/record.py tools/mock/recordings/demo.json.gz 360   # while demos run on 7930 (k8s) and 7931 (temporal)
     python3 tools/mock/replay-build.py tools/mock/recordings/demo.json.gz replay.html
+    python3 tools/mock/replay-build.py tools/mock/recordings/feature.json.gz replay.html   # FEATURE=1, both promotion modes
 
 The page is the real village renderer (src/web/village.html) fed with the
 recorded /api/village snapshots instead of a server, with a playback bar:
-runtime (Temporal or Kubernetes), play/pause, speed and a scrubber.
+runtime (Temporal or Kubernetes) or, for a feature recording, promotion mode
+(per subtask or whole feature), play/pause, speed and a scrubber.
 """
 import gzip
 import json
@@ -27,6 +29,9 @@ for run in frames.values():
                 h.pop("question", None)
             for item in v["backlog"] + v["board"]:
                 item.pop("url", None)
+            for f in v.get("features", []):
+                f["url"] = ""
+                f.pop("spec_url", None)
 
 # A story recording (tools/mock/demo.sh with STORY=1) gets captions: each
 # frame's step, worked out from the frames themselves and never going back.
@@ -80,11 +85,29 @@ def story_captions(run):
 
 captions = {k: story_captions(v) for k, v in frames.items() if k == "story"}
 
+# A feature recording (FEATURE=1, one run per promotion mode) picks a mode
+# instead of a runtime and opens on the dev village, where the banners fly.
+features = set(frames) <= {"subtask", "feature"}
+RUN_LABELS = {"temporal": "Temporal", "k8s": "Kubernetes", "subtask": "Per subtask", "feature": "Whole feature"}
+runs = sorted(frames, key=lambda k: (k != "temporal", k != "subtask", k))
+run_buttons = "\n".join(
+    f'      <button id="rt-{k}" data-run="{k}" aria-pressed="{str(i == 0).lower()}">{RUN_LABELS.get(k, k)}</button>'
+    for i, k in enumerate(runs))
+title = "Bug to Fix in Prod" if captions else "Feature to Prod" if features else "Worktree Hollow Simulation"
+about = (
+    "Two features followed from spec to prod by agents-tui and its simulators: banners for the features, a trail to each "
+    "subtask and a strip that counts them through build, dev, UAT and prod. One subtask waits on a design, one is dropped, "
+    "and for a while the village can't tell what UAT runs. Pick a promotion mode: per subtask, or the whole feature as one barge."
+    if features else
+    "Six minutes of agents-tui driven by its simulators: a coding swarm (the dev village) builds the app, and the app runs on "
+    "Temporal or on a Kubernetes namespace. Failures raise incidents that float down to the swarm; releases ride up to the "
+    "platform. Pick <b>shop ⇄</b> to see both, or one village alone.")
+
 src = (ROOT / "src/web/village.html").read_text()
 head = src[src.index("<head>") + 6:src.index("</head>")]
 body = src[src.index("<body>") + 6:src.index("</body>")]
 head = head.replace('<meta charset="utf-8">', "").replace('<meta name="viewport" content="width=device-width, initial-scale=1">', "")
-head = head.replace("<title>Worktree Hollow</title>", '<title>' + ("Bug to Fix in Prod" if captions else "Worktree Hollow Simulation") + '</title>\n<meta name="claude:viewport-fit-sides" content="cover">')
+head = head.replace("<title>Worktree Hollow</title>", '<title>' + title + '</title>\n<meta name="claude:viewport-fit-sides" content="cover">')
 
 def must(old, new, where):
     assert old in where, old[:60]
@@ -113,9 +136,8 @@ head = must("</style>", css + "</style>", head)
 
 player = """
   <div class="win player" role="group" aria-label="Replay">
-    <span class="seg" role="group" aria-label="Runtime">
-      <button id="rt-temporal" data-run="temporal" aria-pressed="true">Temporal</button>
-      <button id="rt-k8s" data-run="k8s" aria-pressed="false">Kubernetes</button>
+    <span class="seg" id="runs" role="group" aria-label="RUN_GROUP">
+""" + run_buttons + """
     </span>
     <button id="play" aria-pressed="true">Pause</button>
     <span class="seg" role="group" aria-label="Speed">
@@ -126,9 +148,10 @@ player = """
     <input id="scrub" type="range" min="0" value="0" aria-label="Position in the recording">
     <span class="clock" id="clock">0:00 / 0:00</span>
     <div class="story" id="story" hidden><ol class="steps" id="steps"></ol><p class="caption" id="caption" aria-live="polite"></p></div>
-    <p class="about" id="about">Six minutes of agents-tui driven by its simulators: a coding swarm (the dev village) builds the app, and the app runs on Temporal or on a Kubernetes namespace. Failures raise incidents that float down to the swarm; releases ride up to the platform. Pick <b>shop ⇄</b> to see both, or one village alone.</p>
+    <p class="about" id="about">""" + about + """</p>
   </div>
 """
+player = player.replace("RUN_GROUP", "Promotion" if features else "Runtime")
 body = must('  <div class="win stage">', player + '  <div class="win stage">', body)
 body = must('<a href="/">Dashboard</a>', "", body)
 
@@ -137,7 +160,7 @@ replay_js = """<script type="application/json" id="recording">""" + json.dumps(f
 /* Replay: the village asks /api/village every few seconds; answer with the next recorded snapshot. */
 const REC = JSON.parse(document.getElementById('recording').textContent);
 const CAPTIONS = """ + json.dumps(captions) + """;
-const replay = { run: REC.temporal ? 'temporal' : Object.keys(REC)[0], i: 0, playing: true, speed: 1 };
+const replay = { run: """ + json.dumps(runs[0]) + """, i: 0, playing: true, speed: 1 };
 window.__pollMs = 3000;
 window.fetch = async () => {
   const frames = REC[replay.run];
@@ -158,7 +181,7 @@ controls = """
   window.addEventListener('replay-tick', showClock);
   // A story recording: one run, captions instead of the runtime choice.
   if (CAPTIONS[replay.run]) {
-    document.querySelector('[aria-label="Runtime"]').hidden = true;
+    document.getElementById('runs').hidden = true;
     document.getElementById('story').hidden = false;
     document.getElementById('about').textContent = 'One bug from start to finish, recorded from agents-tui and its simulators: the app crashes in prod (the cluster, top), the dev village (below) fixes it, and the fix ships back up.';
     const steps = document.getElementById('steps'), caption = document.getElementById('caption');
@@ -185,7 +208,7 @@ controls = """
   }));
   play.addEventListener('click', () => { replay.playing = !replay.playing; play.textContent = replay.playing ? 'Pause' : 'Play'; play.setAttribute('aria-pressed', String(replay.playing)); });
   scrub.addEventListener('input', () => { replay.i = Number(scrub.value); showClock(); });
-  if (!location.hash) location.hash = 'world:shop';
+  if (!location.hash) location.hash = """ + json.dumps("shop" if features else "world:shop") + """;
 """
 body = must("  poll();\n", controls + "  poll();\n", body)
 body = must("    setTimeout(poll, 3000);", "    setTimeout(poll, window.__pollMs || 3000);", body)
