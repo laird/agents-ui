@@ -16,6 +16,8 @@
 #   tools/mock/demo.sh                 # then open http://127.0.0.1:7878/village
 #   RUNTIME=k8s tools/mock/demo.sh     # the platform as a simulated Kubernetes namespace instead of Temporal
 #   STORY=1 RUNTIME=k8s tools/mock/demo.sh   # one incident from the cluster, fixed and released
+#   FEATURE=1 tools/mock/demo.sh       # two features followed from spec to prod (banners, strip, stuck, unknown, live)
+#   FEATURE=1 PROMOTION=feature tools/mock/demo.sh   # ... promoted as whole features (one barge)
 #   PORT=8080 tools/mock/demo.sh
 #   tools/mock/demo.sh --source issues=none   # extra flags go to agents-tui
 #
@@ -42,7 +44,9 @@ trap cleanup EXIT INT TERM
 python3 "$HERE/swarm_sim.py" --dir "$DEMO" setup
 # STORY=1: one incident, start to finish (see swarm_sim.py and k8s_sim.py).
 story=(); [ -n "${STORY:-}" ] && story=(--story)
-python3 "$HERE/swarm_sim.py" --dir "$DEMO" "${story[@]}" run & pids+=($!)
+# FEATURE=1: the feature story (see swarm_sim.py); PROMOTION=feature moves features as a whole.
+feature=(); [ -n "${FEATURE:-}" ] && feature=(--feature --promotion "${PROMOTION:-subtask}")
+python3 "$HERE/swarm_sim.py" --dir "$DEMO" "${story[@]}" "${feature[@]}" run & pids+=($!)
 # One runtime source at a time: Temporal, or a Kubernetes namespace.
 RUNTIME=${RUNTIME:-temporal}
 if [ "$RUNTIME" = k8s ]; then

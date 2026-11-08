@@ -26,6 +26,8 @@ in "shop" naming the workstream that failed.
     swarm_sim.py --dir DEMO setup     # create repos (idempotent)
     swarm_sim.py --dir DEMO run       # play it out, forever
     swarm_sim.py --dir DEMO --story run   # the incident story: one bug, start to finish
+    swarm_sim.py --dir DEMO --feature run                       # two features, spec to prod
+    swarm_sim.py --dir DEMO --feature --promotion feature run   # ... promoted as whole features
 
 With --story the demo tells one story cleanly: an incident from the platform
 becomes a P0 bug, a worker fixes it (asking once for permission on the way),
@@ -33,9 +35,28 @@ it lands and stays open as awaiting-integration (as autocoder parks it) until
 a prod release contains the fix; then it closes, and state/fixed names that
 release so the platform can stop failing on it. No red builds, a quieter
 backlog.
+
+With --feature, "shop" follows two features from spec to prod (#346). Its
+environments become dev (a branch), uat (GitHub Deployments only) and prod
+(Deployments and a branch). The story:
+  * the specs arrive: "Saved carts" (#700, subtasks linked as GitHub
+    sub-issues) and "Order export" (#710, subtasks whose bodies say
+    `Sub-task of #710`, labelled `decomposed` the way autocoder does);
+  * workers claim the subtasks, land them, and they move through dev, uat and
+    prod one by one (so a feature reads "UAT 2/4" for a while), or with
+    --promotion feature together, held at the quay until the last one lands;
+  * one subtask starts as `needs-design` (the feature is stuck), and one is
+    closed as not planned (its feature counts 3, not 4);
+  * once a subtask reaches uat, uat's deployment goes missing for a while (the
+    village can't tell what uat runs);
+  * every counted subtask reaches prod (live), and the parent closes later.
+The issues, sub-issues and deployments go to <dir>/state/features and
+<dir>/state/deployments, where the `gh` shim serves GitHub's GraphQL and
+Deployments answers from them.
 """
 
 import argparse
+import datetime
 import json
 import os
 import random
@@ -45,6 +66,21 @@ from pathlib import Path
 
 SWARMS = [("shop", 5, "autocoder"), ("billing", 2, "modernize")]
 STORY = False
+FEATURE = False
+PROMOTION = "subtask"
+REPO_URL = "https://github.com/sim/shop"
+# The feature story's two features (see the module docstring). Numbers sit
+# far above the random issues so the two never collide.
+FEATURES = [
+    {"number": 700, "title": "Saved carts", "linked_by": "sub-issues", "arrive": 5,
+     "body": "Customers can save a cart and come back to it later.\n\nSpec: [Saved carts](docs/specs/saved-carts.md)",
+     "children": [(701, "Cart table"), (702, "Save and restore API"), (703, "Saved carts page"), (704, "Expire old carts")],
+     "stuck": 703},
+    {"number": 710, "title": "Order export", "linked_by": "body", "arrive": 25,
+     "body": "Accounting wants every order as CSV, once a day.",
+     "children": [(711, "Export query"), (712, "CSV writer"), (713, "Download button"), (714, "Excel export")],
+     "dropped": 714},
+]
 LABELS = [["bug", "P1"], ["bug", "P0"], ["enhancement", "P2"], ["test-failure", "P1"], ["security", "P0"],
           ["documentation", "P3"], ["performance", "P2"], ["refactor", "P3"], ["enhancement", "P1"],
           ["bug", "P2"], ["dependencies", "P3"]]
@@ -97,6 +133,7 @@ class Swarm:
         self.next_arrival = 0
         self.manager_subagents = []
         self.next_manager_change = 0
+        self.story = None  # FeatureStory, for "shop" with --feature
 
     # -- setup ------------------------------------------------------------
     def setup(self):
@@ -129,9 +166,11 @@ class Swarm:
                             "opened": time.time()})
 
     def claimable(self):
-        blocking = {"needs-design", "needs-clarification", "needs-approval", "too-complex", "proposal", "working", "awaiting-integration"}
+        blocking = {"needs-design", "needs-clarification", "needs-approval", "too-complex", "proposal", "working",
+                    "awaiting-integration", "decomposed"}
         rank = lambda i: next((int(l[1]) for l in i["labels"] if len(l) == 2 and l[0] == "P"), 9)
-        return sorted((i for i in self.issues if not blocking & set(i["labels"])), key=lambda i: (rank(i), i["number"]))
+        # `hold`: the feature story keeps its doomed subtask in the backlog until it drops it.
+        return sorted((i for i in self.issues if not blocking & set(i["labels"]) and not i.get("hold")), key=lambda i: (rank(i), i["number"]))
 
     # -- transcripts ------------------------------------------------------
     def append(self, path, entry):
@@ -151,7 +190,7 @@ class Swarm:
     def tick(self, t):
         if t >= self.next_arrival:
             self.new_issue()
-            self.next_arrival = t + (random.uniform(40, 60) if STORY else random.uniform(10, 22))
+            self.next_arrival = t + (random.uniform(40, 60) if STORY or FEATURE else random.uniform(10, 22))
         for issue in self.issues:
             # Blocked issues get approved after a while.
             if t - issue["opened"] > 45 and {"needs-design", "needs-clarification", "proposal"} & set(issue["labels"]):
@@ -211,6 +250,8 @@ class Swarm:
         git(self.repo, "push", "-q", "origin", "master", f"{sha}:refs/autocoder/tips/master/{sha}-{n}")
         git(self.repo, "fetch", "-q", "origin")
         issue = next((i for i in self.issues if i["number"] == n), None)
+        if self.story:
+            self.story.landed(n, sha)
         if issue and "incident" in issue["labels"]:
             # Landed, not yet shipped: parked until a prod release carries it.
             issue["labels"] = [l for l in issue["labels"] if l != "working"] + ["awaiting-integration"]
@@ -280,16 +321,162 @@ class Swarm:
         tmp.replace(path)
 
 
+def now_iso(t):
+    return datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def shop_config(feature):
+    if not feature:
+        return {"environments": [{"name": "staging", "ref": "env/staging", "requires": "green", "auto": True},
+                                 {"name": "prod", "ref": "env/prod", "requires": "staging"}]}
+    # uat has no branch: only its deployments say what it runs.
+    return {"environments": [{"name": "dev", "ref": "env/dev", "requires": "green", "auto": True},
+                             {"name": "uat", "requires": "dev"},
+                             {"name": "prod", "ref": "env/prod", "requires": "uat"}],
+            "promotion": PROMOTION}
+
+
+class FeatureStory:
+    """The feature story for "shop" (see the module docstring)."""
+
+    def __init__(self, swarm, t0):
+        self.s, self.t0 = swarm, t0
+        self.started = []          # features whose spec has arrived
+        self.closed = {}           # subtask -> stateReason, once closed
+        self.landed_sha = {}       # subtask -> the commit it landed as
+        self.live_at, self.parent_closed = {}, set()
+        self.deploys = {"uat": [], "prod": []}  # newest first, each with its statuses
+        self.next_id = 1
+        self.gap, self.gap_done = None, False
+        self.next_dev = self.next_uat = self.next_prod = t0 + 10
+        swarm.promote("env/dev", "master-green")
+
+    def counted(self, f):
+        return [n for n, _ in f["children"] if n != f.get("dropped")]
+
+    def ancestor(self, sha, of):
+        return subprocess.run(["git", "merge-base", "--is-ancestor", sha, of], cwd=self.s.repo, env=GIT_ENV).returncode == 0
+
+    def landed(self, n, sha):
+        if any(n == c for f in self.started for c, _ in f["children"]):
+            self.landed_sha[n] = sha
+            self.closed[n] = "COMPLETED"
+
+    def hold(self):
+        """Whole-feature promotion: green waits while a feature is part-landed."""
+        if PROMOTION != "feature":
+            return False
+        for f in self.started:
+            done = sum(1 for n in self.counted(f) if n in self.landed_sha)
+            if 0 < done < len(self.counted(f)):
+                return True
+        return False
+
+    def in_gap(self, t):
+        return self.gap is not None and self.gap[0] <= t < self.gap[1]
+
+    def current(self, env, t):
+        if env == "uat" and self.in_gap(t):
+            return None
+        return self.deploys[env][0]["sha"] if self.deploys[env] else None
+
+    def deploy(self, env, sha, t):
+        old = self.deploys[env]
+        if old:
+            old[0]["statuses"].insert(0, {"state": "inactive", "created_at": now_iso(t)})
+        self.deploys[env].insert(0, {"id": self.next_id, "sha": sha, "environment": env, "created_at": now_iso(t),
+                                     "statuses": [{"state": "success", "created_at": now_iso(t)},
+                                                  {"state": "in_progress", "created_at": now_iso(t - 1)}]})
+        self.next_id += 1
+
+    def tick(self, t):
+        s = self.s
+        for f in FEATURES:
+            if f not in self.started and t >= self.t0 + f["arrive"]:
+                self.started.append(f)
+                s.issues.append({"number": f["number"], "title": f["title"], "labels": ["enhancement", "decomposed"], "opened": t})
+                for n, title in f["children"]:
+                    labels = ["enhancement", "P1", "subtask"] + (["needs-design"] if n == f.get("stuck") else [])
+                    s.issues.append({"number": n, "title": title, "labels": labels, "opened": t, "hold": n == f.get("dropped")})
+            # Dropped a little after the spec arrives: the feature counts one fewer.
+            drop = f.get("dropped")
+            if f in self.started and drop and drop not in self.closed and t >= self.t0 + f["arrive"] + 40:
+                s.issues = [i for i in s.issues if i["number"] != drop]
+                self.closed[drop] = "NOT_PLANNED"
+
+        # Promotions: dev follows green, uat deploys dev, prod deploys uat.
+        if t >= self.next_dev:
+            s.promote("env/dev", "master-green")
+            self.next_dev = t + 15
+        if t >= self.next_uat:
+            if not self.in_gap(t):
+                dev = git(s.repo, "rev-parse", "refs/remotes/origin/env/dev")
+                if dev != self.current("uat", t):
+                    self.deploy("uat", dev, t)
+            self.next_uat = t + 22
+        if t >= self.next_prod:
+            uat = self.current("uat", t)
+            if uat and uat != self.current("prod", t):
+                self.deploy("prod", uat, t)
+                git(s.repo, "push", "-q", "-f", "origin", f"{uat}:refs/heads/env/prod")
+                git(s.repo, "fetch", "-q", "origin")
+                s.write_release()
+            self.next_prod = t + 35
+
+        # Once a subtask reaches uat, uat's deployment goes missing for a while.
+        uat = self.current("uat", t)
+        if not self.gap_done and uat and any(self.ancestor(sha, uat) for sha in self.landed_sha.values()):
+            self.gap, self.gap_done = (t + 25, t + 65), True
+
+        # Live once every counted subtask runs in prod; the parent closes later.
+        prod = self.current("prod", t)
+        for f in self.started:
+            n = f["number"]
+            if n not in self.live_at and prod and all(c in self.landed_sha and self.ancestor(self.landed_sha[c], prod) for c in self.counted(f)):
+                self.live_at[n] = t
+            if n in self.live_at and n not in self.parent_closed and t >= self.live_at[n] + 45:
+                self.parent_closed.add(n)
+                s.issues = [i for i in s.issues if i["number"] != n]
+        self.write_state(t)
+
+    def node(self, n, title, body):
+        open_ = any(i["number"] == n for i in self.s.issues)
+        return {"number": n, "title": title, "url": f"{REPO_URL}/issues/{n}", "body": body,
+                "state": "OPEN" if open_ else "CLOSED", "stateReason": None if open_ else self.closed.get(n, "COMPLETED")}
+
+    def write_state(self, t):
+        parents = []
+        for f in self.started:
+            body = "" if f["linked_by"] == "sub-issues" else f"Part of the order export.\n\nSub-task of #{f['number']}\n"
+            kids = [self.node(n, title, body) for n, title in f["children"]]
+            parents.append({"number": f["number"], "title": f["title"], "url": f"{REPO_URL}/issues/{f['number']}", "body": f["body"],
+                            "state": "CLOSED" if f["number"] in self.parent_closed else "OPEN",
+                            "labels": ["enhancement", "decomposed"],
+                            "subIssues": kids if f["linked_by"] == "sub-issues" else [],
+                            "search": kids if f["linked_by"] == "body" else []})
+        deploys = {env: ([] if env == "uat" and self.in_gap(t) else d) for env, d in self.deploys.items()}
+        for name, data in (("features", {"parents": parents}), ("deployments", deploys)):
+            path = self.s.state / name / f"{self.s.name}.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data))
+            tmp.replace(path)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Simulated coding swarms under herdr.")
     ap.add_argument("--dir", required=True, type=Path)
     ap.add_argument("--home", type=Path, help="HOME whose ~/.claude gets transcripts (default <dir>/home)")
     ap.add_argument("--seed", type=int)
     ap.add_argument("--story", action="store_true", help="tell the incident story cleanly (see the module docstring)")
+    ap.add_argument("--feature", action="store_true", help="follow two features from spec to prod (see the module docstring)")
+    ap.add_argument("--promotion", choices=["subtask", "feature"], default="subtask",
+                    help="with --feature: promote each subtask on its own, or each feature as a whole")
     ap.add_argument("command", choices=["setup", "run"])
     args = ap.parse_args()
-    global STORY
-    STORY = args.story
+    global STORY, FEATURE, PROMOTION
+    STORY, FEATURE, PROMOTION = args.story, args.feature, args.promotion
+    quiet = STORY or FEATURE
     if args.seed is not None:
         random.seed(args.seed)
     root = args.dir.resolve()
@@ -299,12 +486,17 @@ def main():
         s.setup()
     if args.command == "setup":
         return
+    # The environments follow the mode, whatever an earlier run left behind.
+    shop = swarms[0]
+    (shop.repo / ".autocoder.json").write_text(json.dumps(shop_config(FEATURE), indent=2))
     for s in swarms:
-        for _ in range(3 if STORY else 8):
+        for _ in range(3 if quiet else 8):
             s.new_issue()
-        if STORY:
+        if quiet:
             s.next_arrival = time.time() + 60
-    swarms[0].write_release()
+    shop.write_release()
+    if FEATURE:
+        shop.story = FeatureStory(shop, time.time())
     incident_offset = 0
     print(f"simulating {', '.join(s.name for s in swarms)} in {root}", flush=True)
     next_green, next_staging, next_prod, red_until, next_red = 0, 0, 0, 0, time.time() + 150
@@ -313,18 +505,21 @@ def main():
         for s in swarms:
             s.tick(t)
         incident_offset = swarms[0].file_incidents(incident_offset)
-        if t >= next_red and not STORY:
+        if t >= next_red and not quiet:
             red_until, next_red = t + 25, t + random.uniform(150, 240)
         if t >= next_green:
             for s in swarms:
-                s.sentinel(red=t < red_until)
+                s.sentinel(red=t < red_until or (s.story is not None and s.story.hold()))
             next_green = t + 12
-        if t >= next_staging:
-            swarms[0].promote("env/staging", "master-green")
-            next_staging = t + 20
-        if t >= next_prod:
-            swarms[0].promote("env/prod", "env/staging")
-            next_prod = t + 35
+        if shop.story:
+            shop.story.tick(t)
+        else:
+            if t >= next_staging:
+                shop.promote("env/staging", "master-green")
+                next_staging = t + 20
+            if t >= next_prod:
+                shop.promote("env/prod", "env/staging")
+                next_prod = t + 35
         state = root / "state"
         state.mkdir(parents=True, exist_ok=True)
         tmp = state / "herdr.tmp"

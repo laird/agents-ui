@@ -1,11 +1,61 @@
 #!/usr/bin/env python3
-"""gh shim: issues of the simulated repos from the swarm simulator; everything
-else (and any other repo) goes to the real gh."""
+"""gh shim: the simulated repos' GitHub from the swarm simulator (issues,
+feature parents and sub-issues over GraphQL, Deployments); everything else
+(and any other repo) goes to the real gh."""
+import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _shim import real  # noqa: E402
+
+
+def state(demo, kind, name, default):
+    try:
+        with open(os.path.join(demo, "state", kind, name + ".json")) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
+
+
+def flag(args, name):
+    """The value of `-F name=…` / `-f name=…`."""
+    for i, a in enumerate(args[:-1]):
+        if a in ("-F", "-f", "--field", "--raw-field") and args[i + 1].startswith(name + "="):
+            return args[i + 1][len(name) + 1:]
+    return None
+
+
+def graphql(demo, name, args):
+    """Answer the two queries agents-tui sends for features (src/model/issue.rs)."""
+    parents = state(demo, "features", name, {"parents": []})["parents"]
+    query = flag(args, "query") or ""
+    if "subIssuesSummary" in query:
+        nodes = [{"number": p["number"], "subIssuesSummary": {"total": len(p["subIssues"])},
+                  "labels": {"nodes": [{"name": l} for l in p["labels"]]}}
+                 for p in parents if p["state"] == "OPEN"]
+        return {"data": {"repository": {"issues": {"nodes": nodes}}}}
+    number = int(flag(args, "number") or 0)
+    p = next((p for p in parents if p["number"] == number), None)
+    if p is None:
+        return {"data": {"repository": {"issue": None}, "search": {"nodes": []}}}
+    issue = {k: p[k] for k in ("number", "title", "url", "body")}
+    issue["subIssues"] = {"nodes": p["subIssues"]}
+    return {"data": {"repository": {"issue": issue}, "search": {"nodes": p["search"]}}}
+
+
+def deployments(demo, name, path):
+    """`repos/{owner}/{repo}/deployments?environment=…` and `…/deployments/<id>/statuses`."""
+    envs = state(demo, "deployments", name, {})
+    m = re.search(r"/deployments/(\d+)/statuses", path)
+    if m:
+        d = next((d for ds in envs.values() for d in ds if d["id"] == int(m.group(1))), None)
+        return d["statuses"] if d else []
+    env = re.search(r"[?&]environment=([^&]*)", path)
+    listing = envs.get(env.group(1), []) if env else [d for ds in envs.values() for d in ds]
+    return [{k: v for k, v in d.items() if k != "statuses"} for d in listing]
+
 
 demo = os.environ.get("AGENTS_UI_DEMO_DIR")
 args = sys.argv[1:]
@@ -15,14 +65,20 @@ if demo:
     if args[:2] == ["auth", "status"]:
         print("Logged in to github.com (swarm simulator)")
         sys.exit(0)
-    if args[:2] == ["issue", "list"] and os.path.realpath(cwd).startswith(src + os.sep):
+    if os.path.realpath(cwd).startswith(src + os.sep):
         name = os.path.basename(os.path.realpath(cwd)).split("-wt-")[0]
-        try:
-            with open(os.path.join(demo, "state", "issues", name + ".json")) as f:
-                sys.stdout.write(f.read())
-        except OSError:
-            sys.stdout.write("[]")
-        sys.exit(0)
+        if args[:2] == ["issue", "list"]:
+            sys.stdout.write(json.dumps(state(demo, "issues", name, [])))
+            sys.exit(0)
+        if args[:2] == ["repo", "view"]:
+            print(json.dumps({"name": name}))
+            sys.exit(0)
+        if args[:2] == ["api", "graphql"]:
+            print(json.dumps(graphql(demo, name, args)))
+            sys.exit(0)
+        if args[:1] == ["api"] and len(args) > 1 and "/deployments" in args[1]:
+            print(json.dumps(deployments(demo, name, args[1])))
+            sys.exit(0)
 path = real("gh", os.path.dirname(os.path.abspath(__file__)))
 if path:
     os.execv(path, [path] + args)
