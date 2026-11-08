@@ -368,6 +368,204 @@ pub async fn fetch_issues(repo_path: &Path) -> anyhow::Result<Vec<GitHubIssue>> 
 
     Ok(issues)
 }
+// ---------------------------------------------------------------------------
+// Feature links: which subtasks make a feature (#346, #347)
+// ---------------------------------------------------------------------------
+
+/// How a feature's subtasks were found.
+#[allow(dead_code)] // read by the village once #350 wires features in
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkedBy {
+    /// GitHub sub-issues of the parent.
+    SubIssues,
+    /// Issues whose body says `Sub-task of #N` (autocoder's convention).
+    Body,
+}
+
+/// One subtask of a feature.
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Child {
+    pub number: u32,
+    pub title: String,
+    pub url: String,
+    pub closed: bool,
+    /// Closed as not planned (or as a duplicate): out of the feature's total.
+    pub not_planned: bool,
+}
+
+/// A parent issue and the subtasks that make it up.
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct FeatureLink {
+    pub parent: u32,
+    pub title: String,
+    pub url: String,
+    /// The repository document the parent's body links to, if any. When
+    /// there is none the issue itself is the spec.
+    pub spec_url: Option<String>,
+    pub linked_by: LinkedBy,
+    /// Sorted by number.
+    pub children: Vec<Child>,
+}
+
+/// The GraphQL query `crate::github::fetch_feature_link` sends: the parent
+/// with its sub-issues, plus a search for `Sub-task of #N` bodies, so both
+/// sources cost one round trip.
+#[allow(dead_code)]
+pub const FEATURE_LINK_QUERY: &str = "query($owner:String!,$name:String!,$number:Int!,$q:String!){\
+repository(owner:$owner,name:$name){issue(number:$number){number title url body \
+subIssues(first:100){nodes{number title url state stateReason}}}}\
+search(query:$q,type:ISSUE,first:100){nodes{... on Issue{number title url state stateReason body}}}}";
+
+/// The search string that finds candidate `Sub-task of #N` children. GitHub's
+/// search is loose, so results are re-checked with [`body_names_parent`].
+#[allow(dead_code)]
+pub fn subtask_search_query(owner_repo: &str, parent: u32) -> String {
+    format!("repo:{owner_repo} is:issue \"Sub-task of #{parent}\"")
+}
+
+/// Whether an issue body carries autocoder's `Sub-task of #N` line for this
+/// parent (`#34` does not match `#346`).
+#[allow(dead_code)]
+pub fn body_names_parent(body: &str, parent: u32) -> bool {
+    let needle = format!("sub-task of #{parent}");
+    let lower = body.to_lowercase();
+    lower.match_indices(&needle).any(|(i, m)| {
+        !lower[i + m.len()..].starts_with(|c: char| c.is_ascii_digit())
+    })
+}
+
+/// The first link in a parent's body to a document in the same repository:
+/// a `…/blob/…/*.md` URL, or a markdown link to a relative `docs/…` path
+/// (made absolute against the repository). `None` means the issue is the spec.
+#[allow(dead_code)]
+pub fn spec_link(body: &str, issue_url: &str) -> Option<String> {
+    let repo = issue_url.split("/issues/").next().filter(|r| *r != issue_url)?;
+    let blob_prefix = format!("{repo}/blob/");
+    let mut best: Option<(usize, String)> = None;
+    let mut consider = |at: usize, link: String| {
+        if best.as_ref().is_none_or(|(b, _)| at < *b) {
+            best = Some((at, link));
+        }
+    };
+
+    // Absolute blob URLs, bare or inside a markdown link.
+    if let Some((at, url)) = body.match_indices(&blob_prefix).find_map(|(at, _)| {
+        let url = take_link(&body[at..]);
+        is_markdown_doc(url).then(|| (at, url.to_string()))
+    }) {
+        consider(at, url);
+    }
+
+    // Relative markdown link targets: `[spec](docs/specs/x.md)`.
+    if let Some((at, path)) = body.match_indices("](").find_map(|(at, m)| {
+        let target = take_link(&body[at + m.len()..]);
+        let path = target.trim_start_matches("./").trim_start_matches('/');
+        path.starts_with("docs/").then(|| (at, path.to_string()))
+    }) {
+        consider(at, format!("{repo}/blob/HEAD/{path}"));
+    }
+
+    best.map(|(_, link)| link)
+}
+
+/// The link at the start of `s`, up to whitespace or a closing delimiter.
+fn take_link(s: &str) -> &str {
+    let end = s
+        .find(|c: char| c.is_whitespace() || matches!(c, ')' | '>' | '"' | '\'' | '`' | ']'))
+        .unwrap_or(s.len());
+    s[..end].trim_end_matches(['.', ',', ';', ':'])
+}
+
+fn is_markdown_doc(url: &str) -> bool {
+    let path = url.split(['#', '?']).next().unwrap_or(url);
+    path.to_ascii_lowercase().ends_with(".md")
+}
+
+#[derive(Deserialize)]
+struct GqlIssue {
+    #[serde(default)]
+    number: u32,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    url: String,
+    #[serde(default)]
+    state: String,
+    #[serde(default, rename = "stateReason")]
+    state_reason: Option<String>,
+    #[serde(default)]
+    body: Option<String>,
+}
+
+impl GqlIssue {
+    fn child(self) -> Child {
+        let closed = self.state.eq_ignore_ascii_case("closed");
+        let reason = self.state_reason.unwrap_or_default().to_ascii_uppercase();
+        Child {
+            number: self.number,
+            title: self.title,
+            url: self.url,
+            closed,
+            not_planned: closed && matches!(reason.as_str(), "NOT_PLANNED" | "DUPLICATE"),
+        }
+    }
+}
+
+/// Build a parent's [`FeatureLink`] from the [`FEATURE_LINK_QUERY`]
+/// response. Sub-issues win when the parent has any; otherwise children are
+/// the search hits whose body names the parent. `None` when the JSON can't be
+/// read, the parent is missing, or it has no subtasks (it isn't a feature).
+#[allow(dead_code)]
+pub fn feature_link_from_json(bytes: &[u8]) -> Option<FeatureLink> {
+    let v: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    let data = v.get("data")?;
+    let issue = data.pointer("/repository/issue").filter(|i| !i.is_null())?;
+    let nodes = |v: Option<&serde_json::Value>| -> Vec<GqlIssue> {
+        v.and_then(|n| n.as_array())
+            .map(|arr| {
+                arr.iter()
+                    // Search nodes that aren't issues come back as `{}`.
+                    .filter(|n| n.get("number").is_some())
+                    .filter_map(|n| serde_json::from_value(n.clone()).ok())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+
+    let parent: GqlIssue = serde_json::from_value(issue.clone()).ok()?;
+    let subs = nodes(issue.pointer("/subIssues/nodes"));
+    let (linked_by, mut children): (LinkedBy, Vec<Child>) = if !subs.is_empty() {
+        (LinkedBy::SubIssues, subs.into_iter().map(GqlIssue::child).collect())
+    } else {
+        let hits = nodes(data.pointer("/search/nodes"));
+        let kids = hits
+            .into_iter()
+            .filter(|h| h.number != parent.number)
+            .filter(|h| h.body.as_deref().is_some_and(|b| body_names_parent(b, parent.number)))
+            .map(GqlIssue::child)
+            .collect();
+        (LinkedBy::Body, kids)
+    };
+    if children.is_empty() {
+        return None;
+    }
+    children.sort_by_key(|c| c.number);
+    children.dedup_by_key(|c| c.number);
+
+    let spec_url = spec_link(parent.body.as_deref().unwrap_or(""), &parent.url);
+    Some(FeatureLink {
+        parent: parent.number,
+        title: parent.title,
+        url: parent.url,
+        spec_url,
+        linked_by,
+        children,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -574,5 +772,135 @@ mod tests {
 
         let all_issues = cache.filtered(None);
         assert_eq!(all_issues.len(), 3);
+    }
+
+    // -- Feature links (#347) ----------------------------------------------
+
+    const REPO: &str = "https://github.com/acme/app";
+
+    fn gql(parent_body: &str, subs: &str, search: &str) -> Vec<u8> {
+        serde_json::json!({"data": {
+            "repository": {"issue": {
+                "number": 10, "title": "Checkout v2", "url": format!("{REPO}/issues/10"),
+                "body": parent_body,
+                "subIssues": {"nodes": serde_json::from_str::<serde_json::Value>(subs).unwrap()}
+            }},
+            "search": {"nodes": serde_json::from_str::<serde_json::Value>(search).unwrap()}
+        }})
+        .to_string()
+        .into_bytes()
+    }
+
+    #[test]
+    fn feature_link_from_sub_issues() {
+        let f = feature_link_from_json(&gql(
+            "The feature.",
+            r##"[{"number":12,"title":"B","url":"u12","state":"OPEN","stateReason":null},
+                {"number":11,"title":"A","url":"u11","state":"CLOSED","stateReason":"COMPLETED"}]"##,
+            "[]",
+        ))
+        .unwrap();
+        assert_eq!(f.parent, 10);
+        assert_eq!(f.title, "Checkout v2");
+        assert_eq!(f.linked_by, LinkedBy::SubIssues);
+        assert_eq!(f.children.iter().map(|c| c.number).collect::<Vec<_>>(), vec![11, 12]);
+        assert!(f.children[0].closed && !f.children[0].not_planned);
+        assert!(!f.children[1].closed);
+        assert_eq!(f.spec_url, None);
+    }
+
+    #[test]
+    fn feature_link_from_subtask_bodies_only() {
+        let f = feature_link_from_json(&gql(
+            "",
+            "[]",
+            r##"[{"number":10,"title":"parent","url":"u10","state":"OPEN","body":"Sub-task of #10 appears in my own text"},
+                {"number":21,"title":"A","url":"u21","state":"OPEN","body":"Dependencies:\n- Sub-task of #10\n"},
+                {"number":22,"title":"other parent","url":"u22","state":"OPEN","body":"Sub-task of #100"},
+                {"number":23,"title":"loose hit","url":"u23","state":"OPEN","body":"mentions #10 only"},
+                {},
+                {"number":20,"title":"B","url":"u20","state":"CLOSED","stateReason":"COMPLETED","body":"sub-task of #10."}]"##,
+        ))
+        .unwrap();
+        assert_eq!(f.linked_by, LinkedBy::Body);
+        assert_eq!(f.children.iter().map(|c| c.number).collect::<Vec<_>>(), vec![20, 21]);
+        assert!(f.children[0].closed);
+    }
+
+    #[test]
+    fn not_planned_child_is_flagged() {
+        let f = feature_link_from_json(&gql(
+            "",
+            r##"[{"number":11,"title":"dropped","url":"u","state":"CLOSED","stateReason":"NOT_PLANNED"},
+                {"number":12,"title":"dupe","url":"u","state":"CLOSED","stateReason":"DUPLICATE"},
+                {"number":13,"title":"done","url":"u","state":"CLOSED","stateReason":"COMPLETED"}]"##,
+            "[]",
+        ))
+        .unwrap();
+        let flags: Vec<_> = f.children.iter().map(|c| (c.closed, c.not_planned)).collect();
+        assert_eq!(flags, vec![(true, true), (true, true), (true, false)]);
+    }
+
+    #[test]
+    fn sub_issues_win_over_subtask_bodies() {
+        let f = feature_link_from_json(&gql(
+            "",
+            r##"[{"number":11,"title":"A","url":"u","state":"OPEN"}]"##,
+            r##"[{"number":30,"title":"body child","url":"u","state":"OPEN","body":"Sub-task of #10"}]"##,
+        ))
+        .unwrap();
+        assert_eq!(f.linked_by, LinkedBy::SubIssues);
+        assert_eq!(f.children.iter().map(|c| c.number).collect::<Vec<_>>(), vec![11]);
+    }
+
+    #[test]
+    fn parent_without_subtasks_or_bad_json_is_not_a_feature() {
+        assert_eq!(feature_link_from_json(&gql("", "[]", "[]")), None);
+        assert_eq!(feature_link_from_json(b"not json"), None);
+        assert_eq!(feature_link_from_json(br#"{"data":{"repository":{"issue":null}}}"#), None);
+        assert_eq!(feature_link_from_json(br#"{"errors":[{"message":"boom"}]}"#), None);
+    }
+
+    #[test]
+    fn spec_link_from_parent_body() {
+        let url = format!("{REPO}/issues/10");
+        let f = feature_link_from_json(&gql(
+            &format!("Spec: {REPO}/blob/main/docs/specs/checkout.md#goals.\nAlso {REPO}/blob/main/README.md"),
+            r##"[{"number":11,"title":"A","url":"u","state":"OPEN"}]"##,
+            "[]",
+        ))
+        .unwrap();
+        assert_eq!(f.spec_url.as_deref(), Some(&*format!("{REPO}/blob/main/docs/specs/checkout.md#goals")));
+
+        // A relative markdown link, made absolute; earlier in the body wins.
+        assert_eq!(
+            spec_link(&format!("See [the spec](./docs/specs/c.md) and {REPO}/blob/main/x.md"), &url),
+            Some(format!("{REPO}/blob/HEAD/docs/specs/c.md"))
+        );
+        assert_eq!(
+            spec_link(&format!("{REPO}/blob/main/x.md then [spec](docs/c.md)"), &url),
+            Some(format!("{REPO}/blob/main/x.md"))
+        );
+        // Not a repo document: other repos, source files, issue links, code spans.
+        assert_eq!(
+            spec_link(
+                &format!(
+                    "https://github.com/other/repo/blob/main/a.md {REPO}/blob/main/src/x.rs \
+                     {REPO}/issues/3 edit `docs/village.md`"
+                ),
+                &url
+            ),
+            None
+        );
+        assert_eq!(spec_link("", &url), None);
+    }
+
+    #[test]
+    fn body_names_parent_matches_whole_numbers() {
+        assert!(body_names_parent("- Sub-task of #34\n", 34));
+        assert!(body_names_parent("## Sub-task of #34", 34));
+        assert!(!body_names_parent("Sub-task of #346", 34));
+        assert!(body_names_parent("Sub-task of #346 and Sub-task of #34.", 34));
+        assert_eq!(subtask_search_query("o/r", 7), "repo:o/r is:issue \"Sub-task of #7\"");
     }
 }
