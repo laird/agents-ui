@@ -27,6 +27,7 @@ agents-tui --headless --framework ./reports.json                 # a file (file:
 | `workstreams[].helpers[]` | sub-agents (the Task tool, modernize specialists) | child workflows: the agents working for it |
 | `tasks[]` | issues: crates at the docks, notes on the board | failed runs pinned to the board |
 | `pipeline` | the canal: landed, then each stage to production | completed runs at the castle |
+| `tasks[].parent` | features: a banner per parent, a trail to its subtasks | features, the same way |
 | `builds[]` | none | versions the workers run; a world matches releases against these |
 | `plane` | `development` | `runtime` |
 
@@ -120,6 +121,7 @@ Matching ignores case. Anything else counts as `unknown`.
 
 - `id` (required): `412`, `#412`, `PROJ-12`, or a workflow id. Numeric ids keep their number; other ids are hashed to a stable one.
 - `title`, `labels`, `priority` (`P0` to `P3`), `url`: the task in its tracker. Its house, crate or note links to it.
+- `parent`: the id of the task this one is a subtask of. Tasks that share a parent make a **feature**: a banner the village follows from spec to production (see [Following a feature](village.md#following-a-feature)). Setting `parent` is all an adapter does; the village works out where each subtask is and how far the feature has got. The parent's title and url come from its own task when the report lists it. A subtask in state `done` counts as closed; a report has no "not planned", so every subtask counts.
 - `state`:
   - `open` (the default): a crate at the docks;
   - `claimed`: taken, so not in the backlog;
@@ -163,6 +165,7 @@ autocoder's manager and workers do not message each other. They coordinate throu
 | labels `merging`, `awaiting-integration` | the fix has left the worker and waits at the quay |
 | `refs/autocoder/tips/<integration>/<sha>-<issue>` | where a landed fix is on the canal |
 | `<integration>-green` | the sentinel's lock |
-| `env/<name>` from `.autocoder.json` `environments` | one lock per environment, the last being the castle |
+| `env/<name>` from `.autocoder.json` `environments`, or the newest successful GitHub Deployment to `<name>` | one lock per environment, the last being the castle |
+| GitHub sub-issues, or `Sub-task of #N` in a body under a `decomposed` parent | a feature's banner and its subtasks |
 | a pane waiting on a prompt, herdr `blocked` | a house with an open door and an orange "!" |
 | Task-tool sub-agents, modernize specialists | villagers working for the house |

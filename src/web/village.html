@@ -1620,7 +1620,7 @@
   function sourceWords(s) {
     const sha = s.sha ? ' · ' + String(s.sha).slice(0, 7) : '';
     if (s.source === 'deployment') return `GitHub Deployment${sha}`;
-    if (s.source === 'branch') return `branch ${s.branch || s.name}${sha}`;
+    if (s.source === 'branch') return `${s.branch ? 'branch ' + s.branch : 'its branch ref'}${sha}`;
     if (s.source === 'unknown') return 'no Deployment and no branch';
     return 'not reported';
   }
