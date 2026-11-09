@@ -23,6 +23,9 @@
     --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
   }
   * { box-sizing: border-box; }
+  /* Room for the page scrollbar is kept, so the map's fitted width does not
+   * change when the page grows tall enough to scroll (say, the key opens). */
+  html { scrollbar-gutter: stable; }
   html, body { margin: 0; background: var(--night); color: var(--ink); font: 14px/1.5 var(--sans); }
   body { padding: 12px max(12px, env(safe-area-inset-right)) 24px max(12px, env(safe-area-inset-left)); }
   a { color: var(--ink-dim); }
@@ -81,6 +84,12 @@
   .fb.live { border-color: var(--gold); }
   .fb.stuck small { color: #ff8070; }
   .fb.stuck[aria-pressed="true"] small { color: #600; }
+  /* A feature's label stays hidden until its flag is clicked (followed), the
+   * button has keyboard focus, or the pointer is on the flag. Hidden, it still
+   * sits in the Tab order; clicks pass through to the map. */
+  .fb { opacity: 0; pointer-events: none; }
+  .fb[aria-pressed="true"] { opacity: 1; pointer-events: auto; }
+  .fb:focus-visible, .fb.peek { opacity: var(--fade, 1); }
   /* Area names: a banner over each part of the map, and the worktree under each
    * house. Pointer-transparent, so clicks still reach the map beneath. */
   .alabels { position: absolute; inset: 0; pointer-events: none; }
@@ -90,11 +99,26 @@
   .hitkeys { position: absolute; inset: 0; pointer-events: none; }
   .hk { position: absolute; pointer-events: none; padding: 0; margin: 0; border: 0; background: none; opacity: 0; }
   .hk:focus-visible { opacity: 1; outline: 3px solid var(--gold); outline-offset: 1px; }
-  .al { position: absolute; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 700 11px/1.2 var(--mono); color: var(--gold); background: rgba(6,8,20,.78); border: 1px solid var(--gold); border-radius: 3px; padding: 1px 5px; }
+  .al { position: absolute; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 700 var(--lf, 11px)/1.2 var(--mono); color: var(--gold); background: rgba(6,8,20,.78); border: 1px solid var(--gold); border-radius: 3px; padding: 1px 5px; }
   .al small { font-weight: 400; color: var(--ink-dim); }
-  .al.house { font-size: 10px; color: var(--ink); border-color: var(--win-inner); padding: 0 3px; }
+  .alabels.compact small { display: none; }
+  .al.house { font-size: calc(var(--lf, 11px) - 1px); color: var(--ink); border-color: var(--win-inner); padding: 0 3px; }
   .al.house.working { border-color: #38c848; }
   .al.house.blocked { border-color: #e02828; }
+  .legend-btn { background: var(--win-bot); color: var(--gold); border: 2px solid var(--win-inner); border-radius: 50%; font: 700 14px var(--mono); width: 30px; height: 30px; padding: 0; cursor: pointer; }
+  .legend-btn[aria-expanded="true"] { background: var(--gold); color: #241400; }
+  /* The key: every symbol on the map, drawn by the renderer itself. */
+  .legend { margin-top: 8px; padding: 8px 10px; border: 2px solid var(--rule); border-radius: 4px; background: rgba(6,8,20,.55); }
+  .legend[hidden] { display: none; }
+  .legend h3 { margin: 0 0 4px; font: 700 13px var(--mono); color: var(--gold); }
+  .legend h4 { margin: 8px 0 4px; font: 700 12px var(--mono); color: var(--ink-dim); }
+  .legend ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr)); gap: 4px 12px; }
+  .legend li { display: flex; align-items: center; gap: 8px; font: 13px/1.3 var(--mono); }
+  .legend canvas { width: 42px; height: 42px; flex: none; cursor: default; background: var(--frame-shadow); border-radius: 3px; }
+  /* Said where open ground was clicked, then gone. */
+  .hint { position: absolute; transform: translate(-50%, -130%); pointer-events: none; z-index: 3; font: 700 12px var(--mono); color: var(--ink); background: rgba(6,8,20,.92); border: 2px solid var(--gold); border-radius: 4px; padding: 3px 8px; white-space: nowrap; }
+  .hint.below { transform: translate(-50%, 40%); }
+  .hint[hidden] { display: none; }
   .labels-toggle { font: 13px var(--mono); color: var(--ink-dim); white-space: nowrap; }
   .fstrip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 8px; padding: 6px 8px; border: 2px solid var(--fc, var(--rule)); border-radius: 4px; background: rgba(6,8,20,.55); font: 13px var(--mono); }
   .fstrip[hidden] { display: none; }
@@ -119,7 +143,7 @@
 </head>
 <body>
   <div class="bar">
-    <div class="title">Worktree Hollow <span id="vname" class="vname"></span> <a id="repo" hidden target="_blank" rel="noopener"></a> <span id="workflow" class="status"></span> <select id="pick" aria-label="Village" hidden></select> <select id="theme" aria-label="Style"><option value="medieval">Medieval village</option><option value="modern">Modern business district</option><option value="future">Future</option></select> <label class="labels-toggle"><input type="checkbox" id="labels-on" checked> Labels</label> <span class="zoom" role="group" aria-label="Zoom"><button id="zoom-out" aria-label="Zoom out">−</button><button id="zoom-fit" title="Fit the map to the panel width">Fit</button><button id="zoom-in" aria-label="Zoom in">+</button></span> <a href="/">Dashboard</a></div>
+    <div class="title">Worktree Hollow <span id="vname" class="vname"></span> <a id="repo" hidden target="_blank" rel="noopener"></a> <span id="workflow" class="status"></span> <select id="pick" aria-label="Village" hidden></select> <select id="theme" aria-label="Style"><option value="medieval">Medieval village</option><option value="modern">Modern business district</option><option value="future">Future</option></select> <label class="labels-toggle"><input type="checkbox" id="labels-on" checked> Labels</label> <span class="zoom" role="group" aria-label="Zoom"><button id="zoom-out" aria-label="Zoom out">−</button><button id="zoom-fit" title="Fit the map to the panel width">Fit</button><button id="zoom-in" aria-label="Zoom in">+</button></span> <button id="legend-btn" class="legend-btn" aria-expanded="false" aria-controls="legend" aria-label="Key: what the symbols mean" title="What the symbols mean">?</button> <a href="/">Dashboard</a></div>
     <div class="status" id="status" aria-live="polite">Connecting…</div>
   </div>
   <div class="win stage">
@@ -128,6 +152,7 @@
       <canvas id="map" width="320" height="180" hidden aria-label="The swarm drawn as a village. Select a house to see its crew and issue."></canvas>
       <div class="alabels" id="alabels"></div><div class="hitkeys" id="hitkeys"></div>
       <div class="fbanners" id="fbanners"></div>
+      <div class="hint" id="hint" role="status" hidden>Click a building, crate or person for details</div>
     </div>
     <div class="fstrip" id="fstrip" hidden>
       <h3 id="fs-title"></h3>
@@ -136,6 +161,10 @@
       <button id="fs-details">Details</button><button id="fs-stop">Stop following</button>
     </div>
     <div class="flow" id="flow"></div>
+    <div class="legend" id="legend" hidden role="region" aria-labelledby="legend-title">
+      <h3 id="legend-title">Key</h3>
+      <div id="legend-body"></div>
+    </div>
   </div>
   <div class="win toast" id="toast" hidden role="status"></div>
   <div class="win dialog" id="dialog" hidden role="dialog" aria-live="polite">
@@ -593,6 +622,8 @@
     // Deck slots for cargo (from the harbour's x and the canal's y), the "+N"
     // badge past them, and the box the ship takes up.
     hold: [[3, -2], [8, -2], [14, -2], [19, -2], [2, -7], [20, -7]], holdBadge: [23, -12], hull: [2, -17, 23, 29],
+    // The destination's tall parts, [dx, dy, w, h] from (castleX, canalY): labels keep off them.
+    towers: [[26, -60, 12, 42]],
     people: 'medieval', steam: [P.white, P.stoneL], sign: [P.woodD, P.parch, P.woodD]
   };
 
@@ -709,6 +740,7 @@
   const MODERN = {
     name: 'Modern business district',
     labels: { docks: 'Mailroom', board: 'Whiteboard', houses: 'Offices', quay: 'Loading bay', castle: 'Launch pad', hall: 'Headquarters', ship: 'Rocket', sails: 'lifts off' },
+    towers: [[3, -51, 6, 43], [12, -51, 18, 43]],
     ground(c, x0, y0, w, h) {
       for (let y = y0; y < y0 + h; y += 4) R(c, x0, y, w, Math.min(4, y0 + h - y), (y >> 2) % 2 ? M.lawn : M.lawnD);
     },
@@ -936,6 +968,7 @@
   const FUTURE = {
     name: 'Future',
     labels: { docks: 'Cargo bay', board: 'Holo-board', houses: 'Pods', quay: 'Launch rail', castle: 'Spaceport', hall: 'Command dome', ship: 'Shuttle', sails: 'launches' },
+    towers: [[2, -58, 9, 50], [13, -55, 18, 45]],
     ground(c, x0, y0, w, h) {
       R(c, x0, y0, w, h, F.deckD);
       for (let x = x0 + 7; x < x0 + w; x += 8) R(c, x, y0, 1, h, F.seam);
@@ -1765,10 +1798,12 @@
     b.issues.slice(0, 4).forEach((n, k) => T.crate(c, x + 2 + k * 5, y + 1, 'workshop', null, true));
     tap(b.x, b.y - 6, 28, 18, { kind: 'barge', f: b.f ? b.f.number : null, issues: b.issues });
   }
+  /* The fog wash per theme, shared with the key. */
+  const fogCol = th => th === MODERN ? 'rgba(170,176,196,.75)' : th === FUTURE ? 'rgba(60,52,110,.78)' : 'rgba(206,210,230,.72)';
   /* Fog over a stop with neither a Deployment nor a branch: "?", never "not live". */
   function fogStop(c, v, i, lay, t) {
     const last = v.pipeline.stops.length - 1, x = i === last ? lay.castleX - 4 : lay.lockStart + i * 34 - 7, w = i === last ? 46 : 32;
-    R(c, x, lay.canalY - 28, w, lay.H - lay.canalY + 28, T === MODERN ? 'rgba(170,176,196,.75)' : T === FUTURE ? 'rgba(60,52,110,.78)' : 'rgba(206,210,230,.72)');
+    R(c, x, lay.canalY - 28, w, lay.H - lay.canalY + 28, fogCol(T));
     if (!reduce) for (let k = 0; k < w / 6 - 1; k++) puffs(c, x + 4 + k * 6, lay.canalY - 18 + (k % 2) * 22, t + k * 330, '#e0e4f0', '#b8c0d8');
     bubble(c, x + (w >> 1) - 4, lay.canalY - 6, 'unknown');
   }
@@ -2215,16 +2250,16 @@
     links((info.links || []).filter(Boolean));
     dialog.hidden = false;
   }
+  /* Do what a click on `o` does; false when it does nothing (open ground). A
+   * flag follows its feature (label and strip shown) or stops following it;
+   * the strip's Details button opens the feature. */
   function act(o, sc, theme) {
     const v = sc.v;
-    if (o.kind === 'banner') {
-      toggleFollow(v.project, o.f);
-      const f = isFollowed(v, { number: o.f }) && (v.features || []).find(f => f.number === o.f);
-      return f && showFeature(f, v);
-    }
-    if (o.kind === 'barge') { const f = (v.features || []).find(f => f.number === o.f); return f && showFeature(f, v); }
+    if (o.kind === 'banner') { toggleFollow(v.project, o.f); return true; }
+    if (o.kind === 'barge') { const f = (v.features || []).find(f => f.number === o.f); if (f) showFeature(f, v); return !!f; }
     const info = explain(o, sc, theme);
     if (info) openInfo(info);
+    return !!info;
   }
   /* The topmost drawn object under a point, in scene pixels. */
   function hitAt(sc, x, y) {
@@ -2232,21 +2267,43 @@
     for (let k = hs.length - 1; k >= 0; k--) { const r = hs[k]; if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return r.o; }
     return null;
   }
-  function hit(sc, x, y, theme) {
-    const o = hitAt(sc, x, y);
-    if (o) act(o, sc, theme);
+  /* What is under a pointer event: the object, its scene and theme; or null. */
+  function objAt(e) {
+    if (!view) return null;
+    const r = cv.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width * cv.width, y = (e.clientY - r.top) / r.height * cv.height;
+    if (!view.world) { const sc = scenes[view.village], o = sc && sc.v && hitAt(sc, x, y); return o ? { o, sc, theme: T } : null; }
+    const w = worlds.find(x => x.name === view.world), Ps = w && scenes[w.platform], Ds = w && scenes[w.dev];
+    if (!Ps || !Ds || !Ps.v || !Ds.v) return null;
+    const g = worldGeom(Ps, Ds);
+    const [sc, theme, top] = y < Ps.L.H ? [Ps, otherTheme(), 0] : y >= g.devTop ? [Ds, T, g.devTop] : [];
+    const o = sc && hitAt(sc, x - SIDE, y - top);
+    return o ? { o, sc, theme } : null;
   }
   cv.addEventListener('click', e => {
     if (!view) return;
-    const r = cv.getBoundingClientRect();
-    const x = (e.clientX - r.left) / r.width * cv.width, y = (e.clientY - r.top) / r.height * cv.height;
-    if (!view.world) { const sc = scenes[view.village]; if (sc && sc.v) hit(sc, x, y, T); return; }
-    const w = worlds.find(x => x.name === view.world), Ps = w && scenes[w.platform], Ds = w && scenes[w.dev];
-    if (!Ps || !Ds || !Ps.v || !Ds.v) return;
-    const g = worldGeom(Ps, Ds);
-    if (y < Ps.L.H) hit(Ps, x - SIDE, y, otherTheme());
-    else if (y >= g.devTop) hit(Ds, x - SIDE, y - g.devTop, T);
+    const h = objAt(e);
+    if (!(h && act(h.o, h.sc, h.theme))) groundHint(e);
   });
+  /* Hovering a flag shows its feature's label while the pointer is on it. */
+  cv.addEventListener('mousemove', e => {
+    const h = objAt(e);
+    peek(h && h.o.kind === 'banner' ? fbuttons.get(`${h.sc.v.project}#${h.o.f}`) : null);
+  });
+  cv.addEventListener('mouseleave', () => peek(null));
+  /* Open ground does nothing, so say what does, where the click was. */
+  const hintEl = document.getElementById('hint');
+  let hintTimer = 0;
+  function groundHint(e) {
+    const vp = document.getElementById('viewport'), vr = vp.getBoundingClientRect();
+    hintEl.hidden = false;
+    const half = hintEl.offsetWidth / 2 + 4, y = e.clientY - vr.top;
+    const x = Math.max(vp.scrollLeft + half, Math.min(vp.scrollLeft + vp.clientWidth - half, e.clientX - vr.left + vp.scrollLeft));
+    hintEl.classList.toggle('below', y < 40);
+    hintEl.style.left = x + 'px'; hintEl.style.top = y + vp.scrollTop + 'px';
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(() => { hintEl.hidden = true; }, 2500);
+  }
   document.addEventListener('keydown', e => { if (e.key === 'Escape') dialog.hidden = true; });
 
 
@@ -2279,6 +2336,13 @@
   }
   /* One button per banner, kept across polls so keyboard focus survives a refresh. */
   const fbuttons = new Map();
+  let peeked = null;
+  function peek(b) {
+    if (peeked === b) return;
+    if (peeked) peeked.classList.remove('peek');
+    peeked = b || null;
+    if (peeked) peeked.classList.add('peek');
+  }
   function placeBanners() {
     const vp = document.getElementById('viewport'), r = cv.getBoundingClientRect(), vr = vp.getBoundingClientRect();
     const s = r.width / cv.width, keep = new Set();
@@ -2294,19 +2358,19 @@
         fbuttons.set(key, b); fbox.appendChild(b);
       }
       b.project = sc.v.project; b.number = f.number;
-      b.className = 'fb' + (f.live ? ' live' : '') + ((f.stuck || []).length ? ' stuck' : '');
+      b.className = 'fb' + (f.live ? ' live' : '') + ((f.stuck || []).length ? ' stuck' : '') + (b === peeked ? ' peek' : '');
       b.style.setProperty('--fc', col);
       b.setAttribute('aria-pressed', String(on));
       const sum = featureSummary(f);
       b.innerHTML = `#${f.number} ${esc(f.title)}<small>${esc(sum)}</small>`;
       b.setAttribute('aria-label', `Feature #${f.number} ${f.title}: ${sum}. ${on ? 'Following; press to stop' : 'Press to follow'}.`);
-      b.style.opacity = on ? 1 : (sc.fade[f.number] ?? 1);
+      b.style.setProperty('--fade', on ? 1 : (sc.fade[f.number] ?? 1));
       // Labels sit under their banners; when the map is drawn small they alternate rows.
       const lift = 30 * s < 120 && k % 2 ? 36 : 0;
       b.style.left = (r.left - vr.left + vp.scrollLeft + (ox + g.x + 7) * s) + 'px';
       b.style.top = (r.top - vr.top + vp.scrollTop + (oy + g.y + 28) * s + lift) + 'px';
     }));
-    for (const [key, b] of fbuttons) if (!keep.has(key)) { b.remove(); fbuttons.delete(key); }
+    for (const [key, b] of fbuttons) if (!keep.has(key)) { if (b === peeked) peeked = null; b.remove(); fbuttons.delete(key); }
     renderStrip(strip);
     placeLabels();
     placeKeys();
@@ -2366,7 +2430,8 @@
     const add = (x, y, anchor, text, sub, cls) => out.push({ x, y, anchor, text, sub, cls });
     add(34, 51, 'top', theme.labels.docks, runtime ? 'waiting' : `backlog · ${v.backlog.length}`);
     add(lay.hallX + 16, 43, 'top', theme.labels.hall, 'manager');
-    add(lay.hallX + 51, 27, 'bottom', theme.labels.board, runtime ? 'failed' : `blocked · ${v.board.length}`);
+    // Under the board, not over it or the trees beside it.
+    add(lay.hallX + 51, 45, 'top', theme.labels.board, runtime ? 'failed' : `blocked · ${v.board.length}`);
     v.houses.forEach((h, i) => {
       const lot = lay.lots[i]; if (!lot) return;
       const name = houseName(v, h);
@@ -2376,8 +2441,34 @@
     // Each stop is labelled with its own name (master-green, uat, prod), as the pipeline reports it.
     stops.slice(0, -1).forEach((s, i) => add(lay.lockStart + i * 34 + 3, lay.canalY - 21, 'bottom', s.name));
     const last = stops[stops.length - 1];
-    add(lay.castleX + 12, lay.canalY - 16, 'bottom', theme.labels.castle, last ? last.name : null);
+    // Over the harbour wall, left of the lighthouse.
+    add(lay.castleX + 10, lay.canalY - 22, 'bottom', theme.labels.castle, last ? last.name : null);
     return out;
+  }
+  /* Sprites a label must not cover, in scene pixels: the board, the
+   * destination's towers (the lighthouse, the masts downtown and in the
+   * future), which each theme lists, and the ship (or rocket, or shuttle)
+   * where it waits at the destination. */
+  function labelAvoid(sc, theme) {
+    const lay = sc.L, board = (sc.hits || []).filter(h => h.o.kind === 'board');
+    const at = ([dx, dy, w, h]) => ({ x: lay.castleX + dx, y: lay.canalY + dy, w, h });
+    return [...board, ...theme.towers.map(at), at(theme.hull)];
+  }
+  /* Move labels that cover an avoided sprite or an earlier label: up for those
+   * that sit above their point, down for those that hang below it. Measured on
+   * screen, so it holds at any scale. */
+  function unclutter(els, blocked) {
+    const hits = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+    const placed = [...blocked];
+    els.forEach(el => {
+      const up = el.dataset.anchor !== 'top';
+      for (let k = 0; k < 8; k++) {
+        const r = el.getBoundingClientRect(), o = placed.find(p => hits(r, p));
+        if (!o) break;
+        el.style.top = parseFloat(el.style.top) + (up ? o.top - r.bottom - 1 : o.bottom - r.top + 1) + 'px';
+      }
+      placed.push(el.getBoundingClientRect());
+    });
   }
   function placeLabels() {
     abox.hidden = !labelsOn.checked || cv.hidden;
@@ -2385,17 +2476,27 @@
     const vp = document.getElementById('viewport'), r = cv.getBoundingClientRect(), vr = vp.getBoundingClientRect();
     const s = r.width / cv.width, ox0 = r.left - vr.left + vp.scrollLeft, oy0 = r.top - vr.top + vp.scrollTop;
     const shift = { top: 'translate(-50%, 0)', bottom: 'translate(-50%, -100%)', right: 'translate(-100%, -50%)' };
+    // Text grows with the map; below 3x the subtitles go, so names stay readable.
+    abox.style.setProperty('--lf', Math.round(Math.max(9, Math.min(14, 2 + 2.5 * s))) + 'px');
+    abox.classList.toggle('compact', s < 3);
     let html = '';
+    const blocked = [];
     shownScenes().forEach(([sc, ox, oy]) => {
       const theme = view.world && oy === 0 ? otherTheme() : T;
+      labelAvoid(sc, theme).forEach(a => blocked.push({ left: r.left + (ox + a.x) * s, top: r.top + (oy + a.y) * s, right: r.left + (ox + a.x + a.w) * s, bottom: r.top + (oy + a.y + a.h) * s }));
       areaLabels(sc, theme).forEach(l => {
         // A house label may be no wider than its lot, so neighbours never overlap.
         const max = l.cls && l.cls.startsWith('house') ? `max-width:${Math.max(28, (LW - 1) * s)}px;` : '';
-        html += `<div class="al${l.cls ? ' ' + esc(l.cls) : ''}" aria-hidden="true" style="left:${ox0 + (ox + l.x) * s}px;top:${oy0 + (oy + l.y) * s}px;transform:${shift[l.anchor]};${max}">` +
+        html += `<div class="al${l.cls ? ' ' + esc(l.cls) : ''}" aria-hidden="true" data-anchor="${l.anchor}" style="left:${ox0 + (ox + l.x) * s}px;top:${oy0 + (oy + l.y) * s}px;transform:${shift[l.anchor]};${max}">` +
           `${esc(l.text)}${l.sub ? ` <small>${esc(l.sub)}</small>` : ''}</div>`;
       });
     });
-    if (abox.innerHTML !== html) abox.innerHTML = html;
+    // Redo it when the labels or the sprites to avoid change (the board's rect is
+    // only known once a frame has drawn it).
+    const drawn = html + blocked.map(b => [b.left, b.top, b.right, b.bottom].map(Math.round).join(',')).join(';');
+    if (abox.drawn === drawn) return;
+    abox.innerHTML = html; abox.drawn = drawn;
+    unclutter([...abox.children], blocked);
   }
   function renderStrip(on) {
     fstrip.hidden = !on;
@@ -2473,6 +2574,55 @@
     dialog.hidden = false;
     document.getElementById('close').focus();
   }
+
+  /* ---------- Key ----------
+   * What every symbol means, in the current theme. Each swatch is drawn by the
+   * renderer's own functions (T.crate, pennant, bubble, cobwebs, person) from
+   * its own tables (KINDCOL, ICONS, STATE, SPECIALTIES, NOTECOL), and the rows
+   * are listed from those tables, so the key cannot drift from the map. */
+  const KIND_WORDS = { bug: 'Bug', feature: 'Feature', tests: 'Tests', security: 'Security', research: 'Research', perf: 'Performance',
+    refactor: 'Refactor', docs: 'Docs', chores: 'Chore', workshop: 'Finished work, sealed (quay and stages)', cottage: 'Other work' };
+  const ICON_WORDS = { blocked: 'Blocked: waiting on you', done: 'Done', unknown: 'Unknown: no word from it', stalled: 'Stalled: no progress' };
+  const PENNANT_WORDS = { P0: 'P0: urgent (waves)', P1: 'P1: high', P2: 'P2: normal' };
+  function swatch(paint, size = 14) {
+    const c = document.createElement('canvas');
+    c.width = size; c.height = size; c.setAttribute('aria-hidden', 'true');
+    const g = c.getContext('2d'); g.imageSmoothingEnabled = false; paint(g);
+    return c;
+  }
+  function renderLegend() {
+    const L = T.labels, body = document.getElementById('legend-body');
+    document.getElementById('legend-title').textContent = `Key · ${T.name}`;
+    const groups = [
+      [`Crates at the ${L.docks}: the kind of work`, Object.keys(KINDCOL).map(k => [c => T.crate(c, 1, 1, k, null, k === 'workshop'), KIND_WORDS[k] || k, 7])],
+      ['Priority', [[c => T.crate(c, 1, 1, 'feature', 'P0'), 'Red mark on a crate: P0', 7],
+        ...Object.keys(PENNANT_WORDS).map(p => [c => pennant(c, 5, 7, p, 0), `Pennant over a house: ${PENNANT_WORDS[p]}`]),
+        [() => {}, 'No pennant: P3']]],
+      ['Bubbles over people and stops', Object.keys(ICONS).map(k => [c => bubble(c, 2, 1, k), ICON_WORDS[k] || k])],
+      ['Other marks', [[c => cobwebs(c, -1, -6), 'Cobwebs on a house: stalled'],
+        [c => { R(c, 0, 0, 14, 14, fogCol(T)); bubble(c, 2, 1, 'unknown'); }, 'Grey fog over a stage: nothing says what runs there (no Deployment, no branch)']]],
+      ['Sub-agent accents: their specialty', [...SPECIALTIES.map(([name, kind]) => [c => person(c, 3, 1, 'key:' + name, 'stand', { accent: KINDCOL[kind], sub: true }), name]),
+        [c => person(c, 3, 1, 'key:other', 'stand', { accent: P.white, sub: true }), 'any other']]],
+      [`Notes on the ${L.board}`, Object.keys(NOTECOL).map(k => [c => { R(c, 1, 1, 5, 5, P.o); R(c, 2, 2, 3, 3, NOTECOL[k]); }, k.replace(/-/g, ' '), 7])]
+    ];
+    body.textContent = '';
+    groups.forEach(([title, rows]) => {
+      const h = document.createElement('h4'), ul = document.createElement('ul');
+      h.textContent = title;
+      rows.forEach(([paint, words, size]) => {
+        const li = document.createElement('li'), span = document.createElement('span');
+        span.textContent = words;
+        li.append(swatch(paint, size), span); ul.appendChild(li);
+      });
+      body.append(h, ul);
+    });
+  }
+  const legendBtn = document.getElementById('legend-btn'), legend = document.getElementById('legend');
+  legendBtn.addEventListener('click', () => {
+    legend.hidden = !legend.hidden;
+    legendBtn.setAttribute('aria-expanded', String(!legend.hidden));
+    if (!legend.hidden) renderLegend();
+  });
 
   /* ---------- Data ---------- */
   /* The map fills the panel's width; a tall map scrolls the page rather than
@@ -2561,6 +2711,7 @@
   themePick.addEventListener('change', () => {
     themeName = themePick.value; T = THEMES[themeName];
     try { localStorage.setItem('village-theme', themeName); } catch {}
+    if (!legend.hidden) renderLegend();
     if (view) select(view.world || view.village);
   });
   pick.addEventListener('change', () => { location.hash = pick.value; select(pick.value); });
