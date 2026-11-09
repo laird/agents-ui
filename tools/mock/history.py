@@ -21,7 +21,8 @@ Sources, all from history:
     them, the `Merge origin/<branch> into feature/issue-N` or `Fix #N` /
     `Implement #N` commit does. The commit's time is when it landed.
   * GitHub (unless --no-github): every issue's timeline: when it opened, each
-    label added and removed (`working` is a claim), when it closed and why;
+    label added and removed (`working` is a claim, when a commit, a work-started
+    or a release comment shows a worker held it), when it closed and why;
     sub-issues and `Sub-task of #N` bodies for features; GitHub Deployments
     per environment in .autocoder.json.
   * --no-github: commits and merges only. Each landed issue is claimed from
@@ -83,6 +84,8 @@ class Issue:
         # (time, "add" | "remove", label), in time order.
         self.label_events = sorted(labels or [], key=lambda e: e[0])
         self.releases = []       # times of `🔓 Releasing claim` comments
+        self.starts = None       # times of work-started comments; None: no comment record
+        self.commits = []        # author times of commits made for it
         self.parent = None       # feature parent, when this is a subtask
         self.linked_by = None    # "sub-issues" | "body"
         self.linked_at = None    # when it became the parent's subtask
@@ -107,26 +110,45 @@ class Issue:
         still claimed). A gap of `rejoin` seconds or less with no release
         comment in it is one claim: the merge job or a relaunch drops and
         restores the label while the same worker holds the issue. A release
-        (a worker giving the issue back, e.g. for a dependency) always ends one."""
-        out, start = [], None
+        (a worker giving the issue back, e.g. for a dependency) always ends one.
+
+        A span counts only when a worker shows it held the issue (see `held`):
+        a `working` label left behind, or put back, with no worker on it is
+        not a claim and gets no house."""
+        spans, start = [], None
         for et, op, name in self.label_events:
             if name != "working":
                 continue
             if self.closed is not None and et >= self.closed:
                 break
             if op == "add" and start is None:
-                gap_from = out[-1][1] if out and out[-1][1] is not None else None
-                released = gap_from is not None and any(gap_from - 30 <= r <= et for r in self.releases)
-                if gap_from is not None and et - gap_from <= rejoin and not released:
-                    start = out.pop()[0]
-                else:
-                    start = et
+                start = et
             elif op == "remove" and start is not None:
-                out.append((start, et))
+                spans.append((start, et))
                 start = None
         if start is not None:
-            out.append((start, self.closed))
+            spans.append((start, self.closed))
+        out = []
+        for s, e in spans:
+            if not self.held(s, e):
+                continue
+            gap_from = out[-1][1] if out and out[-1][1] is not None else None
+            released = gap_from is not None and any(gap_from - 30 <= r <= s for r in self.releases)
+            if gap_from is not None and s - gap_from <= rejoin and not released:
+                out[-1] = (out[-1][0], e)
+            else:
+                out.append((s, e))
         return out
+
+    def held(self, start, end, slack=5):
+        """Did a worker hold the issue between `start` and `end` (None: still
+        open)? Evidence: a commit for it, a work-started comment, or a release
+        comment (a worker gave it back, so a worker had it). Without a comment
+        record (`starts` None: git-only, or built by hand) every span counts."""
+        if self.starts is None:
+            return True
+        hi = INF if end is None else end + slack
+        return any(start - slack <= t <= hi for t in (*self.commits, *self.starts, *self.releases))
 
 
 def assign_houses(intervals):
@@ -460,6 +482,21 @@ def landings_from_log(lines):
     return out
 
 
+def commit_times(lines):
+    """issue -> author times of the commits made for it, from `%H %ct %at %s`
+    lines: those whose subject names it (`Fix #N`, `Implement #N`, the merge into
+    feature/issue-N). Evidence a worker held the issue when they were made."""
+    out = {}
+    for line in lines:
+        parts = line.split(" ", 3)
+        if len(parts) < 4:
+            continue
+        m = MERGE_SUBJECT.search(parts[3]) or ISSUE_SUBJECT.match(parts[3])
+        if m:
+            out.setdefault(int(m.group(1)), []).append(float(parts[2]))
+    return out
+
+
 def read_landings(repo, integration, use_remote):
     ref = ref_for(repo, integration)
     if not ref:
@@ -516,6 +553,10 @@ def paginated(repo, path):
     return [x for page in pages for x in (page if isinstance(page, list) else [])]
 
 
+# A worker starting on an issue: /fix's start comment, or its claim marker.
+WORK_STARTED = re.compile(r"Automated Fix Started|Implementation Started|\[autocoder-claim\][^\n]*lock established")
+
+
 def read_issues(repo, since, until, limit):
     listing = gh_json(repo, "issue", "list", "--state", "all", "--limit", str(limit), "--json",
                       "number,title,url,body,createdAt,closedAt,stateReason") or []
@@ -526,7 +567,7 @@ def read_issues(repo, since, until, limit):
         if created > until or (closed is not None and closed < since):
             continue
         timeline = paginated(repo, f"repos/{{owner}}/{{repo}}/issues/{d['number']}/timeline?per_page=100")
-        labels, reason, linked, releases = [], d.get("stateReason"), None, []
+        labels, reason, linked, releases, starts = [], d.get("stateReason"), None, [], []
         for e in timeline:
             kind, when = e.get("event"), e.get("created_at")
             if not when:
@@ -537,10 +578,14 @@ def read_issues(repo, since, until, limit):
                 reason = e["state_reason"]
             elif kind == "parent_issue_added" and linked is None:
                 linked = parse_time(when)
-            elif kind == "commented" and (e.get("body") or "").lstrip().startswith("🔓"):
-                releases.append(parse_time(when))
+            elif kind == "commented":
+                body = e.get("body") or ""
+                if body.lstrip().startswith("🔓"):
+                    releases.append(parse_time(when))
+                elif WORK_STARTED.search(body):
+                    starts.append(parse_time(when))
         i = Issue(d["number"], d["title"], d["url"], d.get("body"), created, closed, reason, labels)
-        i.linked_at, i.releases = linked, releases
+        i.linked_at, i.releases, i.starts = linked, releases, starts
         issues.append(i)
     link_features(repo, issues)
     return issues
@@ -622,6 +667,10 @@ def read_history(repo, since, until, use_github=True, issue_limit=500):
     landed = {n: v for n, v in landed.items() if since <= v[0] <= until}
     if use_github:
         issues = read_issues(repo, since, until, issue_limit)
+        ref = ref_for(repo, integration)
+        times = commit_times(git(repo, "log", "--format=%H %ct %at %s", ref).splitlines()) if ref else {}
+        for i in issues:
+            i.commits = times.get(i.number, [])
     else:
         # Commits and merges only: each landed issue, claimed from its first commit.
         issues = []
