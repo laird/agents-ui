@@ -307,7 +307,8 @@ pub async fn fetch_issues(
             "--limit".to_string(),
             "100".to_string(),
             "--json".to_string(),
-            "number,title,state,labels,url".to_string(),
+            // `body` for the dependency lines (see `parse_dependencies`).
+            "number,title,state,labels,url,body".to_string(),
         ],
     )
     .await

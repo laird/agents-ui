@@ -226,6 +226,7 @@ mod tests {
             assigned_worker: None,
             updated_at: None,
             url: None,
+            depends_on: Vec::new(),
         }
     }
 
@@ -241,6 +242,7 @@ mod tests {
             assigned_worker: None,
             updated_at: None,
             url: None,
+            depends_on: Vec::new(),
         }
     }
 

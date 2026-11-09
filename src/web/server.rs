@@ -1970,6 +1970,19 @@ mod tests {
     }
 
     #[test]
+    fn village_html_ropes_crates_that_wait_on_a_dependency() {
+        let body = &village_source();
+        assert!(body.contains("if ((cr.waits_on || []).length) roped(c, s.x, s.y);"));
+        assert!(body.contains("function roped(c, x, y)"));
+        // The crate dialog and the docks list say what it waits on.
+        assert!(body.contains("return w.length ? ` · waits on ${w.map(d => '#' + d).join(', ')}` : '';"));
+        assert!(body.contains("waiting at the ${theme.labels.docks.toLowerCase()}${waitsWords(v, o.n)}"));
+        assert!(body.contains("(i.waits_on || []).length ? ' · waits on ' + i.waits_on.map(d => '#' + d).join(', ') : ''"));
+        // And the key explains the rope.
+        assert!(body.contains("'Roped crate: waits on another issue (\"Depends on\")'"));
+    }
+
+    #[test]
     fn village_html_reaches_every_object_by_keyboard() {
         let body = &village_source();
         assert!(body.contains(r#"<div class="hitkeys" id="hitkeys"></div>"#));

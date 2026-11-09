@@ -231,6 +231,14 @@
     R(c, x + 1, y + 1, 7, 7, w); R(c, x + 4, y + 8, 1, 2, w); R(c, x + 3, y + 9, 1, 1, o); R(c, x + 5, y + 9, 1, 1, o); R(c, x + 4, y + 10, 1, 1, o);
     for (let r = 0; r < 5; r++) for (let k = 0; k < 5; k++) if (m[r][k] === '#') R(c, x + 2 + k, y + 2 + r, 1, 1, col);
   }
+  /* A crate tied shut: it waits on another issue (a "Depends on" line), so
+   * nobody picks it up yet. Drawn over any theme's crate. */
+  const ROPE = '#d8b070';
+  function roped(c, x, y) {
+    x = Math.round(x); y = Math.round(y);
+    R(c, x - 1, y + 2, 7, 1, ROPE); R(c, x + 2, y - 1, 1, 7, ROPE);
+    R(c, x + 1, y + 1, 3, 3, P.o); R(c, x + 2, y + 2, 1, 1, ROPE);
+  }
   function crate(c, x, y, kind, pr, sealed) {
     x = Math.round(x); y = Math.round(y);
     R(c, x, y, 5, 5, P.o); R(c, x + 1, y + 1, 3, 3, P.woodL);
@@ -1579,7 +1587,7 @@
 
     v.backlog.slice(0, 40).forEach((cr, i) => {
       if (bound.has(cr.number)) return;
-      const s = slotPos(i); T.crate(c, s.x, s.y, cr.kind, cr.priority); tap(s.x, s.y, 5, 5, { kind: 'crate', n: cr.number, at: 'backlog' });
+      const s = slotPos(i); T.crate(c, s.x, s.y, cr.kind, cr.priority); if ((cr.waits_on || []).length) roped(c, s.x, s.y); tap(s.x, s.y, 5, 5, { kind: 'crate', n: cr.number, at: 'backlog' });
     });
 
     const bubbles = [];
@@ -2147,9 +2155,14 @@
     const ago = m < 1 ? 'just now' : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
     return `${new Date(t).toTimeString().slice(0, 5)} (${ago})`;
   }
+  /* " · waits on #361, #362" for a backlog issue with open dependencies. */
+  function waitsWords(v, n) {
+    const w = (v.backlog.find(c => c.number === n) || {}).waits_on || [];
+    return w.length ? ` · waits on ${w.map(d => '#' + d).join(', ')}` : '';
+  }
   function crateWhere(o, v, theme) {
     const stops = v.pipeline.stops;
-    if (o.at === 'backlog') return `waiting at the ${theme.labels.docks.toLowerCase()}`;
+    if (o.at === 'backlog') return `waiting at the ${theme.labels.docks.toLowerCase()}${waitsWords(v, o.n)}`;
     if (o.at === 'quay') return `landed on ${v.pipeline.integration || 'the integration branch'}, at the ${theme.labels.quay.toLowerCase()}`;
     if (o.at === 'ship') return `on the ${theme.labels.ship.toLowerCase()}, waiting for the next release`;
     if (o.at === 'stop') return o.i === stops.length - 1 ? `shipped to ${stops[o.i].name}` : `at ${stops[o.i].name}`;
@@ -2280,7 +2293,7 @@
     // ("Runs: no Deployment and no branchNothing here.").
     const meta = (info.meta || []).filter(Boolean).map(m => `<span class="fact">${esc(m)}</span>`).join('');
     const items = info.items && (info.items.length
-      ? `<ul>${info.items.map(i => `<li>${i.url ? `<a href="${esc(i.url)}" target="_blank" rel="noopener">#${i.number}</a>` : '#' + i.number} ${esc(i.title || '')}${i.label ? ' · ' + esc(i.label) : ''}${i.priority ? ' · ' + esc(i.priority) : ''}</li>`).join('')}</ul>`
+      ? `<ul>${info.items.map(i => `<li>${i.url ? `<a href="${esc(i.url)}" target="_blank" rel="noopener">#${i.number}</a>` : '#' + i.number} ${esc(i.title || '')}${i.label ? ' · ' + esc(i.label) : ''}${i.priority ? ' · ' + esc(i.priority) : ''}${(i.waits_on || []).length ? ' · waits on ' + i.waits_on.map(d => '#' + d).join(', ') : ''}</li>`).join('')}</ul>`
       : '<span class="fact">Nothing here.</span>');
     document.getElementById('d-meta').innerHTML = [meta, items].filter(Boolean).join('');
     ask(info.house || {});
@@ -2639,7 +2652,7 @@
         ...Object.keys(PENNANT_WORDS).map(p => [c => pennant(c, 5, 7, p, 0), `Pennant over a house: ${PENNANT_WORDS[p]}`]),
         [() => {}, 'No pennant: P3']]],
       ['Bubbles over people and stops', Object.keys(ICONS).map(k => [c => bubble(c, 2, 1, k), ICON_WORDS[k] || k])],
-      ['Other marks', [[c => cobwebs(c, -1, -6), 'Cobwebs on a house: stalled'],
+      ['Other marks', [[c => { T.crate(c, 1, 1, 'feature', null); roped(c, 1, 1); }, 'Roped crate: waits on another issue ("Depends on")', 7], [c => cobwebs(c, -1, -6), 'Cobwebs on a house: stalled'],
         [c => { R(c, 0, 0, 14, 14, fogCol(T)); bubble(c, 2, 1, 'unknown'); }, 'Grey fog over a stage: nothing says what runs there (no Deployment, no branch)']]],
       ['Sub-agent accents: their specialty', [...SPECIALTIES.map(([name, kind]) => [c => person(c, 3, 1, 'key:' + name, 'stand', { accent: KINDCOL[kind], sub: true }), name]),
         [c => person(c, 3, 1, 'key:other', 'stand', { accent: P.white, sub: true }), 'any other']]],

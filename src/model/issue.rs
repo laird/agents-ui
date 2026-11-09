@@ -96,6 +96,8 @@ pub struct GitHubIssue {
     pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
     /// The issue's web URL as the tracker reports it (`gh`'s `url` field).
     pub url: Option<String>,
+    /// Issues its body says it depends on (see [`parse_dependencies`]).
+    pub depends_on: Vec<u32>,
 }
 
 pub const BLOCKING_LABELS: &[&str] = &[
@@ -246,6 +248,35 @@ impl IssueCache {
     }
 }
 
+/// The issues a body says this one depends on, as autocoder's `issue-deps.sh`
+/// reads them: every `#N` on a line that says "Depends on" or "Blocked by" (in
+/// any case). "Sub-task of #N" names the parent, not a dependency, and a
+/// placeholder such as `#<sibling>` carries no number.
+pub fn parse_dependencies(body: &str) -> Vec<u32> {
+    fn says_it(line: &str) -> bool {
+        let lower = line.to_lowercase();
+        ["depends on", "blocked by"].iter().any(|phrase| {
+            lower.match_indices(phrase).any(|(i, _)| {
+                let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
+                !word(lower[..i].chars().next_back()) && !word(lower[i + phrase.len()..].chars().next())
+            })
+        })
+    }
+    let mut deps: Vec<u32> = body
+        .lines()
+        .filter(|l| says_it(l))
+        .flat_map(|l| {
+            l.split('#').skip(1).filter_map(|rest| {
+                let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+                digits.parse().ok()
+            })
+        })
+        .collect();
+    deps.sort_unstable();
+    deps.dedup();
+    deps
+}
+
 /// Raw JSON structure from `gh issue list --json`.
 #[derive(Deserialize)]
 pub struct GhIssueJson {
@@ -257,6 +288,8 @@ pub struct GhIssueJson {
     pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(default)]
     pub url: Option<String>,
+    #[serde(default)]
+    pub body: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -312,6 +345,7 @@ impl From<GhIssueJson> for GitHubIssue {
             assigned_worker: None,
             updated_at: raw.updated_at,
             url: raw.url.filter(|u| !u.is_empty()),
+            depends_on: raw.body.as_deref().map(parse_dependencies).unwrap_or_default(),
         }
     }
 }
@@ -366,6 +400,7 @@ pub async fn fetch_issues(repo_path: &Path) -> anyhow::Result<Vec<GitHubIssue>> 
                 assigned_worker: None,
                 updated_at: None,
                 url,
+                depends_on: Vec::new(),
             });
         }
     }
@@ -598,6 +633,30 @@ pub fn feature_link_from_json(bytes: &[u8]) -> Option<FeatureLink> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn dependencies_are_every_number_on_a_depends_on_or_blocked_by_line() {
+        // The cases autocoder's issue-deps.sh reads.
+        assert_eq!(parse_dependencies("- **Depends on: #347 and #348**"), vec![347, 348]);
+        assert_eq!(parse_dependencies("Blocked by #12"), vec![12]);
+        assert_eq!(parse_dependencies("depends on #5\nBLOCKED BY #3, #5"), vec![3, 5], "any case, unique, sorted");
+        // The parent is not a dependency, and placeholders carry no number.
+        assert!(parse_dependencies("## Sub-task of #376\nSee #12 for context").is_empty());
+        assert!(parse_dependencies("- [Depends on: #<sibling-subtask-number> — reason]").is_empty());
+        // Whole words only.
+        assert!(parse_dependencies("independs on #9").is_empty());
+        assert_eq!(parse_dependencies("## Dependencies\n- Sub-task of #367\n- Depends on: #371 (both edit village.html)"), vec![371]);
+        assert!(parse_dependencies("").is_empty());
+    }
+
+    #[test]
+    fn an_issue_body_carries_its_dependencies_into_the_issue() {
+        let raw: GhIssueJson = serde_json::from_str(r#"{"number": 372, "title": "t", "state": "OPEN", "labels": [], "body": "Depends on: #371"}"#).unwrap();
+        assert_eq!(GitHubIssue::from(raw).depends_on, vec![371]);
+        let raw: GhIssueJson = serde_json::from_str(r#"{"number": 1, "title": "t", "state": "OPEN", "labels": []}"#).unwrap();
+        assert!(GitHubIssue::from(raw).depends_on.is_empty(), "no body: no dependencies");
+    }
+
     use super::*;
     use chrono::Utc;
 
@@ -617,6 +676,7 @@ mod tests {
             assigned_worker: None,
             updated_at: None,
             url: None,
+            depends_on: Vec::new(),
         }
     }
 

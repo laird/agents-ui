@@ -71,6 +71,9 @@ pub struct IssueSnapshot {
     pub assigned_worker: Option<String>,
     /// GitHub URL for linking.
     pub url: String,
+    /// Issues this one depends on, from "Depends on" / "Blocked by" lines in its body.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub depends_on: Vec<u32>,
 }
 
 /// Snapshot of a full swarm suitable for JSON serialization.
@@ -180,6 +183,7 @@ impl IssueSnapshot {
             is_working: issue.is_being_worked(),
             assigned_worker: issue.assigned_worker.clone(),
             url,
+            depends_on: issue.depends_on.clone(),
         }
     }
 }
@@ -288,6 +292,7 @@ mod tests {
             assigned_worker: None,
             updated_at: None,
             url: url.map(String::from),
+            depends_on: Vec::new(),
         }
     }
 

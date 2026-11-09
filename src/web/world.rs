@@ -180,6 +180,7 @@ mod tests {
             is_working: false,
             assigned_worker: None,
             url: String::new(),
+            depends_on: Vec::new(),
         }
     }
 

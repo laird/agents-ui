@@ -1314,6 +1314,7 @@ mod tests {
             assigned_worker: None,
             updated_at: None,
             url: None,
+            depends_on: Vec::new(),
         };
         let enh = GitHubIssue {
             number: 2,
@@ -1326,6 +1327,7 @@ mod tests {
             assigned_worker: None,
             updated_at: None,
             url: None,
+            depends_on: Vec::new(),
         };
         let issues = vec![bug, enh];
         // Only bug should pass the type filter
@@ -1358,6 +1360,7 @@ mod tests {
                 assigned_worker: None,
                 updated_at: None,
                 url: None,
+                depends_on: Vec::new(),
             },
             GitHubIssue {
                 number: 5,
@@ -1370,6 +1373,7 @@ mod tests {
                 assigned_worker: None,
                 updated_at: None,
                 url: None,
+                depends_on: Vec::new(),
             },
             GitHubIssue {
                 number: 3,
@@ -1382,6 +1386,7 @@ mod tests {
                 assigned_worker: None,
                 updated_at: None,
                 url: None,
+                depends_on: Vec::new(),
             },
             GitHubIssue {
                 number: 8,
@@ -1394,6 +1399,7 @@ mod tests {
                 assigned_worker: None,
                 updated_at: None,
                 url: None,
+                depends_on: Vec::new(),
             },
         ];
         // apply_filters returns issues sorted by priority then number
@@ -1417,6 +1423,7 @@ mod tests {
             assigned_worker: None,
             updated_at: None,
             url: None,
+            depends_on: Vec::new(),
         };
         let issues = vec![
             // Blocked P0 should still sort after an unblocked P3.
@@ -1477,6 +1484,7 @@ mod tests {
                 assigned_worker: None,
                 updated_at: None,
                 url: None,
+                depends_on: Vec::new(),
             },
             GitHubIssue {
                 number: 2,
@@ -1489,6 +1497,7 @@ mod tests {
                 assigned_worker: None,
                 updated_at: None,
                 url: None,
+                depends_on: Vec::new(),
             },
             GitHubIssue {
                 number: 3,
@@ -1501,6 +1510,7 @@ mod tests {
                 assigned_worker: None,
                 updated_at: None,
                 url: None,
+                depends_on: Vec::new(),
             },
         ];
         let mut view = SwarmView::new();
@@ -1536,6 +1546,7 @@ mod tests {
             assigned_worker: Some("worker-1".to_string()),
             updated_at: None,
             url: None,
+            depends_on: Vec::new(),
         }];
 
         terminal
@@ -1675,6 +1686,7 @@ mod tests {
             assigned_worker: None,
             updated_at: None,
             url: None,
+            depends_on: Vec::new(),
         }
     }
 
@@ -1763,6 +1775,7 @@ mod tests {
                 assigned_worker: None,
                 updated_at: None,
                 url: None,
+                depends_on: Vec::new(),
             },
             GitHubIssue {
                 number: 2,
@@ -1775,6 +1788,7 @@ mod tests {
                 assigned_worker: None,
                 updated_at: None,
                 url: None,
+                depends_on: Vec::new(),
             },
         ];
         terminal
@@ -1826,6 +1840,7 @@ mod tests {
                 assigned_worker: None,
                 updated_at: None,
                 url: None,
+                depends_on: Vec::new(),
             },
             GitHubIssue {
                 number: 2,
@@ -1838,6 +1853,7 @@ mod tests {
                 assigned_worker: None,
                 updated_at: None,
                 url: None,
+                depends_on: Vec::new(),
             },
         ];
         terminal
@@ -1892,6 +1908,7 @@ mod tests {
             assigned_worker: None,
             updated_at: None,
             url: None,
+            depends_on: Vec::new(),
         }];
 
         // Fresh: no indicator
@@ -1988,6 +2005,7 @@ mod tests {
                 assigned_worker: None,
                 updated_at: None,
                 url: None,
+                depends_on: Vec::new(),
             },
             GitHubIssue {
                 number: 2,
@@ -2000,6 +2018,7 @@ mod tests {
                 assigned_worker: None,
                 updated_at: None,
                 url: None,
+                depends_on: Vec::new(),
             },
             GitHubIssue {
                 number: 3,
@@ -2012,6 +2031,7 @@ mod tests {
                 assigned_worker: None,
                 updated_at: None,
                 url: None,
+                depends_on: Vec::new(),
             },
         ];
         let mut view = SwarmView::new();
@@ -2051,6 +2071,7 @@ mod tests {
                 assigned_worker: None,
                 updated_at: None,
                 url: None,
+                depends_on: Vec::new(),
             },
             GitHubIssue {
                 number: 2,
@@ -2063,6 +2084,7 @@ mod tests {
                 assigned_worker: None,
                 updated_at: None,
                 url: None,
+                depends_on: Vec::new(),
             },
         ];
         terminal

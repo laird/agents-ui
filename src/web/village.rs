@@ -192,6 +192,10 @@ pub struct Crate {
     /// The issue in its tracker.
     #[serde(default)]
     pub url: Option<String>,
+    /// Open issues this one waits on ("Depends on" / "Blocked by" in its
+    /// body). autocoder won't pick it up until they close.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub waits_on: Vec<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1026,6 +1030,7 @@ mod tests {
             labels,
             assigned_worker: None,
             url: String::new(),
+            depends_on: Vec::new(),
         }
     }
 

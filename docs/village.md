@@ -104,6 +104,7 @@ session is a house, and agents sharing a worktree are one house.
 | Flag on a house | `P0`–`P3` label |
 | People out front | Running Claude Code sub-agents (`~/.claude/projects/<worktree>/<session>/subagents/`) |
 | Crates at the docks | Open, unclaimed, unblocked issues, highest priority first |
+| A roped crate | An issue waiting on another one: its body says "Depends on #N" or "Blocked by #N" and #N is still open. autocoder won't pick it up yet; its dialog says "waits on #N" |
 | Notes on the board | Issues with a blocking label (`needs-design`, `proposal`, ...) |
 | Crates at the quay | `refs/autocoder/tips/<integration>/<sha>-<issue>` not yet green |
 | Locks, then the harbour or launch pad | `<integration>-green`, then each environment in `.autocoder.json` (see [Environments](#environments)) |

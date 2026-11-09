@@ -360,6 +360,10 @@ pub struct Task {
     /// Where the task is in the merge gate, once its work has left the worker.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate: Option<super::gate::TaskGate>,
+    /// Tasks this one waits on, by id. While any of them is still in the
+    /// report and not done, the task is waiting, not ready to be picked up.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub depends_on: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -626,6 +630,10 @@ pub fn to_village(report: &Report) -> Reading {
 
     let in_houses: HashSet<u32> = houses.iter().chain(std::iter::once(&manager)).filter_map(|h| h.issue).collect();
     let in_transit: HashSet<u32> = pipeline.quay.iter().chain(pipeline.stops.iter().flat_map(|s| s.issues.iter())).copied().collect();
+    // A dependency is met once its task is done or gone from the report: one
+    // that can't be found counts as met, as autocoder's own check does.
+    let open: HashSet<u32> = report.tasks.iter().filter(|t| t.state != TaskState::Done).map(|t| task_number(&t.id)).collect();
+    let waits_on = |t: &Task| -> Vec<u32> { t.depends_on.iter().map(|d| task_number(d)).filter(|d| open.contains(d) && *d != task_number(&t.id)).collect() };
     let mut backlog = Vec::new();
     let mut board = Vec::new();
     for t in &report.tasks {
@@ -635,7 +643,7 @@ pub fn to_village(report: &Report) -> Reading {
         }
         match t.state {
             TaskState::Blocked | TaskState::Failed => board.push(Note { number: n, title: t.title.clone(), label: note_label(t), url: t.url.clone() }),
-            TaskState::Open => backlog.push(Crate { number: n, title: t.title.clone(), kind: house_kind(&t.labels), priority: priority(&t.priority), url: t.url.clone() }),
+            TaskState::Open => backlog.push(Crate { number: n, title: t.title.clone(), kind: house_kind(&t.labels), priority: priority(&t.priority), url: t.url.clone(), waits_on: waits_on(t) }),
             TaskState::Claimed | TaskState::Done => {}
         }
     }
@@ -656,6 +664,7 @@ pub fn to_village(report: &Report) -> Reading {
             is_working: t.state == TaskState::Claimed,
             assigned_worker: None,
             url: t.url.clone().unwrap_or_default(),
+            depends_on: t.depends_on.iter().map(|d| task_number(d)).collect(),
         })
         .collect();
 
@@ -823,6 +832,7 @@ pub fn swarm_report_gated(swarm: &SwarmSnapshot, issues: &[IssueSnapshot], pipel
                 url: Some(i.url.clone()).filter(|u| !u.is_empty()),
                 parent: None,
                 gate: gates.get(&i.number).cloned(),
+                depends_on: i.depends_on.iter().map(u32::to_string).collect(),
             })
             .collect(),
         pipeline: ReportPipeline {
@@ -1006,6 +1016,46 @@ mod tests {
     }
 
     #[test]
+    fn a_task_with_an_open_dependency_waits_on_it() {
+        let report = Report {
+            project: "shop".into(),
+            tasks: vec![
+                // Depends on #8 (open), #10 (done) and #99 (not in the report): only #8 holds it.
+                Task { id: "7".into(), title: "Ship it".into(), depends_on: vec!["8".into(), "10".into(), "99".into(), "7".into()], ..Task::default() },
+                Task { id: "8".into(), title: "Build it".into(), ..Task::default() },
+                Task { id: "10".into(), title: "Plan it".into(), state: TaskState::Done, ..Task::default() },
+                Task { id: "11".into(), title: "After the plan".into(), depends_on: vec!["10".into()], ..Task::default() },
+            ],
+            ..Report::default()
+        };
+        let v = to_village(&report).village;
+        let crate_of = |n: u32| v.backlog.iter().find(|c| c.number == n).unwrap();
+        assert_eq!(crate_of(7).waits_on, vec![8], "a done or unknown dependency is met; itself never counts");
+        assert!(crate_of(8).waits_on.is_empty());
+        assert!(crate_of(11).waits_on.is_empty(), "its only dependency is done");
+        // Reported only when there is something to wait on.
+        let json = serde_json::to_value(&v.backlog).unwrap();
+        assert!(json.as_array().unwrap().iter().filter(|c| c.get("waits_on").is_some()).count() == 1);
+        // A swarm's issues carry their body's dependencies into the report.
+        let swarm: SwarmSnapshot = serde_json::from_value(serde_json::json!({
+            "project_name": "shop", "repo_path": "", "agent_type": "claude", "workflow": null, "tmux_session": "",
+            "stopped": false, "busy_count": 0, "idle_count": 0, "attention_count": 0, "workers": [], "issues": [],
+            "manager": {"id": "m", "role": "manager", "state": "Idle", "is_manager": true, "waiting_for_input": false,
+                "current_issue": null, "current_issue_title": null, "pane_content": "", "tmux_target": "", "health": "Healthy",
+                "completed_issue_count": 0, "resurrection_attempts": 0, "status_timestamp": null}
+        }))
+        .unwrap();
+        let issues = [
+            IssueSnapshot { number: 5, state: "open".into(), depends_on: vec![4], ..IssueSnapshot::default() },
+            IssueSnapshot { number: 4, state: "open".into(), ..IssueSnapshot::default() },
+        ];
+        let report = swarm_report(&swarm, &issues, &Pipeline::default());
+        assert_eq!(report.tasks[0].depends_on, vec!["4".to_string()]);
+        let v = to_village(&report).village;
+        assert_eq!(v.backlog.iter().find(|c| c.number == 5).unwrap().waits_on, vec![4]);
+    }
+
+    #[test]
     fn workstreams_become_houses() {
         let report = Report {
             project: "shop".into(),
@@ -1048,6 +1098,7 @@ mod tests {
             is_working: false,
             assigned_worker: None,
             url: String::new(),
+            depends_on: Vec::new(),
         };
         let swarm: SwarmSnapshot = serde_json::from_value(serde_json::json!({
             "project_name": "shop", "repo_path": "", "agent_type": "claude", "workflow": null, "tmux_session": "",
@@ -1073,6 +1124,7 @@ mod tests {
             state: "open".into(),
             labels: labels.iter().map(|l| l.to_string()).collect(),
             url: format!("https://github.com/acme/shop/issues/{n}"),
+            depends_on: Vec::new(),
             ..IssueSnapshot::default()
         };
         let swarm: SwarmSnapshot = serde_json::from_value(serde_json::json!({
