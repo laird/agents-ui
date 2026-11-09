@@ -1879,7 +1879,7 @@ mod tests {
 
     #[test]
     fn village_html_draws_the_merge_gate_as_a_gatehouse() {
-        let body = VILLAGE_HTML;
+        let body = &village_source();
         // Layout: a band between the houses and the quay, one table per gate slot, only when the gate is known.
         assert!(body.contains("const LW = 20, LH = 26, RD = 6, DOCK_W = 64, GATE_H = 30, GATE_TABLES = 6;"));
         assert!(body.contains("const tablesN = v.plane === 'runtime' || (!merge && !gates.length) ? 0"));
