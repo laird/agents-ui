@@ -212,11 +212,21 @@ what `src/web/deployments.rs` reads to place each stop:
   starts a server of its own. The reference unit, with install steps, is
   `docs/agents-tui.service`. Its tests: `bash tools/test_deploy.sh` (also run
   by `cargo test deploy_script`).
-- **`release`**: run `tools/release.sh vX.Y.Z` (or add `--dry-run`). It runs
-  `gh release create --generate-notes` at `origin/master`'s tip, or at
-  `--commit`, and records a Deployment of that commit. For a release made by
-  hand, run the same command afterwards: when the release already exists, it
-  only records the Deployment.
+- **`release`**: a GitHub Release, recorded as a Deployment of its commit.
+  **Every deploy releases**: once `deploy.sh` has recorded `nuc-1` as
+  `success`, it runs `tools/release.sh` for the same commit, so the village's
+  ship sails on each deploy. Tags are automatic, `vYYYY.MM.DD.N` (N counts up
+  within the day, from origin's tags), and a commit that already is the newest
+  release is not released again. A failed release leaves the deploy standing:
+  `deploy.sh` exits 3 and the next deploy releases it. `--no-release` skips it
+  for one deploy, and `--dry-run` shows the tag and commit it would release.
+  **Pushes of master from the main checkout release too**, once its pre-push
+  hook is installed (`tools/install-hooks.sh`, once per clone). Pushes from the
+  swarm's worktrees and merge jobs never do: they share the hooks but not the
+  main checkout. `AGENTS_UI_NO_RELEASE=1 git push` skips it; the log is
+  `~/.agents-ui/release.log`. `tools/release.sh [vX.Y.Z]` still releases by
+  hand, and for a release made on GitHub it only records the Deployment. Its
+  tests: `bash tools/test_release.sh` (also run by `cargo test release_script`).
 
 There is no sentinel here, so no `master-green` ref exists. `nuc-1` is marked
 `"requires": "integration"`, which drops the green stop, and the village shows

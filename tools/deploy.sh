@@ -9,12 +9,19 @@
 # village answers, or `failure` if the install, the restart or the check fails.
 #
 # USAGE:
-#   tools/deploy.sh [--env nuc-1] [--dry-run] [--no-restart]
+#   tools/deploy.sh [--env nuc-1] [--dry-run] [--no-restart] [--no-release]
 #
 #   --env         environment to record (default: nuc-1; must be listed in .autocoder.json)
 #   --dry-run     run every check and print the unit it would restart and the URL it
 #                 would check; install, restart and record nothing
 #   --no-restart  install and record, but leave the running server alone
+#   --no-release  deploy without cutting a release afterwards
+#
+# Every deploy also releases: once the Deployment is recorded as `success`,
+# tools/release.sh cuts a GitHub Release of the same commit under the next
+# vYYYY.MM.DD.N tag, so the village's ship sails. A commit that already is the
+# newest release is not released again. A failed release does not undo the
+# deploy: it stays `success`, and the script exits 3 so the next deploy retries.
 #
 # What it refuses, before opening a Deployment:
 #   - a dirty tree (what is installed must be exactly the recorded commit;
@@ -31,17 +38,20 @@
 #   AGENTS_TUI_URL (e.g. http://127.0.0.1:7890) overrides the address, and
 #   AGENTS_TUI_WAIT the seconds to wait (default 30).
 #
-# EXIT: 0 deployed (or dry run passed) · 1 refused or setup error · 2 deploy failed (recorded as failure)
+# EXIT: 0 deployed and released (or dry run passed) · 1 refused or setup error ·
+#       2 deploy failed (recorded as failure) · 3 deployed, but the release failed
 set -euo pipefail
 
 ENVIRONMENT="nuc-1"
 DRY_RUN=false
 RESTART=true
+RELEASE=true
 while [ $# -gt 0 ]; do
   case "$1" in
     --env) [ $# -ge 2 ] || { echo "deploy.sh: --env needs a value" >&2; exit 1; }; ENVIRONMENT="$2"; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
     --no-restart) RESTART=false; shift ;;
+    --no-release) RELEASE=false; shift ;;
     -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
     *) echo "deploy.sh: unknown argument: $1" >&2; exit 1 ;;
   esac
@@ -136,6 +146,12 @@ if [ "$DRY_RUN" = true ]; then
     say "dry run: would run: systemctl --user restart $UNIT"
     say "dry run: would wait up to ${WAIT}s for $CHECK to answer"
   fi
+  if [ "$RELEASE" = false ]; then
+    say "dry run: would not release (--no-release)"
+  else
+    bash tools/release.sh --commit "$SHA" --dry-run 2>&1 | sed 's/^release\.sh: /deploy.sh: release: /' \
+      || say "dry run: the release check failed; the deploy would still go ahead"
+  fi
   say "dry run: checks passed, nothing changed"
   exit 0
 fi
@@ -173,3 +189,13 @@ fi
 
 status success "agents-tui ${SHA:0:12} installed on $(hostname)"
 say "deployed ${SHA:0:12} to $ENVIRONMENT"
+
+if [ "$RELEASE" = false ]; then
+  say "not releasing (--no-release)"
+  exit 0
+fi
+# The deploy stands whatever happens here: it is recorded, and only the release is retried.
+if ! bash tools/release.sh --commit "$SHA"; then
+  echo "deploy.sh: deployed ${SHA:0:12} to $ENVIRONMENT, but the release failed; the next deploy releases it" >&2
+  exit 3
+fi

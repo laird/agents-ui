@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# pre-push — release each push of the integration branch made from the main
+# checkout. Installed by tools/install-hooks.sh.
+#
+# Every checkout of this repo shares one hooks directory: the main checkout,
+# the swarm's worktrees (<repo>-wt-N) and the merge jobs' throwaway worktrees
+# (/tmp/autocoder-merge-worktree-*). They also all push as the same GitHub
+# account. What tells the user's (or the manager's) push apart is where it is
+# pushed from, so only a push from the main checkout releases.
+#
+# A pre-push hook runs before the push and cannot know whether it succeeds.
+# So it hands off to a background job that waits until origin's branch is at
+# the pushed commit, then runs tools/release.sh for it (which skips a commit
+# that already is the newest release). If the push fails, the branch never
+# gets there and the job gives up. It logs to ~/.agents-ui/release.log.
+#
+# Why not a reference-transaction hook on refs/remotes/origin/master: a plain
+# `git fetch` in the main checkout moves that ref too, so every merge the swarm
+# landed would be released as if the user had pushed it.
+#
+# The push itself is never held up or refused: this always exits 0.
+#   AGENTS_UI_NO_RELEASE=1 git push ...   pushes without releasing
+#   AGENTS_UI_RELEASE_WAIT=<seconds>      how long to wait for the push (default 120)
+
+[ "${AGENTS_UI_NO_RELEASE:-}" = 1 ] && exit 0
+
+top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+common=$(cd "$top" && cd "$(git rev-parse --git-common-dir)" && pwd -P) || exit 0
+# The main checkout is the one whose .git is the common dir.
+[ "$(basename "$common")" = .git ] || exit 0
+main=$(cd "$common/.." && pwd -P)
+[ "$(cd "$top" && pwd -P)" = "$main" ] || exit 0
+
+integration=$(git symbolic-ref --short "refs/remotes/$1/HEAD" 2>/dev/null | sed "s@^$1/@@")
+integration="${integration:-master}"
+
+while read -r _local_ref local_sha remote_ref _remote_sha; do
+  [ "$remote_ref" = "refs/heads/$integration" ] || continue
+  case "$local_sha" in *[!0]*) ;; *) continue ;; esac   # a delete, not a push
+  log="$HOME/.agents-ui/release.log"
+  mkdir -p "$(dirname "$log")"
+  wait_s="${AGENTS_UI_RELEASE_WAIT:-120}"
+  (
+    cd "$main" || exit 0
+    echo "$(date -Iseconds) pushed ${local_sha:0:12} to $1/$integration; releasing once it lands"
+    deadline=$((SECONDS + wait_s))
+    until [ "$(git ls-remote "$1" "refs/heads/$integration" 2>/dev/null | cut -f1)" = "$local_sha" ]; do
+      [ "$SECONDS" -lt "$deadline" ] || { echo "$(date -Iseconds) ${local_sha:0:12} never reached $1/$integration; not releasing"; exit 0; }
+      sleep 2
+    done
+    bash tools/release.sh --commit "$local_sha" || echo "$(date -Iseconds) release of ${local_sha:0:12} failed; the next push or deploy releases it"
+  ) >> "$log" 2>&1 < /dev/null &
+  disown 2>/dev/null || true
+done
+exit 0

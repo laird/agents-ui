@@ -476,6 +476,24 @@ mod tests {
         );
     }
 
+    /// tools/release.sh makes the `release` Deployments read here. Its shell
+    /// tests cover date tags (first and next of a day), not releasing a commit
+    /// twice, and the pre-push hook releasing only pushes from the main checkout.
+    #[test]
+    fn release_script_tests_pass() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        let out = std::process::Command::new("bash")
+            .arg(format!("{root}/tools/test_release.sh"))
+            .output()
+            .expect("run tools/test_release.sh");
+        assert!(
+            out.status.success(),
+            "tools/test_release.sh failed:\n{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
     /// The served instance is the systemd unit only: no detached-server fallback.
     #[test]
     fn deploy_script_never_starts_a_server_of_its_own() {

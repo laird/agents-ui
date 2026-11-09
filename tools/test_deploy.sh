@@ -28,7 +28,13 @@ EOF
 cat > "$STUBS/gh" <<'EOF'
 #!/usr/bin/env bash
 echo "gh $*" >> "$STUB_LOG"
-case "$*" in *"/statuses"*) ;; *deployments*) echo 42 ;; esac
+case "$*" in
+  "release create"*) exit "${STUB_CREATE_RC:-0}" ;;
+  "release view"*"--json url"*) echo "https://github.com/o/r/releases/tag/x" ;;
+  "release view"*) exit 1 ;;
+  *"/statuses"*) ;;
+  *deployments*) echo 42 ;;
+esac
 EOF
 cat > "$STUBS/cargo" <<'EOF'
 #!/usr/bin/env bash
@@ -51,7 +57,7 @@ git init -q -b master "$TMP/work"
 (
   cd "$TMP/work"
   git config user.email t@example.com; git config user.name test
-  mkdir tools; cp "$SCRIPT" tools/deploy.sh
+  mkdir tools; cp "$SCRIPT" tools/deploy.sh; cp "$HERE/release.sh" tools/release.sh
   echo '{"environments":[{"name":"nuc-1"}]}' > .autocoder.json
   git add -A; git commit -qm "landed"
   git remote add origin "$TMP/origin.git"; git push -q origin master
@@ -124,6 +130,39 @@ check "defaults to 127.0.0.1:7878" has "http://127.0.0.1:7878/api/village" "$OUT
 
 run tailnet-only "STUB_EXECSTART=ExecStart=/usr/bin/agents-tui --headless --web-port=7890 --web-bind=tailscale" -- --dry-run
 check "resolves a tailnet-only bind" has "http://100.64.0.9:7890/api/village" "$OUT"
+
+# ---- the release that follows every deploy --------------------------------------
+run releases --
+check "exits 0" test "$RC" -eq 0
+check "records the nuc-1 Deployment first" has "environment=nuc-1" "$LOG"
+check "then releases the same commit under a date tag" has "gh release create v$(date +%Y.%m.%d)." "$LOG"
+check "and records the release Deployment" has "environment=release" "$LOG"
+SHA=$(git -C "$TMP/work" rev-parse HEAD)
+check "of the deployed commit" has "--target $SHA" "$LOG"
+
+run release-fails STUB_CREATE_RC=1 --
+check "exits 3" test "$RC" -eq 3
+check "the deploy still stands" has "state=success" "$LOG"
+check "and never records failure" hasnt "state=failure" "$LOG"
+check "says the release failed and will be retried" has "but the release failed; the next deploy releases it" "$OUT"
+
+run no-release -- --no-release
+check "exits 0" test "$RC" -eq 0
+check "deploys" has "state=success" "$LOG"
+check "does not release" hasnt "release create" "$LOG"
+check "says so" has "not releasing (--no-release)" "$OUT"
+
+run dry-run-release -- --dry-run
+check "names the tag and commit it would release" has "release: dry run: would run: gh release create v$(date +%Y.%m.%d)." "$OUT"
+run dry-run-no-release -- --dry-run --no-release
+check "a dry run with --no-release says it would not release" has "would not release (--no-release)" "$OUT"
+
+# Released already: tag the deployed commit on origin, and a redeploy cuts no second release.
+git -C "$TMP/work" tag "v$(date +%Y.%m.%d).1" && git -C "$TMP/work" push -q origin --tags
+run redeploy --
+check "exits 0" test "$RC" -eq 0
+check "deploys again" has "state=success" "$LOG"
+check "but does not release the same commit twice" hasnt "release create" "$LOG"
 
 run no-restart -- --no-restart
 check "exits 0" test "$RC" -eq 0
