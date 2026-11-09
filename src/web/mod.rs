@@ -4,6 +4,7 @@ pub mod feature;
 pub mod framework;
 pub mod herdr;
 pub mod kubernetes;
+pub mod pane;
 pub mod server;
 pub mod source;
 pub mod temporal;
@@ -41,6 +42,19 @@ pub struct AgentSnapshot {
     /// Git branch checked out in that worktree. `None` for a detached HEAD.
     #[serde(default)]
     pub branch: Option<String>,
+    /// The terminal multiplexer the agent runs in, which decides how its pane
+    /// is read and typed into (`tmux_target` is a tmux target or a herdr pane id).
+    #[serde(default)]
+    pub mux: Mux,
+}
+
+/// Where an agent's terminal lives.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Mux {
+    #[default]
+    Tmux,
+    Herdr,
 }
 
 /// A single GitHub issue suitable for JSON serialization.
@@ -106,6 +120,7 @@ impl AgentSnapshot {
             status_timestamp,
             worktree_path: info.worktree_path.to_string_lossy().into_owned(),
             branch: info.branch.clone(),
+            mux: Mux::Tmux,
         }
     }
 }

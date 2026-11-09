@@ -145,6 +145,7 @@ fn stopped_placeholder_agent(project_name: &str, role: &str, is_manager: bool) -
         status_timestamp: None,
         worktree_path: String::new(),
         branch: None,
+        mux: Default::default(),
     }
 }
 
@@ -359,6 +360,7 @@ this swarm is running without a manager."
         status_timestamp: None,
         worktree_path: String::new(),
         branch: None,
+        mux: Default::default(),
     }
 }
 
@@ -466,6 +468,7 @@ async fn build_agent_snapshot(
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_default(),
         branch,
+        mux: Default::default(),
     }
 }
 

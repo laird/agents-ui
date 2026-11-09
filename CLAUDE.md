@@ -82,6 +82,7 @@ src/
     source.rs       # Swappable source layers (villages, swarms, issues, pipeline, activity), `--source`
     discovery.rs    # Polls the swarm sources; the tmux and saved-swarm sources
     herdr.rs        # Swarms under herdr: `herdr agent list`, grouped by worktree cwd
+    pane.rs         # Read and type into an agent's pane through its multiplexer (tmux or herdr)
     temporal.rs     # Temporal namespaces as villages, via the frontend HTTP API
     kubernetes.rs   # A Kubernetes namespace as a runtime village (alternative to Temporal), via kubectl JSON
     village.rs      # Village model: houses per worktree, issue crates, pipeline from git

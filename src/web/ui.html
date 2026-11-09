@@ -940,6 +940,8 @@
     // ── State ──────────────────────────────────────────────────────────────────
     const state = {
       swarms:  [],
+      // A --read-only server refuses all input, so the session view offers none.
+      readOnly: false,
       project: null,   // selected project_name (Level 2)
       agent:   null,   // selected agent role (Level 3)
       error:   null,
@@ -1553,13 +1555,15 @@
     // leaving the user to infer it from a border colour.
     function setPaneFocusLabel(focused) {
       const el = document.getElementById('pane-focus-label');
-      if (el) el.textContent = focused ? 'typing goes to the agent' : 'click to type here';
+      if (el) el.textContent = state.readOnly ? 'read-only: viewing only' : focused ? 'typing goes to the agent' : 'click to type here';
     }
 
     // Keys pressed while the pane itself has focus go to the agent, so the
     // pane behaves like a terminal. The composer textarea keeps normal editing
     // behaviour -- arrows there move the caret.
     function onTerminalKeyDown(e) {
+      // Nothing to send on a read-only server; leave the keys to the browser.
+      if (state.readOnly) return;
       // Leave browser/OS shortcuts alone.
       if (e.metaKey) return;
 
@@ -1805,16 +1809,17 @@
 
         '<div class="terminal-wrap">' +
           '<div class="terminal-toolbar">' +
-            '<span class="pane-focus-state" id="pane-focus-label">click to type here</span>' +
+            '<span class="pane-focus-state" id="pane-focus-label">' + (state.readOnly ? 'read-only: viewing only' : 'click to type here') + '</span>' +
             '<button onclick="refreshSessionPane()" aria-label="Refresh pane">↺ Refresh</button>' +
           '</div>' +
           '<div class="terminal-output" id="terminal-output" tabindex="0" ' +
-               'role="application" aria-label="Agent pane. Type here to send keys straight to the agent." ' +
+               'role="application" aria-label="' + (state.readOnly ? 'Agent pane, view only.' : 'Agent pane. Type here to send keys straight to the agent.') + '" ' +
                'onkeydown="onTerminalKeyDown(event)" ' +
                'onfocus="setPaneFocusLabel(true)" onblur="setPaneFocusLabel(false)">' +
                ansiToHtml(s.paneContent, paneCursorTarget(s.paneContent, s.cursor)) + '</div>' +
         '</div>' +
 
+        (state.readOnly ? '' :
         '<div class="key-row">' +
           '<span class="key-row-label">Keys</span>' +
           [['Up','\u2191'], ['Down','\u2193'], ['Left','\u2190'], ['Right','\u2192'],
@@ -1844,7 +1849,7 @@
               (s.sending ? '\u2026' : 'Send') +
             '</button>' +
           '</div>' +
-        '</details>' +
+        '</details>') +
         feedbackHtml
       );
     }
@@ -2335,7 +2340,8 @@
     // validating a deep link (swarm/agent still exists) needs state.swarms
     // populated, otherwise every target looks stale and falls back to '#/'.
     window.addEventListener('hashchange', applyRoute);
-    refresh().then(applyRoute);
+    fetch('/api/config').then(r => r.ok ? r.json() : {}).then(c => { state.readOnly = !!c.read_only; }).catch(() => {})
+      .finally(() => refresh().then(applyRoute));
     setInterval(refresh, 5000);
   </script>
 </body>

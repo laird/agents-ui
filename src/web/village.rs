@@ -885,6 +885,7 @@ mod tests {
             status_timestamp: None,
             worktree_path: worktree.to_string(),
             branch: None,
+            mux: Default::default(),
         }
     }
 
