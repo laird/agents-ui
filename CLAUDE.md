@@ -52,6 +52,7 @@ Tests are inline `#[cfg(test)]` modules in each source file:
 - `src/web/world.rs` — world specs, build-ID matching, incident origins, shipping vs landed
 
 For the village UI, `tools/mock/demo.sh` runs agents-tui against simulated herdr and Temporal swarms.
+The Omarchy bar widget (`tools/omarchy-plugin/agents-village/`): `node --test tools/omarchy-plugin/agents-village/tests/` (its model, against recorded `/api/swarms` and `/api/village`) and `python3 tools/omarchy-plugin/agents-village/tests/qml_check.py` (the real `Panel.qml` in Quickshell, offscreen). Install with `tools/omarchy-plugin/install.sh [--host <ssh host>] [--enable]`.
 `tools/mock/history.py` rebuilds a replay of a repo's real development from git and GitHub history (`--no-github` for git only); its tests: `python3 -m unittest discover -s tools/mock -p 'test_history.py'`.
 
 Tests use `tempfile` for filesystem tests. No mocking of tmux — integration-level tmux testing is done manually via `tmux new-session -d` + `cargo run`.
@@ -103,6 +104,7 @@ src/
     world.rs        # Worlds: a dev village paired with the platform it builds (incidents down, releases up)
     village.html    # /village: the swarm as a 16-bit village (canvas renderer, themes, worlds)
 tools/mock/         # Simulated herdr/Temporal/Kubernetes for the village: demo.sh (RUNTIME=k8s), record.py + replay-build.py, history.py (replay from git/GitHub history)
+tools/omarchy-plugin/ # Omarchy bar widget: swarm list → village summary from /api/swarms + /api/village; install.sh
 tools/adapters/     # Outside framework adapters: example report, adapter template (docs/village-protocol.md)
 ```
 
