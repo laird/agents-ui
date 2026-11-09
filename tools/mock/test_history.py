@@ -230,6 +230,83 @@ class Frames(unittest.TestCase):
         self.assertEqual(p["sentinel"], "green")
 
 
+
+def pr(number, title="", body="", merged="2026-11-08T15:00:00Z", oid="m1", commits=("2026-11-08T14:00:00Z",),
+       closing=(), base="master", created="2026-11-08T14:30:00Z"):
+    url = "https://github.com/o/r"
+    return {"number": number, "title": title, "body": body, "url": f"{url}/pull/{number}", "createdAt": created,
+            "mergedAt": merged, "mergeCommit": {"oid": oid} if oid else None, "baseRefName": base,
+            "closingIssuesReferences": [{"number": n, "url": f"{url}/issues/{n}"} for n in closing],
+            "commits": [{"authoredDate": c} for c in commits]}
+
+
+class PullRequests(unittest.TestCase):
+    def test_closing_reference_wins_then_body_then_title(self):
+        self.assertEqual(hm.pull_issues(pr(10, "Fix #3", "Closes #4", closing=[5])), [5])
+        self.assertEqual(hm.pull_issues(pr(10, "Fix #3", "Fixes #4, resolves: #6")), [4, 6])
+        self.assertEqual(hm.pull_issues(pr(10, "feat: thing (#3)", "see #9")), [3])
+        self.assertEqual(hm.pull_issues(pr(10, "feat: thing", "mentions #9 only")), [])
+
+    def test_other_repos_closing_references_are_ignored(self):
+        p = pr(10, "x", closing=[5])
+        p["closingIssuesReferences"].append({"number": 7, "url": "https://github.com/other/r/issues/7"})
+        self.assertEqual(hm.pull_issues(p), [5])
+
+    def test_landing_is_the_merge_commit_at_merge_time_claimed_from_the_first_commit(self):
+        [l] = hm.landings_from_pulls([pr(10, "Fix #3", commits=("2026-11-08T14:10:00Z", "2026-11-08T14:00:00Z"))],
+                                     "master")
+        self.assertEqual((l["issues"], l["sha"]), ([3], "m1"))
+        self.assertEqual(l["time"], hm.parse_time("2026-11-08T15:00Z"))
+        self.assertEqual(l["start"], hm.parse_time("2026-11-08T14:00Z"))
+
+    def test_squash_merge_and_no_commits_fall_back_to_created(self):
+        [l] = hm.landings_from_pulls([pr(10, "Squashed (#3)", oid="sq", commits=())], "master")
+        self.assertEqual((l["sha"], l["start"]), ("sq", hm.parse_time("2026-11-08T14:30Z")))
+
+    def test_unmerged_and_other_base_pulls_are_not_landings(self):
+        self.assertEqual(hm.landings_from_pulls([pr(1, merged=None), pr(2, base="dev"), pr(3, oid=None)], "master"),
+                         [])
+
+    def test_issue_is_landed_and_claimed_by_its_pull(self):
+        i = hm.Issue(3, "thing", created=hm.parse_time("2026-11-08T13:00Z"))
+        issues = [i]
+        landed = hm.apply_pulls(issues, {}, hm.landings_from_pulls([pr(10, "Fix #3")], "master"))
+        self.assertEqual(landed, {3: (hm.parse_time("2026-11-08T15:00Z"), "m1")})
+        self.assertEqual(i.claims(), [(hm.parse_time("2026-11-08T14:00Z"), hm.parse_time("2026-11-08T15:00Z"))])
+
+    def test_pull_claim_counts_as_held_for_an_issue_with_a_comment_record(self):
+        i = hm.Issue(3, "thing", created=0)
+        i.starts = []  # read from GitHub: no work-started comment, so labels alone wouldn't count
+        hm.apply_pulls([i], {}, hm.landings_from_pulls([pr(10, "Fix #3")], "master"))
+        self.assertEqual(len(i.claims()), 1, "the PR's commits are the evidence a worker held it")
+
+    def test_own_working_claims_are_kept(self):
+        i = hm.Issue(3, "thing", created=0, labels=[(100, "add", "working"), (200, "remove", "working")])
+        hm.apply_pulls([i], {}, hm.landings_from_pulls([pr(10, "Fix #3")], "master"))
+        self.assertEqual(i.claims(), [(100, 200)])
+
+    def test_git_landing_wins(self):
+        landed = hm.apply_pulls([], {3: (5.0, "g")}, hm.landings_from_pulls([pr(10, "Fix #3")], "master"))
+        self.assertEqual(landed[3], (5.0, "g"))
+
+    def test_pull_with_no_issue_is_its_own_task(self):
+        issues = []
+        landed = hm.apply_pulls(issues, {}, hm.landings_from_pulls([pr(10, "Tidy the docs")], "master"))
+        [i] = issues
+        self.assertEqual((i.number, i.title, i.url), (10, "Tidy the docs", "https://github.com/o/r/pull/10"))
+        self.assertEqual(landed[10][1], "m1")
+        self.assertEqual(len(i.claims()), 1)
+        h = hm.History("p", "/r", "master", issues, landed, [])
+        self.assertIn(10, hm.frame_at(h, hm.parse_time("2026-11-08T15:01Z"))
+                      ["villages"][0]["pipeline"]["quay"])
+
+    def test_pulls_outside_the_window_are_skipped(self):
+        issues = []
+        landed = hm.apply_pulls(issues, {}, hm.landings_from_pulls([pr(10, "x")], "master"),
+                                since=hm.parse_time("2026-11-09T00:00Z"))
+        self.assertEqual((issues, landed), ([], {}))
+
+
 class Parsing(unittest.TestCase):
     def test_times(self):
         self.assertEqual(hm.parse_time("2026-11-08T14:50Z"), hm.parse_time("2026-11-08T14:50:00+00:00"))

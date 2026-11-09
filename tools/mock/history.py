@@ -19,6 +19,12 @@ Sources, all from history:
     or a release comment shows a worker held it), when it closed and why;
     sub-issues and `Sub-task of #N` bodies for features; GitHub Deployments
     per environment in .autocoder.json.
+  * GitHub merged pull requests: each lands the issues it closes
+    (closingIssuesReferences, else `Fixes/Closes/Resolves #N` in its body,
+    else `#N` in its title) at its merge commit and merge time, or lands as a
+    task of its own, numbered by the PR. An issue with no `working` claims is
+    claimed from the PR's first commit to its merge. A landing git already
+    found by autocoder's conventions wins.
   * --no-github: commits and merges only. Each landed issue is claimed from
     its branch's first commit to its landing.
 
@@ -612,6 +618,118 @@ def link_features(repo, issues, sub_issues=None):
                 c.parent, c.linked_by, c.linked_at = int(m.group(1)), "body", c.created
 
 
+CLOSING_REF = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b:?\s+#(\d+)\b", re.I)
+TITLE_REF = re.compile(r"(?<![\w/])#(\d+)\b")
+PULL_FIELDS = "number,title,url,body,createdAt,mergedAt,mergeCommit,baseRefName,closingIssuesReferences"
+
+
+def pull_issues(pr):
+    """The issues a merged pull request lands: its closing references (GitHub's,
+    then `Fixes/Closes/Resolves #N` in its body), else `#N` in its title. Only
+    issues of the PR's own repository; empty when it closes none."""
+    repo = (pr.get("url") or "").split("/pull/")[0]
+    own = []
+    for ref in pr.get("closingIssuesReferences") or []:
+        url, n = ref.get("url") or "", ref.get("number")
+        if isinstance(n, int) and (not url or not repo or url.startswith(repo + "/issues/")):
+            own.append(n)
+    if not own:
+        own = [int(m.group(1)) for m in CLOSING_REF.finditer(pr.get("body") or "")]
+    if not own:
+        own = [int(m.group(1)) for m in TITLE_REF.finditer(pr.get("title") or "")][:1]
+    return list(dict.fromkeys(n for n in own if n != pr.get("number")))
+
+
+def landings_from_pulls(prs, integration):
+    """Merged pull requests into `integration` as landings, oldest merge first:
+    [{issues, number, title, url, body, start, time, sha}]. `issues` is empty
+    for a PR that closes none (it lands as its own task). `start` is its first
+    commit's author time, else when it was opened. Squash and rebase merges
+    have a merge commit too (the commit on the branch), so they count alike."""
+    out = []
+    for pr in prs or []:
+        if not pr.get("mergedAt") or (pr.get("baseRefName") or integration) != integration:
+            continue
+        sha = (pr.get("mergeCommit") or {}).get("oid")
+        if not sha:
+            continue
+        merged = parse_time(pr["mergedAt"])
+        authored = [parse_time(c["authoredDate"]) for c in pr.get("commits") or [] if c.get("authoredDate")]
+        start = min(authored) if authored else parse_time(pr["createdAt"]) if pr.get("createdAt") else merged
+        if start >= merged:
+            start = merged - 120
+        out.append({"issues": pull_issues(pr), "number": pr["number"], "title": pr.get("title") or "",
+                    "url": pr.get("url") or "", "body": pr.get("body") or "", "start": start, "time": merged,
+                    "sha": sha})
+    return sorted(out, key=lambda p: p["time"])
+
+
+def apply_pulls(issues, landed, pulls, since=-INF, until=INF):
+    """Fold PR landings into `landed` (issue -> (time, sha)) and `issues`
+    (extended in place). An issue git already saw land keeps that landing;
+    otherwise its latest merged PR is where it landed. An issue with no
+    `working` claims of its own is claimed from the PR's first commit to its
+    merge, so repos that don't use autocoder's labels still get houses. A PR
+    that closes no issue becomes a task of its own, numbered by the PR."""
+    landed = dict(landed)
+    by_no = {i.number: i for i in issues}
+    from_git = set(landed)
+    spans = {}
+    for p in pulls:
+        if p["start"] > until or p["time"] < since:
+            continue
+        if not p["issues"]:
+            if p["number"] in by_no or p["number"] in from_git:
+                continue
+            i = Issue(p["number"], p["title"], p["url"], p["body"], p["start"], p["time"], "COMPLETED")
+            issues.append(i)
+            by_no[i.number] = i
+            landed[i.number] = (p["time"], p["sha"])
+            spans.setdefault(i.number, []).append((p["start"], p["time"]))
+            continue
+        for n in p["issues"]:
+            if n in from_git:
+                continue
+            landed[n] = (p["time"], p["sha"])  # oldest first, so the latest merge wins
+            spans.setdefault(n, []).append((p["start"], p["time"]))
+            if n not in by_no:
+                i = Issue(n, p["title"], "", "", p["start"], p["time"], "COMPLETED")
+                issues.append(i)
+                by_no[n] = i
+    for n, ss in spans.items():
+        i = by_no[n]
+        if any(name == "working" for _, _, name in i.label_events):
+            continue
+        events = list(i.label_events)
+        for s, e in ss:
+            events += [(s, "add", "working"), (e, "remove", "working")]
+            # The PR's commits are the evidence a worker held it (see Issue.held).
+            i.commits = sorted([*i.commits, s, e])
+        i.label_events = sorted(events, key=lambda e: e[0])
+    return landed
+
+
+def read_pulls(repo, limit):
+    """Merged pull requests, newest first (`gh pr list`). Older gh without
+    `closingIssuesReferences` falls back to body and title references.
+    `commits` isn't asked of GitHub (its authors overrun the GraphQL node
+    limit on long listings): a true merge's first commit comes from git, the
+    merge's second-parent side; a squash or rebase merge starts at createdAt."""
+    prs = []
+    for fields in (PULL_FIELDS, PULL_FIELDS.replace(",closingIssuesReferences", "")):
+        got = gh_json(repo, "pr", "list", "--state", "merged", "--limit", str(limit), "--json", fields)
+        if isinstance(got, list):
+            prs = got
+            break
+    for pr in prs:
+        sha = (pr.get("mergeCommit") or {}).get("oid")
+        if sha and len(git(repo, "show", "-s", "--format=%P", sha, check=False).split()) > 1:
+            start = branch_start(repo, sha)
+            if start is not None:
+                pr["commits"] = [{"authoredDate": datetime.fromtimestamp(start, timezone.utc).isoformat()}]
+    return prs
+
+
 def read_stops(repo, integration, use_github):
     """The green ref, then each environment in .autocoder.json."""
     stops = [Stop(f"{integration}-green", branch_head=ref_for(repo, f"{integration}-green"))]
@@ -657,15 +775,18 @@ def read_history(repo, since, until, use_github=True, issue_limit=500):
     repo = os.path.abspath(repo)
     integration = integration_branch(repo)
     landed, titles = read_landings(repo, integration, use_github)
-    # Only what landed in the window: older history would crowd the quay.
-    landed = {n: v for n, v in landed.items() if since <= v[0] <= until}
     if use_github:
         issues = read_issues(repo, since, until, issue_limit)
         ref = ref_for(repo, integration)
         times = commit_times(git(repo, "log", "--format=%H %ct %at %s", ref).splitlines()) if ref else {}
         for i in issues:
             i.commits = times.get(i.number, [])
-    else:
+        # Merged pull requests land issues too (and squash merges leave no message to match).
+        landed = apply_pulls(issues, landed, landings_from_pulls(read_pulls(repo, issue_limit), integration),
+                             since, until)
+    # Only what landed in the window: older history would crowd the quay.
+    landed = {n: v for n, v in landed.items() if since <= v[0] <= until}
+    if not use_github:
         # Commits and merges only: each landed issue, claimed from its first commit.
         issues = []
         for n, (t, sha) in landed.items():
