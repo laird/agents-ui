@@ -1958,7 +1958,7 @@ mod tests {
 
     #[test]
     fn village_html_says_which_source_placed_each_stop() {
-        let body = VILLAGE_HTML;
+        let body = &village_source();
         for line in [
             "if (s.source === 'deployment') return `GitHub Deployment${sha}`;",
             "if (s.source === 'release') return `${s.tag ? s.tag + ' ' : ''}(GitHub Release)${sha}`;",
