@@ -19,6 +19,7 @@
 #   FEATURE=1 tools/mock/demo.sh       # two features followed from spec to prod (banners, strip, stuck, unknown, live)
 #   FEATURE=1 PROMOTION=feature tools/mock/demo.sh   # ... promoted as whole features (one barge)
 #   LIFECYCLE=1 tools/mock/demo.sh     # every issue transition on a loop: arrive, claim, work, block, land, close, ship
+#   VOYAGES=1 tools/mock/demo.sh       # nuc-1 and release Deployments on a 120 s loop: a deploy, a promotion, a failure
 #   PORT=8080 tools/mock/demo.sh
 #   touch "$AGENTS_UI_DEMO_DIR/state/release-now"   # cut a release of "shop" now: its ship sails
 #   tools/mock/demo.sh --source issues=none   # extra flags go to agents-tui
@@ -50,6 +51,8 @@ story=(); [ -n "${STORY:-}" ] && story=(--story)
 feature=(); [ -n "${FEATURE:-}" ] && feature=(--feature --promotion "${PROMOTION:-subtask}")
 # LIFECYCLE=1: every transition of an issue's life on a 90 s loop (see swarm_sim.py).
 [ -n "${LIFECYCLE:-}" ] && feature+=(--lifecycle)
+# VOYAGES=1: shop deploys to nuc-1 and promotes to release through scripted Deployments (see voyages.py).
+[ -n "${VOYAGES:-}" ] && feature+=(--voyages)
 python3 "$HERE/swarm_sim.py" --dir "$DEMO" "${story[@]}" "${feature[@]}" run & pids+=($!)
 # One runtime source at a time: Temporal, or a Kubernetes namespace.
 RUNTIME=${RUNTIME:-temporal}

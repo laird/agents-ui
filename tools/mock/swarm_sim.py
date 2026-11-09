@@ -32,6 +32,13 @@ and then unblocked (to the board and back), one is closed as not planned
 (carried off), workers claim, work on and land the rest, and a release
 ships what has landed.
 
+With --voyages, "shop" uses this repo's own environments, nuc-1 then release,
+both read from GitHub Deployments, and voyages.py scripts them on a 120 s
+loop: a deploy to nuc-1 that goes pending, in_progress, success; a
+promotion of what nuc-1 runs to release; and a deploy to nuc-1 that fails.
+The village's environment row shows each voyage (loading, sailing, docked,
+failed). `touch DEMO/state/release-now` promotes nuc-1 to release at once.
+
 Linked to the platform (temporal_sim.py): every prod promotion of "shop"
 writes the released commit to <dir>/state/release, and every line the
 platform appends to <dir>/state/incidents.jsonl becomes an `incident` issue
@@ -43,6 +50,7 @@ in "shop" naming the workstream that failed.
     swarm_sim.py --dir DEMO --feature run                       # two features, spec to prod
     swarm_sim.py --dir DEMO --feature --promotion feature run   # ... promoted as whole features
     swarm_sim.py --dir DEMO --lifecycle run                     # every issue transition, on a loop
+    swarm_sim.py --dir DEMO --voyages run                       # nuc-1 and release deployments, on a loop
 
 With --story the demo tells one story cleanly: an incident from the platform
 becomes a P0 bug, a worker fixes it (asking once for permission on the way),
@@ -79,10 +87,13 @@ import subprocess
 import time
 from pathlib import Path
 
+import voyages  # next to this file: scripted Deployments for the environment row
+
 SWARMS = [("shop", 5, "autocoder"), ("billing", 2, "modernize")]
 STORY = False
 FEATURE = False
 LIFECYCLE = False
+VOYAGES = False
 PROMOTION = "subtask"
 REPO_URL = "https://github.com/sim/shop"
 # The feature story's two features (see the module docstring). Numbers sit
@@ -315,8 +326,8 @@ class Swarm:
             tmp.write_text(json.dumps({"prod": self.releases[:10]}))
             tmp.replace(path)
 
-    def write_release(self):
-        sha = git(self.repo, "rev-parse", "refs/remotes/origin/env/prod")
+    def write_release(self, sha=None):
+        sha = sha or git(self.repo, "rev-parse", "refs/remotes/origin/env/prod")
         self.state.mkdir(parents=True, exist_ok=True)
         (self.state / "release").write_text(sha + "\n")
         # Parked incidents whose fix this release carries are shipped: close them.
@@ -563,10 +574,12 @@ def main():
     ap.add_argument("--promotion", choices=["subtask", "feature"], default="subtask",
                     help="with --feature: promote each subtask on its own, or each feature as a whole")
     ap.add_argument("--lifecycle", action="store_true", help="play every transition of an issue's life on a loop (see the module docstring)")
+    ap.add_argument("--voyages", action="store_true", help="script nuc-1 and release deployments (see the module docstring)")
     ap.add_argument("command", choices=["setup", "run"])
     args = ap.parse_args()
     global STORY, FEATURE, PROMOTION, LIFECYCLE
-    STORY, FEATURE, PROMOTION, LIFECYCLE = args.story, args.feature, args.promotion, args.lifecycle
+    global VOYAGES
+    STORY, FEATURE, PROMOTION, LIFECYCLE, VOYAGES = args.story, args.feature, args.promotion, args.lifecycle, args.voyages
     quiet = STORY or FEATURE or LIFECYCLE
     if args.seed is not None:
         random.seed(args.seed)
@@ -579,7 +592,7 @@ def main():
         return
     # The environments follow the mode, whatever an earlier run left behind.
     shop = swarms[0]
-    (shop.repo / ".autocoder.json").write_text(json.dumps(shop_config(FEATURE), indent=2))
+    (shop.repo / ".autocoder.json").write_text(json.dumps(voyages.config() if VOYAGES else shop_config(FEATURE), indent=2))
     for s in swarms:
         for _ in range(3 if quiet else 8):
             s.new_issue()
@@ -589,6 +602,9 @@ def main():
     if FEATURE:
         shop.story = FeatureStory(shop, time.time())
     lifecycle = Lifecycle(shop, time.time() + 5) if LIFECYCLE else None
+    # --voyages: nuc-1 ships the integration tip; a release is what the platform runs.
+    script = voyages.VoyageScript(lambda: git(shop.repo, "rev-parse", "refs/remotes/origin/master"), time.time() + 5,
+                                  released=shop.write_release) if VOYAGES else None
     incident_offset = 0
     print(f"simulating {', '.join(s.name for s in swarms)} in {root}", flush=True)
     next_green, next_staging, next_prod, red_until, next_red = 0, 0, 0, 0, time.time() + 150
@@ -601,6 +617,8 @@ def main():
             # Cut a release now: staging catches up with green, and prod with staging.
             release_now.unlink()
             next_staging = next_prod = 0
+            if script:
+                script.promote_now(t)
             if shop.story:
                 shop.story.next_dev = shop.story.next_uat = shop.story.next_prod = 0
         for s in swarms:
@@ -614,7 +632,15 @@ def main():
             next_green = t + 12
         if lifecycle:
             lifecycle.tick(t)
-        if shop.story:
+        if script:
+            # Deployments, not branches, say what nuc-1 and release run.
+            script.tick(t)
+            path = shop.state / "deployments" / f"{shop.name}.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(script.state()))
+            tmp.replace(path)
+        elif shop.story:
             shop.story.tick(t)
         else:
             if t >= next_staging:
