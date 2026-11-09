@@ -130,6 +130,29 @@ Matching ignores case. Anything else counts as `unknown`.
   - `done`: not drawn.
 
   A blocked task is pinned under its blocking label (`needs-design`, `needs-approval` and so on) when it has one.
+- `gate`: where the task is in the **merge gate**, once its work has left the worker. Leave it out when the framework has no gate, or can't tell. Fields:
+  - `state`:
+
+    | `state` | Meaning |
+    |---|---|
+    | `queued` | handed to a merge job, waiting for a gate slot |
+    | `merging` | merging onto the integration branch, re-syncing, or publishing |
+    | `gating` | the regression suite is running on the integrated tree |
+    | `passed` | landed, tested and closed |
+    | `landed-unproven` | landed on another basis, waiting for the sentinel to prove a green tip |
+    | `failed` | the gate failed on the integrated tree |
+    | `conflict` | the merge conflicted |
+    | `red-base` | the integration branch is red without this change |
+
+  - `landed`: whether the work is on the integration branch. A `red-base` landing is, a refused one isn't.
+  - `slot`: the gate slot it holds while gating, numbered from 1.
+  - `started_at` (RFC 3339) and `elapsed_secs`: when the merge job started, and for how long it has run.
+  - `tests_run`, `progress`: how far the gate has got, e.g. `412 tests run (3 suites)`.
+  - `attempt`: gate runs in this job. It is 2 once a re-sync made it gate again.
+  - `failure_url`: where the gate said what went wrong, for `failed`, `conflict` and `red-base`.
+  - `train`: the id of the merge train the task rides in.
+
+  A task that is `queued`, `merging` or `gating` is not at the quay, even if `landed` lists it: the quay is for landed work. A `failed` or `conflict` task should be `state: failed`, and is pinned to the board as `failed` or `conflict`.
 
 **Pipeline**
 
@@ -141,6 +164,12 @@ Matching ignores case. Anything else counts as `unknown`.
   - `sha`: the commit the stage runs, when a deployment names it.
 - `release`: the version at the last stage. A world compares it with the platform's `builds`, and either may be a prefix of the other (at least 7 characters).
 - `promotion`: `subtask` (the default: each task moves through the stages on its own) or `feature` (a feature's landed tasks wait at the quay and move together).
+- `merge`: the merge gate on the host that lands the work:
+  - `slots`: how many gates may run at once;
+  - `busy`: the slots in use, by number;
+  - `trains`: merge trains, the branches gated together as one tree. Each is `{id, task, members, state}`, where `task` is the task the train's merge job runs under, `members` the tasks it carries, and `state` a gate state as above.
+
+`/api/village` reports the same per village: `pipeline.gates` (one `{issue, state, ...}` per task in the gate) and `pipeline.merge`.
 
 ## Replaying history
 
@@ -181,6 +210,7 @@ autocoder's manager and workers do not message each other. They coordinate throu
 | labels `needs-design`, `needs-clarification`, `needs-feedback`, `needs-approval`, `too-complex`, `future`, `proposal`, `blocked` | a note on the board |
 | label `decomposed` | taken: its sub-issues are what gets worked |
 | labels `merging`, `awaiting-integration` | the fix has left the worker and waits at the quay |
+| the merge job's `${AUTOCODER_TMP:-/tmp}/autocoder-merge-<repo-id>-<issue>.{pid,log,exit,run.sh}`, the gate slot locks `autocoder-gate-slot-<k>.lock` | the task's `gate`: queued, merging, gating, then passed, landed-unproven, failed, conflict or red-base; its slot, timing, attempt and test progress. Work still in the gate, or handed back by it, is not at the quay. A `train/<UTC>` branch is a merge train. These files are local, so only a village served on the host that runs the merges shows them. |
 | `refs/autocoder/tips/<integration>/<sha>-<issue>` | where a landed fix is on the canal |
 | `<integration>-green` | the sentinel's lock |
 | `env/<name>` from `.autocoder.json` `environments`, or the newest successful GitHub Deployment to `<name>` | one lock per environment, the last being the castle |

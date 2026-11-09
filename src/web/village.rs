@@ -257,6 +257,20 @@ pub struct Pipeline {
     /// Counting a feature's subtasks in production needs all of them.
     #[serde(skip)]
     pub reached: HashMap<u32, usize>,
+    /// Where each task handed to the merge gate is: queued, gating, failed...
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gates: Vec<GateEntry>,
+    /// The host's merge gate: slots, the busy ones, and merge trains.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge: Option<super::gate::MergeGate>,
+}
+
+/// A task's trip through the merge gate, by issue number.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct GateEntry {
+    pub issue: u32,
+    #[serde(flatten)]
+    pub gate: super::gate::TaskGate,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -324,7 +338,12 @@ pub fn agent_status(agent: &AgentSnapshot) -> HouseStatus {
 /// `issues` overrides `swarm.issues` when the snapshot came from tmux
 /// discovery, which doesn't fetch issues.
 pub fn build(swarm: &SwarmSnapshot, issues: &[IssueSnapshot], pipeline: Pipeline) -> VillageSnapshot {
-    let mut village = super::framework::to_village(&super::framework::swarm_report(swarm, issues, &pipeline)).village;
+    build_gated(swarm, issues, pipeline, &super::gate::GateReading::default())
+}
+
+/// [`build`], with what the merge gate's files on this host say.
+pub fn build_gated(swarm: &SwarmSnapshot, issues: &[IssueSnapshot], pipeline: Pipeline, gate: &super::gate::GateReading) -> VillageSnapshot {
+    let mut village = super::framework::to_village(&super::framework::swarm_report_gated(swarm, issues, &pipeline, gate)).village;
     // Not part of the report: only git's placement has it.
     village.pipeline.reached = pipeline.reached;
     village
@@ -770,6 +789,7 @@ pub async fn read_pipeline(transport: &ServerTransport, repo: &Path) -> Pipeline
         release,
         promotion,
         reached: placement.reached,
+        ..Pipeline::default()
     }
 }
 
@@ -840,7 +860,16 @@ impl SwarmVillages {
                 .await
         };
         let issues = if swarm.issues.is_empty() { fetched } else { swarm.issues.clone() };
-        let mut village = build(swarm, &issues, pipeline);
+        // The merge gate's files are on the host that runs the merges: read
+        // them only for a local village, and fresh each time (they change by
+        // the second while a gate runs).
+        let gate = if transport.server().is_none() && !swarm.repo_path.is_empty() {
+            let repo = repo.clone();
+            tokio::task::spawn_blocking(move || super::gate::read_local(&repo)).await.unwrap_or_default()
+        } else {
+            super::gate::GateReading::default()
+        };
+        let mut village = build_gated(swarm, &issues, pipeline, &gate);
         let features = super::feature::build(&village, &links);
         village.features = self.live.keep(&swarm.repo_path, features, std::time::Instant::now());
         self.activity.attach(transport, &mut village);
