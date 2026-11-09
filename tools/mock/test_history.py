@@ -72,6 +72,50 @@ class Claims(unittest.TestCase):
                        releases=[21])
         self.assertEqual(i.claims(), [(10, 22), (70, 600)])
 
+    def recorded(self, events, closed=None, releases=(), starts=(), commits=()):
+        """An issue read from GitHub: its comments are known, so spans need evidence."""
+        i = self.issue(events, closed, releases)
+        i.starts, i.commits = list(starts), list(commits)
+        return i
+
+    def test_a_stranded_label_with_no_worker_is_no_claim(self):
+        i = self.recorded([(10, "add", "working"), (400, "remove", "working")])
+        self.assertEqual(i.claims(), [])
+        self.assertEqual(self.recorded([(10, "add", "working")]).claims(), [], "still stranded")
+
+    def test_a_claim_released_for_dependencies_is_still_a_short_one(self):
+        i = self.recorded([(10, "add", "working"), (40, "remove", "working")], releases=[39])
+        self.assertEqual(i.claims(), [(10, 40)])
+
+    def test_a_start_comment_or_a_commit_shows_a_worker_held_it(self):
+        ev = [(10, "add", "working"), (400, "remove", "working")]
+        self.assertEqual(self.recorded(ev, starts=[14]).claims(), [(10, 400)])
+        self.assertEqual(self.recorded(ev, commits=[200]).claims(), [(10, 400)])
+        self.assertEqual(self.recorded(ev, commits=[500]).claims(), [], "a commit after the span is not evidence")
+
+    def test_a_label_put_back_with_no_worker_does_not_extend_the_claim(self):
+        # #346 wave: the worker released, a stranded label followed; the real claim came later.
+        i = self.recorded([(10, "add", "working"), (40, "remove", "working"), (50, "add", "working"),
+                           (360, "remove", "working"), (380, "add", "working")], closed=900,
+                          releases=[39], starts=[385])
+        self.assertEqual(i.claims(), [(10, 40), (380, 900)])
+        # #347: the worker handed off, and the label came back 30 s later with no worker.
+        i = self.recorded([(10, "add", "working"), (300, "remove", "working"), (330, "add", "working")],
+                          closed=600, starts=[12])
+        self.assertEqual(i.claims(), [(10, 300)])
+
+    def test_work_started_comments(self):
+        for body in ("🤖 **Automated Fix Started**\n\nStarting…",
+                     "🔒 [autocoder-claim] Starting fix for issue #350 — lock established",
+                     "🚀 **Enhancement Implementation Started**"):
+            self.assertTrue(hm.WORK_STARTED.search(body), body)
+        self.assertFalse(hm.WORK_STARTED.search("🔒 claim nuc-526287 1794150997174"), "the gate's claim alone")
+
+    def test_commit_times_by_issue(self):
+        log = ["a 200 190 Merge origin/master into feature/issue-7 (pre-integration sync)",
+               "b 150 120 Fix #7: the thing", "c 100 90 Implement #8: other", "d 50 40 Tidy up"]
+        self.assertEqual(hm.commit_times(log), {7: [190.0, 120.0], 8: [90.0]})
+
     def test_still_claimed(self):
         self.assertEqual(self.issue([(10, "add", "working")]).claims(), [(10, None)])
 
