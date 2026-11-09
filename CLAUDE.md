@@ -162,3 +162,26 @@ swarm this MUST be the real shared branch, never a per-worktree branch —
 otherwise fixes strand on `master-wt-N` and never converge.
 
 Note this repository's default branch is `master`, not `main`.
+
+### Deploying and releasing
+
+Landed work waits at the village quay until it is deployed. `.autocoder.json`
+lists two environments, and both are recorded as GitHub Deployments, which is
+what `src/web/deployments.rs` reads to place each stop:
+
+- **`nuc-1`**: what is installed and served on nuc-1. From a clean checkout of
+  a commit already on `origin/master`, run `tools/deploy.sh` (add `--dry-run`
+  to check without changing anything). It runs `cargo install`, restarts the
+  served `agents-tui`, and records the Deployment as `success`. If the install
+  or restart fails, it records `failure`.
+- **`release`**: run `tools/release.sh vX.Y.Z` (or add `--dry-run`). It runs
+  `gh release create --generate-notes` at `origin/master`'s tip, or at
+  `--commit`, and records a Deployment of that commit. For a release made by
+  hand, run the same command afterwards: when the release already exists, it
+  only records the Deployment.
+
+There is no sentinel here, so no `master-green` ref exists. `nuc-1` is marked
+`"requires": "integration"`, which drops the green stop, and the village shows
+the gate as `absent`. The environments are moved by deployments, not by
+autocoder's `promote.sh`, which only accepts `green` or an earlier environment.
+Run `main-sentinel.sh` and remove that `requires` if a green gate is wanted.

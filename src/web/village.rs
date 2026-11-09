@@ -508,6 +508,38 @@ fn attach_subagents(village: &mut VillageSnapshot, home: &Path, now: SystemTime)
 pub struct Environment {
     pub name: String,
     pub branch: String,
+    /// What it takes work from: the previous stop's name, `green` (the
+    /// sentinel), or `integration` (the integration branch, with no sentinel).
+    pub requires: Option<String>,
+}
+
+/// `requires` value for an environment that takes work straight from the
+/// integration branch.
+pub const REQUIRES_INTEGRATION: &str = "integration";
+
+/// Whether the pipeline has no sentinel: its first environment takes work
+/// straight from the integration branch. A repo with no sentinel has no
+/// green ref, and a green stop that never exists would hold everything at
+/// the quay.
+pub fn gate_absent(envs: &[Environment]) -> bool {
+    envs.first().and_then(|e| e.requires.as_deref()) == Some(REQUIRES_INTEGRATION)
+}
+
+/// The sentinel's state and its stop, given the green ref's history and the
+/// integration tip. `absent` (and no stop) when the environments say there
+/// is no sentinel; else `unknown` with no green ref, `green` when it is at
+/// the tip, `pending` while newer work waits to be tested.
+pub fn sentinel_gate(envs: &[Environment], green: Option<Vec<String>>, tip: Option<&String>) -> (String, Option<StopHistory>) {
+    if gate_absent(envs) {
+        return ("absent".to_string(), None);
+    }
+    let state = match (&green, tip) {
+        (None, _) => "unknown",
+        (Some(g), Some(tip)) if g.first() == Some(tip) => "green",
+        _ => "pending",
+    };
+    let stop = StopHistory { source: StopSource::Branch, sha: None, commits: green.map(|v| v.into_iter().collect()) };
+    (state.to_string(), Some(stop))
 }
 
 /// Parse the `environments` array of `.autocoder.json`.
@@ -522,6 +554,7 @@ pub fn parse_environments(json: &str) -> Vec<Environment> {
         name: String,
         #[serde(rename = "ref")]
         branch: Option<String>,
+        requires: Option<String>,
     }
     serde_json::from_str::<Config>(json)
         .map(|c| {
@@ -530,6 +563,7 @@ pub fn parse_environments(json: &str) -> Vec<Environment> {
                 .map(|e| Environment {
                     branch: e.branch.unwrap_or_else(|| format!("env/{}", e.name)),
                     name: e.name,
+                    requires: e.requires,
                 })
                 .collect()
         })
@@ -701,20 +735,15 @@ pub async fn read_pipeline(transport: &ServerTransport, repo: &Path) -> Pipeline
         .collect();
     tips.sort_by_key(|(sha, _)| position[sha.as_str()]);
 
-    let sentinel = match (&green_set, mainline.first()) {
-        (None, _) => "unknown",
-        (Some(g), Some(tip)) if g.first() == Some(tip) => "green",
-        _ => "pending",
-    }
-    .to_string();
-
-    let mut names = vec![green];
     let mut release = green_set.as_ref().and_then(|v| v.first().cloned());
-    let mut stops = vec![StopHistory {
-        source: StopSource::Branch,
-        sha: None,
-        commits: green_set.map(|v| v.into_iter().collect::<HashSet<_>>()),
-    }];
+    let (sentinel, gate) = sentinel_gate(&envs, green_set, mainline.first());
+    let (mut names, mut stops) = match gate {
+        Some(stop) => (vec![green], vec![stop]),
+        None => {
+            release = None;
+            (Vec::new(), Vec::new())
+        }
+    };
     for env in &envs {
         names.push(env.name.clone());
         // A deployment says what the environment runs; its branch ref is the
@@ -1001,8 +1030,8 @@ mod tests {
         assert_eq!(
             envs,
             vec![
-                Environment { name: "staging".into(), branch: "env/staging".into() },
-                Environment { name: "prod".into(), branch: "env/prod".into() },
+                Environment { name: "staging".into(), branch: "env/staging".into(), requires: Some("green".into()) },
+                Environment { name: "prod".into(), branch: "env/prod".into(), requires: Some("staging".into()) },
             ]
         );
         assert!(parse_environments("").is_empty());
@@ -1165,6 +1194,80 @@ mod tests {
         let Placement { quay, stops: placed, .. } = place_tips(&tips, &names, &stops);
         assert_eq!(quay, vec![7, 8], "no green ref: nothing passes the sentinel");
         assert!(placed.iter().all(|s| s.issues.is_empty()));
+    }
+
+    /// This repo's own `.autocoder.json`: no sentinel, an install on nuc-1,
+    /// then GitHub Releases.
+    const NO_SENTINEL: &str = r#"{"issueSource":"github","environments":[
+        {"name":"nuc-1","requires":"integration"},
+        {"name":"release","requires":"nuc-1"}]}"#;
+
+    #[test]
+    fn the_repo_config_has_no_sentinel_and_two_environments() {
+        let config = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(".autocoder.json")).unwrap();
+        let envs = parse_environments(&config);
+        let names: Vec<_> = envs.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["nuc-1", "release"]);
+        assert!(gate_absent(&envs));
+        assert_eq!(envs, parse_environments(NO_SENTINEL));
+    }
+
+    #[test]
+    fn the_gate_is_absent_only_when_the_first_environment_follows_integration() {
+        assert!(gate_absent(&parse_environments(NO_SENTINEL)));
+        assert!(!gate_absent(&[]));
+        assert!(!gate_absent(&parse_environments(r#"{"environments":[{"name":"prod","requires":"green"}]}"#)));
+        assert!(!gate_absent(&parse_environments(r#"{"environments":[{"name":"prod"}]}"#)));
+        // Only the first stop decides: a later one following integration is a typo, not "no sentinel".
+        assert!(!gate_absent(&parse_environments(
+            r#"{"environments":[{"name":"dev"},{"name":"prod","requires":"integration"}]}"#
+        )));
+    }
+
+    #[test]
+    fn sentinel_gate_states() {
+        let envs = parse_environments(r#"{"environments":[{"name":"prod"}]}"#);
+        let tip = "t".to_string();
+        let (state, stop) = sentinel_gate(&envs, None, Some(&tip));
+        assert_eq!(state, "unknown");
+        assert_eq!(stop.map(|s| s.commits), Some(None), "a missing green ref is an unknown stop, not no stop");
+        assert_eq!(sentinel_gate(&envs, Some(vec!["t".into(), "s".into()]), Some(&tip)).0, "green");
+        assert_eq!(sentinel_gate(&envs, Some(vec!["s".into()]), Some(&tip)).0, "pending");
+        let (state, stop) = sentinel_gate(&parse_environments(NO_SENTINEL), Some(vec!["t".into()]), Some(&tip));
+        assert_eq!((state.as_str(), stop), ("absent", None));
+    }
+
+    #[test]
+    fn without_a_sentinel_deployed_work_moves_past_the_quay() {
+        // Newest first: #9 landed after the nuc-1 install, #8 and #7 before it,
+        // and the release was cut before #8.
+        let tips = vec![("c".to_string(), 9), ("b".to_string(), 8), ("a".to_string(), 7)];
+        let envs = parse_environments(NO_SENTINEL);
+        let (sentinel, gate) = sentinel_gate(&envs, None, Some(&"c".to_string()));
+        assert_eq!(sentinel, "absent");
+        assert!(gate.is_none());
+        let names: Vec<String> = envs.iter().map(|e| e.name.clone()).collect();
+        let (nuc, _) = stop_history(Some(("b".into(), vec!["b".into(), "a".into()])), None);
+        let (release, head) = stop_history(Some(("a".into(), vec!["a".into()])), None);
+        assert_eq!(head.as_deref(), Some("a"));
+        let p = place_tips(&tips, &names, &[nuc, release]);
+        assert_eq!(p.quay, vec![9], "landed after the last deploy: still at the quay");
+        assert_eq!(p.stops[0].name, "nuc-1");
+        assert_eq!(p.stops[0].issues, vec![8]);
+        assert_eq!(p.stops[0].source, StopSource::Deployment);
+        assert_eq!(p.stops[1].name, "release");
+        assert_eq!(p.stops[1].issues, vec![7]);
+    }
+
+    #[test]
+    fn with_a_sentinel_but_no_green_ref_deployments_still_wait() {
+        // The same deployments behind a sentinel that never ran hold everything.
+        let tips = vec![("b".to_string(), 8), ("a".to_string(), 7)];
+        let envs = parse_environments(r#"{"environments":[{"name":"nuc-1"}]}"#);
+        let (_, gate) = sentinel_gate(&envs, None, Some(&"b".to_string()));
+        let (nuc, _) = stop_history(Some(("b".into(), vec!["b".into(), "a".into()])), None);
+        let p = place_tips(&tips, &["master-green".into(), "nuc-1".into()], &[gate.unwrap(), nuc]);
+        assert_eq!(p.quay, vec![8, 7]);
     }
 
     fn temp_project(name: &str) -> PathBuf {

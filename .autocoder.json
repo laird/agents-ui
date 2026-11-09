@@ -1,3 +1,7 @@
 {
-  "issueSource": "github"
+  "issueSource": "github",
+  "environments": [
+    {"name": "nuc-1", "requires": "integration"},
+    {"name": "release", "requires": "nuc-1"}
+  ]
 }

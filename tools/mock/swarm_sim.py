@@ -221,7 +221,9 @@ class Swarm:
                     w.update(until=t + 32, block_at=t + 9)
                 git(w["path"], "checkout", "-q", "-B", f"feature/issue-{issue['number']}")
                 pool = MODERNIZE_SUBAGENTS if self.workflow == "modernize" else AUTOCODER_SUBAGENTS
-                w["subagents"] = [(f"w{w['i']}x{issue['number']}{k}", kind) for k, kind in enumerate(random.sample(pool, random.randint(0, 2)))]
+                # Worker 1 always runs a crowd (4-7) so the village's sub-agent rows and "+N" badge show.
+                kinds = [random.choice(pool) for _ in range(random.randint(4, 7))] if w["i"] == 1 else random.sample(pool, random.randint(0, 2))
+                w["subagents"] = [(f"w{w['i']}x{issue['number']}{k}", kind) for k, kind in enumerate(kinds)]
         elif w["status"] == "working":
             if w["block_at"] and t >= w["block_at"]:
                 w.update(status="blocked", block_at=0, resume=t + random.uniform(8, 14))
