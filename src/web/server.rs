@@ -41,6 +41,7 @@ const VILLAGE_ASSETS: &[(&str, &str, &str)] = &[
     ("registry.js", "text/javascript; charset=utf-8", include_str!("village/registry.js")),
     ("layout.js", "text/javascript; charset=utf-8", include_str!("village/layout.js")),
     ("lifecycle.js", "text/javascript; charset=utf-8", include_str!("village/lifecycle.js")),
+    ("trips.js", "text/javascript; charset=utf-8", include_str!("village/trips.js")),
     ("ship.js", "text/javascript; charset=utf-8", include_str!("village/ship.js")),
     ("features.js", "text/javascript; charset=utf-8", include_str!("village/features.js")),
     ("worlds.js", "text/javascript; charset=utf-8", include_str!("village/worlds.js")),
@@ -1393,6 +1394,16 @@ mod tests {
         }
     }
 
+    /// The village stays in files a reader (or an agent's context) can take in
+    /// whole: about 400 lines each. Split a module that grows past that.
+    #[test]
+    fn village_files_stay_small() {
+        for (path, _, body) in VILLAGE_ASSETS {
+            let lines = body.lines().count();
+            assert!(lines <= 420, "src/web/village/{path} is {lines} lines; split it (CLAUDE.md, Adding to the village)");
+        }
+    }
+
     /// The replay page (tools/mock/replay-build.py) bundles these modules into
     /// one script, so a change here that it cannot bundle fails here (#392).
     #[test]
@@ -1432,7 +1443,7 @@ mod tests {
         }
         // The features and the modules they lean on, two imports or more away included.
         for module in [
-            "registry.js", "layout.js", "lifecycle.js", "ship.js", "features.js", "worlds.js", "panels.js", "dialogs.js",
+            "registry.js", "layout.js", "lifecycle.js", "trips.js", "ship.js", "features.js", "worlds.js", "panels.js", "dialogs.js",
             "labels.js", "key.js", "data.js", "state.js", "palette.js", "sprites/houses.js", "scenery.js", "people.js",
             "themes/registry.js", "themes/medieval.js", "themes/modern.js", "themes/future.js",
         ] {
@@ -1990,7 +2001,8 @@ mod tests {
     fn village_html_animates_each_issues_life_in_a_queue() {
         let body = &village_source();
         // The queue: in order, staggered, capped; timed so a background tab never replays.
-        assert!(body.contains("const STAGGER = 700, QUEUE_CAP = 12, WALK = 0.05, ARRIVE_IN = 1800, UNLOAD = 450, SAIL_OUT = 1500;"));
+        assert!(body.contains("const STAGGER = 700, QUEUE_CAP = 12, WALK = 0.05;"));
+        assert!(body.contains("export const ARRIVE_IN = 1800, UNLOAD = 450, SAIL_OUT = 1500;"));
         assert!(body.contains("if (state.reduce || state.porters.filter(p => p.t0 > t).length >= QUEUE_CAP) return null;"));
         assert!(body.contains("trip.t0 = Math.max(t, sc.nextAt || 0);"));
         // No replay on load; reduced motion walks no one and says what changed.

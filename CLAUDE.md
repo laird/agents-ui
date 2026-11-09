@@ -111,7 +111,8 @@ src/
       registry.js   #   registerLayer/Hit/Labels/Counter/Overlay, and the feature-free core: paint(), tap(), hitAt()
       state.js      #   what the drawing reads and the page sets: `state.T` (theme), the scene being drawn, scenes, view
       layout.js     #   where things stand (layout(), world geometry, shownScenes) and the ground layers
-      lifecycle.js  #   each issue's life: docks, hall, board, houses, trips (layers, hits, labels, counters)
+      lifecycle.js  #   each issue's life: docks, hall, board, houses, walkers (layers, hits, labels, counters)
+      trips.js      #   what each change between two polls sets off: diff(), the queued trips and where each is
       ship.js       #   the canal: quay, locks, harbour and the ship that sails on a release
       features.js   #   feature banners, trails, barges, fog, the strip and the feature dialog
       worlds.js     #   a world drawn as platform over dev village; draw(); the world counters
@@ -129,6 +130,36 @@ tools/mock/         # Simulated herdr/Temporal/Kubernetes for the village: demo.
 tools/omarchy-plugin/ # Omarchy bar widget: swarm list → village summary from /api/swarms + /api/village; install.sh
 tools/adapters/     # Outside framework adapters: example report, adapter template (docs/village-protocol.md)
 ```
+
+### Adding to the village
+
+The village page's core (`paint()`, the hit test, `explain()`/`act()`,
+`renderFlow()`, `placeLabels()`) names no feature: it walks what the feature
+modules register (`registry.js`). To add something to the village:
+
+1. **A new module** in `src/web/village/`, importing what it draws with from
+   `palette.js`, `scenery.js`, `people.js`, and `layout.js` for positions.
+   Keep each file under ~400 lines; split one that grows past that.
+2. **Register what it is**, at the module's top level:
+   - `registerLayer({ z, draw(c, scene, t) })` to draw. `z` places it among
+     the others (ground 0–40, the hall 50, houses 70, ship 110, walkers 120,
+     banners 140). Inside `draw`, `tap(x, y, w, h, { kind, ... })` makes what
+     was just drawn clickable.
+   - `registerHit({ kind, dialog(obj, scene, theme) })` for what a click on
+     that kind says. `act` instead of a dialog does something; `key: false`
+     gives it no keyboard target.
+   - `registerLabels(fn, order)` for its names on the map, and
+     `{ avoid: rect }` items for sprites labels must keep clear of.
+   - `registerCounter({ plane, order, render(v) })` for a step of the flow
+     strip ('development', 'runtime' or 'world').
+   - A theme registers with `registerTheme` (`themes/registry.js`).
+3. **Import it in `main.js`.** That is all `main.js` does: import the
+   modules, then `start()`.
+4. **Embed it**: add the file to `VILLAGE_ASSETS` in `src/web/server.rs`.
+   `cargo test every_module_main_js_loads` fails for a module that is
+   imported but not embedded, or embedded but never imported.
+   `cargo test replay_build` fails if two modules declare the same
+   top-level name: the replay page bundles them into one script.
 
 ## Key conventions
 

@@ -1,159 +1,18 @@
 /* ---------- Each issue's life ----------
- * The docks, the town hall and its board, the houses, and the trips between
- * them.
- *
- * Every change seen between two polls plays as a trip: a worker, porter or
- * crew member walks a route in steps, carrying the issue's crate on some.
- *   arrives   a supply boat (truck, shuttle) brings new issues to the docks
- *             and its crew unloads one crate each into its slot;
- *   claimed   the worker walks from its house to the docks, picks up that
- *             crate and carries it home, then works on it at the door;
- *   blocked   the crate is carried from the docks or house to the board;
- *   unblocked it is carried from the board back to the docks;
- *   landed    the worker carries it, sealed, to the quay and walks home;
- *   closed    (not planned) it is carried off the map's west edge.
- * Trips queue: each starts STAGGER after the one before, so many changes in
- * one poll play in order rather than at once. Past QUEUE_CAP waiting trips
- * the rest are skipped, their crates simply where they now are. Trips are
- * timed, so a tab left in the background never replays what it missed. The
- * first poll after a load animates nothing, and with reduced motion no one
- * walks: a toast says what changed. */
+ * The docks, the town hall and its board, the houses, and the people walking
+ * between them: what each draws, what a click on it says, its labels and its
+ * counters. The walks themselves, what each change between two polls sets
+ * off, are the trips (trips.js). */
 import { state } from './state.js';
 import { P, R, blink, shadow, subHat, waveFrame } from './palette.js';
 import { cobwebs, pennant, puffs } from './sprites/houses.js';
 import { ICONS, badge, bubble, roped } from './scenery.js';
 import { QUIET_ACTIONS, actionSign, drawAction, person, wander } from './people.js';
 import { registerCounter, registerHit, registerLabels, registerLayer, tap } from './registry.js';
-import { LW, porterPos, slotPos } from './layout.js';
-import { cargoStop, placeOf, placePoint, toShip, workOf } from './ship.js';
+import { LW, slotPos } from './layout.js';
+import { ARRIVE_IN, SAIL_OUT, UNLOAD, pickup, tripAt } from './trips.js';
+import { workOf } from './ship.js';
 import { houseName, issueItems, issueLabel, issueOf, link, repoUrl, sessionOf } from './dialogs.js';
-
-const STAGGER = 700, QUEUE_CAP = 12, WALK = 0.05, ARRIVE_IN = 1800, UNLOAD = 450, SAIL_OUT = 1500;
-function enqueue(sc, t, trip, gap = STAGGER) {
-  if (state.reduce || state.porters.filter(p => p.t0 > t).length >= QUEUE_CAP) return null;
-  trip.t0 = Math.max(t, sc.nextAt || 0);
-  sc.nextAt = trip.t0 + gap;
-  state.porters.push(trip);
-  return trip;
-}
-const back = pts => [...pts].reverse();
-/* Routes on the map, from the lane in front of a house (lot) or a docks slot (s). */
-const ROAD = 53;
-const houseToRoad = (lot, lay) => [[lot.x + 8, lot.lane], [lay.roadX + 3, lot.lane], [lay.roadX + 3, ROAD]];
-const slotFromRoad = s => [[s.x + 2, ROAD], [s.x + 2, s.y + 6]];
-const boardFromRoad = lay => [[lay.hallX + 51, ROAD], [lay.hallX + 51, 46]];
-/* What a trip does to the crate it carries, for the dialog of a crate in transit. */
-function trip(seed, n, cr, to, steps, extra = {}) {
-  return { seed, issue: n, kind: (cr && cr.kind) || 'workshop', pr: cr && cr.priority, to, steps, ...extra };
-}
-/* The trips (and floats down the canal) that a new model calls for, started
- * on `state.porters` and `state.floats`; returns what changed, in words. */
-export function diff(old, now, lay, t, sc) {
-  if (!old || old.project !== now.project) return [];
-  const cs = cargoStop(now), said = [];
-  const oldSlot = n => old.backlog.findIndex(c => c.number === n), newSlot = n => now.backlog.findIndex(c => c.number === n);
-  const oldBoard = new Set(old.board.map(b => b.number)), oldHouse = n => old.houses.findIndex(h => h.issue === n);
-  const lotOf = id => lay.lots[now.houses.findIndex(h => h.id === id)];
-
-  // Arrives: new issues come by supply boat, one crate each.
-  const fresh = now.backlog.map((c, i) => ({ c, i })).filter(({ c }) => oldSlot(c.number) < 0 && !oldBoard.has(c.number) && oldHouse(c.number) < 0 && c.number);
-  if (fresh.length) {
-    said.push(`${fresh.length} new ${fresh.length === 1 ? 'issue' : 'issues'}`);
-    if (!state.reduce && state.porters.filter(p => p.t0 > t).length < QUEUE_CAP) {
-      const t0 = Math.max(t, sc.nextAt || 0), shown = fresh.filter(f => f.i < 40);
-      const job = { t0, crates: shown.map(f => f.c.number), leave: t0 + ARRIVE_IN + shown.length * UNLOAD + 500 };
-      sc.supplies.push(job);
-      shown.forEach(({ c, i }, k) => {
-        const s = slotPos(i), dx = 22 + (k % 3) * 5;
-        state.porters.push({ ...trip('crew:' + now.project + k, c.number, c, 'backlog', [
-          { pts: [[dx, 13], [s.x + 2, 13], [s.x + 2, s.y + 6]], carry: true },
-          { pts: [[s.x + 2, s.y + 6], [s.x + 2, 13], [dx, 13]] }]), t0: t0 + ARRIVE_IN + k * UNLOAD, crew: job });
-      });
-      sc.nextAt = job.leave;
-    }
-  }
-  // Claimed: the worker fetches its crate from the docks.
-  now.houses.forEach((h, i) => {
-    const before = old.houses.find(o => o.id === h.id);
-    if (!h.issue || (before && before.issue === h.issue)) return;
-    const slot = oldSlot(h.issue), lot = lay.lots[i];
-    if (slot < 0 || !lot) return;
-    const s = slotPos(Math.min(slot, 39)), out = [...houseToRoad(lot, lay), ...slotFromRoad(s)];
-    said.push(`#${h.issue} claimed`);
-    enqueue(sc, t, trip(h.id, h.issue, old.backlog[slot], 'house', [{ pts: out }, { pts: back(out), carry: true }]));
-  });
-  // Blocked: from the docks or a house to the board, and the board back to the docks.
-  now.board.forEach(b => {
-    const n = b.number;
-    if (oldBoard.has(n)) return;
-    const slot = oldSlot(n), hi = oldHouse(n);
-    let steps = null, seed = 'porter:' + n;
-    if (slot >= 0) { const s = slotPos(Math.min(slot, 39)); steps = [{ pts: [...back(slotFromRoad(s)), ...boardFromRoad(lay)], carry: true }]; }
-    else if (hi >= 0 && lotOf(old.houses[hi].id)) {
-      const lot = lotOf(old.houses[hi].id), there = [...houseToRoad(lot, lay), ...boardFromRoad(lay)];
-      seed = old.houses[hi].id; steps = [{ pts: there, carry: true }, { pts: back(there) }];
-    }
-    if (!steps) return;
-    said.push(`#${n} blocked`);
-    enqueue(sc, t, trip(seed, n, { kind: 'workshop', priority: b.priority }, 'board', steps));
-  });
-  now.backlog.forEach((c, i) => {
-    if (!oldBoard.has(c.number) || i >= 40) return;
-    said.push(`#${c.number} back in the backlog`);
-    enqueue(sc, t, trip('porter:' + c.number, c.number, c, 'backlog', [{ pts: [...back(boardFromRoad(lay)), ...slotFromRoad(slotPos(i))], carry: true }]));
-  });
-  // Landed: the worker carries the sealed crate to the quay, then walks home.
-  const oldQuay = new Set(old.pipeline.quay);
-  now.pipeline.quay.forEach(n => {
-    if (oldQuay.has(n)) return;
-    const i = oldHouse(n);
-    if (i < 0) return;
-    const lot = lotOf(old.houses[i].id) || lay.lots[i];
-    if (!lot) return;
-    const pts = [[lot.x + 8, lot.lane], [lay.roadX + 3, lot.lane], [lay.roadX + 3, lay.quayY]];
-    // With one stop the quay is where the next release waits: on to the ship.
-    if (cs === -1) pts.push(...toShip([lay.roadX + 3, lay.quayY], lay).slice(1));
-    said.push(`#${n} landed`);
-    enqueue(sc, t, trip(old.houses[i].id, n, { kind: old.houses[i].kind, priority: old.houses[i].priority }, cs === -1 ? 'ship' : 'quay',
-      [{ pts, carry: true }, { pts: back(pts) }], { sealed: true }));
-  });
-  // Closed without landing: carried off the map's west edge.
-  const placed = n => now.backlog.some(c => c.number === n) || now.board.some(b => b.number === n) || now.houses.some(h => h.issue === n)
-    || now.pipeline.quay.includes(n) || now.pipeline.stops.some(st => st.issues.includes(n));
-  [...old.backlog.map((c, i) => ({ n: c.number, c, s: i < 40 ? slotPos(i) : null })), ...old.board.map(b => ({ n: b.number, c: b, board: true }))].forEach(o => {
-    if (placed(o.n) || (!o.s && !o.board)) return;
-    const from = o.board ? back(boardFromRoad(lay)) : back(slotFromRoad(o.s));
-    said.push(`#${o.n} closed`);
-    enqueue(sc, t, trip('porter:' + o.n, o.n, o.c, 'away', [{ pts: [...from, [-10, ROAD]], carry: true }]));
-  });
-  // Work moving down the canal opens each lock it passes. The stop before
-  // the harbour loads it onto the ship; any other stop docks it in its basin.
-  now.pipeline.stops.slice(0, -1).forEach((st, i) => st.issues.forEach(n => {
-    const was = placeOf(n, old) ?? -1;
-    if (was >= i) return;
-    for (let g = was + 1; g <= i; g++) sc.gates[g] = t;
-    const from = placePoint(was, lay);
-    if (i === cs) enqueue(sc, t, trip('porter:' + n, n, null, 'ship', [{ pts: toShip(from, lay), carry: true }], { sealed: true, speed: 0.04 }), 300);
-    else if (!state.reduce) state.floats.push({ n, t0: t, pts: [from, [from[0], lay.canalY + 4], [lay.lockStart + i * 34 + 10, lay.canalY + 4], placePoint(i, lay)] });
-  }));
-  return said;
-}
-/* Where a trip is: { x, y, carry } on its route, `waiting` before it starts
- * (at the route's first point), or null once it is over. */
-function tripAt(p, t) {
-  const first = p.steps[0].pts[0];
-  if (t < p.t0) return { x: first[0], y: first[1], carry: false, waiting: true, fetched: false };
-  let d = (t - p.t0) * (p.speed || WALK), fetched = false;
-  for (const st of p.steps) {
-    const at = porterPos({ t0: 0, speed: 1, pts: st.pts }, d);
-    if (at) return { x: at[0], y: at[1], carry: !!st.carry, fetched: fetched || !!st.carry };
-    fetched = fetched || !!st.carry;
-    d -= st.pts.slice(1).reduce((n, q, k) => n + Math.hypot(q[0] - st.pts[k][0], q[1] - st.pts[k][1]), 0);
-  }
-  return null;
-}
-/* The point a trip picks its crate up from: the start of its first carrying step. */
-const pickup = p => (p.steps.find(st => st.carry) || p.steps[0]).pts[0];
 
 /* Where a house's sub-agents stand: two beside the door, then a row on the
  * lane in front. Past that, a "+N" badge counts the rest, so every running

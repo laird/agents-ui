@@ -8,7 +8,7 @@ import { placeOverlays } from './registry.js';
 import { cv, layout, shownScenes } from './layout.js';
 import { esc, fit, renderFlow, toast } from './panels.js';
 import { kbox, kbuttons, placeKeys, repoUrl } from './dialogs.js';
-import { diff } from './lifecycle.js';
+import { diff } from './trips.js';
 import { releaseOf, sail } from './ship.js';
 import { fadeLive } from './features.js';
 import { draw, updateWorld } from './worlds.js';
