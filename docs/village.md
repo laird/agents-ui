@@ -107,6 +107,7 @@ session is a house, and agents sharing a worktree are one house.
 | Notes on the board | Issues with a blocking label (`needs-design`, `proposal`, ...) |
 | Crates at the quay | `refs/autocoder/tips/<integration>/<sha>-<issue>` not yet green |
 | Locks, then the harbour or launch pad | `<integration>-green`, then each environment in `.autocoder.json` (see [Environments](#environments)) |
+| Crates on the ship (a rocket downtown) | Issues at the stop before the last, waiting for the next release (see [The ship](#the-ship)) |
 | Banners east of the houses | Features: parent issues split into subtasks (see [Following a feature](#following-a-feature)) |
 
 ### Environments
@@ -145,6 +146,29 @@ Deployment and no branch`.
 
 `promotion` says how your project moves landed work through the environments.
 It is `subtask` (the default) or `feature`; see below.
+
+### The ship
+
+A ship is moored in the harbour (a rocket stands on the launch pad). Work
+waiting for the next release is loaded onto it: the issues at the stop just
+before the last one, or at the quay when there is only one stop. Porters
+carry each one along the canal as it arrives; past six crates a badge counts
+the rest ("+7"). Intermediate locks open their gates as crates float through
+and keep their own crates docked.
+
+When the last stop's deployment changes (its `sha`, so a release of the same
+issues still counts), the ship sails off east with what shipped, the
+fireworks go up, and an empty ship comes in; the rocket lifts off and a new
+one rolls out. This plays once per release, and a page opened afterwards just
+shows the new ship. With reduced motion the ship is swapped without a voyage
+and a "shipped vX.Y.Z" notice shows. In a world, the release cart sets off up
+the road as the ship leaves the map.
+
+Click the ship for its cargo and "next release: N issues since vX.Y.Z"; click
+the harbour (or a departing ship's wake) for the last release and its GitHub
+Release. The tag and link come from the deployment `tools/release.sh` records
+(description `Release vX.Y.Z`, status `log_url`). In the demo,
+`touch "$AGENTS_UI_DEMO_DIR/state/release-now"` cuts a release at once.
 
 ## Following a feature
 

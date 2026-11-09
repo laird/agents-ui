@@ -371,6 +371,12 @@ pub struct Stage {
     /// The commit this stage runs, when a deployment names it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha: Option<String>,
+    /// The release this stage runs, such as `v0.5.0`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+    /// A page about that release, such as its GitHub Release.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -599,7 +605,14 @@ pub fn to_village(report: &Report) -> Reading {
         stops: p
             .stages
             .iter()
-            .map(|s| Stop { name: s.name.clone(), issues: numbers(&s.tasks), source: s.source, sha: s.sha.clone() })
+            .map(|s| Stop {
+                name: s.name.clone(),
+                issues: numbers(&s.tasks),
+                source: s.source,
+                sha: s.sha.clone(),
+                tag: s.tag.clone(),
+                url: s.url.clone().filter(|u| u.starts_with("https://") || u.starts_with("http://")),
+            })
             .collect(),
         release: p.release.clone(),
         promotion: p.promotion,
@@ -813,7 +826,14 @@ pub fn swarm_report_gated(swarm: &SwarmSnapshot, issues: &[IssueSnapshot], pipel
             stages: pipeline
                 .stops
                 .iter()
-                .map(|s| Stage { name: s.name.clone(), tasks: ids(&s.issues), source: s.source, sha: s.sha.clone() })
+                .map(|s| Stage {
+                    name: s.name.clone(),
+                    tasks: ids(&s.issues),
+                    source: s.source,
+                    sha: s.sha.clone(),
+                    tag: s.tag.clone(),
+                    url: s.url.clone(),
+                })
                 .collect(),
             release: pipeline.release.clone(),
             promotion: pipeline.promotion,
@@ -1107,6 +1127,34 @@ mod tests {
         let v = to_village(&outside).village;
         assert_eq!(v.pipeline.quay, vec![10]);
         assert_eq!(v.pipeline.merge.unwrap().trains[0].members, vec!["9".to_string()]);
+    }
+
+    #[test]
+    fn a_release_tag_and_page_reach_the_village() {
+        let swarm: SwarmSnapshot = serde_json::from_value(serde_json::json!({
+            "project_name": "shop", "repo_path": "", "agent_type": "claude", "workflow": null, "tmux_session": "",
+            "stopped": false, "busy_count": 0, "idle_count": 0, "attention_count": 0, "workers": [], "issues": [],
+            "manager": {"id": "m", "role": "manager", "state": "Idle", "is_manager": true, "waiting_for_input": false,
+                "current_issue": null, "current_issue_title": null, "pane_content": "", "tmux_target": "", "health": "Healthy",
+                "completed_issue_count": 0, "resurrection_attempts": 0, "status_timestamp": null}
+        }))
+        .unwrap();
+        let release = Stop {
+            name: "release".into(),
+            issues: vec![7],
+            source: StopSource::Deployment,
+            sha: Some("abc1234".into()),
+            tag: Some("v0.5.0".into()),
+            url: Some("https://github.com/acme/shop/releases/tag/v0.5.0".into()),
+        };
+        let pipeline = Pipeline { stops: vec![Stop { name: "nuc-1".into(), issues: vec![8], ..Stop::default() }, release.clone()], ..Pipeline::default() };
+        let report = swarm_report(&swarm, &[], &pipeline);
+        assert_eq!(report.pipeline.stages[1].tag.as_deref(), Some("v0.5.0"));
+        assert_eq!(to_village(&report).village.pipeline.stops[1], release);
+        // An outside adapter's page that isn't a web link is dropped.
+        let mut odd = report.clone();
+        odd.pipeline.stages[1].url = Some("javascript:alert(1)".into());
+        assert_eq!(to_village(&odd).village.pipeline.stops[1].url, None);
     }
 
     #[test]

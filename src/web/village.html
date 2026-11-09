@@ -45,6 +45,8 @@
   .step b { display: block; font: 700 18px/1.1 var(--mono); font-variant-numeric: tabular-nums; }
   .step span { font: 12px var(--mono); color: var(--ink-dim); }
   .empty { padding: 48px 16px; text-align: center; color: var(--ink-dim); font: 14px var(--mono); }
+  .toast { position: fixed; left: 50%; top: 16px; transform: translateX(-50%); max-width: calc(100vw - 32px); padding: 8px 14px; z-index: 11; font: 700 13px/1.3 var(--mono); color: var(--gold); }
+  .toast[hidden] { display: none; }
   .dialog { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); width: min(560px, calc(100vw - 32px)); padding: 14px 16px; z-index: 10; }
   .dialog h2 { margin: 0 0 4px; font: 700 14px var(--mono); color: var(--gold); letter-spacing: .04em; }
   .dialog p { margin: 4px 0; font: 15px/1.4 var(--mono); }
@@ -129,6 +131,7 @@
     </div>
     <div class="flow" id="flow"></div>
   </div>
+  <div class="win toast" id="toast" hidden role="status"></div>
   <div class="win dialog" id="dialog" hidden role="dialog" aria-live="polite">
     <button id="close" aria-label="Close">×</button>
     <h2 id="d-title"></h2>
@@ -469,8 +472,9 @@
     R(c, x, cy - 10, 3, 4, P.woodD);
     R(c, x + 8, cy - 25, 1, 10, P.stoneD); R(c, x + 9, cy - 25, 5, 4, P.o); R(c, x + 9, cy - 24, 4, 2, flag);
   }
-  /* Where finished work ships out: a harbour with a lighthouse and a ship
-   * at the end of the canal. Its lamp flares when new work arrives. */
+  /* Where finished work ships out: a harbour with a lighthouse at the end of
+   * the canal. Its lamp flares when a release goes out. The ship moored in it
+   * is drawn by ship() below, so it can load cargo and sail. */
   function harbour(c, x, cy, t, fw) {
     R(c, x, cy - 20, 38, 20, P.o); R(c, x + 1, cy - 19, 36, 18, P.stone);
     for (let yy = cy - 17; yy < cy - 2; yy += 3) for (let xx = x + 2 + ((yy % 2) ? 2 : 0); xx < x + 36; xx += 5) R(c, xx, yy, 1, 1, P.stoneD);
@@ -480,10 +484,6 @@
     for (let yy = cy - 49; yy < cy - 19; yy++) R(c, lx + 1, yy, 7, 1, Math.floor((yy - cy) / 5) % 2 ? P.white : P.red);
     R(c, lx - 1, cy - 56, 11, 7, P.o); R(c, lx, cy - 55, 9, 4, blink(t, 700) || t - fw < 1600 ? P.lamp : P.glass);
     R(c, lx + 1, cy - 59, 7, 3, P.o); R(c, lx + 2, cy - 58, 5, 1, P.red);
-    R(c, x + 2, cy + 3, 22, 9, P.o); R(c, x + 3, cy + 4, 20, 6, P.wood); R(c, x + 3, cy + 4, 20, 1, P.woodL); R(c, x + 5, cy + 10, 16, 1, P.woodD);
-    R(c, x + 12, cy - 14, 1, 18, P.woodD);
-    R(c, x + 6, cy - 12, 13, 12, P.o); R(c, x + 7, cy - 11, 11, 10, P.sail); R(c, x + 12, cy - 11, 1, 10, P.millD);
-    R(c, x + 13, cy - 17, 5, 3, P.o); R(c, x + 13, cy - 16, 4, 1, '#804098');
     const ft = t - fw;
     if (ft >= 0 && ft < 1600) {
       const p = ft / 1600;
@@ -492,6 +492,15 @@
         for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; R(c, fx + Math.cos(a) * p * 9, fy + Math.sin(a) * p * 9, 1, 1, col); }
       });
     }
+  }
+  /* The ship that carries the next release, moored at harbour x, moved by
+   * (ox, oy) while it sails. Its cargo is drawn on deck at SHIP_HOLD. */
+  function ship(c, x, cy, t, ox, oy) {
+    x = Math.round(x + ox); cy = Math.round(cy + oy);
+    R(c, x + 2, cy + 3, 22, 9, P.o); R(c, x + 3, cy + 4, 20, 6, P.wood); R(c, x + 3, cy + 4, 20, 1, P.woodL); R(c, x + 5, cy + 10, 16, 1, P.woodD);
+    R(c, x + 12, cy - 14, 1, 18, P.woodD);
+    R(c, x + 6, cy - 12, 13, 12, P.o); R(c, x + 7, cy - 11, 11, 10, P.sail); R(c, x + 12, cy - 11, 1, 10, P.millD);
+    R(c, x + 13, cy - 17, 5, 3, P.o); R(c, x + 13, cy - 16, 4, 1, '#804098');
   }
 
   /* ---------- Themes ----------
@@ -571,10 +580,13 @@
 
   const MEDIEVAL = {
     name: 'Medieval village',
-    labels: { docks: 'Docks', board: 'Notice board', houses: 'Houses', quay: 'Quay', castle: 'Harbour', hall: 'Castle' },
+    labels: { docks: 'Docks', board: 'Notice board', houses: 'Houses', quay: 'Quay', castle: 'Harbour', hall: 'Castle', ship: 'Ship', sails: 'sails' },
     ground: grass, road: path, yard: path, channel: water,
     dock(c, x, y, w) { R(c, x, y, w, 7, P.o); R(c, x + 1, y, w - 2, 6, P.plank); },
-    tree, hall, board, crate, B, scaffold, gate: lock, destination: harbour, decor: DECOR.medieval, border: BORDER.medieval,
+    tree, hall, board, crate, B, scaffold, gate: lock, destination: harbour, vessel: ship, decor: DECOR.medieval, border: BORDER.medieval,
+    // Deck slots for cargo (from the harbour's x and the canal's y), the "+N"
+    // badge past them, and the box the ship takes up.
+    hold: [[3, -2], [8, -2], [14, -2], [19, -2], [2, -7], [20, -7]], holdBadge: [23, -12], hull: [2, -17, 23, 29],
     people: 'medieval', steam: [P.white, P.stoneL], sign: [P.woodD, P.parch, P.woodD]
   };
 
@@ -690,7 +702,7 @@
   };
   const MODERN = {
     name: 'Modern business district',
-    labels: { docks: 'Mailroom', board: 'Whiteboard', houses: 'Offices', quay: 'Loading bay', castle: 'Launch pad', hall: 'Headquarters' },
+    labels: { docks: 'Mailroom', board: 'Whiteboard', houses: 'Offices', quay: 'Loading bay', castle: 'Launch pad', hall: 'Headquarters', ship: 'Rocket', sails: 'lifts off' },
     ground(c, x0, y0, w, h) {
       for (let y = y0; y < y0 + h; y += 4) R(c, x0, y, w, Math.min(4, y0 + h - y), (y >> 2) % 2 ? M.lawn : M.lawnD);
     },
@@ -768,23 +780,15 @@
       R(c, x + 2, cy - 4, 2, 4, P.o);
       if (!open) for (let k = 0; k < 14; k += 2) R(c, x + 2, cy + k, 2, 2, (k / 2) % 2 ? P.white : P.p0);
     },
-    /* Launch pad: shipped work lifts off. The engines fire and the sky
-     * lights up when new work arrives. */
+    /* Launch pad: released work lifts off. The sky lights up when it does.
+     * The rocket on it is drawn by vessel() below, so it can load and fly. */
     destination(c, x, cy, t, fw) {
       R(c, x, cy - 8, 38, 8, P.o); R(c, x + 1, cy - 7, 36, 6, M.concrete);
       for (let k = 2; k < 36; k += 6) R(c, x + k, cy - 4, 3, 1, M.dash);
       R(c, x + 4, cy - 50, 4, 42, P.o); R(c, x + 5, cy - 49, 2, 40, P.red);
       for (let yy = cy - 46; yy < cy - 8; yy += 6) R(c, x + 8, yy, 6, 1, M.steelD);
-      const rx = x + 16;
-      R(c, rx, cy - 44, 10, 36, P.o); R(c, rx + 1, cy - 42, 8, 33, P.white); R(c, rx + 1, cy - 42, 2, 33, M.concreteL);
-      R(c, rx + 2, cy - 48, 6, 4, P.o); R(c, rx + 3, cy - 47, 4, 4, P.red); R(c, rx + 4, cy - 50, 2, 2, P.red);
-      R(c, rx + 3, cy - 34, 4, 3, P.o); R(c, rx + 4, cy - 33, 2, 1, M.glassL);
-      R(c, rx - 3, cy - 16, 3, 8, P.o); R(c, rx - 2, cy - 15, 2, 6, P.red);
-      R(c, rx + 10, cy - 16, 3, 8, P.o); R(c, rx + 10, cy - 15, 2, 6, P.red);
-      R(c, rx + 2, cy - 18, 6, 1, M.steelD);
       const ft = t - fw;
       if (ft >= 0 && ft < 1600) {
-        for (let k = 0; k < 4; k++) R(c, rx + 2 + k * 2, cy - 8 + (blink(t + k * 60, 80) ? 1 : 0), 2, 3, k % 2 ? P.gold : '#f8f8f8');
         const p = ft / 1600;
         [[x + 6, P.gold], [x + 21, P.fizzA], [x + 34, P.fizzB]].forEach(([fx, col], i) => {
           const fy = cy - 58 - p * 18 - i * 3;
@@ -793,7 +797,20 @@
       }
       R(c, x + 8, cy - 2, 20, 18, P.o); R(c, x + 9, cy, 18, 15, P.dark);
     },
-    decor: DECOR.modern, border: BORDER.modern,
+    /* The rocket for the next release, with its cargo rack, moved by (ox, oy).
+     * Its engines fire while it climbs. */
+    vessel(c, x, cy, t, ox, oy) {
+      const rx = Math.round(x + 16 + ox); cy = Math.round(cy + oy);
+      R(c, rx, cy - 44, 10, 36, P.o); R(c, rx + 1, cy - 42, 8, 33, P.white); R(c, rx + 1, cy - 42, 2, 33, M.concreteL);
+      R(c, rx + 2, cy - 48, 6, 4, P.o); R(c, rx + 3, cy - 47, 4, 4, P.red); R(c, rx + 4, cy - 50, 2, 2, P.red);
+      R(c, rx + 3, cy - 34, 4, 3, P.o); R(c, rx + 4, cy - 33, 2, 1, M.glassL);
+      R(c, rx - 3, cy - 16, 3, 8, P.o); R(c, rx - 2, cy - 15, 2, 6, P.red);
+      R(c, rx + 10, cy - 16, 3, 8, P.o); R(c, rx + 10, cy - 15, 2, 6, P.red);
+      R(c, rx + 2, cy - 18, 6, 1, M.steelD);
+      R(c, rx + 13, cy - 26, 1, 18, M.steelD); R(c, rx + 13, cy - 9, 11, 1, M.steelD);
+      if (oy < 0) for (let k = 0; k < 4; k++) R(c, rx + 2 + k * 2, cy - 8 + (blink(t + k * 60, 80) ? 1 : 0), 2, 3 + (k % 2) * 2, k % 2 ? P.gold : '#f8f8f8');
+    },
+    hold: [[30, -14], [35, -14], [30, -19], [35, -19], [30, -24], [35, -24]], holdBadge: [29, -32], hull: [12, -52, 28, 46], flies: true,
     people: 'modern',
     steam: [P.white, M.concreteL], sign: [P.o, P.dark, M.led]
   };
@@ -912,7 +929,7 @@
   };
   const FUTURE = {
     name: 'Future',
-    labels: { docks: 'Cargo bay', board: 'Holo-board', houses: 'Pods', quay: 'Launch rail', castle: 'Spaceport', hall: 'Command dome' },
+    labels: { docks: 'Cargo bay', board: 'Holo-board', houses: 'Pods', quay: 'Launch rail', castle: 'Spaceport', hall: 'Command dome', ship: 'Shuttle', sails: 'launches' },
     ground(c, x0, y0, w, h) {
       R(c, x0, y0, w, h, F.deckD);
       for (let x = x0 + 7; x < x0 + w; x += 8) R(c, x, y0, 1, h, F.seam);
@@ -1018,8 +1035,8 @@
         for (let k = 0; k < 14; k += 3) R(c, x + 1 + ((k + Math.floor(t / 150)) % 4), cy + k, 1, 1, F.magenta);
       }
     },
-    /* The spaceport: shipped work leaves on a shuttle. Its engines fire and
-     * the sky lights up when new work arrives. */
+    /* The spaceport: released work leaves on a shuttle. The sky lights up
+     * when it does. The shuttle is drawn by vessel() below, so it can load and launch. */
     destination(c, x, cy, t, fw) {
       R(c, x, cy - 8, 38, 8, P.o); R(c, x + 1, cy - 7, 36, 6, F.hullD);
       for (let k = 2; k < 36; k += 6) R(c, x + k, cy - 4, 3, 1, F.cyan);
@@ -1027,16 +1044,8 @@
       for (let yy = cy - 42; yy < cy - 10; yy += 5) R(c, x + 5, yy, 2, 2, F.cyanL);
       R(c, x + 2, cy - 52, 8, 6, P.o); R(c, x + 3, cy - 51, 6, 4, F.glass);
       R(c, x + 5, cy - 56, 1, 4, F.hull); R(c, x + 4, cy - 57, 3, 1, blink(t, 700) || t - fw < 1600 ? P.p0 : F.magentaD);
-      const rx = x + 17, lift = t - fw >= 0 && t - fw < 1600 ? Math.floor((t - fw) / 200) : 0;
-      const sy = cy - 40 - lift;
-      R(c, rx + 3, sy - 6, 6, 4, P.o); R(c, rx + 4, sy - 5, 4, 3, F.hullL);
-      R(c, rx + 1, sy - 2, 10, 32, P.o); R(c, rx + 2, sy - 1, 8, 30, F.hullL); R(c, rx + 2, sy - 1, 2, 30, F.hull);
-      R(c, rx + 2, sy + 8, 8, 2, F.magenta); R(c, rx + 4, sy + 2, 4, 3, P.o); R(c, rx + 5, sy + 3, 2, 1, F.cyan);
-      R(c, rx - 2, sy + 20, 3, 10, P.o); R(c, rx - 1, sy + 21, 2, 8, F.magentaD);
-      R(c, rx + 11, sy + 20, 3, 10, P.o); R(c, rx + 11, sy + 21, 2, 8, F.magentaD);
       const ft = t - fw;
       if (ft >= 0 && ft < 1600) {
-        for (let k = 0; k < 4; k++) R(c, rx + 2 + k * 2, sy + 30 + (blink(t + k * 60, 80) ? 1 : 0), 2, 3, k % 2 ? F.cyan : F.cyanL);
         const p = ft / 1600;
         [[x + 6, P.gold], [x + 21, F.magenta], [x + 34, F.cyan]].forEach(([fx, col], i) => {
           const fy = cy - 58 - p * 18 - i * 3;
@@ -1046,6 +1055,19 @@
       R(c, x + 8, cy - 2, 22, 18, P.o); R(c, x + 9, cy, 20, 15, F.space);
       for (let k = 0; k < 4; k++) R(c, x + 11 + k * 5, cy + 7, 2, 1, F.cyanD);
     },
+    /* The shuttle for the next release, with its cargo rack, moved by (ox, oy).
+     * Its engines fire while it climbs. */
+    vessel(c, x, cy, t, ox, oy) {
+      const rx = Math.round(x + 17 + ox), sy = Math.round(cy - 40 + oy);
+      R(c, rx + 3, sy - 6, 6, 4, P.o); R(c, rx + 4, sy - 5, 4, 3, F.hullL);
+      R(c, rx + 1, sy - 2, 10, 32, P.o); R(c, rx + 2, sy - 1, 8, 30, F.hullL); R(c, rx + 2, sy - 1, 2, 30, F.hull);
+      R(c, rx + 2, sy + 8, 8, 2, F.magenta); R(c, rx + 4, sy + 2, 4, 3, P.o); R(c, rx + 5, sy + 3, 2, 1, F.cyan);
+      R(c, rx - 2, sy + 20, 3, 10, P.o); R(c, rx - 1, sy + 21, 2, 8, F.magentaD);
+      R(c, rx + 11, sy + 20, 3, 10, P.o); R(c, rx + 11, sy + 21, 2, 8, F.magentaD);
+      R(c, rx + 15, sy + 14, 1, 18, F.hullD); R(c, rx + 15, sy + 31, 12, 1, F.cyanD);
+      if (oy < 0) for (let k = 0; k < 4; k++) R(c, rx + 2 + k * 2, sy + 30 + (blink(t + k * 60, 80) ? 1 : 0), 2, 3 + (k % 2) * 2, k % 2 ? F.cyan : F.cyanL);
+    },
+    hold: [[33, -14], [38, -14], [33, -19], [38, -19], [33, -24], [38, -24]], holdBadge: [31, -32], hull: [14, -58, 30, 50], flies: true,
     decor(c, x, y, k, t) {
       switch (k) {
         case 0: // antenna
@@ -1373,10 +1395,11 @@
   const pick = document.getElementById('pick');
   let villages = [], worlds = [], view = null;
   /* One scene per village: its model, layout and the animations in flight.
-   * `current`, `L`, `porters` and `fireworks` hold the scene being drawn
-   * while paint() runs, so the drawing code reads them as before. */
+   * `current`, `L`, `porters`, `floats` and `fireworks` hold the scene being
+   * drawn while paint() runs, so the drawing code reads them as before; `S`
+   * is the scene itself (its voyage and lock gates). */
   const scenes = {};
-  let current = null, L = null, porters = [], fireworks = -1e9;
+  let current = null, L = null, porters = [], floats = [], fireworks = -1e9, S = null;
   /* Per world: the incidents and landing seen last poll, and crates afloat. */
   const worldState = {};
   const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1390,8 +1413,9 @@
   const tap = (x, y, w, h, o) => { if (hits) hits.push({ x: Math.round(x), y: Math.round(y), w, h, o }); };
 
   /* Animate crates that moved since the last snapshot. */
-  function diff(old, now, lay, t) {
+  function diff(old, now, lay, t, sc) {
     if (!old || old.project !== now.project) return;
+    const cs = cargoStop(now);
     const oldBacklog = old.backlog.map(c => c.number);
     now.houses.forEach((h, i) => {
       const before = old.houses.find(o => o.id === h.id);
@@ -1409,9 +1433,22 @@
       if (i < 0) return;
       const lot = lay.lots[now.houses.findIndex(h => h.id === old.houses[i].id)] || lay.lots[i];
       if (!lot) return;
+      const pts = [[lot.x + 8, lot.lane], [lay.roadX + 3, lot.lane], [lay.roadX + 3, lay.quayY]];
+      // With one stop the quay is where the next release waits: on to the ship.
+      if (cs === -1) pts.push(...toShip([lay.roadX + 3, lay.quayY], lay).slice(1));
       porters.push({ t0: t, speed: 0.05, seed: old.houses[i].id, kind: old.houses[i].kind, pr: old.houses[i].priority, sealed: true, issue: n,
-        pts: [[lot.x + 8, lot.lane], [lay.roadX + 3, lot.lane], [lay.roadX + 3, lay.quayY]] });
+        to: cs === -1 ? 'ship' : 'quay', pts });
     });
+    // Work moving down the canal opens each lock it passes. The stop before
+    // the harbour loads it onto the ship; any other stop docks it in its basin.
+    now.pipeline.stops.slice(0, -1).forEach((st, i) => st.issues.forEach(n => {
+      const was = placeOf(n, old) ?? -1;
+      if (was >= i) return;
+      for (let g = was + 1; g <= i; g++) sc.gates[g] = t;
+      const from = placePoint(was, lay);
+      if (i === cs) porters.push({ t0: t, speed: 0.04, seed: 'porter:' + n, kind: 'workshop', sealed: true, issue: n, to: 'ship', pts: toShip(from, lay) });
+      else floats.push({ n, t0: t, pts: [from, [from[0], lay.canalY + 4], [lay.lockStart + i * 34 + 10, lay.canalY + 4], placePoint(i, lay)] });
+    }));
   }
   function porterPos(p, t) {
     let d = (t - p.t0) * p.speed;
@@ -1421,6 +1458,63 @@
       d -= len;
     }
     return null;
+  }
+
+  /* ---------- The ship ----------
+   * Work waiting for the next release is loaded onto the ship in the harbour
+   * (a rocket on the launch pad): the issues at the stop before the last, or
+   * at the quay when there is only one stop. When the last stop's deployment
+   * changes, the ship sails off east with what shipped, the fireworks fire,
+   * and an empty ship comes in. The change is read from the last stop's sha
+   * (or the released commit), never its issues, so a release of the same
+   * issues still sails; a page loaded after a release just shows the new ship. */
+  const SAIL = 4200, ARRIVE = 3200, GATE_OPEN = 2400, SHIP_CAP = 6;
+  const cargoStop = v => v.pipeline.stops.length - 2; // -1: the quay
+  function cargoOf(v) {
+    const i = cargoStop(v);
+    return i < -1 ? [] : i < 0 ? v.pipeline.quay : v.pipeline.stops[i].issues;
+  }
+  const lastStop = v => v.pipeline.stops[v.pipeline.stops.length - 1] || null;
+  /* What the last stop runs, with what says so ("deployment:<sha>"). A poll
+   * where GitHub didn't answer falls back to the branch or to nothing; that
+   * is a different source, not a release, so it never sails the ship. */
+  function releaseOf(v) {
+    const last = lastStop(v), id = last && (last.sha || last.tag || v.pipeline.release);
+    return id ? `${last.source || 'branch'}:${id}` : null;
+  }
+  /* Where the ship is: moored, sailing out with the last release, or coming in. */
+  function shipAt(sc, t, lay) {
+    const vo = sc.voyage, since = vo ? t - vo.t0 : Infinity, flies = !!T.flies, out = lay.W - lay.castleX + 4;
+    if (since < SAIL) { const p = (since / SAIL) ** 2; return { leaving: true, ox: flies ? 0 : p * out, oy: flies ? -p * (lay.canalY + 64) : 0 }; }
+    if (since < SAIL + ARRIVE) { const p = 1 - (since - SAIL) / ARRIVE; return { leaving: false, ox: out * p * p, oy: 0 }; }
+    return { leaving: false, ox: 0, oy: 0 };
+  }
+  const holdPos = (lay, k, ox = 0, oy = 0) => [Math.round(lay.castleX + T.hold[k][0] + ox), Math.round(lay.canalY + T.hold[k][1] + oy)];
+  /* A crate's resting point at the quay (-1) or in stop i's basin. */
+  const placePoint = (i, lay) => (i < 0 ? [lay.roadX + 9, lay.quayY + 2] : [lay.lockStart + i * 34 + 10, lay.canalY + 22]);
+  /* A porter's walk from a point along the canal bank to the ship's side. */
+  function toShip([x, y], lay) {
+    const bank = lay.canalY + 26, sx = lay.castleX + T.hold[0][0] + 4;
+    return [[x, y], [x, bank], [sx, bank], [sx, lay.canalY + 18]];
+  }
+  function sail(sc, v, t) {
+    const old = sc.v, last = lastStop(v), before = new Set((lastStop(old) || { issues: [] }).issues);
+    const shipped = last ? last.issues.filter(n => !before.has(n)) : [];
+    sc.fireworks = t;
+    sc.voyage = reduce ? null : { t0: t, cargo: shipped };
+    if (shownScenes().some(([x]) => x === sc)) toast(`${v.project}: shipped ${releaseName(v, last) || 'a release'}${shipped.length ? ` · ${shipped.length} ${shipped.length === 1 ? 'issue' : 'issues'}` : ''}`);
+  }
+  /* A release's name: its tag, else its commit. */
+  function releaseName(v, s) {
+    if (!s) return null;
+    const sha = s.sha || v.pipeline.release;
+    return s.tag || (sha ? String(sha).slice(0, 7) : null);
+  }
+  let toastTimer = 0;
+  function toast(text) {
+    const el = document.getElementById('toast');
+    el.textContent = text; el.hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 5000);
   }
 
   /* Where a house's sub-agents stand: two beside the door, then a row on the
@@ -1523,8 +1617,9 @@
       if (ICONS[st]) bubbles.push([lot.x + 4, lot.y - (st === 'blocked' ? 1 : 3) + (st === 'blocked' && blink(t, 200) ? -1 : 0), st]);
     });
 
-    const carried = new Set(porters.filter(p => p.issue).map(p => p.issue));
-    v.pipeline.quay.filter(n => !carried.has(n) && !hid.has(n)).slice(0, 6).forEach((n, k) => {
+    const carried = new Set([...porters.filter(p => p.issue).map(p => p.issue), ...floats.map(f => f.n)]);
+    const cargo = cargoOf(v), onShip = new Set(cargo);
+    v.pipeline.quay.filter(n => !carried.has(n) && !hid.has(n) && !onShip.has(n)).slice(0, 6).forEach((n, k) => {
       const x = roadX + 6 + (k % 3) * 6, y = quayY - 3 - Math.floor(k / 3) * 6;
       T.crate(c, x, y, 'workshop', null, true); tap(x, y, 5, 5, { kind: 'crate', n, at: 'quay' });
     });
@@ -1536,24 +1631,48 @@
     const stops = v.pipeline.stops;
     stops.slice(0, -1).forEach((s, i) => {
       const lx = lay.lockStart + i * 34;
-      T.gate(c, lx, canalY, false, flagOf(i)); tap(lx - 7, canalY - 28, 32, H - canalY + 28, { kind: 'stop', i });
-      s.issues.filter(n => !hid.has(n)).slice(0, 4).forEach((n, k) => {
+      const open = !reduce && t - (S.gates[i] ?? -1e9) < GATE_OPEN;
+      T.gate(c, lx, canalY, open, flagOf(i)); tap(lx - 7, canalY - 28, 32, H - canalY + 28, { kind: 'stop', i });
+      s.issues.filter(n => !hid.has(n) && !onShip.has(n) && !carried.has(n)).slice(0, 4).forEach((n, k) => {
         const x = lx + 8 + (k % 2) * 6, y = canalY + 18 + Math.floor(k / 2) * 6;
         T.crate(c, x, y, 'workshop', null, true); tap(x, y, 5, 5, { kind: 'crate', n, at: 'stop', i });
       });
     });
-    T.destination(c, lay.castleX, canalY, t, fireworks); tap(lay.castleX - 4, canalY - 28, 46, H - canalY + 28, { kind: 'harbour' });
-    if (stops.length) stops[stops.length - 1].issues.filter(n => !hid.has(n)).slice(0, 6).forEach((n, k) => {
-      const x = lay.castleX + 6 + (k % 4) * 6, y = canalY + 18 + Math.floor(k / 4) * 6;
-      T.crate(c, x, y, 'workshop', null, true); tap(x, y, 5, 5, { kind: 'crate', n, at: 'stop', i: stops.length - 1 });
+    // Crates floating down to a lock's basin while its gate stands open.
+    floats = floats.filter(f => {
+      const pos = porterPos({ t0: f.t0, speed: 0.03, pts: f.pts }, t);
+      if (!pos) return false;
+      T.crate(c, pos[0] - 2, pos[1] - 2, 'workshop', null, true);
+      return true;
     });
+    T.destination(c, lay.castleX, canalY, t, fireworks); tap(lay.castleX - 4, canalY - 28, 46, H - canalY + 28, { kind: 'harbour' });
+    // The ship in the harbour, loaded with the next release; or the last one
+    // sailing off with what shipped, leaving a wake, then an empty one coming in.
+    if (stops.length) {
+      const at = shipAt(S, t, lay), bob = T.flies || reduce || !blink(t, 900) ? 0 : 1, oy = at.oy + bob;
+      if (at.leaving && T.flies) puffs(c, lay.castleX + 18, canalY - 12, t, ...T.steam);
+      else if (at.leaving) {
+        for (let x = lay.castleX + 4; x < lay.castleX + at.ox; x += 5) R(c, x, canalY + 12 + ((x >> 2) % 2), 3, 1, P.white);
+        tap(lay.castleX + 4, canalY + 8, Math.max(0, at.ox - 4), 8, { kind: 'harbour' });
+      }
+      const load = at.leaving ? S.voyage.cargo : cargo.filter(n => !carried.has(n) && !hid.has(n));
+      T.vessel(c, lay.castleX, canalY, t, at.ox, oy);
+      const [hx, hy, hw, hh] = T.hull;
+      tap(lay.castleX + hx + at.ox, canalY + hy + at.oy, hw, hh, at.leaving ? { kind: 'ship', at: 'away' } : { kind: 'ship' });
+      load.slice(0, SHIP_CAP).forEach((n, k) => {
+        const [x, y] = holdPos(lay, k, at.ox, oy);
+        T.crate(c, x, y, 'workshop', null, true);
+        if (!at.leaving) tap(x, y, 5, 5, { kind: 'crate', n, at: 'ship' });
+      });
+      if (load.length > SHIP_CAP) badge(c, Math.round(lay.castleX + T.holdBadge[0] + at.ox), Math.round(canalY + T.holdBadge[1] + oy), load.length - SHIP_CAP);
+    }
 
     porters = porters.filter(p => {
       const pos = porterPos(p, t);
       if (!pos) return false;
       person(c, pos[0] - 4, pos[1] - 11, p.seed, blink(t, 140) ? 'carrystep' : 'carry');
       T.crate(c, pos[0] - 2, pos[1] - 16, p.kind, p.pr, p.sealed);
-      tap(pos[0] - 4, pos[1] - 16, 8, 17, { kind: 'porter', seed: p.seed, n: p.issue });
+      tap(pos[0] - 4, pos[1] - 16, 8, 17, { kind: 'porter', seed: p.seed, n: p.issue, to: p.to });
       return true;
     });
     bubbles.forEach(([x, y, s]) => bubble(c, x, y, s));
@@ -1606,15 +1725,18 @@
     const b = barges.find(b => b.issues.includes(n));
     if (b) { const k = Math.min(b.issues.indexOf(n), 3); return { x: b.x + 4 + k * 5, y: b.y + 3 }; }
     const hid = new Set(barges.flatMap(b => b.issues));
+    const ci = cargoOf(v).filter(m => !hid.has(m)).indexOf(n);
+    if (ci >= 0) { const [x, y] = holdPos(lay, Math.min(ci, SHIP_CAP - 1)); return { x: x + 2, y: y + 2 }; }
     const qi = v.pipeline.quay.filter(m => !hid.has(m)).indexOf(n);
     if (qi >= 0) { const k = Math.min(qi, 5); return { x: lay.roadX + 8 + (k % 3) * 6, y: lay.quayY - 1 - Math.floor(k / 3) * 6 }; }
     const stops = v.pipeline.stops;
     for (let i = 0; i < stops.length; i++) {
       let k = stops[i].issues.filter(m => !hid.has(m)).indexOf(n);
       if (k < 0) continue;
+      // Shipped work has sailed: the trail ends at the harbour's lighthouse.
       return i < stops.length - 1
         ? (k = Math.min(k, 3), { x: lay.lockStart + i * 34 + 10 + (k % 2) * 6, y: lay.canalY + 20 + Math.floor(k / 2) * 6 })
-        : (k = Math.min(k, 5), { x: lay.castleX + 8 + (k % 4) * 6, y: lay.canalY + 20 + Math.floor(k / 4) * 6 });
+        : { x: lay.castleX + 31, y: lay.canalY - 24 };
     }
     return null;
   }
@@ -1684,11 +1806,11 @@
   }
 
   function drawVillage(c, sc, t) {
-    current = sc.v; L = sc.L; porters = sc.porters; fireworks = sc.fireworks;
+    current = sc.v; L = sc.L; porters = sc.porters; floats = sc.floats; fireworks = sc.fireworks; S = sc;
     hits = [];
     paint(c, t);
     sc.hits = hits; hits = null;
-    sc.porters = porters;
+    sc.porters = porters; sc.floats = floats;
   }
 
   /* A live banner has done its job: it fades over the first hour after this
@@ -1710,14 +1832,19 @@
   /* Fold a new model into its village's scene, starting the animations its
    * changes call for. */
   function updateScene(v, t) {
-    const sc = scenes[v.project] || (scenes[v.project] = { v: null, porters: [], fireworks: -1e9, lastDelivered: null, liveSince: {}, fade: {} });
+    const sc = scenes[v.project] || (scenes[v.project] = { v: null, porters: [], floats: [], gates: {}, voyage: null, fireworks: -1e9,
+      lastDelivered: null, lastRelease: null, liveSince: {}, fade: {} });
     fadeLive(sc, v);
     const lay = layout(v);
-    porters = sc.porters;
-    diff(sc.v, v, lay, t);
-    sc.porters = porters;
-    const delivered = v.pipeline.stops.length ? v.pipeline.stops[v.pipeline.stops.length - 1].issues.join(',') : '';
-    if (sc.lastDelivered !== null && sc.v && delivered !== sc.lastDelivered && delivered) sc.fireworks = t;
+    porters = sc.porters; floats = sc.floats;
+    diff(sc.v, v, lay, t, sc);
+    sc.porters = porters; sc.floats = floats;
+    // A new deployment at the last stop sails the ship. A village with no
+    // release to compare (a runtime's stages) still lights up when work arrives.
+    const rel = releaseOf(v), delivered = v.pipeline.stops.length ? v.pipeline.stops[v.pipeline.stops.length - 1].issues.join(',') : '';
+    const was = sc.lastRelease, sameSource = rel && was && rel.split(':')[0] === was.split(':')[0];
+    if (rel) { if (sc.v && sameSource && rel !== was) sail(sc, v, t); sc.lastRelease = rel; }
+    else if (!was && sc.lastDelivered !== null && sc.v && delivered !== sc.lastDelivered && delivered) sc.fireworks = t;
     sc.lastDelivered = delivered;
     sc.v = v; sc.L = lay;
     return sc;
@@ -1821,10 +1948,13 @@
     T.road(ctx, roadEnd, g.roadY - 3, g.W - 20 - roadEnd, 6);
 
     // Released work on its way up, until the platform's workers run it.
-    if (w.shipping.length) {
+    // The cart takes over from the ship: it sets off from the harbour as the
+    // ship sails off the dev village's edge, and none while the ship is still in sight.
+    const sailed = Ds.voyage ? Ds.voyage.t0 + SAIL : 0;
+    if (w.shipping.length && t >= sailed) {
       const pts = [[SIDE + Ds.L.castleX + 34, ry], [g.W - 12, ry], [g.W - 12, g.roadY], [roadEnd, g.roadY]];
       const len = pts.slice(1).reduce((n, p, k) => n + Math.hypot(p[0] - pts[k][0], p[1] - pts[k][1]), 0);
-      const d = reduce ? len / 2 : (t / 30) % len;
+      const d = reduce ? len / 2 : ((t - sailed) / 30) % len;
       const at = porterPos({ t0: 0, speed: 1, pts }, d) || pts[0];
       cart(ctx, at[0] - 7, at[1] - 6, w.shipping.length);
     }
@@ -1960,10 +2090,17 @@
       isSha(s.sha) ? link(`Commit ${String(s.sha).slice(0, 7)}`, `${repo}/commit/${s.sha}`) : null
     ].filter(Boolean);
   }
+  /* The GitHub Release a stop runs: the page its deployment links, else its tag's page. */
+  function releaseLink(v, s, words = 'Release') {
+    if (!s || !s.tag && !s.url) return null;
+    const repo = repoUrl(v), url = s.url || (repo ? `${repo}/releases/tag/${encodeURIComponent(s.tag)}` : null);
+    return link(`${words}${s.tag ? ' ' + s.tag : ''}`, url);
+  }
   function crateWhere(o, v, theme) {
     const stops = v.pipeline.stops;
     if (o.at === 'backlog') return `waiting at the ${theme.labels.docks.toLowerCase()}`;
     if (o.at === 'quay') return `landed on ${v.pipeline.integration || 'the integration branch'}, at the ${theme.labels.quay.toLowerCase()}`;
+    if (o.at === 'ship') return `on the ${theme.labels.ship.toLowerCase()}, waiting for the next release`;
     if (o.at === 'stop') return o.i === stops.length - 1 ? `shipped to ${stops[o.i].name}` : `at ${stops[o.i].name}`;
     return '';
   }
@@ -2011,7 +2148,7 @@
         const h = v.houses.find(h => h.id === o.seed), n = o.n || (h && h.issue);
         const it = n ? issueOf(v, n) : {};
         return { title: `${h ? h.role : 'Porter'} · carrying`, line: n ? `#${n} ${it.title}` : '',
-          meta: [o.n ? `Taking the finished work to the ${theme.labels.quay.toLowerCase()}` : 'Bringing a claimed issue from the backlog to its house'],
+          meta: [o.to === 'ship' ? `Loading the finished work onto the ${theme.labels.ship.toLowerCase()}` : o.n ? `Taking the finished work to the ${theme.labels.quay.toLowerCase()}` : 'Bringing a claimed issue from the backlog to its house'],
           links: [h && sessionOf(h), n ? link(issueLabel(n), it.url) : null] };
       }
       case 'crate': {
@@ -2035,7 +2172,21 @@
         const rel = v.pipeline.release, repo = repoUrl(v);
         const relLink = rel && repo ? link(`Release ${isSha(rel) ? rel.slice(0, 7) : rel}`, isSha(rel) ? `${repo}/commit/${rel}` : `${repo}/releases/tag/${encodeURIComponent(rel)}`) : null;
         return { title: `${theme.labels.castle}${last ? ' · ' + last.name : ''}`, line: last ? (runtime ? 'Completed in the last 24 hours' : `What shipped to ${last.name}`) : 'Nothing ships yet',
-          meta: [rel ? `Release: ${rel}` : null, last && !runtime ? `Runs: ${sourceWords(last)}` : null], items: last ? issueItems(v, last.issues) : [], links: [relLink, ...stopLinks(v, last)] };
+          meta: [last && last.tag ? `Last release: ${last.tag}` : rel ? `Release: ${rel}` : null, last && !runtime ? `Runs: ${sourceWords(last)}` : null],
+          items: last ? issueItems(v, last.issues) : [], links: [releaseLink(v, last), relLink, ...stopLinks(v, last)] };
+      }
+      case 'ship': {
+        if (!last) return null;
+        const name = releaseName(v, last);
+        if (o.at === 'away') {
+          const gone = (sc.voyage || {}).cargo || [];
+          return { title: `${theme.labels.ship} · ${theme.labels.sails}`, line: `Shipped ${name || 'a release'} to ${last.name}`, items: issueItems(v, gone), links: [releaseLink(v, last)] };
+        }
+        const cargo = cargoOf(v), n = cargo.length, repo = repoUrl(v), br = v.pipeline.integration;
+        return { title: `${theme.labels.ship} · next release`, line: `Next release: ${n} ${n === 1 ? work : work + 's'}${name ? ' since ' + name : ''}`,
+          meta: [`${theme.labels.sails.charAt(0).toUpperCase() + theme.labels.sails.slice(1)} when ${last.name} is next deployed`],
+          items: issueItems(v, cargo),
+          links: [releaseLink(v, last, 'Last release'), repo && last.tag && br ? link(`Changes since ${last.tag}`, `${repo}/compare/${encodeURIComponent(last.tag)}...${encodeURIComponent(br)}`) : null] };
       }
       case 'canal':
         return { title: runtime ? 'Pipeline' : 'Canal', line: `From ${v.pipeline.integration || 'integration'} through ${stops.map(s => s.name).join(', ') || 'no stages'}`,

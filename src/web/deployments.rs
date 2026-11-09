@@ -23,6 +23,9 @@ pub struct Deployment {
     pub sha: String,
     #[serde(default)]
     pub created_at: String,
+    /// `tools/release.sh` writes "Release vX.Y.Z" here.
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 /// One entry of `GET /repos/{owner}/{repo}/deployments/{id}/statuses`.
@@ -32,6 +35,25 @@ pub struct DeploymentStatus {
     pub state: String,
     #[serde(default)]
     pub created_at: String,
+    /// Where the deployment's output is: `tools/release.sh` links the GitHub Release.
+    #[serde(default)]
+    pub log_url: Option<String>,
+}
+
+/// What an environment runs according to its newest successful deployment.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Deployed {
+    pub sha: String,
+    /// The release tag, when the deployment says "Release <tag>".
+    pub tag: Option<String>,
+    /// The page the successful status links to, such as the GitHub Release.
+    pub url: Option<String>,
+}
+
+/// The tag in a deployment description of the form "Release <tag>".
+pub fn release_tag(description: Option<&str>) -> Option<String> {
+    let tag = description?.trim().strip_prefix("Release ")?.trim();
+    (!tag.is_empty() && !tag.contains(char::is_whitespace)).then(|| tag.to_string())
 }
 
 /// Parse a deployments listing. Anything unreadable is no deployments.
@@ -56,19 +78,29 @@ fn newest_first(deployments: &[Deployment]) -> Vec<&Deployment> {
 /// later marked `inactive` (superseded), failed, or is still pending is not
 /// what the environment runs.
 fn succeeded(statuses: &[DeploymentStatus]) -> bool {
-    statuses
-        .iter()
-        .max_by(|a, b| a.created_at.cmp(&b.created_at))
-        .is_some_and(|s| s.state == "success")
+    latest(statuses).is_some_and(|s| s.state == "success")
 }
 
-/// The sha of the newest deployment whose latest status is `success`, given
-/// each deployment's statuses by id. Deployments without statuses are skipped.
+fn latest(statuses: &[DeploymentStatus]) -> Option<&DeploymentStatus> {
+    statuses.iter().max_by(|a, b| a.created_at.cmp(&b.created_at))
+}
+
+/// The newest deployment whose latest status is `success`, given each
+/// deployment's statuses by id. Deployments without statuses are skipped.
+pub fn newest_deployed(deployments: &[Deployment], statuses: &HashMap<u64, Vec<DeploymentStatus>>) -> Option<Deployed> {
+    newest_first(deployments).into_iter().find_map(|d| {
+        let s = statuses.get(&d.id).filter(|s| succeeded(s))?;
+        Some(Deployed {
+            sha: d.sha.clone(),
+            tag: release_tag(d.description.as_deref()),
+            url: latest(s).and_then(|s| s.log_url.clone()).filter(|u| u.starts_with("https://")),
+        })
+    })
+}
+
+/// The sha of [`newest_deployed`].
 pub fn newest_successful(deployments: &[Deployment], statuses: &HashMap<u64, Vec<DeploymentStatus>>) -> Option<String> {
-    newest_first(deployments)
-        .into_iter()
-        .find(|d| statuses.get(&d.id).is_some_and(|s| succeeded(s)))
-        .map(|d| d.sha.clone())
+    newest_deployed(deployments, statuses).map(|d| d.sha)
 }
 
 /// Percent-encode an environment name for a query string.
@@ -88,9 +120,9 @@ async fn gh_api(transport: &ServerTransport, repo: &Path, path: &str) -> Option<
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-/// The commit `environment` runs according to GitHub Deployments, or `None`
-/// when it has no successful deployment (or GitHub can't be asked).
-pub async fn deployed_sha(transport: &ServerTransport, repo: &Path, environment: &str) -> Option<String> {
+/// What `environment` runs according to GitHub Deployments, or `None` when it
+/// has no successful deployment (or GitHub can't be asked).
+pub async fn deployed(transport: &ServerTransport, repo: &Path, environment: &str) -> Option<Deployed> {
     let listing = gh_api(
         transport,
         repo,
@@ -111,7 +143,7 @@ pub async fn deployed_sha(transport: &ServerTransport, repo: &Path, environment:
         }
     }
     // The sha is handed to git; anything but a commit id is no answer.
-    newest_successful(&deployments, &statuses).filter(|sha| !sha.is_empty() && sha.chars().all(|c| c.is_ascii_hexdigit()))
+    newest_deployed(&deployments, &statuses).filter(|d| !d.sha.is_empty() && d.sha.chars().all(|c| c.is_ascii_hexdigit()))
 }
 
 #[cfg(test)]
@@ -133,9 +165,9 @@ mod tests {
     fn parses_deployments_and_statuses_from_the_api() {
         let d = parse_deployments(DEPLOYMENTS);
         assert_eq!(d.len(), 4);
-        assert_eq!(d[0], Deployment { id: 30, sha: "ccc333".into(), created_at: "2026-11-03T10:00:00Z".into() });
+        assert_eq!(d[0], Deployment { id: 30, sha: "ccc333".into(), created_at: "2026-11-03T10:00:00Z".into(), description: None });
         let s = parse_statuses(r#"[{"id": 1, "state": "success", "created_at": "2026-11-01T10:05:00Z", "environment": "prod"}]"#);
-        assert_eq!(s, vec![DeploymentStatus { state: "success".into(), created_at: "2026-11-01T10:05:00Z".into() }]);
+        assert_eq!(s, vec![DeploymentStatus { state: "success".into(), created_at: "2026-11-01T10:05:00Z".into(), log_url: None }]);
         assert!(parse_deployments("not json").is_empty());
         assert!(parse_deployments(r#"{"message": "Not Found"}"#).is_empty());
         assert!(parse_statuses("").is_empty());
@@ -181,6 +213,34 @@ mod tests {
         assert_eq!(newest_successful(&[], &HashMap::new()), None);
         let s = statuses(&[(30, r#"[{"state": "error", "created_at": "2026-11-03T10:05:00Z"}]"#), (20, "[]")]);
         assert_eq!(newest_successful(&d, &s), None);
+    }
+
+    #[test]
+    fn a_release_deployment_names_its_tag_and_page() {
+        let d = parse_deployments(
+            r#"[{"id": 40, "sha": "ddd444", "created_at": "2026-11-04T10:00:00Z", "description": "Release v0.5.0"},
+                {"id": 30, "sha": "ccc333", "created_at": "2026-11-03T10:00:00Z", "description": "agents-tui installed on nuc-1"}]"#,
+        );
+        let s = statuses(&[
+            (40, r#"[{"state": "success", "created_at": "2026-11-04T10:05:00Z", "log_url": "https://github.com/o/r/releases/tag/v0.5.0"}]"#),
+            (30, r#"[{"state": "success", "created_at": "2026-11-03T10:05:00Z"}]"#),
+        ]);
+        assert_eq!(
+            newest_deployed(&d, &s),
+            Some(Deployed { sha: "ddd444".into(), tag: Some("v0.5.0".into()), url: Some("https://github.com/o/r/releases/tag/v0.5.0".into()) })
+        );
+        // Not a release: no tag, and no page to link.
+        assert_eq!(newest_deployed(&d[1..], &s), Some(Deployed { sha: "ccc333".into(), tag: None, url: None }));
+    }
+
+    #[test]
+    fn release_tags_come_only_from_release_descriptions() {
+        assert_eq!(release_tag(Some("Release v1.2.3")), Some("v1.2.3".into()));
+        assert_eq!(release_tag(Some("  Release v1.2.3 ")), Some("v1.2.3".into()));
+        assert_eq!(release_tag(Some("Release ")), None);
+        assert_eq!(release_tag(Some("Release two words")), None);
+        assert_eq!(release_tag(Some("agents-tui installed on nuc-1")), None);
+        assert_eq!(release_tag(None), None);
     }
 
     #[test]

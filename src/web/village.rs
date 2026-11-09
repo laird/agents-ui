@@ -223,6 +223,12 @@ pub struct Stop {
     /// The commit this stop runs, when a deployment names it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha: Option<String>,
+    /// The release this stop runs (e.g. `v0.5.0`), when its deployment says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+    /// A page about what this stop runs, such as its GitHub Release.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
 }
 
 /// How landed work moves through the environments, from `.autocoder.json`'s
@@ -557,7 +563,7 @@ pub fn sentinel_gate(envs: &[Environment], green: Option<Vec<String>>, tip: Opti
         (Some(g), Some(tip)) if g.first() == Some(tip) => "green",
         _ => "pending",
     };
-    let stop = StopHistory { source: StopSource::Branch, sha: None, commits: green.map(|v| v.into_iter().collect()) };
+    let stop = StopHistory { source: StopSource::Branch, commits: green.map(|v| v.into_iter().collect()), ..StopHistory::default() };
     (state.to_string(), Some(stop))
 }
 
@@ -613,6 +619,9 @@ pub fn parse_tip_ref(refname: &str, integration: &str) -> Option<(String, u32)> 
 pub struct StopHistory {
     pub source: StopSource,
     pub sha: Option<String>,
+    /// The deployment's release tag and page, passed on to the stop.
+    pub tag: Option<String>,
+    pub url: Option<String>,
     /// The commits the stop contains, or `None` when nothing says (no
     /// deployment, no ref): the stop is unknown.
     pub commits: Option<HashSet<String>>,
@@ -628,7 +637,7 @@ pub fn stop_history(deployed: Option<(String, Vec<String>)>, branch: Option<Vec<
         (None, None) => (StopSource::Unknown, None, None),
     };
     let head = commits.as_ref().and_then(|v| v.first().cloned());
-    (StopHistory { source, sha, commits: commits.map(|v| v.into_iter().collect()) }, head)
+    (StopHistory { source, sha, commits: commits.map(|v| v.into_iter().collect()), ..StopHistory::default() }, head)
 }
 
 /// Where each pushed tip ended up.
@@ -655,6 +664,8 @@ pub fn place_tips(tips: &[(String, u32)], stop_names: &[String], stops: &[StopHi
             issues: Vec::new(),
             source: if h.commits.is_some() { h.source } else { StopSource::Unknown },
             sha: h.sha.clone(),
+            tag: h.tag.clone(),
+            url: h.url.clone(),
         })
         .collect();
     let mut reached_by = HashMap::new();
@@ -768,15 +779,22 @@ pub async fn read_pipeline(transport: &ServerTransport, repo: &Path) -> Pipeline
         // A deployment says what the environment runs; its branch ref is the
         // fallback. A deployed commit this clone hasn't fetched can't place
         // anything, so it falls back too.
-        let deployed = match super::deployments::deployed_sha(transport, repo, &env.name).await {
-            Some(sha) => history(sha.clone()).await.map(|commits| (sha, commits)),
+        let record = super::deployments::deployed(transport, repo, &env.name).await;
+        let deployed = match &record {
+            Some(d) => history(d.sha.clone()).await.map(|commits| (d.sha.clone(), commits)),
             None => None,
         };
         let branch = match deployed {
             Some(_) => None,
             None => history(format!("origin/{}", env.branch)).await,
         };
-        let (stop, head) = stop_history(deployed, branch);
+        let (mut stop, head) = stop_history(deployed, branch);
+        if stop.source == StopSource::Deployment {
+            if let Some(d) = record {
+                stop.tag = d.tag;
+                stop.url = d.url;
+            }
+        }
         release = head;
         stops.push(stop);
     }
@@ -1079,7 +1097,7 @@ mod tests {
     }
 
     fn set(items: &[&str]) -> StopHistory {
-        StopHistory { source: StopSource::Branch, sha: None, commits: Some(items.iter().map(|s| s.to_string()).collect()) }
+        StopHistory { source: StopSource::Branch, commits: Some(items.iter().map(|s| s.to_string()).collect()), ..StopHistory::default() }
     }
 
     fn deployed(sha: &str, items: &[&str]) -> StopHistory {
@@ -1087,7 +1105,7 @@ mod tests {
     }
 
     fn unknown() -> StopHistory {
-        StopHistory { source: StopSource::Unknown, sha: None, commits: None }
+        StopHistory { source: StopSource::Unknown, ..StopHistory::default() }
     }
 
     #[test]
@@ -1184,7 +1202,7 @@ mod tests {
 
     #[test]
     fn stop_source_serializes_and_old_stops_still_parse() {
-        let stop = Stop { name: "uat".into(), issues: vec![461], source: StopSource::Unknown, sha: None };
+        let stop = Stop { name: "uat".into(), issues: vec![461], source: StopSource::Unknown, ..Stop::default() };
         let json = serde_json::to_value(&stop).unwrap();
         assert_eq!(json, serde_json::json!({"name": "uat", "issues": [461], "source": "unknown"}));
         let deployed = Stop { source: StopSource::Deployment, sha: Some("9b1e440".into()), ..stop.clone() };
@@ -1202,8 +1220,8 @@ mod tests {
         let pipeline = Pipeline {
             stops: vec![
                 Stop { name: "master-green".into(), issues: vec![], ..Stop::default() },
-                Stop { name: "uat".into(), issues: vec![3], source: StopSource::Deployment, sha: Some("abc1234".into()) },
-                Stop { name: "prod".into(), issues: vec![], source: StopSource::Unknown, sha: None },
+                Stop { name: "uat".into(), issues: vec![3], source: StopSource::Deployment, sha: Some("abc1234".into()), ..Stop::default() },
+                Stop { name: "prod".into(), issues: vec![], source: StopSource::Unknown, ..Stop::default() },
             ],
             promotion: Promotion::Feature,
             reached: HashMap::from([(3, 2)]),

@@ -161,7 +161,9 @@ Matching ignores case. Anything else counts as `unknown`.
 - `landed`: task ids that have landed but not yet reached the first stage. These wait at the quay.
 - `stages`: in order, each `{name, tasks}`. A task appears in the furthest stage it has reached. A stage may also give:
   - `source`: what says what the stage runs: `deployment` (a deployment record), `branch` (a branch or ref, the default), or `unknown` (nothing does, so the village can't tell, which is not the same as "nothing has reached it");
-  - `sha`: the commit the stage runs, when a deployment names it.
+  - `sha`: the commit the stage runs, when a deployment names it;
+  - `tag`: the release the stage runs, such as `v0.5.0` (the harbour's ship says "next release: N issues since v0.5.0");
+  - `url`: a page about that release, such as its GitHub Release.
 - `release`: the version at the last stage. A world compares it with the platform's `builds`, and either may be a prefix of the other (at least 7 characters).
 - `promotion`: `subtask` (the default: each task moves through the stages on its own) or `feature` (a feature's landed tasks wait at the quay and move together).
 - `merge`: the merge gate on the host that lands the work:

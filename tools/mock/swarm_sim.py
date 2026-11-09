@@ -18,6 +18,13 @@ workers) against them:
 The state agents-tui can't read from git goes to <dir>/state, where the
 `herdr` and `gh` shims in tools/mock/bin serve it.
 
+Every prod release of "shop" is recorded the way tools/release.sh records
+one: a successful GitHub Deployment of the commit to prod, described as
+"Release v0.N.0" and linking its GitHub Release, so the village's ship
+sails with a tag. To cut a release now instead of waiting for the next one:
+
+    touch DEMO/state/release-now
+
 Linked to the platform (temporal_sim.py): every prod promotion of "shop"
 writes the released commit to <dir>/state/release, and every line the
 platform appends to <dir>/state/incidents.jsonl becomes an `incident` issue
@@ -134,6 +141,8 @@ class Swarm:
         self.manager_subagents = []
         self.next_manager_change = 0
         self.story = None  # FeatureStory, for "shop" with --feature
+        self.releases = []  # shop's prod deployments, newest first, without --feature
+        self.next_tag = 1
 
     # -- setup ------------------------------------------------------------
     def setup(self):
@@ -271,6 +280,31 @@ class Swarm:
         git(self.repo, "fetch", "-q", "origin")
         if env == "env/prod":
             self.write_release()
+            if self.name == "shop" and not FEATURE:
+                self.record_release(git(self.repo, "rev-parse", "refs/remotes/origin/env/prod"), time.time())
+
+    def release_deployment(self, deploys, sha, t):
+        """Record a release of sha as tools/release.sh does: a new successful
+        deployment described "Release <tag>", the previous one made inactive."""
+        if deploys and deploys[0]["sha"] == sha:
+            return False
+        tag = f"v0.{self.next_tag}.0"
+        self.next_tag += 1
+        if deploys:
+            deploys[0]["statuses"].insert(0, {"state": "inactive", "created_at": now_iso(t)})
+        deploys.insert(0, {"id": 5000 + self.next_tag, "sha": sha, "environment": "prod", "created_at": now_iso(t),
+                           "description": f"Release {tag}",
+                           "statuses": [{"state": "success", "created_at": now_iso(t), "log_url": f"{REPO_URL}/releases/tag/{tag}"},
+                                        {"state": "in_progress", "created_at": now_iso(t - 1)}]})
+        return True
+
+    def record_release(self, sha, t):
+        if self.release_deployment(self.releases, sha, t):
+            path = self.state / "deployments" / f"{self.name}.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"prod": self.releases[:10]}))
+            tmp.replace(path)
 
     def write_release(self):
         sha = git(self.repo, "rev-parse", "refs/remotes/origin/env/prod")
@@ -419,7 +453,7 @@ class FeatureStory:
         if t >= self.next_prod:
             uat = self.current("uat", t)
             if uat and uat != self.current("prod", t):
-                self.deploy("prod", uat, t)
+                s.release_deployment(self.deploys["prod"], uat, t)
                 git(s.repo, "push", "-q", "-f", "origin", f"{uat}:refs/heads/env/prod")
                 git(s.repo, "fetch", "-q", "origin")
                 s.write_release()
@@ -502,8 +536,17 @@ def main():
     incident_offset = 0
     print(f"simulating {', '.join(s.name for s in swarms)} in {root}", flush=True)
     next_green, next_staging, next_prod, red_until, next_red = 0, 0, 0, 0, time.time() + 150
+    # Room for the ship to load up between releases; the story keeps its pace.
+    prod_every = 35 if STORY else 75
+    release_now = root / "state" / "release-now"
     while True:
         t = time.time()
+        if release_now.exists():
+            # Cut a release now: staging catches up with green, and prod with staging.
+            release_now.unlink()
+            next_staging = next_prod = 0
+            if shop.story:
+                shop.story.next_dev = shop.story.next_uat = shop.story.next_prod = 0
         for s in swarms:
             s.tick(t)
         incident_offset = swarms[0].file_incidents(incident_offset)
@@ -521,7 +564,7 @@ def main():
                 next_staging = t + 20
             if t >= next_prod:
                 shop.promote("env/prod", "env/staging")
-                next_prod = t + 35
+                next_prod = t + prod_every
         state = root / "state"
         state.mkdir(parents=True, exist_ok=True)
         tmp = state / "herdr.tmp"

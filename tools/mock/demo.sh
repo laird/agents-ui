@@ -19,6 +19,7 @@
 #   FEATURE=1 tools/mock/demo.sh       # two features followed from spec to prod (banners, strip, stuck, unknown, live)
 #   FEATURE=1 PROMOTION=feature tools/mock/demo.sh   # ... promoted as whole features (one barge)
 #   PORT=8080 tools/mock/demo.sh
+#   touch "$AGENTS_UI_DEMO_DIR/state/release-now"   # cut a release of "shop" now: its ship sails
 #   tools/mock/demo.sh --source issues=none   # extra flags go to agents-tui
 #
 # Everything lives in a temporary directory (AGENTS_UI_DEMO_DIR to reuse one),
@@ -66,6 +67,7 @@ echo "Village:    http://127.0.0.1:$PORT/village"
 echo "Platform:   http://127.0.0.1:$PORT/village#$platform"
 echo "World:      http://127.0.0.1:$PORT/village#world:shop"
 echo "Demo files: $DEMO"
+echo "Release:    touch $DEMO/state/release-now   (the ship sails)"
 HOME="$DEMO/home" PATH="$HERE/bin:$PATH" "$BIN" --headless --web-port "$PORT" "${runtime[@]}" \
   --framework "$ROOT/tools/adapters/example-report.json" \
   --framework "exec:$ROOT/tools/adapters/adapter-template.py" "$@" & pids+=($!)

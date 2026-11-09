@@ -1622,6 +1622,43 @@ mod tests {
     }
 
     #[test]
+    fn village_html_loads_the_ship_and_sails_it_on_a_release() {
+        let body = VILLAGE_HTML;
+        // Loading: the stop before the harbour (or the quay) is the ship's cargo, capped with a count.
+        assert!(body.contains("const cargoStop = v => v.pipeline.stops.length - 2; // -1: the quay"));
+        assert!(body.contains("return i < -1 ? [] : i < 0 ? v.pipeline.quay : v.pipeline.stops[i].issues;"));
+        assert!(body.contains("const SAIL = 4200, ARRIVE = 3200, GATE_OPEN = 2400, SHIP_CAP = 6;"));
+        assert!(body.contains("if (load.length > SHIP_CAP) badge("));
+        assert!(body.contains("tap(x, y, 5, 5, { kind: 'crate', n, at: 'ship' });"));
+        // Porters carry newly arrived work to the ship; lock gates open as crates pass.
+        assert!(body.contains("to: 'ship', pts: toShip(from, lay) });"));
+        assert!(body.contains("for (let g = was + 1; g <= i; g++) sc.gates[g] = t;"));
+        assert!(body.contains("const open = !reduce && t - (S.gates[i] ?? -1e9) < GATE_OPEN;"));
+        // Sailing: from the last stop's sha, once per change, never on first load.
+        assert!(body.contains("const last = lastStop(v), id = last && (last.sha || last.tag || v.pipeline.release);"));
+        assert!(body.contains("return id ? `${last.source || 'branch'}:${id}` : null;"));
+        assert!(body.contains("if (rel) { if (sc.v && sameSource && rel !== was) sail(sc, v, t); sc.lastRelease = rel; }"));
+        assert!(!body.contains("[stops.length - 1].issues.filter(n => !hid.has(n)).slice(0, 6)"), "shipped crates no longer pile up in the harbour");
+        // Reduced motion: no voyage, just the toast.
+        assert!(body.contains("sc.voyage = reduce ? null : { t0: t, cargo: shipped };"));
+        assert!(body.contains("toast(`${v.project}: shipped ${releaseName(v, last) || 'a release'}"));
+        assert!(body.contains(r#"<div class="win toast" id="toast" hidden role="status"></div>"#));
+        // Both themes have a vessel and a hold; the rocket lifts off, the ship sails east.
+        assert!(body.contains("vessel: ship,"));
+        assert_eq!(body.matches("hold: [[").count(), 3, "medieval, modern and future each have a hold");
+        assert_eq!(body.matches("vessel(c, x, cy, t, ox, oy) {").count(), 2, "the rocket and the shuttle");
+        assert_eq!(body.matches(" flies: true,").count(), 2, "the rocket and the shuttle lift off; the ship sails");
+        assert!(body.contains("oy: flies ? -p * (lay.canalY + 64) : 0"));
+        // Clicking: the ship's cargo and next release, a departed ship, the harbour's last release.
+        assert!(body.contains("line: `Next release: ${n} ${n === 1 ? work : work + 's'}${name ? ' since ' + name : ''}`"));
+        assert!(body.contains("line: `Shipped ${name || 'a release'} to ${last.name}`"));
+        assert!(body.contains("`${repo}/compare/${encodeURIComponent(last.tag)}...${encodeURIComponent(br)}`"));
+        assert!(body.contains("const repo = repoUrl(v), url = s.url || (repo ? `${repo}/releases/tag/${encodeURIComponent(s.tag)}` : null);"));
+        // Worlds: the release cart sets off as the ship leaves the map.
+        assert!(body.contains("const sailed = Ds.voyage ? Ds.voyage.t0 + SAIL : 0;"));
+    }
+
+    #[test]
     fn village_html_links_only_what_it_knows() {
         let body = VILLAGE_HTML;
         // The repo's pages only when a real issue URL names the repo.

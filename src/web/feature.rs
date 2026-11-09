@@ -286,7 +286,7 @@ mod tests {
     }
 
     fn stop(name: &str, issues: &[u32], source: StopSource) -> Stop {
-        Stop { name: name.into(), issues: issues.to_vec(), source, sha: None }
+        Stop { name: name.into(), issues: issues.to_vec(), source, ..Stop::default() }
     }
 
     /// A village whose pipeline has a green ref, dev, uat and prod.
