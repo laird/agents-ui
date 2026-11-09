@@ -1,4 +1,4 @@
-/* Things and scenery: crates, speech bubbles, grass, paths, water, trees,
+/* Things and scenery: crates, speech bubbles, "+N" badges, grass, paths, water, trees,
  * the castle, the board, the locks, the harbour, the ship and the supply boat. */
 import { state } from './state.js';
 import { KINDCOL, NOTECOL, P, R, STATE, blink, glassOf, hash, shadow } from './palette.js';
@@ -159,4 +159,13 @@ export function ship(c, x, cy, t, ox, oy) {
   R(c, x + 12, cy - 14, 1, 18, P.woodD);
   R(c, x + 6, cy - 12, 13, 12, P.o); R(c, x + 7, cy - 11, 11, 10, P.sail); R(c, x + 12, cy - 11, 1, 10, P.millD);
   R(c, x + 13, cy - 17, 5, 3, P.o); R(c, x + 13, cy - 16, 4, 1, '#804098');
+}
+
+const DIGITS = ['111101101101111', '010110010010111', '111001111100111', '111001111001111', '101101111001001',
+  '111100111001111', '111100111101111', '111001001001001', '111101111101111', '111101111001111'];
+/* A gold tag reading "+N" in a 3x5 pixel font. */
+export function badge(c, x, y, n) {
+  const glyphs = ['000010111010000', ...String(n).split('').map(d => DIGITS[+d])], w = glyphs.length * 4 + 1;
+  R(c, x - 1, y - 1, w + 2, 7, P.o); R(c, x, y, w, 5, P.gold);
+  glyphs.forEach((g, j) => { for (let k = 0; k < 15; k++) if (g[k] === '1') R(c, x + 1 + j * 4 + (k % 3), y + Math.floor(k / 3), 1, 1, P.o); });
 }

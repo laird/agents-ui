@@ -1,0 +1,131 @@
+/* ---------- Layout ----------
+ * Where everything stands on a village's map, the ground it stands on, and
+ * where each village shown sits on the canvas (alone, or both halves of a
+ * world). */
+import { state } from './state.js';
+import { FEATURE_COLS, hash, shadow } from './palette.js';
+import { THEMES } from './themes/registry.js';
+import { registerLayer } from './registry.js';
+
+export const cv = document.getElementById('map'), ctx = cv.getContext('2d');
+
+export const LW = 20, LH = 26, RD = 6, DOCK_W = 64;
+export function layout(v) {
+  const n = v.houses.length;
+  const per = Math.max(1, Math.ceil(Math.sqrt(Math.max(n, 1) / 2)));
+  const rows = Math.max(1, Math.ceil(n / (2 * per)));
+  const cx0 = DOCK_W + 8;
+  const vw = Math.max(per * LW * 2 + RD, 72);
+  const roadX = cx0 + Math.floor((vw - RD) / 2);
+  const hallX = roadX + RD / 2 - 16;
+  const top = 60;
+  const lots = [];
+  for (let i = 0; i < rows * 2 * per; i++) {
+    const r = Math.floor(i / (2 * per)), j = i % (2 * per), side = j % 2, pos = Math.floor(j / 2);
+    const x = side === 0 ? roadX - (pos + 1) * LW + 2 : roadX + RD + pos * LW + 2;
+    lots.push({ x, y: top + r * LH, lane: top + r * LH + 18 });
+  }
+  const quayY = top + rows * LH + 4;
+  const canalY = quayY + 8;
+  // Every stop but the last is a lock; the last stop is the castle.
+  const locks = Math.max(0, v.pipeline.stops.length - 1);
+  const lockStart = roadX + 40;
+  const castleX = lockStart + locks * 34 + 6;
+  const forestX = Math.max(cx0 + vw + 6, hallX + 64);
+  // Feature banners stand in a strip cleared out of the forest, east of the
+  // houses; the map widens if they need the room. No features, no strip.
+  const banners = (v.features || []).map((f, k) => ({ f, x: forestX + 12 + k * 30, y: 14, col: FEATURE_COLS[k % FEATURE_COLS.length] }));
+  const W = Math.max(cx0 + vw + 40, roadX + 70, castleX + 46, banners.length ? forestX + 12 + banners.length * 30 : 0);
+  const H = canalY + 34;
+  // What's built on: river, docks, plaza, roads, house rows, canal and its
+  // stations. Every free 9×8 cell may get a decoration.
+  const taken = [
+    [0, 0, W, 14], [4, 8, 62, 46], [4, 46, cx0 + vw, 14], [hallX - 10, 4, 74, 46],
+    [roadX - 2, 46, RD + 4, quayY - 40], [roadX - 18, quayY - 12, W, H],
+    [forestX - 2, 12, W, canalY - 46]
+  ];
+  for (let r = 0; r < rows; r++) {
+    const left = roadX - per * LW, right = roadX + RD + per * LW;
+    taken.push([left - 4, top + r * LH - 10, right - left + 8, LH + 4]);
+  }
+  const free = (x, y, w, h) => !taken.some(([tx, ty, tw, th]) => x < tx + tw && x + w > tx && y < ty + th && y + h > ty);
+  // Big free ground grows small groves; what's left gets a few props. The
+  // prop kind drifts slowly across the map, so neighbours form a garden
+  // (flowerbeds together, rocks together) instead of random clutter.
+  const decor = [];
+  for (let y = 16; y < H - 18; y += 15) for (let x = 6; x < W - 16; x += 14) {
+    if (!free(x, y, 14, 15) || hash(x * 7, y * 3) > 0.45) continue;
+    decor.push({ x: x + Math.floor(hash(y, x) * 3), y: y + Math.floor(hash(x, y) * 2), tree: true });
+    taken.push([x, y, 14, 15]);
+  }
+  for (let y = 16; y < H - 10; y += 9) for (let x = 6; x < W - 14; x += 11) {
+    if (!free(x, y, 11, 9) || hash(x * 3, y * 5) > 0.2) continue;
+    const zone = Math.floor(hash(x >> 5, y >> 5) * 6), k = hash(x + 11, y + 7) < 0.7 ? zone : Math.floor(hash(y, x + 3) * 6);
+    decor.push({ x: x + Math.floor(hash(y, x) * 4), y: y + Math.floor(hash(x, y + 1) * 3), k });
+  }
+  return { per, rows, cx0, vw, roadX, hallX, top, lots, quayY, canalY, lockStart, castleX, W, H, decor, banners };
+}
+/* Where backlog crate i rests at the docks. */
+export const slotPos = i => ({ x: 10 + (i % 8) * 6, y: 22 + Math.floor(i / 8) * 6 });
+/* The strip cleared out of the forest for the feature banners. */
+export function inBannerStrip(lay, x, y) {
+  const b = lay.banners;
+  return b.length > 0 && y < 48 && x >= b[0].x - 14 && x <= b[b.length - 1].x + 22;
+}
+
+/* Where a walk along `pts` is `t - p.t0` after it set off at `p.speed`, or null once over. */
+export function porterPos(p, t) {
+  let d = (t - p.t0) * p.speed;
+  for (let k = 0; k < p.pts.length - 1; k++) {
+    const [ax, ay] = p.pts[k], [bx, by] = p.pts[k + 1], len = Math.hypot(bx - ax, by - ay);
+    if (d <= len) return [ax + (bx - ax) * d / len, ay + (by - ay) * d / len];
+    d -= len;
+  }
+  return null;
+}
+
+/* A world stacks its platform over its dev village, with a margin each side
+ * for the river down and the road up. */
+export const SIDE = 24, GAP = 28;
+export const otherTheme = () => THEMES[state.T.pair] || THEMES.medieval;
+export function worldGeom(Ps, Ds) {
+  const W = Math.max(Ps.L.W, Ds.L.W) + 2 * SIDE, devTop = Ps.L.H + GAP;
+  return { W, H: devTop + Ds.L.H, devTop, srcY: Ps.L.top, roadY: 53 };
+}
+/* The scenes on screen and where each sits on the canvas. */
+export function shownScenes() {
+  const { view, scenes, worlds } = state;
+  if (!view) return [];
+  if (!view.world) { const sc = scenes[view.village]; return sc && sc.v ? [[sc, 0, 0]] : []; }
+  const w = worlds.find(x => x.name === view.world), Ps = w && scenes[w.platform], Ds = w && scenes[w.dev];
+  if (!Ps || !Ds || !Ps.v || !Ds.v) return [];
+  return [[Ps, SIDE, 0], [Ds, SIDE, worldGeom(Ps, Ds).devTop]];
+}
+/* The theme a shown scene is drawn in: a world's platform takes the other one. */
+export const themeAt = oy => (state.view.world && oy === 0 ? otherTheme() : state.T);
+
+/* The ground: grass, the river and the docks' yard. */
+registerLayer({ z: 0, draw(c, { lay }, t) {
+  const { W, H } = lay;
+  state.T.ground(c, 0, 0, W, H);
+  if (state.T.border) state.T.border(c, W, H);
+  state.T.channel(c, 0, 0, W, 11, t, 1);
+} });
+/* Streets: the main road, the road down to the quay, the plaza, a lane per row of houses. */
+registerLayer({ z: 20, draw(c, { lay }) {
+  const { roadX, hallX, quayY, cx0, vw } = lay;
+  state.T.road(c, 4, 50, cx0 + vw - 4, 6);
+  state.T.road(c, roadX, 50, RD, quayY - 50 + 2);
+  state.T.yard(c, hallX - 8, 42, 48, 9);
+  for (let r = 0; r < lay.rows; r++) {
+    const left = roadX - lay.per * LW + 2, right = roadX + RD + lay.per * LW - 2;
+    state.T.road(c, left - 1, lay.top + r * LH + 17, right - left + 2, 4);
+  }
+} });
+/* The forest east of the houses (clear of the banner strip), groves and props on free ground. */
+registerLayer({ z: 40, draw(c, { lay }, t) {
+  const { W, hallX, canalY, cx0, vw } = lay;
+  for (let x = Math.max(cx0 + vw + 6, hallX + 64); x < W - 14; x += 15) for (let y = 16; y < canalY - 38; y += 16) if (hash(x, y) < 0.55 && !inBannerStrip(lay, x, y)) state.T.tree(c, x + Math.floor(hash(y, x) * 4), y);
+  lay.decor.forEach(d => d.tree ? state.T.tree(c, d.x, d.y) : state.T.decor && state.T.decor(c, d.x, d.y, d.k, state.reduce ? 0 : t));
+  shadow(c, hallX - 2, 40, 42, 2);
+} });

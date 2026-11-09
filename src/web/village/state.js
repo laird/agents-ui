@@ -4,11 +4,17 @@
  * `T` is the theme being drawn. `current`, `L`, `porters`, `floats` and
  * `fireworks` hold the scene being drawn while paint() runs: its model, its
  * layout and the animations in flight. `S` is that scene itself (its voyage
- * and lock gates). */
+ * and lock gates).
+ *
+ * The page's own state lives here too: `villages` and `worlds` from the last
+ * poll, `scenes` (one per village: its model, layout and the animations in
+ * flight), `worldState` (per world: incidents seen and crates afloat) and
+ * `view`, what is shown ({ village } or { world }). */
 export const state = {
   T: null,
   reduce: window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
   current: null, L: null, porters: [], floats: [], fireworks: -1e9, S: null,
+  villages: [], worlds: [], scenes: {}, worldState: {}, view: null,
 };
 
 /* The animation clock, held still when motion is reduced. */

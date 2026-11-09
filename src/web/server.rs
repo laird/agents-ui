@@ -38,6 +38,17 @@ const VILLAGE_ASSETS: &[(&str, &str, &str)] = &[
     ("themes/medieval.js", "text/javascript; charset=utf-8", include_str!("village/themes/medieval.js")),
     ("themes/modern.js", "text/javascript; charset=utf-8", include_str!("village/themes/modern.js")),
     ("themes/future.js", "text/javascript; charset=utf-8", include_str!("village/themes/future.js")),
+    ("registry.js", "text/javascript; charset=utf-8", include_str!("village/registry.js")),
+    ("layout.js", "text/javascript; charset=utf-8", include_str!("village/layout.js")),
+    ("lifecycle.js", "text/javascript; charset=utf-8", include_str!("village/lifecycle.js")),
+    ("ship.js", "text/javascript; charset=utf-8", include_str!("village/ship.js")),
+    ("features.js", "text/javascript; charset=utf-8", include_str!("village/features.js")),
+    ("worlds.js", "text/javascript; charset=utf-8", include_str!("village/worlds.js")),
+    ("panels.js", "text/javascript; charset=utf-8", include_str!("village/panels.js")),
+    ("dialogs.js", "text/javascript; charset=utf-8", include_str!("village/dialogs.js")),
+    ("labels.js", "text/javascript; charset=utf-8", include_str!("village/labels.js")),
+    ("key.js", "text/javascript; charset=utf-8", include_str!("village/key.js")),
+    ("data.js", "text/javascript; charset=utf-8", include_str!("village/data.js")),
 ];
 
 /// One of the village's embedded files, with its content type.
@@ -1383,6 +1394,85 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn every_module_main_js_loads_is_embedded_and_served() {
+        // Follow main.js's imports, and theirs, to every module the page loads.
+        let (mut seen, mut todo) = (vec!["main.js".to_string()], vec!["main.js".to_string()]);
+        while let Some(path) = todo.pop() {
+            let (ty, body) = village_asset(&path).unwrap_or_else(|| panic!("{path} is loaded but not embedded"));
+            assert_eq!(ty, "text/javascript; charset=utf-8", "{path}");
+            let app = make_app(make_web_state(new_shared_state()));
+            let resp = app.oneshot(Request::builder().uri(format!("/village/{path}")).body(Body::empty()).unwrap()).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::OK, "{path}");
+            assert_eq!(resp.headers()["content-type"], "text/javascript; charset=utf-8", "{path}");
+            let served = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+            assert_eq!(served, body.as_bytes(), "{path} is served as embedded");
+            for import in village_imports(&path, body) {
+                if !seen.contains(&import) {
+                    seen.push(import.clone());
+                    todo.push(import);
+                }
+            }
+        }
+        // The features and the modules they lean on, two imports or more away included.
+        for module in [
+            "registry.js", "layout.js", "lifecycle.js", "ship.js", "features.js", "worlds.js", "panels.js", "dialogs.js",
+            "labels.js", "key.js", "data.js", "state.js", "palette.js", "sprites/houses.js", "scenery.js", "people.js",
+            "themes/registry.js", "themes/medieval.js", "themes/modern.js", "themes/future.js",
+        ] {
+            assert!(seen.iter().any(|s| s == module), "main.js never loads {module}");
+        }
+        // And every embedded script is one of them.
+        for (path, _, _) in VILLAGE_ASSETS.iter().filter(|(p, _, _)| p.ends_with(".js")) {
+            assert!(seen.iter().any(|s| s == path), "{path} is embedded but main.js never loads it");
+        }
+        // main.js only imports and starts them.
+        let main = village_asset("main.js").unwrap().1;
+        let code: Vec<&str> = main.lines().filter(|l| !l.trim().is_empty() && !l.starts_with("/*") && !l.starts_with(" *")).collect();
+        assert!(code.iter().all(|l| l.starts_with("import ") || *l == "start();"), "main.js does more than import and start: {code:?}");
+    }
+
+    /// The text of `function <name>(` up to its closing brace at column 0.
+    fn js_fn<'a>(body: &'a str, name: &str) -> &'a str {
+        let start = body.find(&format!("function {name}(")).unwrap_or_else(|| panic!("no function {name}"));
+        let rest = &body[start..];
+        &rest[..rest.find("\n}\n").unwrap()]
+    }
+
+    #[test]
+    fn village_core_functions_know_no_feature() {
+        let body = &village_source();
+        // paint() walks the layers, renderFlow() the counters, placeLabels()
+        // the label lists, explain()/act() the hits, and the hit test only the
+        // rectangles paint() recorded: none of them names a feature.
+        for name in ["paint", "hitAt", "objAt", "explain", "act", "renderFlow", "placeLabels", "placeOverlays"] {
+            let f = js_fn(body, name);
+            for word in [
+                "house", "crate", "porter", "ship", "harbour", "quay", "stop", "banner", "barge", "feature", "docks", "board", "hall",
+                "manager", "backlog", "pipeline", "lay.", "state.T.", "LW", "incidents", "'world'",
+            ] {
+                assert!(!f.contains(word), "{name}() knows about `{word}`: {f}");
+            }
+        }
+        assert!(js_fn(body, "paint").contains("for (const layer of LAYERS) layer.draw(c, scene, t);"));
+        assert!(js_fn(body, "renderFlow").contains("COUNTERS.filter(k => k.plane === plane)"));
+        // Each feature registers itself: its layers, hits, labels and counters.
+        for (file, registers) in [
+            ("layout.js", &["registerLayer("][..]),
+            ("lifecycle.js", &["registerLayer(", "registerHit(", "registerLabels(", "registerCounter("][..]),
+            ("ship.js", &["registerLayer(", "registerHit(", "registerLabels(", "registerCounter("][..]),
+            ("features.js", &["registerLayer(", "registerHit(", "registerOverlay("][..]),
+            ("worlds.js", &["registerCounter("][..]),
+            ("dialogs.js", &["registerOverlay("][..]),
+            ("labels.js", &["registerOverlay("][..]),
+        ] {
+            let src = village_asset(file).unwrap().1;
+            for r in registers {
+                assert!(src.contains(r), "{file} does not call {r}");
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn village_page_returns_html() {
         let app = make_app(make_web_state(new_shared_state()));
         let req = Request::builder().uri("/village").body(Body::empty()).unwrap();
@@ -1565,8 +1655,9 @@ mod tests {
         // One overlay of area names, switchable, placed with the map.
         assert!(body.contains(r#"<div class="alabels" id="alabels"></div>"#));
         assert!(body.contains(r#"id="labels-on" checked"#));
-        assert!(body.contains("function areaLabels(sc, theme)"));
-        assert!(body.contains("placeLabels();\n}"));
+        assert!(body.contains("LABELS.forEach(({ fn }) => fn(sc, theme).forEach(l => {"));
+        assert!(body.contains("registerOverlay(placeLabels, 20);"));
+        assert!(body.contains("add(lot.x + 8, lot.y + 17, 'top', houseName(v, h), null, 'house ' + h.status, LW - 1);"));
         // Houses are named for their worktree, less the project prefix.
         assert!(body.contains("function houseName(v, h)"));
         assert!(body.contains("base.startsWith(v.project + '-')"));
@@ -1622,16 +1713,18 @@ mod tests {
         ] {
             assert!(body.contains(&format!("{{ kind: {kind}")), "no tap for {kind}");
         }
-        // ...and the ones with a dialog of their own say what they are.
-        for case in [
-            "case 'river': case 'docks':", "case 'board':", "case 'hall':", "case 'house':", "case 'person':",
-            "case 'sub':", "case 'porter':", "case 'crate':", "case 'quay':", "case 'stop':", "case 'harbour':", "case 'canal':",
-        ] {
-            assert!(body.contains(case), "no dialog for {case}");
+        // ...and the ones with a dialog of their own say what they are, each
+        // registered by the module that draws it.
+        for kind in ["river", "docks", "board", "hall", "house", "person", "sub", "porter", "supply", "crate", "quay", "stop", "harbour", "ship", "canal"] {
+            let at = body.find(&format!("registerHit({{ kind: '{kind}',")).unwrap_or_else(|| panic!("no hit registered for {kind}"));
+            assert!(body[at..at + 80].contains("dialog"), "no dialog for {kind}");
         }
         // A flag only follows (the strip's Details opens the feature); a barge opens its feature.
-        assert!(body.contains("if (o.kind === 'barge')"));
-        assert!(body.contains("if (o.kind === 'banner') { toggleFollow(v.project, o.f); return true; }"));
+        assert!(body.contains("registerHit({ kind: 'banner', key: false, act(o, sc) { toggleFollow(sc.v.project, o.f); return true; } });"));
+        assert!(body.contains("registerHit({ kind: 'barge', act(o, sc) { const v = sc.v, f = (v.features || []).find(f => f.number === o.f); if (f) showFeature(f, v); return !!f; } });"));
+        // explain() and act() only dispatch on the kind.
+        assert!(body.contains("return hit && hit.dialog ? hit.dialog(o, sc, theme) : null;"));
+        assert!(body.contains("if (hit && hit.act) return hit.act(o, sc, theme);"));
     }
 
     #[test]
@@ -1672,8 +1765,8 @@ mod tests {
         assert!(body.contains("add(lay.hallX + 51, 45, 'top', theme.labels.board,"));
         assert!(body.contains("add(lay.castleX + 10, lay.canalY - 22, 'bottom', theme.labels.castle,"));
         // And any label still covering the board, the tower or another label is moved.
-        assert!(body.contains("function labelAvoid(sc, theme)"));
-        assert!(body.contains("return [...board, ...theme.towers.map(at), at(theme.hull)];"));
+        assert!(body.contains("(sc.hits || []).filter(h => h.o.kind === 'board').forEach(h => out.push({ avoid: h }));"));
+        assert!(body.contains("out.push(...theme.towers.map(at), at(theme.hull));"));
         assert!(body.contains("towers: [[26, -60, 12, 42]],"));
         assert!(body.contains("function unclutter(els, blocked)"));
         assert!(body.contains("unclutter([...abox.children], blocked);"));
@@ -1695,7 +1788,7 @@ mod tests {
         assert!(body.contains("R(c, 0, 0, 14, 14, fogCol(state.T));"));
         assert!(body.contains("lay.H - lay.canalY + 28, fogCol(state.T));"));
         // Redrawn in the theme being shown.
-        assert!(body.contains("if (!legend.hidden) renderLegend();\n  if (view) select("));
+        assert!(body.contains("if (!legend.hidden) renderLegend();\n    if (view) select("));
         assert!(body.contains("`Key · ${state.T.name}`"));
         // Every kind, icon and pennant the map draws has words in the key.
         for table in ["KINDCOL", "ICONS"] {
@@ -1903,7 +1996,7 @@ mod tests {
         assert!(body.contains("[{ pts, carry: true }, { pts: back(pts) }], { sealed: true }));"));
         assert!(body.contains("'away', [{ pts: [...from, [-10, ROAD]], carry: true }]));"));
         // A crate in transit is hidden at rest and opens the crate dialog.
-        assert!(body.contains("const bound = new Set(state.porters.filter(p => p.issue && at.get(p) && !(at.get(p).fetched && !at.get(p).carry)).map(p => p.issue));"));
+        assert!(body.contains("scene.bound = new Set(state.porters.filter(p => p.issue && at.get(p) && !(at.get(p).fetched && !at.get(p).carry)).map(p => p.issue));"));
         assert!(body.contains("tap(a.x - 2, a.y - 16, 5, 5, { kind: 'crate', n: p.issue, at: 'transit', to: p.to });"));
         assert!(body.contains("if (o.at === 'transit') return o.to === 'away' ? 'closed without landing: carried away' : `on its way to the ${tripPlace(o.to, theme)}`;"));
     }
@@ -2044,7 +2137,9 @@ mod tests {
         let body = &village_source();
         assert!(body.contains(r#"<div class="hitkeys" id="hitkeys"></div>"#));
         assert!(body.contains("function placeKeys()"));
-        assert!(body.contains("placeLabels();\n  placeKeys();"));
+        // Placed after the banners and the area labels, whenever the map moves or changes.
+        assert!(body.contains("registerOverlay(placeBanners, 10);") && body.contains("registerOverlay(placeKeys, 30);"));
+        assert!(body.contains("OVERLAYS.forEach(o => o.fn());"));
         assert!(body.contains(".hk:focus-visible"));
         assert!(body.contains("b.setAttribute('aria-label', [info.title, info.line].filter(Boolean).join(': '));"));
     }

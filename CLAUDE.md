@@ -106,11 +106,22 @@ src/
     village/        # /village: the swarm as a 16-bit village, embedded in the binary and served from /village/<path>
       index.html    #   the page's markup
       village.css   #   its styles
-      main.js       #   layout, scenes, the ship, features, worlds, panels, dialogs, labels, key, data (being split further, #387)
-      state.js      #   what the drawing reads and the page sets: `state.T` (theme), `state.reduce`, the scene being drawn
+      main.js       #   only imports the modules (each registers itself) and starts the page
+      registry.js   #   registerLayer/Hit/Labels/Counter/Overlay, and the feature-free core: paint(), tap(), hitAt()
+      state.js      #   what the drawing reads and the page sets: `state.T` (theme), the scene being drawn, scenes, view
+      layout.js     #   where things stand (layout(), world geometry, shownScenes) and the ground layers
+      lifecycle.js  #   each issue's life: docks, hall, board, houses, trips (layers, hits, labels, counters)
+      ship.js       #   the canal: quay, locks, harbour and the ship that sails on a release
+      features.js   #   feature banners, trails, barges, fog, the strip and the feature dialog
+      worlds.js     #   a world drawn as platform over dev village; draw(); the world counters
+      panels.js     #   the flow strip (renderFlow walks the counters), toast, zoom
+      dialogs.js    #   explain()/act() dispatch on registered hits; the hit test; keyboard targets
+      labels.js     #   area labels from registerLabels, kept clear of the art and each other
+      key.js        #   the Key (legend), drawn with the renderer's own functions
+      data.js       #   the feed: poll, scenes, select a village or world, the theme picker, the loop
       palette.js    #   colours and drawing primitives (`P`, `R`, `hash`, `blink`, `shadow`)
       sprites/houses.js # houses, one sprite per kind
-      scenery.js    #   crates, bubbles, grass, paths, water, trees, castle, board, locks, harbour, ship, boat
+      scenery.js    #   crates, bubbles, +N badges, grass, paths, water, trees, castle, board, locks, harbour, ship, boat
       people.js     #   people, robots, drones and what they act out
       themes/       #   registry.js (`registerTheme`, `THEMES`: the Style picker lists them) and medieval/modern/future.js, each registering itself
 tools/mock/         # Simulated herdr/Temporal/Kubernetes for the village: demo.sh (RUNTIME=k8s), record.py + replay-build.py, history.py (replay from git/GitHub history)
