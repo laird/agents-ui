@@ -105,7 +105,13 @@ src/
     village/        # /village: the swarm as a 16-bit village, embedded in the binary and served from /village/<path>
       index.html    #   the page's markup
       village.css   #   its styles
-      main.js       #   the canvas renderer, themes, worlds (an ES module; being split further, #387)
+      main.js       #   layout, scenes, the ship, features, worlds, panels, dialogs, labels, key, data (being split further, #387)
+      state.js      #   what the drawing reads and the page sets: `state.T` (theme), `state.reduce`, the scene being drawn
+      palette.js    #   colours and drawing primitives (`P`, `R`, `hash`, `blink`, `shadow`)
+      sprites/houses.js # houses, one sprite per kind
+      scenery.js    #   crates, bubbles, grass, paths, water, trees, castle, board, locks, harbour, ship, boat
+      people.js     #   people, robots, drones and what they act out
+      themes/       #   registry.js (`registerTheme`, `THEMES`: the Style picker lists them) and medieval/modern/future.js, each registering itself
 tools/mock/         # Simulated herdr/Temporal/Kubernetes for the village: demo.sh (RUNTIME=k8s), record.py + replay-build.py, history.py (replay from git/GitHub history)
 tools/omarchy-plugin/ # Omarchy bar widget: swarm list → village summary from /api/swarms + /api/village; install.sh
 tools/adapters/     # Outside framework adapters: example report, adapter template (docs/village-protocol.md)

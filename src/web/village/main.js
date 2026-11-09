@@ -1,2808 +1,1592 @@
-(() => {
-  /* ---------- Palette (15-bit, outline #202030) ---------- */
-  const P = {
-    o: '#202030', skin: '#f8c898', skinS: '#d09068',
-    grass: '#58a048', grassD: '#386830', grassL: '#88c858',
-    path: '#d8b878', pathS: '#b08858', pathL: '#e8d098',
-    wood: '#a06030', woodD: '#683818', woodL: '#c88848', plank: '#e0b070',
-    stone: '#9898a8', stoneD: '#606078', stoneL: '#c8c8d8',
-    roofB: '#4868b8', roofBD: '#283878',
-    leaf: '#308838', leafD: '#205028', leafL: '#58b050',
-    white: '#f8f8f8', gold: '#f8d040', glass: '#a8d0f0', lamp: '#f8e080', dark: '#383850',
-    red: '#c04838', redD: '#802828', thatch: '#c8a048', thatchD: '#907028',
-    teal: '#2878a0', tealD: '#185070', parch: '#e8dcc0',
-    purple: '#7848a8', purpleD: '#503078', copper: '#d08840',
-    slate: '#6878a0', slateD: '#485878', barn: '#a83028', barnD: '#701818',
-    bug: '#e03838', fizzA: '#e070d0', fizzB: '#60e0c8', shield: '#3058b0', mill: '#d8c8a8', millD: '#a89878', sail: '#f0e8d8',
-    dome: '#e0e4f0', domeD: '#a8b0c8', water: '#3870c0', waterD: '#2850a0', waterL: '#80b8f0',
-    p0: '#e02828', seal: '#38c848', web: '#d8d8e8'
-  };
-  const STATE = { blocked: '#f07020', done: '#3878e0', unknown: '#585870', stalled: '#8088a8' };
-  const KINDCOL = { bug: '#e03838', feature: '#40b8e8', tests: '#e070d0', security: '#3058b0', research: '#c0a8f0', perf: '#d8c8a8', refactor: '#6878a0', docs: '#2878a0', chores: '#a83028', workshop: '#c88848', cottage: '#c8a048' };
-  const NOTECOL = { 'needs-design': '#f8c800', 'needs-clarification': '#d0c0f8', 'needs-approval': '#e89890', 'too-complex': '#b02010', 'future': '#8088a8', 'proposal': '#c0a8f0', 'failed': '#e02828', 'conflict': '#f07020', 'unreachable': '#585870' };
-  const STOPCOL = ['#38c848', '#f8d040', '#f8f8f8', '#4868e8', '#e070d0'];
-  /* One cloth colour per feature banner, in the order the server lists them. */
-  const FEATURE_COLS = ['#40b8e8', '#e070d0', '#60e0c8', '#f07020', '#c0a8f0', '#a8c8f8'];
-  /* A sub-agent's accent (tie, apron, belt) matches the building its specialty would build. */
-  const SPECIALTIES = [['architect', 'research'], ['security', 'security'], ['test', 'tests'], ['doc', 'docs'], ['coder', 'feature']];
-  const subHat = s => {
-    const role = s.agent_type.toLowerCase().split(':').pop();
-    const hit = SPECIALTIES.find(([name]) => role.includes(name));
-    return hit ? KINDCOL[hit[1]] : P.white;
-  };
+/* The village page: layout, scenes, the ship, features, worlds, panels,
+ * dialogs, labels, the key and the data feed. Drawing comes from the modules
+ * imported here. */
+import { state } from './state.js';
+import { F, FEATURE_COLS, KINDCOL, NOTECOL, P, R, SPECIALTIES, STOPCOL, blink, hash, shadow, subHat, waveFrame } from './palette.js';
+import { cobwebs, pennant, puffs } from './sprites/houses.js';
+import { ICONS, bubble, roped } from './scenery.js';
+import { QUIET_ACTIONS, actionSign, drawAction, person, wander } from './people.js';
+import { MEDIEVAL } from './themes/medieval.js';
+import { M, MODERN } from './themes/modern.js';
+import { FUTURE } from './themes/future.js';
+import { THEMES } from './themes/registry.js';
 
-  const R = (c, x, y, w, h, col) => { c.fillStyle = col; c.fillRect(Math.round(x), Math.round(y), w, h); };
-  function hash(x, y) {
-    let n = (Math.imul(x, 374761393) + Math.imul(y, 668265263)) | 0;
-    n = Math.imul(n ^ (n >>> 13), 1274126177);
-    return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
+const themeFromUrl = new URLSearchParams(location.search).get('theme');
+let themeName = THEMES[themeFromUrl] ? themeFromUrl : (() => {
+  try { return THEMES[localStorage.getItem('village-theme')] ? localStorage.getItem('village-theme') : 'medieval'; } catch { return 'medieval'; }
+})();
+state.T = THEMES[themeName];
+
+/* ---------- Layout ---------- */
+const LW = 20, LH = 26, RD = 6, DOCK_W = 64;
+function layout(v) {
+  const n = v.houses.length;
+  const per = Math.max(1, Math.ceil(Math.sqrt(Math.max(n, 1) / 2)));
+  const rows = Math.max(1, Math.ceil(n / (2 * per)));
+  const cx0 = DOCK_W + 8;
+  const vw = Math.max(per * LW * 2 + RD, 72);
+  const roadX = cx0 + Math.floor((vw - RD) / 2);
+  const hallX = roadX + RD / 2 - 16;
+  const top = 60;
+  const lots = [];
+  for (let i = 0; i < rows * 2 * per; i++) {
+    const r = Math.floor(i / (2 * per)), j = i % (2 * per), side = j % 2, pos = Math.floor(j / 2);
+    const x = side === 0 ? roadX - (pos + 1) * LW + 2 : roadX + RD + pos * LW + 2;
+    lots.push({ x, y: top + r * LH, lane: top + r * LH + 18 });
   }
-  const blink = (t, ms) => Math.floor(t / ms) % 2 === 1;
-  /* Someone who needs you waves: arm up, hand swinging. Reduced motion keeps the arm up, still. */
-  const waveFrame = t => blink(t, 220) ? 'wave2' : 'wave';
-  /* Light comes from the upper left: shadows fall right and down. */
-  const SHADE = 'rgba(12,20,36,.28)', SHINE = 'rgba(255,255,240,.22)';
-  const shadow = (c, x, y, w, h) => R(c, x, y, w, h, SHADE);
-  const lit = st => st === 'working';
-  const glassOf = st => st === 'working' ? P.lamp : (st === 'unknown' || st === 'stopped') ? P.dark : P.glass;
-  function win(c, x, y, st) {
-    R(c, x, y, 4, 4, P.woodD); R(c, x + 1, y + 1, 2, 2, glassOf(st));
-    if (st === 'working') R(c, x + 1, y + 1, 1, 1, P.white);
-    // A flower box under every window.
-    R(c, x, y + 4, 4, 1, P.woodL); R(c, x, y + 3, 1, 1, '#e05050'); R(c, x + 3, y + 3, 1, 1, P.gold);
+  const quayY = top + rows * LH + 4;
+  const canalY = quayY + 8;
+  // Every stop but the last is a lock; the last stop is the castle.
+  const locks = Math.max(0, v.pipeline.stops.length - 1);
+  const lockStart = roadX + 40;
+  const castleX = lockStart + locks * 34 + 6;
+  const forestX = Math.max(cx0 + vw + 6, hallX + 64);
+  // Feature banners stand in a strip cleared out of the forest, east of the
+  // houses; the map widens if they need the room. No features, no strip.
+  const banners = (v.features || []).map((f, k) => ({ f, x: forestX + 12 + k * 30, y: 14, col: FEATURE_COLS[k % FEATURE_COLS.length] }));
+  const W = Math.max(cx0 + vw + 40, roadX + 70, castleX + 46, banners.length ? forestX + 12 + banners.length * 30 : 0);
+  const H = canalY + 34;
+  // What's built on: river, docks, plaza, roads, house rows, canal and its
+  // stations. Every free 9×8 cell may get a decoration.
+  const taken = [
+    [0, 0, W, 14], [4, 8, 62, 46], [4, 46, cx0 + vw, 14], [hallX - 10, 4, 74, 46],
+    [roadX - 2, 46, RD + 4, quayY - 40], [roadX - 18, quayY - 12, W, H],
+    [forestX - 2, 12, W, canalY - 46]
+  ];
+  for (let r = 0; r < rows; r++) {
+    const left = roadX - per * LW, right = roadX + RD + per * LW;
+    taken.push([left - 4, top + r * LH - 10, right - left + 8, LH + 4]);
   }
-  function door(c, x, y, st) {
-    if (st === 'blocked') { R(c, x, y, 4, 5, P.o); return; }
-    R(c, x, y, 4, 5, P.woodD); R(c, x + 2, y + 2, 1, 1, P.gold);
+  const free = (x, y, w, h) => !taken.some(([tx, ty, tw, th]) => x < tx + tw && x + w > tx && y < ty + th && y + h > ty);
+  // Big free ground grows small groves; what's left gets a few props. The
+  // prop kind drifts slowly across the map, so neighbours form a garden
+  // (flowerbeds together, rocks together) instead of random clutter.
+  const decor = [];
+  for (let y = 16; y < H - 18; y += 15) for (let x = 6; x < W - 16; x += 14) {
+    if (!free(x, y, 14, 15) || hash(x * 7, y * 3) > 0.45) continue;
+    decor.push({ x: x + Math.floor(hash(y, x) * 3), y: y + Math.floor(hash(x, y) * 2), tree: true });
+    taken.push([x, y, 14, 15]);
   }
-  function gable(c, x, y, w, h, a, d) {
-    R(c, x, y, w, h, P.o);
-    for (let r = 1; r < h - 1; r++) R(c, x + 1, y + r, w - 2, 1, (r % 3 === 0) ? d : a);
-    R(c, x + 1, y + 1, w - 2, 1, d);
-    // Shingles on the lit slope, shade on the far one, a sunlit ridge.
-    for (let r = 2; r < h - 1; r += 3) for (let k = x + 2 + (r % 2) * 2; k < x + w - 2; k += 4) R(c, k, y + r, 1, 1, d);
-    R(c, x + 1 + Math.ceil((w - 2) * 0.62), y + 1, Math.floor((w - 2) * 0.38), h - 2, SHADE);
-    R(c, x + 1, y + 1, Math.ceil((w - 2) * 0.62), 1, SHINE);
-    R(c, x + 1, y + h - 1, w - 2, 1, SHADE);
+  for (let y = 16; y < H - 10; y += 9) for (let x = 6; x < W - 14; x += 11) {
+    if (!free(x, y, 11, 9) || hash(x * 3, y * 5) > 0.2) continue;
+    const zone = Math.floor(hash(x >> 5, y >> 5) * 6), k = hash(x + 11, y + 7) < 0.7 ? zone : Math.floor(hash(y, x + 3) * 6);
+    decor.push({ x: x + Math.floor(hash(y, x) * 4), y: y + Math.floor(hash(x, y + 1) * 3), k });
   }
-  function wall(c, x, y, w, h, col) {
-    R(c, x, y, w, h, P.o); R(c, x + 1, y, w - 2, h - 1, col);
-    R(c, x + 1, y + h - 2, w - 2, 1, P.stoneD);
-    R(c, x + w - 3, y, 2, h - 2, SHADE);
+  return { per, rows, cx0, vw, roadX, hallX, top, lots, quayY, canalY, lockStart, castleX, W, H, decor, banners };
+}
+
+/* ---------- State ---------- */
+const cv = document.getElementById('map'), ctx = cv.getContext('2d');
+const pick = document.getElementById('pick');
+let villages = [], worlds = [], view = null;
+/* One scene per village: its model, layout and the animations in flight.
+ * The one being drawn is in `state` while paint() runs (see state.js). */
+const scenes = {};
+/* Per world: the incidents and landing seen last poll, and crates afloat. */
+const worldState = {};
+
+const slotPos = i => ({ x: 10 + (i % 8) * 6, y: 22 + Math.floor(i / 8) * 6 });
+/* What is clickable comes from what is drawn: paint() records a rectangle
+ * (scene pixels) and the object behind it for every sprite it draws, later
+ * ones on top. hit() and the keyboard targets read the list back, so a new
+ * or moved sprite stays clickable without copying its coordinates. */
+let hits = null;
+const tap = (x, y, w, h, o) => { if (hits) hits.push({ x: Math.round(x), y: Math.round(y), w, h, o }); };
+
+/* ---------- Each issue's life ----------
+ * Every change seen between two polls plays as a trip: a worker, porter or
+ * crew member walks a route in steps, carrying the issue's crate on some.
+ *   arrives   a supply boat (truck, shuttle) brings new issues to the docks
+ *             and its crew unloads one crate each into its slot;
+ *   claimed   the worker walks from its house to the docks, picks up that
+ *             crate and carries it home, then works on it at the door;
+ *   blocked   the crate is carried from the docks or house to the board;
+ *   unblocked it is carried from the board back to the docks;
+ *   landed    the worker carries it, sealed, to the quay and walks home;
+ *   closed    (not planned) it is carried off the map's west edge.
+ * Trips queue: each starts STAGGER after the one before, so many changes in
+ * one poll play in order rather than at once. Past QUEUE_CAP waiting trips
+ * the rest are skipped, their crates simply where they now are. Trips are
+ * timed, so a tab left in the background never replays what it missed. The
+ * first poll after a load animates nothing, and with reduced motion no one
+ * walks: a toast says what changed. */
+const STAGGER = 700, QUEUE_CAP = 12, WALK = 0.05, ARRIVE_IN = 1800, UNLOAD = 450, SAIL_OUT = 1500;
+function enqueue(sc, t, trip, gap = STAGGER) {
+  if (state.reduce || state.porters.filter(p => p.t0 > t).length >= QUEUE_CAP) return null;
+  trip.t0 = Math.max(t, sc.nextAt || 0);
+  sc.nextAt = trip.t0 + gap;
+  state.porters.push(trip);
+  return trip;
+}
+const back = pts => [...pts].reverse();
+/* Routes on the map, from the lane in front of a house (lot) or a docks slot (s). */
+const ROAD = 53;
+const houseToRoad = (lot, lay) => [[lot.x + 8, lot.lane], [lay.roadX + 3, lot.lane], [lay.roadX + 3, ROAD]];
+const slotFromRoad = s => [[s.x + 2, ROAD], [s.x + 2, s.y + 6]];
+const boardFromRoad = lay => [[lay.hallX + 51, ROAD], [lay.hallX + 51, 46]];
+/* What a trip does to the crate it carries, for the dialog of a crate in transit. */
+function trip(seed, n, cr, to, steps, extra = {}) {
+  return { seed, issue: n, kind: (cr && cr.kind) || 'workshop', pr: cr && cr.priority, to, steps, ...extra };
+}
+function diff(old, now, lay, t, sc) {
+  if (!old || old.project !== now.project) return [];
+  const cs = cargoStop(now), said = [];
+  const oldSlot = n => old.backlog.findIndex(c => c.number === n), newSlot = n => now.backlog.findIndex(c => c.number === n);
+  const oldBoard = new Set(old.board.map(b => b.number)), oldHouse = n => old.houses.findIndex(h => h.issue === n);
+  const lotOf = id => lay.lots[now.houses.findIndex(h => h.id === id)];
+
+  // Arrives: new issues come by supply boat, one crate each.
+  const fresh = now.backlog.map((c, i) => ({ c, i })).filter(({ c }) => oldSlot(c.number) < 0 && !oldBoard.has(c.number) && oldHouse(c.number) < 0 && c.number);
+  if (fresh.length) {
+    said.push(`${fresh.length} new ${fresh.length === 1 ? 'issue' : 'issues'}`);
+    if (!state.reduce && state.porters.filter(p => p.t0 > t).length < QUEUE_CAP) {
+      const t0 = Math.max(t, sc.nextAt || 0), shown = fresh.filter(f => f.i < 40);
+      const job = { t0, crates: shown.map(f => f.c.number), leave: t0 + ARRIVE_IN + shown.length * UNLOAD + 500 };
+      sc.supplies.push(job);
+      shown.forEach(({ c, i }, k) => {
+        const s = slotPos(i), dx = 22 + (k % 3) * 5;
+        state.porters.push({ ...trip('crew:' + now.project + k, c.number, c, 'backlog', [
+          { pts: [[dx, 13], [s.x + 2, 13], [s.x + 2, s.y + 6]], carry: true },
+          { pts: [[s.x + 2, s.y + 6], [s.x + 2, 13], [dx, 13]] }]), t0: t0 + ARRIVE_IN + k * UNLOAD, crew: job });
+      });
+      sc.nextAt = job.leave;
+    }
   }
-  function puffs(c, x, y, t, a, b) {
+  // Claimed: the worker fetches its crate from the docks.
+  now.houses.forEach((h, i) => {
+    const before = old.houses.find(o => o.id === h.id);
+    if (!h.issue || (before && before.issue === h.issue)) return;
+    const slot = oldSlot(h.issue), lot = lay.lots[i];
+    if (slot < 0 || !lot) return;
+    const s = slotPos(Math.min(slot, 39)), out = [...houseToRoad(lot, lay), ...slotFromRoad(s)];
+    said.push(`#${h.issue} claimed`);
+    enqueue(sc, t, trip(h.id, h.issue, old.backlog[slot], 'house', [{ pts: out }, { pts: back(out), carry: true }]));
+  });
+  // Blocked: from the docks or a house to the board, and the board back to the docks.
+  now.board.forEach(b => {
+    const n = b.number;
+    if (oldBoard.has(n)) return;
+    const slot = oldSlot(n), hi = oldHouse(n);
+    let steps = null, seed = 'porter:' + n;
+    if (slot >= 0) { const s = slotPos(Math.min(slot, 39)); steps = [{ pts: [...back(slotFromRoad(s)), ...boardFromRoad(lay)], carry: true }]; }
+    else if (hi >= 0 && lotOf(old.houses[hi].id)) {
+      const lot = lotOf(old.houses[hi].id), there = [...houseToRoad(lot, lay), ...boardFromRoad(lay)];
+      seed = old.houses[hi].id; steps = [{ pts: there, carry: true }, { pts: back(there) }];
+    }
+    if (!steps) return;
+    said.push(`#${n} blocked`);
+    enqueue(sc, t, trip(seed, n, { kind: 'workshop', priority: b.priority }, 'board', steps));
+  });
+  now.backlog.forEach((c, i) => {
+    if (!oldBoard.has(c.number) || i >= 40) return;
+    said.push(`#${c.number} back in the backlog`);
+    enqueue(sc, t, trip('porter:' + c.number, c.number, c, 'backlog', [{ pts: [...back(boardFromRoad(lay)), ...slotFromRoad(slotPos(i))], carry: true }]));
+  });
+  // Landed: the worker carries the sealed crate to the quay, then walks home.
+  const oldQuay = new Set(old.pipeline.quay);
+  now.pipeline.quay.forEach(n => {
+    if (oldQuay.has(n)) return;
+    const i = oldHouse(n);
+    if (i < 0) return;
+    const lot = lotOf(old.houses[i].id) || lay.lots[i];
+    if (!lot) return;
+    const pts = [[lot.x + 8, lot.lane], [lay.roadX + 3, lot.lane], [lay.roadX + 3, lay.quayY]];
+    // With one stop the quay is where the next release waits: on to the ship.
+    if (cs === -1) pts.push(...toShip([lay.roadX + 3, lay.quayY], lay).slice(1));
+    said.push(`#${n} landed`);
+    enqueue(sc, t, trip(old.houses[i].id, n, { kind: old.houses[i].kind, priority: old.houses[i].priority }, cs === -1 ? 'ship' : 'quay',
+      [{ pts, carry: true }, { pts: back(pts) }], { sealed: true }));
+  });
+  // Closed without landing: carried off the map's west edge.
+  const placed = n => now.backlog.some(c => c.number === n) || now.board.some(b => b.number === n) || now.houses.some(h => h.issue === n)
+    || now.pipeline.quay.includes(n) || now.pipeline.stops.some(st => st.issues.includes(n));
+  [...old.backlog.map((c, i) => ({ n: c.number, c, s: i < 40 ? slotPos(i) : null })), ...old.board.map(b => ({ n: b.number, c: b, board: true }))].forEach(o => {
+    if (placed(o.n) || (!o.s && !o.board)) return;
+    const from = o.board ? back(boardFromRoad(lay)) : back(slotFromRoad(o.s));
+    said.push(`#${o.n} closed`);
+    enqueue(sc, t, trip('porter:' + o.n, o.n, o.c, 'away', [{ pts: [...from, [-10, ROAD]], carry: true }]));
+  });
+  // Work moving down the canal opens each lock it passes. The stop before
+  // the harbour loads it onto the ship; any other stop docks it in its basin.
+  now.pipeline.stops.slice(0, -1).forEach((st, i) => st.issues.forEach(n => {
+    const was = placeOf(n, old) ?? -1;
+    if (was >= i) return;
+    for (let g = was + 1; g <= i; g++) sc.gates[g] = t;
+    const from = placePoint(was, lay);
+    if (i === cs) enqueue(sc, t, trip('porter:' + n, n, null, 'ship', [{ pts: toShip(from, lay), carry: true }], { sealed: true, speed: 0.04 }), 300);
+    else if (!state.reduce) state.floats.push({ n, t0: t, pts: [from, [from[0], lay.canalY + 4], [lay.lockStart + i * 34 + 10, lay.canalY + 4], placePoint(i, lay)] });
+  }));
+  return said;
+}
+/* Where a trip is: { x, y, carry } on its route, `waiting` before it starts
+ * (at the route's first point), or null once it is over. */
+function tripAt(p, t) {
+  const first = p.steps[0].pts[0];
+  if (t < p.t0) return { x: first[0], y: first[1], carry: false, waiting: true, fetched: false };
+  let d = (t - p.t0) * (p.speed || WALK), fetched = false;
+  for (const st of p.steps) {
+    const at = porterPos({ t0: 0, speed: 1, pts: st.pts }, d);
+    if (at) return { x: at[0], y: at[1], carry: !!st.carry, fetched: fetched || !!st.carry };
+    fetched = fetched || !!st.carry;
+    d -= st.pts.slice(1).reduce((n, q, k) => n + Math.hypot(q[0] - st.pts[k][0], q[1] - st.pts[k][1]), 0);
+  }
+  return null;
+}
+/* The point a trip picks its crate up from: the start of its first carrying step. */
+const pickup = p => (p.steps.find(st => st.carry) || p.steps[0]).pts[0];
+function porterPos(p, t) {
+  let d = (t - p.t0) * p.speed;
+  for (let k = 0; k < p.pts.length - 1; k++) {
+    const [ax, ay] = p.pts[k], [bx, by] = p.pts[k + 1], len = Math.hypot(bx - ax, by - ay);
+    if (d <= len) return [ax + (bx - ax) * d / len, ay + (by - ay) * d / len];
+    d -= len;
+  }
+  return null;
+}
+
+/* ---------- The ship ----------
+ * Work waiting for the next release is loaded onto the ship in the harbour
+ * (a rocket on the launch pad): the issues at the stop before the last, or
+ * at the quay when there is only one stop. When the last stop's deployment
+ * changes, the ship sails off east with what shipped, the fireworks fire,
+ * and an empty ship comes in. The change is read from the last stop's sha
+ * (or the released commit), never its issues, so a release of the same
+ * issues still sails; a page loaded after a release just shows the new ship. */
+const SAIL = 4200, ARRIVE = 3200, GATE_OPEN = 2400, SHIP_CAP = 6;
+/* Crates drawn at the quay; the rest are a "+N". */
+const QUAY_CAP = 6;
+const cargoStop = v => v.pipeline.stops.length - 2; // -1: the quay
+function cargoOf(v) {
+  const i = cargoStop(v);
+  return i < -1 ? [] : i < 0 ? v.pipeline.quay : v.pipeline.stops[i].issues;
+}
+const lastStop = v => v.pipeline.stops[v.pipeline.stops.length - 1] || null;
+/* What the last stop runs, with what says so ("deployment:<sha>"). A poll
+ * where GitHub didn't answer falls back to the branch or to nothing; that
+ * is a different source, not a release, so it never sails the ship. */
+function releaseOf(v) {
+  const last = lastStop(v), id = last && (last.sha || last.tag || v.pipeline.release);
+  return id ? `${last.source || 'branch'}:${id}` : null;
+}
+/* Where the ship is: moored, sailing out with the last release, or coming in. */
+function shipAt(sc, t, lay) {
+  const vo = sc.voyage, since = vo ? t - vo.t0 : Infinity, flies = !!state.T.flies, out = lay.W - lay.castleX + 4;
+  if (since < SAIL) { const p = (since / SAIL) ** 2; return { leaving: true, ox: flies ? 0 : p * out, oy: flies ? -p * (lay.canalY + 64) : 0 }; }
+  if (since < SAIL + ARRIVE) { const p = 1 - (since - SAIL) / ARRIVE; return { leaving: false, ox: out * p * p, oy: 0 }; }
+  return { leaving: false, ox: 0, oy: 0 };
+}
+const holdPos = (lay, k, ox = 0, oy = 0) => [Math.round(lay.castleX + state.T.hold[k][0] + ox), Math.round(lay.canalY + state.T.hold[k][1] + oy)];
+/* A crate's resting point at the quay (-1) or in stop i's basin. */
+const placePoint = (i, lay) => (i < 0 ? [lay.roadX + 9, lay.quayY + 2] : [lay.lockStart + i * 34 + 10, lay.canalY + 22]);
+/* A porter's walk from a point along the canal bank to the ship's side. */
+function toShip([x, y], lay) {
+  const bank = lay.canalY + 26, sx = lay.castleX + state.T.hold[0][0] + 4;
+  return [[x, y], [x, bank], [sx, bank], [sx, lay.canalY + 18]];
+}
+function sail(sc, v, t) {
+  const old = sc.v, last = lastStop(v), before = new Set((lastStop(old) || { issues: [] }).issues);
+  const shipped = last ? last.issues.filter(n => !before.has(n)) : [];
+  sc.fireworks = t;
+  sc.voyage = state.reduce ? null : { t0: t, cargo: shipped };
+  if (shownScenes().some(([x]) => x === sc)) toast(`${v.project}: shipped ${releaseName(v, last) || 'a release'}${shipped.length ? ` · ${shipped.length} ${shipped.length === 1 ? 'issue' : 'issues'}` : ''}`);
+}
+/* A release's name: its tag, else its commit. */
+function releaseName(v, s) {
+  if (!s) return null;
+  const sha = s.sha || v.pipeline.release;
+  return s.tag || (sha ? String(sha).slice(0, 7) : null);
+}
+let toastTimer = 0;
+function toast(text) {
+  const el = document.getElementById('toast');
+  el.textContent = text; el.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 5000);
+}
+
+/* Where a house's sub-agents stand: two beside the door, then a row on the
+ * lane in front. Past that, a "+N" badge counts the rest, so every running
+ * sub-agent is either drawn or counted, never dropped. */
+const SUB_SLOTS = [[-1, 12], [9, 12], [-4, 16], [4, 16], [12, 16]];
+const workFrame = t => (!state.reduce && blink(t, 180) ? 'work2' : 'work');
+const DIGITS = ['111101101101111', '010110010010111', '111001111100111', '111001111001111', '101101111001001',
+  '111100111001111', '111100111101111', '111001001001001', '111101111101111', '111101111001111'];
+/* A gold tag reading "+N" in a 3x5 pixel font. */
+function badge(c, x, y, n) {
+  const glyphs = ['000010111010000', ...String(n).split('').map(d => DIGITS[+d])], w = glyphs.length * 4 + 1;
+  R(c, x - 1, y - 1, w + 2, 7, P.o); R(c, x, y, w, 5, P.gold);
+  glyphs.forEach((g, j) => { for (let k = 0; k < 15; k++) if (g[k] === '1') R(c, x + 1 + j * 4 + (k % 3), y + Math.floor(k / 3), 1, 1, P.o); });
+}
+function paint(c, t) {
+  const v = state.current, lay = state.L;
+  const { W, H, roadX, hallX, lots, quayY, canalY, cx0, vw } = lay;
+  // A whole-feature barge carries its subtasks' crates: they are not drawn loose.
+  const barges = bargesFor(v, lay), hid = new Set(barges.flatMap(b => b.issues));
+  // A crate on a trip is not at rest anywhere until the trip has delivered it.
+  const at = new Map(state.porters.map(p => [p, tripAt(p, t)]));
+  const bound = new Set(state.porters.filter(p => p.issue && at.get(p) && !(at.get(p).fetched && !at.get(p).carry)).map(p => p.issue));
+  state.T.ground(c, 0, 0, W, H);
+  if (state.T.border) state.T.border(c, W, H);
+  state.T.channel(c, 0, 0, W, 11, t, 1); tap(0, 0, W, 11, { kind: 'river' });
+  state.T.dock(c, 14, 10, 40);
+  state.T.yard(c, 6, 18, 56, 34); tap(6, 8, 56, 44, { kind: 'docks' });
+  // The supply boat: in from the west, moored while its crew unloads, then away.
+  state.S.supplies = state.S.supplies.filter(j => {
+    if (t > j.leave + SAIL_OUT) return false;
+    if (t < j.t0) return true;
+    const x = t < j.t0 + ARRIVE_IN ? -32 + 46 * ((t - j.t0) / ARRIVE_IN) : t < j.leave ? 14 : 14 - 46 * ((t - j.leave) / SAIL_OUT);
+    const load = j.crates.filter((_, k) => t < j.t0 + ARRIVE_IN + k * UNLOAD).length;
+    state.T.supply(c, x, t, load);
+    tap(x, 0, 30, 11, { kind: 'supply', n: j.crates.length, ns: j.crates });
+    return true;
+  });
+  state.T.road(c, 4, 50, cx0 + vw - 4, 6);
+  state.T.road(c, roadX, 50, RD, quayY - 50 + 2);
+  state.T.yard(c, hallX - 8, 42, 48, 9);
+  for (let r = 0; r < lay.rows; r++) {
+    const left = roadX - lay.per * LW + 2, right = roadX + RD + lay.per * LW - 2;
+    state.T.road(c, left - 1, lay.top + r * LH + 17, right - left + 2, 4);
+  }
+  state.T.channel(c, roadX - 16, canalY, W - roadX + 16, 14, t, 0.6); tap(roadX - 16, canalY, W - roadX + 16, 14, { kind: 'canal' });
+  state.T.dock(c, roadX - 4, quayY + 1, 22); if (v.plane !== 'runtime') tap(roadX - 4, quayY - 16, 22, 24, { kind: 'quay' });
+
+  for (let x = Math.max(cx0 + vw + 6, hallX + 64); x < W - 14; x += 15) for (let y = 16; y < canalY - 38; y += 16) if (hash(x, y) < 0.55 && !inBannerStrip(lay, x, y)) state.T.tree(c, x + Math.floor(hash(y, x) * 4), y);
+  lay.decor.forEach(d => d.tree ? state.T.tree(c, d.x, d.y) : state.T.decor && state.T.decor(c, d.x, d.y, d.k, state.reduce ? 0 : t));
+  shadow(c, hallX - 2, 40, 42, 2);
+
+  state.T.hall(c, hallX, 18, v.manager.status); tap(hallX - 4, 6, 40, 36, { kind: 'hall' });
+  state.T.board(c, hallX + 42, 28, v.board.filter(b => !bound.has(b.number))); tap(hallX + 42, 28, 18, 16, { kind: 'board' });
+  if (v.manager.status !== 'stopped') {
+    const busy = v.manager.status === 'working';
+    person(c, hallX + 26, 30, 'manager:' + v.project, v.manager.status === 'blocked' ? waveFrame(t) : busy ? workFrame(t) : 'stand', { mayor: true, status: v.manager.status });
+    if (busy) drawAction(c, hallX + 26, 30, v.manager.action, t);
+    tap(hallX + 26, 30, 8, 12, { kind: 'hall' });
+  }
+  // The manager's sub-agents (a modernize coordinator's specialists) work in the plaza.
+  (v.manager.subagents || []).slice(0, 4).forEach((sa, k) => {
+    const bob = !state.reduce && blink(t + k * 170, 220) ? -1 : 0;
+    const seed = `manager:${v.project}/${sa.description || k}`, px = hallX - 2 + k * 10 + (state.reduce ? 0 : wander(sa.action, t, seed));
+    person(c, px, 39 + bob, seed, 'stand', { accent: subHat(sa), sub: true, status: sa.status });
+    tap(px, 38, 8, 13, { kind: 'sub', house: -1, sa, id: sa.description || k });
+    drawAction(c, px, 39 + bob, sa.action, t + k * 131);
+  });
+
+  v.backlog.slice(0, 40).forEach((cr, i) => {
+    if (bound.has(cr.number)) return;
+    const s = slotPos(i); state.T.crate(c, s.x, s.y, cr.kind, cr.priority); if ((cr.waits_on || []).length) roped(c, s.x, s.y); tap(s.x, s.y, 5, 5, { kind: 'crate', n: cr.number, at: 'backlog' });
+  });
+
+  const bubbles = [];
+  if (['blocked', 'done', 'unknown', 'stalled'].includes(v.manager.status)) bubbles.push([hallX + 26, 18, v.manager.status]);
+  v.houses.forEach((h, i) => {
+    const lot = lots[i]; if (!lot) return;
+    const st = h.status, tt = t + i * 311;
+    shadow(c, lot.x + 2, lot.y + 16, 16, 2); shadow(c, lot.x + 16, lot.y + 4, 2, 12);
+    tap(lot.x, lot.y - 4, 16, 25, { kind: 'house', i });
+    if (st === 'building') state.T.scaffold(c, lot.x, lot.y, tt);
+    else (state.T.B[h.kind] || state.T.B.workshop)(c, lot.x, lot.y, st, state.reduce ? 0 : tt);
+    pennant(c, lot.x, lot.y, h.priority, tt);
+    if (st === 'stalled') cobwebs(c, lot.x, lot.y);
+    if (st === 'unknown') R(c, lot.x - 1, lot.y - 6, 18, 23, 'rgba(32,34,60,.6)');
+    const away = state.porters.some(p => p.seed === h.id && t >= p.t0 && at.get(p));
+    if (!away) {
+      if (st === 'idle') person(c, lot.x + 4, lot.y + 9, h.id, 'stand', { status: st });
+      if (st === 'done') person(c, lot.x + 4, lot.y + 8, h.id, 'stand', { status: st });
+      if (st === 'blocked') person(c, lot.x + 4, lot.y + 10, h.id, waveFrame(t + i * 90), { status: st });
+      // A working agent is one busy figure at its door, acting out what it is doing.
+      if (st === 'working') { person(c, lot.x + 4, lot.y + 8, h.id, workFrame(tt), { status: st }); drawAction(c, lot.x + 4, lot.y + 8, h.action, tt); }
+      // Robots show every status, so a stalled one sits slumped at its door.
+      const slumped = state.T.robots && st === 'stalled';
+      if (slumped) person(c, lot.x + 4, lot.y + 9, h.id, 'stand', { status: st });
+      if (['idle', 'done', 'blocked', 'working'].includes(st) || slumped) tap(lot.x + 4, lot.y + 8, 8, 12, { kind: 'person', i, who: h.crew[0] });
+    }
+    if (h.crew.length > 1 && st !== 'working') { person(c, lot.x + 12, lot.y + 11, h.id + '#crew'); tap(lot.x + 12, lot.y + 11, 8, 12, { kind: 'person', i, who: h.crew[1] }); }
+    if (h.crew.length > 1 && st === 'working' && !state.reduce) puffs(c, lot.x + 3, lot.y - 3, tt + 700, ...state.T.steam);
+    // Sub-agents keep the house busy: one figure each out front (SUB_SLOTS),
+    // and a "+N" badge for any that don't fit.
+    const subs = h.subagents || [];
+    if (subs.length && !state.reduce) puffs(c, lot.x + 3, lot.y - 3, tt + 400, ...state.T.steam);
+    // Anyone waiting on a person is shown first, waving.
+    [...subs].sort((a, b) => (b.status === 'blocked') - (a.status === 'blocked')).slice(0, SUB_SLOTS.length).forEach((sa, k) => {
+      const bob = !state.reduce && blink(t + k * 190, 210) ? -1 : 0;
+      const waiting = sa.status === 'blocked', seed = `${h.id}/${sa.description || k}`, [sx, sy] = SUB_SLOTS[k];
+      const px = lot.x + sx + (state.reduce ? 0 : wander(sa.action, t, seed)), py = lot.y + sy + bob;
+      person(c, px, waiting ? lot.y + sy : py, seed, waiting ? waveFrame(t + k * 110) : 'stand', { accent: subHat(sa), sub: true, status: sa.status });
+      tap(px, lot.y + sy - 1, 8, 13, { kind: 'sub', house: i, sa, id: sa.description || k });
+      if (!waiting) drawAction(c, px, py, sa.action, t + k * 97);
+    });
+    // The issue's crate at the door while it is worked on: hammered, sawn, sparking.
+    if (st === 'working' && h.issue && !away && !bound.has(h.issue)) {
+      state.T.crate(c, lot.x + 11, lot.y + 16, h.kind, h.priority);
+      tap(lot.x + 11, lot.y + 16, 5, 5, { kind: 'crate', n: h.issue, at: 'house', i });
+      if (!state.reduce && !QUIET_ACTIONS.has(h.action) && blink(tt, 150)) {
+        const k = Math.floor(tt / 150) % 3;
+        R(c, lot.x + 12 + k, lot.y + 14 - (k % 2), 1, 1, P.gold); R(c, lot.x + 15 - k, lot.y + 15, 1, 1, P.white);
+      }
+    }
+    if (st === 'working' && h.action) actionSign(c, lot.x + 4, lot.y - 4, h.action);
+    if (subs.length > SUB_SLOTS.length) { badge(c, lot.x + 12, lot.y + 4, subs.length - SUB_SLOTS.length); tap(lot.x + 11, lot.y + 3, 12, 7, { kind: 'house', i }); }
+    if (ICONS[st]) bubbles.push([lot.x + 4, lot.y - (st === 'blocked' ? 1 : 3) + (st === 'blocked' && blink(t, 200) ? -1 : 0), st]);
+  });
+
+  const carried = new Set([...bound, ...state.floats.map(f => f.n)]);
+  const cargo = cargoOf(v), onShip = new Set(cargo);
+  const atQuay = v.pipeline.quay.filter(n => !carried.has(n) && !hid.has(n) && !onShip.has(n));
+  atQuay.slice(0, QUAY_CAP).forEach((n, k) => {
+    const x = roadX + 6 + (k % 3) * 6, y = quayY - 3 - Math.floor(k / 3) * 6;
+    state.T.crate(c, x, y, 'workshop', null, true); tap(x, y, 5, 5, { kind: 'crate', n, at: 'quay' });
+  });
+  // Six crates fit; a "+N" says how many more wait, and the quay's dialog lists them all.
+  if (atQuay.length > QUAY_CAP) { badge(c, roadX + 25, quayY - 9, atQuay.length - QUAY_CAP); tap(roadX + 24, quayY - 10, 14, 7, { kind: 'quay' }); }
+
+  // The sentinel's flag is grey while it still has newer work to test. With
+  // no sentinel the first lock is an environment like any other.
+  const gated = v.pipeline.sentinel !== 'absent';
+  const flagOf = i => i === 0 && gated && v.pipeline.sentinel !== 'green' ? P.stoneD : STOPCOL[i] || P.white;
+  const stops = v.pipeline.stops;
+  stops.slice(0, -1).forEach((s, i) => {
+    const lx = lay.lockStart + i * 34;
+    const open = !state.reduce && t - (state.S.gates[i] ?? -1e9) < GATE_OPEN;
+    state.T.gate(c, lx, canalY, open, flagOf(i)); tap(lx - 7, canalY - 28, 32, H - canalY + 28, { kind: 'stop', i });
+    s.issues.filter(n => !hid.has(n) && !onShip.has(n) && !carried.has(n)).slice(0, 4).forEach((n, k) => {
+      const x = lx + 8 + (k % 2) * 6, y = canalY + 18 + Math.floor(k / 2) * 6;
+      state.T.crate(c, x, y, 'workshop', null, true); tap(x, y, 5, 5, { kind: 'crate', n, at: 'stop', i });
+    });
+  });
+  // Crates floating down to a lock's basin while its gate stands open.
+  state.floats = state.floats.filter(f => {
+    const pos = porterPos({ t0: f.t0, speed: 0.03, pts: f.pts }, t);
+    if (!pos) return false;
+    state.T.crate(c, pos[0] - 2, pos[1] - 2, 'workshop', null, true);
+    return true;
+  });
+  state.T.destination(c, lay.castleX, canalY, t, state.fireworks); tap(lay.castleX - 4, canalY - 28, 46, H - canalY + 28, { kind: 'harbour' });
+  // The ship in the harbour, loaded with the next release; or the last one
+  // sailing off with what shipped, leaving a wake, then an empty one coming in.
+  if (stops.length) {
+    const at = shipAt(state.S, t, lay), bob = state.T.flies || state.reduce || !blink(t, 900) ? 0 : 1, oy = at.oy + bob;
+    if (at.leaving && state.T.flies) puffs(c, lay.castleX + 18, canalY - 12, t, ...state.T.steam);
+    else if (at.leaving) {
+      for (let x = lay.castleX + 4; x < lay.castleX + at.ox; x += 5) R(c, x, canalY + 12 + ((x >> 2) % 2), 3, 1, P.white);
+      tap(lay.castleX + 4, canalY + 8, Math.max(0, at.ox - 4), 8, { kind: 'harbour' });
+    }
+    const load = at.leaving ? state.S.voyage.cargo : cargo.filter(n => !carried.has(n) && !hid.has(n));
+    state.T.vessel(c, lay.castleX, canalY, t, at.ox, oy);
+    const [hx, hy, hw, hh] = state.T.hull;
+    tap(lay.castleX + hx + at.ox, canalY + hy + at.oy, hw, hh, at.leaving ? { kind: 'ship', at: 'away' } : { kind: 'ship' });
+    load.slice(0, SHIP_CAP).forEach((n, k) => {
+      const [x, y] = holdPos(lay, k, at.ox, oy);
+      state.T.crate(c, x, y, 'workshop', null, true);
+      if (!at.leaving) tap(x, y, 5, 5, { kind: 'crate', n, at: 'ship' });
+    });
+    if (load.length > SHIP_CAP) badge(c, Math.round(lay.castleX + state.T.holdBadge[0] + at.ox), Math.round(canalY + state.T.holdBadge[1] + oy), load.length - SHIP_CAP);
+  }
+
+  // Trips: whoever is walking, with the crate carried overhead, or still
+  // waiting where it will be picked up.
+  state.porters = state.porters.filter(p => {
+    const a = at.get(p);
+    if (!a) return false;
+    if (!a.fetched && p.issue && !p.crew) {
+      const [px, py] = pickup(p);
+      state.T.crate(c, px - 2, py - 6, p.kind, p.pr); tap(px - 2, py - 6, 5, 5, { kind: 'crate', n: p.issue, at: 'transit', to: p.to });
+    }
+    if (a.waiting) return true;
+    person(c, a.x - 4, a.y - 11, p.seed, a.carry ? (blink(t, 140) ? 'carrystep' : 'carry') : 'stand');
+    tap(a.x - 4, a.y - 11, 8, 12, { kind: 'porter', seed: p.seed, n: p.issue, to: p.to, carrying: a.carry });
+    if (a.carry) { state.T.crate(c, a.x - 2, a.y - 16, p.kind, p.pr, p.sealed); tap(a.x - 2, a.y - 16, 5, 5, { kind: 'crate', n: p.issue, at: 'transit', to: p.to }); }
+    return true;
+  });
+  bubbles.forEach(([x, y, s]) => bubble(c, x, y, s));
+  featureLayer(c, t, v, lay, barges);
+}
+
+/* ---------- Features ----------
+ * A feature (a parent issue split into subtasks) is a banner in the strip
+ * cleared east of the houses, with its spec scroll at its foot. Following
+ * one draws a marching trail to each counted subtask. In whole-feature
+ * projects a feature's subtasks ride one barge (a truck downtown) once
+ * they are all at the same stop; an environment nobody can answer for is
+ * in fog. The server works out every count; the renderer only draws them. */
+let followed = null; // { project, number }
+const isFollowed = (v, f) => !!followed && followed.project === v.project && followed.number === f.number;
+const counted = f => (f.subtasks || []).filter(s => !s.dropped);
+function inBannerStrip(lay, x, y) {
+  const b = lay.banners;
+  return b.length > 0 && y < 48 && x >= b[0].x - 14 && x <= b[b.length - 1].x + 22;
+}
+/* Where a subtask is on the map: -1 the quay, i stop i, null elsewhere. */
+function placeOf(n, v) {
+  if (v.pipeline.quay.includes(n)) return -1;
+  const i = v.pipeline.stops.findIndex(s => s.issues.includes(n));
+  return i >= 0 ? i : null;
+}
+function bargesFor(v, lay) {
+  const last = v.pipeline.stops.length - 1, queued = {};
+  return lay.banners.map(g => {
+    if (g.f.promotion !== 'feature') return null;
+    const ns = counted(g.f).map(s => s.number), at = ns.map(n => placeOf(n, v));
+    if (!ns.length || at.some(a => a === null || a !== at[0])) return null;
+    // Barges at the same stop queue up: off the quay they line up downstream,
+    // at a lock or the harbour they wait upstream of it.
+    const i = at[0], k = queued[i] = (queued[i] ?? -1) + 1;
+    const x = i === -1 ? lay.roadX - 14 + k * 26
+      : Math.max(lay.roadX - 14, (i === last ? lay.castleX - 26 : lay.lockStart + i * 34 + 8) - k * 26);
+    return { f: g.f, col: g.col, issues: ns, stop: i, x, y: lay.canalY + 1 };
+  }).filter(Boolean);
+}
+/* The map point a trail leads to for subtask n: its house, its crate, or its barge. */
+function whereIs(n, v, lay, barges) {
+  const hi = v.houses.findIndex(h => h.issue === n);
+  if (hi >= 0) { const lot = lay.lots[hi]; if (lot) return { x: lot.x + 8, y: lot.y + 18 }; }
+  const bi = v.backlog.findIndex(c => c.number === n);
+  if (bi >= 0) { const s = slotPos(Math.min(bi, 39)); return { x: s.x + 2, y: s.y + 2 }; }
+  const ni = v.board.findIndex(b => b.number === n);
+  if (ni >= 0) { const k = Math.min(ni, 7); return { x: lay.hallX + 45 + (k % 4) * 4, y: 31 + Math.floor(k / 4) * 4 }; }
+  const b = barges.find(b => b.issues.includes(n));
+  if (b) { const k = Math.min(b.issues.indexOf(n), 3); return { x: b.x + 4 + k * 5, y: b.y + 3 }; }
+  const hid = new Set(barges.flatMap(b => b.issues));
+  const ci = cargoOf(v).filter(m => !hid.has(m)).indexOf(n);
+  if (ci >= 0) { const [x, y] = holdPos(lay, Math.min(ci, SHIP_CAP - 1)); return { x: x + 2, y: y + 2 }; }
+  const qi = v.pipeline.quay.filter(m => !hid.has(m)).indexOf(n);
+  if (qi >= 0) { const k = Math.min(qi, 5); return { x: lay.roadX + 8 + (k % 3) * 6, y: lay.quayY - 1 - Math.floor(k / 3) * 6 }; }
+  const stops = v.pipeline.stops;
+  for (let i = 0; i < stops.length; i++) {
+    let k = stops[i].issues.filter(m => !hid.has(m)).indexOf(n);
+    if (k < 0) continue;
+    // Shipped work has sailed: the trail ends at the harbour's lighthouse.
+    return i < stops.length - 1
+      ? (k = Math.min(k, 3), { x: lay.lockStart + i * 34 + 10 + (k % 2) * 6, y: lay.canalY + 20 + Math.floor(k / 2) * 6 })
+      : { x: lay.castleX + 31, y: lay.canalY - 24 };
+  }
+  return null;
+}
+/* A barge on the canal, or a flatbed truck on the district's road. */
+function drawBarge(c, b, t) {
+  const x = b.x, y = b.y + (!state.reduce && blink(t, 700) ? 1 : 0);
+  if (state.T === FUTURE) {
+    // A hover-barge: hull, cockpit, a glow under it.
+    R(c, x, y + 6, 24, 4, P.o); R(c, x + 1, y + 6, 22, 2, F.hull); R(c, x + 1, y + 6, 22, 1, b.col);
+    R(c, x + 18, y + 1, 6, 6, P.o); R(c, x + 19, y + 2, 4, 3, F.glass);
+    R(c, x + 2, y + 10, 20, 1, !state.reduce && blink(t, 200) ? F.cyanL : F.cyan);
+  } else if (state.T === MODERN) {
+    R(c, x, y + 6, 20, 4, P.o); R(c, x + 1, y + 6, 18, 2, M.steel); R(c, x + 1, y + 6, 18, 1, b.col);
+    R(c, x + 19, y + 1, 6, 9, P.o); R(c, x + 20, y + 2, 4, 6, P.white); R(c, x + 21, y + 3, 3, 2, M.glassL);
+    [x + 3, x + 14, x + 21].forEach(wx => { R(c, wx, y + 9, 3, 3, P.o); R(c, wx + 1, y + 10, 1, 1, M.steel); });
+  } else {
+    R(c, x, y + 6, 24, 5, P.o); R(c, x + 1, y + 6, 22, 3, P.wood); R(c, x + 1, y + 6, 22, 1, P.woodL); R(c, x + 3, y + 9, 18, 1, P.woodD);
+    R(c, x + 22, y - 6, 1, 8, P.o); R(c, x + 23, y - 6, 5, 4, P.o); R(c, x + 23, y - 5, 4, 2, b.col);
+  }
+  b.issues.slice(0, 4).forEach((n, k) => state.T.crate(c, x + 2 + k * 5, y + 1, 'workshop', null, true));
+  tap(b.x, b.y - 6, 28, 18, { kind: 'barge', f: b.f ? b.f.number : null, issues: b.issues });
+}
+/* The fog wash per theme, shared with the key. */
+const fogCol = th => th === MODERN ? 'rgba(170,176,196,.75)' : th === FUTURE ? 'rgba(60,52,110,.78)' : 'rgba(206,210,230,.72)';
+/* Fog over a stop with neither a Deployment nor a branch: "?", never "not live". */
+function fogStop(c, v, i, lay, t) {
+  const last = v.pipeline.stops.length - 1, x = i === last ? lay.castleX - 4 : lay.lockStart + i * 34 - 7, w = i === last ? 46 : 32;
+  R(c, x, lay.canalY - 28, w, lay.H - lay.canalY + 28, fogCol(state.T));
+  if (!state.reduce) for (let k = 0; k < w / 6 - 1; k++) puffs(c, x + 4 + k * 6, lay.canalY - 18 + (k % 2) * 22, t + k * 330, '#e0e4f0', '#b8c0d8');
+  bubble(c, x + (w >> 1) - 4, lay.canalY - 6, 'unknown');
+}
+/* A flag on a pole: swallowtail cloth in the feature's colour, a red pennant
+ * when a subtask is stuck, gold and sparkling once live. The spec lies at
+ * its foot: a scroll in the village, a clipboard downtown. */
+function drawBanner(c, g, on, t) {
+  const { x, y, f } = g, col = f.live ? P.gold : g.col, wave = !state.reduce && blink(t + f.number * 7, 320) ? 1 : 0;
+  const stuck = (f.stuck || []).length > 0, top = stuck ? y - 7 : y - 1, modern = state.T !== MEDIEVAL;
+  R(c, x - 2, y + 23, 5, 2, P.o); R(c, x - 1, y + 23, 3, 1, modern ? M.concrete : P.stoneD);
+  R(c, x, top, 1, y + 23 - top, modern ? M.steelD : P.o); R(c, x, top - 1, 1, 1, P.gold);
+  R(c, x + 1, y, 14, 10, P.o); R(c, x + 1, y + 1, 13, 8, col); R(c, x + 1, y + 1, 13, 1, P.white);
+  if (!modern) R(c, x + 12, y + 4 + wave, 3, 2, P.o);
+  R(c, x + 4, y + 4, 6, 1, f.live ? P.o : P.white); R(c, x + 4, y + 6, 4, 1, f.live ? P.o : P.white);
+  if (stuck) { const w = !state.reduce && blink(t, 260) ? 1 : 0; R(c, x + 1, y - 7, 7 + w, 4, P.o); R(c, x + 1, y - 6, 6 + w, 2, P.p0); }
+  if (modern) { R(c, x + 4, y + 18, 7, 7, P.o); R(c, x + 5, y + 19, 5, 5, P.white); R(c, x + 6, y + 18, 3, 1, M.steel); R(c, x + 6, y + 21, 3, 1, M.concreteD); R(c, x + 6, y + 23, 2, 1, M.concreteD); }
+  else { R(c, x + 3, y + 19, 8, 5, P.o); R(c, x + 4, y + 20, 6, 3, P.parch); R(c, x + 5, y + 21, 4, 1, P.pathS); }
+  if (f.live && !state.reduce) for (let k = 0; k < 3; k++) if (blink(t + k * 170, 220)) R(c, x + 3 + k * 5, y - 3 - (k % 2) * 2, 1, 1, P.gold);
+  if (on) { const o = !state.reduce && blink(t, 400) ? col : P.white; R(c, x - 3, y - 9, 20, 1, o); R(c, x - 3, y + 26, 20, 1, o); R(c, x - 3, y - 9, 1, 36, o); R(c, x + 16, y - 9, 1, 36, o); }
+}
+function drawTrail(c, x0, y0, x1, y1, col, t) {
+  const off = state.reduce ? 0 : Math.floor(t / 110) % 4, pts = [];
+  x1 = Math.round(x1); y1 = Math.round(y1);
+  for (let y = y0; y !== y1; y += Math.sign(y1 - y0)) pts.push([x0, y]);
+  for (let x = x0; x !== x1; x += Math.sign(x1 - x0)) pts.push([x, y1]);
+  pts.forEach(([px, py], i) => { if ((i + off) % 4 < 2) { R(c, px, py + 1, 1, 1, P.o); R(c, px, py, 1, 1, col); } });
+  const o = !state.reduce && blink(t, 300) ? col : P.white;
+  R(c, x1 - 4, y1 - 4, 9, 1, o); R(c, x1 - 4, y1 + 4, 9, 1, o); R(c, x1 - 4, y1 - 4, 1, 9, o); R(c, x1 + 4, y1 - 4, 1, 9, o);
+}
+function featureLayer(c, t, v, lay, barges) {
+  if (!lay.banners.length && !v.pipeline.stops.some(s => s.source === 'unknown')) return;
+  barges.forEach(b => drawBarge(c, b, t));
+  v.pipeline.stops.forEach((s, i) => { if (s.source === 'unknown') fogStop(c, v, i, lay, t); });
+  const fade = (scenes[v.project] || {}).fade || {};
+  lay.banners.forEach(g => {
+    const on = isFollowed(v, g.f), a = on ? 1 : (fade[g.f.number] ?? 1);
+    if (on) counted(g.f).forEach(s => { const w = whereIs(s.number, v, lay, barges); if (w) drawTrail(c, g.x, g.y + 25, w.x, w.y, g.f.live ? P.gold : g.col, t); });
+    c.globalAlpha = a; drawBanner(c, g, on, t); c.globalAlpha = 1;
+    tap(g.x - 3, g.y - 9, 20, 36, { kind: 'banner', f: g.f.number });
+  });
+}
+
+function drawVillage(c, sc, t) {
+  state.current = sc.v; state.L = sc.L; state.porters = sc.porters; state.floats = sc.floats; state.fireworks = sc.fireworks; state.S = sc;
+  hits = [];
+  paint(c, t);
+  sc.hits = hits; hits = null;
+  sc.porters = state.porters; sc.floats = state.floats;
+}
+
+/* A live banner has done its job: it fades over the first hour after this
+ * page saw it go live and is gone after LIVE_GONE, unless it is being
+ * followed. (The server also stops listing a feature a day after it went live.) */
+const LIVE_FADE = 10 * 60e3, LIVE_DIM = 60 * 60e3, LIVE_GONE = 2 * 60 * 60e3;
+function fadeLive(sc, v) {
+  const now = Date.now(), seen = {};
+  sc.fade = {};
+  v.features = (v.features || []).filter(f => {
+    if (!f.live) return true;
+    const since = seen[f.number] = sc.liveSince[f.number] ?? now, age = now - since;
+    if (age > LIVE_GONE && !isFollowed(v, f)) return false;
+    sc.fade[f.number] = age <= LIVE_FADE ? 1 : Math.max(0.35, 1 - 0.65 * (age - LIVE_FADE) / (LIVE_DIM - LIVE_FADE));
+    return true;
+  });
+  sc.liveSince = seen;
+}
+/* Fold a new model into its village's scene, starting the animations its
+ * changes call for. */
+function updateScene(v, t) {
+  const sc = scenes[v.project] || (scenes[v.project] = { v: null, porters: [], floats: [], gates: {}, voyage: null, supplies: [], nextAt: 0, fireworks: -1e9,
+    lastDelivered: null, lastRelease: null, liveSince: {}, fade: {} });
+  fadeLive(sc, v);
+  const lay = layout(v);
+  state.porters = sc.porters; state.floats = sc.floats;
+  const said = diff(sc.v, v, lay, t, sc);
+  sc.porters = state.porters; sc.floats = state.floats;
+  // Reduced motion: nobody walks, so say what changed instead.
+  if (state.reduce && said.length && shownScenes().some(([x]) => x === sc)) toast(`${v.project}: ${said.slice(0, 4).join(' · ')}${said.length > 4 ? ` · +${said.length - 4} more` : ''}`);
+  // A new deployment at the last stop sails the ship. A village with no
+  // release to compare (a runtime's stages) still lights up when work arrives.
+  const rel = releaseOf(v), delivered = v.pipeline.stops.length ? v.pipeline.stops[v.pipeline.stops.length - 1].issues.join(',') : '';
+  const was = sc.lastRelease, sameSource = rel && was && rel.split(':')[0] === was.split(':')[0];
+  if (rel) { if (sc.v && sameSource && rel !== was) sail(sc, v, t); sc.lastRelease = rel; }
+  else if (!was && sc.lastDelivered !== null && sc.v && delivered !== sc.lastDelivered && delivered) sc.fireworks = t;
+  sc.lastDelivered = delivered;
+  sc.v = v; sc.L = lay;
+  return sc;
+}
+
+/* ---------- Worlds ----------
+ * A world stacks the platform village (what runs) over the dev village
+ * (what builds it). Issues the platform raises leave the building they
+ * came from and float down the river on the left to the dev village's
+ * docks; releases leave the dev village's harbour and climb the road on
+ * the right to the platform, until its workers run them. The platform is
+ * drawn in the other style, so the two read apart at a glance. */
+const SIDE = 24, GAP = 28;
+const otherTheme = () => THEMES[state.T.pair] || THEMES.medieval;
+function worldGeom(Ps, Ds) {
+  const W = Math.max(Ps.L.W, Ds.L.W) + 2 * SIDE, devTop = Ps.L.H + GAP;
+  return { W, H: devTop + Ds.L.H, devTop, srcY: Ps.L.top, roadY: 53 };
+}
+function offscreen(sc) {
+  if (!sc.canvas) { sc.canvas = document.createElement('canvas'); sc.cx = sc.canvas.getContext('2d'); }
+  if (sc.canvas.width !== sc.L.W || sc.canvas.height !== sc.L.H) { sc.canvas.width = sc.L.W; sc.canvas.height = sc.L.H; }
+  return sc.cx;
+}
+/* A channel that flows down: water in the village, a conveyor road in the district. */
+function downstream(c, x, y, w, h, t) {
+  const modern = state.T !== MEDIEVAL, fut = state.T === FUTURE;
+  R(c, x, y, w, h, fut ? F.space : modern ? M.asphaltD : P.water);
+  const edge = fut ? F.magentaD : modern ? M.concreteD : P.waterD;
+  R(c, x, y, 1, h, edge); R(c, x + w - 1, y, 1, h, edge);
+  const off = Math.floor(t / 70) % 8;
+  for (let yy = y - 8 + off; yy < y + h; yy += 8) if (yy >= y) {
+    if (modern) R(c, x + (w >> 1), yy, 1, 4, fut ? F.plasmaL : P.white);
+    else { R(c, x + 3, yy, 1, 2, P.waterL); R(c, x + w - 5, yy + 4, 1, 2, P.waterL); }
+  }
+}
+function cart(c, x, y, loads) {
+  const modern = state.T !== MEDIEVAL;
+  x = Math.round(x); y = Math.round(y);
+  R(c, x, y, 14, 8, P.o); R(c, x + 1, y + 1, 12, 5, modern ? P.white : P.wood);
+  if (modern) { R(c, x + 10, y - 3, 4, 4, P.o); R(c, x + 11, y - 2, 2, 2, M.glassL); }
+  R(c, x + 2, y + 7, 3, 3, P.o); R(c, x + 9, y + 7, 3, 3, P.o);
+  for (let k = 0; k < Math.min(loads, modern ? 1 : 2); k++) state.T.crate(c, x + 2 + k * 5, y - 4, 'workshop', null, true);
+}
+function updateWorld(w, t) {
+  const st = worldState[w.name] || (worldState[w.name] = { seen: null, floaters: [], landed: undefined, upgradedAt: -1e9 });
+  const now = new Set(w.incidents.map(i => i.number));
+  if (st.seen) w.incidents.forEach(i => { if (!st.seen.has(i.number)) st.floaters.push({ n: i.number, origin: i.origin, t0: t }); });
+  st.seen = now;
+  if (st.landed === false && w.landed === true) {
+    st.upgradedAt = t;
+    if (scenes[w.platform]) scenes[w.platform].fireworks = t;
+  }
+  st.landed = w.landed;
+}
+function originPoint(Ps, id) {
+  const i = Ps.v.houses.findIndex(h => h.id === id), lot = i >= 0 ? Ps.L.lots[i] : null;
+  return lot ? [SIDE + lot.x + 8, lot.y + 8] : [12, Ps.L.top - 6];
+}
+function drawWorld(t, w) {
+  const Ps = scenes[w.platform], Ds = scenes[w.dev];
+  if (!Ps || !Ps.v || !Ds || !Ds.v) return;
+  const g = worldGeom(Ps, Ds), st = worldState[w.name] || { floaters: [], upgradedAt: -1e9 };
+  if (cv.width !== g.W || cv.height !== g.H) { cv.width = g.W; cv.height = g.H; fit(); }
+  const devTheme = state.T;
+  state.T.ground(ctx, 0, 0, g.W, g.H);
+
+  state.T = otherTheme();
+  state.T.ground(ctx, 0, 0, g.W, Ps.L.H);
+  drawVillage(offscreen(Ps), Ps, t);
+  ctx.drawImage(Ps.canvas, SIDE, 0);
+  // Platform buildings with an open incident against them are on fire.
+  w.damaged.forEach(id => {
+    const i = Ps.v.houses.findIndex(h => h.id === id), lot = Ps.L.lots[i];
+    if (!lot) return;
+    const x = SIDE + lot.x, y = lot.y;
+    R(ctx, x, y - 1, 16, 17, 'rgba(40,24,24,.35)');
     for (let k = 0; k < 3; k++) {
-      const p = ((t / 110) + k * 7) % 21;
-      const s = p < 9 ? 2 : 1;
-      R(c, x + Math.round(Math.sin((p + k * 2) / 3)), y - Math.floor(p * 0.6), s, s, p < 12 ? a : b);
+      puffs(ctx, x + 4 + k * 4, y - 6, t + k * 450, '#484858', '#282830');
+      puffs(ctx, x + 5 + k * 4, y - 12, t + k * 450 + 900, '#585870', '#383848');
     }
-  }
+    const f = blink(t, 140) ? 1 : 0;
+    R(ctx, x + 4, y + 2 - f, 3, 3 + f, P.p0); R(ctx, x + 5, y + 1 - f, 1, 2, P.gold);
+    R(ctx, x + 10, y + 3 + f, 3, 3 - f, P.p0); R(ctx, x + 11, y + 2 + f, 1, 2, P.gold);
+  });
+  if (t - st.upgradedAt < 2400) Ps.v.houses.forEach((h, i) => {
+    const lot = Ps.L.lots[i]; if (lot && blink(t + i * 90, 160)) R(ctx, SIDE + lot.x + 2 + (i * 5) % 12, lot.y - 2, 1, 1, P.gold);
+  });
+  state.T = devTheme;
 
-  /* ---------- Houses: each draws in x..x+15, y-4..y+16 ---------- */
-  const B = {
-    cottage(c, x, y, st, t, roof = P.thatch, roofD = P.thatchD) {
-      R(c, x + 11, y - 2, 4, 5, P.o); R(c, x + 12, y - 1, 2, 4, P.stone);
-      gable(c, x, y + 1, 16, 9, roof, roofD);
-      wall(c, x + 1, y + 9, 14, 7, P.wood); R(c, x + 2, y + 9, 12, 1, P.woodD);
-      win(c, x + 2, y + 10, st); win(c, x + 10, y + 10, st); door(c, x + 6, y + 11, st);
-      if (lit(st)) puffs(c, x + 12, y - 4, t, P.white, P.stoneL);
-    },
-    workshop(c, x, y, st, t) {
-      B.cottage(c, x, y, st, t, P.red, P.redD);
-      R(c, x + 4, y + 4, 6, 3, P.o); R(c, x + 5, y + 4, 4, 1, P.stoneL); R(c, x + 6, y + 5, 2, 1, P.stoneL);
-    },
-    feature(c, x, y, st, t) {
-      gable(c, x, y + 1, 11, 9, P.red, P.redD);
-      wall(c, x + 1, y + 9, 10, 7, P.wood); R(c, x + 2, y + 9, 8, 1, P.woodD);
-      win(c, x + 2, y + 10, st); door(c, x + 6, y + 11, st);
-      R(c, x + 11, y + 2, 1, 14, P.plank); R(c, x + 15, y + 2, 1, 14, P.plank);
-      R(c, x + 10, y + 2, 6, 1, P.plank); R(c, x + 11, y + 7, 5, 1, P.plank);
-      for (let k = 0; k < 4; k++) R(c, x + 12 + k, y + 3 + k, 1, 1, P.woodL);
-      R(c, x + 11, y + 12, 5, 1, P.plank); R(c, x + 11, y + 13, 5, 1, P.woodD); R(c, x + 11, y + 14, 5, 1, P.plank); R(c, x + 11, y + 15, 5, 1, P.o);
-      if (lit(st) && blink(t, 140)) { R(c, x + 12 + (Math.floor(t / 280) % 3), y + 6, 1, 1, P.white); R(c, x + 13, y + 5, 1, 1, P.gold); }
-    },
-    bug(c, x, y, st, t) {
-      gable(c, x, y + 1, 16, 9, P.thatch, P.thatchD);
-      R(c, x + 3, y + 3, 5, 4, P.woodD); R(c, x + 4, y + 4, 3, 2, P.plank); R(c, x + 5, y + 4, 1, 2, P.woodD);
-      wall(c, x + 1, y + 9, 14, 7, P.wood); R(c, x + 2, y + 9, 12, 1, P.woodD);
-      win(c, x + 2, y + 10, st); door(c, x + 6, y + 11, st);
-      R(c, x + 11, y + 2, 1, 14, P.woodL); R(c, x + 14, y + 2, 1, 14, P.woodL);
-      for (let yy = y + 3; yy < y + 16; yy += 3) R(c, x + 11, yy, 4, 1, P.woodD);
-      R(c, x + 9, y - 1, 1, 2, P.o);
-      R(c, x + 6, y - 4, 7, 4, P.o); R(c, x + 7, y - 3, 5, 2, P.bug); R(c, x + 8, y - 3, 1, 1, P.o); R(c, x + 10, y - 2, 1, 1, P.o); R(c, x + 9, y - 3, 1, 2, P.o);
-      if (lit(st)) R(c, x + 2 + Math.floor(t / 160) % 8, y + 7, 2, 1, P.o);
-    },
-    security(c, x, y, st, t) {
-      R(c, x, y + 10, 4, 6, P.o); R(c, x + 1, y + 11, 2, 4, P.stone);
-      R(c, x + 12, y + 10, 4, 6, P.o); R(c, x + 13, y + 11, 2, 4, P.stone);
-      R(c, x + 3, y - 2, 10, 18, P.o); R(c, x + 4, y - 1, 8, 16, P.stone); R(c, x + 4, y - 1, 8, 1, P.stoneL);
-      for (let yy = y + 1; yy < y + 14; yy += 3) for (let xx = x + 5 + ((yy - y) % 2 ? 2 : 0); xx < x + 11; xx += 4) R(c, xx, yy, 1, 1, P.stoneD);
-      [3, 7, 11].forEach(dx => R(c, x + dx, y - 4, 2, 2, P.o));
-      R(c, x + 5, y + 1, 1, 3, glassOf(st)); R(c, x + 10, y + 1, 1, 3, glassOf(st));
-      R(c, x + 6, y + 4, 4, 4, P.gold); R(c, x + 7, y + 5, 2, 2, P.shield); R(c, x + 7, y + 8, 2, 1, P.gold);
-      door(c, x + 6, y + 11, st);
-      if (lit(st)) R(c, x + 7, y - 5, 2, 1, blink(t, 160) ? P.gold : P.lamp);
-    },
-    tests(c, x, y, st, t) {
-      gable(c, x, y + 1, 16, 9, P.purple, P.purpleD);
-      R(c, x + 2, y - 2, 5, 1, P.o); R(c, x + 3, y - 1, 3, 3, P.o); R(c, x + 4, y - 1, 1, 3, P.copper);
-      R(c, x + 9, y + 2, 2, 1, P.o); R(c, x + 8, y + 3, 4, 4, P.o); R(c, x + 9, y + 4, 2, 2, lit(st) ? (blink(t, 300) ? P.fizzA : P.fizzB) : P.glass);
-      wall(c, x + 1, y + 9, 14, 7, P.wood); R(c, x + 2, y + 9, 12, 1, P.woodD);
-      win(c, x + 2, y + 10, st); win(c, x + 10, y + 10, st); door(c, x + 6, y + 11, st);
-      if (lit(st)) puffs(c, x + 4, y - 4, t, P.fizzA, P.fizzB);
-    },
-    research(c, x, y, st, t) {
-      for (let dy = -7; dy <= 0; dy++) for (let dx = -7; dx <= 7; dx++) {
-        const d = dx * dx + dy * dy; if (d > 49) continue;
-        R(c, x + 8 + dx, y + 9 + dy, 1, 1, d > 36 ? P.o : dx < -1 ? P.dome : P.domeD);
-      }
-      R(c, x + 8, y + 3, 2, 6, P.dark);
-      const a = -Math.PI / 4 + (lit(st) ? Math.sin(t / 900) * 0.35 : 0);
-      for (let d = 0; d < 8; d++) {
-        const px = Math.round(x + 9 + Math.cos(a) * d), py = Math.round(y + 6 + Math.sin(a) * d);
-        R(c, px, py, 2, 2, P.o); if (d > 1) R(c, px, py, 1, 1, P.stoneD);
-      }
-      wall(c, x + 1, y + 9, 14, 7, P.stone);
-      win(c, x + 2, y + 10, st); win(c, x + 10, y + 10, st); door(c, x + 6, y + 11, st);
-    },
-    docs(c, x, y, st, t) {
-      for (let r = 0; r < 7; r++) R(c, x + 7 - r, y + r, 2 + 2 * r, 1, P.o);
-      for (let r = 1; r < 7; r++) R(c, x + 8 - r, y + r, 2 * r, 1, r % 2 ? P.teal : P.tealD);
-      R(c, x + 7, y + 3, 2, 2, P.gold);
-      R(c, x, y + 7, 16, 2, P.o); R(c, x + 1, y + 7, 14, 1, P.stoneL);
-      wall(c, x + 1, y + 9, 14, 7, P.parch);
-      const books = ['#c04838', '#3870c0', '#58a048', '#f8d040'];
-      [x + 2, x + 10].forEach((wx, i) => {
-        R(c, wx, y + 9, 4, 6, P.woodD); R(c, wx + 1, y + 10, 2, 4, glassOf(st));
-        R(c, wx + 1, y + 12, 1, 2, books[i * 2]); R(c, wx + 2, y + 12, 1, 2, books[i * 2 + 1]);
-      });
-      door(c, x + 6, y + 11, st);
-    },
-    refactor(c, x, y, st, t) {
-      gable(c, x, y + 1, 16, 9, P.red, P.redD);
-      for (let r = 1; r < 8; r++) R(c, x + 8, y + 1 + r, 7, 1, (r % 3 === 0) ? P.slateD : P.slate);
-      wall(c, x + 1, y + 9, 14, 7, P.wood); R(c, x + 2, y + 9, 12, 1, P.woodD);
-      win(c, x + 2, y + 10, st); door(c, x + 6, y + 11, st);
-      R(c, x + 11, y + 12, 5, 4, P.o); R(c, x + 12, y + 13, 1, 2, P.stoneL); R(c, x + 14, y + 13, 1, 2, P.stoneL);
-      R(c, x + 14, y - 4, 1, 6, P.woodD); R(c, x + 9, y - 4, 6, 1, P.woodD);
-      const drop = lit(st) ? Math.round((Math.sin(t / 300) + 1) * 1.5) : 0;
-      R(c, x + 10, y - 3, 1, 1 + drop, P.stoneD);
-      R(c, x + 9, y - 2 + drop, 3, 2, P.o); R(c, x + 10, y - 2 + drop, 1, 1, P.stoneL);
-    },
-    perf(c, x, y, st, t) {
-      for (let r = 0; r < 13; r++) {
-        const hw = 3 + Math.floor(r / 4);
-        R(c, x + 8 - hw - 1, y + 3 + r, 2 * hw + 2, 1, P.o);
-        R(c, x + 8 - hw, y + 3 + r, 2 * hw, 1, r === 12 ? P.o : (r % 4 === 3 ? P.millD : P.mill));
-      }
-      R(c, x + 4, y + 1, 8, 3, P.o); R(c, x + 5, y + 1, 6, 2, P.red);
-      win(c, x + 6, y + 5, st); door(c, x + 6, y + 10, st);
-      const a = lit(st) ? t / 260 : Math.PI / 4, hx = x + 8, hy = y + 3;
-      for (let k = 0; k < 4; k++) {
-        const ang = a + k * Math.PI / 2, cs = Math.cos(ang), sn = Math.sin(ang);
-        for (let d = 2; d <= 7; d++) {
-          const px = Math.round(hx + cs * d), py = Math.round(hy + sn * d);
-          if (d > 2) R(c, Math.round(px - sn * 1.2), Math.round(py + cs * 1.2), 1, 1, P.sail);
-          R(c, px, py, 1, 1, P.woodD);
-        }
-      }
-      R(c, hx - 1, hy - 1, 2, 2, P.o);
-    },
-    chores(c, x, y, st, t) {
-      for (let r = 0; r < 9; r++) { const i = Math.max(0, 3 - r); R(c, x + i, y + 1 + r, 16 - 2 * i, 1, P.o); }
-      for (let r = 1; r < 8; r++) { const i = Math.max(0, 3 - r) + 1; R(c, x + i, y + 1 + r, 16 - 2 * i, 1, r % 3 === 0 ? P.barnD : P.barn); }
-      R(c, x + 6, y + 3, 4, 4, P.white); R(c, x + 7, y + 4, 2, 2, glassOf(st));
-      wall(c, x + 1, y + 9, 14, 7, P.barn); R(c, x + 2, y + 9, 12, 1, P.barnD);
-      if (st === 'blocked') R(c, x + 4, y + 10, 8, 6, P.o);
-      else {
-        R(c, x + 4, y + 10, 8, 6, P.white); R(c, x + 5, y + 11, 6, 4, P.woodL);
-        for (let k = 0; k < 4; k++) { R(c, x + 5 + k, y + 11 + k, 1, 1, P.white); R(c, x + 10 - k, y + 11 + k, 1, 1, P.white); }
-      }
-    }
-  };
-  function scaffold(c, x, y, t) {
-    R(c, x + 1, y + 2, 1, 14, P.woodL); R(c, x + 14, y + 2, 1, 14, P.woodL);
-    for (let yy = y + 3; yy < y + 16; yy += 5) R(c, x + 1, yy, 14, 1, P.woodL);
-    for (let k = 0; k < 12; k++) R(c, x + 2 + k, y + 15 - k, 1, 1, P.woodD);
-    if (blink(t, 90)) R(c, x + 4 + Math.floor(hash(Math.floor(t / 90), 3) * 8), y + 4, 1, 1, P.gold);
-  }
-  function cobwebs(c, x, y) {
-    [[x + 1, y + 9], [x + 12, y + 9]].forEach(([wx, wy]) => {
-      R(c, wx, wy, 3, 1, P.web); R(c, wx, wy, 1, 3, P.web); R(c, wx + 1, wy + 1, 1, 1, P.web);
-    });
-  }
-  function pennant(c, x, y, pr, t) {
-    if (!pr || pr === 'P3') return;
-    R(c, x - 1, y - 5, 1, 9, P.stoneD);
-    if (pr === 'P0') { const w = blink(t, 300) ? 1 : 0; R(c, x, y - 5, 5, 4, P.o); R(c, x, y - 4, 4 + w, 2, P.p0); }
-    else { R(c, x, y - 5, 4, 3, P.o); R(c, x, y - 4, 3, 1, pr === 'P1' ? P.gold : P.white); }
-  }
+  drawVillage(offscreen(Ds), Ds, t);
+  ctx.drawImage(Ds.canvas, SIDE, g.devTop);
 
-  /* ---------- People and things ---------- */
-  const ICONS = {
-    blocked: ['..#..', '..#..', '..#..', '.....', '..#..'],
-    done: ['.....', '....#', '...#.', '#.#..', '.#...'],
-    unknown: ['.###.', '#...#', '..##.', '.....', '..#..'],
-    stalled: ['.....', '.....', '#.#.#', '.....', '.....']
-  };
-  function bubble(c, x, y, icon) {
-    const o = P.o, w = P.white, m = ICONS[icon], col = STATE[icon];
-    R(c, x + 1, y, 7, 1, o); R(c, x + 1, y + 8, 7, 1, o); R(c, x, y + 1, 1, 7, o); R(c, x + 8, y + 1, 1, 7, o);
-    R(c, x + 1, y + 1, 7, 7, w); R(c, x + 4, y + 8, 1, 2, w); R(c, x + 3, y + 9, 1, 1, o); R(c, x + 5, y + 9, 1, 1, o); R(c, x + 4, y + 10, 1, 1, o);
-    for (let r = 0; r < 5; r++) for (let k = 0; k < 5; k++) if (m[r][k] === '#') R(c, x + 2 + k, y + 2 + r, 1, 1, col);
-  }
-  /* A crate tied shut: it waits on another issue (a "Depends on" line), so
-   * nobody picks it up yet. Drawn over any theme's crate. */
-  const ROPE = '#d8b070';
-  function roped(c, x, y) {
-    x = Math.round(x); y = Math.round(y);
-    R(c, x - 1, y + 2, 7, 1, ROPE); R(c, x + 2, y - 1, 1, 7, ROPE);
-    R(c, x + 1, y + 1, 3, 3, P.o); R(c, x + 2, y + 2, 1, 1, ROPE);
-  }
-  function crate(c, x, y, kind, pr, sealed) {
-    x = Math.round(x); y = Math.round(y);
-    R(c, x, y, 5, 5, P.o); R(c, x + 1, y + 1, 3, 3, P.woodL);
-    R(c, x + 1, y + 1, 3, 1, KINDCOL[kind] || P.woodD);
-    if (pr === 'P0') R(c, x + 2, y + 3, 1, 1, P.p0);
-    if (sealed) R(c, x + 2, y + 2, 1, 1, P.seal);
-  }
+  // The river down: from the platform's gate to the dev village's river.
+  downstream(ctx, 5, g.srcY, 14, g.devTop + 11 - g.srcY, t);
+  R(ctx, 2, g.srcY - 8, 20, 8, P.o); R(ctx, 3, g.srcY - 7, 18, 6, state.T === MODERN ? M.concrete : state.T === FUTURE ? F.hullD : P.stone); R(ctx, 9, g.srcY - 6, 6, 5, P.dark);
+  // The road up: from the dev village's harbour to the platform's main road.
+  const ry = g.devTop + Ds.L.canalY + 4;
+  state.T.road(ctx, g.W - 20, g.roadY - 3, 16, ry - g.roadY + 9);
+  state.T.road(ctx, SIDE + Ds.L.castleX + 36, ry, g.W - 20 - (SIDE + Ds.L.castleX + 36), 6);
+  const roadEnd = SIDE + Ps.L.cx0 + Ps.L.vw - 4;
+  state.T.road(ctx, roadEnd, g.roadY - 3, g.W - 20 - roadEnd, 6);
 
-  /* ---------- Scenery ---------- */
-  const FLOWERS = ['#f8f8f8', '#f8d040', '#e070d0', '#e05050', '#a8c8f8'];
-  function grass(c, x0, y0, w, h) {
-    R(c, x0, y0, w, h, P.grass);
-    // Soft, dithered variation in the grass, then tufts and the odd flower.
-    for (let y = y0; y < y0 + h; y += 2) for (let x = x0 + (y >> 1) % 2; x < x0 + w; x += 2) {
-      const v = hash(x >> 3, y >> 3) * 0.6 + hash(x >> 2, y >> 2) * 0.4;
-      if (v < 0.2) R(c, x, y, 1, 1, '#62a850'); else if (v > 0.82) R(c, x, y, 1, 1, '#4c9040');
-    }
-    for (let y = y0; y < y0 + h; y += 3) for (let x = x0; x < x0 + w; x += 3) {
-      const v = hash(x, y);
-      if (v < 0.05) { R(c, x, y, 1, 1, P.grassL); R(c, x + 2, y, 1, 1, P.grassL); R(c, x + 1, y - 1, 1, 1, P.grassL); }
-      else if (v < 0.1) R(c, x, y, 1, 1, P.grassD);
-      else if (v > 0.985) { R(c, x, y + 1, 1, 1, P.leafD); R(c, x, y, 1, 1, FLOWERS[Math.floor(hash(y, x) * FLOWERS.length)]); }
-    }
+  // Released work on its way up, until the platform's workers run it.
+  // The cart takes over from the ship: it sets off from the harbour as the
+  // ship sails off the dev village's edge, and none while the ship is still in sight.
+  const sailed = Ds.voyage ? Ds.voyage.t0 + SAIL : 0;
+  if (w.shipping.length && t >= sailed) {
+    const pts = [[SIDE + Ds.L.castleX + 34, ry], [g.W - 12, ry], [g.W - 12, g.roadY], [roadEnd, g.roadY]];
+    const len = pts.slice(1).reduce((n, p, k) => n + Math.hypot(p[0] - pts[k][0], p[1] - pts[k][1]), 0);
+    const d = state.reduce ? len / 2 : ((t - sailed) / 30) % len;
+    const at = porterPos({ t0: 0, speed: 1, pts }, d) || pts[0];
+    cart(ctx, at[0] - 7, at[1] - 6, w.shipping.length);
   }
-  function path(c, x0, y0, w, h) {
-    R(c, x0, y0, w, h, P.path);
-    for (let y = y0; y < y0 + h; y += 2) for (let x = x0; x < x0 + w; x += 2) {
-      const v = hash(x + 7, y + 3);
-      if (v < 0.07) R(c, x, y, 1, 1, P.pathS); else if (v < 0.11) R(c, x, y, 1, 1, P.pathL);
-    }
-    // Worn edges where the path meets the grass.
-    if (w > h) { R(c, x0, y0, w, 1, P.pathL); R(c, x0, y0 + h - 1, w, 1, P.pathS); }
-    else { R(c, x0, y0, 1, h, P.pathL); R(c, x0 + w - 1, y0, 1, h, P.pathS); }
-  }
-  function water(c, x0, y0, w, h, t, flow) {
-    R(c, x0, y0, w, h, P.water);
-    R(c, x0, y0 + 1, w, 2, P.waterD);
-    R(c, x0, y0, w, 1, P.pathS); R(c, x0, y0 + h - 1, w, 1, P.pathL);
-    const off = Math.floor(t / 120 * flow);
-    for (let y = y0 + 3; y < y0 + h - 2; y += 3) for (let x = x0; x < x0 + w; x += 7) {
-      if (hash(x, y) < 0.35) R(c, x0 + (((x - x0 + off) % w) + w) % w, y, 2, 1, P.waterL);
-    }
-    // Reeds on the near bank and the odd lily pad.
-    for (let x = x0 + 2; x < x0 + w - 2; x += 5) {
-      const v = hash(x, y0 + h);
-      if (v < 0.22) { R(c, x, y0 + h - 3, 1, 2, P.leafD); R(c, x + 1, y0 + h - 4, 1, 3, P.leaf); }
-      else if (v > 0.93 && h > 9) { R(c, x, y0 + (h >> 1), 3, 1, P.leaf); R(c, x + 1, y0 + (h >> 1), 1, 1, '#e070d0'); }
-    }
-  }
-  function tree(c, x, y) {
-    shadow(c, x + 4, y + 11, 9, 2);
-    R(c, x + 5, y + 8, 2, 4, P.woodD); R(c, x + 5, y + 8, 1, 4, P.wood);
-    const cx = x + 6, cy = y + 5, r = 5;
-    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
-      const d = dx * dx + dy * dy; if (d > r * r) continue;
-      R(c, cx + dx, cy + dy, 1, 1, d > (r - 1) * (r - 1) ? P.o : dx + dy > 3 ? P.leafD : dx + dy < -3 ? P.leafL : P.leaf);
-    }
-    // Leaf clusters and, on some trees, fruit.
-    [[-2, -1], [1, 1], [2, -2]].forEach(([dx, dy]) => { R(c, cx + dx, cy + dy, 2, 1, P.leafL); R(c, cx + dx + 1, cy + dy + 1, 1, 1, P.leafD); });
-    if (hash(x, y) < 0.3) { R(c, cx - 2, cy + 1, 1, 1, '#e05050'); R(c, cx + 2, cy - 1, 1, 1, '#e05050'); }
-  }
-  /* The manager's castle: a keep with banners between two round-roofed
-   * towers, behind a crenellated curtain wall. 40 wide, centred on the
-   * 32-wide hall slot; the gate opens when the manager waits on you. */
-  function hall(c, x, y, st) {
-    const x0 = x - 4, gy = y + 22, lit = glassOf(st);
-    R(c, x0 + 12, y - 2, 16, 20, P.o); R(c, x0 + 13, y - 1, 14, 18, P.stoneL);
-    for (let k = 0; k < 16; k += 3) R(c, x0 + 12 + k, y - 4, 2, 2, P.o);
-    R(c, x0 + 16, y + 3, 2, 4, lit); R(c, x0 + 22, y + 3, 2, 4, lit);
-    [x0 + 14, x0 + 25].forEach(bx => { R(c, bx, y + 1, 2, 7, '#804098'); R(c, bx, y + 1, 2, 1, P.gold); R(c, bx, y + 8, 1, 1, '#804098'); });
-    R(c, x0 + 20, y - 11, 1, 7, P.stoneD); R(c, x0 + 21, y - 11, 5, 3, P.o); R(c, x0 + 21, y - 10, 4, 1, P.gold);
-    R(c, x0, gy - 12, 40, 12, P.o); R(c, x0 + 1, gy - 11, 38, 10, P.stone);
-    for (let k = 0; k < 40; k += 4) R(c, x0 + k, gy - 14, 2, 2, P.o);
-    for (let yy = gy - 9; yy < gy - 1; yy += 3) for (let xx = x0 + 2 + ((yy % 2) ? 2 : 0); xx < x0 + 38; xx += 5) R(c, xx, yy, 1, 1, P.stoneD);
-    [x0, x0 + 32].forEach(tx => {
-      R(c, tx, y - 4, 8, gy - y + 4, P.o); R(c, tx + 1, y - 3, 6, gy - y + 2, P.stoneL);
-      R(c, tx + 3, y + 3, 2, 3, lit);
-      for (let r = 0; r < 4; r++) { R(c, tx + 3 - r, y - 8 + r, 2 + 2 * r, 1, P.o); if (r) R(c, tx + 4 - r, y - 8 + r, 2 * r, 1, r % 2 ? P.red : P.redD); }
-    });
-    R(c, x0 + 16, gy - 9, 8, 9, P.o);
-    if (st === 'blocked') R(c, x0 + 17, gy - 8, 6, 8, P.o);
-    else { R(c, x0 + 17, gy - 8, 6, 8, P.woodD); for (let k = 0; k < 6; k += 2) R(c, x0 + 17 + k, gy - 8, 1, 8, P.stoneD); }
-  }
-  function board(c, x, y, notes) {
-    R(c, x + 1, y + 9, 1, 6, P.woodD); R(c, x + 16, y + 9, 1, 6, P.woodD);
-    R(c, x, y, 18, 11, P.o); R(c, x + 1, y + 1, 16, 9, P.wood);
-    notes.slice(0, 8).forEach((n, i) => R(c, x + 2 + (i % 4) * 4, y + 2 + Math.floor(i / 4) * 4, 3, 3, NOTECOL[n.label] || P.white));
-  }
-  function lock(c, x, cy, open, flag) {
-    R(c, x - 1, cy - 4, 8, 4, P.o); R(c, x, cy - 3, 6, 2, P.stone);
-    R(c, x - 1, cy + 14, 8, 4, P.o); R(c, x, cy + 15, 6, 2, P.stone);
-    if (!open) { R(c, x + 1, cy, 1, 14, P.woodD); R(c, x + 4, cy, 1, 14, P.woodD); R(c, x + 2, cy, 2, 14, P.wood); }
-    R(c, x - 4, cy - 15, 12, 10, P.o); R(c, x - 3, cy - 13, 10, 7, P.stone);
-    R(c, x - 5, cy - 18, 14, 5, P.o); R(c, x - 4, cy - 17, 12, 3, P.red);
-    R(c, x, cy - 10, 3, 4, P.woodD);
-    R(c, x + 8, cy - 25, 1, 10, P.stoneD); R(c, x + 9, cy - 25, 5, 4, P.o); R(c, x + 9, cy - 24, 4, 2, flag);
-  }
-  /* Where finished work ships out: a harbour with a lighthouse at the end of
-   * the canal. Its lamp flares when a release goes out. The ship moored in it
-   * is drawn by ship() below, so it can load cargo and sail. */
-  function harbour(c, x, cy, t, fw) {
-    R(c, x, cy - 20, 38, 20, P.o); R(c, x + 1, cy - 19, 36, 18, P.stone);
-    for (let yy = cy - 17; yy < cy - 2; yy += 3) for (let xx = x + 2 + ((yy % 2) ? 2 : 0); xx < x + 36; xx += 5) R(c, xx, yy, 1, 1, P.stoneD);
-    [x + 3, x + 12, x + 21].forEach(bx => { R(c, bx, cy - 4, 3, 3, P.o); R(c, bx + 1, cy - 3, 1, 1, P.stoneD); });
-    const lx = x + 27;
-    R(c, lx, cy - 50, 9, 32, P.o);
-    for (let yy = cy - 49; yy < cy - 19; yy++) R(c, lx + 1, yy, 7, 1, Math.floor((yy - cy) / 5) % 2 ? P.white : P.red);
-    R(c, lx - 1, cy - 56, 11, 7, P.o); R(c, lx, cy - 55, 9, 4, blink(t, 700) || t - fw < 1600 ? P.lamp : P.glass);
-    R(c, lx + 1, cy - 59, 7, 3, P.o); R(c, lx + 2, cy - 58, 5, 1, P.red);
-    const ft = t - fw;
-    if (ft >= 0 && ft < 1600) {
-      const p = ft / 1600;
-      [[x + 8, P.gold], [x + 20, P.fizzA], [lx + 4, P.fizzB]].forEach(([fx, col], i) => {
-        const fy = cy - 62 - p * 18 - i * 3;
-        for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; R(c, fx + Math.cos(a) * p * 9, fy + Math.sin(a) * p * 9, 1, 1, col); }
-      });
-    }
-  }
-  /* The ship that carries the next release, moored at harbour x, moved by
-   * (ox, oy) while it sails. Its cargo is drawn on deck at SHIP_HOLD. */
-  /* The supply boat that brings new issues down the river to the docks,
-   * with `load` crates still on deck. The river is the map's top 11 rows. */
-  function boat(c, x, t, load) {
-    x = Math.round(x);
-    const y = !reduce && blink(t, 600) ? 1 : 0;
-    R(c, x, y + 5, 28, 5, P.o); R(c, x + 1, y + 5, 26, 3, P.wood); R(c, x + 1, y + 5, 26, 1, P.woodL); R(c, x + 26, y + 4, 3, 3, P.o);
-    R(c, x + 22, 0, 1, y + 5, P.woodD); R(c, x + 17, 1, 5, 4, P.o); R(c, x + 18, 1, 4, 3, P.sail);
-    for (let k = 0; k < Math.min(load, 3); k++) crate(c, x + 2 + k * 5, y, 'workshop', null);
-  }
-  function ship(c, x, cy, t, ox, oy) {
-    x = Math.round(x + ox); cy = Math.round(cy + oy);
-    R(c, x + 2, cy + 3, 22, 9, P.o); R(c, x + 3, cy + 4, 20, 6, P.wood); R(c, x + 3, cy + 4, 20, 1, P.woodL); R(c, x + 5, cy + 10, 16, 1, P.woodD);
-    R(c, x + 12, cy - 14, 1, 18, P.woodD);
-    R(c, x + 6, cy - 12, 13, 12, P.o); R(c, x + 7, cy - 11, 11, 10, P.sail); R(c, x + 12, cy - 11, 1, 10, P.millD);
-    R(c, x + 13, cy - 17, 5, 3, P.o); R(c, x + 13, cy - 16, 4, 1, '#804098');
-  }
+  // New incidents leave their building and float down to the docks.
+  st.floaters = st.floaters.filter(f => {
+    const [ox, oy] = originPoint(Ps, f.origin);
+    const pts = [[ox, oy], [12, oy], [12, g.devTop + 6], [SIDE + 30, g.devTop + 6]];
+    const at = porterPos({ t0: f.t0, speed: 0.04, pts }, t);
+    if (!at) return false;
+    state.T.crate(ctx, at[0] - 2, at[1] - 2, 'bug', 'P0');
+    return true;
+  });
+}
 
-  /* ---------- Themes ----------
-   * A theme decides how things look, never what they mean: every theme draws
-   * the same slots (ground, roads, buildings per kind, stations) in the same
-   * places, and keeps the shared status language -- lit windows for working,
-   * an open door and an orange "!" for blocked, dust for stalled, fog for
-   * unknown -- so switching themes never means relearning the map. */
-  /* ---------- Decoration ----------
-   * Free ground is never left bare: bushes, flowerbeds, rocks, hay and
-   * logs in the village; planters, benches, lamps and bike racks downtown.
-   * Placed once per layout on a grid of free cells (layout().decor). */
-  const DECOR = {
-    medieval(c, x, y, k, t) {
-      switch (k) {
-        case 0: // bush
-          shadow(c, x + 1, y + 5, 7, 1);
-          R(c, x, y + 1, 7, 4, P.o); R(c, x + 1, y, 5, 1, P.o);
-          R(c, x + 1, y + 1, 5, 3, P.leaf); R(c, x + 1, y + 1, 2, 1, P.leafL); R(c, x + 4, y + 3, 2, 1, P.leafD);
-          R(c, x + 2, y + 2, 1, 1, '#e05050'); break;
-        case 1: // flowerbed
-          R(c, x, y + 3, 8, 2, P.woodD); R(c, x + 1, y + 2, 6, 1, '#6a4a2a');
-          for (let i = 0; i < 4; i++) { R(c, x + 1 + i * 2, y + 1, 1, 1, P.leaf); R(c, x + 1 + i * 2, y, 1, 1, FLOWERS[(i + Math.floor(hash(x, y) * 5)) % FLOWERS.length]); } break;
-        case 2: // rocks
-          shadow(c, x + 1, y + 4, 6, 1);
-          R(c, x, y + 1, 5, 3, P.o); R(c, x + 1, y + 1, 3, 2, P.stone); R(c, x + 1, y + 1, 2, 1, P.stoneL);
-          R(c, x + 4, y + 2, 3, 2, P.o); R(c, x + 5, y + 2, 1, 1, P.stone); break;
-        case 3: // haystack
-          shadow(c, x + 2, y + 6, 7, 1);
-          R(c, x + 1, y, 5, 1, P.o); R(c, x, y + 1, 7, 5, P.o); R(c, x + 1, y + 1, 5, 4, P.thatch); R(c, x + 1, y + 1, 3, 1, P.gold);
-          R(c, x + 2, y + 3, 1, 1, P.thatchD); R(c, x + 4, y + 2, 1, 1, P.thatchD); break;
-        case 4: // log with a mushroom
-          R(c, x, y + 2, 7, 3, P.o); R(c, x + 1, y + 3, 5, 1, P.wood); R(c, x + 5, y + 2, 2, 3, P.plank); R(c, x + 6, y + 3, 1, 1, P.woodD);
-          R(c, x + 1, y, 2, 1, '#e05050'); R(c, x + 2, y + 1, 1, 1, P.white); break;
-        default: // fence
-          for (let i = 0; i < 8; i += 3) R(c, x + i, y + 1, 1, 4, P.woodD);
-          R(c, x, y + 2, 8, 1, P.woodL); R(c, x, y + 4, 8, 1, P.woodL);
-      }
-    },
-    modern(c, x, y, k, t) {
-      switch (k) {
-        case 0: // planter
-          shadow(c, x + 1, y + 6, 7, 1);
-          R(c, x, y + 3, 7, 3, P.o); R(c, x + 1, y + 3, 5, 2, M.concreteL);
-          R(c, x + 1, y, 5, 3, P.o); R(c, x + 2, y, 3, 3, P.leaf); R(c, x + 2, y, 1, 1, P.leafL); break;
-        case 1: // bench
-          shadow(c, x, y + 5, 8, 1);
-          R(c, x, y + 1, 8, 2, P.o); R(c, x + 1, y + 1, 6, 1, M.box); R(c, x, y + 3, 8, 1, M.boxD);
-          R(c, x + 1, y + 4, 1, 1, P.o); R(c, x + 6, y + 4, 1, 1, P.o); break;
-        case 2: // lamp post, lit at night-blue intervals
-          shadow(c, x + 3, y + 7, 3, 1);
-          R(c, x + 2, y + 1, 1, 7, M.steelD); R(c, x + 1, y, 3, 2, P.o); R(c, x + 2, y, 1, 1, blink(t + x * 37, 1800) ? P.lamp : M.glassL); break;
-        case 3: // bike rack
-          for (let i = 0; i < 3; i++) { R(c, x + i * 3, y + 2, 1, 3, M.steel); R(c, x + i * 3, y + 2, 2, 1, M.steel); }
-          R(c, x, y + 5, 8, 1, M.concreteD); break;
-        case 4: // fountain
-          shadow(c, x + 1, y + 6, 8, 1);
-          R(c, x, y + 3, 8, 3, P.o); R(c, x + 1, y + 3, 6, 2, M.concreteL); R(c, x + 2, y + 3, 4, 1, M.glassL);
-          R(c, x + 3, y + 1, 2, 2, M.glassL); if (blink(t + y * 13, 300)) R(c, x + 3, y, 1, 1, P.white); break;
-        default: // hedge strip
-          R(c, x, y + 2, 8, 3, P.o); R(c, x + 1, y + 2, 6, 2, P.leaf); R(c, x + 1, y + 2, 3, 1, P.leafL);
-      }
-    }
-  };
-  /* A hedge around the village, a low fence downtown, as in the mockups. */
-  const BORDER = {
-    medieval(c, W, H) {
-      const leaf = (x, y, w, h) => { R(c, x, y, w, h, P.leafD); for (let yy = y; yy < y + h; yy += 2) for (let xx = x + ((yy >> 1) % 2); xx < x + w; xx += 2) R(c, xx, yy, 1, 1, P.leaf); };
-      leaf(0, H - 3, W, 3); leaf(0, 11, 3, H - 11); leaf(W - 3, 11, 3, H - 11);
-      R(c, 3, H - 3, W - 6, 1, P.o); R(c, 3, 11, 1, H - 14, P.o); R(c, W - 4, 11, 1, H - 14, P.o);
-    },
-    modern(c, W, H) {
-      R(c, 0, H - 2, W, 2, M.concreteD); R(c, 0, 11, 2, H - 11, M.concreteD); R(c, W - 2, 11, 2, H - 11, M.concreteD);
-      for (let x = 2; x < W - 2; x += 6) R(c, x, H - 3, 1, 1, M.steel);
-    }
-  };
+/* ---------- Panels ---------- */
+function renderFlow(v) {
+  if (v.plane === 'runtime') return renderRuntimeFlow(v);
+  const stops = v.pipeline.stops;
+  const working = v.houses.filter(h => h.status === 'working').length;
+  const items = [
+    [state.T.labels.docks, 'backlog', v.backlog.length],
+    [state.T.labels.board, 'blocked · proposals', v.board.length],
+    [state.T.labels.houses, `${working} of ${v.houses.length} working`, v.houses.filter(h => h.issue).length],
+    ['Sub-agents', 'running in sessions', [v.manager, ...v.houses].reduce((n, h) => n + (h.subagents || []).length, 0)],
+    [state.T.labels.quay, `pushed to ${v.pipeline.integration || 'integration'}`, v.pipeline.quay.length],
+    ...stops.map((s, i) => [i === stops.length - 1 ? `${state.T.labels.castle} · ${s.name}` : s.name, i === 0 && v.pipeline.sentinel !== 'absent' ? `sentinel: ${v.pipeline.sentinel}` : 'environment', s.issues.length])
+  ];
+  document.getElementById('flow').innerHTML = items.map(([l, s, n], i) =>
+    `<div class="step"><b>${n}</b><span>${esc(l)}<br>${esc(s)}</span></div>`).join('');
+}
+/* Runtime villages (Temporal, AgentEx, ...) count workstreams and agents, not issues and pushes. */
+function renderRuntimeFlow(v) {
+  const count = st => v.houses.filter(h => h.status === st).length;
+  const shipped = v.pipeline.stops.reduce((n, s) => n + s.issues.length, 0);
+  const items = [
+    [state.T.labels.houses, 'top-level workstreams', v.houses.length],
+    ['Working', 'workstreams busy', count('working')],
+    ['Waiting on you', 'an agent asked a person', count('blocked')],
+    ['Retrying', 'activity failing', count('stalled')],
+    ['Agents', 'working for workstreams', v.houses.reduce((n, h) => n + (h.subagents || []).length, 0)],
+    ['Workers', v.manager.status === 'stalled' ? 'a task queue has none' : 'polling task queues', (v.manager.subagents || []).length],
+    [state.T.labels.board, 'failed in 24h', v.board.filter(n => n.label === 'failed').length],
+    [state.T.labels.castle, 'completed in 24h', shipped]
+  ];
+  document.getElementById('flow').innerHTML = items.map(([l, s, n]) =>
+    `<div class="step"><b>${n}</b><span>${esc(l)}<br>${esc(s)}</span></div>`).join('');
+}
+/* World counters follow the loop: raised, being fixed, released, running. */
+function renderWorldFlow(w) {
+  const Ds = scenes[w.dev], Ps = scenes[w.platform];
+  const open = w.incidents.filter(i => !i.in_progress).length, fixing = w.incidents.length - open;
+  const short = s => (s ? s.slice(0, 7) : '—');
+  const landed = w.landed === null ? 'platform reports no build IDs' : w.landed ? 'running on the platform' : 'rolling out';
+  const items = [
+    ['Incidents', 'raised by the platform', open],
+    ['Being fixed', `claimed in ${w.dev}`, fixing],
+    ['Dev village', 'houses working', Ds && Ds.v ? Ds.v.houses.filter(h => h.status === 'working').length : 0],
+    ['Shipping', 'released, not yet running', w.shipping.length],
+    ['Release', landed, short(w.release)],
+    ['Platform', 'workstreams busy', Ps && Ps.v ? Ps.v.houses.filter(h => h.status === 'working').length : 0],
+    ['Platform builds', 'reported by workers', w.platform_builds.map(short).join(' ') || '—']
+  ];
+  document.getElementById('flow').innerHTML = items.map(([l, s, n]) =>
+    `<div class="step"><b>${esc(n)}</b><span>${esc(l)}<br>${esc(s)}</span></div>`).join('');
+}
+const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 
-  const MEDIEVAL = {
-    name: 'Medieval village',
-    labels: { docks: 'Docks', board: 'Notice board', houses: 'Houses', quay: 'Quay', castle: 'Harbour', hall: 'Castle', ship: 'Ship', sails: 'sails' },
-    ground: grass, road: path, yard: path, channel: water,
-    dock(c, x, y, w) { R(c, x, y, w, 7, P.o); R(c, x + 1, y, w - 2, 6, P.plank); },
-    tree, hall, board, crate, B, scaffold, gate: lock, destination: harbour, vessel: ship, supply: boat, decor: DECOR.medieval, border: BORDER.medieval,
-    // Deck slots for cargo (from the harbour's x and the canal's y), the "+N"
-    // badge past them, and the box the ship takes up.
-    hold: [[3, -2], [8, -2], [14, -2], [19, -2], [2, -7], [20, -7]], holdBadge: [23, -12], hull: [2, -17, 23, 29],
-    // The destination's tall parts, [dx, dy, w, h] from (castleX, canalY): labels keep off them.
-    towers: [[26, -60, 12, 42]],
-    people: 'medieval', steam: [P.white, P.stoneL], sign: [P.woodD, P.parch, P.woodD]
-  };
-
-  const M = {
-    lawn: '#68b050', lawnD: '#58a040', asphalt: '#505868', asphaltD: '#383c48', dash: '#f0d850',
-    concrete: '#c0c0c8', concreteD: '#9898a8', concreteL: '#e0e0e8',
-    glass: '#5890c8', glassD: '#386898', glassL: '#a8d0f0', brick: '#a85840', brickD: '#783828',
-    steel: '#8890a0', steelD: '#586070', crane: '#f0c020', box: '#c89858', boxD: '#987040',
-    tarp: '#48a068', tarpD: '#307848', awnA: '#f8f8f8', awnB: '#2890a0', led: '#58e878'
-  };
-  const mWin = st => st === 'working' ? P.lamp : (st === 'unknown' || st === 'stopped') ? P.dark : M.glassL;
-  /* Flat-roofed block: parapet roof, facade, a row of windows, glass door. */
-  function block(c, x, y, st, o) {
-    const top = o.top ?? 1;
-    R(c, x, y + top, 16, 16 - top, P.o);
-    R(c, x + 1, y + top + 1, 14, 3, o.roof || M.concreteD); R(c, x + 1, y + top + 1, 14, 1, o.roofL || M.concrete);
-    R(c, x + 1, y + top + 4, 14, 11 - top, o.wall);
-    if (o.rows !== 0) for (let wy = y + top + 6; wy < y + 10; wy += 3) [x + 2, x + 6, x + 10].forEach(wx => R(c, wx, wy, 3, 2, mWin(st)));
-    if (o.door !== false) {
-      R(c, x + 6, y + 11, 4, 5, st === 'blocked' ? P.o : M.glassD);
-      if (st !== 'blocked') R(c, x + 8, y + 11, 1, 5, P.o);
-    }
-  }
-  const MB = {
-    cottage(c, x, y, st, t) {
-      block(c, x, y, st, { wall: M.concreteL, rows: 0, top: 3 });
-      R(c, x + 1, y + 9, 14, 3, P.o);
-      for (let k = 0; k < 7; k++) R(c, x + 2 + k * 2, y + 10, 2, 1, k % 2 ? M.awnA : M.awnB);
-      R(c, x + 2, y + 13, 3, 2, mWin(st)); R(c, x + 11, y + 13, 3, 2, mWin(st));
-      if (st === 'working') puffs(c, x + 12, y - 1, t, P.white, M.concreteL);
-    },
-    workshop(c, x, y, st, t) {
-      block(c, x, y, st, { wall: M.brick });
-      for (let yy = y + 6; yy < y + 16; yy += 3) R(c, x + 1, yy, 14, 1, M.brickD);
-      [x + 2, x + 10].forEach(wx => { R(c, wx, y + 6, 4, 2, mWin(st)); R(c, wx, y + 9, 4, 1, mWin(st)); });
-    },
-    feature(c, x, y, st, t) {
-      block(c, x, y, st, { wall: M.concrete, top: 4, rows: 0 });
-      R(c, x + 2, y + 10, 3, 2, mWin(st));
-      for (let yy = y + 5; yy < y + 16; yy += 4) R(c, x + 9, yy, 7, 1, M.steel);
-      R(c, x + 9, y + 5, 1, 11, M.steelD); R(c, x + 15, y + 5, 1, 11, M.steelD);
-      R(c, x + 13, y - 4, 2, 20, M.crane); R(c, x + 13, y - 4, 1, 20, P.o);
-      R(c, x + 3, y - 4, 13, 2, M.crane); R(c, x + 3, y - 3, 13, 1, P.o);
-      const hook = st === 'working' ? 5 + Math.floor((Math.sin(t / 400) + 1) * 2) : 6;
-      R(c, x + 5 + (st === 'working' ? Math.floor(t / 700) % 3 : 0), y - 2, 1, hook, P.o);
-    },
-    bug(c, x, y, st, t) {
-      block(c, x, y, st, { wall: M.concreteL, rows: 0 });
-      R(c, x + 2, y + 6, 12, 4, P.o); R(c, x + 3, y + 7, 10, 2, mWin(st));
-      R(c, x + 4, y - 3, 8, 5, P.o); R(c, x + 5, y - 2, 6, 3, P.white);
-      R(c, x + 6, y - 2, 4, 3, P.bug); R(c, x + 7, y - 2, 1, 1, P.o); R(c, x + 8, y - 1, 1, 1, P.o); R(c, x + 8, y - 2, 1, 3, P.o);
-      R(c, x + 6, y + 2, 1, 2, P.o); R(c, x + 9, y + 2, 1, 2, P.o);
-      if (st === 'working') R(c, x + 3 + Math.floor(t / 160) % 9, y + 7, 1, 1, P.o);
-    },
-    security(c, x, y, st, t) {
-      block(c, x, y, st, { wall: M.concreteD, rows: 0, top: 2, roof: M.steelD, roofL: M.steel });
-      [x + 3, x + 11].forEach(wx => R(c, wx, y + 8, 2, 1, mWin(st)));
-      R(c, x + 6, y + 6, 4, 4, P.gold); R(c, x + 7, y + 7, 2, 2, P.shield);
-      R(c, x + 3, y - 2, 1, 5, P.o);
-      const a = st === 'working' ? t / 300 : 0.6;
-      for (let d = 1; d < 5; d++) R(c, x + 3 + Math.round(Math.cos(a) * d), y - 2 + Math.round(Math.sin(a) * d * 0.5), 1, 1, M.steelD);
-      R(c, x + 12, y - 1, 3, 2, P.o); R(c, x + 13, y - 1, 1, 1, st === 'working' && blink(t, 400) ? P.p0 : M.steel);
-    },
-    tests(c, x, y, st, t) {
-      block(c, x, y, st, { wall: M.glass, rows: 0 });
-      for (let wy = y + 5; wy < y + 11; wy += 2) R(c, x + 1, wy, 14, 1, st === 'working' ? P.fizzB : M.glassL);
-      R(c, x + 2, y + 6, 1, 4, M.glassD); R(c, x + 13, y + 6, 1, 4, M.glassD);
-      R(c, x + 3, y - 2, 3, 3, P.o); R(c, x + 4, y - 1, 1, 2, P.copper);
-      R(c, x + 10, y - 2, 3, 3, P.o); R(c, x + 11, y - 1, 1, 2, P.copper);
-      if (st === 'working') { puffs(c, x + 4, y - 3, t, P.fizzA, P.fizzB); puffs(c, x + 11, y - 3, t + 500, P.fizzB, P.fizzA); }
-    },
-    research(c, x, y, st, t) {
-      block(c, x, y, st, { wall: P.white, top: 2 });
-      const a = -2.2 + (st === 'working' ? Math.sin(t / 900) * 0.5 : 0);
-      for (let dy = -4; dy <= 0; dy++) for (let dx = -4; dx <= 4; dx++) {
-        if (dx * dx + dy * dy > 16) continue;
-        R(c, x + 8 + dx, y + 2 + dy, 1, 1, dx * dx + dy * dy > 9 ? P.o : M.concreteL);
-      }
-      R(c, x + 8 + Math.round(Math.cos(a) * 4), y + 1 + Math.round(Math.sin(a) * 4), 1, 1, P.gold);
-      R(c, x + 8, y + 2, 1, 2, P.o);
-    },
-    docs(c, x, y, st, t) {
-      block(c, x, y, st, { wall: P.parch, rows: 0 });
-      R(c, x + 2, y + 6, 4, 4, mWin(st)); R(c, x + 10, y + 6, 4, 4, mWin(st));
-      ['#c04838', '#3870c0', '#58a048', '#f8d040'].forEach((col, k) => R(c, x + 4 + k * 2, y - 2, 2, 4, col));
-      R(c, x + 3, y + 2, 10, 1, P.o);
-    },
-    refactor(c, x, y, st, t) {
-      block(c, x, y, st, { wall: M.brick });
-      R(c, x + 8, y + 1, 8, 15, P.o); R(c, x + 9, y + 2, 6, 13, M.tarp);
-      for (let yy = y + 4; yy < y + 15; yy += 4) R(c, x + 9, yy, 6, 1, M.tarpD);
-      for (let yy = y + 2; yy < y + 16; yy += 5) R(c, x + 7, yy, 9, 1, M.steel);
-      if (st === 'working' && blink(t, 140)) R(c, x + 11, y + 6 + Math.floor(t / 280) % 6, 1, 1, P.white);
-    },
-    perf(c, x, y, st, t) {
-      block(c, x, y, st, { wall: M.steelD, rows: 0, top: 2, roof: M.steel, roofL: M.concrete });
-      [x + 4, x + 11].forEach((fx, k) => {
-        R(c, fx - 3, y - 1, 7, 6, P.o); R(c, fx - 2, y, 5, 4, M.steelD);
-        const a = st === 'working' ? t / 90 + k : 0.3;
-        for (let d = -2; d <= 2; d++) R(c, fx + Math.round(Math.cos(a) * d), y + 2 + Math.round(Math.sin(a) * d * 0.7), 1, 1, M.concreteL);
-      });
-      for (let k = 0; k < 6; k++) R(c, x + 2 + k * 2, y + 9, 1, 1, st === 'working' && hash(k, Math.floor(t / 200)) < 0.6 ? M.led : P.dark);
-    },
-    chores(c, x, y, st, t) {
-      R(c, x, y + 3, 16, 13, P.o); R(c, x + 1, y + 4, 14, 11, M.steel);
-      for (let xx = x + 2; xx < x + 15; xx += 2) R(c, xx, y + 4, 1, 11, M.steelD);
-      R(c, x + 1, y + 4, 14, 2, M.concreteD);
-      R(c, x + 4, y + 8, 8, 8, P.o); R(c, x + 5, y + 9, 6, 7, st === 'blocked' ? P.o : M.concreteL);
-      if (st !== 'blocked') for (let yy = y + 10; yy < y + 16; yy += 2) R(c, x + 5, yy, 6, 1, M.concreteD);
-      if (st === 'working') R(c, x + 5, y + 9, 6, 1, P.lamp);
-      R(c, x + 12, y + 12, 4, 4, P.o); R(c, x + 13, y + 13, 2, 2, M.box);
-    }
-  };
-  const MODERN = {
-    name: 'Modern business district',
-    labels: { docks: 'Mailroom', board: 'Whiteboard', houses: 'Offices', quay: 'Loading bay', castle: 'Launch pad', hall: 'Headquarters', ship: 'Rocket', sails: 'lifts off' },
-    towers: [[3, -51, 6, 43], [12, -51, 18, 43]],
-    ground(c, x0, y0, w, h) {
-      for (let y = y0; y < y0 + h; y += 4) R(c, x0, y, w, Math.min(4, y0 + h - y), (y >> 2) % 2 ? M.lawn : M.lawnD);
-    },
-    road(c, x0, y0, w, h) {
-      R(c, x0, y0, w, h, M.asphalt);
-      if (w > h && h >= 6) for (let x = x0 + 1; x < x0 + w - 2; x += 6) R(c, x, y0 + (h >> 1), 3, 1, M.dash);
-      if (h > w && w >= 6) for (let y = y0 + 1; y < y0 + h - 2; y += 6) R(c, x0 + (w >> 1), y, 1, 3, M.dash);
-    },
-    yard(c, x0, y0, w, h) {
-      R(c, x0, y0, w, h, M.concrete);
-      for (let x = x0 + 3; x < x0 + w; x += 4) R(c, x, y0, 1, h, M.concreteD);
-      for (let y = y0 + 3; y < y0 + h; y += 4) R(c, x0, y, w, 1, M.concreteD);
-    },
-    /* Rivers and canals become roads with moving traffic markings. */
-    channel(c, x0, y0, w, h, t, flow) {
-      R(c, x0, y0, w, h, M.asphaltD);
-      R(c, x0, y0, w, 1, M.concreteD); R(c, x0, y0 + h - 1, w, 1, M.concreteD);
-      const off = Math.floor(t / 60 * flow) % 8;
-      for (let x = x0 - 8 + off; x < x0 + w; x += 8) if (x >= x0) R(c, x, y0 + (h >> 1), 4, 1, P.white);
-    },
-    dock(c, x, y, w) {
-      R(c, x, y, w, 7, P.o); R(c, x + 1, y, w - 2, 6, M.concrete);
-      for (let k = 0; k < w - 2; k += 4) R(c, x + 1 + k, y + 5, 2, 1, M.dash);
-    },
-    tree(c, x, y) {
-      R(c, x + 3, y + 9, 6, 3, P.o); R(c, x + 4, y + 9, 4, 2, M.concrete);
-      const cx = x + 6, cy = y + 5, r = 4;
-      for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
-        const d = dx * dx + dy * dy; if (d > r * r) continue;
-        R(c, cx + dx, cy + dy, 1, 1, d > (r - 1) * (r - 1) ? P.o : dx + dy > 2 ? P.leafD : dx + dy < -2 ? P.leafL : P.leaf);
-      }
-    },
-    /* Headquarters: a glass tower with a gold crown over a colonnaded
-     * podium, flags out front. The lobby doors go dark when the manager
-     * waits on you. */
-    hall(c, x, y, st) {
-      const x0 = x - 4, gy = y + 22;
-      R(c, x0 + 9, y - 8, 22, 22, P.o); R(c, x0 + 10, y - 7, 20, 20, M.glassD);
-      for (let wy = y - 6; wy < y + 12; wy += 3) for (let wx = x0 + 11; wx < x0 + 29; wx += 3) R(c, wx, wy, 2, 2, mWin(st));
-      for (let wx = x0 + 13; wx < x0 + 29; wx += 6) R(c, wx, y - 7, 1, 20, M.glassL);
-      R(c, x0 + 9, y - 11, 22, 4, P.o); R(c, x0 + 10, y - 10, 20, 2, P.gold);
-      R(c, x0 + 14, y - 13, 12, 2, P.o); R(c, x0 + 15, y - 13, 10, 1, P.gold);
-      R(c, x0 + 19, y - 17, 2, 4, P.gold);
-      R(c, x0, gy - 9, 40, 9, P.o); R(c, x0 + 1, gy - 8, 38, 7, M.concreteL);
-      R(c, x0 + 1, gy - 8, 38, 1, P.gold);
-      for (let k = 3; k < 38; k += 5) R(c, x0 + k, gy - 7, 2, 6, M.concrete);
-      R(c, x0 + 15, gy - 7, 10, 7, P.o); R(c, x0 + 16, gy - 6, 8, 6, st === 'blocked' ? P.o : M.glassL);
-      if (st !== 'blocked') R(c, x0 + 20, gy - 6, 1, 6, P.o);
-      [[x0 - 2, P.gold], [x0 + 40, '#3878e0']].forEach(([fx, col]) => { R(c, fx, gy - 22, 1, 22, M.steelD); R(c, fx + 1, gy - 22, 4, 3, P.o); R(c, fx + 1, gy - 21, 3, 1, col); });
-    },
-    board(c, x, y, notes) {
-      R(c, x + 2, y + 9, 1, 6, M.steelD); R(c, x + 15, y + 9, 1, 6, M.steelD);
-      R(c, x, y, 18, 11, P.o); R(c, x + 1, y + 1, 16, 9, P.white);
-      notes.slice(0, 8).forEach((n, i) => R(c, x + 2 + (i % 4) * 4, y + 2 + Math.floor(i / 4) * 4, 3, 3, NOTECOL[n.label] || P.gold));
-    },
-    crate(c, x, y, kind, pr, sealed) {
-      x = Math.round(x); y = Math.round(y);
-      R(c, x, y, 5, 5, P.o); R(c, x + 1, y + 1, 3, 3, M.box);
-      R(c, x + 2, y + 1, 1, 3, KINDCOL[kind] || M.boxD);
-      if (pr === 'P0') R(c, x + 1, y + 3, 1, 1, P.p0);
-      if (sealed) R(c, x + 3, y + 1, 1, 1, P.seal);
-    },
-    B: MB,
-    scaffold(c, x, y, t) {
-      for (let yy = y + 2; yy < y + 16; yy += 4) R(c, x + 1, yy, 14, 1, M.steel);
-      R(c, x + 1, y + 2, 1, 14, M.steelD); R(c, x + 14, y + 2, 1, 14, M.steelD);
-      R(c, x + 7, y - 4, 2, 20, M.crane); R(c, x + 2, y - 4, 13, 2, M.crane);
-      if (blink(t, 90)) R(c, x + 4 + Math.floor(hash(Math.floor(t / 90), 5) * 8), y + 6, 1, 1, P.white);
-    },
-    /* Toll booth with a boom barrier across the road. */
-    gate(c, x, cy, open, flag) {
-      R(c, x - 4, cy - 15, 12, 10, P.o); R(c, x - 3, cy - 14, 10, 8, M.concreteL);
-      R(c, x - 2, cy - 12, 8, 3, M.glassL); R(c, x - 5, cy - 16, 14, 2, M.steelD);
-      R(c, x + 1, cy - 20, 4, 4, P.o); R(c, x + 2, cy - 19, 2, 2, flag);
-      R(c, x + 2, cy - 4, 2, 4, P.o);
-      if (!open) for (let k = 0; k < 14; k += 2) R(c, x + 2, cy + k, 2, 2, (k / 2) % 2 ? P.white : P.p0);
-    },
-    /* Launch pad: released work lifts off. The sky lights up when it does.
-     * The rocket on it is drawn by vessel() below, so it can load and fly. */
-    destination(c, x, cy, t, fw) {
-      R(c, x, cy - 8, 38, 8, P.o); R(c, x + 1, cy - 7, 36, 6, M.concrete);
-      for (let k = 2; k < 36; k += 6) R(c, x + k, cy - 4, 3, 1, M.dash);
-      R(c, x + 4, cy - 50, 4, 42, P.o); R(c, x + 5, cy - 49, 2, 40, P.red);
-      for (let yy = cy - 46; yy < cy - 8; yy += 6) R(c, x + 8, yy, 6, 1, M.steelD);
-      const ft = t - fw;
-      if (ft >= 0 && ft < 1600) {
-        const p = ft / 1600;
-        [[x + 6, P.gold], [x + 21, P.fizzA], [x + 34, P.fizzB]].forEach(([fx, col], i) => {
-          const fy = cy - 58 - p * 18 - i * 3;
-          for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; R(c, fx + Math.cos(a) * p * 9, fy + Math.sin(a) * p * 9, 1, 1, col); }
-        });
-      }
-      R(c, x + 8, cy - 2, 20, 18, P.o); R(c, x + 9, cy, 18, 15, P.dark);
-    },
-    /* The rocket for the next release, with its cargo rack, moved by (ox, oy).
-     * Its engines fire while it climbs. */
-    vessel(c, x, cy, t, ox, oy) {
-      const rx = Math.round(x + 16 + ox); cy = Math.round(cy + oy);
-      R(c, rx, cy - 44, 10, 36, P.o); R(c, rx + 1, cy - 42, 8, 33, P.white); R(c, rx + 1, cy - 42, 2, 33, M.concreteL);
-      R(c, rx + 2, cy - 48, 6, 4, P.o); R(c, rx + 3, cy - 47, 4, 4, P.red); R(c, rx + 4, cy - 50, 2, 2, P.red);
-      R(c, rx + 3, cy - 34, 4, 3, P.o); R(c, rx + 4, cy - 33, 2, 1, M.glassL);
-      R(c, rx - 3, cy - 16, 3, 8, P.o); R(c, rx - 2, cy - 15, 2, 6, P.red);
-      R(c, rx + 10, cy - 16, 3, 8, P.o); R(c, rx + 10, cy - 15, 2, 6, P.red);
-      R(c, rx + 2, cy - 18, 6, 1, M.steelD);
-      R(c, rx + 13, cy - 26, 1, 18, M.steelD); R(c, rx + 13, cy - 9, 11, 1, M.steelD);
-      if (oy < 0) for (let k = 0; k < 4; k++) R(c, rx + 2 + k * 2, cy - 8 + (blink(t + k * 60, 80) ? 1 : 0), 2, 3 + (k % 2) * 2, k % 2 ? P.gold : '#f8f8f8');
-    },
-    hold: [[30, -14], [35, -14], [30, -19], [35, -19], [30, -24], [35, -24]], holdBadge: [29, -32], hull: [12, -52, 28, 46], flies: true,
-    /* The delivery truck that brings new issues along the top road. */
-    supply(c, x, t, load) {
-      x = Math.round(x);
-      R(c, x, 5, 20, 4, P.o); R(c, x + 1, 5, 18, 2, M.steel); R(c, x + 1, 5, 18, 1, M.concreteL);
-      R(c, x + 19, 1, 7, 8, P.o); R(c, x + 20, 2, 5, 5, P.white); R(c, x + 22, 3, 3, 2, M.glassL);
-      [x + 3, x + 14, x + 21].forEach(wx => { R(c, wx, 8, 3, 3, P.o); R(c, wx + 1, 9, 1, 1, M.steel); });
-      for (let k = 0; k < Math.min(load, 3); k++) this.crate(c, x + 2 + k * 5, 0, 'workshop', null);
-    },
-    people: 'modern',
-    steam: [P.white, M.concreteL], sign: [P.o, P.dark, M.led]
-  };
-
-  /* ---------- Future ----------
-   * A space station worked by little robots: deck plates for ground, light-
-   * strip walkways for roads, a plasma canal, habitat pods with portholes. It
-   * keeps the shared status language: lit portholes while working, an open
-   * hatch for blocked, dark glass for unknown. */
-  const F = {
-    deck: '#30365c', deckD: '#262b4c', deckL: '#40487a', seam: '#1c2140', rivet: '#525c94',
-    navy: '#1c2140', space: '#120e2a', purple: '#4a3a78', purpleD: '#33285a',
-    cyan: '#40e0f0', cyanD: '#2098b0', cyanL: '#b8f8ff', magenta: '#f048c0', magentaD: '#a83090',
-    hull: '#c8d0e8', hullD: '#8a94b8', hullL: '#eef2ff', glass: '#6cc8e8', glassD: '#2c5878',
-    plasma: '#7a4ae0', plasmaL: '#b890ff', panel: '#2a50a8', panelL: '#5a8ae0'
-  };
-  /* Portholes: lit cyan-white while working, dark when nobody can say. */
-  const fWin = st => st === 'working' ? F.cyanL : (st === 'unknown' || st === 'stopped') ? P.dark : F.glassD;
-  const now = () => (reduce ? 0 : performance.now());
-  function porthole(c, x, y, st) {
-    R(c, x + 1, y, 2, 4, P.o); R(c, x, y + 1, 4, 2, P.o); R(c, x + 1, y + 1, 2, 2, fWin(st));
-    if (st === 'working') R(c, x + 1, y + 1, 1, 1, P.white);
-  }
-  /* A habitat pod: a rounded module with a domed roof, two portholes and a
-   * hatch. The hatch stands open (dark) while its robot waits on you. */
-  function pod(c, x, y, st, o = {}) {
-    const shell = o.shell || F.hull, shellD = o.shellD || F.hullD, roof = o.roof || F.hullL;
-    [4, 5, 6, 7, 7].forEach((w, dy) => {
-      R(c, x + 8 - w, y + 1 + dy, 2 * w, 1, P.o);
-      if (dy) R(c, x + 9 - w, y + 1 + dy, 2 * w - 2, 1, dy === 1 ? roof : shell);
-    });
-    R(c, x, y + 5, 16, 11, P.o); R(c, x + 1, y + 5, 14, 10, shell);
-    R(c, x + 1, y + 14, 14, 1, shellD); R(c, x + 12, y + 5, 2, 9, SHADE);
-    R(c, x + 1, y + 7, 14, 1, o.band || F.cyanD);
-    if (o.portholes !== false) { porthole(c, x + 2, y + 9, st); porthole(c, x + 10, y + 9, st); }
-    R(c, x + 6, y + 10, 4, 6, P.o);
-    R(c, x + 7, y + 11, 2, 5, st === 'blocked' ? P.o : shellD);
-    R(c, x + 6, y + 9, 4, 1, st === 'working' ? F.cyan : F.cyanD);
-  }
-  const FB = {
-    cottage(c, x, y, st, t) {
-      pod(c, x, y, st);
-      R(c, x + 12, y - 3, 1, 5, F.hullD); R(c, x + 11, y - 4, 3, 1, st === 'working' && blink(t, 500) ? F.cyan : F.cyanD);
-      if (st === 'working') puffs(c, x + 4, y - 1, t, F.cyanL, F.hullD);
-    },
-    workshop(c, x, y, st, t) {
-      pod(c, x, y, st, { shell: '#b8b0d0', shellD: '#8078a0' });
-      const a = st === 'working' ? Math.floor(t / 300) % 2 : 0;
-      R(c, x + 4, y - 3, 2, 5, F.hullD); R(c, x + 5, y - 4, 5, 2, F.hullD); R(c, x + 9, y - 3 + a, 2, 3, P.o);
-      if (st === 'working' && blink(t, 120)) { R(c, x + 10, y + 1 + a, 1, 1, P.white); R(c, x + 11, y + a, 1, 1, P.gold); R(c, x + 12, y + 2 + a, 1, 1, F.cyan); }
-    },
-    feature(c, x, y, st, t) {
-      pod(c, x, y, st, { band: F.magentaD });
-      R(c, x + 13, y - 4, 2, 20, F.magenta); R(c, x + 13, y - 4, 1, 20, P.o);
-      R(c, x + 3, y - 4, 13, 2, F.magenta); R(c, x + 3, y - 3, 13, 1, P.o);
-      const hook = st === 'working' ? 4 + Math.floor((Math.sin(t / 400) + 1) * 2) : 5;
-      const hx = x + 5 + (st === 'working' ? Math.floor(t / 700) % 3 : 0);
-      R(c, hx, y - 2, 1, hook, F.cyan); R(c, hx - 1, y - 2 + hook, 3, 1, F.cyanL);
-    },
-    bug(c, x, y, st, t) {
-      pod(c, x, y, st);
-      R(c, x + 4, y - 4, 8, 5, 'rgba(64,224,240,.35)');
-      R(c, x + 6, y - 3, 4, 3, P.bug); R(c, x + 7, y - 3, 1, 1, P.o); R(c, x + 8, y - 2, 1, 1, P.o);
-      R(c, x + 5, y - 2, 1, 1, P.bug); R(c, x + 10, y - 2, 1, 1, P.bug);
-      R(c, x + 7, y + 1, 2, 1, F.cyan);
-      if (st === 'working') R(c, x + 4, y - 4 + Math.floor(t / 160) % 5, 8, 1, F.cyanL);
-    },
-    security(c, x, y, st, t) {
-      pod(c, x, y, st, { shell: F.panel, shellD: P.shield, roof: F.panelL });
-      R(c, x + 6, y + 2, 4, 3, P.gold); R(c, x + 7, y + 3, 2, 1, P.shield);
-      R(c, x + 3, y - 2, 1, 5, F.hullD);
-      const a = st === 'working' ? t / 300 : 0.6;
-      for (let d = 1; d < 5; d++) R(c, x + 3 + Math.round(Math.cos(a) * d), y - 2 + Math.round(Math.sin(a) * d * 0.5), 1, 1, F.hull);
-      R(c, x + 12, y - 1, 3, 2, P.o); R(c, x + 13, y - 1, 1, 1, st === 'working' && blink(t, 400) ? P.p0 : F.hullD);
-    },
-    tests(c, x, y, st, t) {
-      pod(c, x, y, st, { shell: F.glass, shellD: F.glassD, roof: F.cyanL });
-      [x + 3, x + 11].forEach((tx, k) => {
-        R(c, tx, y - 3, 3, 5, P.o); R(c, tx + 1, y - 2, 1, 4, k ? P.fizzB : P.fizzA);
-        if (st === 'working') puffs(c, tx + 1, y - 4, t + k * 500, P.fizzA, P.fizzB);
-      });
-    },
-    research(c, x, y, st, t) {
-      pod(c, x, y, st, { roof: F.cyanL });
-      const a = -2.2 + (st === 'working' ? Math.sin(t / 900) * 0.5 : 0);
-      for (let d = 0; d < 6; d++) R(c, x + 8 + Math.round(Math.cos(a) * d), y + 2 + Math.round(Math.sin(a) * d), 1, 1, d < 5 ? F.hullD : P.o);
-      R(c, x + 8 + Math.round(Math.cos(a) * 6), y + 2 + Math.round(Math.sin(a) * 6), 1, 1, st === 'working' ? P.gold : F.cyanD);
-    },
-    docs(c, x, y, st, t) {
-      pod(c, x, y, st);
-      [F.magenta, F.cyan, P.gold, F.plasmaL].forEach((col, k) => { R(c, x + 4 + k * 2, y - 3 + (k % 2), 2, 4, P.o); R(c, x + 4 + k * 2, y - 2 + (k % 2), 1, 2, col); });
-      if (st === 'working') R(c, x + 4 + Math.floor(t / 250) % 4 * 2, y - 4, 1, 1, P.white);
-    },
-    refactor(c, x, y, st, t) {
-      pod(c, x, y, st);
-      R(c, x + 8, y + 1, 8, 15, 'rgba(240,72,192,.35)');
-      for (let yy = y + 2; yy < y + 16; yy += 3) R(c, x + 8, yy, 8, 1, F.magentaD);
-      if (st === 'working') R(c, x + 8, y + 2 + Math.floor(t / 140) % 13, 8, 1, F.magenta);
-    },
-    perf(c, x, y, st, t) {
-      pod(c, x, y, st, { shell: F.hullD, shellD: F.deckL });
-      [x + 4, x + 11].forEach((fx, k) => {
-        R(c, fx - 3, y - 2, 7, 6, P.o); R(c, fx - 2, y - 1, 5, 4, F.deck);
-        const a = st === 'working' ? t / 90 + k : 0.3;
-        for (let d = -2; d <= 2; d++) R(c, fx + Math.round(Math.cos(a) * d), y + 1 + Math.round(Math.sin(a) * d * 0.7), 1, 1, F.cyan);
-      });
-    },
-    chores(c, x, y, st, t) {
-      R(c, x, y + 3, 16, 13, P.o); R(c, x + 1, y + 4, 14, 11, F.hullD);
-      R(c, x + 1, y + 4, 14, 2, F.deckL); R(c, x + 1, y + 6, 14, 1, P.gold);
-      R(c, x + 4, y + 8, 8, 8, P.o); R(c, x + 5, y + 9, 6, 7, st === 'blocked' ? P.o : F.deck);
-      if (st !== 'blocked') for (let yy = y + 10; yy < y + 16; yy += 2) R(c, x + 5, yy, 6, 1, F.deckD);
-      if (st === 'working') R(c, x + 5, y + 9, 6, 1, F.cyan);
-      R(c, x + 12, y + 12, 4, 4, P.o); R(c, x + 13, y + 13, 2, 2, F.magenta);
-    }
-  };
-  const FUTURE = {
-    name: 'Future',
-    labels: { docks: 'Cargo bay', board: 'Holo-board', houses: 'Pods', quay: 'Launch rail', castle: 'Spaceport', hall: 'Command dome', ship: 'Shuttle', sails: 'launches' },
-    towers: [[2, -58, 9, 50], [13, -55, 18, 45]],
-    ground(c, x0, y0, w, h) {
-      R(c, x0, y0, w, h, F.deckD);
-      for (let x = x0 + 7; x < x0 + w; x += 8) R(c, x, y0, 1, h, F.seam);
-      for (let y = y0 + 7; y < y0 + h; y += 8) R(c, x0, y, w, 1, F.seam);
-      for (let y = y0 + 1; y < y0 + h; y += 16) for (let x = x0 + 1; x < x0 + w; x += 16) R(c, x, y, 1, 1, F.rivet);
-    },
-    /* Walkways with a glowing light strip down the middle. */
-    road(c, x0, y0, w, h) {
-      R(c, x0, y0, w, h, F.deckL);
-      if (w > h && h >= 4) { R(c, x0, y0, w, 1, F.cyanD); R(c, x0, y0 + h - 1, w, 1, F.cyanD); for (let x = x0 + 1; x < x0 + w - 2; x += 4) R(c, x, y0 + (h >> 1), 2, 1, F.cyan); }
-      if (h > w && w >= 4) { R(c, x0, y0, 1, h, F.cyanD); R(c, x0 + w - 1, y0, 1, h, F.cyanD); for (let y = y0 + 1; y < y0 + h - 2; y += 4) R(c, x0 + (w >> 1), y, 1, 2, F.cyan); }
-    },
-    yard(c, x0, y0, w, h) {
-      R(c, x0, y0, w, h, F.deck);
-      for (let x = x0 + 3; x < x0 + w; x += 4) R(c, x, y0, 1, h, F.deckD);
-      for (let y = y0 + 3; y < y0 + h; y += 4) R(c, x0, y, w, 1, F.deckD);
-    },
-    /* Rivers and canals are plasma conduits; their pulses flow. */
-    channel(c, x0, y0, w, h, t, flow) {
-      R(c, x0, y0, w, h, F.space);
-      R(c, x0, y0, w, 1, F.magentaD); R(c, x0, y0 + h - 1, w, 1, F.magentaD);
-      const off = Math.floor(t / 60 * flow) % 10;
-      for (let x = x0 - 10 + off; x < x0 + w; x += 10) if (x >= x0) {
-        R(c, x, y0 + (h >> 1), 4, 1, F.plasmaL); R(c, x + 5, y0 + (h >> 1) - 2, 2, 1, F.plasma); R(c, x + 2, y0 + (h >> 1) + 2, 2, 1, F.cyanD);
-      }
-    },
-    dock(c, x, y, w) {
-      R(c, x, y, w, 7, P.o); R(c, x + 1, y, w - 2, 6, F.hullD);
-      for (let k = 0; k < w - 2; k += 4) R(c, x + 1 + k, y + 5, 2, 1, F.cyan);
-    },
-    /* Groves become station kit: an antenna mast, a solar array or a small dome. */
-    tree(c, x, y) {
-      const k = Math.floor(hash(x, y) * 3);
-      if (k === 0) {
-        R(c, x + 4, y + 9, 5, 3, P.o); R(c, x + 5, y + 9, 3, 2, F.hullD);
-        R(c, x + 6, y + 1, 1, 8, F.hull); R(c, x + 3, y + 3, 7, 1, F.hullD); R(c, x + 4, y + 6, 5, 1, F.hullD);
-        R(c, x + 5, y, 3, 2, P.o); R(c, x + 6, y, 1, 1, blink(now() + x * 31, 900) ? P.p0 : F.magentaD);
-      } else if (k === 1) {
-        R(c, x + 5, y + 7, 2, 5, F.hullD);
-        R(c, x, y + 2, 12, 6, P.o); R(c, x + 1, y + 3, 10, 4, F.panel);
-        for (let xx = x + 3; xx < x + 11; xx += 3) R(c, xx, y + 3, 1, 4, F.panelL);
-        R(c, x + 1, y + 3, 10, 1, F.panelL);
-      } else {
-        [3, 4, 5, 5].forEach((w, dy) => { R(c, x + 6 - w, y + 4 + dy, 2 * w, 1, P.o); if (dy) R(c, x + 7 - w, y + 4 + dy, 2 * w - 2, 1, dy === 1 ? F.cyanL : F.glass); });
-        R(c, x + 1, y + 8, 10, 3, P.o); R(c, x + 2, y + 8, 8, 2, F.hullD);
-      }
-    },
-    /* Command dome: a glass dome on a hull ring, an antenna with a blinking
-     * beacon on top. The hatch goes dark when the manager waits on you. */
-    hall(c, x, y, st) {
-      const x0 = x - 4, gy = y + 22, cx = x0 + 20, base = y + 10, t = now();
-      R(c, cx, y - 16, 1, 12, F.hull); R(c, cx - 3, y - 12, 7, 1, F.hullD);
-      R(c, cx - 1, y - 19, 3, 3, P.o); R(c, cx, y - 18, 1, 1, blink(t, 700) ? P.p0 : F.magentaD);
-      for (let dy = -13; dy <= 0; dy++) {
-        const w = Math.floor(Math.sqrt(14 * 14 - dy * dy));
-        R(c, cx - w, base + dy, 2 * w + 1, 1, P.o);
-        if (dy > -13) R(c, cx - w + 1, base + dy, 2 * w - 1, 1, (dy + 13) % 4 === 0 ? F.cyanD : F.glass);
-      }
-      for (let wy = y; wy < base; wy += 4) for (let wx = cx - 8; wx <= cx + 8; wx += 4) R(c, wx, wy, 2, 2, fWin(st));
-      R(c, cx - 9, base - 11, 3, 2, 'rgba(255,255,255,.55)');
-      R(c, x0, gy - 12, 40, 12, P.o); R(c, x0 + 1, gy - 11, 38, 10, F.hull);
-      R(c, x0 + 1, gy - 11, 38, 1, F.hullL); R(c, x0 + 1, gy - 8, 38, 1, F.cyanD);
-      for (let k = 3; k < 38; k += 6) R(c, x0 + k, gy - 6, 2, 2, F.cyan);
-      R(c, x0 + 16, gy - 9, 8, 9, P.o);
-      R(c, x0 + 17, gy - 8, 6, 8, st === 'blocked' ? P.o : F.hullD);
-      if (st !== 'blocked') R(c, x0 + 20, gy - 8, 1, 8, P.o);
-    },
-    /* Notes float on a hologram between two emitters. */
-    board(c, x, y, notes) {
-      R(c, x + 1, y + 11, 3, 4, P.o); R(c, x + 2, y + 11, 1, 3, F.cyan); R(c, x + 14, y + 11, 3, 4, P.o); R(c, x + 15, y + 11, 1, 3, F.cyan);
-      R(c, x, y, 18, 11, 'rgba(64,224,240,.28)');
-      R(c, x, y, 18, 1, F.cyan); R(c, x, y + 10, 18, 1, F.cyanD); R(c, x, y, 1, 11, F.cyanD); R(c, x + 17, y, 1, 11, F.cyanD);
-      notes.slice(0, 8).forEach((n, i) => R(c, x + 2 + (i % 4) * 4, y + 2 + Math.floor(i / 4) * 4, 3, 3, NOTECOL[n.label] || F.cyanL));
-    },
-    /* A cargo crate riding a little hover-pad. */
-    crate(c, x, y, kind, pr, sealed) {
-      x = Math.round(x); y = Math.round(y);
-      R(c, x, y, 5, 5, P.o); R(c, x + 1, y + 1, 3, 3, F.hull);
-      R(c, x + 1, y + 2, 3, 1, KINDCOL[kind] || F.hullD);
-      R(c, x + 1, y + 4, 3, 1, F.cyan);
-      if (pr === 'P0') R(c, x + 1, y + 1, 1, 1, P.p0);
-      if (sealed) R(c, x + 3, y + 1, 1, 1, P.seal);
-    },
-    B: FB,
-    /* A pod frame going up, a drone welding at it. */
-    scaffold(c, x, y, t) {
-      for (let yy = y + 2; yy < y + 16; yy += 4) R(c, x + 1, yy, 14, 1, F.hullD);
-      R(c, x + 1, y + 2, 1, 14, F.hull); R(c, x + 14, y + 2, 1, 14, F.hull);
-      const dx = x + 3 + Math.floor((Math.sin(t / 600) + 1) * 4), dy = y - 2 + (blink(t, 300) ? 1 : 0);
-      R(c, dx, dy, 5, 3, P.o); R(c, dx + 1, dy + 1, 3, 1, F.hull); R(c, dx - 1, dy, 1, 1, F.hullD); R(c, dx + 5, dy, 1, 1, F.hullD);
-      R(c, dx + 2, dy + 1, 1, 1, F.cyan);
-      if (blink(t, 90)) { R(c, dx + 2, dy + 4, 1, 1, P.white); R(c, dx + 1 + Math.floor(hash(Math.floor(t / 90), 5) * 3), dy + 5, 1, 1, P.gold); }
-    },
-    /* An airlock: two pylons with a force field between them and a status light on the control tower. */
-    gate(c, x, cy, open, flag) {
-      R(c, x - 4, cy - 15, 12, 10, P.o); R(c, x - 3, cy - 14, 10, 8, F.hull); R(c, x - 2, cy - 12, 8, 3, F.glass);
-      R(c, x - 5, cy - 16, 14, 2, F.hullD);
-      R(c, x + 1, cy - 20, 4, 4, P.o); R(c, x + 2, cy - 19, 2, 2, flag);
-      [x - 1, x + 5].forEach(px => { R(c, px, cy - 4, 2, 22, P.o); R(c, px, cy - 3, 1, 20, F.hullD); R(c, px, cy - 3, 2, 1, F.cyan); R(c, px, cy + 16, 2, 1, F.cyan); });
-      if (!open) {
-        R(c, x + 1, cy, 4, 14, 'rgba(240,72,192,.35)');
-        const t = now();
-        for (let k = 0; k < 14; k += 3) R(c, x + 1 + ((k + Math.floor(t / 150)) % 4), cy + k, 1, 1, F.magenta);
-      }
-    },
-    /* The spaceport: released work leaves on a shuttle. The sky lights up
-     * when it does. The shuttle is drawn by vessel() below, so it can load and launch. */
-    destination(c, x, cy, t, fw) {
-      R(c, x, cy - 8, 38, 8, P.o); R(c, x + 1, cy - 7, 36, 6, F.hullD);
-      for (let k = 2; k < 36; k += 6) R(c, x + k, cy - 4, 3, 1, F.cyan);
-      R(c, x + 3, cy - 46, 6, 38, P.o); R(c, x + 4, cy - 45, 4, 36, F.hull);
-      for (let yy = cy - 42; yy < cy - 10; yy += 5) R(c, x + 5, yy, 2, 2, F.cyanL);
-      R(c, x + 2, cy - 52, 8, 6, P.o); R(c, x + 3, cy - 51, 6, 4, F.glass);
-      R(c, x + 5, cy - 56, 1, 4, F.hull); R(c, x + 4, cy - 57, 3, 1, blink(t, 700) || t - fw < 1600 ? P.p0 : F.magentaD);
-      const ft = t - fw;
-      if (ft >= 0 && ft < 1600) {
-        const p = ft / 1600;
-        [[x + 6, P.gold], [x + 21, F.magenta], [x + 34, F.cyan]].forEach(([fx, col], i) => {
-          const fy = cy - 58 - p * 18 - i * 3;
-          for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; R(c, fx + Math.cos(a) * p * 9, fy + Math.sin(a) * p * 9, 1, 1, col); }
-        });
-      }
-      R(c, x + 8, cy - 2, 22, 18, P.o); R(c, x + 9, cy, 20, 15, F.space);
-      for (let k = 0; k < 4; k++) R(c, x + 11 + k * 5, cy + 7, 2, 1, F.cyanD);
-    },
-    /* The shuttle for the next release, with its cargo rack, moved by (ox, oy).
-     * Its engines fire while it climbs. */
-    vessel(c, x, cy, t, ox, oy) {
-      const rx = Math.round(x + 17 + ox), sy = Math.round(cy - 40 + oy);
-      R(c, rx + 3, sy - 6, 6, 4, P.o); R(c, rx + 4, sy - 5, 4, 3, F.hullL);
-      R(c, rx + 1, sy - 2, 10, 32, P.o); R(c, rx + 2, sy - 1, 8, 30, F.hullL); R(c, rx + 2, sy - 1, 2, 30, F.hull);
-      R(c, rx + 2, sy + 8, 8, 2, F.magenta); R(c, rx + 4, sy + 2, 4, 3, P.o); R(c, rx + 5, sy + 3, 2, 1, F.cyan);
-      R(c, rx - 2, sy + 20, 3, 10, P.o); R(c, rx - 1, sy + 21, 2, 8, F.magentaD);
-      R(c, rx + 11, sy + 20, 3, 10, P.o); R(c, rx + 11, sy + 21, 2, 8, F.magentaD);
-      R(c, rx + 15, sy + 14, 1, 18, F.hullD); R(c, rx + 15, sy + 31, 12, 1, F.cyanD);
-      if (oy < 0) for (let k = 0; k < 4; k++) R(c, rx + 2 + k * 2, sy + 30 + (blink(t + k * 60, 80) ? 1 : 0), 2, 3 + (k % 2) * 2, k % 2 ? F.cyan : F.cyanL);
-    },
-    hold: [[33, -14], [38, -14], [33, -19], [38, -19], [33, -24], [38, -24]], holdBadge: [31, -32], hull: [14, -58, 30, 50], flies: true,
-    /* The cargo shuttle that brings new issues down the conduit, hovering. */
-    supply(c, x, t, load) {
-      x = Math.round(x);
-      const y = !reduce && blink(t, 500) ? 1 : 0;
-      R(c, x, y + 4, 27, 5, P.o); R(c, x + 1, y + 5, 25, 3, F.hull); R(c, x + 1, y + 5, 25, 1, F.hullL); R(c, x + 26, y + 5, 3, 3, P.o); R(c, x + 26, y + 6, 2, 1, F.cyan);
-      R(c, x + 18, y + 2, 7, 3, P.o); R(c, x + 19, y + 3, 5, 1, F.glass);
-      R(c, x - 2, y + 5, 2, 3, blink(t, 120) ? F.cyan : F.cyanL);
-      for (let k = 0; k < Math.min(load, 3); k++) this.crate(c, x + 2 + k * 5, y, 'workshop', null);
-    },
-    decor(c, x, y, k, t) {
-      switch (k) {
-        case 0: // antenna
-          shadow(c, x + 3, y + 7, 3, 1);
-          R(c, x + 3, y + 1, 1, 7, F.hull); R(c, x + 1, y + 3, 5, 1, F.hullD); R(c, x + 2, y, 3, 2, P.o); R(c, x + 3, y, 1, 1, blink(t + x * 37, 900) ? P.p0 : F.magentaD); break;
-        case 1: // solar panel
-          R(c, x + 3, y + 4, 1, 3, F.hullD); R(c, x, y, 8, 4, P.o); R(c, x + 1, y + 1, 6, 2, F.panel); R(c, x + 1, y + 1, 6, 1, F.panelL); R(c, x + 4, y + 1, 1, 2, F.panelL); break;
-        case 2: // small dome
-          shadow(c, x + 1, y + 6, 7, 1);
-          R(c, x + 2, y + 1, 4, 1, P.o); R(c, x + 1, y + 2, 6, 4, P.o); R(c, x + 2, y + 2, 4, 3, F.glass); R(c, x + 2, y + 2, 2, 1, F.cyanL); R(c, x + 1, y + 5, 6, 1, F.hullD); break;
-        case 3: { // maintenance drone, hovering
-          const b = blink(t + y * 29, 400) ? 1 : 0;
-          shadow(c, x + 2, y + 7, 4, 1);
-          R(c, x + 1, y + 1 + b, 6, 3, P.o); R(c, x + 2, y + 2 + b, 4, 1, F.hull); R(c, x + 3, y + 2 + b, 1, 1, F.cyan);
-          R(c, x, y + b, 2, 1, F.hullD); R(c, x + 6, y + b, 2, 1, F.hullD); break;
-        }
-        case 4: // light bollards
-          [x + 1, x + 5].forEach(bx => { R(c, bx, y + 2, 2, 4, P.o); R(c, bx, y + 2, 2, 1, blink(t + bx * 13, 1400) ? F.cyanL : F.cyan); });
-          R(c, x, y + 6, 8, 1, F.deckL); break;
-        default: // vent grille
-          R(c, x, y + 1, 8, 5, P.o); for (let k = 0; k < 4; k++) R(c, x + 1, y + 2 + k, 6, 1, k % 2 ? F.deck : F.deckL);
-      }
-    },
-    /* Hull trim with a starfield outside it. */
-    border(c, W, H) {
-      R(c, 0, H - 3, W, 3, F.space); R(c, 0, 11, 3, H - 11, F.space); R(c, W - 3, 11, 3, H - 11, F.space);
-      for (let x = 1; x < W; x += 7) R(c, x, H - 2 - (x % 2), 1, 1, hash(x, H) < 0.5 ? P.white : F.cyanL);
-      for (let y = 13; y < H - 3; y += 9) { R(c, 1 + (y % 2), y, 1, 1, P.white); R(c, W - 2 - (y % 2), y + 4, 1, 1, F.cyanL); }
-      R(c, 3, H - 3, W - 6, 1, F.magentaD); R(c, 3, 11, 1, H - 14, F.magentaD); R(c, W - 4, 11, 1, H - 14, F.magentaD);
-    },
-    people: 'future', robots: true,
-    steam: [F.cyanL, F.hullD], sign: [P.o, F.navy, F.cyan]
-  };
-  // In a world the platform is drawn in another theme, so the two read apart.
-  MEDIEVAL.pair = MODERN; MODERN.pair = MEDIEVAL; FUTURE.pair = MODERN;
-
-  const THEMES = { medieval: MEDIEVAL, modern: MODERN, future: FUTURE };
-  const themeFromUrl = new URLSearchParams(location.search).get('theme');
-  let themeName = THEMES[themeFromUrl] ? themeFromUrl : (() => {
-    try { return THEMES[localStorage.getItem('village-theme')] ? localStorage.getItem('village-theme') : 'medieval'; } catch { return 'medieval'; }
-  })();
-  let T = THEMES[themeName];
-
-  /* ---------- People ----------
-   * Four body templates per theme, two women and two men, alternating so a
-   * village is a mix. Letters: o outline, h hair, s/S skin and its shade,
-   * c/C clothing and its shade, t accent (belt, apron, tie), w shirt, p legs
-   * or skirt. Who a villager is (template, skin, hair, clothes) comes from a
-   * hash of their agent, so a person looks the same on every refresh. */
-  const BODY = {
-    medieval: [
-      // man in a belted tunic
-      ['..oooo..', '.ohhhho.', 'ohhhhhho', 'ohssssho', 'osossoso', '.oSssSo.', '.occcco.', 'oCccccCo', 'sCttttCs', '.occcco.', '.opoopo.', '.oo..oo.'],
-      // woman with long hair in a dress
-      ['..oooo..', '.ohhhho.', 'ohhhhhho', 'ohssssho', 'hsossosh', 'hoSssSoh', 'hoctccoh', 'oCccccCo', 'sCccccCs', 'oCccccCo', 'oCCCCCCo', '.oo..oo.'],
-      // bearded man in a hood
-      ['..oooo..', '.occcco.', 'occcccco', 'ocssssco', 'osossoso', 'ochhhhco', '.ochhco.', 'oCccccCo', 'sCttttCs', '.occcco.', '.opoopo.', '.oo..oo.'],
-      // woman with a bun and an apron
-      ['...oo...', '..ohho..', '.ohhhho.', 'ohssssho', 'osossoso', '.oSssSo.', '.occcco.', 'oCttttCo', 'sCttttCs', 'oCttttCo', 'oCCCCCCo', '.oo..oo.']
-    ],
-    modern: [
-      // man in a suit and tie
-      ['..oooo..', '.ohhhho.', 'ohhhhhho', 'ohssssho', 'osossoso', '.oSssSo.', '.owttwo.', 'oCcttcCo', 'sCcttcCs', '.occcco.', '.opoopo.', '.oo..oo.'],
-      // woman with long hair in a blazer and skirt
-      ['..oooo..', '.ohhhho.', 'ohhhhhho', 'ohssssho', 'hsossosh', 'hoSssSoh', 'hocwwcoh', 'oCcwwcCo', 'sCccccCs', '.oppppo.', '.os..so.', '.oo..oo.'],
-      // woman with a bob in a trouser suit
-      ['..oooo..', '.ohhhho.', 'ohhhhhho', 'hhssssho', 'hsossosh', '.hSssSh.', '.ocwwco.', 'oCcwwcCo', 'sCccccCs', '.occcco.', '.opoopo.', '.oo..oo.'],
-      // bearded man in a jacket, open collar
-      ['..oooo..', '.ohhhho.', 'ohhhhhho', 'ohssssho', 'osossoso', '.ohhhho.', '.ocwwco.', 'oCcwwcCo', 'sCccccCs', '.occcco.', '.opoopo.', '.oo..oo.']
-    ],
-    /* Robots. Same grid and the same hand and foot cells, so poses still
-     * apply. Letters: h head plate, e eye LED, a antenna tip, c/C shell and
-     * its shade, t chest light, s claw, p legs or hover skirt. */
-    future: [
-      // round bot on legs
-      ['....a...', '....o...', '.oooooo.', 'ohhhhhho', 'ohehheho', 'ohhhhhho', '.oooooo.', 'oCcttcCo', 'sCccccCs', '.oCccCo.', '.opoopo.', '.oo..oo.'],
-      // twin-antenna bot with a visor, hovering on a skirt
-      ['.a....a.', '.o....o.', '.oooooo.', 'ohhhhhho', 'oheeeeho', 'ohhhhhho', '.oooooo.', 'oCcttcCo', 'sCccccCs', 'oCccccCo', '.oppppo.', '..oooo..'],
-      // tall can bot
-      ['...aa...', '...oo...', '..oooo..', '.ohhhho.', '.oehheo.', '.ohhhho.', '.oooooo.', 'oCcttcCo', 'sCcttcCs', '.occcco.', '.opoopo.', '.oo..oo.'],
-      // wide one-eyed bot
-      ['...a....', '...o....', 'oooooooo', 'ohhhhhho', 'ohheehho', 'ohhhhhho', 'oooooooo', '.oCttCo.', 'sCccccCs', '.occcco.', '.opoopo.', '.oo..oo.']
-    ]
-  };
-  const SKIN = [['#f8d0a8', '#d8a880'], ['#e8b088', '#c08860'], ['#c88858', '#a06838'], ['#94603c', '#704428'], ['#603c28', '#482818']];
-  const HAIR = ['#302018', '#704830', '#c89040', '#a03820', '#181820', '#d0c8c0', '#583828'];
-  const DRESS = {
-    medieval: { cloth: [['#a87848', '#785030'], ['#4878a0', '#305878'], ['#7a8a3a', '#56622a'], ['#8a4a6a', '#62324a'], ['#a85838', '#783a24']], accent: ['#e8dcc0', '#583820', '#f8f8f8'], legs: ['#585060', '#685038'],
-      mayor: { c: '#804098', C: '#582868', t: '#f8d040', p: '#302838' } },
-    modern: { cloth: [['#283048', '#181c30'], ['#3a3a44', '#262630'], ['#4a3a30', '#33281f'], ['#5a6070', '#40465a'], ['#2a4a70', '#1c3450']], accent: ['#c03838', '#3878c8', '#f8d040', '#48a878'], legs: ['#262630', '#383850'],
-      mayor: { c: '#1c2030', C: '#101420', t: '#f8d040', p: '#181c28' } },
-    future: { cloth: [['#40c8e0', '#2890a8'], ['#f070c8', '#b04898'], ['#f8c040', '#c08820'], ['#78e070', '#48a848'], ['#a890f8', '#7058c8'], ['#f08858', '#b85830']],
-      accent: ['#40e0f0', '#f048c0', '#f8d040'], legs: ['#585c80', '#40446a'],
-      heads: ['#d8dcf0', '#b8c0dc', '#e8e0f8'],
-      mayor: { c: '#7a4ae0', C: '#4a2ca0', t: '#f8d040', p: '#40446a' } }
-  };
-  /* A robot's eyes and antenna say its status: cyan at work, red and
-   * blinking when it needs you, dim when stalled, dark when unknown. */
-  const ROBOT_EYE = { working: '#b8f8ff', idle: '#40e0f0', blocked: '#e02828', done: '#3878e0', stalled: '#585870', unknown: '#383850', stopped: '#383850' };
-  function strHash(s) {
-    let h = 2166136261;
-    for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
-    return h >>> 0;
-  }
-  /* Poses are edits of the standing body: a raised hand, both hands up under
-   * a crate, a foot lifted mid-step. */
-  const setAt = (row, i, ch) => row.slice(0, i) + ch + row.slice(i + 1);
-  function pose(rows, kind) {
-    const r = rows.slice();
-    // Waving: the right arm is raised (drawn in person()), so its hand leaves the side.
-    if (kind === 'wave' || kind === 'wave2' || kind === 'work' || kind === 'work2') { r[7] = setAt(r[7], 7, '.'); r[8] = setAt(r[8], 7, '.'); }
-    if (kind === 'carry' || kind === 'carrystep') {
-      r[5] = setAt(setAt(r[5], 0, 's'), 7, 's');
-      r[8] = setAt(setAt(r[8], 0, '.'), 7, '.');
-    }
-    if (kind === 'carrystep') r[11] = '.oo...o.';
-    return r;
-  }
-  /* Draw a person. `seed` names who they are; `accent` (a specialist's color)
-   * overrides their tie, apron or belt; `mayor` dresses them for the hall. */
-  function person(c, x, y, seed, kind = 'stand', opts = {}) {
-    const style = T.people, h = strHash(seed + '|' + style);
-    if (T.robots) return robot(c, x, y, seed, h, kind, opts);
-    const bodies = BODY[style], dress = DRESS[style];
-    const rows = pose(bodies[h % bodies.length], kind);
-    const [skin, skinS] = SKIN[(h >>> 3) % SKIN.length];
-    const cloth = opts.mayor ? [dress.mayor.c, dress.mayor.C] : dress.cloth[(h >>> 7) % dress.cloth.length];
-    const map = {
-      o: P.o, s: skin, S: skinS, w: P.white,
-      h: HAIR[(h >>> 11) % HAIR.length],
-      c: cloth[0], C: cloth[1],
-      t: opts.accent || (opts.mayor ? dress.mayor.t : dress.accent[(h >>> 15) % dress.accent.length]),
-      p: opts.mayor ? dress.mayor.p : dress.legs[(h >>> 19) % dress.legs.length]
-    };
-    x = Math.round(x); y = Math.round(y);
-    shadow(c, x + 1, y + 11, 7, 1);
-    for (let r = 0; r < rows.length; r++) for (let k = 0; k < 8; k++) { const ch = rows[r][k]; if (ch !== '.') R(c, x + k, y + r, 1, 1, map[ch]); }
-    if (kind === 'work' || kind === 'work2') {
-      // Busy: a hammer swinging between raised and struck, so a working
-      // agent reads as working even with no action sign.
-      R(c, x + 7, y + 5, 2, 2, P.o); R(c, x + 7, y + 5, 1, 1, map.s);
-      if (kind === 'work') { R(c, x + 8, y + 1, 1, 5, P.woodD); R(c, x + 7, y, 3, 2, P.o); R(c, x + 7, y, 3, 1, P.stoneD); }
-      else { R(c, x + 8, y + 6, 4, 1, P.woodD); R(c, x + 11, y + 4, 2, 4, P.o); R(c, x + 11, y + 5, 1, 2, P.stoneD); R(c, x + 13, y + 7, 1, 1, P.gold); }
-    }
-    if (kind === 'wave' || kind === 'wave2') {
-      // An arm raised above the head, swinging between upright and tilted out,
-      // with motion ticks on the outswing: readable at a glance.
-      R(c, x + 7, y + 6, 2, 2, P.o); R(c, x + 7, y + 6, 1, 1, map.C);
-      if (kind === 'wave') {
-        R(c, x + 8, y + 1, 2, 6, P.o); R(c, x + 8, y + 2, 1, 5, map.c);
-        R(c, x + 7, y - 2, 4, 4, P.o); R(c, x + 8, y - 1, 2, 2, map.s);
-      } else {
-        R(c, x + 9, y + 4, 2, 3, P.o); R(c, x + 10, y + 2, 2, 3, P.o); R(c, x + 9, y + 5, 1, 1, map.c); R(c, x + 10, y + 3, 1, 2, map.c);
-        R(c, x + 10, y - 1, 4, 4, P.o); R(c, x + 11, y, 2, 2, map.s);
-        R(c, x + 14, y - 1, 1, 1, P.white); R(c, x + 15, y + 1, 1, 1, P.white); R(c, x + 14, y + 3, 1, 1, P.white);
-      }
-    }
-  }
-
-  /* A sub-agent in Future is a mini drone in its specialty's colour. */
-  function drone(c, x, y, col, t) {
-    const b = !reduce && blink(t, 300) ? 1 : 0;
-    x = Math.round(x) + 1; y = Math.round(y) + 3 + b;
-    shadow(c, x + 1, y + 8 - b, 5, 1);
-    R(c, x, y + 1, 7, 4, P.o); R(c, x + 1, y + 2, 5, 2, col); R(c, x + 2, y + 2, 1, 1, P.white); R(c, x + 4, y + 2, 1, 1, P.white);
-    R(c, x - 1, y, 3, 1, P.o); R(c, x + 5, y, 3, 1, P.o);
-    R(c, x + 3, y + 5, 1, 1, '#40e0f0');
-  }
-  /* Draw a robot: the person() of the Future theme. `opts.status` picks its
-   * look; `opts.sub` makes it a drone; `mayor` gives it a crown and a cape. */
-  function robot(c, x, y, seed, h, kind, opts) {
-    const t = now(), st = kind === 'work' || kind === 'work2' ? 'working' : opts.status || 'idle';
-    if (opts.sub && kind !== 'wave' && kind !== 'wave2') return drone(c, x, y, opts.accent || '#f8f8f8', t + (h % 997));
-    const dress = DRESS.future, bodies = BODY.future;
-    const slump = st === 'stalled';
-    let rows = pose(bodies[h % bodies.length], kind);
-    if (slump) rows = ['......a.', '.....o..', ...rows.slice(2)];
-    const shell = opts.mayor ? [dress.mayor.c, dress.mayor.C] : dress.cloth[(h >>> 7) % dress.cloth.length];
-    const eye = opts.sub && st !== 'blocked' ? '#40e0f0' : ROBOT_EYE[st] || ROBOT_EYE.idle;
-    const tip = st === 'blocked' ? (blink(t, 300) ? '#e02828' : '#802828') : st === 'working' && blink(t + (h % 500), 600) ? '#b8f8ff' : slump ? '#585870' : '#f048c0';
-    const map = {
-      o: P.o, w: P.white, s: '#9098b8', S: '#686e90',
-      h: dress.heads[(h >>> 11) % dress.heads.length], e: eye, a: tip,
-      c: shell[0], C: shell[1],
-      t: opts.accent || (opts.mayor ? dress.mayor.t : dress.accent[(h >>> 15) % dress.accent.length]),
-      p: opts.mayor ? dress.mayor.p : dress.legs[(h >>> 19) % dress.legs.length]
-    };
-    x = Math.round(x); y = Math.round(y);
-    // Idle robots hover gently; reduced motion keeps them on the ground.
-    const bob = st === 'idle' && kind === 'stand' && !reduce && blink(t + (h % 900), 700) ? -1 : 0;
-    shadow(c, x + 1, y + 11, 7, 1);
-    const yy = y + bob + (slump ? 1 : 0);
-    if (opts.mayor) { R(c, x - 1, yy + 7, 1, 4, map.C); R(c, x + 8, yy + 7, 1, 4, map.C); }
-    for (let r = 0; r < rows.length; r++) for (let k = 0; k < 8; k++) { const ch = rows[r][k]; if (ch !== '.') R(c, x + k, yy + r, 1, 1, map[ch]); }
-    if (opts.mayor) { R(c, x + 2, yy - 2, 5, 2, P.o); R(c, x + 2, yy - 1, 5, 1, P.gold); R(c, x + 2, yy - 2, 1, 1, P.gold); R(c, x + 4, yy - 3, 1, 1, P.gold); R(c, x + 6, yy - 2, 1, 1, P.gold); }
-    if (kind === 'wave' || kind === 'wave2') {
-      R(c, x + 7, yy + 6, 2, 2, P.o); R(c, x + 7, yy + 6, 1, 1, map.C);
-      if (kind === 'wave') { R(c, x + 8, yy + 1, 2, 6, P.o); R(c, x + 8, yy + 2, 1, 5, map.s); R(c, x + 7, yy - 2, 4, 4, P.o); R(c, x + 8, yy - 1, 2, 2, map.s); }
-      else {
-        R(c, x + 9, yy + 4, 2, 3, P.o); R(c, x + 10, yy + 2, 2, 3, P.o); R(c, x + 9, yy + 5, 1, 1, map.s); R(c, x + 10, yy + 3, 1, 2, map.s);
-        R(c, x + 10, yy - 1, 4, 4, P.o); R(c, x + 11, yy, 2, 2, map.s);
-      }
-      // A red "!" light beside a robot that needs you.
-      if (st === 'blocked') { R(c, x - 3, yy, 2, 4, P.o); R(c, x - 3, yy, 1, 3, '#e02828'); R(c, x - 3, yy + 5, 1, 1, '#e02828'); }
-    }
-    if (st === 'working') {
-      // Arms at work with a tiny wrench, sparks at the tip (none with reduced motion).
-      const up = !reduce && blink(t + (h % 400), 260);
-      R(c, x + 8, yy + (up ? 6 : 7), 3, 1, P.o); R(c, x + 10, yy + (up ? 5 : 6), 1, 3, '#9098b8');
-      if (!reduce && blink(t + (h % 300), 120)) { R(c, x + 11, yy + 4, 1, 1, P.white); R(c, x + 12, yy + 6, 1, 1, P.gold); R(c, x + 12, yy + 3, 1, 1, '#40e0f0'); }
-    }
-    if (st === 'done') { R(c, x + 3, yy + 7, 1, 1, '#3878e0'); R(c, x + 4, yy + 7, 1, 1, '#3878e0'); }
-    // Porters carry their crate on a hover-tray.
-    if (kind === 'carry' || kind === 'carrystep') { R(c, x - 1, yy - 1, 10, 2, P.o); R(c, x, yy - 1, 8, 1, F.hull); if (!reduce && blink(t, 160)) R(c, x + 1, yy + 1, 6, 1, F.cyan); }
-  }
-
-  /* ---------- Actions ----------
-   * What an agent is doing right now, acted out with a prop: a thought cloud,
-   * a book, a swinging hammer, a terminal, a magnifying glass, a letter.
-   * Searching and messaging also walk a few steps back and forth. */
-  const wander = (action, t, seed) =>
-    action === 'searching' || action === 'messaging' ? Math.round(Math.sin(t / 520 + (strHash(seed) % 7)) * 3) : 0;
-  function drawAction(c, x, y, action, t) {
-    const up = blink(t, 240);
-    switch (action) {
-      case 'thinking':
-        [[8, -2, 1], [10, -4, 1], [12, -7, 2]].forEach(([dx, dy, sz], k) => {
-          if (blink(t + k * 160, 480) || reduce) { R(c, x + dx - 1, y + dy - 1, sz + 2, sz + 2, P.o); R(c, x + dx, y + dy, sz, sz, P.white); }
-        });
-        break;
-      case 'reading':
-        R(c, x + 1, y + 7, 6, 3, P.o); R(c, x + 2, y + 7, 2, 2, P.white); R(c, x + 4, y + 7, 2, 2, P.parch);
-        break;
-      case 'writing':
-        if (up) { R(c, x + 8, y + 4, 1, 4, P.woodD); R(c, x + 7, y + 3, 3, 2, P.stoneD); }
-        else { R(c, x + 8, y + 7, 3, 1, P.woodD); R(c, x + 10, y + 6, 2, 3, P.stoneD); R(c, x + 12, y + 10, 1, 1, P.gold); }
-        break;
-      case 'running':
-        R(c, x + 8, y + 8, 5, 4, P.o); R(c, x + 9, y + 9, 3, 2, up ? '#58e878' : P.dark);
-        break;
-      case 'searching':
-        R(c, x + 7, y + 1, 4, 4, P.o); R(c, x + 8, y + 2, 2, 2, P.glass); R(c, x + 10, y + 5, 1, 1, P.o); R(c, x + 11, y + 6, 1, 1, P.o);
-        break;
-      case 'messaging':
-        R(c, x + 6, y + 7, 4, 3, P.o); R(c, x + 7, y + 8, 2, 1, P.white); R(c, x + 8, y + 8, 1, 1, P.p0);
-        break;
-    }
-  }
-  /* Actions with nothing to hammer: no sparks fly off the crate. */
-  const QUIET_ACTIONS = new Set(['thinking', 'reading', 'searching', 'messaging']);
-  const ACTION_ICONS = {
-    thinking: ['.###.', '#####', '.###.', '.....', '#....'],
-    reading: ['##.##', '#.#.#', '#.#.#', '##.##', '.....'],
-    writing: ['###..', '###..', '.#...', '.#...', '.#...'],
-    running: ['#.#.#', '.###.', '##.##', '.###.', '#.#.#'],
-    searching: ['.##..', '#..#.', '.##..', '...#.', '....#'],
-    messaging: ['#####', '##.##', '#.#.#', '#...#', '#####']
-  };
-  /* A small sign over a busy house naming what its own agent is doing. */
-  function actionSign(c, x, y, action) {
-    const icon = ACTION_ICONS[action]; if (!icon) return;
-    const [frame, face, ink] = T.sign;
-    R(c, x, y, 7, 7, frame); R(c, x + 1, y + 1, 5, 5, face);
-    for (let r = 0; r < 5; r++) for (let k = 0; k < 5; k++) if (icon[r][k] === '#') R(c, x + 1 + k, y + 1 + r, 1, 1, ink);
-  }
-
-  /* ---------- Layout ---------- */
-  const LW = 20, LH = 26, RD = 6, DOCK_W = 64;
-  function layout(v) {
-    const n = v.houses.length;
-    const per = Math.max(1, Math.ceil(Math.sqrt(Math.max(n, 1) / 2)));
-    const rows = Math.max(1, Math.ceil(n / (2 * per)));
-    const cx0 = DOCK_W + 8;
-    const vw = Math.max(per * LW * 2 + RD, 72);
-    const roadX = cx0 + Math.floor((vw - RD) / 2);
-    const hallX = roadX + RD / 2 - 16;
-    const top = 60;
-    const lots = [];
-    for (let i = 0; i < rows * 2 * per; i++) {
-      const r = Math.floor(i / (2 * per)), j = i % (2 * per), side = j % 2, pos = Math.floor(j / 2);
-      const x = side === 0 ? roadX - (pos + 1) * LW + 2 : roadX + RD + pos * LW + 2;
-      lots.push({ x, y: top + r * LH, lane: top + r * LH + 18 });
-    }
-    const quayY = top + rows * LH + 4;
-    const canalY = quayY + 8;
-    // Every stop but the last is a lock; the last stop is the castle.
-    const locks = Math.max(0, v.pipeline.stops.length - 1);
-    const lockStart = roadX + 40;
-    const castleX = lockStart + locks * 34 + 6;
-    const forestX = Math.max(cx0 + vw + 6, hallX + 64);
-    // Feature banners stand in a strip cleared out of the forest, east of the
-    // houses; the map widens if they need the room. No features, no strip.
-    const banners = (v.features || []).map((f, k) => ({ f, x: forestX + 12 + k * 30, y: 14, col: FEATURE_COLS[k % FEATURE_COLS.length] }));
-    const W = Math.max(cx0 + vw + 40, roadX + 70, castleX + 46, banners.length ? forestX + 12 + banners.length * 30 : 0);
-    const H = canalY + 34;
-    // What's built on: river, docks, plaza, roads, house rows, canal and its
-    // stations. Every free 9×8 cell may get a decoration.
-    const taken = [
-      [0, 0, W, 14], [4, 8, 62, 46], [4, 46, cx0 + vw, 14], [hallX - 10, 4, 74, 46],
-      [roadX - 2, 46, RD + 4, quayY - 40], [roadX - 18, quayY - 12, W, H],
-      [forestX - 2, 12, W, canalY - 46]
-    ];
-    for (let r = 0; r < rows; r++) {
-      const left = roadX - per * LW, right = roadX + RD + per * LW;
-      taken.push([left - 4, top + r * LH - 10, right - left + 8, LH + 4]);
-    }
-    const free = (x, y, w, h) => !taken.some(([tx, ty, tw, th]) => x < tx + tw && x + w > tx && y < ty + th && y + h > ty);
-    // Big free ground grows small groves; what's left gets a few props. The
-    // prop kind drifts slowly across the map, so neighbours form a garden
-    // (flowerbeds together, rocks together) instead of random clutter.
-    const decor = [];
-    for (let y = 16; y < H - 18; y += 15) for (let x = 6; x < W - 16; x += 14) {
-      if (!free(x, y, 14, 15) || hash(x * 7, y * 3) > 0.45) continue;
-      decor.push({ x: x + Math.floor(hash(y, x) * 3), y: y + Math.floor(hash(x, y) * 2), tree: true });
-      taken.push([x, y, 14, 15]);
-    }
-    for (let y = 16; y < H - 10; y += 9) for (let x = 6; x < W - 14; x += 11) {
-      if (!free(x, y, 11, 9) || hash(x * 3, y * 5) > 0.2) continue;
-      const zone = Math.floor(hash(x >> 5, y >> 5) * 6), k = hash(x + 11, y + 7) < 0.7 ? zone : Math.floor(hash(y, x + 3) * 6);
-      decor.push({ x: x + Math.floor(hash(y, x) * 4), y: y + Math.floor(hash(x, y + 1) * 3), k });
-    }
-    return { per, rows, cx0, vw, roadX, hallX, top, lots, quayY, canalY, lockStart, castleX, W, H, decor, banners };
-  }
-
-  /* ---------- State ---------- */
-  const cv = document.getElementById('map'), ctx = cv.getContext('2d');
-  const pick = document.getElementById('pick');
-  let villages = [], worlds = [], view = null;
-  /* One scene per village: its model, layout and the animations in flight.
-   * `current`, `L`, `porters`, `floats` and `fireworks` hold the scene being
-   * drawn while paint() runs, so the drawing code reads them as before; `S`
-   * is the scene itself (its voyage and lock gates). */
-  const scenes = {};
-  let current = null, L = null, porters = [], floats = [], fireworks = -1e9, S = null;
-  /* Per world: the incidents and landing seen last poll, and crates afloat. */
-  const worldState = {};
-  const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-  const slotPos = i => ({ x: 10 + (i % 8) * 6, y: 22 + Math.floor(i / 8) * 6 });
-  /* What is clickable comes from what is drawn: paint() records a rectangle
-   * (scene pixels) and the object behind it for every sprite it draws, later
-   * ones on top. hit() and the keyboard targets read the list back, so a new
-   * or moved sprite stays clickable without copying its coordinates. */
-  let hits = null;
-  const tap = (x, y, w, h, o) => { if (hits) hits.push({ x: Math.round(x), y: Math.round(y), w, h, o }); };
-
-  /* ---------- Each issue's life ----------
-   * Every change seen between two polls plays as a trip: a worker, porter or
-   * crew member walks a route in steps, carrying the issue's crate on some.
-   *   arrives   a supply boat (truck, shuttle) brings new issues to the docks
-   *             and its crew unloads one crate each into its slot;
-   *   claimed   the worker walks from its house to the docks, picks up that
-   *             crate and carries it home, then works on it at the door;
-   *   blocked   the crate is carried from the docks or house to the board;
-   *   unblocked it is carried from the board back to the docks;
-   *   landed    the worker carries it, sealed, to the quay and walks home;
-   *   closed    (not planned) it is carried off the map's west edge.
-   * Trips queue: each starts STAGGER after the one before, so many changes in
-   * one poll play in order rather than at once. Past QUEUE_CAP waiting trips
-   * the rest are skipped, their crates simply where they now are. Trips are
-   * timed, so a tab left in the background never replays what it missed. The
-   * first poll after a load animates nothing, and with reduced motion no one
-   * walks: a toast says what changed. */
-  const STAGGER = 700, QUEUE_CAP = 12, WALK = 0.05, ARRIVE_IN = 1800, UNLOAD = 450, SAIL_OUT = 1500;
-  function enqueue(sc, t, trip, gap = STAGGER) {
-    if (reduce || porters.filter(p => p.t0 > t).length >= QUEUE_CAP) return null;
-    trip.t0 = Math.max(t, sc.nextAt || 0);
-    sc.nextAt = trip.t0 + gap;
-    porters.push(trip);
-    return trip;
-  }
-  const back = pts => [...pts].reverse();
-  /* Routes on the map, from the lane in front of a house (lot) or a docks slot (s). */
-  const ROAD = 53;
-  const houseToRoad = (lot, lay) => [[lot.x + 8, lot.lane], [lay.roadX + 3, lot.lane], [lay.roadX + 3, ROAD]];
-  const slotFromRoad = s => [[s.x + 2, ROAD], [s.x + 2, s.y + 6]];
-  const boardFromRoad = lay => [[lay.hallX + 51, ROAD], [lay.hallX + 51, 46]];
-  /* What a trip does to the crate it carries, for the dialog of a crate in transit. */
-  function trip(seed, n, cr, to, steps, extra = {}) {
-    return { seed, issue: n, kind: (cr && cr.kind) || 'workshop', pr: cr && cr.priority, to, steps, ...extra };
-  }
-  function diff(old, now, lay, t, sc) {
-    if (!old || old.project !== now.project) return [];
-    const cs = cargoStop(now), said = [];
-    const oldSlot = n => old.backlog.findIndex(c => c.number === n), newSlot = n => now.backlog.findIndex(c => c.number === n);
-    const oldBoard = new Set(old.board.map(b => b.number)), oldHouse = n => old.houses.findIndex(h => h.issue === n);
-    const lotOf = id => lay.lots[now.houses.findIndex(h => h.id === id)];
-
-    // Arrives: new issues come by supply boat, one crate each.
-    const fresh = now.backlog.map((c, i) => ({ c, i })).filter(({ c }) => oldSlot(c.number) < 0 && !oldBoard.has(c.number) && oldHouse(c.number) < 0 && c.number);
-    if (fresh.length) {
-      said.push(`${fresh.length} new ${fresh.length === 1 ? 'issue' : 'issues'}`);
-      if (!reduce && porters.filter(p => p.t0 > t).length < QUEUE_CAP) {
-        const t0 = Math.max(t, sc.nextAt || 0), shown = fresh.filter(f => f.i < 40);
-        const job = { t0, crates: shown.map(f => f.c.number), leave: t0 + ARRIVE_IN + shown.length * UNLOAD + 500 };
-        sc.supplies.push(job);
-        shown.forEach(({ c, i }, k) => {
-          const s = slotPos(i), dx = 22 + (k % 3) * 5;
-          porters.push({ ...trip('crew:' + now.project + k, c.number, c, 'backlog', [
-            { pts: [[dx, 13], [s.x + 2, 13], [s.x + 2, s.y + 6]], carry: true },
-            { pts: [[s.x + 2, s.y + 6], [s.x + 2, 13], [dx, 13]] }]), t0: t0 + ARRIVE_IN + k * UNLOAD, crew: job });
-        });
-        sc.nextAt = job.leave;
-      }
-    }
-    // Claimed: the worker fetches its crate from the docks.
-    now.houses.forEach((h, i) => {
-      const before = old.houses.find(o => o.id === h.id);
-      if (!h.issue || (before && before.issue === h.issue)) return;
-      const slot = oldSlot(h.issue), lot = lay.lots[i];
-      if (slot < 0 || !lot) return;
-      const s = slotPos(Math.min(slot, 39)), out = [...houseToRoad(lot, lay), ...slotFromRoad(s)];
-      said.push(`#${h.issue} claimed`);
-      enqueue(sc, t, trip(h.id, h.issue, old.backlog[slot], 'house', [{ pts: out }, { pts: back(out), carry: true }]));
-    });
-    // Blocked: from the docks or a house to the board, and the board back to the docks.
-    now.board.forEach(b => {
-      const n = b.number;
-      if (oldBoard.has(n)) return;
-      const slot = oldSlot(n), hi = oldHouse(n);
-      let steps = null, seed = 'porter:' + n;
-      if (slot >= 0) { const s = slotPos(Math.min(slot, 39)); steps = [{ pts: [...back(slotFromRoad(s)), ...boardFromRoad(lay)], carry: true }]; }
-      else if (hi >= 0 && lotOf(old.houses[hi].id)) {
-        const lot = lotOf(old.houses[hi].id), there = [...houseToRoad(lot, lay), ...boardFromRoad(lay)];
-        seed = old.houses[hi].id; steps = [{ pts: there, carry: true }, { pts: back(there) }];
-      }
-      if (!steps) return;
-      said.push(`#${n} blocked`);
-      enqueue(sc, t, trip(seed, n, { kind: 'workshop', priority: b.priority }, 'board', steps));
-    });
-    now.backlog.forEach((c, i) => {
-      if (!oldBoard.has(c.number) || i >= 40) return;
-      said.push(`#${c.number} back in the backlog`);
-      enqueue(sc, t, trip('porter:' + c.number, c.number, c, 'backlog', [{ pts: [...back(boardFromRoad(lay)), ...slotFromRoad(slotPos(i))], carry: true }]));
-    });
-    // Landed: the worker carries the sealed crate to the quay, then walks home.
-    const oldQuay = new Set(old.pipeline.quay);
-    now.pipeline.quay.forEach(n => {
-      if (oldQuay.has(n)) return;
-      const i = oldHouse(n);
-      if (i < 0) return;
-      const lot = lotOf(old.houses[i].id) || lay.lots[i];
-      if (!lot) return;
-      const pts = [[lot.x + 8, lot.lane], [lay.roadX + 3, lot.lane], [lay.roadX + 3, lay.quayY]];
-      // With one stop the quay is where the next release waits: on to the ship.
-      if (cs === -1) pts.push(...toShip([lay.roadX + 3, lay.quayY], lay).slice(1));
-      said.push(`#${n} landed`);
-      enqueue(sc, t, trip(old.houses[i].id, n, { kind: old.houses[i].kind, priority: old.houses[i].priority }, cs === -1 ? 'ship' : 'quay',
-        [{ pts, carry: true }, { pts: back(pts) }], { sealed: true }));
-    });
-    // Closed without landing: carried off the map's west edge.
-    const placed = n => now.backlog.some(c => c.number === n) || now.board.some(b => b.number === n) || now.houses.some(h => h.issue === n)
-      || now.pipeline.quay.includes(n) || now.pipeline.stops.some(st => st.issues.includes(n));
-    [...old.backlog.map((c, i) => ({ n: c.number, c, s: i < 40 ? slotPos(i) : null })), ...old.board.map(b => ({ n: b.number, c: b, board: true }))].forEach(o => {
-      if (placed(o.n) || (!o.s && !o.board)) return;
-      const from = o.board ? back(boardFromRoad(lay)) : back(slotFromRoad(o.s));
-      said.push(`#${o.n} closed`);
-      enqueue(sc, t, trip('porter:' + o.n, o.n, o.c, 'away', [{ pts: [...from, [-10, ROAD]], carry: true }]));
-    });
-    // Work moving down the canal opens each lock it passes. The stop before
-    // the harbour loads it onto the ship; any other stop docks it in its basin.
-    now.pipeline.stops.slice(0, -1).forEach((st, i) => st.issues.forEach(n => {
-      const was = placeOf(n, old) ?? -1;
-      if (was >= i) return;
-      for (let g = was + 1; g <= i; g++) sc.gates[g] = t;
-      const from = placePoint(was, lay);
-      if (i === cs) enqueue(sc, t, trip('porter:' + n, n, null, 'ship', [{ pts: toShip(from, lay), carry: true }], { sealed: true, speed: 0.04 }), 300);
-      else if (!reduce) floats.push({ n, t0: t, pts: [from, [from[0], lay.canalY + 4], [lay.lockStart + i * 34 + 10, lay.canalY + 4], placePoint(i, lay)] });
-    }));
-    return said;
-  }
-  /* Where a trip is: { x, y, carry } on its route, `waiting` before it starts
-   * (at the route's first point), or null once it is over. */
-  function tripAt(p, t) {
-    const first = p.steps[0].pts[0];
-    if (t < p.t0) return { x: first[0], y: first[1], carry: false, waiting: true, fetched: false };
-    let d = (t - p.t0) * (p.speed || WALK), fetched = false;
-    for (const st of p.steps) {
-      const at = porterPos({ t0: 0, speed: 1, pts: st.pts }, d);
-      if (at) return { x: at[0], y: at[1], carry: !!st.carry, fetched: fetched || !!st.carry };
-      fetched = fetched || !!st.carry;
-      d -= st.pts.slice(1).reduce((n, q, k) => n + Math.hypot(q[0] - st.pts[k][0], q[1] - st.pts[k][1]), 0);
-    }
-    return null;
-  }
-  /* The point a trip picks its crate up from: the start of its first carrying step. */
-  const pickup = p => (p.steps.find(st => st.carry) || p.steps[0]).pts[0];
-  function porterPos(p, t) {
-    let d = (t - p.t0) * p.speed;
-    for (let k = 0; k < p.pts.length - 1; k++) {
-      const [ax, ay] = p.pts[k], [bx, by] = p.pts[k + 1], len = Math.hypot(bx - ax, by - ay);
-      if (d <= len) return [ax + (bx - ax) * d / len, ay + (by - ay) * d / len];
-      d -= len;
-    }
-    return null;
-  }
-
-  /* ---------- The ship ----------
-   * Work waiting for the next release is loaded onto the ship in the harbour
-   * (a rocket on the launch pad): the issues at the stop before the last, or
-   * at the quay when there is only one stop. When the last stop's deployment
-   * changes, the ship sails off east with what shipped, the fireworks fire,
-   * and an empty ship comes in. The change is read from the last stop's sha
-   * (or the released commit), never its issues, so a release of the same
-   * issues still sails; a page loaded after a release just shows the new ship. */
-  const SAIL = 4200, ARRIVE = 3200, GATE_OPEN = 2400, SHIP_CAP = 6;
-  /* Crates drawn at the quay; the rest are a "+N". */
-  const QUAY_CAP = 6;
-  const cargoStop = v => v.pipeline.stops.length - 2; // -1: the quay
-  function cargoOf(v) {
-    const i = cargoStop(v);
-    return i < -1 ? [] : i < 0 ? v.pipeline.quay : v.pipeline.stops[i].issues;
-  }
-  const lastStop = v => v.pipeline.stops[v.pipeline.stops.length - 1] || null;
-  /* What the last stop runs, with what says so ("deployment:<sha>"). A poll
-   * where GitHub didn't answer falls back to the branch or to nothing; that
-   * is a different source, not a release, so it never sails the ship. */
-  function releaseOf(v) {
-    const last = lastStop(v), id = last && (last.sha || last.tag || v.pipeline.release);
-    return id ? `${last.source || 'branch'}:${id}` : null;
-  }
-  /* Where the ship is: moored, sailing out with the last release, or coming in. */
-  function shipAt(sc, t, lay) {
-    const vo = sc.voyage, since = vo ? t - vo.t0 : Infinity, flies = !!T.flies, out = lay.W - lay.castleX + 4;
-    if (since < SAIL) { const p = (since / SAIL) ** 2; return { leaving: true, ox: flies ? 0 : p * out, oy: flies ? -p * (lay.canalY + 64) : 0 }; }
-    if (since < SAIL + ARRIVE) { const p = 1 - (since - SAIL) / ARRIVE; return { leaving: false, ox: out * p * p, oy: 0 }; }
-    return { leaving: false, ox: 0, oy: 0 };
-  }
-  const holdPos = (lay, k, ox = 0, oy = 0) => [Math.round(lay.castleX + T.hold[k][0] + ox), Math.round(lay.canalY + T.hold[k][1] + oy)];
-  /* A crate's resting point at the quay (-1) or in stop i's basin. */
-  const placePoint = (i, lay) => (i < 0 ? [lay.roadX + 9, lay.quayY + 2] : [lay.lockStart + i * 34 + 10, lay.canalY + 22]);
-  /* A porter's walk from a point along the canal bank to the ship's side. */
-  function toShip([x, y], lay) {
-    const bank = lay.canalY + 26, sx = lay.castleX + T.hold[0][0] + 4;
-    return [[x, y], [x, bank], [sx, bank], [sx, lay.canalY + 18]];
-  }
-  function sail(sc, v, t) {
-    const old = sc.v, last = lastStop(v), before = new Set((lastStop(old) || { issues: [] }).issues);
-    const shipped = last ? last.issues.filter(n => !before.has(n)) : [];
-    sc.fireworks = t;
-    sc.voyage = reduce ? null : { t0: t, cargo: shipped };
-    if (shownScenes().some(([x]) => x === sc)) toast(`${v.project}: shipped ${releaseName(v, last) || 'a release'}${shipped.length ? ` · ${shipped.length} ${shipped.length === 1 ? 'issue' : 'issues'}` : ''}`);
-  }
-  /* A release's name: its tag, else its commit. */
-  function releaseName(v, s) {
-    if (!s) return null;
-    const sha = s.sha || v.pipeline.release;
-    return s.tag || (sha ? String(sha).slice(0, 7) : null);
-  }
-  let toastTimer = 0;
-  function toast(text) {
-    const el = document.getElementById('toast');
-    el.textContent = text; el.hidden = false;
-    clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 5000);
-  }
-
-  /* Where a house's sub-agents stand: two beside the door, then a row on the
-   * lane in front. Past that, a "+N" badge counts the rest, so every running
-   * sub-agent is either drawn or counted, never dropped. */
-  const SUB_SLOTS = [[-1, 12], [9, 12], [-4, 16], [4, 16], [12, 16]];
-  const workFrame = t => (!reduce && blink(t, 180) ? 'work2' : 'work');
-  const DIGITS = ['111101101101111', '010110010010111', '111001111100111', '111001111001111', '101101111001001',
-    '111100111001111', '111100111101111', '111001001001001', '111101111101111', '111101111001111'];
-  /* A gold tag reading "+N" in a 3x5 pixel font. */
-  function badge(c, x, y, n) {
-    const glyphs = ['000010111010000', ...String(n).split('').map(d => DIGITS[+d])], w = glyphs.length * 4 + 1;
-    R(c, x - 1, y - 1, w + 2, 7, P.o); R(c, x, y, w, 5, P.gold);
-    glyphs.forEach((g, j) => { for (let k = 0; k < 15; k++) if (g[k] === '1') R(c, x + 1 + j * 4 + (k % 3), y + Math.floor(k / 3), 1, 1, P.o); });
-  }
-  function paint(c, t) {
-    const v = current, lay = L;
-    const { W, H, roadX, hallX, lots, quayY, canalY, cx0, vw } = lay;
-    // A whole-feature barge carries its subtasks' crates: they are not drawn loose.
-    const barges = bargesFor(v, lay), hid = new Set(barges.flatMap(b => b.issues));
-    // A crate on a trip is not at rest anywhere until the trip has delivered it.
-    const at = new Map(porters.map(p => [p, tripAt(p, t)]));
-    const bound = new Set(porters.filter(p => p.issue && at.get(p) && !(at.get(p).fetched && !at.get(p).carry)).map(p => p.issue));
-    T.ground(c, 0, 0, W, H);
-    if (T.border) T.border(c, W, H);
-    T.channel(c, 0, 0, W, 11, t, 1); tap(0, 0, W, 11, { kind: 'river' });
-    T.dock(c, 14, 10, 40);
-    T.yard(c, 6, 18, 56, 34); tap(6, 8, 56, 44, { kind: 'docks' });
-    // The supply boat: in from the west, moored while its crew unloads, then away.
-    S.supplies = S.supplies.filter(j => {
-      if (t > j.leave + SAIL_OUT) return false;
-      if (t < j.t0) return true;
-      const x = t < j.t0 + ARRIVE_IN ? -32 + 46 * ((t - j.t0) / ARRIVE_IN) : t < j.leave ? 14 : 14 - 46 * ((t - j.leave) / SAIL_OUT);
-      const load = j.crates.filter((_, k) => t < j.t0 + ARRIVE_IN + k * UNLOAD).length;
-      T.supply(c, x, t, load);
-      tap(x, 0, 30, 11, { kind: 'supply', n: j.crates.length, ns: j.crates });
-      return true;
-    });
-    T.road(c, 4, 50, cx0 + vw - 4, 6);
-    T.road(c, roadX, 50, RD, quayY - 50 + 2);
-    T.yard(c, hallX - 8, 42, 48, 9);
-    for (let r = 0; r < lay.rows; r++) {
-      const left = roadX - lay.per * LW + 2, right = roadX + RD + lay.per * LW - 2;
-      T.road(c, left - 1, lay.top + r * LH + 17, right - left + 2, 4);
-    }
-    T.channel(c, roadX - 16, canalY, W - roadX + 16, 14, t, 0.6); tap(roadX - 16, canalY, W - roadX + 16, 14, { kind: 'canal' });
-    T.dock(c, roadX - 4, quayY + 1, 22); if (v.plane !== 'runtime') tap(roadX - 4, quayY - 16, 22, 24, { kind: 'quay' });
-
-    for (let x = Math.max(cx0 + vw + 6, hallX + 64); x < W - 14; x += 15) for (let y = 16; y < canalY - 38; y += 16) if (hash(x, y) < 0.55 && !inBannerStrip(lay, x, y)) T.tree(c, x + Math.floor(hash(y, x) * 4), y);
-    lay.decor.forEach(d => d.tree ? T.tree(c, d.x, d.y) : T.decor && T.decor(c, d.x, d.y, d.k, reduce ? 0 : t));
-    shadow(c, hallX - 2, 40, 42, 2);
-
-    T.hall(c, hallX, 18, v.manager.status); tap(hallX - 4, 6, 40, 36, { kind: 'hall' });
-    T.board(c, hallX + 42, 28, v.board.filter(b => !bound.has(b.number))); tap(hallX + 42, 28, 18, 16, { kind: 'board' });
-    if (v.manager.status !== 'stopped') {
-      const busy = v.manager.status === 'working';
-      person(c, hallX + 26, 30, 'manager:' + v.project, v.manager.status === 'blocked' ? waveFrame(t) : busy ? workFrame(t) : 'stand', { mayor: true, status: v.manager.status });
-      if (busy) drawAction(c, hallX + 26, 30, v.manager.action, t);
-      tap(hallX + 26, 30, 8, 12, { kind: 'hall' });
-    }
-    // The manager's sub-agents (a modernize coordinator's specialists) work in the plaza.
-    (v.manager.subagents || []).slice(0, 4).forEach((sa, k) => {
-      const bob = !reduce && blink(t + k * 170, 220) ? -1 : 0;
-      const seed = `manager:${v.project}/${sa.description || k}`, px = hallX - 2 + k * 10 + (reduce ? 0 : wander(sa.action, t, seed));
-      person(c, px, 39 + bob, seed, 'stand', { accent: subHat(sa), sub: true, status: sa.status });
-      tap(px, 38, 8, 13, { kind: 'sub', house: -1, sa, id: sa.description || k });
-      drawAction(c, px, 39 + bob, sa.action, t + k * 131);
-    });
-
-    v.backlog.slice(0, 40).forEach((cr, i) => {
-      if (bound.has(cr.number)) return;
-      const s = slotPos(i); T.crate(c, s.x, s.y, cr.kind, cr.priority); if ((cr.waits_on || []).length) roped(c, s.x, s.y); tap(s.x, s.y, 5, 5, { kind: 'crate', n: cr.number, at: 'backlog' });
-    });
-
-    const bubbles = [];
-    if (['blocked', 'done', 'unknown', 'stalled'].includes(v.manager.status)) bubbles.push([hallX + 26, 18, v.manager.status]);
-    v.houses.forEach((h, i) => {
-      const lot = lots[i]; if (!lot) return;
-      const st = h.status, tt = t + i * 311;
-      shadow(c, lot.x + 2, lot.y + 16, 16, 2); shadow(c, lot.x + 16, lot.y + 4, 2, 12);
-      tap(lot.x, lot.y - 4, 16, 25, { kind: 'house', i });
-      if (st === 'building') T.scaffold(c, lot.x, lot.y, tt);
-      else (T.B[h.kind] || T.B.workshop)(c, lot.x, lot.y, st, reduce ? 0 : tt);
-      pennant(c, lot.x, lot.y, h.priority, tt);
-      if (st === 'stalled') cobwebs(c, lot.x, lot.y);
-      if (st === 'unknown') R(c, lot.x - 1, lot.y - 6, 18, 23, 'rgba(32,34,60,.6)');
-      const away = porters.some(p => p.seed === h.id && t >= p.t0 && at.get(p));
-      if (!away) {
-        if (st === 'idle') person(c, lot.x + 4, lot.y + 9, h.id, 'stand', { status: st });
-        if (st === 'done') person(c, lot.x + 4, lot.y + 8, h.id, 'stand', { status: st });
-        if (st === 'blocked') person(c, lot.x + 4, lot.y + 10, h.id, waveFrame(t + i * 90), { status: st });
-        // A working agent is one busy figure at its door, acting out what it is doing.
-        if (st === 'working') { person(c, lot.x + 4, lot.y + 8, h.id, workFrame(tt), { status: st }); drawAction(c, lot.x + 4, lot.y + 8, h.action, tt); }
-        // Robots show every status, so a stalled one sits slumped at its door.
-        const slumped = T.robots && st === 'stalled';
-        if (slumped) person(c, lot.x + 4, lot.y + 9, h.id, 'stand', { status: st });
-        if (['idle', 'done', 'blocked', 'working'].includes(st) || slumped) tap(lot.x + 4, lot.y + 8, 8, 12, { kind: 'person', i, who: h.crew[0] });
-      }
-      if (h.crew.length > 1 && st !== 'working') { person(c, lot.x + 12, lot.y + 11, h.id + '#crew'); tap(lot.x + 12, lot.y + 11, 8, 12, { kind: 'person', i, who: h.crew[1] }); }
-      if (h.crew.length > 1 && st === 'working' && !reduce) puffs(c, lot.x + 3, lot.y - 3, tt + 700, ...T.steam);
-      // Sub-agents keep the house busy: one figure each out front (SUB_SLOTS),
-      // and a "+N" badge for any that don't fit.
-      const subs = h.subagents || [];
-      if (subs.length && !reduce) puffs(c, lot.x + 3, lot.y - 3, tt + 400, ...T.steam);
-      // Anyone waiting on a person is shown first, waving.
-      [...subs].sort((a, b) => (b.status === 'blocked') - (a.status === 'blocked')).slice(0, SUB_SLOTS.length).forEach((sa, k) => {
-        const bob = !reduce && blink(t + k * 190, 210) ? -1 : 0;
-        const waiting = sa.status === 'blocked', seed = `${h.id}/${sa.description || k}`, [sx, sy] = SUB_SLOTS[k];
-        const px = lot.x + sx + (reduce ? 0 : wander(sa.action, t, seed)), py = lot.y + sy + bob;
-        person(c, px, waiting ? lot.y + sy : py, seed, waiting ? waveFrame(t + k * 110) : 'stand', { accent: subHat(sa), sub: true, status: sa.status });
-        tap(px, lot.y + sy - 1, 8, 13, { kind: 'sub', house: i, sa, id: sa.description || k });
-        if (!waiting) drawAction(c, px, py, sa.action, t + k * 97);
-      });
-      // The issue's crate at the door while it is worked on: hammered, sawn, sparking.
-      if (st === 'working' && h.issue && !away && !bound.has(h.issue)) {
-        T.crate(c, lot.x + 11, lot.y + 16, h.kind, h.priority);
-        tap(lot.x + 11, lot.y + 16, 5, 5, { kind: 'crate', n: h.issue, at: 'house', i });
-        if (!reduce && !QUIET_ACTIONS.has(h.action) && blink(tt, 150)) {
-          const k = Math.floor(tt / 150) % 3;
-          R(c, lot.x + 12 + k, lot.y + 14 - (k % 2), 1, 1, P.gold); R(c, lot.x + 15 - k, lot.y + 15, 1, 1, P.white);
-        }
-      }
-      if (st === 'working' && h.action) actionSign(c, lot.x + 4, lot.y - 4, h.action);
-      if (subs.length > SUB_SLOTS.length) { badge(c, lot.x + 12, lot.y + 4, subs.length - SUB_SLOTS.length); tap(lot.x + 11, lot.y + 3, 12, 7, { kind: 'house', i }); }
-      if (ICONS[st]) bubbles.push([lot.x + 4, lot.y - (st === 'blocked' ? 1 : 3) + (st === 'blocked' && blink(t, 200) ? -1 : 0), st]);
-    });
-
-    const carried = new Set([...bound, ...floats.map(f => f.n)]);
-    const cargo = cargoOf(v), onShip = new Set(cargo);
-    const atQuay = v.pipeline.quay.filter(n => !carried.has(n) && !hid.has(n) && !onShip.has(n));
-    atQuay.slice(0, QUAY_CAP).forEach((n, k) => {
-      const x = roadX + 6 + (k % 3) * 6, y = quayY - 3 - Math.floor(k / 3) * 6;
-      T.crate(c, x, y, 'workshop', null, true); tap(x, y, 5, 5, { kind: 'crate', n, at: 'quay' });
-    });
-    // Six crates fit; a "+N" says how many more wait, and the quay's dialog lists them all.
-    if (atQuay.length > QUAY_CAP) { badge(c, roadX + 25, quayY - 9, atQuay.length - QUAY_CAP); tap(roadX + 24, quayY - 10, 14, 7, { kind: 'quay' }); }
-
-    // The sentinel's flag is grey while it still has newer work to test. With
-    // no sentinel the first lock is an environment like any other.
-    const gated = v.pipeline.sentinel !== 'absent';
-    const flagOf = i => i === 0 && gated && v.pipeline.sentinel !== 'green' ? P.stoneD : STOPCOL[i] || P.white;
-    const stops = v.pipeline.stops;
-    stops.slice(0, -1).forEach((s, i) => {
-      const lx = lay.lockStart + i * 34;
-      const open = !reduce && t - (S.gates[i] ?? -1e9) < GATE_OPEN;
-      T.gate(c, lx, canalY, open, flagOf(i)); tap(lx - 7, canalY - 28, 32, H - canalY + 28, { kind: 'stop', i });
-      s.issues.filter(n => !hid.has(n) && !onShip.has(n) && !carried.has(n)).slice(0, 4).forEach((n, k) => {
-        const x = lx + 8 + (k % 2) * 6, y = canalY + 18 + Math.floor(k / 2) * 6;
-        T.crate(c, x, y, 'workshop', null, true); tap(x, y, 5, 5, { kind: 'crate', n, at: 'stop', i });
-      });
-    });
-    // Crates floating down to a lock's basin while its gate stands open.
-    floats = floats.filter(f => {
-      const pos = porterPos({ t0: f.t0, speed: 0.03, pts: f.pts }, t);
-      if (!pos) return false;
-      T.crate(c, pos[0] - 2, pos[1] - 2, 'workshop', null, true);
-      return true;
-    });
-    T.destination(c, lay.castleX, canalY, t, fireworks); tap(lay.castleX - 4, canalY - 28, 46, H - canalY + 28, { kind: 'harbour' });
-    // The ship in the harbour, loaded with the next release; or the last one
-    // sailing off with what shipped, leaving a wake, then an empty one coming in.
-    if (stops.length) {
-      const at = shipAt(S, t, lay), bob = T.flies || reduce || !blink(t, 900) ? 0 : 1, oy = at.oy + bob;
-      if (at.leaving && T.flies) puffs(c, lay.castleX + 18, canalY - 12, t, ...T.steam);
-      else if (at.leaving) {
-        for (let x = lay.castleX + 4; x < lay.castleX + at.ox; x += 5) R(c, x, canalY + 12 + ((x >> 2) % 2), 3, 1, P.white);
-        tap(lay.castleX + 4, canalY + 8, Math.max(0, at.ox - 4), 8, { kind: 'harbour' });
-      }
-      const load = at.leaving ? S.voyage.cargo : cargo.filter(n => !carried.has(n) && !hid.has(n));
-      T.vessel(c, lay.castleX, canalY, t, at.ox, oy);
-      const [hx, hy, hw, hh] = T.hull;
-      tap(lay.castleX + hx + at.ox, canalY + hy + at.oy, hw, hh, at.leaving ? { kind: 'ship', at: 'away' } : { kind: 'ship' });
-      load.slice(0, SHIP_CAP).forEach((n, k) => {
-        const [x, y] = holdPos(lay, k, at.ox, oy);
-        T.crate(c, x, y, 'workshop', null, true);
-        if (!at.leaving) tap(x, y, 5, 5, { kind: 'crate', n, at: 'ship' });
-      });
-      if (load.length > SHIP_CAP) badge(c, Math.round(lay.castleX + T.holdBadge[0] + at.ox), Math.round(canalY + T.holdBadge[1] + oy), load.length - SHIP_CAP);
-    }
-
-    // Trips: whoever is walking, with the crate carried overhead, or still
-    // waiting where it will be picked up.
-    porters = porters.filter(p => {
-      const a = at.get(p);
-      if (!a) return false;
-      if (!a.fetched && p.issue && !p.crew) {
-        const [px, py] = pickup(p);
-        T.crate(c, px - 2, py - 6, p.kind, p.pr); tap(px - 2, py - 6, 5, 5, { kind: 'crate', n: p.issue, at: 'transit', to: p.to });
-      }
-      if (a.waiting) return true;
-      person(c, a.x - 4, a.y - 11, p.seed, a.carry ? (blink(t, 140) ? 'carrystep' : 'carry') : 'stand');
-      tap(a.x - 4, a.y - 11, 8, 12, { kind: 'porter', seed: p.seed, n: p.issue, to: p.to, carrying: a.carry });
-      if (a.carry) { T.crate(c, a.x - 2, a.y - 16, p.kind, p.pr, p.sealed); tap(a.x - 2, a.y - 16, 5, 5, { kind: 'crate', n: p.issue, at: 'transit', to: p.to }); }
-      return true;
-    });
-    bubbles.forEach(([x, y, s]) => bubble(c, x, y, s));
-    featureLayer(c, t, v, lay, barges);
-  }
-
-
-  /* ---------- Features ----------
-   * A feature (a parent issue split into subtasks) is a banner in the strip
-   * cleared east of the houses, with its spec scroll at its foot. Following
-   * one draws a marching trail to each counted subtask. In whole-feature
-   * projects a feature's subtasks ride one barge (a truck downtown) once
-   * they are all at the same stop; an environment nobody can answer for is
-   * in fog. The server works out every count; the renderer only draws them. */
-  let followed = null; // { project, number }
-  const isFollowed = (v, f) => !!followed && followed.project === v.project && followed.number === f.number;
-  const counted = f => (f.subtasks || []).filter(s => !s.dropped);
-  function inBannerStrip(lay, x, y) {
-    const b = lay.banners;
-    return b.length > 0 && y < 48 && x >= b[0].x - 14 && x <= b[b.length - 1].x + 22;
-  }
-  /* Where a subtask is on the map: -1 the quay, i stop i, null elsewhere. */
-  function placeOf(n, v) {
-    if (v.pipeline.quay.includes(n)) return -1;
-    const i = v.pipeline.stops.findIndex(s => s.issues.includes(n));
-    return i >= 0 ? i : null;
-  }
-  function bargesFor(v, lay) {
-    const last = v.pipeline.stops.length - 1, queued = {};
-    return lay.banners.map(g => {
-      if (g.f.promotion !== 'feature') return null;
-      const ns = counted(g.f).map(s => s.number), at = ns.map(n => placeOf(n, v));
-      if (!ns.length || at.some(a => a === null || a !== at[0])) return null;
-      // Barges at the same stop queue up: off the quay they line up downstream,
-      // at a lock or the harbour they wait upstream of it.
-      const i = at[0], k = queued[i] = (queued[i] ?? -1) + 1;
-      const x = i === -1 ? lay.roadX - 14 + k * 26
-        : Math.max(lay.roadX - 14, (i === last ? lay.castleX - 26 : lay.lockStart + i * 34 + 8) - k * 26);
-      return { f: g.f, col: g.col, issues: ns, stop: i, x, y: lay.canalY + 1 };
-    }).filter(Boolean);
-  }
-  /* The map point a trail leads to for subtask n: its house, its crate, or its barge. */
-  function whereIs(n, v, lay, barges) {
-    const hi = v.houses.findIndex(h => h.issue === n);
-    if (hi >= 0) { const lot = lay.lots[hi]; if (lot) return { x: lot.x + 8, y: lot.y + 18 }; }
-    const bi = v.backlog.findIndex(c => c.number === n);
-    if (bi >= 0) { const s = slotPos(Math.min(bi, 39)); return { x: s.x + 2, y: s.y + 2 }; }
-    const ni = v.board.findIndex(b => b.number === n);
-    if (ni >= 0) { const k = Math.min(ni, 7); return { x: lay.hallX + 45 + (k % 4) * 4, y: 31 + Math.floor(k / 4) * 4 }; }
-    const b = barges.find(b => b.issues.includes(n));
-    if (b) { const k = Math.min(b.issues.indexOf(n), 3); return { x: b.x + 4 + k * 5, y: b.y + 3 }; }
-    const hid = new Set(barges.flatMap(b => b.issues));
-    const ci = cargoOf(v).filter(m => !hid.has(m)).indexOf(n);
-    if (ci >= 0) { const [x, y] = holdPos(lay, Math.min(ci, SHIP_CAP - 1)); return { x: x + 2, y: y + 2 }; }
-    const qi = v.pipeline.quay.filter(m => !hid.has(m)).indexOf(n);
-    if (qi >= 0) { const k = Math.min(qi, 5); return { x: lay.roadX + 8 + (k % 3) * 6, y: lay.quayY - 1 - Math.floor(k / 3) * 6 }; }
-    const stops = v.pipeline.stops;
-    for (let i = 0; i < stops.length; i++) {
-      let k = stops[i].issues.filter(m => !hid.has(m)).indexOf(n);
-      if (k < 0) continue;
-      // Shipped work has sailed: the trail ends at the harbour's lighthouse.
-      return i < stops.length - 1
-        ? (k = Math.min(k, 3), { x: lay.lockStart + i * 34 + 10 + (k % 2) * 6, y: lay.canalY + 20 + Math.floor(k / 2) * 6 })
-        : { x: lay.castleX + 31, y: lay.canalY - 24 };
-    }
-    return null;
-  }
-  /* A barge on the canal, or a flatbed truck on the district's road. */
-  function drawBarge(c, b, t) {
-    const x = b.x, y = b.y + (!reduce && blink(t, 700) ? 1 : 0);
-    if (T === FUTURE) {
-      // A hover-barge: hull, cockpit, a glow under it.
-      R(c, x, y + 6, 24, 4, P.o); R(c, x + 1, y + 6, 22, 2, F.hull); R(c, x + 1, y + 6, 22, 1, b.col);
-      R(c, x + 18, y + 1, 6, 6, P.o); R(c, x + 19, y + 2, 4, 3, F.glass);
-      R(c, x + 2, y + 10, 20, 1, !reduce && blink(t, 200) ? F.cyanL : F.cyan);
-    } else if (T === MODERN) {
-      R(c, x, y + 6, 20, 4, P.o); R(c, x + 1, y + 6, 18, 2, M.steel); R(c, x + 1, y + 6, 18, 1, b.col);
-      R(c, x + 19, y + 1, 6, 9, P.o); R(c, x + 20, y + 2, 4, 6, P.white); R(c, x + 21, y + 3, 3, 2, M.glassL);
-      [x + 3, x + 14, x + 21].forEach(wx => { R(c, wx, y + 9, 3, 3, P.o); R(c, wx + 1, y + 10, 1, 1, M.steel); });
-    } else {
-      R(c, x, y + 6, 24, 5, P.o); R(c, x + 1, y + 6, 22, 3, P.wood); R(c, x + 1, y + 6, 22, 1, P.woodL); R(c, x + 3, y + 9, 18, 1, P.woodD);
-      R(c, x + 22, y - 6, 1, 8, P.o); R(c, x + 23, y - 6, 5, 4, P.o); R(c, x + 23, y - 5, 4, 2, b.col);
-    }
-    b.issues.slice(0, 4).forEach((n, k) => T.crate(c, x + 2 + k * 5, y + 1, 'workshop', null, true));
-    tap(b.x, b.y - 6, 28, 18, { kind: 'barge', f: b.f ? b.f.number : null, issues: b.issues });
-  }
-  /* The fog wash per theme, shared with the key. */
-  const fogCol = th => th === MODERN ? 'rgba(170,176,196,.75)' : th === FUTURE ? 'rgba(60,52,110,.78)' : 'rgba(206,210,230,.72)';
-  /* Fog over a stop with neither a Deployment nor a branch: "?", never "not live". */
-  function fogStop(c, v, i, lay, t) {
-    const last = v.pipeline.stops.length - 1, x = i === last ? lay.castleX - 4 : lay.lockStart + i * 34 - 7, w = i === last ? 46 : 32;
-    R(c, x, lay.canalY - 28, w, lay.H - lay.canalY + 28, fogCol(T));
-    if (!reduce) for (let k = 0; k < w / 6 - 1; k++) puffs(c, x + 4 + k * 6, lay.canalY - 18 + (k % 2) * 22, t + k * 330, '#e0e4f0', '#b8c0d8');
-    bubble(c, x + (w >> 1) - 4, lay.canalY - 6, 'unknown');
-  }
-  /* A flag on a pole: swallowtail cloth in the feature's colour, a red pennant
-   * when a subtask is stuck, gold and sparkling once live. The spec lies at
-   * its foot: a scroll in the village, a clipboard downtown. */
-  function drawBanner(c, g, on, t) {
-    const { x, y, f } = g, col = f.live ? P.gold : g.col, wave = !reduce && blink(t + f.number * 7, 320) ? 1 : 0;
-    const stuck = (f.stuck || []).length > 0, top = stuck ? y - 7 : y - 1, modern = T !== MEDIEVAL;
-    R(c, x - 2, y + 23, 5, 2, P.o); R(c, x - 1, y + 23, 3, 1, modern ? M.concrete : P.stoneD);
-    R(c, x, top, 1, y + 23 - top, modern ? M.steelD : P.o); R(c, x, top - 1, 1, 1, P.gold);
-    R(c, x + 1, y, 14, 10, P.o); R(c, x + 1, y + 1, 13, 8, col); R(c, x + 1, y + 1, 13, 1, P.white);
-    if (!modern) R(c, x + 12, y + 4 + wave, 3, 2, P.o);
-    R(c, x + 4, y + 4, 6, 1, f.live ? P.o : P.white); R(c, x + 4, y + 6, 4, 1, f.live ? P.o : P.white);
-    if (stuck) { const w = !reduce && blink(t, 260) ? 1 : 0; R(c, x + 1, y - 7, 7 + w, 4, P.o); R(c, x + 1, y - 6, 6 + w, 2, P.p0); }
-    if (modern) { R(c, x + 4, y + 18, 7, 7, P.o); R(c, x + 5, y + 19, 5, 5, P.white); R(c, x + 6, y + 18, 3, 1, M.steel); R(c, x + 6, y + 21, 3, 1, M.concreteD); R(c, x + 6, y + 23, 2, 1, M.concreteD); }
-    else { R(c, x + 3, y + 19, 8, 5, P.o); R(c, x + 4, y + 20, 6, 3, P.parch); R(c, x + 5, y + 21, 4, 1, P.pathS); }
-    if (f.live && !reduce) for (let k = 0; k < 3; k++) if (blink(t + k * 170, 220)) R(c, x + 3 + k * 5, y - 3 - (k % 2) * 2, 1, 1, P.gold);
-    if (on) { const o = !reduce && blink(t, 400) ? col : P.white; R(c, x - 3, y - 9, 20, 1, o); R(c, x - 3, y + 26, 20, 1, o); R(c, x - 3, y - 9, 1, 36, o); R(c, x + 16, y - 9, 1, 36, o); }
-  }
-  function drawTrail(c, x0, y0, x1, y1, col, t) {
-    const off = reduce ? 0 : Math.floor(t / 110) % 4, pts = [];
-    x1 = Math.round(x1); y1 = Math.round(y1);
-    for (let y = y0; y !== y1; y += Math.sign(y1 - y0)) pts.push([x0, y]);
-    for (let x = x0; x !== x1; x += Math.sign(x1 - x0)) pts.push([x, y1]);
-    pts.forEach(([px, py], i) => { if ((i + off) % 4 < 2) { R(c, px, py + 1, 1, 1, P.o); R(c, px, py, 1, 1, col); } });
-    const o = !reduce && blink(t, 300) ? col : P.white;
-    R(c, x1 - 4, y1 - 4, 9, 1, o); R(c, x1 - 4, y1 + 4, 9, 1, o); R(c, x1 - 4, y1 - 4, 1, 9, o); R(c, x1 + 4, y1 - 4, 1, 9, o);
-  }
-  function featureLayer(c, t, v, lay, barges) {
-    if (!lay.banners.length && !v.pipeline.stops.some(s => s.source === 'unknown')) return;
-    barges.forEach(b => drawBarge(c, b, t));
-    v.pipeline.stops.forEach((s, i) => { if (s.source === 'unknown') fogStop(c, v, i, lay, t); });
-    const fade = (scenes[v.project] || {}).fade || {};
-    lay.banners.forEach(g => {
-      const on = isFollowed(v, g.f), a = on ? 1 : (fade[g.f.number] ?? 1);
-      if (on) counted(g.f).forEach(s => { const w = whereIs(s.number, v, lay, barges); if (w) drawTrail(c, g.x, g.y + 25, w.x, w.y, g.f.live ? P.gold : g.col, t); });
-      c.globalAlpha = a; drawBanner(c, g, on, t); c.globalAlpha = 1;
-      tap(g.x - 3, g.y - 9, 20, 36, { kind: 'banner', f: g.f.number });
-    });
-  }
-
-  function drawVillage(c, sc, t) {
-    current = sc.v; L = sc.L; porters = sc.porters; floats = sc.floats; fireworks = sc.fireworks; S = sc;
-    hits = [];
-    paint(c, t);
-    sc.hits = hits; hits = null;
-    sc.porters = porters; sc.floats = floats;
-  }
-
-  /* A live banner has done its job: it fades over the first hour after this
-   * page saw it go live and is gone after LIVE_GONE, unless it is being
-   * followed. (The server also stops listing a feature a day after it went live.) */
-  const LIVE_FADE = 10 * 60e3, LIVE_DIM = 60 * 60e3, LIVE_GONE = 2 * 60 * 60e3;
-  function fadeLive(sc, v) {
-    const now = Date.now(), seen = {};
-    sc.fade = {};
-    v.features = (v.features || []).filter(f => {
-      if (!f.live) return true;
-      const since = seen[f.number] = sc.liveSince[f.number] ?? now, age = now - since;
-      if (age > LIVE_GONE && !isFollowed(v, f)) return false;
-      sc.fade[f.number] = age <= LIVE_FADE ? 1 : Math.max(0.35, 1 - 0.65 * (age - LIVE_FADE) / (LIVE_DIM - LIVE_FADE));
-      return true;
-    });
-    sc.liveSince = seen;
-  }
-  /* Fold a new model into its village's scene, starting the animations its
-   * changes call for. */
-  function updateScene(v, t) {
-    const sc = scenes[v.project] || (scenes[v.project] = { v: null, porters: [], floats: [], gates: {}, voyage: null, supplies: [], nextAt: 0, fireworks: -1e9,
-      lastDelivered: null, lastRelease: null, liveSince: {}, fade: {} });
-    fadeLive(sc, v);
-    const lay = layout(v);
-    porters = sc.porters; floats = sc.floats;
-    const said = diff(sc.v, v, lay, t, sc);
-    sc.porters = porters; sc.floats = floats;
-    // Reduced motion: nobody walks, so say what changed instead.
-    if (reduce && said.length && shownScenes().some(([x]) => x === sc)) toast(`${v.project}: ${said.slice(0, 4).join(' · ')}${said.length > 4 ? ` · +${said.length - 4} more` : ''}`);
-    // A new deployment at the last stop sails the ship. A village with no
-    // release to compare (a runtime's stages) still lights up when work arrives.
-    const rel = releaseOf(v), delivered = v.pipeline.stops.length ? v.pipeline.stops[v.pipeline.stops.length - 1].issues.join(',') : '';
-    const was = sc.lastRelease, sameSource = rel && was && rel.split(':')[0] === was.split(':')[0];
-    if (rel) { if (sc.v && sameSource && rel !== was) sail(sc, v, t); sc.lastRelease = rel; }
-    else if (!was && sc.lastDelivered !== null && sc.v && delivered !== sc.lastDelivered && delivered) sc.fireworks = t;
-    sc.lastDelivered = delivered;
-    sc.v = v; sc.L = lay;
-    return sc;
-  }
-
-  /* ---------- Worlds ----------
-   * A world stacks the platform village (what runs) over the dev village
-   * (what builds it). Issues the platform raises leave the building they
-   * came from and float down the river on the left to the dev village's
-   * docks; releases leave the dev village's harbour and climb the road on
-   * the right to the platform, until its workers run them. The platform is
-   * drawn in the other style, so the two read apart at a glance. */
-  const SIDE = 24, GAP = 28;
-  const otherTheme = () => T.pair || MEDIEVAL;
-  function worldGeom(Ps, Ds) {
-    const W = Math.max(Ps.L.W, Ds.L.W) + 2 * SIDE, devTop = Ps.L.H + GAP;
-    return { W, H: devTop + Ds.L.H, devTop, srcY: Ps.L.top, roadY: 53 };
-  }
-  function offscreen(sc) {
-    if (!sc.canvas) { sc.canvas = document.createElement('canvas'); sc.cx = sc.canvas.getContext('2d'); }
-    if (sc.canvas.width !== sc.L.W || sc.canvas.height !== sc.L.H) { sc.canvas.width = sc.L.W; sc.canvas.height = sc.L.H; }
-    return sc.cx;
-  }
-  /* A channel that flows down: water in the village, a conveyor road in the district. */
-  function downstream(c, x, y, w, h, t) {
-    const modern = T !== MEDIEVAL, fut = T === FUTURE;
-    R(c, x, y, w, h, fut ? F.space : modern ? M.asphaltD : P.water);
-    const edge = fut ? F.magentaD : modern ? M.concreteD : P.waterD;
-    R(c, x, y, 1, h, edge); R(c, x + w - 1, y, 1, h, edge);
-    const off = Math.floor(t / 70) % 8;
-    for (let yy = y - 8 + off; yy < y + h; yy += 8) if (yy >= y) {
-      if (modern) R(c, x + (w >> 1), yy, 1, 4, fut ? F.plasmaL : P.white);
-      else { R(c, x + 3, yy, 1, 2, P.waterL); R(c, x + w - 5, yy + 4, 1, 2, P.waterL); }
-    }
-  }
-  function cart(c, x, y, loads) {
-    const modern = T !== MEDIEVAL;
-    x = Math.round(x); y = Math.round(y);
-    R(c, x, y, 14, 8, P.o); R(c, x + 1, y + 1, 12, 5, modern ? P.white : P.wood);
-    if (modern) { R(c, x + 10, y - 3, 4, 4, P.o); R(c, x + 11, y - 2, 2, 2, M.glassL); }
-    R(c, x + 2, y + 7, 3, 3, P.o); R(c, x + 9, y + 7, 3, 3, P.o);
-    for (let k = 0; k < Math.min(loads, modern ? 1 : 2); k++) T.crate(c, x + 2 + k * 5, y - 4, 'workshop', null, true);
-  }
-  function updateWorld(w, t) {
-    const st = worldState[w.name] || (worldState[w.name] = { seen: null, floaters: [], landed: undefined, upgradedAt: -1e9 });
-    const now = new Set(w.incidents.map(i => i.number));
-    if (st.seen) w.incidents.forEach(i => { if (!st.seen.has(i.number)) st.floaters.push({ n: i.number, origin: i.origin, t0: t }); });
-    st.seen = now;
-    if (st.landed === false && w.landed === true) {
-      st.upgradedAt = t;
-      if (scenes[w.platform]) scenes[w.platform].fireworks = t;
-    }
-    st.landed = w.landed;
-  }
-  function originPoint(Ps, id) {
-    const i = Ps.v.houses.findIndex(h => h.id === id), lot = i >= 0 ? Ps.L.lots[i] : null;
-    return lot ? [SIDE + lot.x + 8, lot.y + 8] : [12, Ps.L.top - 6];
-  }
-  function drawWorld(t, w) {
-    const Ps = scenes[w.platform], Ds = scenes[w.dev];
-    if (!Ps || !Ps.v || !Ds || !Ds.v) return;
-    const g = worldGeom(Ps, Ds), st = worldState[w.name] || { floaters: [], upgradedAt: -1e9 };
-    if (cv.width !== g.W || cv.height !== g.H) { cv.width = g.W; cv.height = g.H; fit(); }
-    const devTheme = T;
-    T.ground(ctx, 0, 0, g.W, g.H);
-
-    T = otherTheme();
-    T.ground(ctx, 0, 0, g.W, Ps.L.H);
-    drawVillage(offscreen(Ps), Ps, t);
-    ctx.drawImage(Ps.canvas, SIDE, 0);
-    // Platform buildings with an open incident against them are on fire.
-    w.damaged.forEach(id => {
-      const i = Ps.v.houses.findIndex(h => h.id === id), lot = Ps.L.lots[i];
-      if (!lot) return;
-      const x = SIDE + lot.x, y = lot.y;
-      R(ctx, x, y - 1, 16, 17, 'rgba(40,24,24,.35)');
-      for (let k = 0; k < 3; k++) {
-        puffs(ctx, x + 4 + k * 4, y - 6, t + k * 450, '#484858', '#282830');
-        puffs(ctx, x + 5 + k * 4, y - 12, t + k * 450 + 900, '#585870', '#383848');
-      }
-      const f = blink(t, 140) ? 1 : 0;
-      R(ctx, x + 4, y + 2 - f, 3, 3 + f, P.p0); R(ctx, x + 5, y + 1 - f, 1, 2, P.gold);
-      R(ctx, x + 10, y + 3 + f, 3, 3 - f, P.p0); R(ctx, x + 11, y + 2 + f, 1, 2, P.gold);
-    });
-    if (t - st.upgradedAt < 2400) Ps.v.houses.forEach((h, i) => {
-      const lot = Ps.L.lots[i]; if (lot && blink(t + i * 90, 160)) R(ctx, SIDE + lot.x + 2 + (i * 5) % 12, lot.y - 2, 1, 1, P.gold);
-    });
-    T = devTheme;
-
-    drawVillage(offscreen(Ds), Ds, t);
-    ctx.drawImage(Ds.canvas, SIDE, g.devTop);
-
-    // The river down: from the platform's gate to the dev village's river.
-    downstream(ctx, 5, g.srcY, 14, g.devTop + 11 - g.srcY, t);
-    R(ctx, 2, g.srcY - 8, 20, 8, P.o); R(ctx, 3, g.srcY - 7, 18, 6, T === MODERN ? M.concrete : T === FUTURE ? F.hullD : P.stone); R(ctx, 9, g.srcY - 6, 6, 5, P.dark);
-    // The road up: from the dev village's harbour to the platform's main road.
-    const ry = g.devTop + Ds.L.canalY + 4;
-    T.road(ctx, g.W - 20, g.roadY - 3, 16, ry - g.roadY + 9);
-    T.road(ctx, SIDE + Ds.L.castleX + 36, ry, g.W - 20 - (SIDE + Ds.L.castleX + 36), 6);
-    const roadEnd = SIDE + Ps.L.cx0 + Ps.L.vw - 4;
-    T.road(ctx, roadEnd, g.roadY - 3, g.W - 20 - roadEnd, 6);
-
-    // Released work on its way up, until the platform's workers run it.
-    // The cart takes over from the ship: it sets off from the harbour as the
-    // ship sails off the dev village's edge, and none while the ship is still in sight.
-    const sailed = Ds.voyage ? Ds.voyage.t0 + SAIL : 0;
-    if (w.shipping.length && t >= sailed) {
-      const pts = [[SIDE + Ds.L.castleX + 34, ry], [g.W - 12, ry], [g.W - 12, g.roadY], [roadEnd, g.roadY]];
-      const len = pts.slice(1).reduce((n, p, k) => n + Math.hypot(p[0] - pts[k][0], p[1] - pts[k][1]), 0);
-      const d = reduce ? len / 2 : ((t - sailed) / 30) % len;
-      const at = porterPos({ t0: 0, speed: 1, pts }, d) || pts[0];
-      cart(ctx, at[0] - 7, at[1] - 6, w.shipping.length);
-    }
-    // New incidents leave their building and float down to the docks.
-    st.floaters = st.floaters.filter(f => {
-      const [ox, oy] = originPoint(Ps, f.origin);
-      const pts = [[ox, oy], [12, oy], [12, g.devTop + 6], [SIDE + 30, g.devTop + 6]];
-      const at = porterPos({ t0: f.t0, speed: 0.04, pts }, t);
-      if (!at) return false;
-      T.crate(ctx, at[0] - 2, at[1] - 2, 'bug', 'P0');
-      return true;
-    });
-  }
-
-  /* ---------- Panels ---------- */
-  function renderFlow(v) {
-    if (v.plane === 'runtime') return renderRuntimeFlow(v);
-    const stops = v.pipeline.stops;
-    const working = v.houses.filter(h => h.status === 'working').length;
-    const items = [
-      [T.labels.docks, 'backlog', v.backlog.length],
-      [T.labels.board, 'blocked · proposals', v.board.length],
-      [T.labels.houses, `${working} of ${v.houses.length} working`, v.houses.filter(h => h.issue).length],
-      ['Sub-agents', 'running in sessions', [v.manager, ...v.houses].reduce((n, h) => n + (h.subagents || []).length, 0)],
-      [T.labels.quay, `pushed to ${v.pipeline.integration || 'integration'}`, v.pipeline.quay.length],
-      ...stops.map((s, i) => [i === stops.length - 1 ? `${T.labels.castle} · ${s.name}` : s.name, i === 0 && v.pipeline.sentinel !== 'absent' ? `sentinel: ${v.pipeline.sentinel}` : 'environment', s.issues.length])
-    ];
-    document.getElementById('flow').innerHTML = items.map(([l, s, n], i) =>
-      `<div class="step"><b>${n}</b><span>${esc(l)}<br>${esc(s)}</span></div>`).join('');
-  }
-  /* Runtime villages (Temporal, AgentEx, ...) count workstreams and agents, not issues and pushes. */
-  function renderRuntimeFlow(v) {
-    const count = st => v.houses.filter(h => h.status === st).length;
-    const shipped = v.pipeline.stops.reduce((n, s) => n + s.issues.length, 0);
-    const items = [
-      [T.labels.houses, 'top-level workstreams', v.houses.length],
-      ['Working', 'workstreams busy', count('working')],
-      ['Waiting on you', 'an agent asked a person', count('blocked')],
-      ['Retrying', 'activity failing', count('stalled')],
-      ['Agents', 'working for workstreams', v.houses.reduce((n, h) => n + (h.subagents || []).length, 0)],
-      ['Workers', v.manager.status === 'stalled' ? 'a task queue has none' : 'polling task queues', (v.manager.subagents || []).length],
-      [T.labels.board, 'failed in 24h', v.board.filter(n => n.label === 'failed').length],
-      [T.labels.castle, 'completed in 24h', shipped]
-    ];
-    document.getElementById('flow').innerHTML = items.map(([l, s, n]) =>
-      `<div class="step"><b>${n}</b><span>${esc(l)}<br>${esc(s)}</span></div>`).join('');
-  }
-  /* World counters follow the loop: raised, being fixed, released, running. */
-  function renderWorldFlow(w) {
-    const Ds = scenes[w.dev], Ps = scenes[w.platform];
-    const open = w.incidents.filter(i => !i.in_progress).length, fixing = w.incidents.length - open;
-    const short = s => (s ? s.slice(0, 7) : '—');
-    const landed = w.landed === null ? 'platform reports no build IDs' : w.landed ? 'running on the platform' : 'rolling out';
-    const items = [
-      ['Incidents', 'raised by the platform', open],
-      ['Being fixed', `claimed in ${w.dev}`, fixing],
-      ['Dev village', 'houses working', Ds && Ds.v ? Ds.v.houses.filter(h => h.status === 'working').length : 0],
-      ['Shipping', 'released, not yet running', w.shipping.length],
-      ['Release', landed, short(w.release)],
-      ['Platform', 'workstreams busy', Ps && Ps.v ? Ps.v.houses.filter(h => h.status === 'working').length : 0],
-      ['Platform builds', 'reported by workers', w.platform_builds.map(short).join(' ') || '—']
-    ];
-    document.getElementById('flow').innerHTML = items.map(([l, s, n]) =>
-      `<div class="step"><b>${esc(n)}</b><span>${esc(l)}<br>${esc(s)}</span></div>`).join('');
-  }
-  const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
-
-  const dialog = document.getElementById('dialog');
-  document.getElementById('close').addEventListener('click', () => { dialog.hidden = true; });
-  /* Drill in: each link opens the tool behind the picture (the agent's session,
-   * its issue, its workflow) in a new tab. */
-  function links(list) {
-    document.getElementById('d-links').innerHTML = (list || [])
-      .map(l => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)} ↗</a>`).join('');
-  }
-  /* A structured question the agent is waiting on (a numbered menu or y/n):
-   * one button per option. The server checks the same question is still on
-   * screen before it types the answer; anything open-ended goes through the
-   * agent's session link instead. */
-  function ask(house) {
-    const box = document.getElementById('d-q'), q = house.question;
-    if (!q || !house.answer_url) { box.innerHTML = ''; return; }
-    box.innerHTML = `<p class="q">${esc(q.prompt)}</p><div class="opts">${q.options.map((o, i) =>
+const dialog = document.getElementById('dialog');
+document.getElementById('close').addEventListener('click', () => { dialog.hidden = true; });
+/* Drill in: each link opens the tool behind the picture (the agent's session,
+ * its issue, its workflow) in a new tab. */
+function links(list) {
+  document.getElementById('d-links').innerHTML = (list || [])
+    .map(l => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)} ↗</a>`).join('');
+}
+/* A structured question the agent is waiting on (a numbered menu or y/n):
+ * one button per option. The server checks the same question is still on
+ * screen before it types the answer; anything open-ended goes through the
+ * agent's session link instead. */
+function ask(house) {
+  const box = document.getElementById('d-q'), q = house.question;
+  if (!q || !house.answer_url) { box.innerHTML = ''; return; }
+  box.innerHTML = `<p class="q">${esc(q.prompt)}</p><div class="opts">${q.options.map((o, i) =>
       `<button data-opt="${i}">${q.kind === 'menu' ? esc(o.key) + '. ' : ''}${esc(o.label)}</button>`).join('')}</div><p class="dim" id="d-q-msg" role="status"></p>`;
-    const buttons = [...box.querySelectorAll('[data-opt]')], msg = document.getElementById('d-q-msg');
-    const busy = on => buttons.forEach(b => { b.disabled = on; });
-    buttons.forEach(b => b.addEventListener('click', async () => {
-      busy(true); msg.textContent = 'Sending…';
-      try {
-        const res = await fetch(house.answer_url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: q.prompt, option: Number(b.dataset.opt) }) });
-        const body = await res.json().catch(() => ({}));
-        if (res.ok) { msg.textContent = `Answered: ${body.answered || b.textContent}`; setTimeout(() => { dialog.hidden = true; }, 1200); return; }
-        msg.textContent = res.status === 403 ? 'This dashboard is read-only: answer in the agent session.' : (body.error || `Could not answer (${res.status})`);
-      } catch (e) { msg.textContent = "Can't reach agents-tui."; }
-      busy(false);
-    }));
-  }
-  /* ---------- What each object is ----------
-   * One dialog per kind of thing on the map: what it is in plain words, and
-   * links to what is behind it. Links come from the report (house `links`,
-   * issue `url`s); the repo's own pages (commits, deployments, releases) only
-   * when a real issue URL shows which GitHub repo this is, never a guess. */
-  const ISSUE_URL = /^(https:\/\/github\.com\/[^/]+\/[^/]+)\/issues\/\d+$/;
-  function repoUrl(v) {
-    const urls = [...v.backlog.map(c => c.url), ...v.board.map(n => n.url), ...(v.features || []).map(f => f.url),
-      ...[v.manager, ...v.houses].flatMap(h => (h.links || []).map(l => l.url))];
-    for (const u of urls) { const m = ISSUE_URL.exec(u || ''); if (m) return m[1]; }
-    return null;
-  }
-  const link = (label, url) => (url ? { label, url } : null);
-  /* An issue's title, priority and URL from wherever the village knows it. */
-  function issueOf(v, n) {
-    const c = v.backlog.find(c => c.number === n) || v.board.find(b => b.number === n);
-    const h = v.houses.find(h => h.issue === n);
-    const sub = (v.features || []).flatMap(f => f.subtasks || []).find(s => s.number === n);
-    const own = h && (h.links || []).find(l => new RegExp(`/issues/${n}$`).test(l.url));
-    const repo = repoUrl(v);
-    return {
-      title: (c && c.title) || (h && h.issue_title) || (sub && sub.title) || (v.pipeline.titles || {})[n] || '',
-      priority: (c && c.priority) || (h && h.priority) || '',
-      url: (c && c.url) || (own && own.url) || (repo ? `${repo}/issues/${n}` : null)
-    };
-  }
-  const issueLabel = n => `GitHub issue #${n}`;
-  const issueItems = (v, ns) => ns.map(n => ({ number: n, ...issueOf(v, n) }));
-  const sessionOf = h => (h.links || []).find(l => /^\/#\/swarm\/[^/]+\/agent\//.test(l.url));
-  const isSha = s => /^[0-9a-f]{7,40}$/i.test(String(s || ''));
-  function stopLinks(v, s) {
-    const repo = repoUrl(v);
-    if (!repo || !s) return [];
-    return [
-      s.source === 'deployment' ? link(`${s.name} deployments`, `${repo}/deployments/${encodeURIComponent(s.name)}`) : null,
-      isSha(s.sha) ? link(`Commit ${String(s.sha).slice(0, 7)}`, `${repo}/commit/${s.sha}`) : null
-    ].filter(Boolean);
-  }
-  /* The GitHub Release a stop runs: the page its deployment links, else its tag's page. */
-  function releaseLink(v, s, words = 'Release') {
-    if (!s || !s.tag && !s.url) return null;
-    const repo = repoUrl(v), url = s.url || (repo ? `${repo}/releases/tag/${encodeURIComponent(s.tag)}` : null);
-    return link(`${words}${s.tag ? ' ' + s.tag : ''}`, url);
-  }
-  /* Why nothing says what a stop runs, in plain words, and where the docs are. */
-  function unknownWords(v, i) {
-    const st = v.pipeline.stops[i], br = v.pipeline.integration || 'the integration branch';
-    if (i === 0 && v.pipeline.sentinel === 'unknown')
-      return `No ${st.name} ref yet, so nothing has been verified green. Run autocoder's sentinel (main-sentinel.sh), or, with no sentinel, mark the first environment "requires": "integration" in .autocoder.json.`;
-    return `Nothing says what ${st.name} runs: there is no successful GitHub Deployment to it and no env/${st.name} branch. Record a deployment (tools/deploy.sh records nuc-1), or configure the environment in .autocoder.json.`;
-  }
-  function docsLink(v) {
-    const repo = repoUrl(v), br = v.pipeline.integration;
-    return repo && br ? link('How environments work', `${repo}/blob/${encodeURIComponent(br)}/docs/village.md#environments`) : null;
-  }
-  /* "12:05 · 14m ago" from a house's `since`. */
-  function sinceWords(since) {
-    const t = Date.parse(since || '');
-    if (!isFinite(t)) return '';
-    const m = Math.max(0, Math.round((Date.now() - t) / 60000));
-    const ago = m < 1 ? 'just now' : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
-    return `${new Date(t).toTimeString().slice(0, 5)} (${ago})`;
-  }
-  /* " · waits on #361, #362" for a backlog issue with open dependencies. */
-  function waitsWords(v, n) {
-    const w = (v.backlog.find(c => c.number === n) || {}).waits_on || [];
-    return w.length ? ` · waits on ${w.map(d => '#' + d).join(', ')}` : '';
-  }
-  function crateWhere(o, v, theme) {
-    const stops = v.pipeline.stops;
-    if (o.at === 'backlog') return `waiting at the ${theme.labels.docks.toLowerCase()}${waitsWords(v, o.n)}`;
-    if (o.at === 'quay') return `landed on ${v.pipeline.integration || 'the integration branch'}, at the ${theme.labels.quay.toLowerCase()}`;
-    if (o.at === 'ship') return `on the ${theme.labels.ship.toLowerCase()}, waiting for the next release`;
-    if (o.at === 'stop') return o.i === stops.length - 1 ? `shipped to ${stops[o.i].name}` : `at ${stops[o.i].name}`;
-    if (o.at === 'house') { const h = v.houses[o.i]; return `being worked on at ${h ? houseName(v, h) : 'its house'}`; }
-    if (o.at === 'transit') return o.to === 'away' ? 'closed without landing: carried away' : `on its way to the ${tripPlace(o.to, theme)}`;
-    return '';
-  }
-  /* Where a trip takes its crate, in the theme's words. */
-  function tripPlace(to, theme) {
-    return { house: theme.labels.houses.toLowerCase().replace(/s$/, ''), backlog: theme.labels.docks.toLowerCase(), board: theme.labels.board.toLowerCase(),
-      quay: theme.labels.quay.toLowerCase(), ship: theme.labels.ship.toLowerCase() }[to] || 'next place';
-  }
-  function subWords(sa, v) {
-    return `${sa.agent_type}${sa.description ? ' · ' + sa.description : ''}` +
-      (sa.status === 'blocked' ? ' · waiting on you' : sa.action ? ` · ${sa.action}` : '');
-  }
-  /* What an object on the map is: { title, line, meta (list items), items (issues), links, house }. */
-  function explain(o, sc, theme) {
-    const v = sc.v, runtime = v.plane === 'runtime', stops = v.pipeline.stops, last = stops[stops.length - 1];
-    const work = runtime ? 'workstream' : 'issue';
-    switch (o.kind) {
-      case 'river': case 'docks':
-        return { title: theme.labels.docks, line: runtime ? 'Waiting work' : 'The backlog, highest priority first', items: v.backlog };
-      case 'board':
-        return { title: theme.labels.board, line: runtime ? 'Failed in the last 24 hours' : 'Blocked issues and proposals waiting on you', items: v.board };
-      case 'hall': {
-        const m = v.manager, s = sessionOf(m), swarm = s && s.url.replace(/\/agent\/[^/]+$/, '');
-        return { title: `${theme.labels.hall} · manager`, line: m.issue ? `#${m.issue} ${m.issue_title || ''}` : (m.issue_title || 'The manager of this swarm'),
-          meta: [`Status: ${m.status}`, `Crew: ${m.crew.join(', ') || '—'}`, ...(m.subagents || []).map(sa => `${runtime ? 'Worker' : 'Sub-agent'}: ${subWords(sa, v)}`), m.action ? `Now: ${m.action}` : null],
-          links: [...(m.links || []), link('Swarm view', swarm)], house: m };
-      }
-      case 'house': {
-        const h = v.houses[o.i]; if (!h) return null;
-        const hasIssue = h.issue && (h.links || []).some(l => /\/issues\//.test(l.url));
-        const issue = h.issue && !hasIssue ? link(issueLabel(h.issue), issueOf(v, h.issue).url) : null;
-        // Named by worktree and branch ("wt-1 · feature/issue-7"), not by building.
-        const repo = repoUrl(v), br = v.pipeline.integration, since = sinceWords(h.since);
-        const compare = !runtime && repo && br && h.branch && h.branch !== br ? link(`Compare ${h.branch} with ${br}`, `${repo}/compare/${encodeURIComponent(br)}...${encodeURIComponent(h.branch)}`) : null;
-        return { title: `${houseName(v, h)} · ${h.branch || h.kind}`, line: h.issue ? `#${h.issue} ${h.issue_title || ''}` : (h.issue_title || `No ${work} claimed`),
-          meta: [`${runtime ? 'Workstream' : 'Worktree'}: ${h.id}`, h.branch ? `Branch: ${h.branch}` : null, `Agent: ${h.role}`,
-            `Status: ${h.status}${h.action && h.action !== h.status ? ' · ' + h.action : ''}${h.priority ? ' · ' + h.priority : ''}`,
-            since ? `${h.status.charAt(0).toUpperCase() + h.status.slice(1)} since ${since}` : null,
-            `Crew: ${h.crew.join(', ') || '—'}`, ...(h.subagents || []).map(sa => `${runtime ? 'Agent' : 'Sub-agent'}: ${subWords(sa, v)}`)],
-          links: [...(h.links || []), issue, compare], house: h };
-      }
-      case 'person': {
-        const h = v.houses[o.i]; if (!h) return null;
-        return { title: `${o.who || h.role} · agent`, line: h.issue ? `Working on #${h.issue} ${h.issue_title || ''}` : `Status: ${h.status}`,
-          meta: [`Lives in ${houseName(v, h)}`, `Status: ${h.status}`, h.action ? `Now: ${h.action}` : null],
-          links: [sessionOf(h), h.issue ? link(issueLabel(h.issue), issueOf(v, h.issue).url) : null] };
-      }
-      case 'sub': {
-        const h = o.house < 0 ? v.manager : v.houses[o.house], sa = o.sa; if (!h) return null;
-        return { title: `${sa.agent_type} · ${runtime ? (o.house < 0 ? 'worker' : 'agent') : 'sub-agent'}`, line: sa.description || '',
-          meta: [`Working for ${o.house < 0 ? 'the manager' : houseName(v, h)}`, sa.status ? `Status: ${sa.status}` : null, sa.action ? `Now: ${sa.action}` : null],
-          links: [sessionOf(h) && { label: 'Parent agent session', url: sessionOf(h).url }] };
-      }
-      case 'porter': {
-        const h = v.houses.find(h => h.id === o.seed), n = o.n || (h && h.issue);
-        const it = n ? issueOf(v, n) : {};
-        return { title: `${h ? h.role : 'Porter'} · carrying`, line: n ? `#${n} ${it.title}` : '',
-          meta: [!o.carrying && o.to === 'house' ? `Going to the ${theme.labels.docks.toLowerCase()} to fetch its issue`
-            : !o.carrying ? 'Walking home'
-            : o.to === 'ship' ? `Loading the finished work onto the ${theme.labels.ship.toLowerCase()}`
-            : o.to === 'quay' ? `Taking the finished work to the ${theme.labels.quay.toLowerCase()}`
-            : o.to === 'house' ? 'Carrying a claimed issue from the backlog to its house'
-            : o.to === 'board' ? `Pinning a blocked issue to the ${theme.labels.board.toLowerCase()}`
-            : o.to === 'backlog' ? `Bringing an issue to the ${theme.labels.docks.toLowerCase()}`
-            : 'Carrying off an issue closed without landing'],
-          links: [h && sessionOf(h), n ? link(issueLabel(n), it.url) : null] };
-      }
-      case 'supply':
-        return { title: `Supply ${{ Ship: 'boat', Rocket: 'truck', Shuttle: 'shuttle' }[theme.labels.ship] || 'boat'}`, line: `Bringing ${o.n} new ${o.n === 1 ? work : work + 's'} to the ${theme.labels.docks.toLowerCase()}`,
-          items: issueItems(v, o.ns || []), links: [] };
-      case 'crate': {
-        const it = issueOf(v, o.n);
-        return { title: `#${o.n} ${it.title}`.trim(), line: crateWhere(o, v, theme),
-          meta: [it.priority ? `Priority: ${it.priority}` : null], links: [link(issueLabel(o.n), it.url)] };
-      }
-      case 'quay': {
-        const repo = repoUrl(v), br = v.pipeline.integration;
-        return { title: theme.labels.quay, line: `Work landed on ${br || 'the integration branch'}, not yet past ${stops[0] ? stops[0].name : 'the gate'}`,
-          items: issueItems(v, v.pipeline.quay), links: [repo && br ? link(`${br} commits`, `${repo}/commits/${encodeURIComponent(br)}`) : null] };
-      }
-      case 'stop': {
-        const st = stops[o.i]; if (!st) return null;
-        const sentinel = o.i === 0 && !runtime && v.pipeline.sentinel !== 'absent';
-        const unknown = !runtime && (st.source === 'unknown' || (sentinel && v.pipeline.sentinel === 'unknown'));
-        return { title: `${st.name} · ${runtime ? 'stage' : 'environment'}`, line: sentinel ? `Sentinel: ${v.pipeline.sentinel}` : sourceWords(st),
-          meta: [sentinel ? `Runs: ${sourceWords(st)}` : null, o.i === 0 && v.pipeline.sentinel === 'absent' ? `No sentinel: takes work straight from ${v.pipeline.integration || 'the integration branch'}` : null,
-            unknown ? unknownWords(v, o.i) : null],
-          items: issueItems(v, st.issues), links: [...stopLinks(v, st), unknown ? docsLink(v) : null] };
-      }
-      case 'harbour': {
-        const rel = v.pipeline.release, repo = repoUrl(v);
-        const relLink = rel && repo ? link(`Release ${isSha(rel) ? rel.slice(0, 7) : rel}`, isSha(rel) ? `${repo}/commit/${rel}` : `${repo}/releases/tag/${encodeURIComponent(rel)}`) : null;
-        return { title: `${theme.labels.castle}${last ? ' · ' + last.name : ''}`, line: last ? (runtime ? 'Completed in the last 24 hours' : `What shipped to ${last.name}`) : 'Nothing ships yet',
-          meta: [last && last.tag ? `Last release: ${last.tag}` : rel ? `Release: ${rel}` : null, last && !runtime ? `Runs: ${sourceWords(last)}` : null,
-            last && !runtime && last.source === 'unknown' ? unknownWords(v, stops.length - 1) : null],
-          items: last ? issueItems(v, last.issues) : [], links: [releaseLink(v, last), relLink, ...stopLinks(v, last), last && !runtime && last.source === 'unknown' ? docsLink(v) : null] };
-      }
-      case 'ship': {
-        if (!last) return null;
-        const name = releaseName(v, last);
-        if (o.at === 'away') {
-          const gone = (sc.voyage || {}).cargo || [];
-          return { title: `${theme.labels.ship} · ${theme.labels.sails}`, line: `Shipped ${name || 'a release'} to ${last.name}`, items: issueItems(v, gone), links: [releaseLink(v, last)] };
-        }
-        const cargo = cargoOf(v), n = cargo.length, repo = repoUrl(v), br = v.pipeline.integration;
-        return { title: `${theme.labels.ship} · next release`, line: `Next release: ${n} ${n === 1 ? work : work + 's'}${name ? ' since ' + name : ''}`,
-          meta: [`${theme.labels.sails.charAt(0).toUpperCase() + theme.labels.sails.slice(1)} when ${last.name} is next deployed`],
-          items: issueItems(v, cargo),
-          links: [releaseLink(v, last, 'Last release'), repo && last.tag && br ? link(`Changes since ${last.tag}`, `${repo}/compare/${encodeURIComponent(last.tag)}...${encodeURIComponent(br)}`) : null] };
-      }
-      case 'canal':
-        return { title: runtime ? 'Pipeline' : 'Canal', line: `From ${v.pipeline.integration || 'integration'} through ${stops.map(s => s.name).join(', ') || 'no stages'}`,
-          meta: stops.map(s => `${s.name}: ${s.issues.length} ${s.issues.length === 1 ? work : work + 's'}`), links: [] };
-      case 'banner': case 'barge':
-        return null;
+  const buttons = [...box.querySelectorAll('[data-opt]')], msg = document.getElementById('d-q-msg');
+  const busy = on => buttons.forEach(b => { b.disabled = on; });
+  buttons.forEach(b => b.addEventListener('click', async () => {
+    busy(true); msg.textContent = 'Sending…';
+    try {
+      const res = await fetch(house.answer_url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: q.prompt, option: Number(b.dataset.opt) }) });
+      const body = await res.json().catch(() => ({}));
+      if (res.ok) { msg.textContent = `Answered: ${body.answered || b.textContent}`; setTimeout(() => { dialog.hidden = true; }, 1200); return; }
+      msg.textContent = res.status === 403 ? 'This dashboard is read-only: answer in the agent session.' : (body.error || `Could not answer (${res.status})`);
+    } catch (e) { msg.textContent = "Can't reach agents-tui."; }
+    busy(false);
+  }));
+}
+/* ---------- What each object is ----------
+ * One dialog per kind of thing on the map: what it is in plain words, and
+ * links to what is behind it. Links come from the report (house `links`,
+ * issue `url`s); the repo's own pages (commits, deployments, releases) only
+ * when a real issue URL shows which GitHub repo this is, never a guess. */
+const ISSUE_URL = /^(https:\/\/github\.com\/[^/]+\/[^/]+)\/issues\/\d+$/;
+function repoUrl(v) {
+  const urls = [...v.backlog.map(c => c.url), ...v.board.map(n => n.url), ...(v.features || []).map(f => f.url),
+    ...[v.manager, ...v.houses].flatMap(h => (h.links || []).map(l => l.url))];
+  for (const u of urls) { const m = ISSUE_URL.exec(u || ''); if (m) return m[1]; }
+  return null;
+}
+const link = (label, url) => (url ? { label, url } : null);
+/* An issue's title, priority and URL from wherever the village knows it. */
+function issueOf(v, n) {
+  const c = v.backlog.find(c => c.number === n) || v.board.find(b => b.number === n);
+  const h = v.houses.find(h => h.issue === n);
+  const sub = (v.features || []).flatMap(f => f.subtasks || []).find(s => s.number === n);
+  const own = h && (h.links || []).find(l => new RegExp(`/issues/${n}$`).test(l.url));
+  const repo = repoUrl(v);
+  return {
+    title: (c && c.title) || (h && h.issue_title) || (sub && sub.title) || (v.pipeline.titles || {})[n] || '',
+    priority: (c && c.priority) || (h && h.priority) || '',
+    url: (c && c.url) || (own && own.url) || (repo ? `${repo}/issues/${n}` : null)
+  };
+}
+const issueLabel = n => `GitHub issue #${n}`;
+const issueItems = (v, ns) => ns.map(n => ({ number: n, ...issueOf(v, n) }));
+const sessionOf = h => (h.links || []).find(l => /^\/#\/swarm\/[^/]+\/agent\//.test(l.url));
+const isSha = s => /^[0-9a-f]{7,40}$/i.test(String(s || ''));
+function stopLinks(v, s) {
+  const repo = repoUrl(v);
+  if (!repo || !s) return [];
+  return [
+    s.source === 'deployment' ? link(`${s.name} deployments`, `${repo}/deployments/${encodeURIComponent(s.name)}`) : null,
+    isSha(s.sha) ? link(`Commit ${String(s.sha).slice(0, 7)}`, `${repo}/commit/${s.sha}`) : null
+  ].filter(Boolean);
+}
+/* The GitHub Release a stop runs: the page its deployment links, else its tag's page. */
+function releaseLink(v, s, words = 'Release') {
+  if (!s || !s.tag && !s.url) return null;
+  const repo = repoUrl(v), url = s.url || (repo ? `${repo}/releases/tag/${encodeURIComponent(s.tag)}` : null);
+  return link(`${words}${s.tag ? ' ' + s.tag : ''}`, url);
+}
+/* Why nothing says what a stop runs, in plain words, and where the docs are. */
+function unknownWords(v, i) {
+  const st = v.pipeline.stops[i], br = v.pipeline.integration || 'the integration branch';
+  if (i === 0 && v.pipeline.sentinel === 'unknown')
+    return `No ${st.name} ref yet, so nothing has been verified green. Run autocoder's sentinel (main-sentinel.sh), or, with no sentinel, mark the first environment "requires": "integration" in .autocoder.json.`;
+  return `Nothing says what ${st.name} runs: there is no successful GitHub Deployment to it and no env/${st.name} branch. Record a deployment (tools/deploy.sh records nuc-1), or configure the environment in .autocoder.json.`;
+}
+function docsLink(v) {
+  const repo = repoUrl(v), br = v.pipeline.integration;
+  return repo && br ? link('How environments work', `${repo}/blob/${encodeURIComponent(br)}/docs/village.md#environments`) : null;
+}
+/* "12:05 · 14m ago" from a house's `since`. */
+function sinceWords(since) {
+  const t = Date.parse(since || '');
+  if (!isFinite(t)) return '';
+  const m = Math.max(0, Math.round((Date.now() - t) / 60000));
+  const ago = m < 1 ? 'just now' : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
+  return `${new Date(t).toTimeString().slice(0, 5)} (${ago})`;
+}
+/* " · waits on #361, #362" for a backlog issue with open dependencies. */
+function waitsWords(v, n) {
+  const w = (v.backlog.find(c => c.number === n) || {}).waits_on || [];
+  return w.length ? ` · waits on ${w.map(d => '#' + d).join(', ')}` : '';
+}
+function crateWhere(o, v, theme) {
+  const stops = v.pipeline.stops;
+  if (o.at === 'backlog') return `waiting at the ${theme.labels.docks.toLowerCase()}${waitsWords(v, o.n)}`;
+  if (o.at === 'quay') return `landed on ${v.pipeline.integration || 'the integration branch'}, at the ${theme.labels.quay.toLowerCase()}`;
+  if (o.at === 'ship') return `on the ${theme.labels.ship.toLowerCase()}, waiting for the next release`;
+  if (o.at === 'stop') return o.i === stops.length - 1 ? `shipped to ${stops[o.i].name}` : `at ${stops[o.i].name}`;
+  if (o.at === 'house') { const h = v.houses[o.i]; return `being worked on at ${h ? houseName(v, h) : 'its house'}`; }
+  if (o.at === 'transit') return o.to === 'away' ? 'closed without landing: carried away' : `on its way to the ${tripPlace(o.to, theme)}`;
+  return '';
+}
+/* Where a trip takes its crate, in the theme's words. */
+function tripPlace(to, theme) {
+  return { house: theme.labels.houses.toLowerCase().replace(/s$/, ''), backlog: theme.labels.docks.toLowerCase(), board: theme.labels.board.toLowerCase(),
+    quay: theme.labels.quay.toLowerCase(), ship: theme.labels.ship.toLowerCase() }[to] || 'next place';
+}
+function subWords(sa, v) {
+  return `${sa.agent_type}${sa.description ? ' · ' + sa.description : ''}` +
+    (sa.status === 'blocked' ? ' · waiting on you' : sa.action ? ` · ${sa.action}` : '');
+}
+/* What an object on the map is: { title, line, meta (list items), items (issues), links, house }. */
+function explain(o, sc, theme) {
+  const v = sc.v, runtime = v.plane === 'runtime', stops = v.pipeline.stops, last = stops[stops.length - 1];
+  const work = runtime ? 'workstream' : 'issue';
+  switch (o.kind) {
+    case 'river': case 'docks':
+      return { title: theme.labels.docks, line: runtime ? 'Waiting work' : 'The backlog, highest priority first', items: v.backlog };
+    case 'board':
+      return { title: theme.labels.board, line: runtime ? 'Failed in the last 24 hours' : 'Blocked issues and proposals waiting on you', items: v.board };
+    case 'hall': {
+      const m = v.manager, s = sessionOf(m), swarm = s && s.url.replace(/\/agent\/[^/]+$/, '');
+      return { title: `${theme.labels.hall} · manager`, line: m.issue ? `#${m.issue} ${m.issue_title || ''}` : (m.issue_title || 'The manager of this swarm'),
+        meta: [`Status: ${m.status}`, `Crew: ${m.crew.join(', ') || '—'}`, ...(m.subagents || []).map(sa => `${runtime ? 'Worker' : 'Sub-agent'}: ${subWords(sa, v)}`), m.action ? `Now: ${m.action}` : null],
+        links: [...(m.links || []), link('Swarm view', swarm)], house: m };
     }
-    return null;
+    case 'house': {
+      const h = v.houses[o.i]; if (!h) return null;
+      const hasIssue = h.issue && (h.links || []).some(l => /\/issues\//.test(l.url));
+      const issue = h.issue && !hasIssue ? link(issueLabel(h.issue), issueOf(v, h.issue).url) : null;
+      // Named by worktree and branch ("wt-1 · feature/issue-7"), not by building.
+      const repo = repoUrl(v), br = v.pipeline.integration, since = sinceWords(h.since);
+      const compare = !runtime && repo && br && h.branch && h.branch !== br ? link(`Compare ${h.branch} with ${br}`, `${repo}/compare/${encodeURIComponent(br)}...${encodeURIComponent(h.branch)}`) : null;
+      return { title: `${houseName(v, h)} · ${h.branch || h.kind}`, line: h.issue ? `#${h.issue} ${h.issue_title || ''}` : (h.issue_title || `No ${work} claimed`),
+        meta: [`${runtime ? 'Workstream' : 'Worktree'}: ${h.id}`, h.branch ? `Branch: ${h.branch}` : null, `Agent: ${h.role}`,
+          `Status: ${h.status}${h.action && h.action !== h.status ? ' · ' + h.action : ''}${h.priority ? ' · ' + h.priority : ''}`,
+          since ? `${h.status.charAt(0).toUpperCase() + h.status.slice(1)} since ${since}` : null,
+          `Crew: ${h.crew.join(', ') || '—'}`, ...(h.subagents || []).map(sa => `${runtime ? 'Agent' : 'Sub-agent'}: ${subWords(sa, v)}`)],
+        links: [...(h.links || []), issue, compare], house: h };
+    }
+    case 'person': {
+      const h = v.houses[o.i]; if (!h) return null;
+      return { title: `${o.who || h.role} · agent`, line: h.issue ? `Working on #${h.issue} ${h.issue_title || ''}` : `Status: ${h.status}`,
+        meta: [`Lives in ${houseName(v, h)}`, `Status: ${h.status}`, h.action ? `Now: ${h.action}` : null],
+        links: [sessionOf(h), h.issue ? link(issueLabel(h.issue), issueOf(v, h.issue).url) : null] };
+    }
+    case 'sub': {
+      const h = o.house < 0 ? v.manager : v.houses[o.house], sa = o.sa; if (!h) return null;
+      return { title: `${sa.agent_type} · ${runtime ? (o.house < 0 ? 'worker' : 'agent') : 'sub-agent'}`, line: sa.description || '',
+        meta: [`Working for ${o.house < 0 ? 'the manager' : houseName(v, h)}`, sa.status ? `Status: ${sa.status}` : null, sa.action ? `Now: ${sa.action}` : null],
+        links: [sessionOf(h) && { label: 'Parent agent session', url: sessionOf(h).url }] };
+    }
+    case 'porter': {
+      const h = v.houses.find(h => h.id === o.seed), n = o.n || (h && h.issue);
+      const it = n ? issueOf(v, n) : {};
+      return { title: `${h ? h.role : 'Porter'} · carrying`, line: n ? `#${n} ${it.title}` : '',
+        meta: [!o.carrying && o.to === 'house' ? `Going to the ${theme.labels.docks.toLowerCase()} to fetch its issue`
+          : !o.carrying ? 'Walking home'
+          : o.to === 'ship' ? `Loading the finished work onto the ${theme.labels.ship.toLowerCase()}`
+          : o.to === 'quay' ? `Taking the finished work to the ${theme.labels.quay.toLowerCase()}`
+          : o.to === 'house' ? 'Carrying a claimed issue from the backlog to its house'
+          : o.to === 'board' ? `Pinning a blocked issue to the ${theme.labels.board.toLowerCase()}`
+          : o.to === 'backlog' ? `Bringing an issue to the ${theme.labels.docks.toLowerCase()}`
+          : 'Carrying off an issue closed without landing'],
+        links: [h && sessionOf(h), n ? link(issueLabel(n), it.url) : null] };
+    }
+    case 'supply':
+      return { title: `Supply ${{ Ship: 'boat', Rocket: 'truck', Shuttle: 'shuttle' }[theme.labels.ship] || 'boat'}`, line: `Bringing ${o.n} new ${o.n === 1 ? work : work + 's'} to the ${theme.labels.docks.toLowerCase()}`,
+        items: issueItems(v, o.ns || []), links: [] };
+    case 'crate': {
+      const it = issueOf(v, o.n);
+      return { title: `#${o.n} ${it.title}`.trim(), line: crateWhere(o, v, theme),
+        meta: [it.priority ? `Priority: ${it.priority}` : null], links: [link(issueLabel(o.n), it.url)] };
+    }
+    case 'quay': {
+      const repo = repoUrl(v), br = v.pipeline.integration;
+      return { title: theme.labels.quay, line: `Work landed on ${br || 'the integration branch'}, not yet past ${stops[0] ? stops[0].name : 'the gate'}`,
+        items: issueItems(v, v.pipeline.quay), links: [repo && br ? link(`${br} commits`, `${repo}/commits/${encodeURIComponent(br)}`) : null] };
+    }
+    case 'stop': {
+      const st = stops[o.i]; if (!st) return null;
+      const sentinel = o.i === 0 && !runtime && v.pipeline.sentinel !== 'absent';
+      const unknown = !runtime && (st.source === 'unknown' || (sentinel && v.pipeline.sentinel === 'unknown'));
+      return { title: `${st.name} · ${runtime ? 'stage' : 'environment'}`, line: sentinel ? `Sentinel: ${v.pipeline.sentinel}` : sourceWords(st),
+        meta: [sentinel ? `Runs: ${sourceWords(st)}` : null, o.i === 0 && v.pipeline.sentinel === 'absent' ? `No sentinel: takes work straight from ${v.pipeline.integration || 'the integration branch'}` : null,
+          unknown ? unknownWords(v, o.i) : null],
+        items: issueItems(v, st.issues), links: [...stopLinks(v, st), unknown ? docsLink(v) : null] };
+    }
+    case 'harbour': {
+      const rel = v.pipeline.release, repo = repoUrl(v);
+      const relLink = rel && repo ? link(`Release ${isSha(rel) ? rel.slice(0, 7) : rel}`, isSha(rel) ? `${repo}/commit/${rel}` : `${repo}/releases/tag/${encodeURIComponent(rel)}`) : null;
+      return { title: `${theme.labels.castle}${last ? ' · ' + last.name : ''}`, line: last ? (runtime ? 'Completed in the last 24 hours' : `What shipped to ${last.name}`) : 'Nothing ships yet',
+        meta: [last && last.tag ? `Last release: ${last.tag}` : rel ? `Release: ${rel}` : null, last && !runtime ? `Runs: ${sourceWords(last)}` : null,
+          last && !runtime && last.source === 'unknown' ? unknownWords(v, stops.length - 1) : null],
+        items: last ? issueItems(v, last.issues) : [], links: [releaseLink(v, last), relLink, ...stopLinks(v, last), last && !runtime && last.source === 'unknown' ? docsLink(v) : null] };
+    }
+    case 'ship': {
+      if (!last) return null;
+      const name = releaseName(v, last);
+      if (o.at === 'away') {
+        const gone = (sc.voyage || {}).cargo || [];
+        return { title: `${theme.labels.ship} · ${theme.labels.sails}`, line: `Shipped ${name || 'a release'} to ${last.name}`, items: issueItems(v, gone), links: [releaseLink(v, last)] };
+      }
+      const cargo = cargoOf(v), n = cargo.length, repo = repoUrl(v), br = v.pipeline.integration;
+      return { title: `${theme.labels.ship} · next release`, line: `Next release: ${n} ${n === 1 ? work : work + 's'}${name ? ' since ' + name : ''}`,
+        meta: [`${theme.labels.sails.charAt(0).toUpperCase() + theme.labels.sails.slice(1)} when ${last.name} is next deployed`],
+        items: issueItems(v, cargo),
+        links: [releaseLink(v, last, 'Last release'), repo && last.tag && br ? link(`Changes since ${last.tag}`, `${repo}/compare/${encodeURIComponent(last.tag)}...${encodeURIComponent(br)}`) : null] };
+    }
+    case 'canal':
+      return { title: runtime ? 'Pipeline' : 'Canal', line: `From ${v.pipeline.integration || 'integration'} through ${stops.map(s => s.name).join(', ') || 'no stages'}`,
+        meta: stops.map(s => `${s.name}: ${s.issues.length} ${s.issues.length === 1 ? work : work + 's'}`), links: [] };
+    case 'banner': case 'barge':
+      return null;
   }
-  /* The dialog for one object, or a list such as the board. */
-  function openInfo(info) {
-    document.getElementById('d-title').textContent = info.title;
-    document.getElementById('d-line').textContent = info.line || '';
-    // Each fact on its own line, then the list: joined, they ran together
-    // ("Runs: no Deployment and no branchNothing here.").
-    const meta = (info.meta || []).filter(Boolean).map(m => `<span class="fact">${esc(m)}</span>`).join('');
-    const items = info.items && (info.items.length
-      ? `<ul>${info.items.map(i => `<li>${i.url ? `<a href="${esc(i.url)}" target="_blank" rel="noopener">#${i.number}</a>` : '#' + i.number} ${esc(i.title || '')}${i.label ? ' · ' + esc(i.label) : ''}${i.priority ? ' · ' + esc(i.priority) : ''}${(i.waits_on || []).length ? ' · waits on ' + i.waits_on.map(d => '#' + d).join(', ') : ''}</li>`).join('')}</ul>`
-      : '<span class="fact">Nothing here.</span>');
-    document.getElementById('d-meta').innerHTML = [meta, items].filter(Boolean).join('');
-    ask(info.house || {});
-    links((info.links || []).filter(Boolean));
-    dialog.hidden = false;
-  }
-  /* Do what a click on `o` does; false when it does nothing (open ground). A
-   * flag follows its feature (label and strip shown) or stops following it;
-   * the strip's Details button opens the feature. */
-  function act(o, sc, theme) {
-    const v = sc.v;
-    if (o.kind === 'banner') { toggleFollow(v.project, o.f); return true; }
-    if (o.kind === 'barge') { const f = (v.features || []).find(f => f.number === o.f); if (f) showFeature(f, v); return !!f; }
-    const info = explain(o, sc, theme);
-    if (info) openInfo(info);
-    return !!info;
-  }
-  /* The topmost drawn object under a point, in scene pixels. */
-  function hitAt(sc, x, y) {
-    const hs = sc.hits || [];
-    for (let k = hs.length - 1; k >= 0; k--) { const r = hs[k]; if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return r.o; }
-    return null;
-  }
-  /* What is under a pointer event: the object, its scene and theme; or null. */
-  function objAt(e) {
-    if (!view) return null;
-    const r = cv.getBoundingClientRect();
-    const x = (e.clientX - r.left) / r.width * cv.width, y = (e.clientY - r.top) / r.height * cv.height;
-    if (!view.world) { const sc = scenes[view.village], o = sc && sc.v && hitAt(sc, x, y); return o ? { o, sc, theme: T } : null; }
-    const w = worlds.find(x => x.name === view.world), Ps = w && scenes[w.platform], Ds = w && scenes[w.dev];
-    if (!Ps || !Ds || !Ps.v || !Ds.v) return null;
-    const g = worldGeom(Ps, Ds);
-    const [sc, theme, top] = y < Ps.L.H ? [Ps, otherTheme(), 0] : y >= g.devTop ? [Ds, T, g.devTop] : [];
-    const o = sc && hitAt(sc, x - SIDE, y - top);
-    return o ? { o, sc, theme } : null;
-  }
-  cv.addEventListener('click', e => {
-    if (!view) return;
-    const h = objAt(e);
-    if (!(h && act(h.o, h.sc, h.theme))) groundHint(e);
-  });
-  /* Hovering a flag shows its feature's label while the pointer is on it. */
-  cv.addEventListener('mousemove', e => {
-    const h = objAt(e);
-    peek(h && h.o.kind === 'banner' ? fbuttons.get(`${h.sc.v.project}#${h.o.f}`) : null);
-  });
-  cv.addEventListener('mouseleave', () => peek(null));
-  /* Open ground does nothing, so say what does, where the click was. */
-  const hintEl = document.getElementById('hint');
-  let hintTimer = 0;
-  function groundHint(e) {
-    const vp = document.getElementById('viewport'), vr = vp.getBoundingClientRect();
-    hintEl.hidden = false;
-    const half = hintEl.offsetWidth / 2 + 4, y = e.clientY - vr.top;
-    const x = Math.max(vp.scrollLeft + half, Math.min(vp.scrollLeft + vp.clientWidth - half, e.clientX - vr.left + vp.scrollLeft));
-    hintEl.classList.toggle('below', y < 40);
-    hintEl.style.left = x + 'px'; hintEl.style.top = y + vp.scrollTop + 'px';
-    clearTimeout(hintTimer);
-    hintTimer = setTimeout(() => { hintEl.hidden = true; }, 2500);
-  }
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') dialog.hidden = true; });
+  return null;
+}
+/* The dialog for one object, or a list such as the board. */
+function openInfo(info) {
+  document.getElementById('d-title').textContent = info.title;
+  document.getElementById('d-line').textContent = info.line || '';
+  // Each fact on its own line, then the list: joined, they ran together
+  // ("Runs: no Deployment and no branchNothing here.").
+  const meta = (info.meta || []).filter(Boolean).map(m => `<span class="fact">${esc(m)}</span>`).join('');
+  const items = info.items && (info.items.length
+    ? `<ul>${info.items.map(i => `<li>${i.url ? `<a href="${esc(i.url)}" target="_blank" rel="noopener">#${i.number}</a>` : '#' + i.number} ${esc(i.title || '')}${i.label ? ' · ' + esc(i.label) : ''}${i.priority ? ' · ' + esc(i.priority) : ''}${(i.waits_on || []).length ? ' · waits on ' + i.waits_on.map(d => '#' + d).join(', ') : ''}</li>`).join('')}</ul>`
+    : '<span class="fact">Nothing here.</span>');
+  document.getElementById('d-meta').innerHTML = [meta, items].filter(Boolean).join('');
+  ask(info.house || {});
+  links((info.links || []).filter(Boolean));
+  dialog.hidden = false;
+}
+/* Do what a click on `o` does; false when it does nothing (open ground). A
+ * flag follows its feature (label and strip shown) or stops following it;
+ * the strip's Details button opens the feature. */
+function act(o, sc, theme) {
+  const v = sc.v;
+  if (o.kind === 'banner') { toggleFollow(v.project, o.f); return true; }
+  if (o.kind === 'barge') { const f = (v.features || []).find(f => f.number === o.f); if (f) showFeature(f, v); return !!f; }
+  const info = explain(o, sc, theme);
+  if (info) openInfo(info);
+  return !!info;
+}
+/* The topmost drawn object under a point, in scene pixels. */
+function hitAt(sc, x, y) {
+  const hs = sc.hits || [];
+  for (let k = hs.length - 1; k >= 0; k--) { const r = hs[k]; if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return r.o; }
+  return null;
+}
+/* What is under a pointer event: the object, its scene and theme; or null. */
+function objAt(e) {
+  if (!view) return null;
+  const r = cv.getBoundingClientRect();
+  const x = (e.clientX - r.left) / r.width * cv.width, y = (e.clientY - r.top) / r.height * cv.height;
+  if (!view.world) { const sc = scenes[view.village], o = sc && sc.v && hitAt(sc, x, y); return o ? { o, sc, theme: state.T } : null; }
+  const w = worlds.find(x => x.name === view.world), Ps = w && scenes[w.platform], Ds = w && scenes[w.dev];
+  if (!Ps || !Ds || !Ps.v || !Ds.v) return null;
+  const g = worldGeom(Ps, Ds);
+  const [sc, theme, top] = y < Ps.L.H ? [Ps, otherTheme(), 0] : y >= g.devTop ? [Ds, state.T, g.devTop] : [];
+  const o = sc && hitAt(sc, x - SIDE, y - top);
+  return o ? { o, sc, theme } : null;
+}
+cv.addEventListener('click', e => {
+  if (!view) return;
+  const h = objAt(e);
+  if (!(h && act(h.o, h.sc, h.theme))) groundHint(e);
+});
+/* Hovering a flag shows its feature's label while the pointer is on it. */
+cv.addEventListener('mousemove', e => {
+  const h = objAt(e);
+  peek(h && h.o.kind === 'banner' ? fbuttons.get(`${h.sc.v.project}#${h.o.f}`) : null);
+});
+cv.addEventListener('mouseleave', () => peek(null));
+/* Open ground does nothing, so say what does, where the click was. */
+const hintEl = document.getElementById('hint');
+let hintTimer = 0;
+function groundHint(e) {
+  const vp = document.getElementById('viewport'), vr = vp.getBoundingClientRect();
+  hintEl.hidden = false;
+  const half = hintEl.offsetWidth / 2 + 4, y = e.clientY - vr.top;
+  const x = Math.max(vp.scrollLeft + half, Math.min(vp.scrollLeft + vp.clientWidth - half, e.clientX - vr.left + vp.scrollLeft));
+  hintEl.classList.toggle('below', y < 40);
+  hintEl.style.left = x + 'px'; hintEl.style.top = y + vp.scrollTop + 'px';
+  clearTimeout(hintTimer);
+  hintTimer = setTimeout(() => { hintEl.hidden = true; }, 2500);
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') dialog.hidden = true; });
 
-
-  /* ---------- Features: banner labels, strip, dialog ---------- */
-  const fbox = document.getElementById('fbanners'), fstrip = document.getElementById('fstrip');
-  const STAGE_LABEL = { dev: 'Dev', development: 'Dev', uat: 'UAT', qa: 'QA', staging: 'Staging', prod: 'Prod', production: 'Prod' };
-  const stageLabel = name => STAGE_LABEL[String(name).toLowerCase()] || String(name).charAt(0).toUpperCase() + String(name).slice(1);
-  const blockedWords = b => typeof b === 'string' && b ? b.replace(/-/g, ' ') : 'blocked';
-  function stuckWords(f) {
-    const n = f.stuck[0], s = (f.subtasks || []).find(s => s.number === n);
-    return `#${n} ${blockedWords(s && s.blocked)}`;
-  }
-  /* The furthest state a feature has reached, as its banner label reads it. */
-  function featureSummary(f) {
-    if (f.live) return 'Live in prod';
-    if ((f.stuck || []).length) return `Stuck · ${stuckWords(f)}`;
-    const b = f.build || { landed: 0, total: counted(f).length }, stages = f.stages || [];
-    if (b.landed < b.total) return `Build ${b.landed}/${b.total}`;
-    const s = stages.find(s => s.unknown || s.reached < s.total) || stages[stages.length - 1];
-    if (!s) return `Build ${b.landed}/${b.total}`;
-    return s.unknown ? `${stageLabel(s.name)}: unknown` : `${stageLabel(s.name)} ${s.reached}/${s.total}`;
-  }
-  /* The scenes on screen and where each sits on the canvas. */
-  function shownScenes() {
-    if (!view) return [];
-    if (!view.world) { const sc = scenes[view.village]; return sc && sc.v ? [[sc, 0, 0]] : []; }
-    const w = worlds.find(x => x.name === view.world), Ps = w && scenes[w.platform], Ds = w && scenes[w.dev];
-    if (!Ps || !Ds || !Ps.v || !Ds.v) return [];
-    return [[Ps, SIDE, 0], [Ds, SIDE, worldGeom(Ps, Ds).devTop]];
-  }
-  /* One button per banner, kept across polls so keyboard focus survives a refresh. */
-  const fbuttons = new Map();
-  let peeked = null;
-  function peek(b) {
-    if (peeked === b) return;
-    if (peeked) peeked.classList.remove('peek');
-    peeked = b || null;
-    if (peeked) peeked.classList.add('peek');
-  }
-  function placeBanners() {
-    const vp = document.getElementById('viewport'), r = cv.getBoundingClientRect(), vr = vp.getBoundingClientRect();
-    const s = r.width / cv.width, keep = new Set();
-    let strip = null;
-    if (!cv.hidden) shownScenes().forEach(([sc, ox, oy]) => sc.L.banners.forEach((g, k) => {
-      const f = g.f, key = `${sc.v.project}#${f.number}`, on = isFollowed(sc.v, f), col = f.live ? 'var(--gold)' : g.col;
-      if (on) strip = { sc, g };
+/* ---------- Features: banner labels, strip, dialog ---------- */
+const fbox = document.getElementById('fbanners'), fstrip = document.getElementById('fstrip');
+const STAGE_LABEL = { dev: 'Dev', development: 'Dev', uat: 'UAT', qa: 'QA', staging: 'Staging', prod: 'Prod', production: 'Prod' };
+const stageLabel = name => STAGE_LABEL[String(name).toLowerCase()] || String(name).charAt(0).toUpperCase() + String(name).slice(1);
+const blockedWords = b => typeof b === 'string' && b ? b.replace(/-/g, ' ') : 'blocked';
+function stuckWords(f) {
+  const n = f.stuck[0], s = (f.subtasks || []).find(s => s.number === n);
+  return `#${n} ${blockedWords(s && s.blocked)}`;
+}
+/* The furthest state a feature has reached, as its banner label reads it. */
+function featureSummary(f) {
+  if (f.live) return 'Live in prod';
+  if ((f.stuck || []).length) return `Stuck · ${stuckWords(f)}`;
+  const b = f.build || { landed: 0, total: counted(f).length }, stages = f.stages || [];
+  if (b.landed < b.total) return `Build ${b.landed}/${b.total}`;
+  const s = stages.find(s => s.unknown || s.reached < s.total) || stages[stages.length - 1];
+  if (!s) return `Build ${b.landed}/${b.total}`;
+  return s.unknown ? `${stageLabel(s.name)}: unknown` : `${stageLabel(s.name)} ${s.reached}/${s.total}`;
+}
+/* The scenes on screen and where each sits on the canvas. */
+function shownScenes() {
+  if (!view) return [];
+  if (!view.world) { const sc = scenes[view.village]; return sc && sc.v ? [[sc, 0, 0]] : []; }
+  const w = worlds.find(x => x.name === view.world), Ps = w && scenes[w.platform], Ds = w && scenes[w.dev];
+  if (!Ps || !Ds || !Ps.v || !Ds.v) return [];
+  return [[Ps, SIDE, 0], [Ds, SIDE, worldGeom(Ps, Ds).devTop]];
+}
+/* One button per banner, kept across polls so keyboard focus survives a refresh. */
+const fbuttons = new Map();
+let peeked = null;
+function peek(b) {
+  if (peeked === b) return;
+  if (peeked) peeked.classList.remove('peek');
+  peeked = b || null;
+  if (peeked) peeked.classList.add('peek');
+}
+function placeBanners() {
+  const vp = document.getElementById('viewport'), r = cv.getBoundingClientRect(), vr = vp.getBoundingClientRect();
+  const s = r.width / cv.width, keep = new Set();
+  let strip = null;
+  if (!cv.hidden) shownScenes().forEach(([sc, ox, oy]) => sc.L.banners.forEach((g, k) => {
+    const f = g.f, key = `${sc.v.project}#${f.number}`, on = isFollowed(sc.v, f), col = f.live ? 'var(--gold)' : g.col;
+    if (on) strip = { sc, g };
+    keep.add(key);
+    let b = fbuttons.get(key);
+    if (!b) {
+      b = document.createElement('button');
+      b.addEventListener('click', () => toggleFollow(b.project, b.number));
+      fbuttons.set(key, b); fbox.appendChild(b);
+    }
+    b.project = sc.v.project; b.number = f.number;
+    b.className = 'fb' + (f.live ? ' live' : '') + ((f.stuck || []).length ? ' stuck' : '') + (b === peeked ? ' peek' : '');
+    b.style.setProperty('--fc', col);
+    b.setAttribute('aria-pressed', String(on));
+    const sum = featureSummary(f);
+    b.innerHTML = `#${f.number} ${esc(f.title)}<small>${esc(sum)}</small>`;
+    b.setAttribute('aria-label', `Feature #${f.number} ${f.title}: ${sum}. ${on ? 'Following; press to stop' : 'Press to follow'}.`);
+    b.style.setProperty('--fade', on ? 1 : (sc.fade[f.number] ?? 1));
+    // Labels sit under their banners; when the map is drawn small they alternate rows.
+    const lift = 30 * s < 120 && k % 2 ? 36 : 0;
+    b.style.left = (r.left - vr.left + vp.scrollLeft + (ox + g.x + 7) * s) + 'px';
+    b.style.top = (r.top - vr.top + vp.scrollTop + (oy + g.y + 28) * s + lift) + 'px';
+  }));
+  for (const [key, b] of fbuttons) if (!keep.has(key)) { if (b === peeked) peeked = null; b.remove(); fbuttons.delete(key); }
+  renderStrip(strip);
+  placeLabels();
+  placeKeys();
+}
+/* One keyboard target per object drawn in the last frame, kept across polls
+ * (by what it is, not where) so focus survives a refresh. Walkers and the
+ * banners (which have their own buttons) are left to the mouse. */
+const kbox = document.getElementById('hitkeys'), kbuttons = new Map();
+const NO_KEY = new Set(['porter', 'banner', 'river', 'canal', 'supply']);
+const keyOf = o => [o.kind, o.i ?? '', o.n ?? '', o.at ?? '', o.who ?? '', o.house ?? '', o.id ?? '', o.f ?? ''].join(':');
+function placeKeys() {
+  const vp = document.getElementById('viewport'), r = cv.getBoundingClientRect(), vr = vp.getBoundingClientRect();
+  const s = r.width / cv.width, ox0 = r.left - vr.left + vp.scrollLeft, oy0 = r.top - vr.top + vp.scrollTop, keep = new Set();
+  if (!cv.hidden) shownScenes().forEach(([sc, ox, oy]) => {
+    const theme = view.world && oy === 0 ? otherTheme() : state.T;
+    (sc.hits || []).forEach(h => {
+      if (NO_KEY.has(h.o.kind) || h.o.at === 'transit') return;
+      const key = `${sc.v.project}|${keyOf(h.o)}`;
+      if (keep.has(key)) return;
+      const info = explain(h.o, sc, theme);
+      if (!info) return;
       keep.add(key);
-      let b = fbuttons.get(key);
+      let b = kbuttons.get(key);
       if (!b) {
-        b = document.createElement('button');
-        b.addEventListener('click', () => toggleFollow(b.project, b.number));
-        fbuttons.set(key, b); fbox.appendChild(b);
+        b = document.createElement('button'); b.className = 'hk';
+        b.addEventListener('click', () => { const sc2 = scenes[b.project]; if (sc2 && sc2.v) act(b.obj, sc2, b.theme); });
+        kbuttons.set(key, b); kbox.appendChild(b);
       }
-      b.project = sc.v.project; b.number = f.number;
-      b.className = 'fb' + (f.live ? ' live' : '') + ((f.stuck || []).length ? ' stuck' : '') + (b === peeked ? ' peek' : '');
-      b.style.setProperty('--fc', col);
-      b.setAttribute('aria-pressed', String(on));
-      const sum = featureSummary(f);
-      b.innerHTML = `#${f.number} ${esc(f.title)}<small>${esc(sum)}</small>`;
-      b.setAttribute('aria-label', `Feature #${f.number} ${f.title}: ${sum}. ${on ? 'Following; press to stop' : 'Press to follow'}.`);
-      b.style.setProperty('--fade', on ? 1 : (sc.fade[f.number] ?? 1));
-      // Labels sit under their banners; when the map is drawn small they alternate rows.
-      const lift = 30 * s < 120 && k % 2 ? 36 : 0;
-      b.style.left = (r.left - vr.left + vp.scrollLeft + (ox + g.x + 7) * s) + 'px';
-      b.style.top = (r.top - vr.top + vp.scrollTop + (oy + g.y + 28) * s + lift) + 'px';
-    }));
-    for (const [key, b] of fbuttons) if (!keep.has(key)) { if (b === peeked) peeked = null; b.remove(); fbuttons.delete(key); }
-    renderStrip(strip);
-    placeLabels();
-    placeKeys();
-  }
-  /* One keyboard target per object drawn in the last frame, kept across polls
-   * (by what it is, not where) so focus survives a refresh. Walkers and the
-   * banners (which have their own buttons) are left to the mouse. */
-  const kbox = document.getElementById('hitkeys'), kbuttons = new Map();
-  const NO_KEY = new Set(['porter', 'banner', 'river', 'canal', 'supply']);
-  const keyOf = o => [o.kind, o.i ?? '', o.n ?? '', o.at ?? '', o.who ?? '', o.house ?? '', o.id ?? '', o.f ?? ''].join(':');
-  function placeKeys() {
-    const vp = document.getElementById('viewport'), r = cv.getBoundingClientRect(), vr = vp.getBoundingClientRect();
-    const s = r.width / cv.width, ox0 = r.left - vr.left + vp.scrollLeft, oy0 = r.top - vr.top + vp.scrollTop, keep = new Set();
-    if (!cv.hidden) shownScenes().forEach(([sc, ox, oy]) => {
-      const theme = view.world && oy === 0 ? otherTheme() : T;
-      (sc.hits || []).forEach(h => {
-        if (NO_KEY.has(h.o.kind) || h.o.at === 'transit') return;
-        const key = `${sc.v.project}|${keyOf(h.o)}`;
-        if (keep.has(key)) return;
-        const info = explain(h.o, sc, theme);
-        if (!info) return;
-        keep.add(key);
-        let b = kbuttons.get(key);
-        if (!b) {
-          b = document.createElement('button'); b.className = 'hk';
-          b.addEventListener('click', () => { const sc2 = scenes[b.project]; if (sc2 && sc2.v) act(b.obj, sc2, b.theme); });
-          kbuttons.set(key, b); kbox.appendChild(b);
-        }
-        b.project = sc.v.project; b.obj = h.o; b.theme = theme;
-        b.setAttribute('aria-label', [info.title, info.line].filter(Boolean).join(': '));
-        Object.assign(b.style, { left: ox0 + (ox + h.x) * s + 'px', top: oy0 + (oy + h.y) * s + 'px', width: h.w * s + 'px', height: h.h * s + 'px' });
-      });
+      b.project = sc.v.project; b.obj = h.o; b.theme = theme;
+      b.setAttribute('aria-label', [info.title, info.line].filter(Boolean).join(': '));
+      Object.assign(b.style, { left: ox0 + (ox + h.x) * s + 'px', top: oy0 + (oy + h.y) * s + 'px', width: h.w * s + 'px', height: h.h * s + 'px' });
     });
-    for (const [key, b] of kbuttons) if (!keep.has(key)) { b.remove(); kbuttons.delete(key); }
-  }
-  /* ---------- Area labels ----------
-   * A name over each part of the map (docks, castle, board, quay, each stop)
-   * and the worktree or workstream under each house. Each label is placed in
-   * canvas pixels with an anchor: 'top' hangs below the point, 'bottom' sits
-   * above it, 'right' ends at it. */
-  const abox = document.getElementById('alabels'), labelsOn = document.getElementById('labels-on');
-  try { labelsOn.checked = localStorage.getItem('village-labels') !== 'off'; } catch {}
-  labelsOn.addEventListener('change', () => {
-    try { localStorage.setItem('village-labels', labelsOn.checked ? 'on' : 'off'); } catch {}
-    placeLabels();
   });
-  /* A house's name: its worktree's folder, less the project prefix (shop-wt-2 → wt-2). */
-  function houseName(v, h) {
-    const id = String(h.id || '');
-    if (!id.includes('/')) return id || h.role;
-    const base = id.replace(/\/+$/, '').split('/').pop();
-    const short = base.startsWith(v.project + '-') ? base.slice(v.project.length + 1) : base;
-    return short || h.role;
-  }
-  function areaLabels(sc, theme) {
-    const v = sc.v, lay = sc.L, runtime = v.plane === 'runtime', stops = v.pipeline.stops, out = [];
-    const add = (x, y, anchor, text, sub, cls) => out.push({ x, y, anchor, text, sub, cls });
-    add(34, 51, 'top', theme.labels.docks, runtime ? 'waiting' : `backlog · ${v.backlog.length}`);
-    add(lay.hallX + 16, 43, 'top', theme.labels.hall, 'manager');
-    // Under the board, not over it or the trees beside it.
-    add(lay.hallX + 51, 45, 'top', theme.labels.board, runtime ? 'failed' : `blocked · ${v.board.length}`);
-    v.houses.forEach((h, i) => {
-      const lot = lay.lots[i]; if (!lot) return;
-      const name = houseName(v, h);
-      add(lot.x + 8, lot.y + 17, 'top', name, null, 'house ' + h.status);
-    });
-    if (!runtime) add(lay.roadX - 7, lay.quayY + 4, 'right', theme.labels.quay, `→ ${v.pipeline.integration || 'integration'}`);
-    // Each stop is labelled with its own name (master-green, uat, prod), as the pipeline reports it.
-    stops.slice(0, -1).forEach((s, i) => add(lay.lockStart + i * 34 + 3, lay.canalY - 21, 'bottom', s.name));
-    const last = stops[stops.length - 1];
-    // Over the harbour wall, left of the lighthouse.
-    add(lay.castleX + 10, lay.canalY - 22, 'bottom', theme.labels.castle, last ? last.name : null);
-    return out;
-  }
-  /* Sprites a label must not cover, in scene pixels: the board, the
-   * destination's towers (the lighthouse, the masts downtown and in the
-   * future), which each theme lists, and the ship (or rocket, or shuttle)
-   * where it waits at the destination. */
-  function labelAvoid(sc, theme) {
-    const lay = sc.L, board = (sc.hits || []).filter(h => h.o.kind === 'board');
-    const at = ([dx, dy, w, h]) => ({ x: lay.castleX + dx, y: lay.canalY + dy, w, h });
-    return [...board, ...theme.towers.map(at), at(theme.hull)];
-  }
-  /* Move labels that cover an avoided sprite or an earlier label: up for those
-   * that sit above their point, down for those that hang below it. Measured on
-   * screen, so it holds at any scale. */
-  function unclutter(els, blocked) {
-    const hits = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
-    const placed = [...blocked];
-    els.forEach(el => {
-      const up = el.dataset.anchor !== 'top';
-      for (let k = 0; k < 8; k++) {
-        const r = el.getBoundingClientRect(), o = placed.find(p => hits(r, p));
-        if (!o) break;
-        el.style.top = parseFloat(el.style.top) + (up ? o.top - r.bottom - 1 : o.bottom - r.top + 1) + 'px';
-      }
-      placed.push(el.getBoundingClientRect());
-    });
-  }
-  function placeLabels() {
-    abox.hidden = !labelsOn.checked || cv.hidden;
-    if (abox.hidden) return;
-    const vp = document.getElementById('viewport'), r = cv.getBoundingClientRect(), vr = vp.getBoundingClientRect();
-    const s = r.width / cv.width, ox0 = r.left - vr.left + vp.scrollLeft, oy0 = r.top - vr.top + vp.scrollTop;
-    const shift = { top: 'translate(-50%, 0)', bottom: 'translate(-50%, -100%)', right: 'translate(-100%, -50%)' };
-    // Text grows with the map; below 3x the subtitles go, so names stay readable.
-    abox.style.setProperty('--lf', Math.round(Math.max(9, Math.min(14, 2 + 2.5 * s))) + 'px');
-    abox.classList.toggle('compact', s < 3);
-    let html = '';
-    const blocked = [];
-    shownScenes().forEach(([sc, ox, oy]) => {
-      const theme = view.world && oy === 0 ? otherTheme() : T;
-      labelAvoid(sc, theme).forEach(a => blocked.push({ left: r.left + (ox + a.x) * s, top: r.top + (oy + a.y) * s, right: r.left + (ox + a.x + a.w) * s, bottom: r.top + (oy + a.y + a.h) * s }));
-      areaLabels(sc, theme).forEach(l => {
-        // A house label may be no wider than its lot, so neighbours never overlap.
-        const max = l.cls && l.cls.startsWith('house') ? `max-width:${Math.max(28, (LW - 1) * s)}px;` : '';
-        html += `<div class="al${l.cls ? ' ' + esc(l.cls) : ''}" aria-hidden="true" data-anchor="${l.anchor}" style="left:${ox0 + (ox + l.x) * s}px;top:${oy0 + (oy + l.y) * s}px;transform:${shift[l.anchor]};${max}">` +
-          `${esc(l.text)}${l.sub ? ` <small>${esc(l.sub)}</small>` : ''}</div>`;
-      });
-    });
-    // Redo it when the labels or the sprites to avoid change (the board's rect is
-    // only known once a frame has drawn it).
-    const drawn = html + blocked.map(b => [b.left, b.top, b.right, b.bottom].map(Math.round).join(',')).join(';');
-    if (abox.drawn === drawn) return;
-    abox.innerHTML = html; abox.drawn = drawn;
-    unclutter([...abox.children], blocked);
-  }
-  function renderStrip(on) {
-    fstrip.hidden = !on;
-    if (!on) return;
-    const { sc, g } = on, f = g.f, b = f.build || { landed: 0, total: counted(f).length };
-    fstrip.style.setProperty('--fc', f.live ? 'var(--gold)' : g.col);
-    const chip = (cls, text) => `<span class="chip ${cls}">${esc(text)}</span>`;
-    const build = (f.stuck || []).length ? chip('stuck', `Build ${b.landed}/${b.total}: ${stuckWords(f)}`)
-      : chip(b.landed === b.total ? 'done' : b.landed ? 'part' : '', `Build ${b.landed}/${b.total}`);
-    const stages = (f.stages || []).map(s => s.unknown ? chip('unknown', `${stageLabel(s.name)}: unknown`)
-      : chip(s.reached === s.total ? 'done' : s.reached ? 'part' : '', `${stageLabel(s.name)} ${s.reached}/${s.total}`));
-    document.getElementById('fs-title').textContent = `Following #${f.number} ${f.title}`;
-    const chips = [chip('done', 'Spec ✓'), build, ...stages].join('<span class="sep">›</span>') + (f.live ? ' ' + chip('live', '★ Live in prod') : '');
-    // Only touch the live region when the reading changes, so a poll is not re-announced.
-    const box = document.getElementById('fs-chips');
-    if (box.innerHTML !== chips) box.innerHTML = chips;
-    document.getElementById('fs-mode').textContent = f.promotion === 'feature' ? 'Promotes as a whole feature' : 'Promotes per subtask';
-    fstrip.feature = { project: sc.v.project, number: f.number };
-  }
-  function toggleFollow(project, number) {
-    followed = followed && followed.project === project && followed.number === number ? null : { project, number };
-    placeBanners();
-    if (reduce) draw(0);
-  }
-  document.getElementById('fs-stop').addEventListener('click', () => { followed = null; placeBanners(); if (reduce) draw(0); });
-  document.getElementById('fs-details').addEventListener('click', () => {
-    const k = fstrip.feature, sc = k && scenes[k.project], f = sc && sc.v && (sc.v.features || []).find(f => f.number === k.number);
-    if (f) showFeature(f, sc.v);
+  for (const [key, b] of kbuttons) if (!keep.has(key)) { b.remove(); kbuttons.delete(key); }
+}
+/* ---------- Area labels ----------
+ * A name over each part of the map (docks, castle, board, quay, each stop)
+ * and the worktree or workstream under each house. Each label is placed in
+ * canvas pixels with an anchor: 'top' hangs below the point, 'bottom' sits
+ * above it, 'right' ends at it. */
+const abox = document.getElementById('alabels'), labelsOn = document.getElementById('labels-on');
+try { labelsOn.checked = localStorage.getItem('village-labels') !== 'off'; } catch {}
+labelsOn.addEventListener('change', () => {
+  try { localStorage.setItem('village-labels', labelsOn.checked ? 'on' : 'off'); } catch {}
+  placeLabels();
+});
+/* A house's name: its worktree's folder, less the project prefix (shop-wt-2 → wt-2). */
+function houseName(v, h) {
+  const id = String(h.id || '');
+  if (!id.includes('/')) return id || h.role;
+  const base = id.replace(/\/+$/, '').split('/').pop();
+  const short = base.startsWith(v.project + '-') ? base.slice(v.project.length + 1) : base;
+  return short || h.role;
+}
+function areaLabels(sc, theme) {
+  const v = sc.v, lay = sc.L, runtime = v.plane === 'runtime', stops = v.pipeline.stops, out = [];
+  const add = (x, y, anchor, text, sub, cls) => out.push({ x, y, anchor, text, sub, cls });
+  add(34, 51, 'top', theme.labels.docks, runtime ? 'waiting' : `backlog · ${v.backlog.length}`);
+  add(lay.hallX + 16, 43, 'top', theme.labels.hall, 'manager');
+  // Under the board, not over it or the trees beside it.
+  add(lay.hallX + 51, 45, 'top', theme.labels.board, runtime ? 'failed' : `blocked · ${v.board.length}`);
+  v.houses.forEach((h, i) => {
+    const lot = lay.lots[i]; if (!lot) return;
+    const name = houseName(v, h);
+    add(lot.x + 8, lot.y + 17, 'top', name, null, 'house ' + h.status);
   });
-  /* Where an environment's answer comes from. */
-  function sourceWords(s) {
-    const sha = s.sha ? ' · ' + String(s.sha).slice(0, 7) : '';
-    if (s.source === 'deployment') return `GitHub Deployment${sha}`;
-    if (s.source === 'release') return `${s.tag ? s.tag + ' ' : ''}(GitHub Release)${sha}`;
-    if (s.source === 'tag') return `tag ${s.tag || ''}${sha}`;
-    if (s.source === 'url') return `its version endpoint${sha}`;
-    if (s.source === 'branch') return `${s.branch ? 'branch ' + s.branch : 'its branch ref'}${sha}`;
-    if (s.source === 'unknown') return 'nothing says what runs here (no Deployment, Release or branch)';
-    return 'not reported';
-  }
-  function whereWords(s, v, f) {
-    const extra = s.blocked ? ` · ${blockedWords(s.blocked)}` : '', stops = v.pipeline.stops;
-    switch (s.where) {
-      case 'house': {
-        const h = v.houses.find(h => h.issue === s.number);
-        if (!h) return 'being built' + extra;
-        return h.status === 'blocked' ? `blocked · ${h.role} is waiting on you` : `being built by ${h.role}${extra}`;
-      }
-      case 'backlog': return `waiting at the ${T.labels.docks.toLowerCase()}${extra}`;
-      case 'board': return `on the ${T.labels.board.toLowerCase()}${extra}`;
-      case 'quay': return f.promotion === 'feature' ? `landed · waiting at the ${T.labels.quay.toLowerCase()} for the rest` : `landed · waiting for ${stops.length ? stageLabel(stops[0].name) : 'release'}`;
-      case 'stop': {
-        const st = stops.find(x => x.name === s.stop);
-        return st && st.source === 'unknown' ? `${stageLabel(s.stop)}: unknown` : `in ${stageLabel(s.stop || '?')}`;
-      }
-      case 'closed': return 'closed';
-      default: return s.where || '';
+  if (!runtime) add(lay.roadX - 7, lay.quayY + 4, 'right', theme.labels.quay, `→ ${v.pipeline.integration || 'integration'}`);
+  // Each stop is labelled with its own name (master-green, uat, prod), as the pipeline reports it.
+  stops.slice(0, -1).forEach((s, i) => add(lay.lockStart + i * 34 + 3, lay.canalY - 21, 'bottom', s.name));
+  const last = stops[stops.length - 1];
+  // Over the harbour wall, left of the lighthouse.
+  add(lay.castleX + 10, lay.canalY - 22, 'bottom', theme.labels.castle, last ? last.name : null);
+  return out;
+}
+/* Sprites a label must not cover, in scene pixels: the board, the
+ * destination's towers (the lighthouse, the masts downtown and in the
+ * future), which each theme lists, and the ship (or rocket, or shuttle)
+ * where it waits at the destination. */
+function labelAvoid(sc, theme) {
+  const lay = sc.L, board = (sc.hits || []).filter(h => h.o.kind === 'board');
+  const at = ([dx, dy, w, h]) => ({ x: lay.castleX + dx, y: lay.canalY + dy, w, h });
+  return [...board, ...theme.towers.map(at), at(theme.hull)];
+}
+/* Move labels that cover an avoided sprite or an earlier label: up for those
+ * that sit above their point, down for those that hang below it. Measured on
+ * screen, so it holds at any scale. */
+function unclutter(els, blocked) {
+  const hits = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+  const placed = [...blocked];
+  els.forEach(el => {
+    const up = el.dataset.anchor !== 'top';
+    for (let k = 0; k < 8; k++) {
+      const r = el.getBoundingClientRect(), o = placed.find(p => hits(r, p));
+      if (!o) break;
+      el.style.top = parseFloat(el.style.top) + (up ? o.top - r.bottom - 1 : o.bottom - r.top + 1) + 'px';
     }
+    placed.push(el.getBoundingClientRect());
+  });
+}
+function placeLabels() {
+  abox.hidden = !labelsOn.checked || cv.hidden;
+  if (abox.hidden) return;
+  const vp = document.getElementById('viewport'), r = cv.getBoundingClientRect(), vr = vp.getBoundingClientRect();
+  const s = r.width / cv.width, ox0 = r.left - vr.left + vp.scrollLeft, oy0 = r.top - vr.top + vp.scrollTop;
+  const shift = { top: 'translate(-50%, 0)', bottom: 'translate(-50%, -100%)', right: 'translate(-100%, -50%)' };
+  // Text grows with the map; below 3x the subtitles go, so names stay readable.
+  abox.style.setProperty('--lf', Math.round(Math.max(9, Math.min(14, 2 + 2.5 * s))) + 'px');
+  abox.classList.toggle('compact', s < 3);
+  let html = '';
+  const blocked = [];
+  shownScenes().forEach(([sc, ox, oy]) => {
+    const theme = view.world && oy === 0 ? otherTheme() : state.T;
+    labelAvoid(sc, theme).forEach(a => blocked.push({ left: r.left + (ox + a.x) * s, top: r.top + (oy + a.y) * s, right: r.left + (ox + a.x + a.w) * s, bottom: r.top + (oy + a.y + a.h) * s }));
+    areaLabels(sc, theme).forEach(l => {
+      // A house label may be no wider than its lot, so neighbours never overlap.
+      const max = l.cls && l.cls.startsWith('house') ? `max-width:${Math.max(28, (LW - 1) * s)}px;` : '';
+      html += `<div class="al${l.cls ? ' ' + esc(l.cls) : ''}" aria-hidden="true" data-anchor="${l.anchor}" style="left:${ox0 + (ox + l.x) * s}px;top:${oy0 + (oy + l.y) * s}px;transform:${shift[l.anchor]};${max}">` +
+        `${esc(l.text)}${l.sub ? ` <small>${esc(l.sub)}</small>` : ''}</div>`;
+    });
+  });
+  // Redo it when the labels or the sprites to avoid change (the board's rect is
+  // only known once a frame has drawn it).
+  const drawn = html + blocked.map(b => [b.left, b.top, b.right, b.bottom].map(Math.round).join(',')).join(';');
+  if (abox.drawn === drawn) return;
+  abox.innerHTML = html; abox.drawn = drawn;
+  unclutter([...abox.children], blocked);
+}
+function renderStrip(on) {
+  fstrip.hidden = !on;
+  if (!on) return;
+  const { sc, g } = on, f = g.f, b = f.build || { landed: 0, total: counted(f).length };
+  fstrip.style.setProperty('--fc', f.live ? 'var(--gold)' : g.col);
+  const chip = (cls, text) => `<span class="chip ${cls}">${esc(text)}</span>`;
+  const build = (f.stuck || []).length ? chip('stuck', `Build ${b.landed}/${b.total}: ${stuckWords(f)}`)
+    : chip(b.landed === b.total ? 'done' : b.landed ? 'part' : '', `Build ${b.landed}/${b.total}`);
+  const stages = (f.stages || []).map(s => s.unknown ? chip('unknown', `${stageLabel(s.name)}: unknown`)
+    : chip(s.reached === s.total ? 'done' : s.reached ? 'part' : '', `${stageLabel(s.name)} ${s.reached}/${s.total}`));
+  document.getElementById('fs-title').textContent = `Following #${f.number} ${f.title}`;
+  const chips = [chip('done', 'Spec ✓'), build, ...stages].join('<span class="sep">›</span>') + (f.live ? ' ' + chip('live', '★ Live in prod') : '');
+  // Only touch the live region when the reading changes, so a poll is not re-announced.
+  const box = document.getElementById('fs-chips');
+  if (box.innerHTML !== chips) box.innerHTML = chips;
+  document.getElementById('fs-mode').textContent = f.promotion === 'feature' ? 'Promotes as a whole feature' : 'Promotes per subtask';
+  fstrip.feature = { project: sc.v.project, number: f.number };
+}
+function toggleFollow(project, number) {
+  followed = followed && followed.project === project && followed.number === number ? null : { project, number };
+  placeBanners();
+  if (state.reduce) draw(0);
+}
+document.getElementById('fs-stop').addEventListener('click', () => { followed = null; placeBanners(); if (state.reduce) draw(0); });
+document.getElementById('fs-details').addEventListener('click', () => {
+  const k = fstrip.feature, sc = k && scenes[k.project], f = sc && sc.v && (sc.v.features || []).find(f => f.number === k.number);
+  if (f) showFeature(f, sc.v);
+});
+/* Where an environment's answer comes from. */
+function sourceWords(s) {
+  const sha = s.sha ? ' · ' + String(s.sha).slice(0, 7) : '';
+  if (s.source === 'deployment') return `GitHub Deployment${sha}`;
+  if (s.source === 'release') return `${s.tag ? s.tag + ' ' : ''}(GitHub Release)${sha}`;
+  if (s.source === 'tag') return `tag ${s.tag || ''}${sha}`;
+  if (s.source === 'url') return `its version endpoint${sha}`;
+  if (s.source === 'branch') return `${s.branch ? 'branch ' + s.branch : 'its branch ref'}${sha}`;
+  if (s.source === 'unknown') return 'nothing says what runs here (no Deployment, Release or branch)';
+  return 'not reported';
+}
+function whereWords(s, v, f) {
+  const extra = s.blocked ? ` · ${blockedWords(s.blocked)}` : '', stops = v.pipeline.stops;
+  switch (s.where) {
+    case 'house': {
+      const h = v.houses.find(h => h.issue === s.number);
+      if (!h) return 'being built' + extra;
+      return h.status === 'blocked' ? `blocked · ${h.role} is waiting on you` : `being built by ${h.role}${extra}`;
+    }
+    case 'backlog': return `waiting at the ${state.T.labels.docks.toLowerCase()}${extra}`;
+    case 'board': return `on the ${state.T.labels.board.toLowerCase()}${extra}`;
+    case 'quay': return f.promotion === 'feature' ? `landed · waiting at the ${state.T.labels.quay.toLowerCase()} for the rest` : `landed · waiting for ${stops.length ? stageLabel(stops[0].name) : 'release'}`;
+    case 'stop': {
+      const st = stops.find(x => x.name === s.stop);
+      return st && st.source === 'unknown' ? `${stageLabel(s.stop)}: unknown` : `in ${stageLabel(s.stop || '?')}`;
+    }
+    case 'closed': return 'closed';
+    default: return s.where || '';
   }
-  function showFeature(f, v) {
-    const subs = f.subtasks || [], url = n => (f.url || '').replace(/\/issues\/\d+$/, '/issues/' + n);
-    const issueLink = (n, cls) => f.url ? `<a href="${esc(url(n))}" target="_blank" rel="noopener"${cls ? ` class="${cls}"` : ''}>#${n}</a>` : `<span${cls ? ` class="${cls}"` : ''}>#${n}</span>`;
-    document.getElementById('d-title').textContent = `#${f.number} ${f.title} · feature`;
-    document.getElementById('d-line').textContent = `${featureSummary(f)} · ${counted(f).length} subtasks counted`;
-    document.getElementById('d-meta').innerHTML =
-      `<ul class="subs">${subs.map(s => s.dropped
+}
+function showFeature(f, v) {
+  const subs = f.subtasks || [], url = n => (f.url || '').replace(/\/issues\/\d+$/, '/issues/' + n);
+  const issueLink = (n, cls) => f.url ? `<a href="${esc(url(n))}" target="_blank" rel="noopener"${cls ? ` class="${cls}"` : ''}>#${n}</a>` : `<span${cls ? ` class="${cls}"` : ''}>#${n}</span>`;
+  document.getElementById('d-title').textContent = `#${f.number} ${f.title} · feature`;
+  document.getElementById('d-line').textContent = `${featureSummary(f)} · ${counted(f).length} subtasks counted`;
+  document.getElementById('d-meta').innerHTML =
+    `<ul class="subs">${subs.map(s => s.dropped
         ? `<li>${issueLink(s.number, 'drop')}<span class="drop">${esc(s.title || '')}</span><span class="w">closed as not planned · not counted</span></li>`
         : `<li>${issueLink(s.number)}<span>${esc(s.title || '')}</span><span class="w">${esc(whereWords(s, v, f))}</span></li>`).join('')}</ul>
       <dl><dt>Subtasks from</dt><dd>${f.linked_by === 'body' ? `"Sub-task of #${f.number}" in each body` : 'GitHub sub-issues'}</dd>
       ${v.pipeline.stops.map(s => `<dt>${esc(stageLabel(s.name))}</dt><dd>${esc(sourceWords(s))}</dd>`).join('')}
       <dt>Promotion</dt><dd>${f.promotion === 'feature' ? 'as a whole feature' : 'per subtask'}</dd>
       <dt>Live means</dt><dd>every counted subtask's code runs in ${esc(v.pipeline.stops.length ? stageLabel(v.pipeline.stops[v.pipeline.stops.length - 1].name) : 'prod')}</dd></dl>`;
-    ask({});
-    links([
-      f.spec_url ? { label: `Spec: ${f.spec_url.split('/').pop()}`, url: f.spec_url } : f.url && { label: `Spec: #${f.number} issue body`, url: f.url },
-      f.url && { label: `GitHub issue #${f.number}`, url: f.url }
-    ].filter(Boolean));
-    dialog.hidden = false;
-    document.getElementById('close').focus();
-  }
+  ask({});
+  links([
+    f.spec_url ? { label: `Spec: ${f.spec_url.split('/').pop()}`, url: f.spec_url } : f.url && { label: `Spec: #${f.number} issue body`, url: f.url },
+    f.url && { label: `GitHub issue #${f.number}`, url: f.url }
+  ].filter(Boolean));
+  dialog.hidden = false;
+  document.getElementById('close').focus();
+}
 
-  /* ---------- Key ----------
-   * What every symbol means, in the current theme. Each swatch is drawn by the
-   * renderer's own functions (T.crate, pennant, bubble, cobwebs, person) from
-   * its own tables (KINDCOL, ICONS, STATE, SPECIALTIES, NOTECOL), and the rows
-   * are listed from those tables, so the key cannot drift from the map. */
-  const KIND_WORDS = { bug: 'Bug', feature: 'Feature', tests: 'Tests', security: 'Security', research: 'Research', perf: 'Performance',
-    refactor: 'Refactor', docs: 'Docs', chores: 'Chore', workshop: 'Finished work, sealed (quay and stages)', cottage: 'Other work' };
-  const ICON_WORDS = { blocked: 'Blocked: waiting on you', done: 'Done', unknown: 'Unknown: no word from it', stalled: 'Stalled: no progress' };
-  const PENNANT_WORDS = { P0: 'P0: urgent (waves)', P1: 'P1: high', P2: 'P2: normal' };
-  function swatch(paint, size = 14) {
-    const c = document.createElement('canvas');
-    c.width = size; c.height = size; c.setAttribute('aria-hidden', 'true');
-    const g = c.getContext('2d'); g.imageSmoothingEnabled = false; paint(g);
-    return c;
-  }
-  function renderLegend() {
-    const L = T.labels, body = document.getElementById('legend-body');
-    document.getElementById('legend-title').textContent = `Key · ${T.name}`;
-    const groups = [
-      [`Crates at the ${L.docks}: the kind of work`, Object.keys(KINDCOL).map(k => [c => T.crate(c, 1, 1, k, null, k === 'workshop'), KIND_WORDS[k] || k, 7])],
-      ['Priority', [[c => T.crate(c, 1, 1, 'feature', 'P0'), 'Red mark on a crate: P0', 7],
-        ...Object.keys(PENNANT_WORDS).map(p => [c => pennant(c, 5, 7, p, 0), `Pennant over a house: ${PENNANT_WORDS[p]}`]),
-        [() => {}, 'No pennant: P3']]],
-      ['Bubbles over people and stops', Object.keys(ICONS).map(k => [c => bubble(c, 2, 1, k), ICON_WORDS[k] || k])],
-      ['Other marks', [[c => { T.crate(c, 1, 1, 'feature', null); roped(c, 1, 1); }, 'Roped crate: waits on another issue ("Depends on")', 7], [c => cobwebs(c, -1, -6), 'Cobwebs on a house: stalled'],
-        [c => { R(c, 0, 0, 14, 14, fogCol(T)); bubble(c, 2, 1, 'unknown'); }, 'Grey fog over a stage: nothing says what runs there (no Deployment, no branch)']]],
-      ['Sub-agent accents: their specialty', [...SPECIALTIES.map(([name, kind]) => [c => person(c, 3, 1, 'key:' + name, 'stand', { accent: KINDCOL[kind], sub: true }), name]),
-        [c => person(c, 3, 1, 'key:other', 'stand', { accent: P.white, sub: true }), 'any other']]],
-      [`Notes on the ${L.board}`, Object.keys(NOTECOL).map(k => [c => { R(c, 1, 1, 5, 5, P.o); R(c, 2, 2, 3, 3, NOTECOL[k]); }, k.replace(/-/g, ' '), 7])]
-    ];
-    body.textContent = '';
-    groups.forEach(([title, rows]) => {
-      const h = document.createElement('h4'), ul = document.createElement('ul');
-      h.textContent = title;
-      rows.forEach(([paint, words, size]) => {
-        const li = document.createElement('li'), span = document.createElement('span');
-        span.textContent = words;
-        li.append(swatch(paint, size), span); ul.appendChild(li);
-      });
-      body.append(h, ul);
+/* ---------- Key ----------
+ * What every symbol means, in the current theme. Each swatch is drawn by the
+ * renderer's own functions (T.crate, pennant, bubble, cobwebs, person) from
+ * its own tables (KINDCOL, ICONS, STATE, SPECIALTIES, NOTECOL), and the rows
+ * are listed from those tables, so the key cannot drift from the map. */
+const KIND_WORDS = { bug: 'Bug', feature: 'Feature', tests: 'Tests', security: 'Security', research: 'Research', perf: 'Performance',
+  refactor: 'Refactor', docs: 'Docs', chores: 'Chore', workshop: 'Finished work, sealed (quay and stages)', cottage: 'Other work' };
+const ICON_WORDS = { blocked: 'Blocked: waiting on you', done: 'Done', unknown: 'Unknown: no word from it', stalled: 'Stalled: no progress' };
+const PENNANT_WORDS = { P0: 'P0: urgent (waves)', P1: 'P1: high', P2: 'P2: normal' };
+function swatch(paint, size = 14) {
+  const c = document.createElement('canvas');
+  c.width = size; c.height = size; c.setAttribute('aria-hidden', 'true');
+  const g = c.getContext('2d'); g.imageSmoothingEnabled = false; paint(g);
+  return c;
+}
+function renderLegend() {
+  const L = state.T.labels, body = document.getElementById('legend-body');
+  document.getElementById('legend-title').textContent = `Key · ${state.T.name}`;
+  const groups = [
+    [`Crates at the ${L.docks}: the kind of work`, Object.keys(KINDCOL).map(k => [c => state.T.crate(c, 1, 1, k, null, k === 'workshop'), KIND_WORDS[k] || k, 7])],
+    ['Priority', [[c => state.T.crate(c, 1, 1, 'feature', 'P0'), 'Red mark on a crate: P0', 7],
+      ...Object.keys(PENNANT_WORDS).map(p => [c => pennant(c, 5, 7, p, 0), `Pennant over a house: ${PENNANT_WORDS[p]}`]),
+      [() => {}, 'No pennant: P3']]],
+    ['Bubbles over people and stops', Object.keys(ICONS).map(k => [c => bubble(c, 2, 1, k), ICON_WORDS[k] || k])],
+    ['Other marks', [[c => { state.T.crate(c, 1, 1, 'feature', null); roped(c, 1, 1); }, 'Roped crate: waits on another issue ("Depends on")', 7], [c => cobwebs(c, -1, -6), 'Cobwebs on a house: stalled'],
+      [c => { R(c, 0, 0, 14, 14, fogCol(state.T)); bubble(c, 2, 1, 'unknown'); }, 'Grey fog over a stage: nothing says what runs there (no Deployment, no branch)']]],
+    ['Sub-agent accents: their specialty', [...SPECIALTIES.map(([name, kind]) => [c => person(c, 3, 1, 'key:' + name, 'stand', { accent: KINDCOL[kind], sub: true }), name]),
+      [c => person(c, 3, 1, 'key:other', 'stand', { accent: P.white, sub: true }), 'any other']]],
+    [`Notes on the ${L.board}`, Object.keys(NOTECOL).map(k => [c => { R(c, 1, 1, 5, 5, P.o); R(c, 2, 2, 3, 3, NOTECOL[k]); }, k.replace(/-/g, ' '), 7])]
+  ];
+  body.textContent = '';
+  groups.forEach(([title, rows]) => {
+    const h = document.createElement('h4'), ul = document.createElement('ul');
+    h.textContent = title;
+    rows.forEach(([paint, words, size]) => {
+      const li = document.createElement('li'), span = document.createElement('span');
+      span.textContent = words;
+      li.append(swatch(paint, size), span); ul.appendChild(li);
     });
-  }
-  const legendBtn = document.getElementById('legend-btn'), legend = document.getElementById('legend');
-  legendBtn.addEventListener('click', () => {
-    legend.hidden = !legend.hidden;
-    legendBtn.setAttribute('aria-expanded', String(!legend.hidden));
-    if (!legend.hidden) renderLegend();
+    body.append(h, ul);
   });
+}
+const legendBtn = document.getElementById('legend-btn'), legend = document.getElementById('legend');
+legendBtn.addEventListener('click', () => {
+  legend.hidden = !legend.hidden;
+  legendBtn.setAttribute('aria-expanded', String(!legend.hidden));
+  if (!legend.hidden) renderLegend();
+});
 
-  /* ---------- Data ---------- */
-  /* The map fills the panel's width; a tall map scrolls the page rather than
-   * shrinking. Whole-number scales keep the pixels square; below 1× (a phone)
-   * it shrinks to the panel so the page never scrolls sideways. +/− step the
-   * scale from the fitted one, and the step is remembered. */
-  const ZOOM_MAX_SCALE = 16;
-  let zoom = 0;
-  try { zoom = Math.max(-ZOOM_MAX_SCALE, Math.min(ZOOM_MAX_SCALE, parseInt(localStorage.getItem('village-zoom'), 10) || 0)); } catch {}
-  function fitScale() {
-    const room = (document.getElementById('viewport').clientWidth - 8) / cv.width;
-    return room >= 1 ? Math.floor(room) : Math.max(0.1, room);
-  }
-  function mapScale() {
-    const f = fitScale();
-    return zoom ? Math.max(Math.min(1, f), Math.min(ZOOM_MAX_SCALE, Math.max(1, Math.floor(f)) + zoom)) : f;
-  }
-  function fit() {
-    const W = cv.width, H = cv.height, s = mapScale();
-    cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
-    const fitBtn = document.getElementById('zoom-fit');
-    fitBtn.textContent = zoom ? (Number.isInteger(s) ? s : s.toFixed(1)) + '×' : 'Fit';
-    fitBtn.disabled = !zoom;
-    document.getElementById('zoom-out').disabled = s <= Math.min(1, fitScale());
-    document.getElementById('zoom-in').disabled = s >= ZOOM_MAX_SCALE;
-  }
-  function stepZoom(d) {
-    const before = mapScale();
-    zoom = d ? zoom + d : 0;
-    if (d && mapScale() === before) zoom -= d;  // already at the smallest or largest scale
-    try { localStorage.setItem('village-zoom', String(zoom)); } catch {}
-    fit(); placeBanners();
-  }
-  document.getElementById('zoom-out').addEventListener('click', () => stepZoom(-1));
-  document.getElementById('zoom-in').addEventListener('click', () => stepZoom(1));
-  document.getElementById('zoom-fit').addEventListener('click', () => stepZoom(0));
-  window.addEventListener('resize', () => { fit(); placeBanners(); });
+/* ---------- Data ---------- */
+/* The map fills the panel's width; a tall map scrolls the page rather than
+ * shrinking. Whole-number scales keep the pixels square; below 1× (a phone)
+ * it shrinks to the panel so the page never scrolls sideways. +/− step the
+ * scale from the fitted one, and the step is remembered. */
+const ZOOM_MAX_SCALE = 16;
+let zoom = 0;
+try { zoom = Math.max(-ZOOM_MAX_SCALE, Math.min(ZOOM_MAX_SCALE, parseInt(localStorage.getItem('village-zoom'), 10) || 0)); } catch {}
+function fitScale() {
+  const room = (document.getElementById('viewport').clientWidth - 8) / cv.width;
+  return room >= 1 ? Math.floor(room) : Math.max(0.1, room);
+}
+function mapScale() {
+  const f = fitScale();
+  return zoom ? Math.max(Math.min(1, f), Math.min(ZOOM_MAX_SCALE, Math.max(1, Math.floor(f)) + zoom)) : f;
+}
+function fit() {
+  const W = cv.width, H = cv.height, s = mapScale();
+  cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
+  const fitBtn = document.getElementById('zoom-fit');
+  fitBtn.textContent = zoom ? (Number.isInteger(s) ? s : s.toFixed(1)) + '×' : 'Fit';
+  fitBtn.disabled = !zoom;
+  document.getElementById('zoom-out').disabled = s <= Math.min(1, fitScale());
+  document.getElementById('zoom-in').disabled = s >= ZOOM_MAX_SCALE;
+}
+function stepZoom(d) {
+  const before = mapScale();
+  zoom = d ? zoom + d : 0;
+  if (d && mapScale() === before) zoom -= d;  // already at the smallest or largest scale
+  try { localStorage.setItem('village-zoom', String(zoom)); } catch {}
+  fit(); placeBanners();
+}
+document.getElementById('zoom-out').addEventListener('click', () => stepZoom(-1));
+document.getElementById('zoom-in').addEventListener('click', () => stepZoom(1));
+document.getElementById('zoom-fit').addEventListener('click', () => stepZoom(0));
+window.addEventListener('resize', () => { fit(); placeBanners(); });
 
-  /* Which village this is, always in the bar (the picker shows it only when
-   * there are two or more), plus its GitHub page when a real issue URL shows
-   * which repo it is (`repoUrl`), never a guess. */
-  function nameBar(name, v) {
-    const vn = document.getElementById('vname'), a = document.getElementById('repo'), repo = v ? repoUrl(v) : null;
-    vn.textContent = name;
-    vn.hidden = !pick.hidden;
-    a.hidden = !repo;
-    if (repo) { a.href = repo; a.textContent = repo.replace(/^https:\/\/github\.com\//, '') + ' on GitHub'; }
-  }
+/* Which village this is, always in the bar (the picker shows it only when
+ * there are two or more), plus its GitHub page when a real issue URL shows
+ * which repo it is (`repoUrl`), never a guess. */
+function nameBar(name, v) {
+  const vn = document.getElementById('vname'), a = document.getElementById('repo'), repo = v ? repoUrl(v) : null;
+  vn.textContent = name;
+  vn.hidden = !pick.hidden;
+  a.hidden = !repo;
+  if (repo) { a.href = repo; a.textContent = repo.replace(/^https:\/\/github\.com\//, '') + ' on GitHub'; }
+}
 
-  /* `· autocoder · development`, `· agentex · runtime`: which framework drew it, and which half of the loop it is. */
-  function describe(v) {
-    const fw = v.workflow || v.framework;
-    return [fw, v.plane].filter(Boolean).map(x => '· ' + x).join(' ');
-  }
-  /* Show a village (`shop`) or a world (`world:shop`). */
-  function select(name) {
-    const w = worlds.find(x => x.name === name);
-    const v = villages.find(x => x.project === name);
-    if (w) view = { world: w.name };
-    else if (v || villages[0]) view = { village: (v || villages[0]).project };
-    else return;
-    if (view.world) {
-      document.getElementById('workflow').textContent = `· ${w.dev} builds ${w.platform}`;
-      nameBar(`${w.dev} \u21c4 ${w.platform}`, villages.find(x => x.project === w.dev));
-      renderWorldFlow(w);
-    } else {
-      const sc = scenes[view.village];
-      document.getElementById('workflow').textContent = describe(sc.v);
-      nameBar(sc.v.project, sc.v);
-      if (cv.width !== sc.L.W || cv.height !== sc.L.H) { cv.width = sc.L.W; cv.height = sc.L.H; }
-      renderFlow(sc.v);
-    }
-    fit();
-    if (reduce) draw(0);
-    placeBanners();
-  }
-  function draw(t) {
-    if (!view) return;
-    ctx.imageSmoothingEnabled = false;
-    if (view.world) { const w = worlds.find(x => x.name === view.world); if (w) drawWorld(t, w); return; }
+/* `· autocoder · development`, `· agentex · runtime`: which framework drew it, and which half of the loop it is. */
+function describe(v) {
+  const fw = v.workflow || v.framework;
+  return [fw, v.plane].filter(Boolean).map(x => '· ' + x).join(' ');
+}
+/* Show a village (`shop`) or a world (`world:shop`). */
+function select(name) {
+  const w = worlds.find(x => x.name === name);
+  const v = villages.find(x => x.project === name);
+  if (w) view = { world: w.name };
+  else if (v || villages[0]) view = { village: (v || villages[0]).project };
+  else return;
+  if (view.world) {
+    document.getElementById('workflow').textContent = `· ${w.dev} builds ${w.platform}`;
+    nameBar(`${w.dev} \u21c4 ${w.platform}`, villages.find(x => x.project === w.dev));
+    renderWorldFlow(w);
+  } else {
     const sc = scenes[view.village];
-    if (sc && sc.v) drawVillage(ctx, sc, t);
+    document.getElementById('workflow').textContent = describe(sc.v);
+    nameBar(sc.v.project, sc.v);
+    if (cv.width !== sc.L.W || cv.height !== sc.L.H) { cv.width = sc.L.W; cv.height = sc.L.H; }
+    renderFlow(sc.v);
   }
-  const themePick = document.getElementById('theme');
-  themePick.value = themeName;
-  themePick.addEventListener('change', () => {
-    themeName = themePick.value; T = THEMES[themeName];
-    try { localStorage.setItem('village-theme', themeName); } catch {}
-    if (!legend.hidden) renderLegend();
-    if (view) select(view.world || view.village);
-  });
-  pick.addEventListener('change', () => { location.hash = pick.value; select(pick.value); });
-  window.addEventListener('hashchange', () => select(decodeURIComponent(location.hash.slice(1))));
+  fit();
+  if (state.reduce) draw(0);
+  placeBanners();
+}
+function draw(t) {
+  if (!view) return;
+  ctx.imageSmoothingEnabled = false;
+  if (view.world) { const w = worlds.find(x => x.name === view.world); if (w) drawWorld(t, w); return; }
+  const sc = scenes[view.village];
+  if (sc && sc.v) drawVillage(ctx, sc, t);
+}
+const themePick = document.getElementById('theme');
+// One option per registered theme, in the order they registered.
+for (const [key, th] of Object.entries(THEMES)) themePick.add(new Option(th.name, key));
+themePick.value = themeName;
+themePick.addEventListener('change', () => {
+  themeName = themePick.value; state.T = THEMES[themeName];
+  try { localStorage.setItem('village-theme', themeName); } catch {}
+  if (!legend.hidden) renderLegend();
+  if (view) select(view.world || view.village);
+});
+pick.addEventListener('change', () => { location.hash = pick.value; select(pick.value); });
+window.addEventListener('hashchange', () => select(decodeURIComponent(location.hash.slice(1))));
 
-  async function poll() {
-    try {
-      const res = await fetch('/api/village');
-      if (!res.ok) throw new Error(res.status);
-      const data = await res.json();
-      villages = data.villages || [];
-      worlds = data.worlds || [];
-      const t = performance.now();
-      villages.forEach(v => updateScene(v, t));
-      worlds.forEach(w => updateWorld(w, t));
-      const names = [...worlds.map(w => w.name), ...villages.map(v => v.project)];
-      const label = n => { const w = worlds.find(x => x.name === n); return w ? `${w.dev} \u21c4 ${w.platform}` : n; };
-      pick.hidden = names.length < 2;
-      if (pick.options.length !== names.length || [...pick.options].some((o, i) => o.value !== names[i])) {
-        pick.innerHTML = names.map(n => `<option value="${esc(n)}">${esc(label(n))}</option>`).join('');
-      }
-      const want = decodeURIComponent(location.hash.slice(1)) || (view && (view.world || view.village)) || names[0];
-      if (names.includes(want)) pick.value = want;
-      document.getElementById('empty').hidden = villages.length > 0;
-      cv.hidden = villages.length === 0;
-      if (!villages.length) document.getElementById('empty').textContent = 'No swarms running. Start one from the dashboard or the agents-tui terminal.';
-      else select(pick.value || names[0]);
-      document.getElementById('status').textContent = 'Live · updated ' + new Date().toLocaleTimeString();
-    } catch (e) {
-      document.getElementById('status').textContent = "Can't reach agents-tui. Retrying…";
+async function poll() {
+  try {
+    const res = await fetch('/api/village');
+    if (!res.ok) throw new Error(res.status);
+    const data = await res.json();
+    villages = data.villages || [];
+    worlds = data.worlds || [];
+    const t = performance.now();
+    villages.forEach(v => updateScene(v, t));
+    worlds.forEach(w => updateWorld(w, t));
+    const names = [...worlds.map(w => w.name), ...villages.map(v => v.project)];
+    const label = n => { const w = worlds.find(x => x.name === n); return w ? `${w.dev} \u21c4 ${w.platform}` : n; };
+    pick.hidden = names.length < 2;
+    if (pick.options.length !== names.length || [...pick.options].some((o, i) => o.value !== names[i])) {
+      pick.innerHTML = names.map(n => `<option value="${esc(n)}">${esc(label(n))}</option>`).join('');
     }
-    setTimeout(poll, 3000);
+    const want = decodeURIComponent(location.hash.slice(1)) || (view && (view.world || view.village)) || names[0];
+    if (names.includes(want)) pick.value = want;
+    document.getElementById('empty').hidden = villages.length > 0;
+    cv.hidden = villages.length === 0;
+    if (!villages.length) document.getElementById('empty').textContent = 'No swarms running. Start one from the dashboard or the agents-tui terminal.';
+    else select(pick.value || names[0]);
+    document.getElementById('status').textContent = 'Live · updated ' + new Date().toLocaleTimeString();
+  } catch (e) {
+    document.getElementById('status').textContent = "Can't reach agents-tui. Retrying…";
   }
-  poll();
+  setTimeout(poll, 3000);
+}
+poll();
 
-  if (!reduce) {
-    // The first frame records what is clickable; place the keyboard targets then, not a poll later.
-    const loop = t => { draw(t); if (!kbuttons.size && kbox.dataset.placed !== String(view && (view.world || view.village))) { kbox.dataset.placed = String(view && (view.world || view.village)); placeKeys(); } requestAnimationFrame(loop); };
-    requestAnimationFrame(loop);
-  }
-})();
+if (!state.reduce) {
+  // The first frame records what is clickable; place the keyboard targets then, not a poll later.
+  const loop = t => { draw(t); if (!kbuttons.size && kbox.dataset.placed !== String(view && (view.world || view.village))) { kbox.dataset.placed = String(view && (view.world || view.village)); placeKeys(); } requestAnimationFrame(loop); };
+  requestAnimationFrame(loop);
+}

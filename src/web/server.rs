@@ -29,6 +29,15 @@ const VILLAGE_ASSETS: &[(&str, &str, &str)] = &[
     ("index.html", "text/html; charset=utf-8", include_str!("village/index.html")),
     ("village.css", "text/css; charset=utf-8", include_str!("village/village.css")),
     ("main.js", "text/javascript; charset=utf-8", include_str!("village/main.js")),
+    ("state.js", "text/javascript; charset=utf-8", include_str!("village/state.js")),
+    ("palette.js", "text/javascript; charset=utf-8", include_str!("village/palette.js")),
+    ("sprites/houses.js", "text/javascript; charset=utf-8", include_str!("village/sprites/houses.js")),
+    ("scenery.js", "text/javascript; charset=utf-8", include_str!("village/scenery.js")),
+    ("people.js", "text/javascript; charset=utf-8", include_str!("village/people.js")),
+    ("themes/registry.js", "text/javascript; charset=utf-8", include_str!("village/themes/registry.js")),
+    ("themes/medieval.js", "text/javascript; charset=utf-8", include_str!("village/themes/medieval.js")),
+    ("themes/modern.js", "text/javascript; charset=utf-8", include_str!("village/themes/modern.js")),
+    ("themes/future.js", "text/javascript; charset=utf-8", include_str!("village/themes/future.js")),
 ];
 
 /// One of the village's embedded files, with its content type.
@@ -1324,9 +1333,52 @@ mod tests {
         assert!(index.contains(r#"<link rel="stylesheet" href="/village/village.css">"#));
         assert!(index.contains(r#"<script type="module" src="/village/main.js"></script>"#));
         assert!(!index.contains("<style>") && !index.contains("<script>\n"), "no inline styles or script left");
-        // Every embedded file other than the page is one the page loads.
+        // Every embedded file other than the page is one the page loads,
+        // itself or through an import.
+        let imported: Vec<String> = VILLAGE_ASSETS.iter().flat_map(|(p, _, body)| village_imports(p, body)).collect();
         for (path, _, _) in VILLAGE_ASSETS.iter().filter(|(p, _, _)| *p != "index.html") {
-            assert!(index.contains(&format!("/village/{path}")), "{path} is embedded but not loaded");
+            assert!(index.contains(&format!("/village/{path}")) || imported.iter().any(|i| i == path), "{path} is embedded but not loaded");
+        }
+    }
+
+    /// The files a village module imports, as paths under `village/`:
+    /// `import { P } from '../palette.js';` in `themes/modern.js` is `palette.js`.
+    fn village_imports(path: &str, body: &str) -> Vec<String> {
+        let dir: Vec<&str> = path.split('/').collect::<Vec<_>>()[..path.matches('/').count()].to_vec();
+        body.lines()
+            .filter(|l| l.starts_with("import "))
+            .filter_map(|l| l.split(['\'', '"']).nth(1))
+            .map(|spec| {
+                let mut parts = dir.clone();
+                for seg in spec.split('/') {
+                    match seg {
+                        "." => {}
+                        ".." => { parts.pop(); }
+                        s => parts.push(s),
+                    }
+                }
+                parts.join("/")
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn every_village_import_is_embedded_and_served() {
+        let mut seen = 0;
+        for (path, _, body) in VILLAGE_ASSETS.iter().filter(|(p, _, _)| p.ends_with(".js")) {
+            for import in village_imports(path, body) {
+                seen += 1;
+                assert!(village_asset(&import).is_some(), "{path} imports {import}, which is not embedded");
+                let app = make_app(make_web_state(new_shared_state()));
+                let resp = app.oneshot(Request::builder().uri(format!("/village/{import}")).body(Body::empty()).unwrap()).await.unwrap();
+                assert_eq!(resp.status(), StatusCode::OK, "{import}");
+                assert_eq!(resp.headers()["content-type"], "text/javascript; charset=utf-8", "{import}");
+            }
+        }
+        assert!(seen >= 9, "main.js imports the drawing modules");
+        // The modules are modules: no file still wraps itself in the old script's closure.
+        for (path, _, body) in VILLAGE_ASSETS.iter().filter(|(p, _, _)| p.ends_with(".js")) {
+            assert!(!body.starts_with("(() => {"), "{path}");
         }
     }
 
@@ -1339,7 +1391,9 @@ mod tests {
         let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let html = String::from_utf8_lossy(&body);
         assert!(html.contains("Worktree Hollow"));
-        assert!(html.contains("Medieval village") && html.contains("Modern business district"));
+        assert!(html.contains(r#"<select id="theme" aria-label="Style"></select>"#), "the Style picker is filled from the theme registry");
+        let source = village_source();
+        assert!(source.contains("name: 'Medieval village',") && source.contains("name: 'Modern business district',"));
     }
 
     #[tokio::test]
@@ -1512,7 +1566,7 @@ mod tests {
         assert!(body.contains(r#"<div class="alabels" id="alabels"></div>"#));
         assert!(body.contains(r#"id="labels-on" checked"#));
         assert!(body.contains("function areaLabels(sc, theme)"));
-        assert!(body.contains("placeLabels();\n  }"));
+        assert!(body.contains("placeLabels();\n}"));
         // Houses are named for their worktree, less the project prefix.
         assert!(body.contains("function houseName(v, h)"));
         assert!(body.contains("base.startsWith(v.project + '-')"));
@@ -1559,7 +1613,7 @@ mod tests {
         assert!(body.contains("for (let k = hs.length - 1; k >= 0; k--)"));
         // No hand-copied rectangles left in objAt(), which clicks and hovers share.
         let hit = &body[body.find("function objAt(e)").unwrap()..];
-        let hit = &hit[..hit.find("\n  }\n").unwrap()];
+        let hit = &hit[..hit.find("\n}\n").unwrap()];
         assert!(!hit.contains("lay."), "objAt() should not know the layout: {hit}");
         // Every kind of object on the map is recorded where it is drawn...
         for kind in [
@@ -1631,18 +1685,18 @@ mod tests {
         assert!(body.contains(r#"<button id="legend-btn" class="legend-btn" aria-expanded="false" aria-controls="legend""#));
         assert!(body.contains(r#"<div class="legend" id="legend" hidden role="region" aria-labelledby="legend-title">"#));
         // The rows come from the renderer's own tables, so a new kind or icon appears in the key.
-        assert!(body.contains("Object.keys(KINDCOL).map(k => [c => T.crate(c, 1, 1, k, null, k === 'workshop')"));
+        assert!(body.contains("Object.keys(KINDCOL).map(k => [c => state.T.crate(c, 1, 1, k, null, k === 'workshop')"));
         assert!(body.contains("Object.keys(ICONS).map(k => [c => bubble(c, 2, 1, k)"));
         assert!(body.contains("...SPECIALTIES.map(([name, kind]) => [c => person(c, 3, 1, 'key:' + name"));
         assert!(body.contains("Object.keys(NOTECOL).map(k =>"));
         assert!(body.contains("c => pennant(c, 5, 7, p, 0)"));
         assert!(body.contains("c => cobwebs(c, -1, -6)"));
         // The fog swatch uses the same colour as the map's fog.
-        assert!(body.contains("R(c, 0, 0, 14, 14, fogCol(T));"));
-        assert!(body.contains("lay.H - lay.canalY + 28, fogCol(T));"));
+        assert!(body.contains("R(c, 0, 0, 14, 14, fogCol(state.T));"));
+        assert!(body.contains("lay.H - lay.canalY + 28, fogCol(state.T));"));
         // Redrawn in the theme being shown.
-        assert!(body.contains("if (!legend.hidden) renderLegend();\n    if (view) select("));
-        assert!(body.contains("`Key · ${T.name}`"));
+        assert!(body.contains("if (!legend.hidden) renderLegend();\n  if (view) select("));
+        assert!(body.contains("`Key · ${state.T.name}`"));
         // Every kind, icon and pennant the map draws has words in the key.
         for table in ["KINDCOL", "ICONS"] {
             let words = if table == "KINDCOL" { "KIND_WORDS" } else { "ICON_WORDS" };
@@ -1690,14 +1744,14 @@ mod tests {
     fn js_block<'a>(body: &'a str, name: &str) -> &'a str {
         let start = body.find(&format!("const {name} = {{")).unwrap_or_else(|| panic!("no {name}"));
         let rest = &body[start..];
-        &rest[..rest.find("\n  };\n").unwrap()]
+        &rest[..rest.find("\n};\n").unwrap()]
     }
 
     /// Method and property names at the first level of a theme object.
     fn slots(block: &str) -> Vec<String> {
         let mut out = Vec::new();
         for line in block.lines().skip(1) {
-            let Some(rest) = line.strip_prefix("    ") else { continue };
+            let Some(rest) = line.strip_prefix("  ") else { continue };
             if rest.starts_with(' ') || rest.starts_with('/') || rest.starts_with('*') {
                 continue;
             }
@@ -1739,8 +1793,10 @@ mod tests {
     fn village_html_future_theme_fills_every_slot() {
         let body = &village_source();
         // Registered, offered in the Style picker, and remembered like the others.
-        assert!(body.contains("const THEMES = { medieval: MEDIEVAL, modern: MODERN, future: FUTURE };"));
-        assert!(body.contains(r#"<option value="future">Future</option>"#));
+        let registered = |name: &str, file: &str| village_asset(file).unwrap().1.contains(&format!("registerTheme('{name}', {});", name.to_uppercase()));
+        assert!(registered("medieval", "themes/medieval.js") && registered("modern", "themes/modern.js") && registered("future", "themes/future.js"));
+        assert!(body.contains("for (const [key, th] of Object.entries(THEMES)) themePick.add(new Option(th.name, key));"));
+        assert!(body.contains("name: 'Future',"));
         assert!(body.contains("localStorage.setItem('village-theme', themeName)"));
         let future = js_block(body, "FUTURE");
         let future_slots = slots(future);
@@ -1766,20 +1822,21 @@ mod tests {
         }
         // People are robots, with a look for every status.
         assert!(future.contains("people: 'future', robots: true"));
-        assert!(body.contains("if (T.robots) return robot(c, x, y, seed, h, kind, opts);"));
+        assert!(body.contains("if (state.T.robots) return robot(c, x, y, seed, h, kind, opts);"));
         let eyes = &body[body.find("const ROBOT_EYE = {").unwrap()..];
         let eyes = &eyes[..eyes.find('}').unwrap()];
         for status in ["working", "idle", "blocked", "done", "stalled", "unknown"] {
             assert!(eyes.contains(&format!("{status}:")), "no robot look for {status}");
         }
-        assert!(body.contains("const slumped = T.robots && st === 'stalled';"));
+        assert!(body.contains("const slumped = state.T.robots && st === 'stalled';"));
         // In a world the platform takes the theme's pair; Future pairs with Modern.
-        assert!(body.contains("MEDIEVAL.pair = MODERN; MODERN.pair = MEDIEVAL; FUTURE.pair = MODERN;"));
-        assert!(body.contains("const otherTheme = () => T.pair || MEDIEVAL;"));
+        assert!(js_block(body, "MEDIEVAL").contains("pair: 'modern',") && js_block(body, "MODERN").contains("pair: 'medieval',"));
+        assert!(js_block(body, "FUTURE").contains("pair: 'modern',"));
+        assert!(body.contains("const otherTheme = () => THEMES[state.T.pair] || THEMES.medieval;"));
         // Reduced motion: no hovering bob and no sparks.
-        assert!(body.contains("const now = () => (reduce ? 0 : performance.now());"));
-        assert!(body.contains("kind === 'stand' && !reduce && blink("));
-        assert!(body.contains("if (!reduce && blink(t + (h % 300), 120))"));
+        assert!(body.contains("const now = () => (state.reduce ? 0 : performance.now());"));
+        assert!(body.contains("kind === 'stand' && !state.reduce && blink("));
+        assert!(body.contains("if (!state.reduce && blink(t + (h % 300), 120))"));
     }
 
     #[test]
@@ -1794,14 +1851,14 @@ mod tests {
         // Porters carry newly arrived work to the ship; lock gates open as crates pass.
         assert!(body.contains("if (i === cs) enqueue(sc, t, trip('porter:' + n, n, null, 'ship', [{ pts: toShip(from, lay), carry: true }], { sealed: true, speed: 0.04 }), 300);"));
         assert!(body.contains("for (let g = was + 1; g <= i; g++) sc.gates[g] = t;"));
-        assert!(body.contains("const open = !reduce && t - (S.gates[i] ?? -1e9) < GATE_OPEN;"));
+        assert!(body.contains("const open = !state.reduce && t - (state.S.gates[i] ?? -1e9) < GATE_OPEN;"));
         // Sailing: from the last stop's sha, once per change, never on first load.
         assert!(body.contains("const last = lastStop(v), id = last && (last.sha || last.tag || v.pipeline.release);"));
         assert!(body.contains("return id ? `${last.source || 'branch'}:${id}` : null;"));
         assert!(body.contains("if (rel) { if (sc.v && sameSource && rel !== was) sail(sc, v, t); sc.lastRelease = rel; }"));
         assert!(!body.contains("[stops.length - 1].issues.filter(n => !hid.has(n)).slice(0, 6)"), "shipped crates no longer pile up in the harbour");
         // Reduced motion: no voyage, just the toast.
-        assert!(body.contains("sc.voyage = reduce ? null : { t0: t, cargo: shipped };"));
+        assert!(body.contains("sc.voyage = state.reduce ? null : { t0: t, cargo: shipped };"));
         assert!(body.contains("toast(`${v.project}: shipped ${releaseName(v, last) || 'a release'}"));
         assert!(body.contains(r#"<div class="win toast" id="toast" hidden role="status"></div>"#));
         // Both themes have a vessel and a hold; the rocket lifts off, the ship sails east.
@@ -1824,11 +1881,11 @@ mod tests {
         let body = &village_source();
         // The queue: in order, staggered, capped; timed so a background tab never replays.
         assert!(body.contains("const STAGGER = 700, QUEUE_CAP = 12, WALK = 0.05, ARRIVE_IN = 1800, UNLOAD = 450, SAIL_OUT = 1500;"));
-        assert!(body.contains("if (reduce || porters.filter(p => p.t0 > t).length >= QUEUE_CAP) return null;"));
+        assert!(body.contains("if (state.reduce || state.porters.filter(p => p.t0 > t).length >= QUEUE_CAP) return null;"));
         assert!(body.contains("trip.t0 = Math.max(t, sc.nextAt || 0);"));
         // No replay on load; reduced motion walks no one and says what changed.
         assert!(body.contains("if (!old || old.project !== now.project) return [];"));
-        assert!(body.contains("if (reduce && said.length && shownScenes().some(([x]) => x === sc)) toast("));
+        assert!(body.contains("if (state.reduce && said.length && shownScenes().some(([x]) => x === sc)) toast("));
         // Arrives: a supply vessel in every theme, its crew unloading one crate each.
         assert_eq!(body.matches("supply(c, x, t, load) {").count(), 2, "modern truck and future shuttle");
         assert!(body.contains("vessel: ship, supply: boat,"));
@@ -1846,7 +1903,7 @@ mod tests {
         assert!(body.contains("[{ pts, carry: true }, { pts: back(pts) }], { sealed: true }));"));
         assert!(body.contains("'away', [{ pts: [...from, [-10, ROAD]], carry: true }]));"));
         // A crate in transit is hidden at rest and opens the crate dialog.
-        assert!(body.contains("const bound = new Set(porters.filter(p => p.issue && at.get(p) && !(at.get(p).fetched && !at.get(p).carry)).map(p => p.issue));"));
+        assert!(body.contains("const bound = new Set(state.porters.filter(p => p.issue && at.get(p) && !(at.get(p).fetched && !at.get(p).carry)).map(p => p.issue));"));
         assert!(body.contains("tap(a.x - 2, a.y - 16, 5, 5, { kind: 'crate', n: p.issue, at: 'transit', to: p.to });"));
         assert!(body.contains("if (o.at === 'transit') return o.to === 'away' ? 'closed without landing: carried away' : `on its way to the ${tripPlace(o.to, theme)}`;"));
     }
@@ -1874,7 +1931,7 @@ mod tests {
         assert!(body.contains("title: `${houseName(v, h)} · ${h.branch || h.kind}`"));
         assert!(body.contains("link(`Compare ${h.branch} with ${br}`, `${repo}/compare/"));
         assert!(body.contains("since ${since}` : null"));
-        assert!(!body.contains("h.action ? `Now: ${h.action}` : null],\n          links: [...(h.links || []), issue"), "no separate Now line in the house dialog");
+        assert!(!body.contains("h.action ? `Now: ${h.action}` : null],\n        links: [...(h.links || []), issue"), "no separate Now line in the house dialog");
     }
 
     #[test]
@@ -1898,7 +1955,7 @@ mod tests {
         let body = &village_source();
         // A working agent is one busy figure at its door, acting out its action.
         assert!(body.contains("if (st === 'working') { person(c, lot.x + 4, lot.y + 8, h.id, workFrame(tt), { status: st }); drawAction(c, lot.x + 4, lot.y + 8, h.action, tt); }"));
-        assert!(body.contains("const workFrame = t => (!reduce && blink(t, 180) ? 'work2' : 'work');"));
+        assert!(body.contains("const workFrame = t => (!state.reduce && blink(t, 180) ? 'work2' : 'work');"));
         assert!(body.contains("if (kind === 'work' || kind === 'work2') {"));
         // One figure per sub-agent in the slots, then a "+N" badge: none dropped.
         assert!(body.contains("const SUB_SLOTS = [[-1, 12], [9, 12], [-4, 16], [4, 16], [12, 16]];"));
@@ -1987,7 +2044,7 @@ mod tests {
         let body = &village_source();
         assert!(body.contains(r#"<div class="hitkeys" id="hitkeys"></div>"#));
         assert!(body.contains("function placeKeys()"));
-        assert!(body.contains("placeLabels();\n    placeKeys();"));
+        assert!(body.contains("placeLabels();\n  placeKeys();"));
         assert!(body.contains(".hk:focus-visible"));
         assert!(body.contains("b.setAttribute('aria-label', [info.title, info.line].filter(Boolean).join(': '));"));
     }
