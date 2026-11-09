@@ -1,0 +1,227 @@
+{
+  "villages": [
+    {
+      "backlog": [
+        {
+          "kind": "feature",
+          "number": 371,
+          "priority": "P2",
+          "title": "Village: dialogs explain unknown stops, list the whole quay with titles, and name houses by branch (#367 items 4, 6, 7)",
+          "url": "https://github.com/laird/agents-ui/issues/371"
+        },
+        {
+          "kind": "feature",
+          "number": 372,
+          "priority": "P2",
+          "title": "Village: show issues waiting on dependencies as waiting on #N (#367 item 5)",
+          "url": "https://github.com/laird/agents-ui/issues/372"
+        },
+        {
+          "kind": "feature",
+          "number": 375,
+          "priority": "P2",
+          "title": "Village: a gatehouse that shows the merge queue, gating in progress, pass/fail/conflict, and merge trains",
+          "url": "https://github.com/laird/agents-ui/issues/375"
+        },
+        {
+          "kind": "feature",
+          "number": 376,
+          "priority": "P2",
+          "title": "Village: one village per deploy environment, left to right (production right-most), with deployments sailing between them",
+          "url": "https://github.com/laird/agents-ui/issues/376"
+        }
+      ],
+      "board": [
+        {
+          "label": "needs-approval",
+          "number": 365,
+          "title": "Record release Deployments from a release-published workflow (needs the workflow token scope)",
+          "url": "https://github.com/laird/agents-ui/issues/365"
+        }
+      ],
+      "builds": [],
+      "features": [
+        {
+          "build": {
+            "landed": 1,
+            "total": 4
+          },
+          "linked_by": "body",
+          "live": false,
+          "number": 367,
+          "promotion": "subtask",
+          "stages": [
+            {
+              "name": "nuc-1",
+              "reached": 0,
+              "total": 4,
+              "unknown": false
+            },
+            {
+              "name": "release",
+              "reached": 0,
+              "total": 4,
+              "unknown": true
+            }
+          ],
+          "stuck": [],
+          "title": "Village clarity pass: map too small, unlabeled repo, label collisions, unexplained harbour/quay/symbols",
+          "url": "https://github.com/laird/agents-ui/issues/367"
+        }
+      ],
+      "framework": "autocoder",
+      "houses": [
+        {
+          "action": "running",
+          "crew": [
+            "worker-2"
+          ],
+          "id": "/src/agents-ui-wt-2",
+          "issue": 378,
+          "issue_title": "Omarchy bar widget for the village: live swarm status in the bar, a panel summary, and Open village",
+          "kind": "feature",
+          "links": [
+            {
+              "label": "Agent session",
+              "url": "/#/swarm/agents-ui/agent/worker-2"
+            },
+            {
+              "label": "GitHub issue #378",
+              "url": "https://github.com/laird/agents-ui/issues/378"
+            }
+          ],
+          "priority": "P2",
+          "role": "worker-2",
+          "status": "working"
+        },
+        {
+          "action": "running",
+          "crew": [
+            "worker-3"
+          ],
+          "id": "/src/agents-ui-wt-3",
+          "issue": 368,
+          "issue_title": "Village: animate each issue's life (supply ship unloads new issues, workers fetch, work, and deliver crates)",
+          "kind": "feature",
+          "links": [
+            {
+              "label": "Agent session",
+              "url": "/#/swarm/agents-ui/agent/worker-3"
+            },
+            {
+              "label": "GitHub issue #368",
+              "url": "https://github.com/laird/agents-ui/issues/368"
+            }
+          ],
+          "priority": "P2",
+          "role": "worker-3",
+          "status": "working"
+        },
+        {
+          "action": "thinking",
+          "crew": [
+            "worker-4"
+          ],
+          "id": "/src/agents-ui-wt-4",
+          "issue": 370,
+          "issue_title": "Village: keep labels clear of the art, add a symbol legend and an open-ground hint (#367 items 3, 8, 9)",
+          "kind": "feature",
+          "links": [
+            {
+              "label": "Agent session",
+              "url": "/#/swarm/agents-ui/agent/worker-4"
+            },
+            {
+              "label": "GitHub issue #370",
+              "url": "https://github.com/laird/agents-ui/issues/370"
+            }
+          ],
+          "priority": "P2",
+          "role": "worker-4",
+          "status": "working"
+        }
+      ],
+      "manager": {
+        "action": null,
+        "crew": [
+          "manager"
+        ],
+        "id": "manager",
+        "issue": null,
+        "issue_title": null,
+        "kind": "cottage",
+        "links": [
+          {
+            "label": "Agent session",
+            "url": "/#/swarm/agents-ui/agent/manager"
+          }
+        ],
+        "priority": null,
+        "role": "manager",
+        "status": "done"
+      },
+      "pipeline": {
+        "gates": [
+          {
+            "failure_url": "https://github.com/laird/agents-ui/issues/370",
+            "issue": 370,
+            "landed": false,
+            "started_at": "2026-11-09T17:32:59Z",
+            "state": "conflict"
+          }
+        ],
+        "integration": "master",
+        "merge": {
+          "busy": [],
+          "slots": 8
+        },
+        "promotion": "subtask",
+        "quay": [
+          362,
+          377,
+          369,
+          374,
+          373
+        ],
+        "release": null,
+        "sentinel": "absent",
+        "stops": [
+          {
+            "issues": [
+              364,
+              366,
+              363,
+              361,
+              360,
+              359,
+              356,
+              355,
+              358,
+              357,
+              354,
+              351,
+              352,
+              350,
+              349,
+              348,
+              347
+            ],
+            "name": "nuc-1",
+            "sha": "da3d41852451c9ca0d41d47a6a5638e5a7973050",
+            "source": "deployment"
+          },
+          {
+            "issues": [],
+            "name": "release",
+            "source": "unknown"
+          }
+        ]
+      },
+      "plane": "development",
+      "project": "agents-ui",
+      "repo_path": "/src/agents-ui",
+      "workflow": null
+    }
+  ],
+  "worlds": []
+}

@@ -1,0 +1,49 @@
+{
+  "swarms": [
+    {
+      "project_name": "agents-ui",
+      "repo_path": "/src/agents-ui",
+      "workflow": null,
+      "agent_type": "claude",
+      "stopped": false,
+      "busy_count": 3,
+      "idle_count": 0,
+      "attention_count": 0,
+      "workers": [
+        {
+          "id": "agents-ui/worker-2",
+          "role": "worker-2",
+          "state": "Working #378",
+          "current_issue": 378,
+          "worktree_path": "/src/agents-ui-wt-2",
+          "branch": "feature/issue-378",
+          "health": "Healthy",
+          "waiting_for_input": false,
+          "context_pct": null
+        },
+        {
+          "id": "agents-ui/worker-3",
+          "role": "worker-3",
+          "state": "Working #368",
+          "current_issue": 368,
+          "worktree_path": "/src/agents-ui-wt-3",
+          "branch": "feature/issue-368",
+          "health": "Healthy",
+          "waiting_for_input": false,
+          "context_pct": null
+        },
+        {
+          "id": "agents-ui/worker-4",
+          "role": "worker-4",
+          "state": "Working #370",
+          "current_issue": 370,
+          "worktree_path": "/src/agents-ui-wt-4",
+          "branch": "feature/issue-370",
+          "health": "Healthy",
+          "waiting_for_input": false,
+          "context_pct": null
+        }
+      ]
+    }
+  ]
+}
