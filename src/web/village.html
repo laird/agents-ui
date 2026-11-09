@@ -111,7 +111,7 @@
 </head>
 <body>
   <div class="bar">
-    <div class="title">Worktree Hollow <span id="workflow" class="status"></span> <select id="pick" aria-label="Village" hidden></select> <select id="theme" aria-label="Style"><option value="medieval">Medieval village</option><option value="modern">Modern business district</option></select> <label class="labels-toggle"><input type="checkbox" id="labels-on" checked> Labels</label> <a href="/">Dashboard</a></div>
+    <div class="title">Worktree Hollow <span id="workflow" class="status"></span> <select id="pick" aria-label="Village" hidden></select> <select id="theme" aria-label="Style"><option value="medieval">Medieval village</option><option value="modern">Modern business district</option><option value="future">Future</option></select> <label class="labels-toggle"><input type="checkbox" id="labels-on" checked> Labels</label> <a href="/">Dashboard</a></div>
     <div class="status" id="status" aria-live="polite">Connecting…</div>
   </div>
   <div class="win stage">
@@ -798,7 +798,291 @@
     steam: [P.white, M.concreteL], sign: [P.o, P.dark, M.led]
   };
 
-  const THEMES = { medieval: MEDIEVAL, modern: MODERN };
+  /* ---------- Future ----------
+   * A space station worked by little robots: deck plates for ground, light-
+   * strip walkways for roads, a plasma canal, habitat pods with portholes. It
+   * keeps the shared status language: lit portholes while working, an open
+   * hatch for blocked, dark glass for unknown. */
+  const F = {
+    deck: '#30365c', deckD: '#262b4c', deckL: '#40487a', seam: '#1c2140', rivet: '#525c94',
+    navy: '#1c2140', space: '#120e2a', purple: '#4a3a78', purpleD: '#33285a',
+    cyan: '#40e0f0', cyanD: '#2098b0', cyanL: '#b8f8ff', magenta: '#f048c0', magentaD: '#a83090',
+    hull: '#c8d0e8', hullD: '#8a94b8', hullL: '#eef2ff', glass: '#6cc8e8', glassD: '#2c5878',
+    plasma: '#7a4ae0', plasmaL: '#b890ff', panel: '#2a50a8', panelL: '#5a8ae0'
+  };
+  /* Portholes: lit cyan-white while working, dark when nobody can say. */
+  const fWin = st => st === 'working' ? F.cyanL : (st === 'unknown' || st === 'stopped') ? P.dark : F.glassD;
+  const now = () => (reduce ? 0 : performance.now());
+  function porthole(c, x, y, st) {
+    R(c, x + 1, y, 2, 4, P.o); R(c, x, y + 1, 4, 2, P.o); R(c, x + 1, y + 1, 2, 2, fWin(st));
+    if (st === 'working') R(c, x + 1, y + 1, 1, 1, P.white);
+  }
+  /* A habitat pod: a rounded module with a domed roof, two portholes and a
+   * hatch. The hatch stands open (dark) while its robot waits on you. */
+  function pod(c, x, y, st, o = {}) {
+    const shell = o.shell || F.hull, shellD = o.shellD || F.hullD, roof = o.roof || F.hullL;
+    [4, 5, 6, 7, 7].forEach((w, dy) => {
+      R(c, x + 8 - w, y + 1 + dy, 2 * w, 1, P.o);
+      if (dy) R(c, x + 9 - w, y + 1 + dy, 2 * w - 2, 1, dy === 1 ? roof : shell);
+    });
+    R(c, x, y + 5, 16, 11, P.o); R(c, x + 1, y + 5, 14, 10, shell);
+    R(c, x + 1, y + 14, 14, 1, shellD); R(c, x + 12, y + 5, 2, 9, SHADE);
+    R(c, x + 1, y + 7, 14, 1, o.band || F.cyanD);
+    if (o.portholes !== false) { porthole(c, x + 2, y + 9, st); porthole(c, x + 10, y + 9, st); }
+    R(c, x + 6, y + 10, 4, 6, P.o);
+    R(c, x + 7, y + 11, 2, 5, st === 'blocked' ? P.o : shellD);
+    R(c, x + 6, y + 9, 4, 1, st === 'working' ? F.cyan : F.cyanD);
+  }
+  const FB = {
+    cottage(c, x, y, st, t) {
+      pod(c, x, y, st);
+      R(c, x + 12, y - 3, 1, 5, F.hullD); R(c, x + 11, y - 4, 3, 1, st === 'working' && blink(t, 500) ? F.cyan : F.cyanD);
+      if (st === 'working') puffs(c, x + 4, y - 1, t, F.cyanL, F.hullD);
+    },
+    workshop(c, x, y, st, t) {
+      pod(c, x, y, st, { shell: '#b8b0d0', shellD: '#8078a0' });
+      const a = st === 'working' ? Math.floor(t / 300) % 2 : 0;
+      R(c, x + 4, y - 3, 2, 5, F.hullD); R(c, x + 5, y - 4, 5, 2, F.hullD); R(c, x + 9, y - 3 + a, 2, 3, P.o);
+      if (st === 'working' && blink(t, 120)) { R(c, x + 10, y + 1 + a, 1, 1, P.white); R(c, x + 11, y + a, 1, 1, P.gold); R(c, x + 12, y + 2 + a, 1, 1, F.cyan); }
+    },
+    feature(c, x, y, st, t) {
+      pod(c, x, y, st, { band: F.magentaD });
+      R(c, x + 13, y - 4, 2, 20, F.magenta); R(c, x + 13, y - 4, 1, 20, P.o);
+      R(c, x + 3, y - 4, 13, 2, F.magenta); R(c, x + 3, y - 3, 13, 1, P.o);
+      const hook = st === 'working' ? 4 + Math.floor((Math.sin(t / 400) + 1) * 2) : 5;
+      const hx = x + 5 + (st === 'working' ? Math.floor(t / 700) % 3 : 0);
+      R(c, hx, y - 2, 1, hook, F.cyan); R(c, hx - 1, y - 2 + hook, 3, 1, F.cyanL);
+    },
+    bug(c, x, y, st, t) {
+      pod(c, x, y, st);
+      R(c, x + 4, y - 4, 8, 5, 'rgba(64,224,240,.35)');
+      R(c, x + 6, y - 3, 4, 3, P.bug); R(c, x + 7, y - 3, 1, 1, P.o); R(c, x + 8, y - 2, 1, 1, P.o);
+      R(c, x + 5, y - 2, 1, 1, P.bug); R(c, x + 10, y - 2, 1, 1, P.bug);
+      R(c, x + 7, y + 1, 2, 1, F.cyan);
+      if (st === 'working') R(c, x + 4, y - 4 + Math.floor(t / 160) % 5, 8, 1, F.cyanL);
+    },
+    security(c, x, y, st, t) {
+      pod(c, x, y, st, { shell: F.panel, shellD: P.shield, roof: F.panelL });
+      R(c, x + 6, y + 2, 4, 3, P.gold); R(c, x + 7, y + 3, 2, 1, P.shield);
+      R(c, x + 3, y - 2, 1, 5, F.hullD);
+      const a = st === 'working' ? t / 300 : 0.6;
+      for (let d = 1; d < 5; d++) R(c, x + 3 + Math.round(Math.cos(a) * d), y - 2 + Math.round(Math.sin(a) * d * 0.5), 1, 1, F.hull);
+      R(c, x + 12, y - 1, 3, 2, P.o); R(c, x + 13, y - 1, 1, 1, st === 'working' && blink(t, 400) ? P.p0 : F.hullD);
+    },
+    tests(c, x, y, st, t) {
+      pod(c, x, y, st, { shell: F.glass, shellD: F.glassD, roof: F.cyanL });
+      [x + 3, x + 11].forEach((tx, k) => {
+        R(c, tx, y - 3, 3, 5, P.o); R(c, tx + 1, y - 2, 1, 4, k ? P.fizzB : P.fizzA);
+        if (st === 'working') puffs(c, tx + 1, y - 4, t + k * 500, P.fizzA, P.fizzB);
+      });
+    },
+    research(c, x, y, st, t) {
+      pod(c, x, y, st, { roof: F.cyanL });
+      const a = -2.2 + (st === 'working' ? Math.sin(t / 900) * 0.5 : 0);
+      for (let d = 0; d < 6; d++) R(c, x + 8 + Math.round(Math.cos(a) * d), y + 2 + Math.round(Math.sin(a) * d), 1, 1, d < 5 ? F.hullD : P.o);
+      R(c, x + 8 + Math.round(Math.cos(a) * 6), y + 2 + Math.round(Math.sin(a) * 6), 1, 1, st === 'working' ? P.gold : F.cyanD);
+    },
+    docs(c, x, y, st, t) {
+      pod(c, x, y, st);
+      [F.magenta, F.cyan, P.gold, F.plasmaL].forEach((col, k) => { R(c, x + 4 + k * 2, y - 3 + (k % 2), 2, 4, P.o); R(c, x + 4 + k * 2, y - 2 + (k % 2), 1, 2, col); });
+      if (st === 'working') R(c, x + 4 + Math.floor(t / 250) % 4 * 2, y - 4, 1, 1, P.white);
+    },
+    refactor(c, x, y, st, t) {
+      pod(c, x, y, st);
+      R(c, x + 8, y + 1, 8, 15, 'rgba(240,72,192,.35)');
+      for (let yy = y + 2; yy < y + 16; yy += 3) R(c, x + 8, yy, 8, 1, F.magentaD);
+      if (st === 'working') R(c, x + 8, y + 2 + Math.floor(t / 140) % 13, 8, 1, F.magenta);
+    },
+    perf(c, x, y, st, t) {
+      pod(c, x, y, st, { shell: F.hullD, shellD: F.deckL });
+      [x + 4, x + 11].forEach((fx, k) => {
+        R(c, fx - 3, y - 2, 7, 6, P.o); R(c, fx - 2, y - 1, 5, 4, F.deck);
+        const a = st === 'working' ? t / 90 + k : 0.3;
+        for (let d = -2; d <= 2; d++) R(c, fx + Math.round(Math.cos(a) * d), y + 1 + Math.round(Math.sin(a) * d * 0.7), 1, 1, F.cyan);
+      });
+    },
+    chores(c, x, y, st, t) {
+      R(c, x, y + 3, 16, 13, P.o); R(c, x + 1, y + 4, 14, 11, F.hullD);
+      R(c, x + 1, y + 4, 14, 2, F.deckL); R(c, x + 1, y + 6, 14, 1, P.gold);
+      R(c, x + 4, y + 8, 8, 8, P.o); R(c, x + 5, y + 9, 6, 7, st === 'blocked' ? P.o : F.deck);
+      if (st !== 'blocked') for (let yy = y + 10; yy < y + 16; yy += 2) R(c, x + 5, yy, 6, 1, F.deckD);
+      if (st === 'working') R(c, x + 5, y + 9, 6, 1, F.cyan);
+      R(c, x + 12, y + 12, 4, 4, P.o); R(c, x + 13, y + 13, 2, 2, F.magenta);
+    }
+  };
+  const FUTURE = {
+    name: 'Future',
+    labels: { docks: 'Cargo bay', board: 'Holo-board', houses: 'Pods', quay: 'Launch rail', castle: 'Spaceport', hall: 'Command dome' },
+    ground(c, x0, y0, w, h) {
+      R(c, x0, y0, w, h, F.deckD);
+      for (let x = x0 + 7; x < x0 + w; x += 8) R(c, x, y0, 1, h, F.seam);
+      for (let y = y0 + 7; y < y0 + h; y += 8) R(c, x0, y, w, 1, F.seam);
+      for (let y = y0 + 1; y < y0 + h; y += 16) for (let x = x0 + 1; x < x0 + w; x += 16) R(c, x, y, 1, 1, F.rivet);
+    },
+    /* Walkways with a glowing light strip down the middle. */
+    road(c, x0, y0, w, h) {
+      R(c, x0, y0, w, h, F.deckL);
+      if (w > h && h >= 4) { R(c, x0, y0, w, 1, F.cyanD); R(c, x0, y0 + h - 1, w, 1, F.cyanD); for (let x = x0 + 1; x < x0 + w - 2; x += 4) R(c, x, y0 + (h >> 1), 2, 1, F.cyan); }
+      if (h > w && w >= 4) { R(c, x0, y0, 1, h, F.cyanD); R(c, x0 + w - 1, y0, 1, h, F.cyanD); for (let y = y0 + 1; y < y0 + h - 2; y += 4) R(c, x0 + (w >> 1), y, 1, 2, F.cyan); }
+    },
+    yard(c, x0, y0, w, h) {
+      R(c, x0, y0, w, h, F.deck);
+      for (let x = x0 + 3; x < x0 + w; x += 4) R(c, x, y0, 1, h, F.deckD);
+      for (let y = y0 + 3; y < y0 + h; y += 4) R(c, x0, y, w, 1, F.deckD);
+    },
+    /* Rivers and canals are plasma conduits; their pulses flow. */
+    channel(c, x0, y0, w, h, t, flow) {
+      R(c, x0, y0, w, h, F.space);
+      R(c, x0, y0, w, 1, F.magentaD); R(c, x0, y0 + h - 1, w, 1, F.magentaD);
+      const off = Math.floor(t / 60 * flow) % 10;
+      for (let x = x0 - 10 + off; x < x0 + w; x += 10) if (x >= x0) {
+        R(c, x, y0 + (h >> 1), 4, 1, F.plasmaL); R(c, x + 5, y0 + (h >> 1) - 2, 2, 1, F.plasma); R(c, x + 2, y0 + (h >> 1) + 2, 2, 1, F.cyanD);
+      }
+    },
+    dock(c, x, y, w) {
+      R(c, x, y, w, 7, P.o); R(c, x + 1, y, w - 2, 6, F.hullD);
+      for (let k = 0; k < w - 2; k += 4) R(c, x + 1 + k, y + 5, 2, 1, F.cyan);
+    },
+    /* Groves become station kit: an antenna mast, a solar array or a small dome. */
+    tree(c, x, y) {
+      const k = Math.floor(hash(x, y) * 3);
+      if (k === 0) {
+        R(c, x + 4, y + 9, 5, 3, P.o); R(c, x + 5, y + 9, 3, 2, F.hullD);
+        R(c, x + 6, y + 1, 1, 8, F.hull); R(c, x + 3, y + 3, 7, 1, F.hullD); R(c, x + 4, y + 6, 5, 1, F.hullD);
+        R(c, x + 5, y, 3, 2, P.o); R(c, x + 6, y, 1, 1, blink(now() + x * 31, 900) ? P.p0 : F.magentaD);
+      } else if (k === 1) {
+        R(c, x + 5, y + 7, 2, 5, F.hullD);
+        R(c, x, y + 2, 12, 6, P.o); R(c, x + 1, y + 3, 10, 4, F.panel);
+        for (let xx = x + 3; xx < x + 11; xx += 3) R(c, xx, y + 3, 1, 4, F.panelL);
+        R(c, x + 1, y + 3, 10, 1, F.panelL);
+      } else {
+        [3, 4, 5, 5].forEach((w, dy) => { R(c, x + 6 - w, y + 4 + dy, 2 * w, 1, P.o); if (dy) R(c, x + 7 - w, y + 4 + dy, 2 * w - 2, 1, dy === 1 ? F.cyanL : F.glass); });
+        R(c, x + 1, y + 8, 10, 3, P.o); R(c, x + 2, y + 8, 8, 2, F.hullD);
+      }
+    },
+    /* Command dome: a glass dome on a hull ring, an antenna with a blinking
+     * beacon on top. The hatch goes dark when the manager waits on you. */
+    hall(c, x, y, st) {
+      const x0 = x - 4, gy = y + 22, cx = x0 + 20, base = y + 10, t = now();
+      R(c, cx, y - 16, 1, 12, F.hull); R(c, cx - 3, y - 12, 7, 1, F.hullD);
+      R(c, cx - 1, y - 19, 3, 3, P.o); R(c, cx, y - 18, 1, 1, blink(t, 700) ? P.p0 : F.magentaD);
+      for (let dy = -13; dy <= 0; dy++) {
+        const w = Math.floor(Math.sqrt(14 * 14 - dy * dy));
+        R(c, cx - w, base + dy, 2 * w + 1, 1, P.o);
+        if (dy > -13) R(c, cx - w + 1, base + dy, 2 * w - 1, 1, (dy + 13) % 4 === 0 ? F.cyanD : F.glass);
+      }
+      for (let wy = y; wy < base; wy += 4) for (let wx = cx - 8; wx <= cx + 8; wx += 4) R(c, wx, wy, 2, 2, fWin(st));
+      R(c, cx - 9, base - 11, 3, 2, 'rgba(255,255,255,.55)');
+      R(c, x0, gy - 12, 40, 12, P.o); R(c, x0 + 1, gy - 11, 38, 10, F.hull);
+      R(c, x0 + 1, gy - 11, 38, 1, F.hullL); R(c, x0 + 1, gy - 8, 38, 1, F.cyanD);
+      for (let k = 3; k < 38; k += 6) R(c, x0 + k, gy - 6, 2, 2, F.cyan);
+      R(c, x0 + 16, gy - 9, 8, 9, P.o);
+      R(c, x0 + 17, gy - 8, 6, 8, st === 'blocked' ? P.o : F.hullD);
+      if (st !== 'blocked') R(c, x0 + 20, gy - 8, 1, 8, P.o);
+    },
+    /* Notes float on a hologram between two emitters. */
+    board(c, x, y, notes) {
+      R(c, x + 1, y + 11, 3, 4, P.o); R(c, x + 2, y + 11, 1, 3, F.cyan); R(c, x + 14, y + 11, 3, 4, P.o); R(c, x + 15, y + 11, 1, 3, F.cyan);
+      R(c, x, y, 18, 11, 'rgba(64,224,240,.28)');
+      R(c, x, y, 18, 1, F.cyan); R(c, x, y + 10, 18, 1, F.cyanD); R(c, x, y, 1, 11, F.cyanD); R(c, x + 17, y, 1, 11, F.cyanD);
+      notes.slice(0, 8).forEach((n, i) => R(c, x + 2 + (i % 4) * 4, y + 2 + Math.floor(i / 4) * 4, 3, 3, NOTECOL[n.label] || F.cyanL));
+    },
+    /* A cargo crate riding a little hover-pad. */
+    crate(c, x, y, kind, pr, sealed) {
+      x = Math.round(x); y = Math.round(y);
+      R(c, x, y, 5, 5, P.o); R(c, x + 1, y + 1, 3, 3, F.hull);
+      R(c, x + 1, y + 2, 3, 1, KINDCOL[kind] || F.hullD);
+      R(c, x + 1, y + 4, 3, 1, F.cyan);
+      if (pr === 'P0') R(c, x + 1, y + 1, 1, 1, P.p0);
+      if (sealed) R(c, x + 3, y + 1, 1, 1, P.seal);
+    },
+    B: FB,
+    /* A pod frame going up, a drone welding at it. */
+    scaffold(c, x, y, t) {
+      for (let yy = y + 2; yy < y + 16; yy += 4) R(c, x + 1, yy, 14, 1, F.hullD);
+      R(c, x + 1, y + 2, 1, 14, F.hull); R(c, x + 14, y + 2, 1, 14, F.hull);
+      const dx = x + 3 + Math.floor((Math.sin(t / 600) + 1) * 4), dy = y - 2 + (blink(t, 300) ? 1 : 0);
+      R(c, dx, dy, 5, 3, P.o); R(c, dx + 1, dy + 1, 3, 1, F.hull); R(c, dx - 1, dy, 1, 1, F.hullD); R(c, dx + 5, dy, 1, 1, F.hullD);
+      R(c, dx + 2, dy + 1, 1, 1, F.cyan);
+      if (blink(t, 90)) { R(c, dx + 2, dy + 4, 1, 1, P.white); R(c, dx + 1 + Math.floor(hash(Math.floor(t / 90), 5) * 3), dy + 5, 1, 1, P.gold); }
+    },
+    /* An airlock: two pylons with a force field between them and a status light on the control tower. */
+    gate(c, x, cy, open, flag) {
+      R(c, x - 4, cy - 15, 12, 10, P.o); R(c, x - 3, cy - 14, 10, 8, F.hull); R(c, x - 2, cy - 12, 8, 3, F.glass);
+      R(c, x - 5, cy - 16, 14, 2, F.hullD);
+      R(c, x + 1, cy - 20, 4, 4, P.o); R(c, x + 2, cy - 19, 2, 2, flag);
+      [x - 1, x + 5].forEach(px => { R(c, px, cy - 4, 2, 22, P.o); R(c, px, cy - 3, 1, 20, F.hullD); R(c, px, cy - 3, 2, 1, F.cyan); R(c, px, cy + 16, 2, 1, F.cyan); });
+      if (!open) {
+        R(c, x + 1, cy, 4, 14, 'rgba(240,72,192,.35)');
+        const t = now();
+        for (let k = 0; k < 14; k += 3) R(c, x + 1 + ((k + Math.floor(t / 150)) % 4), cy + k, 1, 1, F.magenta);
+      }
+    },
+    /* The spaceport: shipped work leaves on a shuttle. Its engines fire and
+     * the sky lights up when new work arrives. */
+    destination(c, x, cy, t, fw) {
+      R(c, x, cy - 8, 38, 8, P.o); R(c, x + 1, cy - 7, 36, 6, F.hullD);
+      for (let k = 2; k < 36; k += 6) R(c, x + k, cy - 4, 3, 1, F.cyan);
+      R(c, x + 3, cy - 46, 6, 38, P.o); R(c, x + 4, cy - 45, 4, 36, F.hull);
+      for (let yy = cy - 42; yy < cy - 10; yy += 5) R(c, x + 5, yy, 2, 2, F.cyanL);
+      R(c, x + 2, cy - 52, 8, 6, P.o); R(c, x + 3, cy - 51, 6, 4, F.glass);
+      R(c, x + 5, cy - 56, 1, 4, F.hull); R(c, x + 4, cy - 57, 3, 1, blink(t, 700) || t - fw < 1600 ? P.p0 : F.magentaD);
+      const rx = x + 17, lift = t - fw >= 0 && t - fw < 1600 ? Math.floor((t - fw) / 200) : 0;
+      const sy = cy - 40 - lift;
+      R(c, rx + 3, sy - 6, 6, 4, P.o); R(c, rx + 4, sy - 5, 4, 3, F.hullL);
+      R(c, rx + 1, sy - 2, 10, 32, P.o); R(c, rx + 2, sy - 1, 8, 30, F.hullL); R(c, rx + 2, sy - 1, 2, 30, F.hull);
+      R(c, rx + 2, sy + 8, 8, 2, F.magenta); R(c, rx + 4, sy + 2, 4, 3, P.o); R(c, rx + 5, sy + 3, 2, 1, F.cyan);
+      R(c, rx - 2, sy + 20, 3, 10, P.o); R(c, rx - 1, sy + 21, 2, 8, F.magentaD);
+      R(c, rx + 11, sy + 20, 3, 10, P.o); R(c, rx + 11, sy + 21, 2, 8, F.magentaD);
+      const ft = t - fw;
+      if (ft >= 0 && ft < 1600) {
+        for (let k = 0; k < 4; k++) R(c, rx + 2 + k * 2, sy + 30 + (blink(t + k * 60, 80) ? 1 : 0), 2, 3, k % 2 ? F.cyan : F.cyanL);
+        const p = ft / 1600;
+        [[x + 6, P.gold], [x + 21, F.magenta], [x + 34, F.cyan]].forEach(([fx, col], i) => {
+          const fy = cy - 58 - p * 18 - i * 3;
+          for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; R(c, fx + Math.cos(a) * p * 9, fy + Math.sin(a) * p * 9, 1, 1, col); }
+        });
+      }
+      R(c, x + 8, cy - 2, 22, 18, P.o); R(c, x + 9, cy, 20, 15, F.space);
+      for (let k = 0; k < 4; k++) R(c, x + 11 + k * 5, cy + 7, 2, 1, F.cyanD);
+    },
+    decor(c, x, y, k, t) {
+      switch (k) {
+        case 0: // antenna
+          shadow(c, x + 3, y + 7, 3, 1);
+          R(c, x + 3, y + 1, 1, 7, F.hull); R(c, x + 1, y + 3, 5, 1, F.hullD); R(c, x + 2, y, 3, 2, P.o); R(c, x + 3, y, 1, 1, blink(t + x * 37, 900) ? P.p0 : F.magentaD); break;
+        case 1: // solar panel
+          R(c, x + 3, y + 4, 1, 3, F.hullD); R(c, x, y, 8, 4, P.o); R(c, x + 1, y + 1, 6, 2, F.panel); R(c, x + 1, y + 1, 6, 1, F.panelL); R(c, x + 4, y + 1, 1, 2, F.panelL); break;
+        case 2: // small dome
+          shadow(c, x + 1, y + 6, 7, 1);
+          R(c, x + 2, y + 1, 4, 1, P.o); R(c, x + 1, y + 2, 6, 4, P.o); R(c, x + 2, y + 2, 4, 3, F.glass); R(c, x + 2, y + 2, 2, 1, F.cyanL); R(c, x + 1, y + 5, 6, 1, F.hullD); break;
+        case 3: { // maintenance drone, hovering
+          const b = blink(t + y * 29, 400) ? 1 : 0;
+          shadow(c, x + 2, y + 7, 4, 1);
+          R(c, x + 1, y + 1 + b, 6, 3, P.o); R(c, x + 2, y + 2 + b, 4, 1, F.hull); R(c, x + 3, y + 2 + b, 1, 1, F.cyan);
+          R(c, x, y + b, 2, 1, F.hullD); R(c, x + 6, y + b, 2, 1, F.hullD); break;
+        }
+        case 4: // light bollards
+          [x + 1, x + 5].forEach(bx => { R(c, bx, y + 2, 2, 4, P.o); R(c, bx, y + 2, 2, 1, blink(t + bx * 13, 1400) ? F.cyanL : F.cyan); });
+          R(c, x, y + 6, 8, 1, F.deckL); break;
+        default: // vent grille
+          R(c, x, y + 1, 8, 5, P.o); for (let k = 0; k < 4; k++) R(c, x + 1, y + 2 + k, 6, 1, k % 2 ? F.deck : F.deckL);
+      }
+    },
+    /* Hull trim with a starfield outside it. */
+    border(c, W, H) {
+      R(c, 0, H - 3, W, 3, F.space); R(c, 0, 11, 3, H - 11, F.space); R(c, W - 3, 11, 3, H - 11, F.space);
+      for (let x = 1; x < W; x += 7) R(c, x, H - 2 - (x % 2), 1, 1, hash(x, H) < 0.5 ? P.white : F.cyanL);
+      for (let y = 13; y < H - 3; y += 9) { R(c, 1 + (y % 2), y, 1, 1, P.white); R(c, W - 2 - (y % 2), y + 4, 1, 1, F.cyanL); }
+      R(c, 3, H - 3, W - 6, 1, F.magentaD); R(c, 3, 11, 1, H - 14, F.magentaD); R(c, W - 4, 11, 1, H - 14, F.magentaD);
+    },
+    people: 'future', robots: true,
+    steam: [F.cyanL, F.hullD], sign: [P.o, F.navy, F.cyan]
+  };
+  // In a world the platform is drawn in another theme, so the two read apart.
+  MEDIEVAL.pair = MODERN; MODERN.pair = MEDIEVAL; FUTURE.pair = MODERN;
+
+  const THEMES = { medieval: MEDIEVAL, modern: MODERN, future: FUTURE };
   const themeFromUrl = new URLSearchParams(location.search).get('theme');
   let themeName = THEMES[themeFromUrl] ? themeFromUrl : (() => {
     try { return THEMES[localStorage.getItem('village-theme')] ? localStorage.getItem('village-theme') : 'medieval'; } catch { return 'medieval'; }
@@ -831,6 +1115,19 @@
       ['..oooo..', '.ohhhho.', 'ohhhhhho', 'hhssssho', 'hsossosh', '.hSssSh.', '.ocwwco.', 'oCcwwcCo', 'sCccccCs', '.occcco.', '.opoopo.', '.oo..oo.'],
       // bearded man in a jacket, open collar
       ['..oooo..', '.ohhhho.', 'ohhhhhho', 'ohssssho', 'osossoso', '.ohhhho.', '.ocwwco.', 'oCcwwcCo', 'sCccccCs', '.occcco.', '.opoopo.', '.oo..oo.']
+    ],
+    /* Robots. Same grid and the same hand and foot cells, so poses still
+     * apply. Letters: h head plate, e eye LED, a antenna tip, c/C shell and
+     * its shade, t chest light, s claw, p legs or hover skirt. */
+    future: [
+      // round bot on legs
+      ['....a...', '....o...', '.oooooo.', 'ohhhhhho', 'ohehheho', 'ohhhhhho', '.oooooo.', 'oCcttcCo', 'sCccccCs', '.oCccCo.', '.opoopo.', '.oo..oo.'],
+      // twin-antenna bot with a visor, hovering on a skirt
+      ['.a....a.', '.o....o.', '.oooooo.', 'ohhhhhho', 'oheeeeho', 'ohhhhhho', '.oooooo.', 'oCcttcCo', 'sCccccCs', 'oCccccCo', '.oppppo.', '..oooo..'],
+      // tall can bot
+      ['...aa...', '...oo...', '..oooo..', '.ohhhho.', '.oehheo.', '.ohhhho.', '.oooooo.', 'oCcttcCo', 'sCcttcCs', '.occcco.', '.opoopo.', '.oo..oo.'],
+      // wide one-eyed bot
+      ['...a....', '...o....', 'oooooooo', 'ohhhhhho', 'ohheehho', 'ohhhhhho', 'oooooooo', '.oCttCo.', 'sCccccCs', '.occcco.', '.opoopo.', '.oo..oo.']
     ]
   };
   const SKIN = [['#f8d0a8', '#d8a880'], ['#e8b088', '#c08860'], ['#c88858', '#a06838'], ['#94603c', '#704428'], ['#603c28', '#482818']];
@@ -839,8 +1136,15 @@
     medieval: { cloth: [['#a87848', '#785030'], ['#4878a0', '#305878'], ['#7a8a3a', '#56622a'], ['#8a4a6a', '#62324a'], ['#a85838', '#783a24']], accent: ['#e8dcc0', '#583820', '#f8f8f8'], legs: ['#585060', '#685038'],
       mayor: { c: '#804098', C: '#582868', t: '#f8d040', p: '#302838' } },
     modern: { cloth: [['#283048', '#181c30'], ['#3a3a44', '#262630'], ['#4a3a30', '#33281f'], ['#5a6070', '#40465a'], ['#2a4a70', '#1c3450']], accent: ['#c03838', '#3878c8', '#f8d040', '#48a878'], legs: ['#262630', '#383850'],
-      mayor: { c: '#1c2030', C: '#101420', t: '#f8d040', p: '#181c28' } }
+      mayor: { c: '#1c2030', C: '#101420', t: '#f8d040', p: '#181c28' } },
+    future: { cloth: [['#40c8e0', '#2890a8'], ['#f070c8', '#b04898'], ['#f8c040', '#c08820'], ['#78e070', '#48a848'], ['#a890f8', '#7058c8'], ['#f08858', '#b85830']],
+      accent: ['#40e0f0', '#f048c0', '#f8d040'], legs: ['#585c80', '#40446a'],
+      heads: ['#d8dcf0', '#b8c0dc', '#e8e0f8'],
+      mayor: { c: '#7a4ae0', C: '#4a2ca0', t: '#f8d040', p: '#40446a' } }
   };
+  /* A robot's eyes and antenna say its status: cyan at work, red and
+   * blinking when it needs you, dim when stalled, dark when unknown. */
+  const ROBOT_EYE = { working: '#b8f8ff', idle: '#40e0f0', blocked: '#e02828', done: '#3878e0', stalled: '#585870', unknown: '#383850', stopped: '#383850' };
   function strHash(s) {
     let h = 2166136261;
     for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
@@ -864,6 +1168,7 @@
    * overrides their tie, apron or belt; `mayor` dresses them for the hall. */
   function person(c, x, y, seed, kind = 'stand', opts = {}) {
     const style = T.people, h = strHash(seed + '|' + style);
+    if (T.robots) return robot(c, x, y, seed, h, kind, opts);
     const bodies = BODY[style], dress = DRESS[style];
     const rows = pose(bodies[h % bodies.length], kind);
     const [skin, skinS] = SKIN[(h >>> 3) % SKIN.length];
@@ -898,6 +1203,63 @@
         R(c, x + 14, y - 1, 1, 1, P.white); R(c, x + 15, y + 1, 1, 1, P.white); R(c, x + 14, y + 3, 1, 1, P.white);
       }
     }
+  }
+
+  /* A sub-agent in Future is a mini drone in its specialty's colour. */
+  function drone(c, x, y, col, t) {
+    const b = !reduce && blink(t, 300) ? 1 : 0;
+    x = Math.round(x) + 1; y = Math.round(y) + 3 + b;
+    shadow(c, x + 1, y + 8 - b, 5, 1);
+    R(c, x, y + 1, 7, 4, P.o); R(c, x + 1, y + 2, 5, 2, col); R(c, x + 2, y + 2, 1, 1, P.white); R(c, x + 4, y + 2, 1, 1, P.white);
+    R(c, x - 1, y, 3, 1, P.o); R(c, x + 5, y, 3, 1, P.o);
+    R(c, x + 3, y + 5, 1, 1, '#40e0f0');
+  }
+  /* Draw a robot: the person() of the Future theme. `opts.status` picks its
+   * look; `opts.sub` makes it a drone; `mayor` gives it a crown and a cape. */
+  function robot(c, x, y, seed, h, kind, opts) {
+    const t = now(), st = kind === 'work' || kind === 'work2' ? 'working' : opts.status || 'idle';
+    if (opts.sub && kind !== 'wave' && kind !== 'wave2') return drone(c, x, y, opts.accent || '#f8f8f8', t + (h % 997));
+    const dress = DRESS.future, bodies = BODY.future;
+    const slump = st === 'stalled';
+    let rows = pose(bodies[h % bodies.length], kind);
+    if (slump) rows = ['......a.', '.....o..', ...rows.slice(2)];
+    const shell = opts.mayor ? [dress.mayor.c, dress.mayor.C] : dress.cloth[(h >>> 7) % dress.cloth.length];
+    const eye = opts.sub && st !== 'blocked' ? '#40e0f0' : ROBOT_EYE[st] || ROBOT_EYE.idle;
+    const tip = st === 'blocked' ? (blink(t, 300) ? '#e02828' : '#802828') : st === 'working' && blink(t + (h % 500), 600) ? '#b8f8ff' : slump ? '#585870' : '#f048c0';
+    const map = {
+      o: P.o, w: P.white, s: '#9098b8', S: '#686e90',
+      h: dress.heads[(h >>> 11) % dress.heads.length], e: eye, a: tip,
+      c: shell[0], C: shell[1],
+      t: opts.accent || (opts.mayor ? dress.mayor.t : dress.accent[(h >>> 15) % dress.accent.length]),
+      p: opts.mayor ? dress.mayor.p : dress.legs[(h >>> 19) % dress.legs.length]
+    };
+    x = Math.round(x); y = Math.round(y);
+    // Idle robots hover gently; reduced motion keeps them on the ground.
+    const bob = st === 'idle' && kind === 'stand' && !reduce && blink(t + (h % 900), 700) ? -1 : 0;
+    shadow(c, x + 1, y + 11, 7, 1);
+    const yy = y + bob + (slump ? 1 : 0);
+    if (opts.mayor) { R(c, x - 1, yy + 7, 1, 4, map.C); R(c, x + 8, yy + 7, 1, 4, map.C); }
+    for (let r = 0; r < rows.length; r++) for (let k = 0; k < 8; k++) { const ch = rows[r][k]; if (ch !== '.') R(c, x + k, yy + r, 1, 1, map[ch]); }
+    if (opts.mayor) { R(c, x + 2, yy - 2, 5, 2, P.o); R(c, x + 2, yy - 1, 5, 1, P.gold); R(c, x + 2, yy - 2, 1, 1, P.gold); R(c, x + 4, yy - 3, 1, 1, P.gold); R(c, x + 6, yy - 2, 1, 1, P.gold); }
+    if (kind === 'wave' || kind === 'wave2') {
+      R(c, x + 7, yy + 6, 2, 2, P.o); R(c, x + 7, yy + 6, 1, 1, map.C);
+      if (kind === 'wave') { R(c, x + 8, yy + 1, 2, 6, P.o); R(c, x + 8, yy + 2, 1, 5, map.s); R(c, x + 7, yy - 2, 4, 4, P.o); R(c, x + 8, yy - 1, 2, 2, map.s); }
+      else {
+        R(c, x + 9, yy + 4, 2, 3, P.o); R(c, x + 10, yy + 2, 2, 3, P.o); R(c, x + 9, yy + 5, 1, 1, map.s); R(c, x + 10, yy + 3, 1, 2, map.s);
+        R(c, x + 10, yy - 1, 4, 4, P.o); R(c, x + 11, yy, 2, 2, map.s);
+      }
+      // A red "!" light beside a robot that needs you.
+      if (st === 'blocked') { R(c, x - 3, yy, 2, 4, P.o); R(c, x - 3, yy, 1, 3, '#e02828'); R(c, x - 3, yy + 5, 1, 1, '#e02828'); }
+    }
+    if (st === 'working') {
+      // Arms at work with a tiny wrench, sparks at the tip (none with reduced motion).
+      const up = !reduce && blink(t + (h % 400), 260);
+      R(c, x + 8, yy + (up ? 6 : 7), 3, 1, P.o); R(c, x + 10, yy + (up ? 5 : 6), 1, 3, '#9098b8');
+      if (!reduce && blink(t + (h % 300), 120)) { R(c, x + 11, yy + 4, 1, 1, P.white); R(c, x + 12, yy + 6, 1, 1, P.gold); R(c, x + 12, yy + 3, 1, 1, '#40e0f0'); }
+    }
+    if (st === 'done') { R(c, x + 3, yy + 7, 1, 1, '#3878e0'); R(c, x + 4, yy + 7, 1, 1, '#3878e0'); }
+    // Porters carry their crate on a hover-tray.
+    if (kind === 'carry' || kind === 'carrystep') { R(c, x - 1, yy - 1, 10, 2, P.o); R(c, x, yy - 1, 8, 1, F.hull); if (!reduce && blink(t, 160)) R(c, x + 1, yy + 1, 6, 1, F.cyan); }
   }
 
   /* ---------- Actions ----------
@@ -1102,7 +1464,7 @@
     T.board(c, hallX + 42, 28, v.board); tap(hallX + 42, 28, 18, 16, { kind: 'board' });
     if (v.manager.status !== 'stopped') {
       const busy = v.manager.status === 'working';
-      person(c, hallX + 26, 30, 'manager:' + v.project, v.manager.status === 'blocked' ? waveFrame(t) : busy ? workFrame(t) : 'stand', { mayor: true });
+      person(c, hallX + 26, 30, 'manager:' + v.project, v.manager.status === 'blocked' ? waveFrame(t) : busy ? workFrame(t) : 'stand', { mayor: true, status: v.manager.status });
       if (busy) drawAction(c, hallX + 26, 30, v.manager.action, t);
       tap(hallX + 26, 30, 8, 12, { kind: 'hall' });
     }
@@ -1110,7 +1472,7 @@
     (v.manager.subagents || []).slice(0, 4).forEach((sa, k) => {
       const bob = !reduce && blink(t + k * 170, 220) ? -1 : 0;
       const seed = `manager:${v.project}/${sa.description || k}`, px = hallX - 2 + k * 10 + (reduce ? 0 : wander(sa.action, t, seed));
-      person(c, px, 39 + bob, seed, 'stand', { accent: subHat(sa) });
+      person(c, px, 39 + bob, seed, 'stand', { accent: subHat(sa), sub: true, status: sa.status });
       tap(px, 38, 8, 13, { kind: 'sub', house: -1, sa, id: sa.description || k });
       drawAction(c, px, 39 + bob, sa.action, t + k * 131);
     });
@@ -1131,12 +1493,15 @@
       if (st === 'unknown') R(c, lot.x - 1, lot.y - 6, 18, 23, 'rgba(32,34,60,.6)');
       const away = porters.some(p => p.seed === h.id);
       if (!away) {
-        if (st === 'idle') person(c, lot.x + 4, lot.y + 9, h.id);
-        if (st === 'done') person(c, lot.x + 4, lot.y + 8, h.id);
-        if (st === 'blocked') person(c, lot.x + 4, lot.y + 10, h.id, waveFrame(t + i * 90));
+        if (st === 'idle') person(c, lot.x + 4, lot.y + 9, h.id, 'stand', { status: st });
+        if (st === 'done') person(c, lot.x + 4, lot.y + 8, h.id, 'stand', { status: st });
+        if (st === 'blocked') person(c, lot.x + 4, lot.y + 10, h.id, waveFrame(t + i * 90), { status: st });
         // A working agent is one busy figure at its door, acting out what it is doing.
-        if (st === 'working') { person(c, lot.x + 4, lot.y + 8, h.id, workFrame(tt)); drawAction(c, lot.x + 4, lot.y + 8, h.action, tt); }
-        if (['idle', 'done', 'blocked', 'working'].includes(st)) tap(lot.x + 4, lot.y + 8, 8, 12, { kind: 'person', i, who: h.crew[0] });
+        if (st === 'working') { person(c, lot.x + 4, lot.y + 8, h.id, workFrame(tt), { status: st }); drawAction(c, lot.x + 4, lot.y + 8, h.action, tt); }
+        // Robots show every status, so a stalled one sits slumped at its door.
+        const slumped = T.robots && st === 'stalled';
+        if (slumped) person(c, lot.x + 4, lot.y + 9, h.id, 'stand', { status: st });
+        if (['idle', 'done', 'blocked', 'working'].includes(st) || slumped) tap(lot.x + 4, lot.y + 8, 8, 12, { kind: 'person', i, who: h.crew[0] });
       }
       if (h.crew.length > 1 && st !== 'working') { person(c, lot.x + 12, lot.y + 11, h.id + '#crew'); tap(lot.x + 12, lot.y + 11, 8, 12, { kind: 'person', i, who: h.crew[1] }); }
       if (h.crew.length > 1 && st === 'working' && !reduce) puffs(c, lot.x + 3, lot.y - 3, tt + 700, ...T.steam);
@@ -1149,7 +1514,7 @@
         const bob = !reduce && blink(t + k * 190, 210) ? -1 : 0;
         const waiting = sa.status === 'blocked', seed = `${h.id}/${sa.description || k}`, [sx, sy] = SUB_SLOTS[k];
         const px = lot.x + sx + (reduce ? 0 : wander(sa.action, t, seed)), py = lot.y + sy + bob;
-        person(c, px, waiting ? lot.y + sy : py, seed, waiting ? waveFrame(t + k * 110) : 'stand', { accent: subHat(sa) });
+        person(c, px, waiting ? lot.y + sy : py, seed, waiting ? waveFrame(t + k * 110) : 'stand', { accent: subHat(sa), sub: true, status: sa.status });
         tap(px, lot.y + sy - 1, 8, 13, { kind: 'sub', house: i, sa, id: sa.description || k });
         if (!waiting) drawAction(c, px, py, sa.action, t + k * 97);
       });
@@ -1256,7 +1621,12 @@
   /* A barge on the canal, or a flatbed truck on the district's road. */
   function drawBarge(c, b, t) {
     const x = b.x, y = b.y + (!reduce && blink(t, 700) ? 1 : 0);
-    if (T === MODERN) {
+    if (T === FUTURE) {
+      // A hover-barge: hull, cockpit, a glow under it.
+      R(c, x, y + 6, 24, 4, P.o); R(c, x + 1, y + 6, 22, 2, F.hull); R(c, x + 1, y + 6, 22, 1, b.col);
+      R(c, x + 18, y + 1, 6, 6, P.o); R(c, x + 19, y + 2, 4, 3, F.glass);
+      R(c, x + 2, y + 10, 20, 1, !reduce && blink(t, 200) ? F.cyanL : F.cyan);
+    } else if (T === MODERN) {
       R(c, x, y + 6, 20, 4, P.o); R(c, x + 1, y + 6, 18, 2, M.steel); R(c, x + 1, y + 6, 18, 1, b.col);
       R(c, x + 19, y + 1, 6, 9, P.o); R(c, x + 20, y + 2, 4, 6, P.white); R(c, x + 21, y + 3, 3, 2, M.glassL);
       [x + 3, x + 14, x + 21].forEach(wx => { R(c, wx, y + 9, 3, 3, P.o); R(c, wx + 1, y + 10, 1, 1, M.steel); });
@@ -1270,7 +1640,7 @@
   /* Fog over a stop with neither a Deployment nor a branch: "?", never "not live". */
   function fogStop(c, v, i, lay, t) {
     const last = v.pipeline.stops.length - 1, x = i === last ? lay.castleX - 4 : lay.lockStart + i * 34 - 7, w = i === last ? 46 : 32;
-    R(c, x, lay.canalY - 28, w, lay.H - lay.canalY + 28, T === MODERN ? 'rgba(170,176,196,.75)' : 'rgba(206,210,230,.72)');
+    R(c, x, lay.canalY - 28, w, lay.H - lay.canalY + 28, T === MODERN ? 'rgba(170,176,196,.75)' : T === FUTURE ? 'rgba(60,52,110,.78)' : 'rgba(206,210,230,.72)');
     if (!reduce) for (let k = 0; k < w / 6 - 1; k++) puffs(c, x + 4 + k * 6, lay.canalY - 18 + (k % 2) * 22, t + k * 330, '#e0e4f0', '#b8c0d8');
     bubble(c, x + (w >> 1) - 4, lay.canalY - 6, 'unknown');
   }
@@ -1279,7 +1649,7 @@
    * its foot: a scroll in the village, a clipboard downtown. */
   function drawBanner(c, g, on, t) {
     const { x, y, f } = g, col = f.live ? P.gold : g.col, wave = !reduce && blink(t + f.number * 7, 320) ? 1 : 0;
-    const stuck = (f.stuck || []).length > 0, top = stuck ? y - 7 : y - 1, modern = T === MODERN;
+    const stuck = (f.stuck || []).length > 0, top = stuck ? y - 7 : y - 1, modern = T !== MEDIEVAL;
     R(c, x - 2, y + 23, 5, 2, P.o); R(c, x - 1, y + 23, 3, 1, modern ? M.concrete : P.stoneD);
     R(c, x, top, 1, y + 23 - top, modern ? M.steelD : P.o); R(c, x, top - 1, 1, 1, P.gold);
     R(c, x + 1, y, 14, 10, P.o); R(c, x + 1, y + 1, 13, 8, col); R(c, x + 1, y + 1, 13, 1, P.white);
@@ -1361,7 +1731,7 @@
    * the right to the platform, until its workers run them. The platform is
    * drawn in the other style, so the two read apart at a glance. */
   const SIDE = 24, GAP = 28;
-  const otherTheme = () => (T === MEDIEVAL ? MODERN : MEDIEVAL);
+  const otherTheme = () => T.pair || MEDIEVAL;
   function worldGeom(Ps, Ds) {
     const W = Math.max(Ps.L.W, Ds.L.W) + 2 * SIDE, devTop = Ps.L.H + GAP;
     return { W, H: devTop + Ds.L.H, devTop, srcY: Ps.L.top, roadY: 53 };
@@ -1373,17 +1743,18 @@
   }
   /* A channel that flows down: water in the village, a conveyor road in the district. */
   function downstream(c, x, y, w, h, t) {
-    const modern = T === MODERN;
-    R(c, x, y, w, h, modern ? M.asphaltD : P.water);
-    R(c, x, y, 1, h, modern ? M.concreteD : P.waterD); R(c, x + w - 1, y, 1, h, modern ? M.concreteD : P.waterD);
+    const modern = T !== MEDIEVAL, fut = T === FUTURE;
+    R(c, x, y, w, h, fut ? F.space : modern ? M.asphaltD : P.water);
+    const edge = fut ? F.magentaD : modern ? M.concreteD : P.waterD;
+    R(c, x, y, 1, h, edge); R(c, x + w - 1, y, 1, h, edge);
     const off = Math.floor(t / 70) % 8;
     for (let yy = y - 8 + off; yy < y + h; yy += 8) if (yy >= y) {
-      if (modern) R(c, x + (w >> 1), yy, 1, 4, P.white);
+      if (modern) R(c, x + (w >> 1), yy, 1, 4, fut ? F.plasmaL : P.white);
       else { R(c, x + 3, yy, 1, 2, P.waterL); R(c, x + w - 5, yy + 4, 1, 2, P.waterL); }
     }
   }
   function cart(c, x, y, loads) {
-    const modern = T === MODERN;
+    const modern = T !== MEDIEVAL;
     x = Math.round(x); y = Math.round(y);
     R(c, x, y, 14, 8, P.o); R(c, x + 1, y + 1, 12, 5, modern ? P.white : P.wood);
     if (modern) { R(c, x + 10, y - 3, 4, 4, P.o); R(c, x + 11, y - 2, 2, 2, M.glassL); }
@@ -1441,7 +1812,7 @@
 
     // The river down: from the platform's gate to the dev village's river.
     downstream(ctx, 5, g.srcY, 14, g.devTop + 11 - g.srcY, t);
-    R(ctx, 2, g.srcY - 8, 20, 8, P.o); R(ctx, 3, g.srcY - 7, 18, 6, T === MODERN ? M.concrete : P.stone); R(ctx, 9, g.srcY - 6, 6, 5, P.dark);
+    R(ctx, 2, g.srcY - 8, 20, 8, P.o); R(ctx, 3, g.srcY - 7, 18, 6, T === MODERN ? M.concrete : T === FUTURE ? F.hullD : P.stone); R(ctx, 9, g.srcY - 6, 6, 5, P.dark);
     // The road up: from the dev village's harbour to the platform's main road.
     const ry = g.devTop + Ds.L.canalY + 4;
     T.road(ctx, g.W - 20, g.roadY - 3, 16, ry - g.roadY + 9);

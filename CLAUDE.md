@@ -13,6 +13,16 @@ cargo run            # Run the TUI
 cargo install --path . # Install globally as `agents-tui`
 ```
 
+To serve the web UI to tailnet devices and this machine together, give
+`--web-bind` a comma-separated list (one listener per address; `tailscale`
+expands to this machine's tailnet addresses):
+
+```bash
+agents-tui --headless --web-port 7890 --web-bind 127.0.0.1,tailscale --read-only
+```
+
+Avoid `0.0.0.0`: it also exposes the UI on the LAN, and it has no authentication.
+
 ## Testing
 
 ```bash

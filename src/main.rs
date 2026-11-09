@@ -39,7 +39,8 @@ struct CliOptions {
     /// Kubernetes namespaces drawn as runtime villages (`--runtime k8s:[<context>/]<namespace>`).
     kubernetes: Vec<String>,
     /// Address the web UI listens on (`--web-bind`); loopback by default.
-    web_bind: Option<std::net::IpAddr>,
+    /// Addresses the web UI listens on (`--web-bind a,b`); empty means loopback.
+    web_bind: Vec<std::net::IpAddr>,
     /// Refuse every request that would change something (`--read-only`).
     read_only: bool,
     /// Dev villages paired with the platform they build (`--world shop=temporal:agents`).
@@ -69,7 +70,7 @@ where
     let mut temporal_url = None;
     let mut temporal_ui = None;
     let mut kubernetes = Vec::new();
-    let mut web_bind = None;
+    let mut web_bind = Vec::new();
     let mut read_only = false;
     let mut worlds = Vec::new();
     let mut incident_label = None;
@@ -171,16 +172,10 @@ where
                 let Some(value) = iter.next() else {
                     anyhow::bail!("--web-bind requires an address, e.g. 0.0.0.0");
                 };
-                let raw = value.as_ref();
-                web_bind = Some(raw.parse().map_err(|_| {
-                    anyhow::anyhow!("--web-bind value '{raw}' is not an IP address")
-                })?);
+                web_bind = parse_web_bind(value.as_ref(), tailscale_ips)?;
             }
             value if value.starts_with("--web-bind=") => {
-                let raw = value.trim_start_matches("--web-bind=");
-                web_bind = Some(raw.parse().map_err(|_| {
-                    anyhow::anyhow!("--web-bind value '{raw}' is not an IP address")
-                })?);
+                web_bind = parse_web_bind(value.trim_start_matches("--web-bind="), tailscale_ips)?;
             }
             "--runtime" => {
                 let Some(value) = iter.next() else {
@@ -264,10 +259,48 @@ fn runtime_spec(spec: &str, temporal: &mut Vec<String>, kubernetes: &mut Vec<Str
     Ok(())
 }
 
+/// `--web-bind` as a comma-separated list: IPv4 and IPv6 literals (`::1`,
+/// `[fd7a::1]`), and `tailscale` for this machine's tailnet addresses. Any
+/// entry that isn't one fails the whole flag, naming it, so a typo can't
+/// silently drop an address.
+fn parse_web_bind(
+    raw: &str,
+    tailscale: impl Fn() -> anyhow::Result<Vec<std::net::IpAddr>>,
+) -> anyhow::Result<Vec<std::net::IpAddr>> {
+    let mut ips = Vec::new();
+    for entry in raw.split(',').map(str::trim) {
+        if entry.is_empty() {
+            anyhow::bail!("--web-bind '{raw}' has an empty entry");
+        }
+        if entry.eq_ignore_ascii_case("tailscale") {
+            ips.extend(tailscale()?);
+            continue;
+        }
+        let literal = entry.strip_prefix('[').and_then(|e| e.strip_suffix(']')).unwrap_or(entry);
+        ips.push(literal.parse().map_err(|_| anyhow::anyhow!("--web-bind value '{entry}' is not an IP address (or `tailscale`)"))?);
+    }
+    ips.dedup();
+    Ok(ips)
+}
+
+/// This machine's tailnet addresses, from `tailscale ip`.
+fn tailscale_ips() -> anyhow::Result<Vec<std::net::IpAddr>> {
+    let out = std::process::Command::new("tailscale")
+        .arg("ip")
+        .output()
+        .map_err(|e| anyhow::anyhow!("--web-bind tailscale: couldn't run `tailscale ip`: {e}"))?;
+    let ips: Vec<std::net::IpAddr> =
+        String::from_utf8_lossy(&out.stdout).lines().filter_map(|l| l.trim().parse().ok()).collect();
+    if !out.status.success() || ips.is_empty() {
+        anyhow::bail!("--web-bind tailscale: `tailscale ip` reported no addresses (is tailscale up?)");
+    }
+    Ok(ips)
+}
+
 /// Where the web UI listens: loopback unless `--web-bind` says otherwise.
-fn web_addr(cli: &CliOptions, port: u16) -> std::net::SocketAddr {
-    let ip = cli.web_bind.unwrap_or(std::net::IpAddr::from([127, 0, 0, 1]));
-    std::net::SocketAddr::new(ip, port)
+fn web_addrs(cli: &CliOptions, port: u16) -> Vec<std::net::SocketAddr> {
+    let ips = if cli.web_bind.is_empty() { vec![std::net::IpAddr::from([127, 0, 0, 1])] } else { cli.web_bind.clone() };
+    ips.into_iter().map(|ip| std::net::SocketAddr::new(ip, port)).collect()
 }
 
 /// The village sources: swarm villages from `--source`, a village per
@@ -409,9 +442,9 @@ async fn main() -> Result<()> {
             transport,
             village: village_cache(&cli),
         };
-        let (addr, read_only) = (web_addr(&cli, port), cli.read_only);
+        let (addrs, read_only) = (web_addrs(&cli, port), cli.read_only);
         tokio::spawn(async move {
-            if let Err(e) = web::server::run(addr, read_only, web_server_state).await {
+            if let Err(e) = web::server::run(&addrs, read_only, web_server_state).await {
                 tracing::error!("Web server exited with error: {e:#}");
             }
         });
@@ -473,12 +506,12 @@ async fn run_headless(cli: &CliOptions) -> Result<()> {
 
     // Unlike the TUI path, this awaits the server instead of detaching it --
     // the process has nothing else to keep it alive.
-    web::server::run(web_addr(cli, port), cli.read_only, state).await
+    web::server::run(&web_addrs(cli, port), cli.read_only, state).await
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{CliOptions, parse_cli_options, select_initial_agent_type, web_addr};
+    use super::{CliOptions, parse_cli_options, select_initial_agent_type, parse_web_bind, web_addrs};
     use crate::model::swarm::AgentType;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -508,7 +541,7 @@ mod tests {
                 temporal_url: None,
                 temporal_ui: None,
                 kubernetes: Vec::new(),
-                web_bind: None,
+                web_bind: Vec::new(),
                 read_only: false,
                 worlds: Vec::new(),
                 incident_label: None,
@@ -530,11 +563,38 @@ mod tests {
     #[test]
     fn web_bind_and_read_only() {
         let cli = parse_cli_options(["agents-tui", "--headless", "--web-bind", "0.0.0.0", "--read-only"]).unwrap();
-        assert_eq!(web_addr(&cli, 7878).to_string(), "0.0.0.0:7878");
+        assert_eq!(web_addrs(&cli, 7878), ["0.0.0.0:7878".parse().unwrap()]);
         assert!(cli.read_only);
         let local = parse_cli_options(["agents-tui", "--web"]).unwrap();
-        assert_eq!(web_addr(&local, 7878).to_string(), "127.0.0.1:7878");
+        assert_eq!(web_addrs(&local, 7878), ["127.0.0.1:7878".parse().unwrap()]);
         assert!(parse_cli_options(["agents-tui", "--web-bind", "nope"]).is_err());
+    }
+
+    #[test]
+    fn web_bind_takes_a_list_of_addresses() {
+        let cli = parse_cli_options(["agents-tui", "--headless", "--web-bind", "127.0.0.1,100.98.138.89"]).unwrap();
+        let want: Vec<std::net::SocketAddr> = vec!["127.0.0.1:7890".parse().unwrap(), "100.98.138.89:7890".parse().unwrap()];
+        assert_eq!(web_addrs(&cli, 7890), want);
+        let eq = parse_cli_options(["agents-tui", "--web-bind=127.0.0.1, ::1"]).unwrap();
+        assert_eq!(web_addrs(&eq, 1), ["127.0.0.1:1".parse().unwrap(), "[::1]:1".parse().unwrap()] as [std::net::SocketAddr; 2]);
+    }
+
+    #[test]
+    fn web_bind_parses_ipv6_and_names_bad_entries() {
+        let none = || -> anyhow::Result<Vec<std::net::IpAddr>> { anyhow::bail!("no tailscale here") };
+        assert_eq!(parse_web_bind("[fd7a:115c::1]", none).unwrap(), ["fd7a:115c::1".parse::<std::net::IpAddr>().unwrap()]);
+        assert_eq!(parse_web_bind("::1", none).unwrap(), ["::1".parse::<std::net::IpAddr>().unwrap()]);
+        let err = parse_web_bind("127.0.0.1,127.0.0.l", none).unwrap_err().to_string();
+        assert!(err.contains("'127.0.0.l'"), "{err}");
+        assert!(parse_web_bind("127.0.0.1,", none).is_err(), "a trailing comma is a typo, not nothing");
+        assert!(parse_web_bind("tailscale", none).is_err());
+    }
+
+    #[test]
+    fn web_bind_tailscale_expands_to_the_tailnet_addresses() {
+        let ts = || Ok(vec!["100.98.138.89".parse().unwrap(), "fd7a::5".parse().unwrap()]);
+        let ips = parse_web_bind("127.0.0.1,tailscale", ts).unwrap();
+        assert_eq!(ips, ["127.0.0.1", "100.98.138.89", "fd7a::5"].map(|s| s.parse::<std::net::IpAddr>().unwrap()));
     }
 
     #[test]
@@ -630,7 +690,7 @@ mod tests {
                 temporal_url: None,
                 temporal_ui: None,
                 kubernetes: Vec::new(),
-                web_bind: None,
+                web_bind: Vec::new(),
                 read_only: false,
                 worlds: Vec::new(),
                 incident_label: None,
@@ -651,7 +711,7 @@ mod tests {
                 temporal_url: None,
                 temporal_ui: None,
                 kubernetes: Vec::new(),
-                web_bind: None,
+                web_bind: Vec::new(),
                 read_only: false,
                 worlds: Vec::new(),
                 incident_label: None,
