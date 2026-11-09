@@ -165,6 +165,21 @@ Before merging: the full suite must pass (`cargo test`), and the merge must be
 conflict-free. If it conflicts, rebase onto the integration branch and re-run
 the tests rather than merging with conflicts resolved blindly.
 
+**Always rebase before you merge.** Immediately before launching the merge
+(`merge-launch.sh` / `merge-to-integration.sh`), every worker must:
+
+1. `git fetch origin` and `git rebase origin/master` on its feature branch.
+2. Resolve any conflicts itself, keeping both sides' behaviour. Most work here
+   edits `src/web/village.html`, so other workers' changes land there
+   constantly; read what they added rather than taking "ours".
+3. Re-run the full suite (`source "$HOME/.cargo/env" && cargo test`) on the
+   rebased branch, and only then launch the merge.
+
+The merge job's own pre-integration sync then finds nothing to do. If the merge
+job still reports a conflict (master moved again in the meantime), that is not
+a `needs-clarification` question for the user: rebase again, re-test and
+re-launch. Escalate to the user only if the same conflict comes back twice.
+
 ### Integration Branch
 ```
 master
