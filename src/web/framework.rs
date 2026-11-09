@@ -31,7 +31,7 @@ use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 
 use super::source::{Reading, TtlCache, VillageSource};
-use super::village::{Action, Crate, House, HouseKind, HouseStatus, Note, Pipeline, Promotion, Stop, StopSource, Subagent, VillageSnapshot, house_kind};
+use super::village::{Action, Crate, GateEntry, House, HouseKind, HouseStatus, Note, Pipeline, Promotion, Stop, StopSource, Subagent, VillageSnapshot, house_kind};
 use super::{IssueSnapshot, SwarmSnapshot};
 use crate::transport::ServerTransport;
 
@@ -354,6 +354,9 @@ pub struct Task {
     /// a feature, followed from spec to production.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
+    /// Where the task is in the merge gate, once its work has left the worker.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate: Option<super::gate::TaskGate>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -392,6 +395,9 @@ pub struct ReportPipeline {
     /// through the stages one by one or together.
     #[serde(default)]
     pub promotion: Promotion,
+    /// The merge gate on the host that lands the work: its slots and trains.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge: Option<super::gate::MergeGate>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -553,6 +559,12 @@ fn task_link_label(url: &str, id: &str) -> String {
 
 /// The note label a blocked or failed task is pinned with.
 fn note_label(t: &Task) -> String {
+    // A gate that handed the work back says why, ahead of any label.
+    match t.gate.as_ref().map(|g| g.state) {
+        Some(super::gate::GateState::Conflict) => return "conflict".to_string(),
+        Some(super::gate::GateState::Failed | super::gate::GateState::RedBase) if t.state == TaskState::Failed => return "failed".to_string(),
+        _ => {}
+    }
     t.labels
         .iter()
         .find(|l| crate::model::issue::BLOCKING_LABELS.contains(&l.as_str()))
@@ -575,10 +587,15 @@ pub fn to_village(report: &Report) -> Reading {
 
     let p = &report.pipeline;
     let numbers = |ids: &[String]| ids.iter().map(|i| task_number(i)).collect::<Vec<u32>>();
+    // The quay is for landed work: a task still in the merge gate isn't there yet.
+    let gates: Vec<GateEntry> = report.tasks.iter().filter_map(|t| t.gate.clone().map(|gate| GateEntry { issue: task_number(&t.id), gate })).collect();
+    let gating: HashSet<u32> = gates.iter().filter(|g| g.gate.state.in_flight() || g.gate.state.handed_back()).map(|g| g.issue).collect();
     let pipeline = Pipeline {
         integration: p.integration.clone(),
         sentinel: if p.gate.is_empty() { "unknown".to_string() } else { p.gate.clone() },
-        quay: numbers(&p.landed),
+        quay: numbers(&p.landed).into_iter().filter(|n| !gating.contains(n)).collect(),
+        gates,
+        merge: p.merge.clone(),
         stops: p
             .stages
             .iter()
@@ -716,6 +733,12 @@ pub const HANDED_OFF_LABELS: &[&str] = &["merging", "awaiting-integration"];
 /// A coding swarm's report. Agents sharing a worktree are one workstream;
 /// `issues` are the swarm's open issues and `pipeline` where pushed work is.
 pub fn swarm_report(swarm: &SwarmSnapshot, issues: &[IssueSnapshot], pipeline: &Pipeline) -> Report {
+    swarm_report_gated(swarm, issues, pipeline, &super::gate::GateReading::default())
+}
+
+/// [`swarm_report`] with what the merge gate's files on this host say.
+pub fn swarm_report_gated(swarm: &SwarmSnapshot, issues: &[IssueSnapshot], pipeline: &Pipeline, gate: &super::gate::GateReading) -> Report {
+    let (gates, merge) = super::gate::assess(gate, issues, std::time::SystemTime::now());
     let mut order: Vec<String> = Vec::new();
     let mut crews: HashMap<String, Vec<&super::AgentSnapshot>> = HashMap::new();
     for worker in &swarm.workers {
@@ -738,13 +761,18 @@ pub fn swarm_report(swarm: &SwarmSnapshot, issues: &[IssueSnapshot], pipeline: &
     // autocoder hands an issue to a merge job (`merging`) and parks it once
     // landed but not yet proven green (`awaiting-integration`): either way it
     // has left the worker and waits at the quay, if git hasn't placed it yet.
+    // When the merge job's files say more, they decide: work still in the
+    // gate, or handed back by it, has not landed.
     let placed: HashSet<u32> = pipeline.quay.iter().chain(pipeline.stops.iter().flat_map(|s| s.issues.iter())).copied().collect();
     let mut landed = ids(&pipeline.quay);
     landed.extend(
         issues
             .iter()
             .filter(|i| i.state == "open" && !placed.contains(&i.number))
-            .filter(|i| i.labels.iter().any(|l| HANDED_OFF_LABELS.contains(&l.as_str())))
+            .filter(|i| match gates.get(&i.number) {
+                Some(g) => g.landed,
+                None => i.labels.iter().any(|l| HANDED_OFF_LABELS.contains(&l.as_str())),
+            })
             .map(|i| i.number.to_string()),
     );
     Report {
@@ -764,15 +792,18 @@ pub fn swarm_report(swarm: &SwarmSnapshot, issues: &[IssueSnapshot], pipeline: &
                 title: i.title.clone(),
                 labels: i.labels.clone(),
                 priority: Some(i.priority.clone()).filter(|p| !p.is_empty()),
-                state: if i.labels.iter().any(|l| crate::model::issue::BLOCKING_LABELS.contains(&l.as_str())) {
+                state: if gates.get(&i.number).is_some_and(|g| g.state.handed_back() || (g.state == super::gate::GateState::RedBase && !g.landed)) {
+                    TaskState::Failed
+                } else if i.labels.iter().any(|l| crate::model::issue::BLOCKING_LABELS.contains(&l.as_str())) {
                     TaskState::Blocked
-                } else if i.is_working || i.labels.iter().any(|l| l == "decomposed") {
+                } else if i.is_working || i.labels.iter().any(|l| l == "decomposed") || gates.get(&i.number).is_some_and(|g| g.state.in_flight()) {
                     TaskState::Claimed
                 } else {
                     TaskState::Open
                 },
                 url: Some(i.url.clone()).filter(|u| !u.is_empty()),
                 parent: None,
+                gate: gates.get(&i.number).cloned(),
             })
             .collect(),
         pipeline: ReportPipeline {
@@ -786,6 +817,7 @@ pub fn swarm_report(swarm: &SwarmSnapshot, issues: &[IssueSnapshot], pipeline: &
                 .collect(),
             release: pipeline.release.clone(),
             promotion: pipeline.promotion,
+            merge,
         },
         builds: Vec::new(),
     }
@@ -1005,6 +1037,76 @@ mod tests {
         assert_eq!(v.pipeline.quay, vec![1], "#2 is already placed by git");
         assert_eq!(v.backlog.iter().map(|c| c.number).collect::<Vec<_>>(), vec![4]);
         assert_eq!(v.board.iter().map(|n| (n.number, n.label.as_str())).collect::<Vec<_>>(), vec![(5, "needs-feedback")]);
+    }
+
+    #[test]
+    fn the_merge_gate_decides_what_is_at_the_quay() {
+        use super::super::gate::{GateReading, GateState, Job};
+        let issue = |n: u32, labels: &[&str]| IssueSnapshot {
+            number: n,
+            state: "open".into(),
+            labels: labels.iter().map(|l| l.to_string()).collect(),
+            url: format!("https://github.com/acme/shop/issues/{n}"),
+            ..IssueSnapshot::default()
+        };
+        let swarm: SwarmSnapshot = serde_json::from_value(serde_json::json!({
+            "project_name": "shop", "repo_path": "", "agent_type": "claude", "workflow": null, "tmux_session": "",
+            "stopped": false, "busy_count": 0, "idle_count": 0, "attention_count": 0, "workers": [], "issues": [],
+            "manager": {"id": "m", "role": "manager", "state": "Idle", "is_manager": true, "waiting_for_input": false,
+                "current_issue": null, "current_issue_title": null, "pane_content": "", "tmux_target": "", "health": "Healthy",
+                "completed_issue_count": 0, "resurrection_attempts": 0, "status_timestamp": null}
+        }))
+        .unwrap();
+        let job = |n: u32, alive: bool, exit: Option<i32>, log: &str| Job { issue: n, alive, exit, log: log.into(), slot: alive.then_some(1), ..Job::default() };
+        let reading = GateReading {
+            local: true,
+            slots: 2,
+            busy: vec![1],
+            jobs: vec![
+                job(1, true, None, "🧪 Gating the integrated tree a: cargo test\n"),
+                job(2, true, None, "⏳ All 2 gate slot(s) on this host are busy; waiting for slot 2 (12:00:00)\n"),
+                job(3, false, Some(2), "❌ Tests fail on the integrated tree a.\n❌ origin/master passes alone, so this change broke it. NOT pushing.\n"),
+                job(4, false, Some(1), "❌ Merge conflict integrating 'master' into feature/issue-4.\n"),
+                job(5, false, Some(0), "✅ Issue #5 merged into 'master' (disjoint re-sync; ...)\n"),
+            ],
+        };
+        let issues = vec![
+            issue(1, &["merging"]),
+            issue(2, &["working"]),
+            issue(3, &["needs-clarification"]),
+            issue(4, &["needs-clarification"]),
+            issue(5, &["awaiting-integration"]),
+            issue(6, &["merging"]),
+        ];
+        let report = swarm_report_gated(&swarm, &issues, &Pipeline::default(), &reading);
+        let task = |n: &str| report.tasks.iter().find(|t| t.id == n).unwrap();
+        assert_eq!(task("1").gate.as_ref().map(|g| (g.state, g.slot)), Some((GateState::Gating, Some(1))));
+        assert_eq!(task("2").state, TaskState::Claimed, "queued for the gate, not in the backlog");
+        assert_eq!(task("3").state, TaskState::Failed);
+        assert_eq!(report.pipeline.merge.as_ref().map(|m| (m.slots, m.busy.clone())), Some((2, vec![1])));
+
+        let v = to_village(&report).village;
+        // Landed work only: #5 landed unproven; #6 has no job here, so its label still counts.
+        assert_eq!(v.pipeline.quay, vec![5, 6]);
+        let states: Vec<(u32, GateState)> = v.pipeline.gates.iter().map(|g| (g.issue, g.gate.state)).collect();
+        assert_eq!(states, vec![(1, GateState::Gating), (2, GateState::Queued), (3, GateState::Failed), (4, GateState::Conflict), (5, GateState::LandedUnproven)]);
+        // Handed back: on the board, saying why, with the issue holding the gate's comment.
+        assert_eq!(v.board.iter().map(|n| (n.number, n.label.as_str())).collect::<Vec<_>>(), vec![(3, "failed"), (4, "conflict")]);
+        assert_eq!(v.pipeline.gates[2].gate.failure_url.as_deref(), Some("https://github.com/acme/shop/issues/3"));
+        assert!(v.backlog.is_empty());
+        let json = serde_json::to_value(&v.pipeline).unwrap();
+        assert_eq!(json["gates"][0], serde_json::json!({"issue": 1, "state": "gating", "landed": false, "slot": 1, "attempt": 1}));
+        assert_eq!(json["merge"], serde_json::json!({"slots": 2, "busy": [1]}));
+
+        // An outside report says the same with `gate` on its tasks: in-flight work leaves the quay.
+        let outside: Report = serde_json::from_value(serde_json::json!({
+            "project": "x", "tasks": [{"id": "9", "gate": {"state": "merging"}}, {"id": "10"}],
+            "pipeline": {"landed": ["9", "10"], "merge": {"slots": 1, "busy": [], "trains": [{"id": "t1", "members": ["9"], "state": "merging"}]}}
+        }))
+        .unwrap();
+        let v = to_village(&outside).village;
+        assert_eq!(v.pipeline.quay, vec![10]);
+        assert_eq!(v.pipeline.merge.unwrap().trains[0].members, vec!["9".to_string()]);
     }
 
     #[test]

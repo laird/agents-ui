@@ -2,6 +2,7 @@ pub mod deployments;
 pub mod discovery;
 pub mod feature;
 pub mod framework;
+pub mod gate;
 pub mod herdr;
 pub mod kubernetes;
 pub mod pane;
@@ -58,7 +59,7 @@ pub enum Mux {
 }
 
 /// A single GitHub issue suitable for JSON serialization.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct IssueSnapshot {
     pub number: u32,
     pub title: String,
