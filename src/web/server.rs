@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use axum::{
     Json, Router,
     extract::{Path, State},
@@ -1067,7 +1067,7 @@ async fn reject_writes(req: axum::extract::Request, next: axum::middleware::Next
 
 /// Serve the dashboard on `addr`. With `read_only`, only GET and HEAD get
 /// through, so the dashboard can be shared without handing out control.
-pub async fn run(addr: SocketAddr, read_only: bool, state: WebServerState) -> Result<()> {
+pub async fn run(addrs: &[SocketAddr], read_only: bool, state: WebServerState) -> Result<()> {
     let app = Router::new()
         .route("/healthz", get(|| async { "ok" }))
         // What the pages need to know about this server: a read-only one gets no input controls.
@@ -1121,17 +1121,36 @@ pub async fn run(addr: SocketAddr, read_only: bool, state: WebServerState) -> Re
         app
     };
 
-    if !addr.ip().is_loopback() && !read_only {
-        tracing::warn!(
-            "Web UI is reachable from other machines and accepts control requests; add --read-only for a shared view"
-        );
-        eprintln!("agents-tui: warning: {addr} is reachable from other machines and is not --read-only");
+    // Bind every address before serving any, so one that can't be bound fails
+    // startup by name rather than leaving the UI up on only some of them.
+    let mut listeners = Vec::with_capacity(addrs.len());
+    for &addr in addrs {
+        let listener = tokio::net::TcpListener::bind(addr)
+            .await
+            .with_context(|| format!("couldn't listen on {addr} (--web-bind)"))?;
+        listeners.push((addr, listener));
     }
-    tracing::info!("Web UI listening on http://{addr}");
-    eprintln!("agents-tui: web UI available at http://{addr}");
+    for (addr, _) in &listeners {
+        if !addr.ip().is_loopback() && !read_only {
+            tracing::warn!(
+                "Web UI is reachable from other machines and accepts control requests; add --read-only for a shared view"
+            );
+            eprintln!("agents-tui: warning: {addr} is reachable from other machines and is not --read-only");
+        }
+        tracing::info!("Web UI listening on http://{addr}");
+        eprintln!("agents-tui: web UI available at http://{addr}");
+    }
 
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    // One app and one state behind every listener; the first to stop ends the server.
+    let mut servers = tokio::task::JoinSet::new();
+    for (_, listener) in listeners {
+        let app = app.clone();
+        servers.spawn(async move { axum::serve(listener, app).await });
+    }
+    match servers.join_next().await {
+        Some(done) => done??,
+        None => anyhow::bail!("--web-bind gave no address to listen on"),
+    }
     Ok(())
 }
 

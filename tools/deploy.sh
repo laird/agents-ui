@@ -26,8 +26,8 @@
 #   this script runs the server itself, detached, and remembers its pid in
 #   ~/.agents-ui/serve.pid so the next deploy can replace it:
 #     agents-tui --headless --web-port $AGENTS_TUI_PORT --web-bind $AGENTS_TUI_BIND --read-only
-#   AGENTS_TUI_PORT defaults to 7877; AGENTS_TUI_BIND to this machine's tailnet
-#   address (`tailscale ip -4`), else 127.0.0.1. AGENTS_TUI_SERVE_ARGS replaces
+#   AGENTS_TUI_PORT defaults to 7877; AGENTS_TUI_BIND to 127.0.0.1 plus this
+#   machine's tailnet address (`tailscale ip -4`) when there is one. AGENTS_TUI_SERVE_ARGS replaces
 #   the arguments entirely.
 #
 # EXIT: 0 deployed (or dry run passed) · 1 refused or setup error · 2 deploy failed (recorded as failure)
@@ -76,8 +76,9 @@ say "environment: $ENVIRONMENT"
 say "commit:      $SHA ($(git log -1 --format=%s "$SHA"))"
 
 PORT="${AGENTS_TUI_PORT:-7877}"
-BIND="${AGENTS_TUI_BIND:-$(tailscale ip -4 2>/dev/null | head -1 || true)}"
-BIND="${BIND:-127.0.0.1}"
+# Localhost and the tailnet together, so the host's own browser keeps working.
+TAILNET_IP="$(tailscale ip -4 2>/dev/null | head -1 || true)"
+BIND="${AGENTS_TUI_BIND:-127.0.0.1${TAILNET_IP:+,$TAILNET_IP}}"
 if [ -n "${AGENTS_TUI_SERVE_ARGS:-}" ]; then
   read -r -a SERVE_ARGS <<< "$AGENTS_TUI_SERVE_ARGS"
 else

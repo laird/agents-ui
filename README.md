@@ -86,6 +86,14 @@ Supported flags:
 - `--server <host>`
 - `--server=<host>`
 
+Web UI flags: `--web` (alongside the TUI), `--headless` (web UI only), `--web-port <port>`, `--read-only`, and `--web-bind <addr>[,<addr>...]`. `--web-bind` sets where the UI listens and defaults to `127.0.0.1`. It takes IPv4 or IPv6 literals, or `tailscale` for this machine's tailnet addresses, and listens on each one. To reach the village from other tailnet devices and from this machine together:
+
+```bash
+agents-tui --headless --web-port 7890 --web-bind 127.0.0.1,tailscale --read-only
+```
+
+An address that can't be bound fails startup and names the address.
+
 Only one runtime flag may be passed at a time. If no runtime flag is provided, `agents-tui` uses the repo's saved default from `.agents-ui.toml` when available, otherwise it starts with `Claude`.
 
 ## Startup Checks
