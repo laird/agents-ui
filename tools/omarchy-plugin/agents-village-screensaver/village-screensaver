@@ -1,0 +1,169 @@
+#!/bin/bash
+# village-screensaver — the agents-tui village as Omarchy's screensaver.
+#
+# USAGE:
+#   village-screensaver [force] [--dry-run]
+#
+# Opens the village full screen on every monitor, as a Chromium kiosk window
+# of class org.omarchy.screensaver, so Omarchy treats it as its screensaver:
+# its window rules make it fullscreen on a special workspace, and Omarchy's
+# own launcher will not start the text screensaver over it. Any key, click or
+# real mouse movement closes every window and brings the cursor back.
+#
+# The agents-village-screensaver shell service runs this when the session goes
+# idle; `force` runs it by hand. Settings come from
+# ~/.config/agents-ui/screensaver.json (written by install.sh --screensaver):
+#   { "server": "http://nuc-1:7890", "cycle": 30, "dim": "23-7", "timeout": 150 }
+#
+# It does nothing while the session is locked or the screensaver is already
+# up, nor (unless forced) while Omarchy's stay-awake indicator is on or its
+# screensaver is toggled off.
+set -uo pipefail
+
+FORCE=false
+DRY_RUN=false
+for a in "$@"; do
+  case "$a" in
+    force) FORCE=true ;;
+    --dry-run) DRY_RUN=true ;;
+    -h|--help) sed -n '2,/^set -uo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
+    *) echo "village-screensaver: unknown argument: $a" >&2; exit 1 ;;
+  esac
+done
+
+HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+CONFIG="${AGENTS_VILLAGE_SCREENSAVER_CONFIG:-$HOME/.config/agents-ui/screensaver.json}"
+PROFILES="${XDG_CACHE_HOME:-$HOME/.cache}/agents-village-screensaver"
+CLASS=org.omarchy.screensaver
+# What marks this launcher's own browsers in `ps`, for pgrep and pkill.
+MARK=agents-village-screensaver-profile
+EXIT_TITLE=agents-village-screensaver-exit
+
+setting() {  # setting <key> <default>
+  local v=""
+  [ -f "$CONFIG" ] && v=$(jq -r --arg k "$1" '.[$k] // empty' "$CONFIG" 2>/dev/null)
+  echo "${v:-$2}"
+}
+
+SERVER=$(setting server "http://nuc-1:7890")
+SERVER=${SERVER%/}
+CYCLE=$(setting cycle 30)
+DIM=$(setting dim "")
+
+# The page: screensaver mode, closing on input, cycling and dimming as set.
+village_url() {
+  local q="screensaver=1&dismiss=1&cycle=${CYCLE}"
+  [ -n "$DIM" ] && q="$q&dim=${DIM}"
+  echo "$SERVER/village?$q"
+}
+
+# The page to open: the village, or, when the server does not answer, a local
+# page that says so and opens the village once it does (a browser error page
+# would sit there frozen).
+start_url() {
+  local url
+  url=$(village_url)
+  if curl -fsS -m 3 -o /dev/null "$SERVER/api/village" 2>/dev/null; then
+    echo "$url"
+  else
+    echo "file://$HERE/offline.html#$(jq -rn --arg u "$url" '$u | @uri')"
+  fi
+}
+
+browser() {
+  local b
+  for b in chromium chromium-browser google-chrome-stable brave; do
+    command -v "$b" >/dev/null && { echo "$b"; return; }
+  done
+  return 1
+}
+
+if [ "$DRY_RUN" = true ]; then
+  echo "server:  $SERVER"
+  echo "opens:   $(start_url)"
+  echo "browser: $(browser || echo 'none found')"
+  echo "class:   $CLASS"
+  exit 0
+fi
+
+pgrep -f "[a]gents-village-screensaver-profile" >/dev/null && exit 0
+if [ "$FORCE" != true ]; then
+  [ -f "$HOME/.local/state/omarchy/indicators/stay-awake" ] && exit 0
+  command -v omarchy-toggle-enabled >/dev/null && omarchy-toggle-enabled screensaver-off && exit 1
+fi
+# Never over (or under) the lock screen, as Omarchy's idle service does.
+[[ $(omarchy-shell lock isLocked 2>/dev/null) == "true" ]] && exit 0
+BROWSER=$(browser) || { echo "village-screensaver: no Chromium-family browser found" >&2; exit 1; }
+URL=$(start_url)
+
+cursor() {  # cursor <true|false>: hide or show the pointer
+  hyprctl eval "hl.config({ cursor = { invisible = $1 } })" &>/dev/null || hyprctl keyword cursor:invisible "$1" &>/dev/null || true
+}
+
+stop_all() {
+  cursor false
+  pkill -f "[a]gents-village-screensaver-profile" 2>/dev/null
+  exit 0
+}
+trap stop_all INT TERM HUP QUIT
+
+hypr_focus_monitor() {
+  hyprctl dispatch "hl.dsp.focus({ monitor = \"$1\" })" >/dev/null 2>&1 || hyprctl dispatch focusmonitor "$1" >/dev/null
+}
+hypr_exec() {  # hypr_exec <workspace> <command...>
+  local workspace=$1 command
+  shift
+  printf -v command '%q ' "$@"
+  hyprctl dispatch "hl.dsp.exec_cmd([[[workspace $workspace] $command]])" >/dev/null 2>&1 ||
+    hyprctl dispatch exec -- "[workspace $workspace]" bash -lc "$command" >/dev/null
+}
+
+SOCKET="$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock"
+exec {events}< <(socat -U - "UNIX-CONNECT:$SOCKET")
+
+# The window address a Hyprland event is about: `openwindow>>ADDR,...`.
+window_of() { local rest=${1#*>>}; echo "${rest%%,*}"; }
+declare -A ours=()
+
+# One window per monitor, each a browser of its own (its own profile), so it
+# opens on that monitor and closing one is noticed. Wait for each to map
+# before moving on, as Omarchy's launcher does.
+focused=$(hyprctl monitors -j | jq -r '.[] | select(.focused) | .name')
+mkdir -p "$PROFILES"
+while read -r m special; do
+  hypr_focus_monitor "$m"
+  hypr_exec "${special:-special:screensaver-$m}" "$BROWSER" \
+    "--user-data-dir=$PROFILES/$MARK-$m" "--class=$CLASS" \
+    --kiosk --no-first-run --no-default-browser-check --disable-session-crashed-bubble \
+    --disable-extensions --disable-sync --disable-background-networking \
+    --disable-features=Translate --noerrdialogs --password-store=basic "$URL"
+  deadline=$((SECONDS + 8))
+  while ((SECONDS < deadline)) && IFS= read -r -t $((deadline - SECONDS)) -u "$events" line; do
+    if [[ $line == openwindow\>\>*,$CLASS,* ]]; then ours[$(window_of "$line")]=1; break; fi
+  done
+done < <(hyprctl monitors -j | jq -r '.[] | "\(.name) \(.specialWorkspace.name)"')
+[ -n "$focused" ] && hypr_focus_monitor "$focused"
+# Focus the screensaver on the monitor that had focus, so keys reach the page,
+# not a window under it.
+mine=$(hyprctl clients -j | jq -r --arg c "$CLASS" --arg m "$focused" --argjson mons "$(hyprctl monitors -j)" \
+  '($mons | map(select(.name == $m)) | .[0].id) as $id | [.[] | select(.class == $c and .monitor == $id)][0].address // empty')
+[ -n "$mine" ] && { hyprctl dispatch "hl.dsp.focus({ window = \"address:$mine\" })" >/dev/null 2>&1 || hyprctl dispatch focuswindow "address:$mine" >/dev/null; }
+cursor true
+ready=$SECONDS
+
+# Close everything when a page asks (it retitles itself on input), when any
+# of the windows closes (the page closed itself, or something else did), or
+# when focus moves to another window, as Omarchy's own screensaver does.
+while IFS= read -r -u "$events" line; do
+  case "$line" in
+    openwindow\>\>*,"$CLASS",*) ours[$(window_of "$line")]=1 ;;
+    windowtitlev2\>\>*,"$EXIT_TITLE"*) stop_all ;;
+    closewindow\>\>*) [ -n "${ours[$(window_of "$line")]:-}" ] && stop_all ;;
+    activewindowv2\>\>?*)
+      w=${line#*>>}
+      ((SECONDS - ready > 3)) && [ -n "$w" ] && [ "$w" != "," ] && [ -z "${ours[0x${w#0x}]:-}${ours[$w]:-}" ] && stop_all
+      ;;
+  esac
+  pgrep -f "[a]gents-village-screensaver-profile" >/dev/null || stop_all
+done
+stop_all

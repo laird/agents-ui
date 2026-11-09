@@ -9,12 +9,14 @@
  * The page's own state lives here too: `villages` and `worlds` from the last
  * poll, `scenes` (one per village: its model, layout and the animations in
  * flight), `worldState` (per world: incidents seen and crates afloat) and
- * `view`, what is shown ({ village } or { world }). */
+ * `view`, what is shown ({ village } or { world }). `screensaver` is set by
+ * screensaver.js when the page is an idle display. */
 export const state = {
   T: null,
   reduce: window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
   current: null, L: null, porters: [], floats: [], fireworks: -1e9, S: null,
   villages: [], worlds: [], scenes: {}, worldState: {}, view: null,
+  screensaver: false,
 };
 
 /* The animation clock, held still when motion is reduced. */

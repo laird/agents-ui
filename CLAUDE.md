@@ -53,6 +53,7 @@ Tests are inline `#[cfg(test)]` modules in each source file:
 
 For the village UI, `tools/mock/demo.sh` runs agents-tui against simulated herdr and Temporal swarms.
 `VOYAGES=1 tools/mock/demo.sh` scripts Deployments for this repo's own environments (`nuc-1`, then `release`): a deploy, a promotion and a failed deploy on a 120 s loop, so the environment row's voyages can be seen without real ones (`tools/mock/voyages.py`; tests: `python3 -m unittest discover -s tools/mock -p 'test_voyages.py'`).
+The village screensaver (`/village?screensaver=1`, `src/web/village/saver.js` + `screensaver.js`; the Omarchy service, launcher and installer in `tools/omarchy-plugin/agents-village-screensaver/`): `node --test tools/omarchy-plugin/agents-village-screensaver/tests/` and `bash tools/omarchy-plugin/agents-village-screensaver/tests/test_install.sh` (both run by `cargo test screensaver`), and `python3 tools/omarchy-plugin/agents-village-screensaver/tests/qml_check.py` (the real `Service.qml` in Quickshell, offscreen). Install with `tools/omarchy-plugin/install.sh --screensaver [--never-sleep] [--host <ssh host>]`.
 The Omarchy bar widget (`tools/omarchy-plugin/agents-village/`): `node --test tools/omarchy-plugin/agents-village/tests/` (its model, against recorded `/api/swarms` and `/api/village`) and `python3 tools/omarchy-plugin/agents-village/tests/qml_check.py` (the real `Panel.qml` in Quickshell, offscreen). Install with `tools/omarchy-plugin/install.sh [--host <ssh host>] [--enable]`.
 `tools/mock/replay-build.py` bundles the village's modules into one self-contained replay page (each module after its imports; two modules declaring the same top-level name stop the build); its tests: `python3 -m unittest discover -s tools/mock -p 'test_replay_build.py'` (also run by `cargo test replay_build`).
 `tools/mock/history.py` rebuilds a replay of a repo's real development from git and GitHub history (`--no-github` for git only); its tests: `python3 -m unittest discover -s tools/mock -p 'test_history.py'`.
@@ -123,13 +124,15 @@ src/
       labels.js     #   area labels from registerLabels, kept clear of the art and each other
       key.js        #   the Key (legend), drawn with the renderer's own functions
       data.js       #   the feed: poll, scenes, select a village or world, the theme picker, the loop
+      saver.js      #   the screensaver's decisions (no DOM: options, strip counts, cycling, drift, night dimming)
+      screensaver.js #  ?screensaver=1: the map full screen, the big status strip, "can't reach", burn-in care
       palette.js    #   colours and drawing primitives (`P`, `R`, `hash`, `blink`, `shadow`)
       sprites/houses.js # houses, one sprite per kind
       scenery.js    #   crates, bubbles, +N badges, grass, paths, water, trees, castle, board, locks, harbour, ship, boat
       people.js     #   people, robots, drones and what they act out
       themes/       #   registry.js (`registerTheme`, `THEMES`: the Style picker lists them) and medieval/modern/future.js, each registering itself
 tools/mock/         # Simulated herdr/Temporal/Kubernetes for the village: demo.sh (RUNTIME=k8s), record.py + replay-build.py, history.py (replay from git/GitHub history)
-tools/omarchy-plugin/ # Omarchy bar widget: swarm list → village summary from /api/swarms + /api/village; install.sh
+tools/omarchy-plugin/ # Omarchy bar widget (agents-village/) and the village as the screensaver (agents-village-screensaver/); install.sh
 tools/adapters/     # Outside framework adapters: example report, adapter template (docs/village-protocol.md)
 ```
 

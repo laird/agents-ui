@@ -3,6 +3,7 @@
  * toast, and the zoom. */
 import { COUNTERS, placeOverlays } from './registry.js';
 import { cv } from './layout.js';
+import { state } from './state.js';
 
 export const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 
@@ -33,10 +34,14 @@ let zoom = 0;
 try { zoom = Math.max(-ZOOM_MAX_SCALE, Math.min(ZOOM_MAX_SCALE, parseInt(localStorage.getItem('village-zoom'), 10) || 0)); } catch {}
 function fitScale() {
   const room = (document.getElementById('viewport').clientWidth - 8) / cv.width;
+  // The screensaver fits the whole display: its height bounds the scale too.
+  if (state.screensaver) return fitRoom(Math.min(room, (document.getElementById('viewport').clientHeight - 8) / cv.height));
   return room >= 1 ? Math.floor(room) : Math.max(0.1, room);
 }
+const fitRoom = room => (room >= 1 ? Math.floor(room) : Math.max(0.1, room));
 function mapScale() {
   const f = fitScale();
+  if (state.screensaver) return f;
   return zoom ? Math.max(Math.min(1, f), Math.min(ZOOM_MAX_SCALE, Math.max(1, Math.floor(f)) + zoom)) : f;
 }
 export function fit() {

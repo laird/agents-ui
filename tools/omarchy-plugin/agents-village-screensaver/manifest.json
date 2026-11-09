@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "agents-ui.village-screensaver",
+  "name": "Agents village screensaver",
+  "version": "1.0.0",
+  "author": "agents-ui",
+  "license": "MIT",
+  "description": "The agents-tui village as the screensaver: when the session goes idle, the swarm's village opens full screen with a status strip readable across the room, and closes on any input.",
+  "kinds": [
+    "service"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml"
+  }
+}

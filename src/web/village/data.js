@@ -15,6 +15,7 @@ import { scrollToVillage } from './envrow.js';
 import { fadeLive } from './features.js';
 import { draw, updateWorld } from './worlds.js';
 import { legend, renderLegend } from './key.js';
+import { hashName } from './saver.js';
 
 const pick = document.getElementById('pick');
 let themeName = 'medieval';
@@ -88,6 +89,9 @@ function select(want) {
   placeOverlays();
 }
 
+/* Whether the server answered, for what shows it (the screensaver's strip). */
+const polled = ok => window.dispatchEvent(new CustomEvent('village:polled', { detail: { ok, at: Date.now() } }));
+
 async function poll() {
   try {
     const res = await fetch('/api/village');
@@ -105,15 +109,17 @@ async function poll() {
       pick.innerHTML = names.map(n => `<option value="${esc(n)}">${esc(label(n))}</option>`).join('');
     }
     const view = state.view;
-    const want = String(decodeURIComponent(location.hash.slice(1)) || (view && (view.world || view.village)) || names[0] || '');
+    const want = String(hashName(location.hash) || (view && (view.world || view.village)) || names[0] || '');
     if (names.includes(want.split('@')[0])) pick.value = want.split('@')[0];
     document.getElementById('empty').hidden = villages.length > 0;
     cv.hidden = villages.length === 0;
     if (!villages.length) document.getElementById('empty').textContent = 'No swarms running. Start one from the dashboard or the agents-tui terminal.';
     else select(want.includes('@') && want.split('@')[0] === pick.value ? want : pick.value || names[0]);
     document.getElementById('status').textContent = 'Live · updated ' + new Date().toLocaleTimeString();
+    polled(true);
   } catch (e) {
     document.getElementById('status').textContent = "Can't reach agents-tui. Retrying…";
+    polled(false);
   }
   setTimeout(poll, 3000);
 }
@@ -139,7 +145,7 @@ export function start() {
     if (view) select(view.world || view.village);
   });
   pick.addEventListener('change', () => { location.hash = pick.value; select(pick.value); });
-  window.addEventListener('hashchange', () => select(decodeURIComponent(location.hash.slice(1))));
+  window.addEventListener('hashchange', () => select(hashName(location.hash)));
 
   poll();
 

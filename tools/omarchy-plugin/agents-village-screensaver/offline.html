@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Village screensaver</title>
+<!-- Opened by village-screensaver when agents-tui does not answer: says so,
+     and opens the village (the URL after #) once it does. The village
+     replaces this page rather than adding to the history, so the window
+     keeps one history entry and may still close itself. -->
+<style>
+  html, body { margin: 0; height: 100%; background: #0c1028; color: #a8b0d8; cursor: none; overflow: hidden; }
+  body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .6em; padding: 32px; box-sizing: border-box; text-align: center; font-family: ui-monospace, Menlo, Consolas, monospace; transition: translate 20s linear; }
+  #big { font: 700 clamp(28px, 4.5vw, 84px)/1.2 ui-monospace, Menlo, Consolas, monospace; color: #ff5a4a; }
+  #small { font-size: clamp(18px, 2vw, 40px); }
+</style>
+</head>
+<body>
+  <div id="big">Can't reach agents-tui</div>
+  <div id="small">retrying</div>
+<script>
+  const target = decodeURIComponent(location.hash.slice(1));
+  let host = 'the server';
+  try { host = new URL(target).hostname; } catch {}
+  document.getElementById('big').textContent = `Can't reach agents-tui on ${host}`;
+  const since = Date.now();
+  const hm = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  // A file:// page may not fetch from a server, but it may load a script
+  // from one: `load` means the server answered, `error` that it did not.
+  // (The module does not run as a classic script; only the answer matters.)
+  function check() {
+    document.getElementById('small').textContent = `${hm()} · down ${Math.round((Date.now() - since) / 60000)}m · retrying`;
+    const probe = document.createElement('script');
+    probe.src = new URL('/village/saver.js?probe=' + Date.now(), target).href;
+    probe.onload = () => location.replace(target);
+    probe.onerror = () => { probe.remove(); setTimeout(check, 10000); };
+    document.head.append(probe);
+  }
+  check();
+  // Burn-in care, as the village does.
+  setInterval(() => { const t = Date.now() / 600000 * 2 * Math.PI; document.body.style.translate = `${Math.round(8 * Math.sin(t))}px ${Math.round(8 * Math.cos(t * 0.8))}px`; }, 20000);
+  // Close on input, as the village does when the launcher asks.
+  const t0 = performance.now();
+  let start = null;
+  const done = () => { document.title = 'agents-village-screensaver-exit'; window.close(); };
+  for (const type of ['keydown', 'pointerdown', 'wheel', 'touchstart']) addEventListener(type, () => { if (performance.now() - t0 > 1500) done(); }, true);
+  addEventListener('pointermove', e => {
+    if (performance.now() - t0 < 1500) return;
+    if (!start) { start = { x: e.x, y: e.y }; return; }
+    if (Math.hypot(e.x - start.x, e.y - start.y) > 24) done();
+  }, true);
+</script>
+</body>
+</html>
