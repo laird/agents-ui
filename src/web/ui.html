@@ -58,6 +58,9 @@
     .header-actions { display: flex; align-items: center; gap: 1rem; }
     .header-link { font-size: 0.8rem; color: var(--text-dim); text-decoration: none; }
     .header-link:hover { color: var(--text); text-decoration: underline; }
+    .village-link { font-size: 0.8rem; color: var(--accent); text-decoration: none; white-space: nowrap; }
+    .village-link:hover { text-decoration: underline; }
+    .card-footer { display: flex; justify-content: flex-end; margin-top: 0.5rem; }
 
     .refresh-indicator {
       font-size: 0.75rem;
@@ -1684,6 +1687,7 @@
           (swarm.workflow ? '<span class="meta-item">' + esc(swarm.workflow) + '</span>' : '') +
           '<span class="meta-item" style="font-family:monospace;font-size:0.75rem">' + esc(swarm.tmux_session) + '</span>' +
           '<span class="meta-item" style="opacity:0.7">' + esc(swarm.repo_path) + '</span>' +
+          '<a class="meta-item village-link" href="' + villageUrl(swarm.project_name) + '">Village view →</a>' +
         '</div>' +
         (function() {
           const proj = swarm.project_name;
@@ -1885,6 +1889,12 @@
              '</div>';
     }
 
+    // The village page selects a village by its URL hash, and villages are
+    // named after their swarm's project, so this opens it on this swarm.
+    function villageUrl(project) {
+      return '/village#' + esc(encodeURIComponent(project));
+    }
+
     function renderSwarmCard(swarm) {
       // One dot per agent replaces the busy/idle/attention counters: the dots
       // carry the same totals, but also say which agent is in which state, and
@@ -1903,6 +1913,11 @@
           '</div>' +
           '<div class="card-path">' + esc(swarm.repo_path) + '</div>' +
           renderAgentDots(swarm) +
+          '<div class="card-footer">' +
+            '<a class="village-link" href="' + villageUrl(swarm.project_name) + '" ' +
+               'onclick="event.stopPropagation()" onkeydown="event.stopPropagation()" ' +
+               'aria-label="Open ' + esc(swarm.project_name) + ' in the village view">Village view →</a>' +
+          '</div>' +
         '</div>'
       );
     }

@@ -1486,6 +1486,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn index_html_links_each_swarm_to_its_village() {
+        // The village page picks a village from its URL hash, so a swarm's
+        // link must carry its project name there, on the card and the detail view.
+        let body = INDEX_HTML;
+        assert!(body.contains("function villageUrl(project)"));
+        assert!(body.contains("'/village#' + esc(encodeURIComponent(project))"));
+        assert_eq!(body.matches("href=\"' + villageUrl(swarm.project_name)").count(), 2);
+    }
+
+    #[tokio::test]
     async fn index_html_contains_session_view() {
         let body = INDEX_HTML;
         assert!(body.contains("/pane"));
