@@ -127,22 +127,44 @@ last is the harbour (medieval) or launch pad (modern).
 }
 ```
 
-For each environment the village works out what it runs, in this order:
+For each environment the village works out what it runs from a chain of
+sources, tried in order. The first that names a commit wins:
 
-1. **A GitHub Deployment.** It takes the newest deployment to an environment
-   with that `name` whose latest status is `success`, checking up to 10. A
-   deployment later marked `inactive`, failed or still pending doesn't count.
-   This needs `gh` signed in. If the deployed commit hasn't been fetched into
-   the clone yet, the village uses the branch instead.
-2. **Else its branch.** This is `origin/<ref>`, where `ref` defaults to
-   `env/<name>`.
-3. **Else unknown.** With neither, the village can't tell what the
-   environment runs. It fogs the lock with a "?" rather than call it empty.
+| Source | What it reads |
+|---|---|
+| `deployment` | The newest GitHub Deployment to an environment with that `name` whose latest status is `success`, checking up to 10. A deployment later marked `inactive`, failed or still pending doesn't count. `tools/deploy.sh`, Actions `environment:` jobs, Vercel, Netlify and Heroku all record these. |
+| `release` | The latest published GitHub Release (drafts and prereleases are skipped), at its tag's commit. A Release made on GitHub's website counts. |
+| `tag:<glob>` | The newest tag matching the glob (`v*`, `prod-*`), in version order, so `v1.10.0` beats `v1.9.2`. |
+| `branch` | `origin/<ref>`, where `ref` defaults to `env/<name>`. |
+| `url:<endpoint>` | An `http(s)` endpoint whose response names the running commit: a bare sha, or JSON with a `sha`, `commit`, `git_sha`, `gitSha`, `revision` or `version` field (top level or one object down). This is the most truthful answer to "what is actually running". |
+
+Set an environment's `source` to one of these or an ordered list:
+
+```json
+{
+  "environments": [
+    { "name": "staging", "source": "branch" },
+    { "name": "prod", "source": ["deployment", "tag:v*", "url:https://app.example.com/version"] }
+  ]
+}
+```
+
+Without `source`, the chain is `deployment`, then `release` (for the last
+environment only, so a repo that publishes Releases gets a real harbour with no
+config), then `branch`. Entries the village can't read are dropped. All the
+GitHub sources need `gh` signed in. A source that can't answer (no `gh`, no
+Releases, an unreachable endpoint) falls through to the next one, never to an
+error. A commit the clone hasn't fetched yet falls through too, since it can't
+place anything.
+
+With no source answering, the environment is **unknown**: the village can't
+tell what it runs. It fogs the lock with a "?" rather than call it empty.
 
 Work only reaches a lock after reaching every lock before it, so crates never
 pass an unknown environment. A feature's Details dialog says where each
-answer came from: `GitHub Deployment · 9b1e440`, `its branch ref`, or `no
-Deployment and no branch`.
+answer came from: `GitHub Deployment · 9b1e440`, `v1.2.0 (GitHub Release) ·
+a1b2c3d`, `tag v1.10.0`, `its version endpoint`, `its branch ref`, or
+`nothing says what runs here`.
 
 `promotion` says how your project moves landed work through the environments.
 It is `subtask` (the default) or `feature`; see below.

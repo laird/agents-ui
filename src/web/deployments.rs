@@ -1,9 +1,11 @@
-//! What each environment runs, from GitHub Deployments.
+//! What each environment runs: from GitHub Deployments, Releases, tags, a
+//! version endpoint, or the environment's branch.
 //!
-//! An environment's newest deployment whose latest status is `success` names
-//! the commit it runs. The pipeline prefers that over the environment's branch
-//! ref, and falls back to the ref when the repository records no deployments
-//! (or `gh` isn't there to ask).
+//! Each environment has a chain of [`EnvSource`]s, tried in order; the first
+//! that names a commit wins. Unconfigured, the chain is the newest successful
+//! Deployment, then (for the last stop) the latest published Release, then
+//! the branch ref. A source that can't answer (no `gh`, no Releases, an
+//! unreachable endpoint) falls through to the next, never to an error.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -112,6 +114,212 @@ fn encode(value: &str) -> String {
             _ => format!("%{b:02X}"),
         })
         .collect()
+}
+
+/// Where an environment's "what runs here" comes from. In `.autocoder.json`
+/// an environment's `source` is one of these or an ordered list of them:
+/// `deployment`, `release`, `tag:<glob>`, `branch`, `url:<endpoint>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EnvSource {
+    /// The newest Deployment to the environment whose latest status is `success`.
+    Deployment,
+    /// The latest published GitHub Release (not a draft or a prerelease).
+    Release,
+    /// The newest tag matching the glob (`v*`, `prod-*`), in version order.
+    Tag(String),
+    /// The environment's branch ref (`origin/<ref>`).
+    Branch,
+    /// An endpoint whose response names the running commit, e.g. `https://app/version`.
+    Url(String),
+}
+
+impl EnvSource {
+    /// Parse one `source` entry. Anything else is `None`, and is dropped.
+    pub fn parse(raw: &str) -> Option<Self> {
+        let raw = raw.trim();
+        match raw {
+            "deployment" => Some(Self::Deployment),
+            "release" => Some(Self::Release),
+            "branch" => Some(Self::Branch),
+            _ => {
+                if let Some(glob) = raw.strip_prefix("tag:") {
+                    let glob = glob.trim();
+                    (!glob.is_empty()).then(|| Self::Tag(glob.to_string()))
+                } else if let Some(url) = raw.strip_prefix("url:") {
+                    let url = url.trim();
+                    (url.starts_with("http://") || url.starts_with("https://")).then(|| Self::Url(url.to_string()))
+                } else {
+                    None
+                }
+            }
+        }
+    }
+}
+
+/// The chain for an environment whose `source` isn't set: its Deployments,
+/// then for the last stop (the harbour) the latest Release, then its branch.
+/// A repo that publishes Releases gets a real harbour with no config.
+pub fn default_chain(last: bool) -> Vec<EnvSource> {
+    let mut chain = vec![EnvSource::Deployment];
+    if last {
+        chain.push(EnvSource::Release);
+    }
+    chain.push(EnvSource::Branch);
+    chain
+}
+
+/// Parse `source` from an environment entry: a string or a list of strings.
+/// Unreadable entries are dropped; nothing readable leaves it unset (the
+/// default chain).
+pub fn parse_sources(value: Option<&serde_json::Value>) -> Vec<EnvSource> {
+    match value {
+        Some(serde_json::Value::String(s)) => EnvSource::parse(s).into_iter().collect(),
+        Some(serde_json::Value::Array(a)) => a.iter().filter_map(|v| v.as_str()).filter_map(EnvSource::parse).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Try each source in order; the first that `look` answers wins.
+pub async fn first_hit<T, F, Fut>(chain: &[EnvSource], mut look: F) -> Option<(EnvSource, T)>
+where
+    F: FnMut(EnvSource) -> Fut,
+    Fut: std::future::Future<Output = Option<T>>,
+{
+    for source in chain {
+        if let Some(found) = look(source.clone()).await {
+            return Some((source.clone(), found));
+        }
+    }
+    None
+}
+
+/// One entry of `GET /repos/{owner}/{repo}/releases`.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct Release {
+    pub tag_name: String,
+    #[serde(default)]
+    pub draft: bool,
+    #[serde(default)]
+    pub prerelease: bool,
+    #[serde(default)]
+    pub html_url: Option<String>,
+    #[serde(default)]
+    pub published_at: Option<String>,
+}
+
+/// The latest published release: drafts and prereleases don't count.
+pub fn latest_release(json: &str) -> Option<Release> {
+    let releases: Vec<Release> = serde_json::from_str(json).unwrap_or_default();
+    releases
+        .into_iter()
+        .filter(|r| !r.draft && !r.prerelease && !r.tag_name.is_empty())
+        .max_by(|a, b| a.published_at.cmp(&b.published_at))
+}
+
+/// One entry of `GET /repos/{owner}/{repo}/tags`.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct Tag {
+    pub name: String,
+    pub commit: TagCommit,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct TagCommit {
+    pub sha: String,
+}
+
+/// Parse a tags listing. Anything unreadable is no tags.
+pub fn parse_tags(json: &str) -> Vec<Tag> {
+    serde_json::from_str(json).unwrap_or_default()
+}
+
+/// Whether `name` matches a glob of `*` (any run) and `?` (any one character).
+pub fn glob_match(glob: &str, name: &str) -> bool {
+    fn go(g: &[char], n: &[char]) -> bool {
+        match g.split_first() {
+            None => n.is_empty(),
+            Some(('*', rest)) => (0..=n.len()).any(|i| go(rest, &n[i..])),
+            Some(('?', rest)) => !n.is_empty() && go(rest, &n[1..]),
+            Some((c, rest)) => n.first() == Some(c) && go(rest, &n[1..]),
+        }
+    }
+    go(&glob.chars().collect::<Vec<_>>(), &name.chars().collect::<Vec<_>>())
+}
+
+/// A tag name as runs of digits (compared as numbers) and other text, so
+/// `v1.10.0` sorts after `v1.9.2`.
+fn version_key(name: &str) -> Vec<(u64, String)> {
+    let mut key = Vec::new();
+    let mut chars = name.chars().peekable();
+    while let Some(&c) = chars.peek() {
+        let digit = c.is_ascii_digit();
+        let mut run = String::new();
+        while let Some(&c) = chars.peek() {
+            if c.is_ascii_digit() != digit {
+                break;
+            }
+            run.push(c);
+            chars.next();
+        }
+        key.push(if digit { (run.parse().unwrap_or(u64::MAX), String::new()) } else { (0, run) });
+    }
+    key
+}
+
+/// The newest tag matching `glob`, in version order.
+pub fn newest_matching<'a>(tags: &'a [Tag], glob: &str) -> Option<&'a Tag> {
+    tags.iter().filter(|t| glob_match(glob, &t.name)).max_by(|a, b| version_key(&a.name).cmp(&version_key(&b.name)))
+}
+
+/// The `sha` of a `GET /repos/{owner}/{repo}/commits/{ref}` response.
+pub fn commit_sha(json: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    v.get("sha")?.as_str().map(str::to_string)
+}
+
+fn is_sha(s: &str) -> bool {
+    (7..=40).contains(&s.len()) && s.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// The commit a version endpoint names: a bare sha, or JSON with a `sha`,
+/// `commit`, `git_sha`, `gitSha`, `revision` or `version` field holding one
+/// (at the top level or one object down, as in `{"build": {"commit": ...}}`).
+pub fn version_sha(body: &str) -> Option<String> {
+    const KEYS: [&str; 6] = ["sha", "commit", "git_sha", "gitSha", "revision", "version"];
+    let body = body.trim();
+    if let Ok(serde_json::Value::Object(top)) = serde_json::from_str::<serde_json::Value>(body) {
+        let pick = |o: &serde_json::Map<String, serde_json::Value>| {
+            KEYS.iter().find_map(|k| o.get(*k).and_then(|v| v.as_str()).filter(|s| is_sha(s)).map(str::to_string))
+        };
+        return pick(&top).or_else(|| top.values().filter_map(|v| v.as_object()).find_map(pick));
+    }
+    body.split_whitespace().next().filter(|s| is_sha(s)).map(str::to_string)
+}
+
+/// What an environment runs according to one non-branch source.
+pub async fn locate(transport: &ServerTransport, repo: &Path, environment: &str, source: &EnvSource) -> Option<Deployed> {
+    let found = match source {
+        EnvSource::Deployment => deployed(transport, repo, environment).await,
+        EnvSource::Release => {
+            let release = latest_release(&gh_api(transport, repo, "repos/{owner}/{repo}/releases?per_page=20").await?)?;
+            let sha = commit_sha(&gh_api(transport, repo, &format!("repos/{{owner}}/{{repo}}/commits/{}", encode(&release.tag_name))).await?)?;
+            Some(Deployed { sha, url: release.html_url.filter(|u| u.starts_with("https://")), tag: Some(release.tag_name) })
+        }
+        EnvSource::Tag(glob) => {
+            let tags = parse_tags(&gh_api(transport, repo, "repos/{owner}/{repo}/tags?per_page=100").await?);
+            let tag = newest_matching(&tags, glob)?;
+            Some(Deployed { sha: tag.commit.sha.clone(), tag: Some(tag.name.clone()), url: None })
+        }
+        EnvSource::Url(url) => {
+            let args: Vec<String> = ["-fsS", "--max-time", "5", url.as_str()].iter().map(|s| s.to_string()).collect();
+            let out = transport.output("curl", &args, Some(repo)).await.ok()?;
+            let sha = out.status.success().then(|| version_sha(&String::from_utf8_lossy(&out.stdout)))??;
+            Some(Deployed { sha, tag: None, url: None })
+        }
+        EnvSource::Branch => None,
+    };
+    // The sha is handed to git; anything but a commit id is no answer.
+    found.filter(|d| is_sha(&d.sha))
 }
 
 async fn gh_api(transport: &ServerTransport, repo: &Path, path: &str) -> Option<String> {
@@ -279,5 +487,68 @@ mod tests {
         assert!(script.contains("cp docs/agents-tui.service ~/.config/systemd/user/"));
         let unit = include_str!("../../docs/agents-tui.service");
         assert!(unit.contains("ExecStart=%h/.cargo/bin/agents-tui --headless --web-port 7890 --web-bind 127.0.0.1,tailscale"));
+    }
+
+    #[test]
+    fn the_latest_release_skips_drafts_and_prereleases() {
+        let json = r#"[
+            {"tag_name": "v1.3.0-rc1", "prerelease": true, "published_at": "2026-11-09T12:00:00Z"},
+            {"tag_name": "v1.4.0", "draft": true, "published_at": null},
+            {"tag_name": "v1.2.0", "html_url": "https://github.com/o/r/releases/tag/v1.2.0", "published_at": "2026-11-08T12:00:00Z"},
+            {"tag_name": "v1.1.0", "published_at": "2026-11-01T12:00:00Z"}
+        ]"#;
+        let r = latest_release(json).unwrap();
+        assert_eq!(r.tag_name, "v1.2.0");
+        assert_eq!(r.html_url.as_deref(), Some("https://github.com/o/r/releases/tag/v1.2.0"));
+        assert_eq!(latest_release("[]"), None, "no Releases: fall through");
+        assert_eq!(latest_release(r#"{"message": "Not Found"}"#), None);
+        assert_eq!(commit_sha(r#"{"sha": "a1b2c3d4e5", "commit": {}}"#).as_deref(), Some("a1b2c3d4e5"));
+        assert_eq!(commit_sha("not json"), None);
+    }
+
+    #[test]
+    fn the_newest_matching_tag_is_in_version_order() {
+        let json = r#"[
+            {"name": "v1.9.2", "commit": {"sha": "9999999"}},
+            {"name": "v1.10.0", "commit": {"sha": "1010101"}},
+            {"name": "prod-2026-11-01", "commit": {"sha": "abcabca"}},
+            {"name": "prod-2026-11-09", "commit": {"sha": "defdefd"}},
+            {"name": "nightly", "commit": {"sha": "0000000"}}
+        ]"#;
+        let tags = parse_tags(json);
+        assert_eq!(newest_matching(&tags, "v*").map(|t| t.name.as_str()), Some("v1.10.0"), "1.10 after 1.9");
+        assert_eq!(newest_matching(&tags, "prod-*").map(|t| t.commit.sha.as_str()), Some("defdefd"));
+        assert_eq!(newest_matching(&tags, "release-*"), None);
+        assert!(glob_match("v?.*", "v1.2"));
+        assert!(!glob_match("v?.*", "v10.2"));
+        assert!(glob_match("*", ""));
+        assert!(!glob_match("v*", "nightly"));
+        assert!(parse_tags("garbage").is_empty());
+    }
+
+    #[test]
+    fn a_version_endpoint_names_its_commit() {
+        assert_eq!(version_sha("9b1e440c3d\n").as_deref(), Some("9b1e440c3d"));
+        assert_eq!(version_sha(r#"{"sha": "9b1e440"}"#).as_deref(), Some("9b1e440"));
+        assert_eq!(version_sha(r#"{"status": "ok", "build": {"commit": "abcdef12"}}"#).as_deref(), Some("abcdef12"));
+        assert_eq!(version_sha(r#"{"version": "1.2.0", "git_sha": "abcdef1"}"#).as_deref(), Some("abcdef1"), "a semver is not a commit");
+        assert_eq!(version_sha("OK"), None);
+        assert_eq!(version_sha(r#"{"status": "ok"}"#), None);
+        assert_eq!(version_sha(""), None);
+    }
+
+    #[test]
+    fn sources_parse_and_reject_what_they_cannot_use() {
+        assert_eq!(EnvSource::parse("deployment"), Some(EnvSource::Deployment));
+        assert_eq!(EnvSource::parse(" release "), Some(EnvSource::Release));
+        assert_eq!(EnvSource::parse("branch"), Some(EnvSource::Branch));
+        assert_eq!(EnvSource::parse("tag:prod-*"), Some(EnvSource::Tag("prod-*".into())));
+        assert_eq!(EnvSource::parse("url:https://app/version"), Some(EnvSource::Url("https://app/version".into())));
+        assert_eq!(EnvSource::parse("tag:"), None);
+        assert_eq!(EnvSource::parse("url:/version"), None);
+        assert_eq!(EnvSource::parse("deployments"), None);
+        assert_eq!(parse_sources(Some(&serde_json::json!(["release", 3, "branch"]))), vec![EnvSource::Release, EnvSource::Branch]);
+        assert!(parse_sources(None).is_empty());
+        assert!(parse_sources(Some(&serde_json::json!({"x": 1}))).is_empty());
     }
 }

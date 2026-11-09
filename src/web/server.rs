@@ -1902,6 +1902,19 @@ mod tests {
     }
 
     #[test]
+    fn village_html_says_which_source_placed_each_stop() {
+        let body = VILLAGE_HTML;
+        for line in [
+            "if (s.source === 'deployment') return `GitHub Deployment${sha}`;",
+            "if (s.source === 'release') return `${s.tag ? s.tag + ' ' : ''}(GitHub Release)${sha}`;",
+            "if (s.source === 'tag') return `tag ${s.tag || ''}${sha}`;",
+            "if (s.source === 'url') return `its version endpoint${sha}`;",
+        ] {
+            assert!(body.contains(line), "sourceWords is missing: {line}");
+        }
+    }
+
+    #[test]
     fn village_html_reaches_every_object_by_keyboard() {
         let body = VILLAGE_HTML;
         assert!(body.contains(r#"<div class="hitkeys" id="hitkeys"></div>"#));

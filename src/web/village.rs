@@ -25,6 +25,7 @@ use std::time::{Duration, SystemTime};
 use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 
+use super::deployments::EnvSource;
 use super::source::{ActivitySource, IssueTracker, PipelineSource, Reading, TtlCache, VillageSource};
 use super::{AgentSnapshot, IssueSnapshot, SwarmSnapshot};
 use crate::model::issue::FeatureLink;
@@ -209,6 +210,12 @@ pub struct Note {
 pub enum StopSource {
     /// The newest successful GitHub Deployment to the environment.
     Deployment,
+    /// The latest published GitHub Release (its tag's commit).
+    Release,
+    /// The newest tag matching the environment's `tag:<glob>`.
+    Tag,
+    /// A version endpoint the environment's `url:<endpoint>` names.
+    Url,
     /// The environment's branch ref (or, for the first stop, the green ref).
     /// Also what a report that doesn't say means.
     #[default]
@@ -546,6 +553,20 @@ pub struct Environment {
     /// What it takes work from: the previous stop's name, `green` (the
     /// sentinel), or `integration` (the integration branch, with no sentinel).
     pub requires: Option<String>,
+    /// Where to learn what it runs, tried in order (`source` in
+    /// `.autocoder.json`). Empty: [`super::deployments::default_chain`].
+    pub sources: Vec<EnvSource>,
+}
+
+/// The stop source a chain entry reports as.
+pub fn stop_source(source: &EnvSource) -> StopSource {
+    match source {
+        EnvSource::Deployment => StopSource::Deployment,
+        EnvSource::Release => StopSource::Release,
+        EnvSource::Tag(_) => StopSource::Tag,
+        EnvSource::Url(_) => StopSource::Url,
+        EnvSource::Branch => StopSource::Branch,
+    }
 }
 
 /// `requires` value for an environment that takes work straight from the
@@ -590,6 +611,7 @@ pub fn parse_environments(json: &str) -> Vec<Environment> {
         #[serde(rename = "ref")]
         branch: Option<String>,
         requires: Option<String>,
+        source: Option<serde_json::Value>,
     }
     serde_json::from_str::<Config>(json)
         .map(|c| {
@@ -599,6 +621,7 @@ pub fn parse_environments(json: &str) -> Vec<Environment> {
                     branch: e.branch.unwrap_or_else(|| format!("env/{}", e.name)),
                     name: e.name,
                     requires: e.requires,
+                    sources: super::deployments::parse_sources(e.source.as_ref()),
                 })
                 .collect()
         })
@@ -637,17 +660,16 @@ pub struct StopHistory {
     pub commits: Option<HashSet<String>>,
 }
 
-/// Choose what a stop runs: the deployed commit's history when there is one,
-/// else the branch's, else unknown. Histories are newest first; the first
-/// element of the chosen one is the stop's head (what it releases).
-pub fn stop_history(deployed: Option<(String, Vec<String>)>, branch: Option<Vec<String>>) -> (StopHistory, Option<String>) {
-    let (source, sha, commits) = match (deployed, branch) {
-        (Some((sha, commits)), _) => (StopSource::Deployment, Some(sha), Some(commits)),
-        (None, Some(commits)) => (StopSource::Branch, None, Some(commits)),
-        (None, None) => (StopSource::Unknown, None, None),
+/// The stop for the first source in an environment's chain that answered
+/// (`None`: none did, so it is unknown), and its head commit.
+pub fn stop_from_hit(hit: Option<(EnvSource, (Option<super::deployments::Deployed>, Vec<String>))>) -> (StopHistory, Option<String>) {
+    let Some((source, (found, commits))) = hit else {
+        return (StopHistory { source: StopSource::Unknown, ..StopHistory::default() }, None);
     };
-    let head = commits.as_ref().and_then(|v| v.first().cloned());
-    (StopHistory { source, sha, commits: commits.map(|v| v.into_iter().collect()), ..StopHistory::default() }, head)
+    let head = commits.first().cloned();
+    let found = found.unwrap_or_default();
+    let sha = (!found.sha.is_empty()).then_some(found.sha);
+    (StopHistory { source: stop_source(&source), sha, tag: found.tag, url: found.url, commits: Some(commits.into_iter().collect()) }, head)
 }
 
 /// Where each pushed tip ended up.
@@ -824,27 +846,24 @@ pub async fn read_pipeline(transport: &ServerTransport, repo: &Path) -> Pipeline
             (Vec::new(), Vec::new())
         }
     };
-    for env in &envs {
+    for (i, env) in envs.iter().enumerate() {
         names.push(env.name.clone());
-        // A deployment says what the environment runs; its branch ref is the
-        // fallback. A deployed commit this clone hasn't fetched can't place
-        // anything, so it falls back too.
-        let record = super::deployments::deployed(transport, repo, &env.name).await;
-        let deployed = match &record {
-            Some(d) => history(d.sha.clone()).await.map(|commits| (d.sha.clone(), commits)),
-            None => None,
-        };
-        let branch = match deployed {
-            Some(_) => None,
-            None => history(format!("origin/{}", env.branch)).await,
-        };
-        let (mut stop, head) = stop_history(deployed, branch);
-        if stop.source == StopSource::Deployment {
-            if let Some(d) = record {
-                stop.tag = d.tag;
-                stop.url = d.url;
+        // The environment's sources, in order: the first that names a commit
+        // this clone has wins. A commit it hasn't fetched can't place
+        // anything, so that source falls through to the next one too.
+        let chain = if env.sources.is_empty() { super::deployments::default_chain(i + 1 == envs.len()) } else { env.sources.clone() };
+        let hit = super::deployments::first_hit(&chain, |source| async move {
+            match source {
+                EnvSource::Branch => history(format!("origin/{}", env.branch)).await.map(|commits| (None, commits)),
+                other => {
+                    let found = super::deployments::locate(transport, repo, &env.name, &other).await?;
+                    let commits = history(found.sha.clone()).await?;
+                    Some((Some(found), commits))
+                }
             }
-        }
+        })
+        .await;
+        let (stop, head) = stop_from_hit(hit);
         release = head;
         stops.push(stop);
     }
@@ -1178,8 +1197,8 @@ mod tests {
         assert_eq!(
             envs,
             vec![
-                Environment { name: "staging".into(), branch: "env/staging".into(), requires: Some("green".into()) },
-                Environment { name: "prod".into(), branch: "env/prod".into(), requires: Some("staging".into()) },
+                Environment { name: "staging".into(), branch: "env/staging".into(), requires: Some("green".into()), sources: vec![] },
+                Environment { name: "prod".into(), branch: "env/prod".into(), requires: Some("staging".into()), sources: vec![] },
             ]
         );
         assert!(parse_environments("").is_empty());
@@ -1247,25 +1266,98 @@ mod tests {
         items.iter().map(|s| s.to_string()).collect()
     }
 
-    #[test]
-    fn a_deployment_beats_the_branch() {
-        let (stop, head) = stop_history(Some(("b".into(), commits(&["b", "a"]))), Some(commits(&["c", "b", "a"])));
+    /// A stop placed by a deployment of `sha` whose history is `items`.
+    fn dep(sha: &str, items: &[&str]) -> (StopHistory, Option<String>) {
+        let found = super::super::deployments::Deployed { sha: sha.into(), ..Default::default() };
+        stop_from_hit(Some((EnvSource::Deployment, (Some(found), commits(items)))))
+    }
+
+    /// The default chain, with each source answering from `answers`.
+    async fn place(answers: Vec<(EnvSource, (Option<super::super::deployments::Deployed>, Vec<String>))>, last: bool) -> (StopHistory, Option<String>) {
+        let chain = super::super::deployments::default_chain(last);
+        let hit = super::super::deployments::first_hit(&chain, |s| {
+            let a = answers.iter().find(|(k, _)| *k == s).map(|(_, v)| v.clone());
+            async move { a }
+        })
+        .await;
+        stop_from_hit(hit)
+    }
+
+    fn found(sha: &str, tag: Option<&str>) -> Option<super::super::deployments::Deployed> {
+        Some(super::super::deployments::Deployed { sha: sha.into(), tag: tag.map(str::to_string), url: None })
+    }
+
+    #[tokio::test]
+    async fn a_deployment_beats_the_branch() {
+        let (stop, head) = place(vec![(EnvSource::Deployment, (found("b", None), commits(&["b", "a"]))), (EnvSource::Branch, (None, commits(&["c", "b", "a"])))], true).await;
         assert_eq!(stop, deployed("b", &["b", "a"]));
         assert_eq!(head.as_deref(), Some("b"));
     }
 
-    #[test]
-    fn the_branch_is_used_without_a_deployment() {
-        let (stop, head) = stop_history(None, Some(commits(&["c", "b"])));
+    #[tokio::test]
+    async fn the_branch_is_used_without_a_deployment() {
+        let (stop, head) = place(vec![(EnvSource::Branch, (None, commits(&["c", "b"])))], false).await;
         assert_eq!(stop, set(&["c", "b"]));
         assert_eq!(head.as_deref(), Some("c"));
     }
 
-    #[test]
-    fn neither_deployment_nor_branch_is_unknown() {
-        let (stop, head) = stop_history(None, None);
+    #[tokio::test]
+    async fn neither_deployment_nor_branch_is_unknown() {
+        let (stop, head) = place(vec![], true).await;
         assert_eq!(stop, unknown());
         assert_eq!(head, None);
+    }
+
+    #[tokio::test]
+    async fn the_harbour_falls_back_to_the_latest_release() {
+        // No Deployments, a published Release: the last stop is at its commit.
+        let answers = vec![(EnvSource::Release, (found("a1b2c3d", Some("v1.2.0")), commits(&["a1b2c3d", "0000000"]))), (EnvSource::Branch, (None, commits(&["fffffff"])))];
+        let (stop, head) = place(answers.clone(), true).await;
+        assert_eq!(stop.source, StopSource::Release);
+        assert_eq!(stop.sha.as_deref(), Some("a1b2c3d"));
+        assert_eq!(stop.tag.as_deref(), Some("v1.2.0"));
+        assert_eq!(head.as_deref(), Some("a1b2c3d"));
+        // Only the last stop looks at Releases by default; others use their branch.
+        let (mid, _) = place(answers, false).await;
+        assert_eq!(mid.source, StopSource::Branch);
+    }
+
+    #[tokio::test]
+    async fn a_configured_chain_falls_through_on_a_miss() {
+        let envs = parse_environments(r#"{"environments":[{"name":"prod","source":["deployment","tag:v*","url:https://app/version"]}]}"#);
+        let chain = envs[0].sources.clone();
+        assert_eq!(chain, vec![EnvSource::Deployment, EnvSource::Tag("v*".into()), EnvSource::Url("https://app/version".into())]);
+        // The deployment misses; the tag answers, so the url is never asked.
+        let mut asked = Vec::new();
+        let hit = super::super::deployments::first_hit(&chain, |s| {
+            asked.push(s.clone());
+            let a = matches!(s, EnvSource::Tag(_)).then(|| (found("abcdef1", Some("v2.0.0")), commits(&["abcdef1"])));
+            async move { a }
+        })
+        .await;
+        let (stop, _) = stop_from_hit(hit);
+        assert_eq!(stop.source, StopSource::Tag);
+        assert_eq!(stop.tag.as_deref(), Some("v2.0.0"));
+        assert_eq!(asked.len(), 2);
+        // Everything missing is unknown, as before.
+        let none = super::super::deployments::first_hit(&chain, |_| async { None::<(Option<super::super::deployments::Deployed>, Vec<String>)> }).await;
+        assert_eq!(stop_from_hit(none).0, unknown());
+    }
+
+    #[test]
+    fn source_is_parsed_from_a_string_or_a_list() {
+        let envs = parse_environments(
+            r#"{"environments":[{"name":"a"},{"name":"b","source":"release"},{"name":"c","source":["branch","nonsense","tag:"]},{"name":"d","source":"url:ftp://x"}]}"#,
+        );
+        assert!(envs[0].sources.is_empty(), "unset: the default chain");
+        assert_eq!(envs[1].sources, vec![EnvSource::Release]);
+        assert_eq!(envs[2].sources, vec![EnvSource::Branch], "unreadable entries are dropped");
+        assert!(envs[3].sources.is_empty(), "only http(s) endpoints");
+        assert_eq!(super::super::deployments::default_chain(false), vec![EnvSource::Deployment, EnvSource::Branch]);
+        assert_eq!(super::super::deployments::default_chain(true), vec![EnvSource::Deployment, EnvSource::Release, EnvSource::Branch]);
+        // Each reports as itself.
+        let json = serde_json::to_value([StopSource::Release, StopSource::Tag, StopSource::Url]).unwrap();
+        assert_eq!(json, serde_json::json!(["release", "tag", "url"]));
     }
 
     #[test]
@@ -1395,8 +1487,8 @@ mod tests {
         assert_eq!(sentinel, "absent");
         assert!(gate.is_none());
         let names: Vec<String> = envs.iter().map(|e| e.name.clone()).collect();
-        let (nuc, _) = stop_history(Some(("b".into(), vec!["b".into(), "a".into()])), None);
-        let (release, head) = stop_history(Some(("a".into(), vec!["a".into()])), None);
+        let (nuc, _) = dep("b", &["b", "a"]);
+        let (release, head) = dep("a", &["a"]);
         assert_eq!(head.as_deref(), Some("a"));
         let p = place_tips(&tips, &names, &[nuc, release]);
         assert_eq!(p.quay, vec![9], "landed after the last deploy: still at the quay");
@@ -1413,7 +1505,7 @@ mod tests {
         let tips = vec![("b".to_string(), 8), ("a".to_string(), 7)];
         let envs = parse_environments(r#"{"environments":[{"name":"nuc-1"}]}"#);
         let (_, gate) = sentinel_gate(&envs, None, Some(&"b".to_string()));
-        let (nuc, _) = stop_history(Some(("b".into(), vec!["b".into(), "a".into()])), None);
+        let (nuc, _) = dep("b", &["b", "a"]);
         let p = place_tips(&tips, &["master-green".into(), "nuc-1".into()], &[gate.unwrap(), nuc]);
         assert_eq!(p.quay, vec![8, 7]);
     }

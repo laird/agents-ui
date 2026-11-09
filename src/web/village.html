@@ -2747,8 +2747,11 @@
   function sourceWords(s) {
     const sha = s.sha ? ' · ' + String(s.sha).slice(0, 7) : '';
     if (s.source === 'deployment') return `GitHub Deployment${sha}`;
+    if (s.source === 'release') return `${s.tag ? s.tag + ' ' : ''}(GitHub Release)${sha}`;
+    if (s.source === 'tag') return `tag ${s.tag || ''}${sha}`;
+    if (s.source === 'url') return `its version endpoint${sha}`;
     if (s.source === 'branch') return `${s.branch ? 'branch ' + s.branch : 'its branch ref'}${sha}`;
-    if (s.source === 'unknown') return 'no Deployment and no branch';
+    if (s.source === 'unknown') return 'nothing says what runs here (no Deployment, Release or branch)';
     return 'not reported';
   }
   function whereWords(s, v, f) {
