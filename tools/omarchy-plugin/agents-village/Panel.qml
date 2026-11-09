@@ -35,6 +35,12 @@ Panel {
   property double nowMs: Date.now()
   // The swarm picked from the list; "" until one is.
   property string picked: ""
+  // Releases seen so far (project → key), and when each project's ship got back.
+  property var releasesSeen: null
+  property var sailingUntil: ({})
+  readonly property var sailing: Object.keys(sailingUntil).filter(function(p) { return sailingUntil[p] > nowMs })
+  // How long the ship is drawn out after a release.
+  readonly property int sailMs: 120000
 
   readonly property var rows: Model.swarmRows(swarmsDoc, villagesDoc)
   readonly property string project: Model.chooseProject(rows, pinned, picked)
@@ -45,7 +51,7 @@ Panel {
   readonly property var flowItems: Model.flow(village)
   readonly property var attentionItems: Model.attention(base, village)
   readonly property var featureItems: Model.features(village)
-  readonly property var badge: Model.badge(villagesDoc, project, reachable)
+  readonly property var badge: Model.badge(villagesDoc, project, reachable, sailing)
   readonly property string repo: Model.repoUrl(village)
   readonly property string host: base.replace(/^[a-z]+:\/\//i, "").replace(/:\d+$/, "")
 
@@ -72,6 +78,7 @@ Panel {
   function refresh() {
     get("/api/village", function(doc) {
       if (doc === null) { root.reachable = false; return }
+      root.noteReleases(doc)
       root.villagesDoc = doc
       root.reachable = true
       root.lastOk = Date.now()
@@ -79,10 +86,23 @@ Panel {
     get("/api/swarms", function(doc) { if (doc !== null) root.swarmsDoc = doc })
   }
 
+  // A release (the last stop's deployment changing) sets the ship sailing.
+  function noteReleases(doc) {
+    var r = Model.releases(doc, releasesSeen)
+    releasesSeen = r.seen
+    if (r.sailed.length === 0) return
+    var until = Object.assign({}, sailingUntil)
+    r.sailed.forEach(function(p) { until[p] = Date.now() + sailMs })
+    sailingUntil = until
+    nowMs = Date.now()
+  }
+
   // The harness feeds recorded answers through the same path.
   function apply(swarmsText, villagesText) {
     swarmsDoc = Model.parse(swarmsText)
-    villagesDoc = Model.parse(villagesText)
+    var doc = Model.parse(villagesText)
+    if (doc !== null) noteReleases(doc)
+    villagesDoc = doc
     reachable = villagesDoc !== null
     if (reachable) lastOk = Date.now()
   }

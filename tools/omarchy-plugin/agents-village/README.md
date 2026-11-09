@@ -11,7 +11,9 @@ A house glyph, with:
 - **a count:** how many houses are working;
 - **a red dot:** something waits on you: a blocked house or manager, a note on
   the board, a merge gate that failed or conflicted;
-- **a ship:** a deployment is sailing (when the server reports one);
+- **a ship:** a release just went out: the last stop's deployment changed, as
+  when the village page sails its ship. It shows for two minutes, and never for the
+  release already there when the widget starts;
 - **dimmed:** the server can't be reached. The tooltip says so.
 
 With a village open in the panel, the icon counts that village; otherwise it

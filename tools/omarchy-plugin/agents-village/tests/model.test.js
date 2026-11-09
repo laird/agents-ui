@@ -119,6 +119,22 @@ test("the bar badge: working, needs you, sailing, unreachable", () => {
   assert.strictEqual(M.badge(sailing, "", true).sailing, true)
 })
 
+test("a ship sails when the last stop's release changes, never on first sight", () => {
+  const at = (sha, source = "deployment") => ({ villages: [{ project: "x", houses: [], board: [], pipeline: { stops: [{ name: "nuc-1" }, { name: "release", source, sha }] } }] })
+  assert.strictEqual(M.releaseKey(at("abc").villages[0]), "deployment:abc")
+  assert.strictEqual(M.releaseKey(M.villageFor(villages, "agents-ui")), "", "no release yet")
+  let r = M.releases(at("abc"), null)
+  assert.deepStrictEqual(r.sailed, [], "first sight")
+  r = M.releases(at("abc"), r.seen)
+  assert.deepStrictEqual(r.sailed, [], "unchanged")
+  r = M.releases(at("def"), r.seen)
+  assert.deepStrictEqual(r.sailed, ["x"], "a new release")
+  r = M.releases(at("def", "branch"), r.seen)
+  assert.deepStrictEqual(r.sailed, ["x"], "the source is part of the key, as on the page")
+  assert.strictEqual(M.badge(at("def"), "", true, ["x"]).sailing, true)
+  assert.strictEqual(M.badge(at("def"), "", true, ["y"]).sailing, false)
+})
+
 test("repo link and timestamps", () => {
   assert.strictEqual(M.repoUrl(M.villageFor(villages, "agents-ui")), "https://github.com/laird/agents-ui")
   assert.strictEqual(M.repoUrl({ houses: [], board: [], backlog: [] }), "")

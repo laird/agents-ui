@@ -57,6 +57,18 @@ ShellRoot {
       check("the server setting is read", pinned.base, "http://127.0.0.1:9")
       check("the interval defaults to 5s", pinned.intervalMs, 5000)
 
+      console.log("a release")
+      var shipped = function(sha) {
+        var doc = JSON.parse(Fixtures.villages)
+        doc.villages[0].pipeline.stops[1].sha = sha
+        doc.villages[0].pipeline.stops[1].source = "deployment"
+        return JSON.stringify(doc)
+      }
+      one.apply(Fixtures.swarms, shipped("aaa1111"))
+      check("no ship on first sight", one.badge.sailing, false)
+      one.apply(Fixtures.swarms, shipped("bbb2222"))
+      check("the ship sails on a new release", one.badge.sailing, true)
+
       console.log("server down")
       one.apply("", "")
       check("unreachable", one.reachable, false)

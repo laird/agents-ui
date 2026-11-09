@@ -188,12 +188,37 @@ function features(v) {
   })
 }
 
+// What the last stop runs, as the village page tells a release: its sha,
+// keyed by where that came from, so a gh outage falling back to the branch
+// never counts as a release. "" when nothing says.
+function releaseKey(v) {
+  var stops = (v && v.pipeline && v.pipeline.stops) || []
+  var last = stops[stops.length - 1]
+  return last && last.sha ? String(last.source || "") + ":" + last.sha : ""
+}
+
+// Villages whose release changed since `seen` (project → key), and the new
+// `seen`. A village seen for the first time sets its key without sailing,
+// as the page never sails on load.
+function releases(villagesDoc, seen) {
+  var next = {}, sailed = []
+  villagesOf(villagesDoc).forEach(function(v) {
+    var key = releaseKey(v)
+    next[v.project] = key
+    var was = seen ? seen[v.project] : undefined
+    if (key !== "" && was !== undefined && was !== "" && was !== key) sailed.push(v.project)
+  })
+  return { seen: next, sailed: sailed }
+}
+
 // The bar icon: houses working, a red dot when anything waits on you, a ship
-// while a deployment sails, dimmed when the server can't be reached. One
-// village when one is picked, all of them otherwise.
-function badge(villagesDoc, project, reachable) {
+// while a deployment sails (`sailing`: the projects whose ship is out), dimmed
+// when the server can't be reached. One village when one is picked, all of
+// them otherwise.
+function badge(villagesDoc, project, reachable, sailingProjects) {
   var vs = villagesOf(villagesDoc).filter(function(v) { return project === "" || v.project === project })
-  var sailing = vs.some(function(v) { return !!(v.pipeline && v.pipeline.sailing) })
+  var out = sailingProjects || []
+  var sailing = vs.some(function(v) { return out.indexOf(v.project) >= 0 || !!(v.pipeline && v.pipeline.sailing) })
   return {
     reachable: !!reachable,
     working: vs.reduce(function(n, v) { return n + working(v) }, 0),
@@ -229,6 +254,7 @@ if (typeof module !== "undefined") {
     parse: parse, baseUrl: baseUrl, absolute: absolute, villageUrl: villageUrl,
     villageFor: villageFor, swarmFor: swarmFor, needsYou: needsYou, swarmRows: swarmRows,
     chooseProject: chooseProject, canGoBack: canGoBack, houseName: houseName, houseRows: houseRows,
-    flow: flow, attention: attention, features: features, badge: badge, ago: ago, repoUrl: repoUrl
+    flow: flow, attention: attention, features: features, badge: badge, ago: ago, repoUrl: repoUrl,
+    releaseKey: releaseKey, releases: releases
   }
 }
