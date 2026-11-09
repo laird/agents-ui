@@ -32,13 +32,19 @@
   .title a { font-weight: 400; font-size: 12px; text-transform: none; letter-spacing: 0; }
   select { background: var(--win-bot); color: var(--ink); border: 2px solid var(--win-inner); border-radius: 4px; font: 13px var(--mono); padding: 4px 6px; }
   .status { font: 12px var(--mono); color: var(--ink-dim); }
+  .vname { color: var(--ink); text-transform: none; letter-spacing: 0; overflow-wrap: anywhere; }
+  .vname[hidden], .title a[hidden] { display: none; }
+  .zoom { display: inline-flex; gap: 2px; }
+  .zoom button { background: var(--win-bot); color: var(--ink); border: 2px solid var(--win-inner); border-radius: 4px; font: 700 13px var(--mono); min-width: 30px; padding: 2px 6px; cursor: pointer; }
+  .zoom button:disabled { opacity: .5; cursor: default; }
   .win {
     background: linear-gradient(180deg, var(--win-top), var(--win-bot));
     border: 3px solid var(--frame); border-radius: 6px;
     box-shadow: 0 0 0 3px var(--frame-shadow), inset 0 0 0 2px var(--win-inner);
   }
   .stage { max-width: 1400px; margin: 0 auto; padding: 8px; }
-  .viewport { overflow: auto; display: flex; justify-content: center; background: var(--frame-shadow); border-radius: 2px; min-height: 200px; align-items: center; }
+  /* `safe center`: a zoomed-in map scrolls from its left edge instead of being cut off. */
+  .viewport { overflow: auto; display: flex; justify-content: safe center; background: var(--frame-shadow); border-radius: 2px; min-height: 200px; align-items: safe center; }
   canvas { image-rendering: pixelated; image-rendering: crisp-edges; display: block; cursor: pointer; }
   .flow { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   .step { flex: 1 1 90px; padding: 6px 8px; background: rgba(6,8,20,.45); border: 2px solid var(--rule); border-radius: 4px; }
@@ -111,7 +117,7 @@
 </head>
 <body>
   <div class="bar">
-    <div class="title">Worktree Hollow <span id="workflow" class="status"></span> <select id="pick" aria-label="Village" hidden></select> <select id="theme" aria-label="Style"><option value="medieval">Medieval village</option><option value="modern">Modern business district</option><option value="future">Future</option></select> <label class="labels-toggle"><input type="checkbox" id="labels-on" checked> Labels</label> <a href="/">Dashboard</a></div>
+    <div class="title">Worktree Hollow <span id="vname" class="vname"></span> <a id="repo" hidden target="_blank" rel="noopener"></a> <span id="workflow" class="status"></span> <select id="pick" aria-label="Village" hidden></select> <select id="theme" aria-label="Style"><option value="medieval">Medieval village</option><option value="modern">Modern business district</option><option value="future">Future</option></select> <label class="labels-toggle"><input type="checkbox" id="labels-on" checked> Labels</label> <span class="zoom" role="group" aria-label="Zoom"><button id="zoom-out" aria-label="Zoom out">−</button><button id="zoom-fit" title="Fit the map to the panel width">Fit</button><button id="zoom-in" aria-label="Zoom in">+</button></span> <a href="/">Dashboard</a></div>
     <div class="status" id="status" aria-live="polite">Connecting…</div>
   </div>
   <div class="win stage">
@@ -2318,12 +2324,52 @@
   }
 
   /* ---------- Data ---------- */
-  function fit() {
-    const vp = document.getElementById('viewport'), W = cv.width, H = cv.height;
-    const s = Math.max(1, Math.min(8, Math.floor((vp.clientWidth - 8) / W), Math.floor((window.innerHeight - 190) / H) || 1));
-    cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
+  /* The map fills the panel's width; a tall map scrolls the page rather than
+   * shrinking. Whole-number scales keep the pixels square; below 1× (a phone)
+   * it shrinks to the panel so the page never scrolls sideways. +/− step the
+   * scale from the fitted one, and the step is remembered. */
+  const ZOOM_MAX_SCALE = 16;
+  let zoom = 0;
+  try { zoom = Math.max(-ZOOM_MAX_SCALE, Math.min(ZOOM_MAX_SCALE, parseInt(localStorage.getItem('village-zoom'), 10) || 0)); } catch {}
+  function fitScale() {
+    const room = (document.getElementById('viewport').clientWidth - 8) / cv.width;
+    return room >= 1 ? Math.floor(room) : Math.max(0.1, room);
   }
+  function mapScale() {
+    const f = fitScale();
+    return zoom ? Math.max(Math.min(1, f), Math.min(ZOOM_MAX_SCALE, Math.max(1, Math.floor(f)) + zoom)) : f;
+  }
+  function fit() {
+    const W = cv.width, H = cv.height, s = mapScale();
+    cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
+    const fitBtn = document.getElementById('zoom-fit');
+    fitBtn.textContent = zoom ? (Number.isInteger(s) ? s : s.toFixed(1)) + '×' : 'Fit';
+    fitBtn.disabled = !zoom;
+    document.getElementById('zoom-out').disabled = s <= Math.min(1, fitScale());
+    document.getElementById('zoom-in').disabled = s >= ZOOM_MAX_SCALE;
+  }
+  function stepZoom(d) {
+    const before = mapScale();
+    zoom = d ? zoom + d : 0;
+    if (d && mapScale() === before) zoom -= d;  // already at the smallest or largest scale
+    try { localStorage.setItem('village-zoom', String(zoom)); } catch {}
+    fit(); placeBanners();
+  }
+  document.getElementById('zoom-out').addEventListener('click', () => stepZoom(-1));
+  document.getElementById('zoom-in').addEventListener('click', () => stepZoom(1));
+  document.getElementById('zoom-fit').addEventListener('click', () => stepZoom(0));
   window.addEventListener('resize', () => { fit(); placeBanners(); });
+
+  /* Which village this is, always in the bar (the picker shows it only when
+   * there are two or more), plus its GitHub page when a real issue URL shows
+   * which repo it is (`repoUrl`), never a guess. */
+  function nameBar(name, v) {
+    const vn = document.getElementById('vname'), a = document.getElementById('repo'), repo = v ? repoUrl(v) : null;
+    vn.textContent = name;
+    vn.hidden = !pick.hidden;
+    a.hidden = !repo;
+    if (repo) { a.href = repo; a.textContent = repo.replace(/^https:\/\/github\.com\//, '') + ' on GitHub'; }
+  }
 
   /* `· autocoder · development`, `· agentex · runtime`: which framework drew it, and which half of the loop it is. */
   function describe(v) {
@@ -2339,10 +2385,12 @@
     else return;
     if (view.world) {
       document.getElementById('workflow').textContent = `· ${w.dev} builds ${w.platform}`;
+      nameBar(`${w.dev} \u21c4 ${w.platform}`, villages.find(x => x.project === w.dev));
       renderWorldFlow(w);
     } else {
       const sc = scenes[view.village];
       document.getElementById('workflow').textContent = describe(sc.v);
+      nameBar(sc.v.project, sc.v);
       if (cv.width !== sc.L.W || cv.height !== sc.L.H) { cv.width = sc.L.W; cv.height = sc.L.H; }
       renderFlow(sc.v);
     }
