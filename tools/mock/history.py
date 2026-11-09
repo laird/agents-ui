@@ -9,6 +9,12 @@ prior recording:
         --step 60 tools/mock/recordings/history.json.gz
     python3 tools/mock/replay-build.py tools/mock/recordings/history.json.gz replay.html
 
+Or play it back in the live, interactive village, one frame every 6 seconds
+(tools/adapters/history-replay.py; docs/village-protocol.md, "Replaying history"):
+
+    agents-tui --headless --read-only --source swarms=none \\
+        --framework "exec:python3 tools/adapters/history-replay.py tools/mock/recordings/history.json.gz"
+
 Sources, all from history:
   * git: where each issue landed on the integration branch. autocoder's tip
     refs (refs/autocoder/tips/<branch>/<sha>-<N>) name the exact commit; without
