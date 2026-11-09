@@ -142,6 +142,24 @@ Matching ignores case. Anything else counts as `unknown`.
 - `release`: the version at the last stage. A world compares it with the platform's `builds`, and either may be a prefix of the other (at least 7 characters).
 - `promotion`: `subtask` (the default: each task moves through the stages on its own) or `feature` (a feature's landed tasks wait at the quay and move together).
 
+## Replaying history
+
+`tools/adapters/history-replay.py` plays a repository's past back in the live village. It reads recordings made by `tools/mock/history.py`. The village is fully interactive: houses, crates and notes open their GitHub issues, and features follow their subtasks down the canal.
+
+```bash
+python3 tools/mock/history.py --repo ~/src/agents-ui --since 2026-03-20T00:00Z --until 2026-11-08T17:00Z \
+    --step 1800 --idle-gap 3600 --run agents-ui hist-agents-ui.json.gz
+agents-tui --headless --read-only --source swarms=none \
+    --framework "exec:python3 tools/adapters/history-replay.py hist-agents-ui.json.gz --every 6"
+```
+
+- Each recording becomes one village named `replay:<project>` (change the prefix with `--prefix`), so it never clashes with a live village of the same repository. Give several recordings to get several villages.
+- The title bar reads `history replay i/N`.
+- The replay clock starts the first time a recording is played. It advances one recorded frame every `--every` seconds (default 6, since agents-tui polls every 5 seconds at most) and loops at the end.
+- The clock and an index of each recording's frames live in `--state` (default `$XDG_STATE_HOME/agents-tui/history-replay`). The index lets a poll read one frame instead of decompressing the whole recording.
+- To start a replay over, run the adapter once by hand with `--restart`. Don't put `--restart` in the `--framework` command: agents-tui reruns that command on every poll, so the replay would never leave the first frame.
+- Subtasks closed as not planned are left out, because a report has no "not planned" state and every subtask counts toward its feature.
+
 ## Built-in adapters
 
 | Framework | Plane | Reads |
