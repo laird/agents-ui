@@ -1546,6 +1546,26 @@ mod tests {
     }
 
     #[test]
+    fn village_html_shows_working_agents_and_every_subagent() {
+        let body = VILLAGE_HTML;
+        // A working agent is one busy figure at its door, acting out its action.
+        assert!(body.contains("if (st === 'working') { person(c, lot.x + 4, lot.y + 8, h.id, workFrame(tt)); drawAction(c, lot.x + 4, lot.y + 8, h.action, tt); }"));
+        assert!(body.contains("const workFrame = t => (!reduce && blink(t, 180) ? 'work2' : 'work');"));
+        assert!(body.contains("if (kind === 'work' || kind === 'work2') {"));
+        // One figure per sub-agent in the slots, then a "+N" badge: none dropped.
+        assert!(body.contains("const SUB_SLOTS = [[-1, 12], [9, 12], [-4, 16], [4, 16], [12, 16]];"));
+        assert!(body.contains(".slice(0, SUB_SLOTS.length).forEach((sa, k) => {"));
+        assert!(body.contains("if (subs.length > SUB_SLOTS.length) { badge(c, lot.x + 12, lot.y + 4, subs.length - SUB_SLOTS.length);"));
+        assert!(body.contains("function badge(c, x, y, n)"));
+        assert!(!body.contains("subs.length > 2"), "the old two-figure cap is gone");
+        // The flow counter counts every sub-agent, as the figures plus badge do.
+        assert!(body.contains("['Sub-agents', 'running in sessions', [v.manager, ...v.houses].reduce((n, h) => n + (h.subagents || []).length, 0)]"));
+        // The manager is drawn busy at the hall while working.
+        assert!(body.contains("if (v.manager.status !== 'stopped') {"));
+        assert!(body.contains("busy ? workFrame(t) : 'stand', { mayor: true });"));
+    }
+
+    #[test]
     fn village_html_reaches_every_object_by_keyboard() {
         let body = VILLAGE_HTML;
         assert!(body.contains(r#"<div class="hitkeys" id="hitkeys"></div>"#));
