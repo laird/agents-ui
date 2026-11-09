@@ -32,6 +32,15 @@ and then unblocked (to the board and back), one is closed as not planned
 (carried off), workers claim, work on and land the rest, and a release
 ships what has landed.
 
+With --gate, "shop"'s finished work goes through a simulated merge gate
+(#375) instead of landing at once. Each hand-off is a merge job that writes
+the files src/web/gate.rs reads (<AUTOCODER_TMP>/autocoder-merge-<repo-id>-<N>
+.pid/.log/.exit/.run.sh, and a flock on autocoder-gate-slot-<k>.lock while it
+gates): it queues for one of two slots, merges, gates with a test count that
+climbs, then passes, lands unproven, fails, conflicts or meets a red base, in
+turn. Every third hand-off waits for a partner and goes as a merge train.
+Failed work is handed back and re-queued a little later.
+
 Linked to the platform (temporal_sim.py): every prod promotion of "shop"
 writes the released commit to <dir>/state/release, and every line the
 platform appends to <dir>/state/incidents.jsonl becomes an `incident` issue
@@ -43,6 +52,7 @@ in "shop" naming the workstream that failed.
     swarm_sim.py --dir DEMO --feature run                       # two features, spec to prod
     swarm_sim.py --dir DEMO --feature --promotion feature run   # ... promoted as whole features
     swarm_sim.py --dir DEMO --lifecycle run                     # every issue transition, on a loop
+    swarm_sim.py --dir DEMO --gate run                          # finished work goes through a merge gate
 
 With --story the demo tells one story cleanly: an incident from the platform
 becomes a P0 bug, a worker fixes it (asking once for permission on the way),
@@ -71,11 +81,15 @@ Deployments answers from them.
 """
 
 import argparse
+import atexit
 import datetime
+import hashlib
 import json
 import os
 import random
+import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -83,6 +97,7 @@ SWARMS = [("shop", 5, "autocoder"), ("billing", 2, "modernize")]
 STORY = False
 FEATURE = False
 LIFECYCLE = False
+GATE = False
 PROMOTION = "subtask"
 REPO_URL = "https://github.com/sim/shop"
 # The feature story's two features (see the module docstring). Numbers sit
@@ -150,6 +165,7 @@ class Swarm:
         self.manager_subagents = []
         self.next_manager_change = 0
         self.story = None  # FeatureStory, for "shop" with --feature
+        self.gate = None  # GateSim, for "shop" with --gate
         self.releases = []  # shop's prod deployments, newest first, without --feature
         self.next_tag = 1
 
@@ -185,7 +201,7 @@ class Swarm:
 
     def claimable(self):
         blocking = {"needs-design", "needs-clarification", "needs-approval", "too-complex", "proposal", "working",
-                    "awaiting-integration", "decomposed"}
+                    "awaiting-integration", "decomposed", "merging"}
         rank = lambda i: next((int(l[1]) for l in i["labels"] if len(l) == 2 and l[0] == "P"), 9)
         # `hold`: the feature story keeps its doomed subtask in the backlog until it drops it.
         return sorted((i for i in self.issues if not blocking & set(i["labels"]) and not i.get("hold")), key=lambda i: (rank(i), i["number"]))
@@ -264,7 +280,12 @@ class Swarm:
 
     def land(self, w):
         """Merge the worker's issue to master the way merge-to-integration does."""
-        n = w["issue"]
+        if self.gate:
+            self.gate.submit(w["issue"], time.time())
+            return
+        self.land_issue(w["issue"])
+
+    def land_issue(self, n, close=True):
         git(self.repo, "commit", "-q", "--allow-empty", "-m", f"Fix #{n}")
         sha = git(self.repo, "rev-parse", "HEAD")
         git(self.repo, "push", "-q", "origin", "master", f"{sha}:refs/autocoder/tips/master/{sha}-{n}")
@@ -272,9 +293,9 @@ class Swarm:
         issue = next((i for i in self.issues if i["number"] == n), None)
         if self.story:
             self.story.landed(n, sha)
-        if issue and "incident" in issue["labels"]:
+        if issue and ("incident" in issue["labels"] or not close):
             # Landed, not yet shipped: parked until a prod release carries it.
-            issue["labels"] = [l for l in issue["labels"] if l != "working"] + ["awaiting-integration"]
+            issue["labels"] = [l for l in issue["labels"] if l not in ("working", "merging")] + ["awaiting-integration"]
             issue["fix"] = sha
         else:
             self.issues = [i for i in self.issues if i["number"] != n]
@@ -553,6 +574,166 @@ class Lifecycle:
         (self.s.state / "release-now").touch()
 
 
+class GateSim:
+    """--gate: a merge gate for "shop", written as autocoder's merge jobs write it."""
+    SLOTS = 2
+    OUTCOMES = ["pass", "pass", "fail", "unproven", "conflict", "pass", "red"]
+    TESTS = 745
+
+    def __init__(self, swarm, tmp):
+        self.s, self.tmp = swarm, tmp
+        tmp.mkdir(parents=True, exist_ok=True)
+        common = os.path.realpath(swarm.repo / ".git")
+        self.prefix = f"autocoder-merge-{swarm.repo.name}-{hashlib.sha1(common.encode()).hexdigest()[:8]}-"
+        for f in tmp.glob(self.prefix + "*"):
+            f.unlink()
+        self.jobs, self.pending, self.handed, self.parked = [], [], [], []
+        self.count = 0
+        atexit.register(self.stop)
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+
+    def stop(self):
+        for j in self.jobs:
+            self.kill(j)
+
+    def kill(self, j):
+        # The whole group: flock's child inherits the lock, so killing flock alone keeps the slot busy.
+        if j.get("proc"):
+            try:
+                os.killpg(j["proc"].pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            j["proc"].wait()
+            j["proc"] = None
+
+    def issue(self, n):
+        return next((i for i in self.s.issues if i["number"] == n), None)
+
+    def label(self, n, drop=(), add=()):
+        i = self.issue(n)
+        if i:
+            i["labels"] = [l for l in i["labels"] if l not in drop] + [l for l in add if l not in i["labels"]]
+
+    def path(self, j, ext):
+        return self.tmp / f"{self.prefix}{j['issue']}.{ext}"
+
+    def log(self, j, text):
+        with open(self.path(j, "log"), "a") as f:
+            f.write(text)
+
+    def spawn(self, j, cmd):
+        self.kill(j)
+        j["proc"] = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        self.path(j, "pid").write_text(f"{j['proc'].pid}\n")
+
+    def submit(self, n, t):
+        """A worker hands its finished branch to the gate (merge-launch.sh)."""
+        self.label(n, drop=("working",), add=("merging",))
+        self.pending.append(n)
+
+    def start(self, members, t):
+        self.count += 1
+        lead = members[0]
+        feature = f"train/{datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime('%Y%m%dT%H%M%S')}Z" if len(members) > 1 else f"feature/issue-{lead}"
+        if len(members) > 1:
+            # A train branch: one merge commit per member, as merge-to-integration's train builder writes them.
+            tip = git(self.s.repo, "rev-parse", "origin/master")
+            tree = git(self.s.repo, "rev-parse", "origin/master^{tree}")
+            for m in members:
+                side = git(self.s.repo, "commit-tree", tree, "-p", tip, "-m", f"Fix #{m}")
+                tip = git(self.s.repo, "commit-tree", tree, "-p", tip, "-p", side, "-m", f"Merge branch 'feature/issue-{m}' into {feature}")
+            git(self.s.repo, "update-ref", f"refs/heads/{feature}", tip)
+        j = {"issue": lead, "members": members, "phase": "queued", "since": t, "outcome": self.OUTCOMES[(self.count - 1) % len(self.OUTCOMES)], "slot": None, "ran": 0}
+        if len(members) > 1 and j["outcome"] in ("conflict", "red"):
+            j["outcome"] = "pass"
+        for ext in ("log", "exit"):
+            self.path(j, ext).unlink(missing_ok=True)
+        self.path(j, "log").write_text("")
+        self.path(j, "run.sh").write_text(f"merge-to-integration.sh --feature {feature} --issue {lead} --integration master\n")
+        self.spawn(j, ["sleep", "900"])
+        self.jobs.append(j)
+
+    def finish(self, j, code, text):
+        self.log(j, text)
+        self.path(j, "exit").write_text(f"{code}\n")
+        self.kill(j)
+        j["phase"] = "done"
+
+    def tick(self, t):
+        # Every third hand-off waits for a partner and rides a train with it.
+        while self.pending:
+            if self.count % 3 == 2 and len(self.pending) < 2:
+                break
+            take = 2 if self.count % 3 == 2 else 1
+            self.start(self.pending[:take], t)
+            self.pending = self.pending[take:]
+        gating = [j for j in self.jobs if j["phase"] == "gating"]
+        for j in list(self.jobs):
+            age = t - j["since"]
+            if j["phase"] == "queued" and age >= 4:
+                j["phase"], j["since"] = "merging", t
+                self.log(j, f"🔀 Merging {j['members']} onto master in a throwaway worktree\n")
+            elif j["phase"] == "merging" and age >= 3:
+                if j["outcome"] == "conflict":
+                    self.finish(j, 1, f"Auto-merging src/web/village.html\nCONFLICT (content): Merge conflict in src/web/village.html\n❌ Merge conflict integrating 'master' into feature/issue-{j['issue']}.\n")
+                    self.hand_back(j, t)
+                    continue
+                free = [k for k in range(1, self.SLOTS + 1) if k not in {g["slot"] for g in gating}]
+                if not free:
+                    if not j.get("waiting"):
+                        self.log(j, f"⏳ All {self.SLOTS} gate slot(s) on this host are busy; waiting for slot {self.SLOTS} ({time.strftime('%H:%M:%S')})\n")
+                        j["waiting"] = True
+                    continue
+                j["slot"], j["phase"], j["since"] = free[0], "gating", t
+                gating.append(j)
+                lock = self.tmp / f"autocoder-gate-slot-{free[0]}.lock"
+                lock.touch()
+                self.spawn(j, ["flock", str(lock), "sleep", "900"])
+                self.log(j, f"▶️  Gate slot {free[0]} acquired ({time.strftime('%H:%M:%S')})\n🧪 Gating the integrated tree {random.getrandbits(32):08x}: cargo test\nrunning {self.TESTS} tests\n")
+            elif j["phase"] == "gating":
+                if age < 14:
+                    n = min(self.TESTS - 5, int(self.TESTS * age / 14)) - j["ran"]
+                    if n > 0:
+                        self.log(j, "".join(f"test t{j['ran'] + k} ... ok\n" for k in range(n)))
+                        j["ran"] += n
+                    continue
+                self.outcome(j, t)
+        # Handed back work is re-queued after a while; unproven work is proven green.
+        for n, when in list(self.handed):
+            if t >= when:
+                self.handed.remove((n, when))
+                self.label(n, drop=("needs-clarification",))
+        for n, when in list(self.parked):
+            if t >= when:
+                self.parked.remove((n, when))
+                self.s.issues = [i for i in self.s.issues if i["number"] != n]
+        self.jobs = [j for j in self.jobs if j["phase"] != "done" or t - j["since"] < 2]
+
+    def outcome(self, j, t):
+        o, members = j["outcome"], j["members"]
+        if o in ("pass", "unproven"):
+            done = f"test result: ok. {self.TESTS} passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 14.00s\n"
+            if o == "pass":
+                self.finish(j, 0, done + f"✅ Issue #{j['issue']} merged into 'master' and verified: tests passed on the published tree.\n✅ Issue #{j['issue']} closed.\n")
+            else:
+                self.finish(j, 0, done + f"✅ Issue #{j['issue']} merged into 'master' (disjoint re-sync; the published tree was not the gated tree)\n")
+            for m in members:
+                self.s.land_issue(m, close=(o == "pass"))
+                if o == "unproven":
+                    self.parked.append((m, t + 20))
+        elif o == "fail":
+            self.finish(j, 2, f"test result: FAILED. {self.TESTS - 2} passed; 2 failed; 0 ignored\n❌ Tests fail on the integrated tree.\n❌ origin/master passes alone, so this change broke it. NOT pushing.\n")
+            self.hand_back(j, t)
+        else:  # red base
+            self.finish(j, 2, "❌ Tests fail on the integrated tree.\n❌ origin/master fails alone too (tree 9c9c9c9c), and no green ref yet. NOT pushing.\n")
+            self.hand_back(j, t)
+
+    def hand_back(self, j, t):
+        for m in j["members"]:
+            self.label(m, drop=("merging",), add=("needs-clarification",))
+            self.handed.append((m, t + 25))
+
+
 def main():
     ap = argparse.ArgumentParser(description="Simulated coding swarms under herdr.")
     ap.add_argument("--dir", required=True, type=Path)
@@ -563,10 +744,11 @@ def main():
     ap.add_argument("--promotion", choices=["subtask", "feature"], default="subtask",
                     help="with --feature: promote each subtask on its own, or each feature as a whole")
     ap.add_argument("--lifecycle", action="store_true", help="play every transition of an issue's life on a loop (see the module docstring)")
+    ap.add_argument("--gate", action="store_true", help="send finished work through a simulated merge gate (see the module docstring)")
     ap.add_argument("command", choices=["setup", "run"])
     args = ap.parse_args()
     global STORY, FEATURE, PROMOTION, LIFECYCLE
-    STORY, FEATURE, PROMOTION, LIFECYCLE = args.story, args.feature, args.promotion, args.lifecycle
+    STORY, FEATURE, PROMOTION, LIFECYCLE, GATE = args.story, args.feature, args.promotion, args.lifecycle, args.gate
     quiet = STORY or FEATURE or LIFECYCLE
     if args.seed is not None:
         random.seed(args.seed)
@@ -589,6 +771,8 @@ def main():
     if FEATURE:
         shop.story = FeatureStory(shop, time.time())
     lifecycle = Lifecycle(shop, time.time() + 5) if LIFECYCLE else None
+    if GATE:
+        shop.gate = GateSim(shop, Path(os.environ.get("AUTOCODER_TMP") or root / "tmp"))
     incident_offset = 0
     print(f"simulating {', '.join(s.name for s in swarms)} in {root}", flush=True)
     next_green, next_staging, next_prod, red_until, next_red = 0, 0, 0, 0, time.time() + 150
@@ -614,6 +798,8 @@ def main():
             next_green = t + 12
         if lifecycle:
             lifecycle.tick(t)
+        if shop.gate:
+            shop.gate.tick(t)
         if shop.story:
             shop.story.tick(t)
         else:

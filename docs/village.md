@@ -170,6 +170,32 @@ a1b2c3d`, `tag v1.10.0`, `its version endpoint`, `its branch ref`, or
 `promotion` says how your project moves landed work through the environments.
 It is `subtask` (the default) or `feature`; see below.
 
+### The merge gate
+
+Between the houses and the quay, the road passes through a gatehouse: a QA
+checkpoint downtown, a scanner arch in Future. It draws where each task is in
+the merge gate, as the report says (`gate` on tasks, `merge` on the pipeline;
+for autocoder, read from the merge jobs' files on this host):
+
+| State | What you see |
+|---|---|
+| queued | In line in front of the gatehouse, in order, each crate numbered |
+| merging | Under the arch, roped to the gold master crate; the rope tangles when a re-sync merges it again |
+| gating | On an inspection table, one per gate slot, checked with a glass while a meter fills as tests run (against the last full run's count) |
+| passed | A green stamp, then carried out to the quay |
+| landed-unproven | At the quay with a yellow tag |
+| failed | A red REJECTED stamp, carried back up to the board dented; its house gets a strike per attempt |
+| conflict | A knot stamp, carried back the same way |
+| red-base | A storm cloud over the quay: the integration branch is red, not this crate's fault |
+
+A merge train rides one cart, its crates chained. Busy tables are lit and
+idle ones dark. Click the gatehouse for the queue, each table and recent
+outcomes; click a crate for its state, attempt and the failure comment. The
+counters add "Gate: N queued · M gating · K failed today". There is no
+gatehouse for runtime villages, or when nothing says what the gate is doing.
+`GATE=1 tools/mock/demo.sh` runs a simulated gate that passes, fails,
+conflicts and trains in turn.
+
 ### An issue's life
 
 Changes seen between two polls play out as trips across the map:

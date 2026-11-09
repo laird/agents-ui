@@ -359,6 +359,23 @@
   }
   /* The ship that carries the next release, moored at harbour x, moved by
    * (ox, oy) while it sails. Its cargo is drawn on deck at SHIP_HOLD. */
+  /* The merge gate's house on the road to the quay: an arch over the road,
+   * and one inspection table per gate slot, lit while it is busy. `g` is
+   * layout().gate; tables sit at g.tables[k]. */
+  function gatehouse(c, g, t, busy) {
+    const { x0, y, w, rx } = g;
+    R(c, rx - 3, y + 2, 2, 20, P.o); R(c, rx - 2, y + 3, 1, 18, P.stone);
+    R(c, rx + RD + 1, y + 2, 2, 20, P.o); R(c, rx + RD + 1, y + 3, 1, 18, P.stone);
+    R(c, rx - 4, y, RD + 8, 4, P.o); R(c, rx - 3, y + 1, RD + 6, 2, P.stoneL);
+    R(c, x0, y + 4, w, 19, P.o); R(c, x0 + 1, y + 5, w - 2, 17, P.stone);
+    for (let yy = y + 7; yy < y + 21; yy += 3) for (let xx = x0 + 2 + ((yy % 2) ? 2 : 0); xx < x0 + w - 2; xx += 5) R(c, xx, yy, 1, 1, P.stoneD);
+    R(c, x0 - 1, y, w + 2, 5, P.o); R(c, x0, y + 1, w, 3, P.red);
+    g.tables.forEach(([tx, ty], k) => {
+      const on = busy.has(k + 1);
+      R(c, tx, ty - 9, 9, 6, P.o); R(c, tx + 1, ty - 8, 7, 4, on ? P.lamp : P.dark);
+      R(c, tx, ty + 5, 9, 2, P.o); R(c, tx + 1, ty + 5, 7, 1, P.wood); R(c, tx + 1, ty + 7, 1, 2, P.woodD); R(c, tx + 7, ty + 7, 1, 2, P.woodD);
+    });
+  }
   /* The supply boat that brings new issues down the river to the docks,
    * with `load` crates still on deck. The river is the map's top 11 rows. */
   function boat(c, x, t, load) {
@@ -453,10 +470,10 @@
 
   const MEDIEVAL = {
     name: 'Medieval village',
-    labels: { docks: 'Docks', board: 'Notice board', houses: 'Houses', quay: 'Quay', castle: 'Harbour', hall: 'Castle', ship: 'Ship', sails: 'sails' },
+    labels: { docks: 'Docks', board: 'Notice board', houses: 'Houses', quay: 'Quay', castle: 'Harbour', hall: 'Castle', ship: 'Ship', sails: 'sails', gate: 'Gatehouse' },
     ground: grass, road: path, yard: path, channel: water,
     dock(c, x, y, w) { R(c, x, y, w, 7, P.o); R(c, x + 1, y, w - 2, 6, P.plank); },
-    tree, hall, board, crate, B, scaffold, gate: lock, destination: harbour, vessel: ship, supply: boat, decor: DECOR.medieval, border: BORDER.medieval,
+    tree, hall, board, crate, B, scaffold, gate: lock, destination: harbour, vessel: ship, supply: boat, gatehouse, decor: DECOR.medieval, border: BORDER.medieval,
     // Deck slots for cargo (from the harbour's x and the canal's y), the "+N"
     // badge past them, and the box the ship takes up.
     hold: [[3, -2], [8, -2], [14, -2], [19, -2], [2, -7], [20, -7]], holdBadge: [23, -12], hull: [2, -17, 23, 29],
@@ -577,7 +594,7 @@
   };
   const MODERN = {
     name: 'Modern business district',
-    labels: { docks: 'Mailroom', board: 'Whiteboard', houses: 'Offices', quay: 'Loading bay', castle: 'Launch pad', hall: 'Headquarters', ship: 'Rocket', sails: 'lifts off' },
+    labels: { docks: 'Mailroom', board: 'Whiteboard', houses: 'Offices', quay: 'Loading bay', castle: 'Launch pad', hall: 'Headquarters', ship: 'Rocket', sails: 'lifts off', gate: 'QA checkpoint' },
     towers: [[3, -51, 6, 43], [12, -51, 18, 43]],
     ground(c, x0, y0, w, h) {
       for (let y = y0; y < y0 + h; y += 4) R(c, x0, y, w, Math.min(4, y0 + h - y), (y >> 2) % 2 ? M.lawn : M.lawnD);
@@ -688,6 +705,21 @@
     },
     hold: [[30, -14], [35, -14], [30, -19], [35, -19], [30, -24], [35, -24]], holdBadge: [29, -32], hull: [12, -52, 28, 46], flies: true,
     /* The delivery truck that brings new issues along the top road. */
+    /* The QA checkpoint: a security gate over the road, and a lab with one
+     * conveyor scanner per gate slot; a busy one runs and shows green. */
+    gatehouse(c, g, t, busy) {
+      const { x0, y, w, rx } = g;
+      [rx - 3, rx + RD + 1].forEach(px => { R(c, px, y + 2, 2, 20, P.o); R(c, px, y + 3, 1, 18, M.steel); });
+      R(c, rx - 4, y, RD + 8, 3, P.o); R(c, rx - 3, y + 1, RD + 6, 1, [...busy].length ? M.led : P.p0);
+      R(c, x0, y + 3, w, 20, P.o); R(c, x0 + 1, y + 4, w - 2, 18, M.concreteL); R(c, x0 + 1, y + 4, w - 2, 2, M.concrete);
+      g.tables.forEach(([tx, ty], k) => {
+        const on = busy.has(k + 1), off = on && !reduce ? Math.floor(t / 120) % 3 : 0;
+        R(c, tx, ty - 9, 9, 6, P.o); R(c, tx + 1, ty - 8, 7, 4, on ? M.glassL : M.glassD);
+        R(c, tx, ty + 5, 10, 3, P.o); R(c, tx + 1, ty + 5, 8, 1, M.steelD);
+        for (let k2 = off; k2 < 8; k2 += 3) R(c, tx + 1 + k2, ty + 6, 1, 1, M.steel);
+        R(c, tx + 8, ty + 1, 1, 1, on ? M.led : P.dark);
+      });
+    },
     supply(c, x, t, load) {
       x = Math.round(x);
       R(c, x, 5, 20, 4, P.o); R(c, x + 1, 5, 18, 2, M.steel); R(c, x + 1, 5, 18, 1, M.concreteL);
@@ -813,7 +845,7 @@
   };
   const FUTURE = {
     name: 'Future',
-    labels: { docks: 'Cargo bay', board: 'Holo-board', houses: 'Pods', quay: 'Launch rail', castle: 'Spaceport', hall: 'Command dome', ship: 'Shuttle', sails: 'launches' },
+    labels: { docks: 'Cargo bay', board: 'Holo-board', houses: 'Pods', quay: 'Launch rail', castle: 'Spaceport', hall: 'Command dome', ship: 'Shuttle', sails: 'launches', gate: 'Scanner arch' },
     towers: [[2, -58, 9, 50], [13, -55, 18, 45]],
     ground(c, x0, y0, w, h) {
       R(c, x0, y0, w, h, F.deckD);
@@ -954,6 +986,21 @@
     },
     hold: [[33, -14], [38, -14], [33, -19], [38, -19], [33, -24], [38, -24]], holdBadge: [31, -32], hull: [14, -58, 30, 50], flies: true,
     /* The cargo shuttle that brings new issues down the conduit, hovering. */
+    /* The scanner arch: laser grids across the walkway while anything is
+     * gating, and one scanner pad per gate slot, glowing while busy. */
+    gatehouse(c, g, t, busy) {
+      const { x0, y, w, rx } = g, any = busy.size > 0;
+      [rx - 3, rx + RD + 1].forEach(px => { R(c, px, y + 2, 2, 20, P.o); R(c, px, y + 3, 1, 18, F.hullD); R(c, px, y + 3, 2, 1, F.cyan); });
+      R(c, rx - 4, y, RD + 8, 3, P.o); R(c, rx - 3, y + 1, RD + 6, 1, F.magenta);
+      if (any && !reduce) for (let k = 0; k < 4; k++) if (blink(t + k * 90, 180)) R(c, rx - 1, y + 5 + k * 4, RD + 2, 1, F.magenta);
+      R(c, x0, y + 3, w, 20, P.o); R(c, x0 + 1, y + 4, w - 2, 18, F.hullD); R(c, x0 + 1, y + 4, w - 2, 1, F.hull);
+      g.tables.forEach(([tx, ty], k) => {
+        const on = busy.has(k + 1);
+        R(c, tx, ty - 9, 9, 6, P.o); R(c, tx + 1, ty - 8, 7, 4, on ? F.glass : F.navy);
+        R(c, tx, ty + 5, 10, 3, P.o); R(c, tx + 1, ty + 5, 8, 2, on ? F.cyan : F.deckD);
+        if (on && !reduce && blink(t + k * 70, 140)) R(c, tx + 2 + (Math.floor(t / 140) % 6), ty + 4, 1, 1, F.cyanL);
+      });
+    },
     supply(c, x, t, load) {
       x = Math.round(x);
       const y = !reduce && blink(t, 500) ? 1 : 0;
@@ -1229,7 +1276,7 @@
   }
 
   /* ---------- Layout ---------- */
-  const LW = 20, LH = 26, RD = 6, DOCK_W = 64;
+  const LW = 20, LH = 26, RD = 6, DOCK_W = 64, GATE_H = 30, GATE_TABLES = 6;
   function layout(v) {
     const n = v.houses.length;
     const per = Math.max(1, Math.ceil(Math.sqrt(Math.max(n, 1) / 2)));
@@ -1245,23 +1292,34 @@
       const x = side === 0 ? roadX - (pos + 1) * LW + 2 : roadX + RD + pos * LW + 2;
       lots.push({ x, y: top + r * LH, lane: top + r * LH + 18 });
     }
-    const quayY = top + rows * LH + 4;
+    // The merge gate's band between the last row of houses and the quay: a
+    // gatehouse over the road with one table per gate slot (a local village
+    // whose report says what its merge gate is doing).
+    const merge = v.pipeline.merge, gates = v.pipeline.gates || [];
+    const tablesN = v.plane === 'runtime' || (!merge && !gates.length) ? 0
+      : Math.min(GATE_TABLES, Math.max(1, (merge && merge.slots) || 0, gates.filter(e => e.state === 'gating').length));
+    const gateY = top + rows * LH + 2, gx0 = roadX + RD + 4, gw = 8 + tablesN * 12;
+    const gate = tablesN ? { y: gateY, x0: gx0, w: gw, rx: roadX, tables: Array.from({ length: tablesN }, (_, k) => [gx0 + 4 + k * 12, gateY + 10]),
+      queueMax: Math.max(1, Math.floor((roadX - 22) / 14) + 1) } : null;
+    const quayY = top + rows * LH + 4 + (gate ? GATE_H : 0);
     const canalY = quayY + 8;
     // Every stop but the last is a lock; the last stop is the castle.
     const locks = Math.max(0, v.pipeline.stops.length - 1);
-    const lockStart = roadX + 40;
+    // The locks start east of the gatehouse, so its tables never stand in a lock's tower.
+    const lockStart = Math.max(roadX + 40, gate ? gx0 + gw + 10 : 0);
     const castleX = lockStart + locks * 34 + 6;
     const forestX = Math.max(cx0 + vw + 6, hallX + 64);
     // Feature banners stand in a strip cleared out of the forest, east of the
     // houses; the map widens if they need the room. No features, no strip.
     const banners = (v.features || []).map((f, k) => ({ f, x: forestX + 12 + k * 30, y: 14, col: FEATURE_COLS[k % FEATURE_COLS.length] }));
-    const W = Math.max(cx0 + vw + 40, roadX + 70, castleX + 46, banners.length ? forestX + 12 + banners.length * 30 : 0);
+    const W = Math.max(cx0 + vw + 40, roadX + 70, castleX + 46, gate ? gx0 + gw + 4 : 0, banners.length ? forestX + 12 + banners.length * 30 : 0);
     const H = canalY + 34;
     // What's built on: river, docks, plaza, roads, house rows, canal and its
     // stations. Every free 9×8 cell may get a decoration.
     const taken = [
       [0, 0, W, 14], [4, 8, 62, 46], [4, 46, cx0 + vw, 14], [hallX - 10, 4, 74, 46],
       [roadX - 2, 46, RD + 4, quayY - 40], [roadX - 18, quayY - 12, W, H],
+      ...(gate ? [[4, gateY - 2, gx0 + gw, GATE_H + 2]] : []),
       [forestX - 2, 12, W, canalY - 46]
     ];
     for (let r = 0; r < rows; r++) {
@@ -1283,7 +1341,7 @@
       const zone = Math.floor(hash(x >> 5, y >> 5) * 6), k = hash(x + 11, y + 7) < 0.7 ? zone : Math.floor(hash(y, x + 3) * 6);
       decor.push({ x: x + Math.floor(hash(y, x) * 4), y: y + Math.floor(hash(x, y + 1) * 3), k });
     }
-    return { per, rows, cx0, vw, roadX, hallX, top, lots, quayY, canalY, lockStart, castleX, W, H, decor, banners };
+    return { per, rows, cx0, vw, roadX, hallX, top, lots, quayY, canalY, lockStart, castleX, W, H, decor, banners, gate };
   }
 
   /* ---------- State ---------- */
@@ -1307,6 +1365,141 @@
    * or moved sprite stays clickable without copying its coordinates. */
   let hits = null;
   const tap = (x, y, w, h, o) => { if (hits) hits.push({ x: Math.round(x), y: Math.round(y), w, h, o }); };
+
+  /* ---------- The merge gate ----------
+   * #374 reports where each task is in the merge gate, and the gatehouse on
+   * the road to the quay draws it:
+   *   queued           in line in front of it, in order, numbered;
+   *   merging          under the arch, roped to the master crate (the rope
+   *                    tangles when a re-sync has it merging again);
+   *   gating           on an inspection table, one per gate slot, checked
+   *                    with a glass while a meter fills as tests run;
+   *   passed           a green stamp, then out to the quay;
+   *   landed-unproven  at the quay with a yellow tag;
+   *   failed           a red REJECTED stamp, carried back up to the board,
+   *                    dented, its house marked with the attempt;
+   *   conflict         a knot, carried back the same way;
+   *   red-base         a storm cloud over the quay: the integration branch
+   *                    is red, which is not this crate's fault.
+   * A merge train rides one cart, its crates chained, at its first member's place. */
+  const IN_GATE = new Set(['queued', 'merging', 'gating']);
+  const gateEntries = v => v.pipeline.gates || [];
+  const gateOf = (v, n) => gateEntries(v).find(e => e.issue === n);
+  /* Where each in-flight entry is drawn: spots maps issue → { x, y, state, unit, lead }. */
+  function gateSpots(v, lay) {
+    const g = lay.gate, spots = new Map(), units = [];
+    if (!g) return { spots, units, queued: 0, gating: 0, waiting: 0 };
+    const trains = new Map();
+    gateEntries(v).filter(e => IN_GATE.has(e.state)).forEach(e => {
+      if (e.train && trains.has(e.train)) { trains.get(e.train).members.push(e); return; }
+      const u = { lead: e, members: [e], state: e.state };
+      units.push(u);
+      if (e.train) trains.set(e.train, u);
+    });
+    let q = 0, m = 0, waiting = 0;
+    const used = new Set();
+    units.forEach(u => {
+      const e = u.lead;
+      if (e.state === 'gating') {
+        let k = e.slot ? e.slot - 1 : -1;
+        if (k < 0 || k >= g.tables.length || used.has(k)) k = g.tables.findIndex((_, i) => !used.has(i));
+        if (k >= 0) { used.add(k); u.table = k; u.x = g.tables[k][0] + 2; u.y = g.tables[k][1]; }
+        else { u.x = g.rx + 1; u.y = g.y + 14; }
+      } else if (e.state === 'merging') { u.x = g.rx + 1; u.y = g.y + 6 + (m++ % 3) * 6; }
+      else {
+        const k = q++;
+        if (k >= g.queueMax) { waiting++; return; }
+        u.x = g.rx - 16 - k * 14; u.y = g.y + 20;
+      }
+      u.members.forEach((mm, i) => spots.set(mm.issue, { x: u.x + Math.min(i, 2) * 6, y: u.y, state: u.state, unit: u, lead: i === 0 }));
+    });
+    return { spots, units: units.filter(u => u.x !== undefined), queued: q, gating: units.filter(u => u.state === 'gating').length, waiting };
+  }
+  /* "3m 20s", "1h 4m". */
+  function duration(secs) {
+    if (secs == null) return '';
+    const m = Math.floor(secs / 60), h = Math.floor(m / 60);
+    return h ? `${h}h ${m % 60}m` : m ? `${m}m ${secs % 60}s` : `${secs}s`;
+  }
+  const GATE_WORDS = { queued: 'queued for the merge gate', merging: 'merging onto', gating: 'gating', passed: 'passed the gate',
+    'landed-unproven': 'landed, waiting for the sentinel to prove the tip green', failed: 'failed the gate: handed back',
+    conflict: 'conflict: rebase needed', 'red-base': 'the integration branch is red without it' };
+  function gateWords(e, v) {
+    const head = e.state === 'merging' ? `merging onto ${v.pipeline.integration || 'the integration branch'}` : GATE_WORDS[e.state] || e.state;
+    return [head, e.state === 'gating' && e.slot ? `table ${e.slot}` : null, e.progress, e.elapsed_secs != null ? duration(e.elapsed_secs) : null,
+      e.attempt > 1 ? `attempt ${e.attempt}` : null, e.train ? `train ${e.train}` : null].filter(Boolean).join(' · ');
+  }
+  /* A number on a parchment tag, in the 3x5 pixel font. */
+  function numberTag(c, x, y, n) {
+    const glyphs = String(n).split('').map(d => DIGITS[+d]), w = glyphs.length * 4 + 1;
+    R(c, x - 1, y - 1, w + 2, 7, P.o); R(c, x, y, w, 5, P.parch);
+    glyphs.forEach((g, j) => { for (let k = 0; k < 15; k++) if (g[k] === '1') R(c, x + 1 + j * 4 + (k % 3), y + Math.floor(k / 3), 1, 1, P.o); });
+  }
+  /* A stamp the inspector brings down on a crate: green for passed, red for rejected, a knot for a conflict. */
+  function stamp(c, x, y, kind) {
+    if (kind === 'knot') {
+      R(c, x - 1, y - 1, 9, 7, P.o); R(c, x, y, 7, 5, NOTECOL.conflict);
+      [[1, 1], [3, 2], [5, 1], [2, 3], [4, 3], [3, 0], [3, 4]].forEach(([dx, dy]) => R(c, x + dx, y + dy, 1, 1, P.woodD));
+      return;
+    }
+    const col = kind === 'ok' ? P.leaf : P.p0;
+    R(c, x - 1, y - 1, 9, 7, P.o); R(c, x, y, 7, 5, P.white); R(c, x, y, 7, 1, col); R(c, x, y + 4, 7, 1, col); R(c, x, y, 1, 5, col); R(c, x + 6, y, 1, 5, col);
+    if (kind === 'ok') { R(c, x + 2, y + 2, 1, 1, col); R(c, x + 3, y + 3, 1, 1, col); R(c, x + 4, y + 1, 1, 2, col); }
+    else for (let k = 1; k < 4; k++) { R(c, x + 1 + k, y + k, 1, 1, col); R(c, x + 5 - k, y + k, 1, 1, col); }
+  }
+  /* A 1px rope from (x0, y0) to (x1, y1); tangled, it knots up halfway. */
+  function rope(c, x0, y0, x1, y1, tangled) {
+    const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
+    for (let k = 0; k <= n; k += 1) R(c, x0 + (x1 - x0) * k / n, y0 + (y1 - y0) * k / n + (k % 4 === 2 ? 1 : 0), 1, 1, P.woodD);
+    if (tangled) { const mx = (x0 + x1) >> 1, my = (y0 + y1) >> 1; [[-1, -1], [1, -1], [0, 0], [-1, 1], [1, 1], [2, 0], [-2, 0]].forEach(([dx, dy]) => R(c, mx + dx, my + dy, 1, 1, P.p0)); }
+  }
+  function drawGate(c, v, lay, t, gs, bound) {
+    const g = lay.gate, merge = v.pipeline.merge || {};
+    const busy = new Set([...(merge.busy || []), ...gs.units.filter(u => u.table !== undefined).map(u => u.table + 1)]);
+    T.gatehouse(c, g, reduce ? 0 : t, busy);
+    tap(g.x0 - 1, g.y, g.w + 2, 24, { kind: 'gatehouse' }); tap(g.rx - 4, g.y, RD + 8, 22, { kind: 'gatehouse' });
+    // The master crate the merging work is roped to: the integration branch.
+    const mx = g.rx - 12, my = g.y + 3;
+    R(c, mx - 1, my - 1, 9, 9, P.o); R(c, mx, my, 7, 7, P.gold); R(c, mx, my, 7, 1, P.woodD); R(c, mx + 3, my, 1, 7, P.woodD);
+    tap(mx - 1, my - 1, 9, 9, { kind: 'gatehouse' });
+    gs.units.forEach(u => {
+      const e = u.lead, n = e.issue;
+      if (u.members.every(mm => bound.has(mm.issue))) return;
+      const { x, y } = u, train = u.members.length > 1;
+      if (u.state === 'gating' && u.table !== undefined) {
+        person(c, x - 3, y - 8, 'inspector:' + v.project + u.table, workFrame(t + u.table * 211), {});
+        drawAction(c, x - 3, y - 8, 'searching', t + u.table * 97);
+      }
+      if (u.state === 'merging') rope(c, x + 2, y + 1, mx + 6, my + 6, e.attempt > 1);
+      if (train) {
+        // A cart under the train's crates, chained together.
+        const shown = u.members.slice(0, 3), cw = shown.length * 6;
+        R(c, x - 1, y + 5, cw + 1, 2, P.o); R(c, x, y + 5, cw - 1, 1, P.woodL);
+        R(c, x, y + 7, 2, 2, P.o); R(c, x + cw - 3, y + 7, 2, 2, P.o);
+        shown.forEach((mm, i) => { T.crate(c, x + i * 6, y, 'workshop', null, false); if (i) R(c, x + i * 6 - 1, y + 2, 1, 1, P.stoneD); });
+        if (u.members.length > 3) badge(c, x + cw + 1, y - 1, u.members.length - 3);
+        tap(x - 1, y - 1, cw + 2, 10, { kind: 'train', id: e.train });
+      } else {
+        T.crate(c, x, y, 'workshop', null, false);
+        tap(x, y, 5, 5, { kind: 'crate', n, at: 'gate' });
+      }
+      if (u.state === 'queued') numberTag(c, x - 3, y - 8, n);
+      if (u.state === 'gating' && u.table !== undefined) {
+        // The meter under the table: tests run against the last full run's count.
+        const total = S.testTotal || 0, ran = e.tests_run || 0, mxw = 9;
+        R(c, x - 3, y + 10, mxw + 2, 3, P.o);
+        if (total > 0) R(c, x - 2, y + 11, Math.max(1, Math.round(mxw * Math.min(1, ran / total))), 1, P.leaf);
+        else if (!reduce) R(c, x - 2 + Math.floor(t / 150) % (mxw - 2), y + 11, 3, 1, P.leaf);
+      }
+    });
+    if (gs.waiting) badge(c, Math.max(4, g.rx - 16 - g.queueMax * 14 + 8), g.y + 14, gs.waiting);
+    // Stamps fall on crates as they leave the tables.
+    S.stamps = S.stamps.filter(st => {
+      if (t - st.t0 > 1600) return false;
+      if (t >= st.t0) stamp(c, st.x, st.y - (t - st.t0 < 150 && !reduce ? 3 : 0), st.kind);
+      return true;
+    });
+  }
 
   /* ---------- Each issue's life ----------
    * Every change seen between two polls plays as a trip: a worker, porter or
@@ -1377,10 +1570,49 @@
       said.push(`#${h.issue} claimed`);
       enqueue(sc, t, trip(h.id, h.issue, old.backlog[slot], 'house', [{ pts: out }, { pts: back(out), carry: true }]));
     });
+    // The merge gate: into the line or onto a table, between its places, and
+    // out again: stamped and sent on to the quay, or handed back to the board.
+    const gated = new Set(), oldGs = gateSpots(old, lay), newGs = gateSpots(now, lay);
+    const at = sp => [sp.x + 2, sp.y + 5];
+    newGs.spots.forEach((sp, n) => {
+      const was = oldGs.spots.get(n), gap = sp.lead && sp.unit.members.length === 1 ? STAGGER : 0;
+      if (was && was.state === sp.state && was.x === sp.x && was.y === sp.y) return;
+      const to = at(sp), cr = { kind: 'workshop' };
+      if (was) {
+        if (was.state !== sp.state) said.push(`#${n} ${sp.state}`);
+        enqueue(sc, t, trip('inspector:' + now.project, n, cr, 'gate', [{ pts: [at(was), [at(was)[0], to[1]], to], carry: true }]), gap);
+        return;
+      }
+      said.push(`#${n} ${sp.state}`);
+      const hi = oldHouse(n), lot = hi >= 0 && lotOf(old.houses[hi].id);
+      const down = [[lay.roadX + 3, to[1]], to];
+      if (lot) { const there = [...houseToRoad(lot, lay), ...down]; enqueue(sc, t, trip(old.houses[hi].id, n, cr, 'gate', [{ pts: there, carry: true }, { pts: back(there) }]), gap); }
+      else enqueue(sc, t, trip('porter:' + n, n, cr, 'gate', [{ pts: [[lay.roadX + 3, ROAD], ...down], carry: true }]), gap);
+    });
+    oldGs.spots.forEach((was, n) => {
+      if (newGs.spots.has(n)) return;
+      const e = gateOf(now, n), state = e ? e.state : now.pipeline.quay.includes(n) || now.pipeline.stops.some(st => st.issues.includes(n)) ? 'passed' : null;
+      if (!state) return;
+      const from = at(was), old_ = gateOf(old, n);
+      if (old_ && old_.tests_run && (state === 'passed' || state === 'landed-unproven' || state === 'failed')) sc.testTotal = Math.max(sc.testTotal || 0, old_.tests_run);
+      gated.add(n);
+      if (state === 'failed' || state === 'conflict') {
+        sc.stamps.push({ x: was.x - 1, y: was.y - 7, t0: Math.max(t, sc.nextAt || 0), kind: state === 'conflict' ? 'knot' : 'rejected' });
+        said.push(`#${n} ${state === 'conflict' ? 'conflict' : 'failed the gate'}`);
+        enqueue(sc, t, trip('inspector:' + now.project, n, { kind: 'workshop' }, 'board',
+          [{ pts: [from, [lay.roadX + 3, from[1]], [lay.roadX + 3, ROAD], ...boardFromRoad(lay)], carry: true }], { dented: true }));
+      } else {
+        sc.stamps.push({ x: was.x - 1, y: was.y - 7, t0: Math.max(t, sc.nextAt || 0), kind: 'ok' });
+        said.push(`#${n} passed the gate`);
+        const out = lay.gate ? lay.gate.y + GATE_H - 3 : lay.quayY;
+        enqueue(sc, t, trip('inspector:' + now.project, n, { kind: 'workshop' }, 'quay',
+          [{ pts: [from, [from[0], out], [lay.roadX + 3, out], [lay.roadX + 3, lay.quayY]], carry: true }], { sealed: true }));
+      }
+    });
     // Blocked: from the docks or a house to the board, and the board back to the docks.
     now.board.forEach(b => {
       const n = b.number;
-      if (oldBoard.has(n)) return;
+      if (oldBoard.has(n) || gated.has(n)) return;
       const slot = oldSlot(n), hi = oldHouse(n);
       let steps = null, seed = 'porter:' + n;
       if (slot >= 0) { const s = slotPos(Math.min(slot, 39)); steps = [{ pts: [...back(slotFromRoad(s)), ...boardFromRoad(lay)], carry: true }]; }
@@ -1400,7 +1632,7 @@
     // Landed: the worker carries the sealed crate to the quay, then walks home.
     const oldQuay = new Set(old.pipeline.quay);
     now.pipeline.quay.forEach(n => {
-      if (oldQuay.has(n)) return;
+      if (oldQuay.has(n) || gated.has(n) || oldGs.spots.has(n)) return;
       const i = oldHouse(n);
       if (i < 0) return;
       const lot = lotOf(old.houses[i].id) || lay.lots[i];
@@ -1414,7 +1646,7 @@
     });
     // Closed without landing: carried off the map's west edge.
     const placed = n => now.backlog.some(c => c.number === n) || now.board.some(b => b.number === n) || now.houses.some(h => h.issue === n)
-      || now.pipeline.quay.includes(n) || now.pipeline.stops.some(st => st.issues.includes(n));
+      || now.pipeline.quay.includes(n) || now.pipeline.stops.some(st => st.issues.includes(n)) || gateEntries(now).some(e => e.issue === n);
     [...old.backlog.map((c, i) => ({ n: c.number, c, s: i < 40 ? slotPos(i) : null })), ...old.board.map(b => ({ n: b.number, c: b, board: true }))].forEach(o => {
       if (placed(o.n) || (!o.s && !o.board)) return;
       const from = o.board ? back(boardFromRoad(lay)) : back(slotFromRoad(o.s));
@@ -1539,6 +1771,7 @@
     // A crate on a trip is not at rest anywhere until the trip has delivered it.
     const at = new Map(porters.map(p => [p, tripAt(p, t)]));
     const bound = new Set(porters.filter(p => p.issue && at.get(p) && !(at.get(p).fetched && !at.get(p).carry)).map(p => p.issue));
+    const gs = gateSpots(v, lay);
     T.ground(c, 0, 0, W, H);
     if (T.border) T.border(c, W, H);
     T.channel(c, 0, 0, W, 11, t, 1); tap(0, 0, W, 11, { kind: 'river' });
@@ -1630,7 +1863,10 @@
         if (!waiting) drawAction(c, px, py, sa.action, t + k * 97);
       });
       // The issue's crate at the door while it is worked on: hammered, sawn, sparking.
-      if (st === 'working' && h.issue && !away && !bound.has(h.issue)) {
+      // A crate the merge gate handed back marks its house: one strike per attempt.
+      const back = h.issue && gateOf(v, h.issue);
+      if (back && (back.state === 'failed' || back.state === 'conflict')) for (let k = 0; k < Math.min(4, Math.max(1, back.attempt || 1)); k++) R(c, lot.x + 1 + k * 2, lot.y + 1, 1, 3, P.p0);
+      if (st === 'working' && h.issue && !away && !bound.has(h.issue) && !gs.spots.has(h.issue)) {
         T.crate(c, lot.x + 11, lot.y + 16, h.kind, h.priority);
         tap(lot.x + 11, lot.y + 16, 5, 5, { kind: 'crate', n: h.issue, at: 'house', i });
         if (!reduce && !QUIET_ACTIONS.has(h.action) && blink(tt, 150)) {
@@ -1643,16 +1879,28 @@
       if (ICONS[st]) bubbles.push([lot.x + 4, lot.y - (st === 'blocked' ? 1 : 3) + (st === 'blocked' && blink(t, 200) ? -1 : 0), st]);
     });
 
+    if (lay.gate) drawGate(c, v, lay, t, gs, bound);
     const carried = new Set([...bound, ...floats.map(f => f.n)]);
     const cargo = cargoOf(v), onShip = new Set(cargo);
     const atQuay = v.pipeline.quay.filter(n => !carried.has(n) && !hid.has(n) && !onShip.has(n));
     atQuay.slice(0, QUAY_CAP).forEach((n, k) => {
       const x = roadX + 6 + (k % 3) * 6, y = quayY - 3 - Math.floor(k / 3) * 6;
       T.crate(c, x, y, 'workshop', null, true); tap(x, y, 5, 5, { kind: 'crate', n, at: 'quay' });
+      // Landed but not proven green: a yellow tag, green once the gate says passed.
+      const ge = gateOf(v, n);
+      if (ge && (ge.state === 'landed-unproven' || ge.state === 'passed')) { R(c, x + 4, y - 2, 2, 3, P.o); R(c, x + 4, y - 2, 1, 2, ge.state === 'passed' ? P.leaf : P.gold); }
     });
     // Six crates fit; a "+N" says how many more wait, and the quay's dialog lists them all.
     if (atQuay.length > QUAY_CAP) { badge(c, roadX + 25, quayY - 9, atQuay.length - QUAY_CAP); tap(roadX + 24, quayY - 10, 14, 7, { kind: 'quay' }); }
 
+    // A storm over the quay while the integration branch is red without the work at the gate.
+    if (gateEntries(v).some(e => e.state === 'red-base')) {
+      const sx = roadX - 6, sy = quayY - 26;
+      for (let k = 0; k < 4; k++) { R(c, sx + k * 5, sy + (k % 2), 7, 5, P.o); R(c, sx + 1 + k * 5, sy + 1 + (k % 2), 5, 3, P.stoneD); }
+      if (!reduce) for (let k = 0; k < 5; k++) if (blink(t + k * 80, 160)) R(c, sx + 2 + k * 4, sy + 7 + (Math.floor(t / 90) + k) % 6, 1, 2, P.glass);
+      if (!reduce && blink(t, 1300) && Math.floor(t / 1300) % 3 === 0) { R(c, sx + 9, sy + 6, 1, 3, P.gold); R(c, sx + 8, sy + 9, 1, 2, P.gold); }
+      tap(sx, sy, 22, 12, { kind: 'redbase' });
+    }
     // The sentinel's flag is grey while it still has newer work to test. With
     // no sentinel the first lock is an environment like any other.
     const gated = v.pipeline.sentinel !== 'absent';
@@ -1708,7 +1956,11 @@
       if (a.waiting) return true;
       person(c, a.x - 4, a.y - 11, p.seed, a.carry ? (blink(t, 140) ? 'carrystep' : 'carry') : 'stand');
       tap(a.x - 4, a.y - 11, 8, 12, { kind: 'porter', seed: p.seed, n: p.issue, to: p.to, carrying: a.carry });
-      if (a.carry) { T.crate(c, a.x - 2, a.y - 16, p.kind, p.pr, p.sealed); tap(a.x - 2, a.y - 16, 5, 5, { kind: 'crate', n: p.issue, at: 'transit', to: p.to }); }
+      if (a.carry) {
+        T.crate(c, a.x - 2, a.y - 16, p.kind, p.pr, p.sealed);
+        if (p.dented) { R(c, a.x - 1, a.y - 15, 1, 1, P.o); R(c, a.x + 1, a.y - 14, 1, 1, P.woodD); }
+        tap(a.x - 2, a.y - 16, 5, 5, { kind: 'crate', n: p.issue, at: 'transit', to: p.to });
+      }
       return true;
     });
     bubbles.forEach(([x, y, s]) => bubble(c, x, y, s));
@@ -1870,7 +2122,7 @@
   /* Fold a new model into its village's scene, starting the animations its
    * changes call for. */
   function updateScene(v, t) {
-    const sc = scenes[v.project] || (scenes[v.project] = { v: null, porters: [], floats: [], gates: {}, voyage: null, supplies: [], nextAt: 0, fireworks: -1e9,
+    const sc = scenes[v.project] || (scenes[v.project] = { v: null, porters: [], floats: [], gates: {}, voyage: null, supplies: [], stamps: [], testTotal: 0, nextAt: 0, fireworks: -1e9,
       lastDelivered: null, lastRelease: null, liveSince: {}, fade: {} });
     fadeLive(sc, v);
     const lay = layout(v);
@@ -2019,11 +2271,20 @@
       [T.labels.board, 'blocked · proposals', v.board.length],
       [T.labels.houses, `${working} of ${v.houses.length} working`, v.houses.filter(h => h.issue).length],
       ['Sub-agents', 'running in sessions', [v.manager, ...v.houses].reduce((n, h) => n + (h.subagents || []).length, 0)],
+      ...(v.pipeline.merge || gateEntries(v).length ? [gateCounter(v)] : []),
       [T.labels.quay, `pushed to ${v.pipeline.integration || 'integration'}`, v.pipeline.quay.length],
       ...stops.map((s, i) => [i === stops.length - 1 ? `${T.labels.castle} · ${s.name}` : s.name, i === 0 && v.pipeline.sentinel !== 'absent' ? `sentinel: ${v.pipeline.sentinel}` : 'environment', s.issues.length])
     ];
     document.getElementById('flow').innerHTML = items.map(([l, s, n], i) =>
       `<div class="step"><b>${n}</b><span>${esc(l)}<br>${esc(s)}</span></div>`).join('');
+  }
+  /* "Gate: N queued · M gating · K failed today". */
+  function gateCounter(v) {
+    // A train counts once, as it does at the gatehouse.
+    const es = gateEntries(v), count = st => new Set(es.filter(e => e.state === st).map(e => e.train || '#' + e.issue)).size;
+    const today = new Date().toISOString().slice(0, 10);
+    const failed = es.filter(e => (e.state === 'failed' || e.state === 'conflict') && (!e.started_at || e.started_at.slice(0, 10) === today)).length;
+    return ['Gate', `${count('queued')} queued · ${count('gating')} gating · ${failed} failed today`, es.filter(e => IN_GATE.has(e.state)).length];
   }
   /* Runtime villages (Temporal, AgentEx, ...) count workstreams and agents, not issues and pushes. */
   function renderRuntimeFlow(v) {
@@ -2167,12 +2428,13 @@
     if (o.at === 'ship') return `on the ${theme.labels.ship.toLowerCase()}, waiting for the next release`;
     if (o.at === 'stop') return o.i === stops.length - 1 ? `shipped to ${stops[o.i].name}` : `at ${stops[o.i].name}`;
     if (o.at === 'house') { const h = v.houses[o.i]; return `being worked on at ${h ? houseName(v, h) : 'its house'}`; }
+    if (o.at === 'gate') { const e = gateOf(v, o.n); return e ? gateWords(e, v) : `at the ${theme.labels.gate.toLowerCase()}`; }
     if (o.at === 'transit') return o.to === 'away' ? 'closed without landing: carried away' : `on its way to the ${tripPlace(o.to, theme)}`;
     return '';
   }
   /* Where a trip takes its crate, in the theme's words. */
   function tripPlace(to, theme) {
-    return { house: theme.labels.houses.toLowerCase().replace(/s$/, ''), backlog: theme.labels.docks.toLowerCase(), board: theme.labels.board.toLowerCase(),
+    return { house: theme.labels.houses.toLowerCase().replace(/s$/, ''), backlog: theme.labels.docks.toLowerCase(), board: theme.labels.board.toLowerCase(), gate: theme.labels.gate.toLowerCase(),
       quay: theme.labels.quay.toLowerCase(), ship: theme.labels.ship.toLowerCase() }[to] || 'next place';
   }
   function subWords(sa, v) {
@@ -2234,13 +2496,35 @@
             : 'Carrying off an issue closed without landing'],
           links: [h && sessionOf(h), n ? link(issueLabel(n), it.url) : null] };
       }
+      case 'gatehouse': {
+        const gs = gateSpots(v, sc.L), merge = v.pipeline.merge, all = gateEntries(v);
+        const order = { gating: 0, merging: 1, queued: 2, 'red-base': 3, failed: 4, conflict: 5, 'landed-unproven': 6, passed: 7 };
+        return { title: `${theme.labels.gate} · merge gate`, line: `${gs.queued} queued · ${gs.gating} gating`,
+          meta: [merge ? `Gate slots: ${(merge.busy || []).length} of ${merge.slots} busy` : null,
+            ...((merge && merge.trains) || []).map(tr => `Train ${tr.id}: ${tr.members.map(m => '#' + m).join(' ')} · ${tr.state}`)],
+          items: [...all].sort((a, b) => (order[a.state] ?? 9) - (order[b.state] ?? 9)).map(e => ({ ...issueOf(v, e.issue), number: e.issue, label: gateWords(e, v), url: e.failure_url || issueOf(v, e.issue).url })),
+          links: [] };
+      }
+      case 'train': {
+        const tr = ((v.pipeline.merge || {}).trains || []).find(x => x.id === o.id), members = gateEntries(v).filter(e => e.train === o.id);
+        return { title: `Merge train ${o.id || ''}`.trim(), line: `${members.length} branches gated together as one tree${tr ? ' · ' + tr.state : ''}`,
+          items: members.map(e => ({ ...issueOf(v, e.issue), number: e.issue, label: gateWords(e, v) })), links: [] };
+      }
+      case 'redbase': {
+        const red = gateEntries(v).filter(e => e.state === 'red-base');
+        return { title: 'Storm over the quay', line: `${v.pipeline.integration || 'The integration branch'} fails without these changes: not their fault`,
+          items: red.map(e => ({ ...issueOf(v, e.issue), number: e.issue, label: gateWords(e, v), url: e.failure_url || issueOf(v, e.issue).url })), links: [] };
+      }
       case 'supply':
         return { title: `Supply ${{ Ship: 'boat', Rocket: 'truck', Shuttle: 'shuttle' }[theme.labels.ship] || 'boat'}`, line: `Bringing ${o.n} new ${o.n === 1 ? work : work + 's'} to the ${theme.labels.docks.toLowerCase()}`,
           items: issueItems(v, o.ns || []), links: [] };
       case 'crate': {
         const it = issueOf(v, o.n);
+        const ge = gateOf(v, o.n);
         return { title: `#${o.n} ${it.title}`.trim(), line: crateWhere(o, v, theme),
-          meta: [it.priority ? `Priority: ${it.priority}` : null], links: [link(issueLabel(o.n), it.url)] };
+          meta: [it.priority ? `Priority: ${it.priority}` : null, ge && o.at !== 'gate' ? `Merge gate: ${gateWords(ge, v)}` : null,
+            ge && ge.attempt ? `Gate attempt ${ge.attempt}` : null],
+          links: [link(issueLabel(o.n), it.url), ge && ge.failure_url && ge.failure_url !== it.url ? link('What went wrong', ge.failure_url) : null] };
       }
       case 'quay': {
         const repo = repoUrl(v), br = v.pipeline.integration;
@@ -2488,6 +2772,7 @@
       add(lot.x + 8, lot.y + 17, 'top', name, null, 'house ' + h.status);
     });
     if (!runtime) add(lay.roadX - 7, lay.quayY + 4, 'right', theme.labels.quay, `→ ${v.pipeline.integration || 'integration'}`);
+    if (lay.gate) { const gs = gateSpots(v, lay); add(lay.gate.x0 + (lay.gate.w >> 1), lay.gate.y + 24, 'top', `${theme.labels.gate} · merge gate`, `${gs.queued} queued · ${gs.gating} gating`); }
     // Each stop is labelled with its own name (master-green, uat, prod), as the pipeline reports it.
     stops.slice(0, -1).forEach((s, i) => add(lay.lockStart + i * 34 + 3, lay.canalY - 21, 'bottom', s.name));
     const last = stops[stops.length - 1];

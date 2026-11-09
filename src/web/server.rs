@@ -1878,6 +1878,40 @@ mod tests {
     }
 
     #[test]
+    fn village_html_draws_the_merge_gate_as_a_gatehouse() {
+        let body = VILLAGE_HTML;
+        // Layout: a band between the houses and the quay, one table per gate slot, only when the gate is known.
+        assert!(body.contains("const LW = 20, LH = 26, RD = 6, DOCK_W = 64, GATE_H = 30, GATE_TABLES = 6;"));
+        assert!(body.contains("const tablesN = v.plane === 'runtime' || (!merge && !gates.length) ? 0"));
+        assert!(body.contains("const quayY = top + rows * LH + 4 + (gate ? GATE_H : 0);"));
+        assert!(body.contains("const lockStart = Math.max(roadX + 40, gate ? gx0 + gw + 10 : 0);"));
+        // Every theme has a gatehouse; busy slots are lit.
+        assert_eq!(body.matches("gatehouse(c, g, t, busy) {").count(), 3, "medieval, modern and future");
+        assert!(body.contains("const busy = new Set([...(merge.busy || []), ...gs.units.filter(u => u.table !== undefined).map(u => u.table + 1)]);"));
+        // Each state's place and picture: the numbered line, the rope to the master crate, the tables with a meter.
+        assert!(body.contains("const IN_GATE = new Set(['queued', 'merging', 'gating']);"));
+        assert!(body.contains("u.x = g.rx - 16 - k * 14; u.y = g.y + 20;"));
+        assert!(body.contains("if (u.state === 'queued') numberTag(c, x - 3, y - 8, n);"));
+        assert!(body.contains("if (u.state === 'merging') rope(c, x + 2, y + 1, mx + 6, my + 6, e.attempt > 1);"));
+        assert!(body.contains("drawAction(c, x - 3, y - 8, 'searching', t + u.table * 97);"));
+        assert!(body.contains("const total = S.testTotal || 0, ran = e.tests_run || 0, mxw = 9;"));
+        assert!(body.contains("if (gateEntries(v).some(e => e.state === 'red-base')) {"));
+        assert!(body.contains("if (ge && (ge.state === 'landed-unproven' || ge.state === 'passed'))"));
+        // A merge train is one cart; handed-back work marks its house.
+        assert!(body.contains("tap(x - 1, y - 1, cw + 2, 10, { kind: 'train', id: e.train });"));
+        assert!(body.contains("if (back && (back.state === 'failed' || back.state === 'conflict')) for (let k = 0; k < Math.min(4, Math.max(1, back.attempt || 1)); k++)"));
+        // Transitions: stamped out to the quay, or back to the board dented; no double trip from #368's landing.
+        assert!(body.contains("kind: state === 'conflict' ? 'knot' : 'rejected' });"));
+        assert!(body.contains("[{ pts: [from, [lay.roadX + 3, from[1]], [lay.roadX + 3, ROAD], ...boardFromRoad(lay)], carry: true }], { dented: true }));"));
+        assert!(body.contains("if (oldQuay.has(n) || gated.has(n) || oldGs.spots.has(n)) return;"));
+        // Dialogs, the area label and the counter.
+        assert!(body.contains("return { title: `${theme.labels.gate} · merge gate`, line: `${gs.queued} queued · ${gs.gating} gating`,"));
+        assert!(body.contains("return ['Gate', `${count('queued')} queued · ${count('gating')} gating · ${failed} failed today`,"));
+        assert!(body.contains("link('What went wrong', ge.failure_url)"));
+        assert!(body.contains("gate: 'Gatehouse' },") && body.contains("gate: 'QA checkpoint' },") && body.contains("gate: 'Scanner arch' },"));
+    }
+
+    #[test]
     fn village_html_links_only_what_it_knows() {
         let body = &village_source();
         // The repo's pages only when a real issue URL names the repo.
