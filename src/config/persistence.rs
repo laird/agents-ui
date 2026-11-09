@@ -9,6 +9,19 @@ use crate::model::swarm::AgentType;
 #[allow(dead_code)] // Persistence layer planned for swarm state save/restore
 /// Root configuration directory.
 pub fn config_dir() -> PathBuf {
+    // Tests get one directory per test process, fixed at first use. It follows
+    // neither HOME nor the user's real data dir: tests that point HOME at a
+    // temporary directory and then delete it used to pull config_dir() out from
+    // under tests running alongside them (#358), and every run wrote into the
+    // user's real ~/.local/share/agents-ui.
+    #[cfg(test)]
+    {
+        static TEST_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+        return TEST_DIR
+            .get_or_init(|| std::env::temp_dir().join(format!("agents-ui-test-config-{}", std::process::id())))
+            .clone();
+    }
+    #[cfg(not(test))]
     dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("agents-ui")
@@ -161,10 +174,7 @@ mod tests {
     use super::{find_repo_root, load_repo_agent_type, load_swarm_state, list_saved_swarms, save_repo_agent_type, save_swarm_state, SwarmState};
     use crate::model::swarm::AgentType;
     use std::path::PathBuf;
-    use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn temp_path(name: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -201,11 +211,20 @@ mod tests {
     }
 
     #[test]
+    fn tests_never_use_the_real_or_home_relative_config_dir() {
+        // #358: config_dir() followed HOME, which other tests point at temporary
+        // directories and delete, so it moved and vanished under these tests.
+        let dir = super::config_dir();
+        assert!(dir.starts_with(std::env::temp_dir()), "{dir:?} is not under the temp dir");
+        if let Some(real) = dirs::data_local_dir() {
+            assert!(!dir.starts_with(real), "{dir:?} is the user's real data dir");
+        }
+        assert_eq!(super::config_dir(), dir, "stable for the whole test process");
+    }
+
+    #[test]
     fn stopped_tombstone_round_trip() {
         use super::{clear_swarm_stopped, config_dir, is_swarm_stopped, mark_swarm_stopped};
-
-        // Hold the env lock so HOME-mutating tests don't change config_dir() under us
-        let _env_guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         // Use a unique project name to avoid collisions between parallel test runs
         let project = format!("test-project-{}", std::process::id());
