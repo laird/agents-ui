@@ -199,8 +199,14 @@ what `src/web/deployments.rs` reads to place each stop:
 - **`nuc-1`**: what is installed and served on nuc-1. From a clean checkout of
   a commit already on `origin/master`, run `tools/deploy.sh` (add `--dry-run`
   to check without changing anything). It runs `cargo install`, restarts the
-  served `agents-tui`, and records the Deployment as `success`. If the install
-  or restart fails, it records `failure`.
+  systemd user unit `agents-tui.service`, waits until the village answers at
+  the unit's own `--web-port`/`--web-bind`, and records the Deployment as
+  `success`. If the install, the restart or that check fails, it records
+  `failure`. The served instance is that unit and nothing else: when it is
+  not installed, `deploy.sh` exits 1 before recording anything, and it never
+  starts a server of its own. The reference unit, with install steps, is
+  `docs/agents-tui.service`. Its tests: `bash tools/test_deploy.sh` (also run
+  by `cargo test deploy_script`).
 - **`release`**: run `tools/release.sh vX.Y.Z` (or add `--dry-run`). It runs
   `gh release create --generate-notes` at `origin/master`'s tip, or at
   `--commit`, and records a Deployment of that commit. For a release made by

@@ -249,4 +249,35 @@ mod tests {
         assert_eq!(encode("github-pages"), "github-pages");
         assert_eq!(encode("Production EU/1"), "Production%20EU%2F1");
     }
+
+    /// tools/deploy.sh makes the Deployments read here. Its shell tests run it
+    /// against stub systemctl/gh/cargo/curl: a missing unit refuses before
+    /// recording anything, and success waits for the village to answer.
+    #[test]
+    fn deploy_script_tests_pass() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        let out = std::process::Command::new("bash")
+            .arg(format!("{root}/tools/test_deploy.sh"))
+            .output()
+            .expect("run tools/test_deploy.sh");
+        assert!(
+            out.status.success(),
+            "tools/test_deploy.sh failed:\n{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// The served instance is the systemd unit only: no detached-server fallback.
+    #[test]
+    fn deploy_script_never_starts_a_server_of_its_own() {
+        let script = include_str!("../../tools/deploy.sh");
+        for gone in ["setsid", "nohup", "serve.pid", "serve.log", "7877", "AGENTS_TUI_SERVE_ARGS", "AGENTS_TUI_PORT"] {
+            assert!(!script.contains(gone), "deploy.sh still has {gone}");
+        }
+        assert!(script.contains("systemctl --user cat \"$UNIT\""));
+        assert!(script.contains("cp docs/agents-tui.service ~/.config/systemd/user/"));
+        let unit = include_str!("../../docs/agents-tui.service");
+        assert!(unit.contains("ExecStart=%h/.cargo/bin/agents-tui --headless --web-port 7890 --web-bind 127.0.0.1,tailscale"));
+    }
 }

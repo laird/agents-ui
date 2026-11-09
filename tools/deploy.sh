@@ -5,30 +5,31 @@
 #
 # The village places an environment at the commit of its newest *successful*
 # Deployment (src/web/deployments.rs). This script is what makes one: it opens
-# the Deployment before installing, then marks it `success` once the server
-# answers, or `failure` if the install or restart did not work.
+# the Deployment before installing, then marks it `success` once the served
+# village answers, or `failure` if the install, the restart or the check fails.
 #
 # USAGE:
 #   tools/deploy.sh [--env nuc-1] [--dry-run] [--no-restart]
 #
 #   --env         environment to record (default: nuc-1; must be listed in .autocoder.json)
-#   --dry-run     run every check and print what would happen; install, restart and
-#                 record nothing
-#   --no-restart  install and record, but leave running servers alone
+#   --dry-run     run every check and print the unit it would restart and the URL it
+#                 would check; install, restart and record nothing
+#   --no-restart  install and record, but leave the running server alone
 #
-# What it refuses:
+# What it refuses, before opening a Deployment:
 #   - a dirty tree (what is installed must be exactly the recorded commit;
 #     harness state under .claude/ is ignored)
 #   - a HEAD that is not on origin/<integration> (only landed work deploys)
+#   - no systemd user unit `agents-tui.service`. The served instance is that
+#     unit and nothing else: this script never starts a server of its own.
+#     The reference unit is docs/agents-tui.service (install steps in it).
 #
 # The served instance:
-#   If a systemd user unit `agents-tui.service` exists it is restarted. Otherwise
-#   this script runs the server itself, detached, and remembers its pid in
-#   ~/.agents-ui/serve.pid so the next deploy can replace it:
-#     agents-tui --headless --web-port $AGENTS_TUI_PORT --web-bind $AGENTS_TUI_BIND --read-only
-#   AGENTS_TUI_PORT defaults to 7877; AGENTS_TUI_BIND to 127.0.0.1 plus this
-#   machine's tailnet address (`tailscale ip -4`) when there is one. AGENTS_TUI_SERVE_ARGS replaces
-#   the arguments entirely.
+#   `systemctl --user restart agents-tui.service`, active or not, then wait until
+#   the village answers at the unit's own address: --web-port and --web-bind
+#   from its ExecStart (127.0.0.1 when it binds there; port 7878 when unset).
+#   AGENTS_TUI_URL (e.g. http://127.0.0.1:7890) overrides the address, and
+#   AGENTS_TUI_WAIT the seconds to wait (default 30).
 #
 # EXIT: 0 deployed (or dry run passed) · 1 refused or setup error · 2 deploy failed (recorded as failure)
 set -euo pipefail
@@ -72,32 +73,68 @@ SHA=$(git rev-parse HEAD)
 git merge-base --is-ancestor "$SHA" "origin/$INTEGRATION" \
   || refuse "HEAD ${SHA:0:12} is not on origin/$INTEGRATION; only landed work deploys"
 
+# The served instance is the systemd user unit. Without it there is nothing to
+# deploy to, and starting a server here would serve somewhere nobody looks.
+UNIT="agents-tui.service"
+UNIT_TEXT=$(systemctl --user cat "$UNIT" 2>/dev/null) || {
+  cat >&2 <<EOF
+deploy.sh: refusing: the systemd user unit $UNIT is not installed, so there is no served
+agents-tui to deploy to. Nothing was installed or recorded. Install the unit, then deploy again:
+
+  mkdir -p ~/.config/systemd/user
+  cp docs/agents-tui.service ~/.config/systemd/user/   # edit ExecStart's port and bind if needed
+  systemctl --user daemon-reload
+  systemctl --user enable --now $UNIT
+EOF
+  exit 1
+}
+
+# Where the unit serves: its ExecStart's --web-port and --web-bind.
+unit_url() {
+  python3 - "$UNIT_TEXT" <<'PY'
+import shlex, sys
+lines = [l.split("=", 1)[1] for l in sys.argv[1].splitlines() if l.strip().startswith("ExecStart=")]
+args = shlex.split(lines[-1].lstrip("-@:+!")) if lines and lines[-1].strip() else []
+def opt(name):
+    for i, a in enumerate(args):
+        if a == name and i + 1 < len(args): return args[i + 1]
+        if a.startswith(name + "="): return a.split("=", 1)[1]
+    return None
+port = opt("--web-port") or "7878"
+binds = [b.strip() for b in (opt("--web-bind") or "127.0.0.1").split(",") if b.strip()]
+if "127.0.0.1" in binds or "localhost" in binds: host = "127.0.0.1"
+elif "::1" in binds: host = "[::1]"
+else:
+    lits = [b for b in binds if b.lower() != "tailscale"]
+    host = lits[0] if lits else "tailscale"
+    if host in ("0.0.0.0", "::", "[::]"): host = "127.0.0.1"
+    elif ":" in host and not host.startswith("["): host = f"[{host}]"
+print(f"http://{host}:{port}")
+PY
+}
+URL="${AGENTS_TUI_URL:-$(unit_url)}"
+if [[ "$URL" == http://tailscale:* ]]; then
+  TAILNET_IP="$(tailscale ip -4 2>/dev/null | head -1 || true)"
+  [ -n "$TAILNET_IP" ] || refuse "$UNIT binds only the tailnet, and \`tailscale ip -4\` has no address"
+  URL="http://$TAILNET_IP:${URL##*:}"
+fi
+URL="${URL%/}"
+CHECK="$URL/api/village"
+WAIT="${AGENTS_TUI_WAIT:-30}"
+
 say "environment: $ENVIRONMENT"
 say "commit:      $SHA ($(git log -1 --format=%s "$SHA"))"
-
-PORT="${AGENTS_TUI_PORT:-7877}"
-# Localhost and the tailnet together, so the host's own browser keeps working.
-TAILNET_IP="$(tailscale ip -4 2>/dev/null | head -1 || true)"
-BIND="${AGENTS_TUI_BIND:-127.0.0.1${TAILNET_IP:+,$TAILNET_IP}}"
-if [ -n "${AGENTS_TUI_SERVE_ARGS:-}" ]; then
-  read -r -a SERVE_ARGS <<< "$AGENTS_TUI_SERVE_ARGS"
-else
-  SERVE_ARGS=(--headless --web-port "$PORT" --web-bind "$BIND" --read-only)
-fi
-PIDFILE="$HOME/.agents-ui/serve.pid"
-LOGFILE="$HOME/.agents-ui/serve.log"
-UNIT="agents-tui.service"
-has_unit() { systemctl --user cat "$UNIT" >/dev/null 2>&1; }
+say "unit:        $UNIT"
+say "check:       $CHECK"
 
 if [ "$DRY_RUN" = true ]; then
   say "dry run: would record a Deployment of ${SHA:0:12} to '$ENVIRONMENT'"
   say "dry run: would run: cargo install --path . --locked"
   if [ "$RESTART" = false ]; then
-    say "dry run: would not restart anything (--no-restart)"
-  elif has_unit; then
-    say "dry run: would run: systemctl --user restart $UNIT"
+    say "dry run: would not restart $UNIT (--no-restart)"
   else
-    say "dry run: would (re)start: agents-tui ${SERVE_ARGS[*]} (pid in $PIDFILE)"
+    say "dry run: would run: systemctl --user restart $UNIT"
+    say "dry run: would wait up to ${WAIT}s for $CHECK to answer"
   fi
   say "dry run: checks passed, nothing changed"
   exit 0
@@ -121,43 +158,17 @@ status in_progress "installing ${SHA:0:12}"
 say "deployment $DEPLOYMENT_ID opened"
 
 cargo install --path . --locked || fail "cargo install failed"
-BIN="$(command -v agents-tui || echo "$HOME/.cargo/bin/agents-tui")"
 
 if [ "$RESTART" = true ]; then
-  if has_unit; then
-    systemctl --user restart "$UNIT" || fail "systemctl --user restart $UNIT failed"
-    sleep 2
-    systemctl --user is-active --quiet "$UNIT" || fail "$UNIT is not running after the restart"
-    say "restarted $UNIT"
-  else
-    mkdir -p "$(dirname "$PIDFILE")"
-    if [ -f "$PIDFILE" ]; then
-      OLD=$(cat "$PIDFILE")
-      # Only stop what this script started: the pid must still be an agents-tui.
-      if [ -n "$OLD" ] && ps -p "$OLD" -o comm= 2>/dev/null | grep -q '^agents-tui'; then
-        kill "$OLD" 2>/dev/null || true
-        for _ in $(seq 1 20); do ps -p "$OLD" >/dev/null 2>&1 || break; sleep 0.25; done
-        ps -p "$OLD" >/dev/null 2>&1 && kill -9 "$OLD" 2>/dev/null || true
-        say "stopped the previous server (pid $OLD)"
-      fi
-    fi
-    setsid nohup "$BIN" "${SERVE_ARGS[@]}" >"$LOGFILE" 2>&1 < /dev/null &
-    echo $! > "$PIDFILE"
-    say "started $BIN ${SERVE_ARGS[*]} (pid $(cat "$PIDFILE"), log $LOGFILE)"
-    # It is deployed when it answers, not when it was launched.
-    if [ -z "${AGENTS_TUI_SERVE_ARGS:-}" ]; then
-      for _ in $(seq 1 40); do
-        curl -fsS -o /dev/null "http://$BIND:$PORT/api/village" 2>/dev/null && break
-        ps -p "$(cat "$PIDFILE")" >/dev/null 2>&1 || fail "the server exited at startup (see $LOGFILE)"
-        sleep 0.5
-      done
-      curl -fsS -o /dev/null "http://$BIND:$PORT/api/village" || fail "the server is not answering on $BIND:$PORT (see $LOGFILE)"
-      say "serving http://$BIND:$PORT/village"
-    else
-      sleep 2
-      ps -p "$(cat "$PIDFILE")" >/dev/null 2>&1 || fail "the server exited at startup (see $LOGFILE)"
-    fi
-  fi
+  # Restart whether or not it was running: an inactive unit is started.
+  systemctl --user restart "$UNIT" || fail "systemctl --user restart $UNIT failed"
+  # It is deployed when the village answers, not when the unit was started.
+  deadline=$((SECONDS + WAIT))
+  until curl -fsS -o /dev/null --max-time 5 "$CHECK" 2>/dev/null; do
+    [ "$SECONDS" -lt "$deadline" ] || fail "$UNIT restarted, but $CHECK did not answer within ${WAIT}s (journalctl --user -u $UNIT)"
+    sleep 1
+  done
+  say "restarted $UNIT; serving $URL/village"
 fi
 
 status success "agents-tui ${SHA:0:12} installed on $(hostname)"

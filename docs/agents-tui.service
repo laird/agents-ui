@@ -1,0 +1,36 @@
+# Reference systemd user unit for the served agents-tui (village and dashboard).
+# tools/deploy.sh installs the new binary and restarts this unit, then checks
+# that the village answers at this ExecStart's --web-port and --web-bind. It
+# refuses to deploy when the unit is not installed, and never starts a server
+# of its own.
+#
+# Install:
+#   mkdir -p ~/.config/systemd/user
+#   cp docs/agents-tui.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now agents-tui.service
+#   loginctl enable-linger "$USER"   # keep it running while you are logged out
+#
+# Check:  systemctl --user status agents-tui.service
+#         journalctl --user -u agents-tui.service -f
+#         curl -fsS http://127.0.0.1:7890/api/village >/dev/null && echo up
+
+[Unit]
+Description=agents-tui village and dashboard (localhost + tailnet)
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h
+Environment=PATH=%h/.local/share/mise/shims:%h/.cargo/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=RUST_LOG=info
+# Localhost plus this machine's tailnet addresses (`tailscale` expands to them):
+# reachable from here and your tailscale devices, not the LAN. Keep 127.0.0.1 in
+# the list; deploy.sh checks the village there. Add --read-only to serve without
+# input, and --source swarms=herdr when the swarms run under herdr.
+ExecStart=%h/.cargo/bin/agents-tui --headless --web-port 7890 --web-bind 127.0.0.1,tailscale --source swarms=herdr
+# tailscale may not have its address yet at login; keep retrying.
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
