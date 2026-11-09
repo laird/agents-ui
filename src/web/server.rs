@@ -1498,6 +1498,63 @@ mod tests {
         assert!(body.contains("base.startsWith(v.project + '-')"));
     }
 
+    #[test]
+    fn village_html_hit_tests_what_it_draws() {
+        let body = VILLAGE_HTML;
+        // paint() records a rectangle per sprite; hit() reads them back, topmost first.
+        assert!(body.contains("const tap = (x, y, w, h, o) =>"));
+        assert!(body.contains("sc.hits = hits; hits = null;"));
+        assert!(body.contains("function hitAt(sc, x, y)"));
+        assert!(body.contains("for (let k = hs.length - 1; k >= 0; k--)"));
+        // No hand-copied rectangles left in hit().
+        let hit = &body[body.find("function hit(sc, x, y, theme)").unwrap()..];
+        let hit = &hit[..hit.find("\n  }\n").unwrap()];
+        assert!(!hit.contains("lay."), "hit() should not know the layout: {hit}");
+        // Every kind of object on the map is recorded where it is drawn...
+        for kind in [
+            "'river'", "'docks'", "'canal'", "'quay'", "'hall'", "'board'", "'sub'", "'crate'",
+            "'house'", "'person'", "'stop'", "'harbour'", "'porter'", "'barge'", "'banner'",
+        ] {
+            assert!(body.contains(&format!("{{ kind: {kind}")), "no tap for {kind}");
+        }
+        // ...and the ones with a dialog of their own say what they are.
+        for case in [
+            "case 'river': case 'docks':", "case 'board':", "case 'hall':", "case 'house':", "case 'person':",
+            "case 'sub':", "case 'porter':", "case 'crate':", "case 'quay':", "case 'stop':", "case 'harbour':", "case 'canal':",
+        ] {
+            assert!(body.contains(case), "no dialog for {case}");
+        }
+        // Banners still follow; a barge opens its feature.
+        assert!(body.contains("if (o.kind === 'barge')"));
+        assert!(body.contains("toggleFollow(v.project, o.f);"));
+    }
+
+    #[test]
+    fn village_html_links_only_what_it_knows() {
+        let body = VILLAGE_HTML;
+        // The repo's pages only when a real issue URL names the repo.
+        assert!(body.contains(r"const ISSUE_URL = /^(https:\/\/github\.com\/[^/]+\/[^/]+)\/issues\/\d+$/;"));
+        assert!(body.contains("url: (c && c.url) || (own && own.url) || (repo ? `${repo}/issues/${n}` : null)"));
+        assert!(body.contains("const link = (label, url) => (url ? { label, url } : null);"));
+        // Houses, people and sub-agents link to the agent session view.
+        assert!(body.contains(r"const sessionOf = h => (h.links || []).find(l => /^\/#\/swarm\/[^/]+\/agent\//.test(l.url));"));
+        assert!(body.contains("link('Swarm view', swarm)"));
+        assert!(body.contains("label: 'Parent agent session'"));
+        // Environments link to their deployments or commit; the quay to the integration branch.
+        assert!(body.contains("/deployments/${encodeURIComponent(s.name)}"));
+        assert!(body.contains("`${repo}/commits/${encodeURIComponent(br)}`"));
+    }
+
+    #[test]
+    fn village_html_reaches_every_object_by_keyboard() {
+        let body = VILLAGE_HTML;
+        assert!(body.contains(r#"<div class="hitkeys" id="hitkeys"></div>"#));
+        assert!(body.contains("function placeKeys()"));
+        assert!(body.contains("placeLabels();\n    placeKeys();"));
+        assert!(body.contains(".hk:focus-visible"));
+        assert!(body.contains("b.setAttribute('aria-label', [info.title, info.line].filter(Boolean).join(': '));"));
+    }
+
     #[tokio::test]
     async fn index_html_links_each_swarm_to_its_village() {
         // The village page picks a village from its URL hash, so a swarm's

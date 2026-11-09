@@ -77,6 +77,11 @@
    * house. Pointer-transparent, so clicks still reach the map beneath. */
   .alabels { position: absolute; inset: 0; pointer-events: none; }
   .alabels[hidden] { display: none; }
+  /* Keyboard targets: one invisible button over each object on the map, so
+   * Tab reaches what a click does. The mouse still goes to the map. */
+  .hitkeys { position: absolute; inset: 0; pointer-events: none; }
+  .hk { position: absolute; pointer-events: none; padding: 0; margin: 0; border: 0; background: none; opacity: 0; }
+  .hk:focus-visible { opacity: 1; outline: 3px solid var(--gold); outline-offset: 1px; }
   .al { position: absolute; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 700 11px/1.2 var(--mono); color: var(--gold); background: rgba(6,8,20,.78); border: 1px solid var(--gold); border-radius: 3px; padding: 1px 5px; }
   .al small { font-weight: 400; color: var(--ink-dim); }
   .al.house { font-size: 10px; color: var(--ink); border-color: var(--win-inner); padding: 0 3px; }
@@ -113,7 +118,7 @@
     <div class="viewport" id="viewport">
       <div class="empty" id="empty">Looking for swarms…</div>
       <canvas id="map" width="320" height="180" hidden aria-label="The swarm drawn as a village. Select a house to see its crew and issue."></canvas>
-      <div class="alabels" id="alabels"></div>
+      <div class="alabels" id="alabels"></div><div class="hitkeys" id="hitkeys"></div>
       <div class="fbanners" id="fbanners"></div>
     </div>
     <div class="fstrip" id="fstrip" hidden>
@@ -1008,6 +1013,12 @@
   const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   const slotPos = i => ({ x: 10 + (i % 8) * 6, y: 22 + Math.floor(i / 8) * 6 });
+  /* What is clickable comes from what is drawn: paint() records a rectangle
+   * (scene pixels) and the object behind it for every sprite it draws, later
+   * ones on top. hit() and the keyboard targets read the list back, so a new
+   * or moved sprite stays clickable without copying its coordinates. */
+  let hits = null;
+  const tap = (x, y, w, h, o) => { if (hits) hits.push({ x: Math.round(x), y: Math.round(y), w, h, o }); };
 
   /* Animate crates that moved since the last snapshot. */
   function diff(old, now, lay, t) {
@@ -1050,9 +1061,9 @@
     const barges = bargesFor(v, lay), hid = new Set(barges.flatMap(b => b.issues));
     T.ground(c, 0, 0, W, H);
     if (T.border) T.border(c, W, H);
-    T.channel(c, 0, 0, W, 11, t, 1);
+    T.channel(c, 0, 0, W, 11, t, 1); tap(0, 0, W, 11, { kind: 'river' });
     T.dock(c, 14, 10, 40);
-    T.yard(c, 6, 18, 56, 34);
+    T.yard(c, 6, 18, 56, 34); tap(6, 8, 56, 44, { kind: 'docks' });
     T.road(c, 4, 50, cx0 + vw - 4, 6);
     T.road(c, roadX, 50, RD, quayY - 50 + 2);
     T.yard(c, hallX - 8, 42, 48, 9);
@@ -1060,27 +1071,29 @@
       const left = roadX - lay.per * LW + 2, right = roadX + RD + lay.per * LW - 2;
       T.road(c, left - 1, lay.top + r * LH + 17, right - left + 2, 4);
     }
-    T.channel(c, roadX - 16, canalY, W - roadX + 16, 14, t, 0.6);
-    T.dock(c, roadX - 4, quayY + 1, 22);
+    T.channel(c, roadX - 16, canalY, W - roadX + 16, 14, t, 0.6); tap(roadX - 16, canalY, W - roadX + 16, 14, { kind: 'canal' });
+    T.dock(c, roadX - 4, quayY + 1, 22); if (v.plane !== 'runtime') tap(roadX - 4, quayY - 16, 22, 24, { kind: 'quay' });
 
     for (let x = Math.max(cx0 + vw + 6, hallX + 64); x < W - 14; x += 15) for (let y = 16; y < canalY - 38; y += 16) if (hash(x, y) < 0.55 && !inBannerStrip(lay, x, y)) T.tree(c, x + Math.floor(hash(y, x) * 4), y);
     lay.decor.forEach(d => d.tree ? T.tree(c, d.x, d.y) : T.decor && T.decor(c, d.x, d.y, d.k, reduce ? 0 : t));
     shadow(c, hallX - 2, 40, 42, 2);
 
-    T.hall(c, hallX, 18, v.manager.status);
-    T.board(c, hallX + 42, 28, v.board);
+    T.hall(c, hallX, 18, v.manager.status); tap(hallX - 4, 6, 40, 36, { kind: 'hall' });
+    T.board(c, hallX + 42, 28, v.board); tap(hallX + 42, 28, 18, 16, { kind: 'board' });
     if (v.manager.status !== 'working' && v.manager.status !== 'stopped') {
       person(c, hallX + 26, 30, 'manager:' + v.project, v.manager.status === 'blocked' ? waveFrame(t) : 'stand', { mayor: true });
+      tap(hallX + 26, 30, 8, 12, { kind: 'hall' });
     }
     // The manager's sub-agents (a modernize coordinator's specialists) work in the plaza.
     (v.manager.subagents || []).slice(0, 4).forEach((sa, k) => {
       const bob = !reduce && blink(t + k * 170, 220) ? -1 : 0;
       const seed = `manager:${v.project}/${sa.description || k}`, px = hallX - 2 + k * 10 + (reduce ? 0 : wander(sa.action, t, seed));
       person(c, px, 39 + bob, seed, 'stand', { accent: subHat(sa) });
+      tap(px, 38, 8, 13, { kind: 'sub', house: -1, sa, id: sa.description || k });
       drawAction(c, px, 39 + bob, sa.action, t + k * 131);
     });
 
-    v.backlog.slice(0, 40).forEach((cr, i) => { const s = slotPos(i); T.crate(c, s.x, s.y, cr.kind, cr.priority); });
+    v.backlog.slice(0, 40).forEach((cr, i) => { const s = slotPos(i); T.crate(c, s.x, s.y, cr.kind, cr.priority); tap(s.x, s.y, 5, 5, { kind: 'crate', n: cr.number, at: 'backlog' }); });
 
     const bubbles = [];
     if (['blocked', 'done', 'unknown', 'stalled'].includes(v.manager.status)) bubbles.push([hallX + 26, 18, v.manager.status]);
@@ -1088,6 +1101,7 @@
       const lot = lots[i]; if (!lot) return;
       const st = h.status, tt = t + i * 311;
       shadow(c, lot.x + 2, lot.y + 16, 16, 2); shadow(c, lot.x + 16, lot.y + 4, 2, 12);
+      tap(lot.x, lot.y - 4, 16, 25, { kind: 'house', i });
       if (st === 'building') T.scaffold(c, lot.x, lot.y, tt);
       else (T.B[h.kind] || T.B.workshop)(c, lot.x, lot.y, st, reduce ? 0 : tt);
       pennant(c, lot.x, lot.y, h.priority, tt);
@@ -1098,8 +1112,9 @@
         if (st === 'idle') person(c, lot.x + 4, lot.y + 9, h.id);
         if (st === 'done') person(c, lot.x + 4, lot.y + 8, h.id);
         if (st === 'blocked') person(c, lot.x + 4, lot.y + 10, h.id, waveFrame(t + i * 90));
+        if (['idle', 'done', 'blocked'].includes(st)) tap(lot.x + 4, lot.y + 8, 8, 12, { kind: 'person', i, who: h.crew[0] });
       }
-      if (h.crew.length > 1 && st !== 'working') person(c, lot.x + 12, lot.y + 11, h.id + '#crew');
+      if (h.crew.length > 1 && st !== 'working') { person(c, lot.x + 12, lot.y + 11, h.id + '#crew'); tap(lot.x + 12, lot.y + 11, 8, 12, { kind: 'person', i, who: h.crew[1] }); }
       if (h.crew.length > 1 && st === 'working' && !reduce) puffs(c, lot.x + 3, lot.y - 3, tt + 700, ...T.steam);
       // Sub-agents keep the house busy: they work out front, two at most shown.
       const subs = h.subagents || [];
@@ -1110,6 +1125,7 @@
         const waiting = sa.status === 'blocked', seed = `${h.id}/${sa.description || k}`;
         const px = lot.x + (k ? 9 : -1) + (reduce ? 0 : wander(sa.action, t, seed)), py = lot.y + 12 + bob;
         person(c, px, waiting ? lot.y + 12 : py, seed, waiting ? waveFrame(t + k * 110) : 'stand', { accent: subHat(sa) });
+        tap(px, lot.y + 11, 8, 13, { kind: 'sub', house: i, sa, id: sa.description || k });
         if (!waiting) drawAction(c, px, py, sa.action, t + k * 97);
       });
       if (st === 'working' && h.action) actionSign(c, lot.x + 4, lot.y - 4, h.action);
@@ -1118,24 +1134,34 @@
     });
 
     const carried = new Set(porters.filter(p => p.issue).map(p => p.issue));
-    v.pipeline.quay.filter(n => !carried.has(n) && !hid.has(n)).slice(0, 6).forEach((n, k) => T.crate(c, roadX + 6 + (k % 3) * 6, quayY - 3 - Math.floor(k / 3) * 6, 'workshop', null, true));
+    v.pipeline.quay.filter(n => !carried.has(n) && !hid.has(n)).slice(0, 6).forEach((n, k) => {
+      const x = roadX + 6 + (k % 3) * 6, y = quayY - 3 - Math.floor(k / 3) * 6;
+      T.crate(c, x, y, 'workshop', null, true); tap(x, y, 5, 5, { kind: 'crate', n, at: 'quay' });
+    });
 
     // The sentinel's flag is grey while it still has newer work to test.
     const flagOf = i => i === 0 && v.pipeline.sentinel !== 'green' ? P.stoneD : STOPCOL[i] || P.white;
     const stops = v.pipeline.stops;
     stops.slice(0, -1).forEach((s, i) => {
       const lx = lay.lockStart + i * 34;
-      T.gate(c, lx, canalY, false, flagOf(i));
-      s.issues.filter(n => !hid.has(n)).slice(0, 4).forEach((n, k) => T.crate(c, lx + 8 + (k % 2) * 6, canalY + 18 + Math.floor(k / 2) * 6, 'workshop', null, true));
+      T.gate(c, lx, canalY, false, flagOf(i)); tap(lx - 7, canalY - 28, 32, H - canalY + 28, { kind: 'stop', i });
+      s.issues.filter(n => !hid.has(n)).slice(0, 4).forEach((n, k) => {
+        const x = lx + 8 + (k % 2) * 6, y = canalY + 18 + Math.floor(k / 2) * 6;
+        T.crate(c, x, y, 'workshop', null, true); tap(x, y, 5, 5, { kind: 'crate', n, at: 'stop', i });
+      });
     });
-    T.destination(c, lay.castleX, canalY, t, fireworks);
-    if (stops.length) stops[stops.length - 1].issues.filter(n => !hid.has(n)).slice(0, 6).forEach((n, k) => T.crate(c, lay.castleX + 6 + (k % 4) * 6, canalY + 18 + Math.floor(k / 4) * 6, 'workshop', null, true));
+    T.destination(c, lay.castleX, canalY, t, fireworks); tap(lay.castleX - 4, canalY - 28, 46, H - canalY + 28, { kind: 'harbour' });
+    if (stops.length) stops[stops.length - 1].issues.filter(n => !hid.has(n)).slice(0, 6).forEach((n, k) => {
+      const x = lay.castleX + 6 + (k % 4) * 6, y = canalY + 18 + Math.floor(k / 4) * 6;
+      T.crate(c, x, y, 'workshop', null, true); tap(x, y, 5, 5, { kind: 'crate', n, at: 'stop', i: stops.length - 1 });
+    });
 
     porters = porters.filter(p => {
       const pos = porterPos(p, t);
       if (!pos) return false;
       person(c, pos[0] - 4, pos[1] - 11, p.seed, blink(t, 140) ? 'carrystep' : 'carry');
       T.crate(c, pos[0] - 2, pos[1] - 16, p.kind, p.pr, p.sealed);
+      tap(pos[0] - 4, pos[1] - 16, 8, 17, { kind: 'porter', seed: p.seed, n: p.issue });
       return true;
     });
     bubbles.forEach(([x, y, s]) => bubble(c, x, y, s));
@@ -1212,6 +1238,7 @@
       R(c, x + 22, y - 6, 1, 8, P.o); R(c, x + 23, y - 6, 5, 4, P.o); R(c, x + 23, y - 5, 4, 2, b.col);
     }
     b.issues.slice(0, 4).forEach((n, k) => T.crate(c, x + 2 + k * 5, y + 1, 'workshop', null, true));
+    tap(b.x, b.y - 6, 28, 18, { kind: 'barge', f: b.f ? b.f.number : null, issues: b.issues });
   }
   /* Fog over a stop with neither a Deployment nor a branch: "?", never "not live". */
   function fogStop(c, v, i, lay, t) {
@@ -1255,12 +1282,15 @@
       const on = isFollowed(v, g.f), a = on ? 1 : (fade[g.f.number] ?? 1);
       if (on) counted(g.f).forEach(s => { const w = whereIs(s.number, v, lay, barges); if (w) drawTrail(c, g.x, g.y + 25, w.x, w.y, g.f.live ? P.gold : g.col, t); });
       c.globalAlpha = a; drawBanner(c, g, on, t); c.globalAlpha = 1;
+      tap(g.x - 3, g.y - 9, 20, 36, { kind: 'banner', f: g.f.number });
     });
   }
 
   function drawVillage(c, sc, t) {
     current = sc.v; L = sc.L; porters = sc.porters; fireworks = sc.fireworks;
+    hits = [];
     paint(c, t);
+    sc.hits = hits; hits = null;
     sc.porters = porters;
   }
 
@@ -1472,17 +1502,6 @@
     document.getElementById('d-links').innerHTML = (list || [])
       .map(l => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)} ↗</a>`).join('');
   }
-  /* The notice board and the docks list their issues, each linked. */
-  function showList(title, sub, items) {
-    document.getElementById('d-title').textContent = title;
-    document.getElementById('d-line').textContent = sub;
-    document.getElementById('d-meta').innerHTML = items.length
-      ? `<ul>${items.slice(0, 40).map(i => `<li>${i.url ? `<a href="${esc(i.url)}" target="_blank" rel="noopener">#${i.number}</a>` : '#' + i.number} ${esc(i.title)}${i.label ? ' · ' + esc(i.label) : ''}${i.priority ? ' · ' + esc(i.priority) : ''}</li>`).join('')}</ul>`
-      : 'Nothing here.';
-    ask({});
-    links([]);
-    dialog.hidden = false;
-  }
   /* A structured question the agent is waiting on (a numbered menu or y/n):
    * one button per option. The server checks the same question is still on
    * screen before it types the answer; anything open-ended goes through the
@@ -1505,26 +1524,160 @@
       busy(false);
     }));
   }
-  function show(house, isManager, v, theme) {
-    document.getElementById('d-title').textContent = isManager ? `${theme.labels.hall} · manager` : `${house.role} · ${house.kind}`;
-    document.getElementById('d-line').textContent = house.issue ? `#${house.issue} ${house.issue_title || ''}` : (house.issue_title || 'No issue claimed');
-    document.getElementById('d-meta').textContent =
-      `Status: ${house.status}${house.priority ? ' · ' + house.priority : ''} · Crew: ${house.crew.join(', ') || '—'}` +
-      ((house.subagents || []).length ? ` · ${v.plane === 'runtime' ? 'Agents' : 'Sub-agents'}: ${house.subagents.map(sa => sa.agent_type + (sa.description ? ' (' + sa.description + ')' : '') + (sa.status === 'blocked' ? ' waiting on you' : sa.action ? ' ' + sa.action : '')).join(', ')}` : '') +
-      (house.action ? ` · Now: ${house.action}` : '');
-    ask(house);
-    links(house.links);
+  /* ---------- What each object is ----------
+   * One dialog per kind of thing on the map: what it is in plain words, and
+   * links to what is behind it. Links come from the report (house `links`,
+   * issue `url`s); the repo's own pages (commits, deployments, releases) only
+   * when a real issue URL shows which GitHub repo this is, never a guess. */
+  const ISSUE_URL = /^(https:\/\/github\.com\/[^/]+\/[^/]+)\/issues\/\d+$/;
+  function repoUrl(v) {
+    const urls = [...v.backlog.map(c => c.url), ...v.board.map(n => n.url), ...(v.features || []).map(f => f.url),
+      ...[v.manager, ...v.houses].flatMap(h => (h.links || []).map(l => l.url))];
+    for (const u of urls) { const m = ISSUE_URL.exec(u || ''); if (m) return m[1]; }
+    return null;
+  }
+  const link = (label, url) => (url ? { label, url } : null);
+  /* An issue's title, priority and URL from wherever the village knows it. */
+  function issueOf(v, n) {
+    const c = v.backlog.find(c => c.number === n) || v.board.find(b => b.number === n);
+    const h = v.houses.find(h => h.issue === n);
+    const sub = (v.features || []).flatMap(f => f.subtasks || []).find(s => s.number === n);
+    const own = h && (h.links || []).find(l => new RegExp(`/issues/${n}$`).test(l.url));
+    const repo = repoUrl(v);
+    return {
+      title: (c && c.title) || (h && h.issue_title) || (sub && sub.title) || '',
+      priority: (c && c.priority) || (h && h.priority) || '',
+      url: (c && c.url) || (own && own.url) || (repo ? `${repo}/issues/${n}` : null)
+    };
+  }
+  const issueLabel = n => `GitHub issue #${n}`;
+  const issueItems = (v, ns) => ns.map(n => ({ number: n, ...issueOf(v, n) }));
+  const sessionOf = h => (h.links || []).find(l => /^\/#\/swarm\/[^/]+\/agent\//.test(l.url));
+  const isSha = s => /^[0-9a-f]{7,40}$/i.test(String(s || ''));
+  function stopLinks(v, s) {
+    const repo = repoUrl(v);
+    if (!repo || !s) return [];
+    return [
+      s.source === 'deployment' ? link(`${s.name} deployments`, `${repo}/deployments/${encodeURIComponent(s.name)}`) : null,
+      isSha(s.sha) ? link(`Commit ${String(s.sha).slice(0, 7)}`, `${repo}/commit/${s.sha}`) : null
+    ].filter(Boolean);
+  }
+  function crateWhere(o, v, theme) {
+    const stops = v.pipeline.stops;
+    if (o.at === 'backlog') return `waiting at the ${theme.labels.docks.toLowerCase()}`;
+    if (o.at === 'quay') return `landed on ${v.pipeline.integration || 'the integration branch'}, at the ${theme.labels.quay.toLowerCase()}`;
+    if (o.at === 'stop') return o.i === stops.length - 1 ? `shipped to ${stops[o.i].name}` : `at ${stops[o.i].name}`;
+    return '';
+  }
+  function subWords(sa, v) {
+    return `${sa.agent_type}${sa.description ? ' · ' + sa.description : ''}` +
+      (sa.status === 'blocked' ? ' · waiting on you' : sa.action ? ` · ${sa.action}` : '');
+  }
+  /* What an object on the map is: { title, line, meta (list items), items (issues), links, house }. */
+  function explain(o, sc, theme) {
+    const v = sc.v, runtime = v.plane === 'runtime', stops = v.pipeline.stops, last = stops[stops.length - 1];
+    const work = runtime ? 'workstream' : 'issue';
+    switch (o.kind) {
+      case 'river': case 'docks':
+        return { title: theme.labels.docks, line: runtime ? 'Waiting work' : 'The backlog, highest priority first', items: v.backlog };
+      case 'board':
+        return { title: theme.labels.board, line: runtime ? 'Failed in the last 24 hours' : 'Blocked issues and proposals waiting on you', items: v.board };
+      case 'hall': {
+        const m = v.manager, s = sessionOf(m), swarm = s && s.url.replace(/\/agent\/[^/]+$/, '');
+        return { title: `${theme.labels.hall} · manager`, line: m.issue ? `#${m.issue} ${m.issue_title || ''}` : (m.issue_title || 'The manager of this swarm'),
+          meta: [`Status: ${m.status}`, `Crew: ${m.crew.join(', ') || '—'}`, ...(m.subagents || []).map(sa => `${runtime ? 'Worker' : 'Sub-agent'}: ${subWords(sa, v)}`), m.action ? `Now: ${m.action}` : null],
+          links: [...(m.links || []), link('Swarm view', swarm)], house: m };
+      }
+      case 'house': {
+        const h = v.houses[o.i]; if (!h) return null;
+        const hasIssue = h.issue && (h.links || []).some(l => /\/issues\//.test(l.url));
+        const issue = h.issue && !hasIssue ? link(issueLabel(h.issue), issueOf(v, h.issue).url) : null;
+        return { title: `${houseName(v, h)} · ${h.kind}`, line: h.issue ? `#${h.issue} ${h.issue_title || ''}` : (h.issue_title || `No ${work} claimed`),
+          meta: [`${runtime ? 'Workstream' : 'Worktree'}: ${h.id}`, `Agent: ${h.role}`, `Status: ${h.status}${h.priority ? ' · ' + h.priority : ''}`,
+            `Crew: ${h.crew.join(', ') || '—'}`, ...(h.subagents || []).map(sa => `${runtime ? 'Agent' : 'Sub-agent'}: ${subWords(sa, v)}`), h.action ? `Now: ${h.action}` : null],
+          links: [...(h.links || []), issue], house: h };
+      }
+      case 'person': {
+        const h = v.houses[o.i]; if (!h) return null;
+        return { title: `${o.who || h.role} · agent`, line: h.issue ? `Working on #${h.issue} ${h.issue_title || ''}` : `Status: ${h.status}`,
+          meta: [`Lives in ${houseName(v, h)}`, `Status: ${h.status}`, h.action ? `Now: ${h.action}` : null],
+          links: [sessionOf(h), h.issue ? link(issueLabel(h.issue), issueOf(v, h.issue).url) : null] };
+      }
+      case 'sub': {
+        const h = o.house < 0 ? v.manager : v.houses[o.house], sa = o.sa; if (!h) return null;
+        return { title: `${sa.agent_type} · ${runtime ? (o.house < 0 ? 'worker' : 'agent') : 'sub-agent'}`, line: sa.description || '',
+          meta: [`Working for ${o.house < 0 ? 'the manager' : houseName(v, h)}`, sa.status ? `Status: ${sa.status}` : null, sa.action ? `Now: ${sa.action}` : null],
+          links: [sessionOf(h) && { label: 'Parent agent session', url: sessionOf(h).url }] };
+      }
+      case 'porter': {
+        const h = v.houses.find(h => h.id === o.seed), n = o.n || (h && h.issue);
+        const it = n ? issueOf(v, n) : {};
+        return { title: `${h ? h.role : 'Porter'} · carrying`, line: n ? `#${n} ${it.title}` : '',
+          meta: [o.n ? `Taking the finished work to the ${theme.labels.quay.toLowerCase()}` : 'Bringing a claimed issue from the backlog to its house'],
+          links: [h && sessionOf(h), n ? link(issueLabel(n), it.url) : null] };
+      }
+      case 'crate': {
+        const it = issueOf(v, o.n);
+        return { title: `#${o.n} ${it.title}`.trim(), line: crateWhere(o, v, theme),
+          meta: [it.priority ? `Priority: ${it.priority}` : null], links: [link(issueLabel(o.n), it.url)] };
+      }
+      case 'quay': {
+        const repo = repoUrl(v), br = v.pipeline.integration;
+        return { title: theme.labels.quay, line: `Work landed on ${br || 'the integration branch'}, not yet past ${stops[0] ? stops[0].name : 'the gate'}`,
+          items: issueItems(v, v.pipeline.quay), links: [repo && br ? link(`${br} commits`, `${repo}/commits/${encodeURIComponent(br)}`) : null] };
+      }
+      case 'stop': {
+        const st = stops[o.i]; if (!st) return null;
+        return { title: `${st.name} · ${runtime ? 'stage' : 'environment'}`, line: o.i === 0 && !runtime ? `Sentinel: ${v.pipeline.sentinel}` : sourceWords(st),
+          meta: [o.i === 0 && !runtime ? `Runs: ${sourceWords(st)}` : null], items: issueItems(v, st.issues), links: stopLinks(v, st) };
+      }
+      case 'harbour': {
+        const rel = v.pipeline.release, repo = repoUrl(v);
+        const relLink = rel && repo ? link(`Release ${isSha(rel) ? rel.slice(0, 7) : rel}`, isSha(rel) ? `${repo}/commit/${rel}` : `${repo}/releases/tag/${encodeURIComponent(rel)}`) : null;
+        return { title: `${theme.labels.castle}${last ? ' · ' + last.name : ''}`, line: last ? (runtime ? 'Completed in the last 24 hours' : `What shipped to ${last.name}`) : 'Nothing ships yet',
+          meta: [rel ? `Release: ${rel}` : null, last && !runtime ? `Runs: ${sourceWords(last)}` : null], items: last ? issueItems(v, last.issues) : [], links: [relLink, ...stopLinks(v, last)] };
+      }
+      case 'canal':
+        return { title: runtime ? 'Pipeline' : 'Canal', line: `From ${v.pipeline.integration || 'integration'} through ${stops.map(s => s.name).join(', ') || 'no stages'}`,
+          meta: stops.map(s => `${s.name}: ${s.issues.length} ${s.issues.length === 1 ? work : work + 's'}`), links: [] };
+      case 'banner': case 'barge':
+        return null;
+    }
+    return null;
+  }
+  /* The dialog for one object, or a list such as the board. */
+  function openInfo(info) {
+    document.getElementById('d-title').textContent = info.title;
+    document.getElementById('d-line').textContent = info.line || '';
+    const meta = (info.meta || []).filter(Boolean).map(esc).join(' · ');
+    const items = info.items && (info.items.length
+      ? `<ul>${info.items.slice(0, 40).map(i => `<li>${i.url ? `<a href="${esc(i.url)}" target="_blank" rel="noopener">#${i.number}</a>` : '#' + i.number} ${esc(i.title || '')}${i.label ? ' · ' + esc(i.label) : ''}${i.priority ? ' · ' + esc(i.priority) : ''}</li>`).join('')}</ul>`
+      : 'Nothing here.');
+    document.getElementById('d-meta').innerHTML = [meta, items].filter(Boolean).join('');
+    ask(info.house || {});
+    links((info.links || []).filter(Boolean));
     dialog.hidden = false;
   }
+  function act(o, sc, theme) {
+    const v = sc.v;
+    if (o.kind === 'banner') {
+      toggleFollow(v.project, o.f);
+      const f = isFollowed(v, { number: o.f }) && (v.features || []).find(f => f.number === o.f);
+      return f && showFeature(f, v);
+    }
+    if (o.kind === 'barge') { const f = (v.features || []).find(f => f.number === o.f); return f && showFeature(f, v); }
+    const info = explain(o, sc, theme);
+    if (info) openInfo(info);
+  }
+  /* The topmost drawn object under a point, in scene pixels. */
+  function hitAt(sc, x, y) {
+    const hs = sc.hits || [];
+    for (let k = hs.length - 1; k >= 0; k--) { const r = hs[k]; if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return r.o; }
+    return null;
+  }
   function hit(sc, x, y, theme) {
-    const lay = sc.L, v = sc.v;
-    const g = lay.banners.find(g => x >= g.x - 3 && x < g.x + 17 && y >= g.y - 9 && y < g.y + 27);
-    if (g) return toggleFollow(v.project, g.f.number);
-    if (x >= lay.hallX - 4 && x < lay.hallX + 36 && y >= 6 && y < 42) return show(v.manager, true, v, theme);
-    if (x >= lay.hallX + 42 && x < lay.hallX + 60 && y >= 28 && y < 44) return showList(theme.labels.board, v.plane === 'runtime' ? 'Failed in the last 24 hours' : 'Blocked issues and proposals waiting on you', v.board);
-    if (x >= 6 && x < 62 && y >= 8 && y < 52) return showList(theme.labels.docks, v.plane === 'runtime' ? 'Waiting work' : 'The backlog, highest priority first', v.backlog);
-    const i = lay.lots.findIndex((lot, k) => k < v.houses.length && x >= lot.x && x < lot.x + 16 && y >= lot.y - 4 && y < lot.y + 21);
-    if (i >= 0) show(v.houses[i], false, v, theme);
+    const o = hitAt(sc, x, y);
+    if (o) act(o, sc, theme);
   }
   cv.addEventListener('click', e => {
     if (!view) return;
@@ -1599,6 +1752,38 @@
     for (const [key, b] of fbuttons) if (!keep.has(key)) { b.remove(); fbuttons.delete(key); }
     renderStrip(strip);
     placeLabels();
+    placeKeys();
+  }
+  /* One keyboard target per object drawn in the last frame, kept across polls
+   * (by what it is, not where) so focus survives a refresh. Walkers and the
+   * banners (which have their own buttons) are left to the mouse. */
+  const kbox = document.getElementById('hitkeys'), kbuttons = new Map();
+  const NO_KEY = new Set(['porter', 'banner', 'river', 'canal']);
+  const keyOf = o => [o.kind, o.i ?? '', o.n ?? '', o.at ?? '', o.who ?? '', o.house ?? '', o.id ?? '', o.f ?? ''].join(':');
+  function placeKeys() {
+    const vp = document.getElementById('viewport'), r = cv.getBoundingClientRect(), vr = vp.getBoundingClientRect();
+    const s = r.width / cv.width, ox0 = r.left - vr.left + vp.scrollLeft, oy0 = r.top - vr.top + vp.scrollTop, keep = new Set();
+    if (!cv.hidden) shownScenes().forEach(([sc, ox, oy]) => {
+      const theme = view.world && oy === 0 ? otherTheme() : T;
+      (sc.hits || []).forEach(h => {
+        if (NO_KEY.has(h.o.kind)) return;
+        const key = `${sc.v.project}|${keyOf(h.o)}`;
+        if (keep.has(key)) return;
+        const info = explain(h.o, sc, theme);
+        if (!info) return;
+        keep.add(key);
+        let b = kbuttons.get(key);
+        if (!b) {
+          b = document.createElement('button'); b.className = 'hk';
+          b.addEventListener('click', () => { const sc2 = scenes[b.project]; if (sc2 && sc2.v) act(b.obj, sc2, b.theme); });
+          kbuttons.set(key, b); kbox.appendChild(b);
+        }
+        b.project = sc.v.project; b.obj = h.o; b.theme = theme;
+        b.setAttribute('aria-label', [info.title, info.line].filter(Boolean).join(': '));
+        Object.assign(b.style, { left: ox0 + (ox + h.x) * s + 'px', top: oy0 + (oy + h.y) * s + 'px', width: h.w * s + 'px', height: h.h * s + 'px' });
+      });
+    });
+    for (const [key, b] of kbuttons) if (!keep.has(key)) { b.remove(); kbuttons.delete(key); }
   }
   /* ---------- Area labels ----------
    * A name over each part of the map (docks, castle, board, quay, each stop)
@@ -1762,8 +1947,8 @@
       renderFlow(sc.v);
     }
     fit();
-    placeBanners();
     if (reduce) draw(0);
+    placeBanners();
   }
   function draw(t) {
     if (!view) return;
@@ -1813,7 +1998,8 @@
   poll();
 
   if (!reduce) {
-    const loop = t => { draw(t); requestAnimationFrame(loop); };
+    // The first frame records what is clickable; place the keyboard targets then, not a poll later.
+    const loop = t => { draw(t); if (!kbuttons.size && kbox.dataset.placed !== String(view && (view.world || view.village))) { kbox.dataset.placed = String(view && (view.world || view.village)); placeKeys(); } requestAnimationFrame(loop); };
     requestAnimationFrame(loop);
   }
 })();
