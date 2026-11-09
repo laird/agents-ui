@@ -1529,6 +1529,102 @@ mod tests {
         assert!(body.contains("toggleFollow(v.project, o.f);"));
     }
 
+    /// The text of `const <name> = {` up to its closing `};` at the same indent.
+    fn js_block<'a>(body: &'a str, name: &str) -> &'a str {
+        let start = body.find(&format!("const {name} = {{")).unwrap_or_else(|| panic!("no {name}"));
+        let rest = &body[start..];
+        &rest[..rest.find("\n  };\n").unwrap()]
+    }
+
+    /// Method and property names at the first level of a theme object.
+    fn slots(block: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        for line in block.lines().skip(1) {
+            let Some(rest) = line.strip_prefix("    ") else { continue };
+            if rest.starts_with(' ') || rest.starts_with('/') || rest.starts_with('*') {
+                continue;
+            }
+            let ident = |s: &str| s.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect::<String>();
+            let first = ident(rest);
+            // A method, `name(...) { ... }`: one slot, whatever its body holds.
+            if !first.is_empty() && rest[first.len()..].starts_with('(') {
+                out.push(first);
+                continue;
+            }
+            // Otherwise the line may list several: `tree, hall, gate: lock, sign: [a, b],`.
+            let (mut depth, mut part) = (0i32, String::new());
+            let mut parts = Vec::new();
+            for ch in rest.chars() {
+                match ch {
+                    '[' | '(' | '{' => depth += 1,
+                    ']' | ')' | '}' => depth -= 1,
+                    ',' if depth == 0 => {
+                        parts.push(std::mem::take(&mut part));
+                        continue;
+                    }
+                    _ => {}
+                }
+                part.push(ch);
+            }
+            parts.push(part);
+            for part in parts.iter().map(|p| p.trim()) {
+                let name = ident(part);
+                let after = &part[name.len()..];
+                if !name.is_empty() && (after.starts_with(':') || after.is_empty()) {
+                    out.push(name);
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn village_html_future_theme_fills_every_slot() {
+        let body = VILLAGE_HTML;
+        // Registered, offered in the Style picker, and remembered like the others.
+        assert!(body.contains("const THEMES = { medieval: MEDIEVAL, modern: MODERN, future: FUTURE };"));
+        assert!(body.contains(r#"<option value="future">Future</option>"#));
+        assert!(body.contains("localStorage.setItem('village-theme', themeName)"));
+        let future = js_block(body, "FUTURE");
+        let future_slots = slots(future);
+        let medieval = slots(js_block(body, "MEDIEVAL"));
+        for slot in ["labels", "ground", "channel", "hall", "B", "gate", "destination", "decor", "border", "people", "sign"] {
+            assert!(medieval.iter().any(|s| s == slot), "slot parser missed {slot}: {medieval:?}");
+        }
+        for theme in ["MEDIEVAL", "MODERN"] {
+            for slot in slots(js_block(body, theme)) {
+                assert!(future_slots.contains(&slot), "Future has no `{slot}`, which {theme} defines");
+            }
+        }
+        // Every area is named, so labels and dialogs read the same in Future.
+        for label in ["docks: 'Cargo bay'", "board: 'Holo-board'", "houses: 'Pods'", "quay: 'Launch rail'", "castle: 'Spaceport'", "hall: 'Command dome'"] {
+            assert!(future.contains(label), "missing label {label}");
+        }
+        // A pod for every kind of building the business district draws.
+        let pods = js_block(body, "FB");
+        for line in js_block(body, "MB").lines() {
+            if let Some(kind) = line.strip_prefix("    ").and_then(|l| l.split_once("(c, x, y, st, t)")).map(|(k, _)| k) {
+                assert!(pods.contains(&format!("    {kind}(c, x, y, st, t)")), "no Future pod for {kind}");
+            }
+        }
+        // People are robots, with a look for every status.
+        assert!(future.contains("people: 'future', robots: true"));
+        assert!(body.contains("if (T.robots) return robot(c, x, y, seed, h, kind, opts);"));
+        let eyes = &body[body.find("const ROBOT_EYE = {").unwrap()..];
+        let eyes = &eyes[..eyes.find('}').unwrap()];
+        for status in ["working", "idle", "blocked", "done", "stalled", "unknown"] {
+            assert!(eyes.contains(&format!("{status}:")), "no robot look for {status}");
+        }
+        assert!(body.contains("const slumped = T.robots && st === 'stalled';"));
+        // In a world the platform takes the theme's pair; Future pairs with Modern.
+        assert!(body.contains("MEDIEVAL.pair = MODERN; MODERN.pair = MEDIEVAL; FUTURE.pair = MODERN;"));
+        assert!(body.contains("const otherTheme = () => T.pair || MEDIEVAL;"));
+        // Reduced motion: no hovering bob and no sparks.
+        assert!(body.contains("const now = () => (reduce ? 0 : performance.now());"));
+        assert!(body.contains("kind === 'stand' && !reduce && blink("));
+        assert!(body.contains("if (!reduce && blink(t + (h % 300), 120))"));
+    }
+
     #[test]
     fn village_html_links_only_what_it_knows() {
         let body = VILLAGE_HTML;
@@ -1543,6 +1639,26 @@ mod tests {
         // Environments link to their deployments or commit; the quay to the integration branch.
         assert!(body.contains("/deployments/${encodeURIComponent(s.name)}"));
         assert!(body.contains("`${repo}/commits/${encodeURIComponent(br)}`"));
+    }
+
+    #[test]
+    fn village_html_shows_working_agents_and_every_subagent() {
+        let body = VILLAGE_HTML;
+        // A working agent is one busy figure at its door, acting out its action.
+        assert!(body.contains("if (st === 'working') { person(c, lot.x + 4, lot.y + 8, h.id, workFrame(tt), { status: st }); drawAction(c, lot.x + 4, lot.y + 8, h.action, tt); }"));
+        assert!(body.contains("const workFrame = t => (!reduce && blink(t, 180) ? 'work2' : 'work');"));
+        assert!(body.contains("if (kind === 'work' || kind === 'work2') {"));
+        // One figure per sub-agent in the slots, then a "+N" badge: none dropped.
+        assert!(body.contains("const SUB_SLOTS = [[-1, 12], [9, 12], [-4, 16], [4, 16], [12, 16]];"));
+        assert!(body.contains(".slice(0, SUB_SLOTS.length).forEach((sa, k) => {"));
+        assert!(body.contains("if (subs.length > SUB_SLOTS.length) { badge(c, lot.x + 12, lot.y + 4, subs.length - SUB_SLOTS.length);"));
+        assert!(body.contains("function badge(c, x, y, n)"));
+        assert!(!body.contains("subs.length > 2"), "the old two-figure cap is gone");
+        // The flow counter counts every sub-agent, as the figures plus badge do.
+        assert!(body.contains("['Sub-agents', 'running in sessions', [v.manager, ...v.houses].reduce((n, h) => n + (h.subagents || []).length, 0)]"));
+        // The manager is drawn busy at the hall while working.
+        assert!(body.contains("if (v.manager.status !== 'stopped') {"));
+        assert!(body.contains("busy ? workFrame(t) : 'stand', { mayor: true, status: v.manager.status });"));
     }
 
     #[test]
