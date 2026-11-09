@@ -94,6 +94,8 @@ pub struct GitHubIssue {
     pub assigned_worker: Option<String>,
     /// When this issue was last updated on GitHub.
     pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// The issue's web URL as the tracker reports it (`gh`'s `url` field).
+    pub url: Option<String>,
 }
 
 pub const BLOCKING_LABELS: &[&str] = &[
@@ -253,6 +255,8 @@ pub struct GhIssueJson {
     pub labels: Vec<GhLabelJson>,
     #[serde(rename = "updatedAt", default)]
     pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    pub url: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -307,6 +311,7 @@ impl From<GhIssueJson> for GitHubIssue {
             is_working,
             assigned_worker: None,
             updated_at: raw.updated_at,
+            url: raw.url.filter(|u| !u.is_empty()),
         }
     }
 }
@@ -314,7 +319,7 @@ impl From<GhIssueJson> for GitHubIssue {
 /// Fetch open issues from GitHub using `gh` CLI.
 pub async fn fetch_issues(repo_path: &Path) -> anyhow::Result<Vec<GitHubIssue>> {
     let pm = ProjectManagementClient::from_env();
-    let cmd = pm.list_open_issues("number,title,labels", 100);
+    let cmd = pm.list_open_issues("number,title,labels,url", 100);
     let output = Command::new(cmd.program)
         .args(cmd.args)
         .current_dir(repo_path)
@@ -335,6 +340,7 @@ pub async fn fetch_issues(repo_path: &Path) -> anyhow::Result<Vec<GitHubIssue>> 
         for item in arr {
             let number = item["number"].as_u64().unwrap_or(0) as u32;
             let title = item["title"].as_str().unwrap_or("").to_string();
+            let url = item["url"].as_str().filter(|u| !u.is_empty()).map(str::to_string);
 
             let labels: Vec<String> = item["labels"]
                 .as_array()
@@ -359,6 +365,7 @@ pub async fn fetch_issues(repo_path: &Path) -> anyhow::Result<Vec<GitHubIssue>> 
                 is_working,
                 assigned_worker: None,
                 updated_at: None,
+                url,
             });
         }
     }
@@ -609,6 +616,7 @@ mod tests {
             is_working,
             assigned_worker: None,
             updated_at: None,
+            url: None,
         }
     }
 

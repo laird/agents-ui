@@ -117,7 +117,7 @@ impl SwarmSnapshot {
             .issues
             .iter()
             .filter(|i| i.state == crate::model::issue::IssueState::Open)
-            .map(|i| IssueSnapshot::from_issue(i, &swarm.project_name))
+            .map(|i| IssueSnapshot::from_issue(i, None))
             .collect();
         Self {
             project_name: swarm.project_name.clone(),
@@ -141,10 +141,15 @@ impl SwarmSnapshot {
 }
 
 impl IssueSnapshot {
-    pub fn from_issue(issue: &crate::model::issue::GitHubIssue, project_name: &str) -> Self {
-        // Derive GitHub URL from project name (owner/repo format expected in project_name or
-        // use a best-effort URL; the actual repo URL is in the gh remote).
-        let url = format!("https://github.com/{project_name}/issues/{}", issue.number);
+    /// `repo_url` is the repo's GitHub page (`https://github.com/<owner>/<repo>`),
+    /// used only when the tracker didn't report the issue's own URL. With
+    /// neither, `url` is empty and pages show the number without a link.
+    pub fn from_issue(issue: &crate::model::issue::GitHubIssue, repo_url: Option<&str>) -> Self {
+        let url = issue
+            .url
+            .clone()
+            .or_else(|| repo_url.map(|r| format!("{}/issues/{}", r.trim_end_matches('/'), issue.number)))
+            .unwrap_or_default();
         let state = match issue.state {
             crate::model::issue::IssueState::Open => "open",
             crate::model::issue::IssueState::Closed => "closed",
@@ -253,6 +258,44 @@ mod tests {
         assert!(json.contains("Claude"));
         assert!(json.contains("manager"));
         assert!(json.contains("worker-1"));
+    }
+
+    fn open_issue(number: u32, url: Option<&str>) -> crate::model::issue::GitHubIssue {
+        crate::model::issue::GitHubIssue {
+            number,
+            title: "t".into(),
+            state: crate::model::issue::IssueState::Open,
+            priority: crate::model::issue::IssuePriority::P2,
+            issue_type: crate::model::issue::IssueType::Bug,
+            labels: vec![],
+            is_working: false,
+            assigned_worker: None,
+            updated_at: None,
+            url: url.map(String::from),
+        }
+    }
+
+    #[test]
+    fn issue_snapshot_prefers_the_url_the_tracker_reported() {
+        let issue = open_issue(358, Some("https://github.com/laird/agents-ui/issues/358"));
+        let snap = IssueSnapshot::from_issue(&issue, Some("https://github.com/someone/else"));
+        assert_eq!(snap.url, "https://github.com/laird/agents-ui/issues/358");
+    }
+
+    #[test]
+    fn issue_snapshot_falls_back_to_the_repo_page() {
+        let snap = IssueSnapshot::from_issue(&open_issue(7, None), Some("https://github.com/laird/agents-ui"));
+        assert_eq!(snap.url, "https://github.com/laird/agents-ui/issues/7");
+    }
+
+    #[test]
+    fn issue_snapshot_without_a_github_repo_has_no_link() {
+        // Not `https://github.com/<dir>/issues/N` built from the checkout's name.
+        let snap = IssueSnapshot::from_issue(&open_issue(2116, None), None);
+        assert_eq!(snap.url, "");
+        let mut swarm = make_swarm();
+        swarm.issue_cache.issues = vec![open_issue(2116, None)];
+        assert_eq!(SwarmSnapshot::from_swarm(&swarm).issues[0].url, "");
     }
 
     #[test]

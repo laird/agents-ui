@@ -634,6 +634,7 @@ mod tests {
             is_working: false,
             assigned_worker: None,
             updated_at: None,
+            url: None,
         }
     }
 
@@ -648,6 +649,7 @@ mod tests {
             is_working: false,
             assigned_worker: None,
             updated_at: None,
+            url: None,
         }
     }
 

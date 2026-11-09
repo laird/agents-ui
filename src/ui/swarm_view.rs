@@ -1313,6 +1313,7 @@ mod tests {
             is_working: false,
             assigned_worker: None,
             updated_at: None,
+            url: None,
         };
         let enh = GitHubIssue {
             number: 2,
@@ -1324,6 +1325,7 @@ mod tests {
             is_working: false,
             assigned_worker: None,
             updated_at: None,
+            url: None,
         };
         let issues = vec![bug, enh];
         // Only bug should pass the type filter
@@ -1355,6 +1357,7 @@ mod tests {
                 is_working: false,
                 assigned_worker: None,
                 updated_at: None,
+                url: None,
             },
             GitHubIssue {
                 number: 5,
@@ -1366,6 +1369,7 @@ mod tests {
                 is_working: false,
                 assigned_worker: None,
                 updated_at: None,
+                url: None,
             },
             GitHubIssue {
                 number: 3,
@@ -1377,6 +1381,7 @@ mod tests {
                 is_working: false,
                 assigned_worker: None,
                 updated_at: None,
+                url: None,
             },
             GitHubIssue {
                 number: 8,
@@ -1388,6 +1393,7 @@ mod tests {
                 is_working: false,
                 assigned_worker: None,
                 updated_at: None,
+                url: None,
             },
         ];
         // apply_filters returns issues sorted by priority then number
@@ -1410,6 +1416,7 @@ mod tests {
             is_working: false,
             assigned_worker: None,
             updated_at: None,
+            url: None,
         };
         let issues = vec![
             // Blocked P0 should still sort after an unblocked P3.
@@ -1469,6 +1476,7 @@ mod tests {
                 is_working: false,
                 assigned_worker: None,
                 updated_at: None,
+                url: None,
             },
             GitHubIssue {
                 number: 2,
@@ -1480,6 +1488,7 @@ mod tests {
                 is_working: false,
                 assigned_worker: None,
                 updated_at: None,
+                url: None,
             },
             GitHubIssue {
                 number: 3,
@@ -1491,6 +1500,7 @@ mod tests {
                 is_working: false,
                 assigned_worker: None,
                 updated_at: None,
+                url: None,
             },
         ];
         let mut view = SwarmView::new();
@@ -1525,6 +1535,7 @@ mod tests {
             is_working: false,
             assigned_worker: Some("worker-1".to_string()),
             updated_at: None,
+            url: None,
         }];
 
         terminal
@@ -1663,6 +1674,7 @@ mod tests {
             is_working: false,
             assigned_worker: None,
             updated_at: None,
+            url: None,
         }
     }
 
@@ -1750,6 +1762,7 @@ mod tests {
                 is_working: false,
                 assigned_worker: None,
                 updated_at: None,
+                url: None,
             },
             GitHubIssue {
                 number: 2,
@@ -1761,6 +1774,7 @@ mod tests {
                 is_working: false,
                 assigned_worker: None,
                 updated_at: None,
+                url: None,
             },
         ];
         terminal
@@ -1811,6 +1825,7 @@ mod tests {
                 is_working: false,
                 assigned_worker: None,
                 updated_at: None,
+                url: None,
             },
             GitHubIssue {
                 number: 2,
@@ -1822,6 +1837,7 @@ mod tests {
                 is_working: false,
                 assigned_worker: None,
                 updated_at: None,
+                url: None,
             },
         ];
         terminal
@@ -1875,6 +1891,7 @@ mod tests {
             is_working: false,
             assigned_worker: None,
             updated_at: None,
+            url: None,
         }];
 
         // Fresh: no indicator
@@ -1970,6 +1987,7 @@ mod tests {
                 is_working: false,
                 assigned_worker: None,
                 updated_at: None,
+                url: None,
             },
             GitHubIssue {
                 number: 2,
@@ -1981,6 +1999,7 @@ mod tests {
                 is_working: false,
                 assigned_worker: None,
                 updated_at: None,
+                url: None,
             },
             GitHubIssue {
                 number: 3,
@@ -1992,6 +2011,7 @@ mod tests {
                 is_working: false,
                 assigned_worker: None,
                 updated_at: None,
+                url: None,
             },
         ];
         let mut view = SwarmView::new();
@@ -2030,6 +2050,7 @@ mod tests {
                 is_working: false,
                 assigned_worker: None,
                 updated_at: None,
+                url: None,
             },
             GitHubIssue {
                 number: 2,
@@ -2041,6 +2062,7 @@ mod tests {
                 is_working: false,
                 assigned_worker: None,
                 updated_at: None,
+                url: None,
             },
         ];
         terminal

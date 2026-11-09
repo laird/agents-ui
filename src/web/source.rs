@@ -131,12 +131,18 @@ impl IssueTracker for GitHubIssues {
     fn name(&self) -> &'static str {
         "github"
     }
-    fn issues<'a>(&'a self, transport: &'a ServerTransport, repo: &'a Path, project: &'a str) -> BoxFuture<'a, Vec<IssueSnapshot>> {
+    fn issues<'a>(&'a self, transport: &'a ServerTransport, repo: &'a Path, _project: &'a str) -> BoxFuture<'a, Vec<IssueSnapshot>> {
         Box::pin(async move {
-            crate::github::fetch_issues(transport, repo)
-                .await
-                .map(|list| list.iter().map(|i| IssueSnapshot::from_issue(i, project)).collect())
-                .unwrap_or_default()
+            let Ok(list) = crate::github::fetch_issues(transport, repo).await else {
+                return Vec::new();
+            };
+            // `gh` reports each issue's URL; the origin remote is only a
+            // fallback, resolved once and only if some issue came without one.
+            let repo_url = match list.iter().any(|i| i.url.is_none()) {
+                true => crate::github::origin_web_url(transport, repo).await,
+                false => None,
+            };
+            list.iter().map(|i| IssueSnapshot::from_issue(i, repo_url.as_deref())).collect()
         })
     }
     fn features<'a>(&'a self, transport: &'a ServerTransport, repo: &'a Path) -> BoxFuture<'a, Vec<FeatureLink>> {

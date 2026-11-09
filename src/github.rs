@@ -101,6 +101,37 @@ fn repo_owner_from_remote(remote: &str) -> Option<String> {
     None
 }
 
+/// The `https://github.com/<owner>/<repo>` page for a git remote URL, in any
+/// of the forms git accepts for GitHub (`https://…(.git)`, `git@github.com:…`,
+/// `ssh://git@github.com/…`). `None` for remotes that aren't on GitHub.
+pub fn repo_web_url(remote: &str) -> Option<String> {
+    let remote = remote.trim();
+    let path = ["https://github.com/", "http://github.com/", "git@github.com:", "ssh://git@github.com/"]
+        .iter()
+        .find_map(|prefix| remote.strip_prefix(prefix))?;
+    let path = path.trim_end_matches('/');
+    let path = path.strip_suffix(".git").unwrap_or(path);
+    let mut parts = path.split('/');
+    match (parts.next(), parts.next(), parts.next()) {
+        (Some(owner), Some(repo), None) if !owner.is_empty() && !repo.is_empty() => {
+            Some(format!("https://github.com/{owner}/{repo}"))
+        }
+        _ => None,
+    }
+}
+
+/// The GitHub page of the repo at `repo_path`, from its `origin` remote.
+/// `None` when there is no origin or it isn't on GitHub.
+pub async fn origin_web_url(transport: &ServerTransport, repo_path: &Path) -> Option<String> {
+    let args = ["remote", "get-url", "origin"].map(String::from);
+    let output = transport.output("git", &args, Some(repo_path)).await.ok()?;
+    output
+        .status
+        .success()
+        .then(|| repo_web_url(&String::from_utf8_lossy(&output.stdout)))
+        .flatten()
+}
+
 /// Return the list of logged-in gh usernames (one per line from `gh auth status`).
 async fn list_gh_users(transport: &ServerTransport) -> Vec<String> {
     let Ok(o) = transport
@@ -276,7 +307,7 @@ pub async fn fetch_issues(
             "--limit".to_string(),
             "100".to_string(),
             "--json".to_string(),
-            "number,title,state,labels".to_string(),
+            "number,title,state,labels,url".to_string(),
         ],
     )
     .await
@@ -456,6 +487,7 @@ fn parse_issues_json(bytes: &[u8]) -> Result<Vec<GitHubIssue>> {
 mod tests {
     use super::{
         GhError, classify_gh_error, feature_link_args, parse_issues_json, repo_owner_from_remote,
+        repo_web_url,
     };
     use crate::model::issue::IssueState;
 
@@ -559,6 +591,38 @@ mod tests {
             repo_owner_from_remote("ssh://git.example.com/acme/widgets"),
             None
         );
+    }
+
+    #[test]
+    fn repo_web_url_handles_https_and_ssh_remotes() {
+        let want = Some("https://github.com/laird/agents-ui".to_string());
+        assert_eq!(repo_web_url("https://github.com/laird/agents-ui.git\n"), want);
+        assert_eq!(repo_web_url("https://github.com/laird/agents-ui"), want);
+        assert_eq!(repo_web_url("https://github.com/laird/agents-ui/"), want);
+        assert_eq!(repo_web_url("git@github.com:laird/agents-ui.git"), want);
+        assert_eq!(repo_web_url("git@github.com:laird/agents-ui"), want);
+        assert_eq!(repo_web_url("ssh://git@github.com/laird/agents-ui.git"), want);
+    }
+
+    #[test]
+    fn repo_web_url_is_none_off_github_or_without_a_repo() {
+        assert_eq!(repo_web_url(""), None);
+        assert_eq!(repo_web_url("/home/me/src/shop"), None);
+        assert_eq!(repo_web_url("git@gitlab.com:acme/shop.git"), None);
+        assert_eq!(repo_web_url("https://github.com/acme"), None);
+        assert_eq!(repo_web_url("https://github.com/acme/shop/issues/3"), None);
+    }
+
+    #[test]
+    fn parsed_issues_keep_the_url_gh_reports() {
+        let issues = parse_issues_json(
+            br#"[{"number": 358, "title": "t", "state": "OPEN", "labels": [],
+                  "url": "https://github.com/laird/agents-ui/issues/358"},
+                 {"number": 2, "title": "u", "state": "OPEN", "labels": []}]"#,
+        )
+        .unwrap();
+        assert_eq!(issues[0].url.as_deref(), Some("https://github.com/laird/agents-ui/issues/358"));
+        assert_eq!(issues[1].url, None);
     }
 
     #[test]

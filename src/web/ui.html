@@ -1751,7 +1751,9 @@
                          : '—';
         return (
           '<tr class="' + rowCls + '">' +
-            '<td class="issue-num"><a href="' + esc(issue.url) + '" target="_blank" rel="noopener">#' + issue.number + '</a></td>' +
+            '<td class="issue-num">' + (issue.url
+              ? '<a href="' + esc(issue.url) + '" target="_blank" rel="noopener">#' + issue.number + '</a>'
+              : '#' + issue.number) + '</td>' +
             '<td class="issue-title">' + esc(issue.title) + '</td>' +
             '<td class="issue-pri">' + esc(issue.priority) + '</td>' +
             '<td class="issue-status">' + esc(statusText) + '</td>' +
