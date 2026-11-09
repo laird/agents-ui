@@ -1502,10 +1502,10 @@ mod tests {
         assert!(body.contains("sc.hits = hits; hits = null;"));
         assert!(body.contains("function hitAt(sc, x, y)"));
         assert!(body.contains("for (let k = hs.length - 1; k >= 0; k--)"));
-        // No hand-copied rectangles left in hit().
-        let hit = &body[body.find("function hit(sc, x, y, theme)").unwrap()..];
+        // No hand-copied rectangles left in objAt(), which clicks and hovers share.
+        let hit = &body[body.find("function objAt(e)").unwrap()..];
         let hit = &hit[..hit.find("\n  }\n").unwrap()];
-        assert!(!hit.contains("lay."), "hit() should not know the layout: {hit}");
+        assert!(!hit.contains("lay."), "objAt() should not know the layout: {hit}");
         // Every kind of object on the map is recorded where it is drawn...
         for kind in [
             "'river'", "'docks'", "'canal'", "'quay'", "'hall'", "'board'", "'sub'", "'crate'",
@@ -1520,9 +1520,115 @@ mod tests {
         ] {
             assert!(body.contains(case), "no dialog for {case}");
         }
-        // Banners still follow; a barge opens its feature.
+        // A flag only follows (the strip's Details opens the feature); a barge opens its feature.
         assert!(body.contains("if (o.kind === 'barge')"));
-        assert!(body.contains("toggleFollow(v.project, o.f);"));
+        assert!(body.contains("if (o.kind === 'banner') { toggleFollow(v.project, o.f); return true; }"));
+    }
+
+    #[test]
+    fn village_html_hides_feature_labels_until_their_flag_is_clicked() {
+        let body = VILLAGE_HTML;
+        // Hidden and click-through until followed; shown while followed, focused or hovered.
+        assert!(body.contains(".fb { opacity: 0; pointer-events: none; }"));
+        assert!(body.contains(r#".fb[aria-pressed="true"] { opacity: 1; pointer-events: auto; }"#));
+        assert!(body.contains(".fb:focus-visible, .fb.peek { opacity: var(--fade, 1); }"));
+        // The fade no longer sets the opacity inline, which would show a hidden label.
+        assert!(body.contains("b.style.setProperty('--fade', on ? 1 : (sc.fade[f.number] ?? 1));"));
+        assert!(!body.contains("b.style.opacity ="));
+        // Still real buttons in the Tab order: Enter/Space toggle as a click does.
+        assert!(body.contains("b.addEventListener('click', () => toggleFollow(b.project, b.number));"));
+        // Hovering a flag peeks at its label.
+        assert!(body.contains("peek(h && h.o.kind === 'banner' ? fbuttons.get(`${h.sc.v.project}#${h.o.f}`) : null);"));
+        assert!(body.contains("cv.addEventListener('mouseleave', () => peek(null));"));
+    }
+
+    #[test]
+    fn village_html_hints_when_open_ground_is_clicked() {
+        let body = VILLAGE_HTML;
+        assert!(body.contains(r#"<div class="hint" id="hint" role="status" hidden>Click a building, crate or person for details</div>"#));
+        // act() says whether a click did anything; when it did not, the hint shows.
+        assert!(body.contains("if (!(h && act(h.o, h.sc, h.theme))) groundHint(e);"));
+        assert!(body.contains("return !!info;"));
+        assert!(body.contains("hintTimer = setTimeout(() => { hintEl.hidden = true; }, 2500);"));
+    }
+
+    #[test]
+    fn village_html_keeps_labels_clear_of_the_art_and_each_other() {
+        let body = VILLAGE_HTML;
+        // Size follows the map; subtitles drop below 3x.
+        assert!(body.contains("abox.style.setProperty('--lf', Math.round(Math.max(9, Math.min(14, 2 + 2.5 * s))) + 'px');"));
+        assert!(body.contains("abox.classList.toggle('compact', s < 3);"));
+        assert!(body.contains(".alabels.compact small { display: none; }"));
+        // The board label sits under the board; the harbour's left of the lighthouse.
+        assert!(body.contains("add(lay.hallX + 51, 45, 'top', theme.labels.board,"));
+        assert!(body.contains("add(lay.castleX + 10, lay.canalY - 22, 'bottom', theme.labels.castle,"));
+        // And any label still covering the board, the tower or another label is moved.
+        assert!(body.contains("function labelAvoid(sc, theme)"));
+        assert!(body.contains("return [...board, ...theme.towers.map(at), at(theme.hull)];"));
+        assert!(body.contains("towers: [[26, -60, 12, 42]],"));
+        assert!(body.contains("function unclutter(els, blocked)"));
+        assert!(body.contains("unclutter([...abox.children], blocked);"));
+    }
+
+    #[test]
+    fn village_html_has_a_key_drawn_from_the_renderer() {
+        let body = VILLAGE_HTML;
+        assert!(body.contains(r#"<button id="legend-btn" class="legend-btn" aria-expanded="false" aria-controls="legend""#));
+        assert!(body.contains(r#"<div class="legend" id="legend" hidden role="region" aria-labelledby="legend-title">"#));
+        // The rows come from the renderer's own tables, so a new kind or icon appears in the key.
+        assert!(body.contains("Object.keys(KINDCOL).map(k => [c => T.crate(c, 1, 1, k, null, k === 'workshop')"));
+        assert!(body.contains("Object.keys(ICONS).map(k => [c => bubble(c, 2, 1, k)"));
+        assert!(body.contains("...SPECIALTIES.map(([name, kind]) => [c => person(c, 3, 1, 'key:' + name"));
+        assert!(body.contains("Object.keys(NOTECOL).map(k =>"));
+        assert!(body.contains("c => pennant(c, 5, 7, p, 0)"));
+        assert!(body.contains("c => cobwebs(c, -1, -6)"));
+        // The fog swatch uses the same colour as the map's fog.
+        assert!(body.contains("R(c, 0, 0, 14, 14, fogCol(T));"));
+        assert!(body.contains("lay.H - lay.canalY + 28, fogCol(T));"));
+        // Redrawn in the theme being shown.
+        assert!(body.contains("if (!legend.hidden) renderLegend();\n    if (view) select("));
+        assert!(body.contains("`Key · ${T.name}`"));
+        // Every kind, icon and pennant the map draws has words in the key.
+        for table in ["KINDCOL", "ICONS"] {
+            let words = if table == "KINDCOL" { "KIND_WORDS" } else { "ICON_WORDS" };
+            let keys = js_keys(body, table);
+            let have = js_keys(body, words);
+            assert!(!keys.is_empty(), "no keys in {table}");
+            for k in keys {
+                assert!(have.contains(&k), "{words} has no words for {table}.{k}");
+            }
+        }
+    }
+
+    /// The keys of a one-line or multi-line `const NAME = { a: ..., b: ... };` table.
+    fn js_keys(body: &str, name: &str) -> Vec<String> {
+        let start = body.find(&format!("const {name} = {{")).unwrap_or_else(|| panic!("no {name}")) + name.len() + 10;
+        let rest = &body[start..];
+        let (mut depth, mut keys, mut tok, mut quote) = (0i32, Vec::new(), String::new(), None::<(char, bool)>);
+        for ch in rest.chars() {
+            // Commas and colons inside quotes are text, not syntax. A quoted key
+            // (`'needs-design':`) is kept; a quoted value is skipped.
+            if let Some((q, keep)) = quote {
+                if ch == q { quote = None; } else if keep { tok.push(ch); }
+                continue;
+            }
+            match ch {
+                '\'' | '"' | '`' => { quote = Some((ch, depth == 0 && tok.trim().is_empty())); continue; }
+                '{' | '[' | '(' => depth += 1,
+                '}' | ']' | ')' if depth == 0 => break,
+                '}' | ']' | ')' => depth -= 1,
+                ':' if depth == 0 => {
+                    let k = tok.trim().to_string();
+                    if !k.is_empty() { keys.push(k); }
+                    tok.clear();
+                    continue;
+                }
+                ',' if depth == 0 => { tok.clear(); continue; }
+                _ => {}
+            }
+            if depth == 0 { tok.push(ch); }
+        }
+        keys
     }
 
     /// The text of `const <name> = {` up to its closing `};` at the same indent.
