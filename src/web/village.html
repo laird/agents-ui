@@ -73,6 +73,16 @@
   .fb.live { border-color: var(--gold); }
   .fb.stuck small { color: #ff8070; }
   .fb.stuck[aria-pressed="true"] small { color: #600; }
+  /* Area names: a banner over each part of the map, and the worktree under each
+   * house. Pointer-transparent, so clicks still reach the map beneath. */
+  .alabels { position: absolute; inset: 0; pointer-events: none; }
+  .alabels[hidden] { display: none; }
+  .al { position: absolute; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 700 11px/1.2 var(--mono); color: var(--gold); background: rgba(6,8,20,.78); border: 1px solid var(--gold); border-radius: 3px; padding: 1px 5px; }
+  .al small { font-weight: 400; color: var(--ink-dim); }
+  .al.house { font-size: 10px; color: var(--ink); border-color: var(--win-inner); padding: 0 3px; }
+  .al.house.working { border-color: #38c848; }
+  .al.house.blocked { border-color: #e02828; }
+  .labels-toggle { font: 13px var(--mono); color: var(--ink-dim); white-space: nowrap; }
   .fstrip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 8px; padding: 6px 8px; border: 2px solid var(--fc, var(--rule)); border-radius: 4px; background: rgba(6,8,20,.55); font: 13px var(--mono); }
   .fstrip[hidden] { display: none; }
   .fstrip h3 { margin: 0 6px 0 0; font: 700 13px var(--mono); color: var(--fc); }
@@ -96,13 +106,14 @@
 </head>
 <body>
   <div class="bar">
-    <div class="title">Worktree Hollow <span id="workflow" class="status"></span> <select id="pick" aria-label="Village" hidden></select> <select id="theme" aria-label="Style"><option value="medieval">Medieval village</option><option value="modern">Modern business district</option></select> <a href="/">Dashboard</a></div>
+    <div class="title">Worktree Hollow <span id="workflow" class="status"></span> <select id="pick" aria-label="Village" hidden></select> <select id="theme" aria-label="Style"><option value="medieval">Medieval village</option><option value="modern">Modern business district</option></select> <label class="labels-toggle"><input type="checkbox" id="labels-on" checked> Labels</label> <a href="/">Dashboard</a></div>
     <div class="status" id="status" aria-live="polite">Connecting…</div>
   </div>
   <div class="win stage">
     <div class="viewport" id="viewport">
       <div class="empty" id="empty">Looking for swarms…</div>
       <canvas id="map" width="320" height="180" hidden aria-label="The swarm drawn as a village. Select a house to see its crew and issue."></canvas>
+      <div class="alabels" id="alabels"></div>
       <div class="fbanners" id="fbanners"></div>
     </div>
     <div class="fstrip" id="fstrip" hidden>
@@ -1587,6 +1598,62 @@
     }));
     for (const [key, b] of fbuttons) if (!keep.has(key)) { b.remove(); fbuttons.delete(key); }
     renderStrip(strip);
+    placeLabels();
+  }
+  /* ---------- Area labels ----------
+   * A name over each part of the map (docks, castle, board, quay, each stop)
+   * and the worktree or workstream under each house. Each label is placed in
+   * canvas pixels with an anchor: 'top' hangs below the point, 'bottom' sits
+   * above it, 'right' ends at it. */
+  const abox = document.getElementById('alabels'), labelsOn = document.getElementById('labels-on');
+  try { labelsOn.checked = localStorage.getItem('village-labels') !== 'off'; } catch {}
+  labelsOn.addEventListener('change', () => {
+    try { localStorage.setItem('village-labels', labelsOn.checked ? 'on' : 'off'); } catch {}
+    placeLabels();
+  });
+  /* A house's name: its worktree's folder, less the project prefix (shop-wt-2 → wt-2). */
+  function houseName(v, h) {
+    const id = String(h.id || '');
+    if (!id.includes('/')) return id || h.role;
+    const base = id.replace(/\/+$/, '').split('/').pop();
+    const short = base.startsWith(v.project + '-') ? base.slice(v.project.length + 1) : base;
+    return short || h.role;
+  }
+  function areaLabels(sc, theme) {
+    const v = sc.v, lay = sc.L, runtime = v.plane === 'runtime', stops = v.pipeline.stops, out = [];
+    const add = (x, y, anchor, text, sub, cls) => out.push({ x, y, anchor, text, sub, cls });
+    add(34, 51, 'top', theme.labels.docks, runtime ? 'waiting' : `backlog · ${v.backlog.length}`);
+    add(lay.hallX + 16, 43, 'top', theme.labels.hall, 'manager');
+    add(lay.hallX + 51, 27, 'bottom', theme.labels.board, runtime ? 'failed' : `blocked · ${v.board.length}`);
+    v.houses.forEach((h, i) => {
+      const lot = lay.lots[i]; if (!lot) return;
+      const name = houseName(v, h);
+      add(lot.x + 8, lot.y + 17, 'top', name, null, 'house ' + h.status);
+    });
+    if (!runtime) add(lay.roadX - 7, lay.quayY + 4, 'right', theme.labels.quay, `→ ${v.pipeline.integration || 'integration'}`);
+    // Each stop is labelled with its own name (master-green, uat, prod), as the pipeline reports it.
+    stops.slice(0, -1).forEach((s, i) => add(lay.lockStart + i * 34 + 3, lay.canalY - 21, 'bottom', s.name));
+    const last = stops[stops.length - 1];
+    add(lay.castleX + 12, lay.canalY - 16, 'bottom', theme.labels.castle, last ? last.name : null);
+    return out;
+  }
+  function placeLabels() {
+    abox.hidden = !labelsOn.checked || cv.hidden;
+    if (abox.hidden) return;
+    const vp = document.getElementById('viewport'), r = cv.getBoundingClientRect(), vr = vp.getBoundingClientRect();
+    const s = r.width / cv.width, ox0 = r.left - vr.left + vp.scrollLeft, oy0 = r.top - vr.top + vp.scrollTop;
+    const shift = { top: 'translate(-50%, 0)', bottom: 'translate(-50%, -100%)', right: 'translate(-100%, -50%)' };
+    let html = '';
+    shownScenes().forEach(([sc, ox, oy]) => {
+      const theme = view.world && oy === 0 ? otherTheme() : T;
+      areaLabels(sc, theme).forEach(l => {
+        // A house label may be no wider than its lot, so neighbours never overlap.
+        const max = l.cls && l.cls.startsWith('house') ? `max-width:${Math.max(28, (LW - 1) * s)}px;` : '';
+        html += `<div class="al${l.cls ? ' ' + esc(l.cls) : ''}" aria-hidden="true" style="left:${ox0 + (ox + l.x) * s}px;top:${oy0 + (oy + l.y) * s}px;transform:${shift[l.anchor]};${max}">` +
+          `${esc(l.text)}${l.sub ? ` <small>${esc(l.sub)}</small>` : ''}</div>`;
+      });
+    });
+    if (abox.innerHTML !== html) abox.innerHTML = html;
   }
   function renderStrip(on) {
     fstrip.hidden = !on;

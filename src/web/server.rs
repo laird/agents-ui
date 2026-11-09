@@ -1485,6 +1485,19 @@ mod tests {
         assert!(body.contains("viewport"));
     }
 
+    #[test]
+    fn village_html_labels_each_area_and_house() {
+        let body = VILLAGE_HTML;
+        // One overlay of area names, switchable, placed with the map.
+        assert!(body.contains(r#"<div class="alabels" id="alabels"></div>"#));
+        assert!(body.contains(r#"id="labels-on" checked"#));
+        assert!(body.contains("function areaLabels(sc, theme)"));
+        assert!(body.contains("placeLabels();\n  }"));
+        // Houses are named for their worktree, less the project prefix.
+        assert!(body.contains("function houseName(v, h)"));
+        assert!(body.contains("base.startsWith(v.project + '-')"));
+    }
+
     #[tokio::test]
     async fn index_html_links_each_swarm_to_its_village() {
         // The village page picks a village from its URL hash, so a swarm's
