@@ -71,7 +71,7 @@ const GATE_WORDS = { queued: 'queued for the merge gate', passed: 'passed the ga
   'landed-unproven': 'landed, waiting for the sentinel to prove the tip green', failed: 'failed the gate: handed back',
   conflict: 'conflict: rebase needed', 'red-base': 'the integration branch is red without it' };
 /* Where an entry is, in words: "gating · table 1 · 412 tests run · 3m 20s · attempt 2". */
-export function gateWords(e, v) {
+export function gateEntryWords(e, v) {
   const head = e.state === 'merging' ? `merging onto ${v.pipeline.integration || 'the integration branch'}`
     : e.state === 'gating' ? 'gating' : GATE_WORDS[e.state] || e.state;
   return [head, e.state === 'gating' && e.slot ? `table ${e.slot}` : null, e.progress, e.elapsed_secs != null ? duration(e.elapsed_secs) : null,
@@ -188,7 +188,7 @@ registerLayer({ z: 85, draw(c, { v, lay, atQuay }, t) {
 
 /* ---------- Dialogs ---------- */
 const ORDER = { gating: 0, merging: 1, queued: 2, 'red-base': 3, failed: 4, conflict: 5, 'landed-unproven': 6, passed: 7 };
-const entryItem = (v, e) => ({ ...issueOf(v, e.issue), number: e.issue, label: gateWords(e, v), url: e.failure_url || issueOf(v, e.issue).url });
+const entryItem = (v, e) => ({ ...issueOf(v, e.issue), number: e.issue, label: gateEntryWords(e, v), url: e.failure_url || issueOf(v, e.issue).url });
 /* The queue, what is on each table, and recent outcomes. */
 registerHit({ kind: 'gatehouse', dialog(o, sc, theme) {
   const v = sc.v, gs = gateSpots(v, sc.L), merge = v.pipeline.merge;
@@ -210,7 +210,7 @@ registerHit({ kind: 'redbase', dialog(o, sc) {
 /* A crate in line, on a table, tagged at the quay or handed back to its house. */
 registerHit({ kind: 'gatecrate', dialog(o, sc, theme) {
   const v = sc.v, it = issueOf(v, o.n), e = gateOf(v, o.n);
-  return { title: `#${o.n} ${it.title}`.trim(), line: e ? gateWords(e, v) : `at the ${theme.labels.gate.toLowerCase()}`,
+  return { title: `#${o.n} ${it.title}`.trim(), line: e ? gateEntryWords(e, v) : `at the ${theme.labels.gate.toLowerCase()}`,
     meta: [it.priority ? `Priority: ${it.priority}` : null, e && e.attempt ? `Gate attempt ${e.attempt}` : null],
     links: [link(issueLabel(o.n), it.url), e && e.failure_url && e.failure_url !== it.url ? link('What went wrong', e.failure_url) : null] };
 } });
