@@ -282,6 +282,8 @@ mod tests {
             links: vec![],
             question: None,
             answer_url: None,
+            branch: None,
+            since: None,
         }
     }
 

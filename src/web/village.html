@@ -138,6 +138,7 @@
   .dialog .subs .drop { text-decoration: line-through; color: var(--ink-dim); }
   .dialog dl { margin: 8px 0 0; font: 13px/1.4 var(--mono); display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; }
   .dialog dt { color: var(--ink-dim); }
+  .dialog .fact { display: block; }
   .dialog dd { margin: 0; }
 </style>
 </head>
@@ -1639,6 +1640,8 @@
    * (or the released commit), never its issues, so a release of the same
    * issues still sails; a page loaded after a release just shows the new ship. */
   const SAIL = 4200, ARRIVE = 3200, GATE_OPEN = 2400, SHIP_CAP = 6;
+  /* Crates drawn at the quay; the rest are a "+N". */
+  const QUAY_CAP = 6;
   const cargoStop = v => v.pipeline.stops.length - 2; // -1: the quay
   function cargoOf(v) {
     const i = cargoStop(v);
@@ -1814,10 +1817,13 @@
 
     const carried = new Set([...bound, ...floats.map(f => f.n)]);
     const cargo = cargoOf(v), onShip = new Set(cargo);
-    v.pipeline.quay.filter(n => !carried.has(n) && !hid.has(n) && !onShip.has(n)).slice(0, 6).forEach((n, k) => {
+    const atQuay = v.pipeline.quay.filter(n => !carried.has(n) && !hid.has(n) && !onShip.has(n));
+    atQuay.slice(0, QUAY_CAP).forEach((n, k) => {
       const x = roadX + 6 + (k % 3) * 6, y = quayY - 3 - Math.floor(k / 3) * 6;
       T.crate(c, x, y, 'workshop', null, true); tap(x, y, 5, 5, { kind: 'crate', n, at: 'quay' });
     });
+    // Six crates fit; a "+N" says how many more wait, and the quay's dialog lists them all.
+    if (atQuay.length > QUAY_CAP) { badge(c, roadX + 25, quayY - 9, atQuay.length - QUAY_CAP); tap(roadX + 24, quayY - 10, 14, 7, { kind: 'quay' }); }
 
     // The sentinel's flag is grey while it still has newer work to test. With
     // no sentinel the first lock is an environment like any other.
@@ -2279,7 +2285,7 @@
     const own = h && (h.links || []).find(l => new RegExp(`/issues/${n}$`).test(l.url));
     const repo = repoUrl(v);
     return {
-      title: (c && c.title) || (h && h.issue_title) || (sub && sub.title) || '',
+      title: (c && c.title) || (h && h.issue_title) || (sub && sub.title) || (v.pipeline.titles || {})[n] || '',
       priority: (c && c.priority) || (h && h.priority) || '',
       url: (c && c.url) || (own && own.url) || (repo ? `${repo}/issues/${n}` : null)
     };
@@ -2301,6 +2307,25 @@
     if (!s || !s.tag && !s.url) return null;
     const repo = repoUrl(v), url = s.url || (repo ? `${repo}/releases/tag/${encodeURIComponent(s.tag)}` : null);
     return link(`${words}${s.tag ? ' ' + s.tag : ''}`, url);
+  }
+  /* Why nothing says what a stop runs, in plain words, and where the docs are. */
+  function unknownWords(v, i) {
+    const st = v.pipeline.stops[i], br = v.pipeline.integration || 'the integration branch';
+    if (i === 0 && v.pipeline.sentinel === 'unknown')
+      return `No ${st.name} ref yet, so nothing has been verified green. Run autocoder's sentinel (main-sentinel.sh), or, with no sentinel, mark the first environment "requires": "integration" in .autocoder.json.`;
+    return `Nothing says what ${st.name} runs: there is no successful GitHub Deployment to it and no env/${st.name} branch. Record a deployment (tools/deploy.sh records nuc-1), or configure the environment in .autocoder.json.`;
+  }
+  function docsLink(v) {
+    const repo = repoUrl(v), br = v.pipeline.integration;
+    return repo && br ? link('How environments work', `${repo}/blob/${encodeURIComponent(br)}/docs/village.md#environments`) : null;
+  }
+  /* "12:05 · 14m ago" from a house's `since`. */
+  function sinceWords(since) {
+    const t = Date.parse(since || '');
+    if (!isFinite(t)) return '';
+    const m = Math.max(0, Math.round((Date.now() - t) / 60000));
+    const ago = m < 1 ? 'just now' : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
+    return `${new Date(t).toTimeString().slice(0, 5)} (${ago})`;
   }
   function crateWhere(o, v, theme) {
     const stops = v.pipeline.stops;
@@ -2340,10 +2365,15 @@
         const h = v.houses[o.i]; if (!h) return null;
         const hasIssue = h.issue && (h.links || []).some(l => /\/issues\//.test(l.url));
         const issue = h.issue && !hasIssue ? link(issueLabel(h.issue), issueOf(v, h.issue).url) : null;
-        return { title: `${houseName(v, h)} · ${h.kind}`, line: h.issue ? `#${h.issue} ${h.issue_title || ''}` : (h.issue_title || `No ${work} claimed`),
-          meta: [`${runtime ? 'Workstream' : 'Worktree'}: ${h.id}`, `Agent: ${h.role}`, `Status: ${h.status}${h.priority ? ' · ' + h.priority : ''}`,
-            `Crew: ${h.crew.join(', ') || '—'}`, ...(h.subagents || []).map(sa => `${runtime ? 'Agent' : 'Sub-agent'}: ${subWords(sa, v)}`), h.action ? `Now: ${h.action}` : null],
-          links: [...(h.links || []), issue], house: h };
+        // Named by worktree and branch ("wt-1 · feature/issue-7"), not by building.
+        const repo = repoUrl(v), br = v.pipeline.integration, since = sinceWords(h.since);
+        const compare = !runtime && repo && br && h.branch && h.branch !== br ? link(`Compare ${h.branch} with ${br}`, `${repo}/compare/${encodeURIComponent(br)}...${encodeURIComponent(h.branch)}`) : null;
+        return { title: `${houseName(v, h)} · ${h.branch || h.kind}`, line: h.issue ? `#${h.issue} ${h.issue_title || ''}` : (h.issue_title || `No ${work} claimed`),
+          meta: [`${runtime ? 'Workstream' : 'Worktree'}: ${h.id}`, h.branch ? `Branch: ${h.branch}` : null, `Agent: ${h.role}`,
+            `Status: ${h.status}${h.action && h.action !== h.status ? ' · ' + h.action : ''}${h.priority ? ' · ' + h.priority : ''}`,
+            since ? `${h.status.charAt(0).toUpperCase() + h.status.slice(1)} since ${since}` : null,
+            `Crew: ${h.crew.join(', ') || '—'}`, ...(h.subagents || []).map(sa => `${runtime ? 'Agent' : 'Sub-agent'}: ${subWords(sa, v)}`)],
+          links: [...(h.links || []), issue, compare], house: h };
       }
       case 'person': {
         const h = v.houses[o.i]; if (!h) return null;
@@ -2387,16 +2417,19 @@
       case 'stop': {
         const st = stops[o.i]; if (!st) return null;
         const sentinel = o.i === 0 && !runtime && v.pipeline.sentinel !== 'absent';
+        const unknown = !runtime && (st.source === 'unknown' || (sentinel && v.pipeline.sentinel === 'unknown'));
         return { title: `${st.name} · ${runtime ? 'stage' : 'environment'}`, line: sentinel ? `Sentinel: ${v.pipeline.sentinel}` : sourceWords(st),
-          meta: [sentinel ? `Runs: ${sourceWords(st)}` : null, o.i === 0 && v.pipeline.sentinel === 'absent' ? `No sentinel: takes work straight from ${v.pipeline.integration || 'the integration branch'}` : null],
-          items: issueItems(v, st.issues), links: stopLinks(v, st) };
+          meta: [sentinel ? `Runs: ${sourceWords(st)}` : null, o.i === 0 && v.pipeline.sentinel === 'absent' ? `No sentinel: takes work straight from ${v.pipeline.integration || 'the integration branch'}` : null,
+            unknown ? unknownWords(v, o.i) : null],
+          items: issueItems(v, st.issues), links: [...stopLinks(v, st), unknown ? docsLink(v) : null] };
       }
       case 'harbour': {
         const rel = v.pipeline.release, repo = repoUrl(v);
         const relLink = rel && repo ? link(`Release ${isSha(rel) ? rel.slice(0, 7) : rel}`, isSha(rel) ? `${repo}/commit/${rel}` : `${repo}/releases/tag/${encodeURIComponent(rel)}`) : null;
         return { title: `${theme.labels.castle}${last ? ' · ' + last.name : ''}`, line: last ? (runtime ? 'Completed in the last 24 hours' : `What shipped to ${last.name}`) : 'Nothing ships yet',
-          meta: [last && last.tag ? `Last release: ${last.tag}` : rel ? `Release: ${rel}` : null, last && !runtime ? `Runs: ${sourceWords(last)}` : null],
-          items: last ? issueItems(v, last.issues) : [], links: [releaseLink(v, last), relLink, ...stopLinks(v, last)] };
+          meta: [last && last.tag ? `Last release: ${last.tag}` : rel ? `Release: ${rel}` : null, last && !runtime ? `Runs: ${sourceWords(last)}` : null,
+            last && !runtime && last.source === 'unknown' ? unknownWords(v, stops.length - 1) : null],
+          items: last ? issueItems(v, last.issues) : [], links: [releaseLink(v, last), relLink, ...stopLinks(v, last), last && !runtime && last.source === 'unknown' ? docsLink(v) : null] };
       }
       case 'ship': {
         if (!last) return null;
@@ -2423,10 +2456,12 @@
   function openInfo(info) {
     document.getElementById('d-title').textContent = info.title;
     document.getElementById('d-line').textContent = info.line || '';
-    const meta = (info.meta || []).filter(Boolean).map(esc).join(' · ');
+    // Each fact on its own line, then the list: joined, they ran together
+    // ("Runs: no Deployment and no branchNothing here.").
+    const meta = (info.meta || []).filter(Boolean).map(m => `<span class="fact">${esc(m)}</span>`).join('');
     const items = info.items && (info.items.length
-      ? `<ul>${info.items.slice(0, 40).map(i => `<li>${i.url ? `<a href="${esc(i.url)}" target="_blank" rel="noopener">#${i.number}</a>` : '#' + i.number} ${esc(i.title || '')}${i.label ? ' · ' + esc(i.label) : ''}${i.priority ? ' · ' + esc(i.priority) : ''}</li>`).join('')}</ul>`
-      : 'Nothing here.');
+      ? `<ul>${info.items.map(i => `<li>${i.url ? `<a href="${esc(i.url)}" target="_blank" rel="noopener">#${i.number}</a>` : '#' + i.number} ${esc(i.title || '')}${i.label ? ' · ' + esc(i.label) : ''}${i.priority ? ' · ' + esc(i.priority) : ''}</li>`).join('')}</ul>`
+      : '<span class="fact">Nothing here.</span>');
     document.getElementById('d-meta').innerHTML = [meta, items].filter(Boolean).join('');
     ask(info.house || {});
     links((info.links || []).filter(Boolean));

@@ -161,6 +161,12 @@ pub struct House {
     /// Where those buttons send the answer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub answer_url: Option<String>,
+    /// The branch its worktree has checked out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    /// When the server first saw it in its current status (RFC 3339).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -263,6 +269,10 @@ pub struct Pipeline {
     /// Counting a feature's subtasks in production needs all of them.
     #[serde(skip)]
     pub reached: HashMap<u32, usize>,
+    /// Titles of the issues at the quay and the stops, which have mostly left
+    /// the open issues the backlog is drawn from.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub titles: std::collections::BTreeMap<u32, String>,
     /// Where each task handed to the merge gate is: queued, gating, failed...
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gates: Vec<GateEntry>,
@@ -719,6 +729,46 @@ async fn integration_branch(transport: &ServerTransport, repo: &Path) -> String 
     "main".to_string()
 }
 
+/// Titles for the issues at the quay and the stops: from the open issues,
+/// else the recently closed ones (landed work's issue has usually closed).
+pub fn pipeline_titles(p: &Pipeline, open: &[IssueSnapshot], closed: &[IssueSnapshot]) -> std::collections::BTreeMap<u32, String> {
+    let known: HashMap<u32, &str> = closed.iter().chain(open).map(|i| (i.number, i.title.as_str())).collect();
+    p.quay
+        .iter()
+        .chain(p.stops.iter().flat_map(|s| s.issues.iter()))
+        .filter_map(|n| known.get(n).filter(|t| !t.is_empty()).map(|t| (*n, t.to_string())))
+        .collect()
+}
+
+/// When each house was first seen in its current status, per village: the
+/// house dialog says how long it has been working, blocked or idle. Only as
+/// long as this server has been watching, so it says "since", not "for".
+#[derive(Default)]
+pub struct SinceMemory {
+    seen: std::sync::Mutex<HashMap<String, HashMap<String, (HouseStatus, String)>>>,
+}
+
+impl SinceMemory {
+    pub fn stamp(&self, village: &str, houses: &mut [House], now: chrono::DateTime<chrono::Utc>) {
+        let Ok(mut seen) = self.seen.lock() else { return };
+        stamp_since(seen.entry(village.to_string()).or_default(), houses, now);
+    }
+}
+
+/// Set each house's `since` from `memory`, starting the clock for a house
+/// that is new or has changed status, and forgetting houses that are gone.
+pub fn stamp_since(memory: &mut HashMap<String, (HouseStatus, String)>, houses: &mut [House], now: chrono::DateTime<chrono::Utc>) {
+    let stamp = now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    memory.retain(|id, _| houses.iter().any(|h| &h.id == id));
+    for h in houses.iter_mut() {
+        let entry = memory.entry(h.id.clone()).or_insert_with(|| (h.status, stamp.clone()));
+        if entry.0 != h.status {
+            *entry = (h.status, stamp.clone());
+        }
+        h.since = Some(entry.1.clone());
+    }
+}
+
 /// Read where pushed work is in the pipeline. Uses local remote-tracking
 /// refs for history and one `ls-remote` for the tip refs, which a plain
 /// `git fetch` doesn't bring down.
@@ -851,19 +901,20 @@ pub struct SwarmVillages {
     issues: Box<dyn IssueTracker>,
     pipeline: Box<dyn PipelineSource>,
     activity: Box<dyn ActivitySource>,
-    extras: TtlCache<PathBuf, (Vec<IssueSnapshot>, Pipeline, Vec<FeatureLink>)>,
+    extras: TtlCache<PathBuf, (Vec<IssueSnapshot>, Pipeline, Vec<FeatureLink>, Vec<IssueSnapshot>)>,
+    since: SinceMemory,
     live: super::feature::LiveMemory,
 }
 
 impl SwarmVillages {
     pub fn new(issues: Box<dyn IssueTracker>, pipeline: Box<dyn PipelineSource>, activity: Box<dyn ActivitySource>) -> Self {
-        Self { issues, pipeline, activity, extras: TtlCache::new(extras_ttl()), live: Default::default() }
+        Self { issues, pipeline, activity, extras: TtlCache::new(extras_ttl()), live: Default::default(), since: Default::default() }
     }
 
     async fn village(&self, transport: &ServerTransport, swarm: &SwarmSnapshot) -> Reading {
         let repo = PathBuf::from(&swarm.repo_path);
-        let (fetched, pipeline, links) = if swarm.repo_path.is_empty() {
-            (Vec::new(), Pipeline::default(), Vec::new())
+        let (fetched, pipeline, links, closed) = if swarm.repo_path.is_empty() {
+            (Vec::new(), Pipeline::default(), Vec::new(), Vec::new())
         } else {
             self.extras
                 .get_or(repo.clone(), || async {
@@ -873,7 +924,8 @@ impl SwarmVillages {
                         false => Vec::new(),
                     };
                     let pipeline = self.pipeline.pipeline(transport, &repo).await;
-                    (issues, pipeline, self.issues.features(transport, &repo).await)
+                    let features = self.issues.features(transport, &repo).await;
+                    (issues, pipeline, features, self.issues.closed(transport, &repo).await)
                 })
                 .await
         };
@@ -888,6 +940,8 @@ impl SwarmVillages {
             super::gate::GateReading::default()
         };
         let mut village = build_gated(swarm, &issues, pipeline, &gate);
+        village.pipeline.titles = pipeline_titles(&village.pipeline, &issues, &closed);
+        self.since.stamp(&swarm.repo_path, &mut village.houses, chrono::Utc::now());
         let features = super::feature::build(&village, &links);
         village.features = self.live.keep(&swarm.repo_path, features, std::time::Instant::now());
         self.activity.attach(transport, &mut village);
@@ -954,6 +1008,53 @@ mod tests {
             assigned_worker: None,
             url: String::new(),
         }
+    }
+
+    #[test]
+    fn landed_issues_keep_their_titles_from_open_or_closed_issues() {
+        let titled = |n: u32, t: &str| IssueSnapshot { number: n, title: t.into(), ..IssueSnapshot::default() };
+        let p = Pipeline {
+            quay: vec![1, 2, 3],
+            stops: vec![Stop { name: "nuc-1".into(), issues: vec![4], ..Stop::default() }],
+            ..Pipeline::default()
+        };
+        let titles = pipeline_titles(&p, &[titled(1, "Still open"), titled(9, "Not landed")], &[titled(2, "Closed when it landed"), titled(4, "Deployed"), titled(3, "")]);
+        assert_eq!(titles, [(1, "Still open".to_string()), (2, "Closed when it landed".to_string()), (4, "Deployed".to_string())].into());
+        let json = serde_json::to_value(Pipeline { titles, ..Pipeline::default() }).unwrap();
+        assert_eq!(json["titles"]["2"], "Closed when it landed");
+        assert!(serde_json::to_value(Pipeline::default()).unwrap().get("titles").is_none());
+    }
+
+    #[test]
+    fn a_house_remembers_since_when_it_has_been_in_its_status() {
+        let at = |m: u32| chrono::DateTime::parse_from_rfc3339(&format!("2026-11-09T12:{m:02}:00Z")).unwrap().with_timezone(&chrono::Utc);
+        let mut memory = HashMap::new();
+        let mut houses = build(&swarm(vec![agent("worker-1", "Working #7", "/wt1"), agent("worker-2", "Idle", "/wt2")]), &[], Pipeline::default()).houses;
+        stamp_since(&mut memory, &mut houses, at(0));
+        assert_eq!(houses[0].since.as_deref(), Some("2026-11-09T12:00:00Z"));
+        // Still working later: the clock keeps its start.
+        stamp_since(&mut memory, &mut houses, at(5));
+        assert_eq!(houses[0].since.as_deref(), Some("2026-11-09T12:00:00Z"));
+        // A new status starts it again.
+        houses[1].status = HouseStatus::Blocked;
+        stamp_since(&mut memory, &mut houses, at(9));
+        assert_eq!((houses[0].since.as_deref(), houses[1].since.as_deref()), (Some("2026-11-09T12:00:00Z"), Some("2026-11-09T12:09:00Z")));
+        // A house that went away is forgotten.
+        let mut one = vec![houses[0].clone()];
+        stamp_since(&mut memory, &mut one, at(10));
+        assert_eq!(memory.len(), 1);
+    }
+
+    #[test]
+    fn a_house_carries_its_worktrees_branch() {
+        let mut a = agent("worker-1", "Working #7", "/repos/proj-wt-1");
+        a.branch = Some("feature/issue-7".into());
+        let v = build(&swarm(vec![a, agent("worker-2", "Idle", "/repos/proj-wt-2")]), &[], Pipeline::default());
+        assert_eq!(v.houses[0].branch.as_deref(), Some("feature/issue-7"));
+        assert_eq!(v.houses[1].branch, None, "a detached HEAD has no branch");
+        let json = serde_json::to_value(&v.houses[0]).unwrap();
+        assert_eq!(json["branch"], "feature/issue-7");
+        assert!(serde_json::to_value(&v.houses[1]).unwrap().get("branch").is_none());
     }
 
     fn swarm(workers: Vec<AgentSnapshot>) -> SwarmSnapshot {

@@ -69,6 +69,11 @@ pub trait IssueTracker: Send + Sync {
     fn features<'a>(&'a self, _transport: &'a ServerTransport, _repo: &'a Path) -> BoxFuture<'a, Vec<FeatureLink>> {
         Box::pin(async { Vec::new() })
     }
+    /// Recently closed issues, for the titles of landed work; none when the
+    /// tracker can't say.
+    fn closed<'a>(&'a self, _transport: &'a ServerTransport, _repo: &'a Path) -> BoxFuture<'a, Vec<IssueSnapshot>> {
+        Box::pin(async { Vec::new() })
+    }
 }
 
 /// Where pushed work has got to on its way to production.
@@ -149,6 +154,12 @@ impl IssueTracker for GitHubIssues {
         Box::pin(async move {
             let parents = crate::github::fetch_feature_parents(transport, repo).await;
             self.links.get(transport, repo, &parents).await
+        })
+    }
+    fn closed<'a>(&'a self, transport: &'a ServerTransport, repo: &'a Path) -> BoxFuture<'a, Vec<IssueSnapshot>> {
+        Box::pin(async move {
+            let list = crate::github::fetch_closed_issues(transport, repo).await.unwrap_or_default();
+            list.iter().map(|i| IssueSnapshot::from_issue(i, None)).collect()
         })
     }
 }
@@ -498,6 +509,8 @@ mod tests {
                 links: Vec::new(),
                 question: None,
                 answer_url: None,
+                branch: None,
+                since: None,
             };
             let village = VillageSnapshot {
                 project: "ops".into(),

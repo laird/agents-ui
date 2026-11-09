@@ -86,6 +86,7 @@ An adapter may print one report, a list of reports, or `{"reports": [...]}`. Onl
 - `name`: shown as the house's role. Defaults to the first agent's name.
 - `task`: the id of the task it is working on. The task's labels decide the building.
 - `title`: shown instead of the task's title.
+- `branch`: the branch the workstream works on. The house's dialog is titled by worktree and branch, and links a compare against the integration branch.
 - `kind`: the building to draw when no task labels decide it. One of `cottage`, `security`, `tests`, `bug`, `perf`, `feature`, `refactor`, `docs`, `chores`, `research`, `workshop`.
 - `state`: the house's state. Set it when the framework knows better than its agents do (a Temporal workflow that is retrying, for example). By default the crew decides: anyone waiting wins, then any work at all, and a running helper makes an idle house busy.
 - `action`: what the house is doing now (see below).

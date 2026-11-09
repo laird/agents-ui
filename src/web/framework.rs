@@ -318,6 +318,9 @@ pub struct Workstream {
     pub question: Option<Question>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub answer_url: Option<String>,
+    /// The branch it works on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -549,6 +552,8 @@ fn house(id: String, ws: &Workstream, tasks: &HashMap<&str, &Task>) -> House {
         links,
         question: if status == HouseStatus::Blocked { ws.question.clone() } else { None },
         answer_url: ws.answer_url.clone(),
+        branch: ws.branch.clone(),
+        since: None,
     }
 }
 
@@ -732,6 +737,7 @@ fn swarm_workstream(id: String, crew: &[&super::AgentSnapshot], project: &str) -
         name: crew.first().map(|a| a.role.clone()).unwrap_or_default(),
         task: crew.iter().find_map(|a| swarm_issue(a)).map(|n| n.to_string()),
         title: crew.iter().find_map(|a| a.current_issue_title.clone()),
+        branch: crew.iter().find_map(|a| a.branch.clone()),
         agents: crew
             .iter()
             .map(|a| Agent { name: a.role.clone(), state: swarm_agent_state(a), ..Agent::default() })

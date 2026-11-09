@@ -321,6 +321,19 @@ pub async fn fetch_issues(
     parse_issues_json(&output.stdout).map_err(|e| GhError::Transient(e.to_string()))
 }
 
+/// Recently closed issues: what landed work was, once its issue closed.
+pub async fn fetch_closed_issues(transport: &ServerTransport, repo_path: &Path) -> std::result::Result<Vec<GitHubIssue>, GhError> {
+    let args: Vec<String> = ["issue", "list", "--state", "closed", "--limit", "200", "--json", "number,title,state,labels,url"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let output = gh_repo_output(transport, repo_path, &args).await.map_err(|e| GhError::Transient(e.to_string()))?;
+    if !output.status.success() {
+        return Err(classify_gh_error(&String::from_utf8_lossy(&output.stderr)));
+    }
+    parse_issues_json(&output.stdout).map_err(|e| GhError::Transient(e.to_string()))
+}
+
 /// Spawn a background task that periodically fetches issues.
 /// Stops retrying on permanent errors (auth, repo not found) and sends a warning event.
 pub fn spawn_issue_fetcher(

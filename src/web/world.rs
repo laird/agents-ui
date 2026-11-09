@@ -147,6 +147,8 @@ mod tests {
             links: Vec::new(),
                 question: None,
                 answer_url: None,
+                branch: None,
+                since: None,
         }
     }
 

@@ -1797,6 +1797,32 @@ mod tests {
     }
 
     #[test]
+    fn village_html_dialogs_explain_unknown_stops_the_whole_quay_and_houses_by_branch() {
+        let body = VILLAGE_HTML;
+        // Facts and the list each get their own line: no "branchNothing here".
+        assert!(body.contains("map(m => `<span class=\"fact\">${esc(m)}</span>`).join('')"));
+        assert!(body.contains(".dialog .fact { display: block; }"));
+        assert!(!body.contains("filter(Boolean).map(esc).join(' · ')"));
+        // An unknown stop says why in plain words, and links to the docs.
+        assert!(body.contains("function unknownWords(v, i)"));
+        assert!(body.contains("so nothing has been verified green. Run autocoder's sentinel"));
+        assert!(body.contains("there is no successful GitHub Deployment to it and no env/${st.name} branch"));
+        assert!(body.contains("/docs/village.md#environments"));
+        assert!(body.contains("unknown ? unknownWords(v, o.i) : null"));
+        assert!(body.contains("last.source === 'unknown' ? unknownWords(v, stops.length - 1) : null"));
+        // The quay: six crates, a "+N" for the rest, and every issue listed with its title.
+        assert!(body.contains("if (atQuay.length > QUAY_CAP) { badge(c, roadX + 25, quayY - 9, atQuay.length - QUAY_CAP);"));
+        assert!(body.contains("items: issueItems(v, v.pipeline.quay)"));
+        assert!(!body.contains("info.items.slice(0, 40)"), "the dialog lists every issue");
+        assert!(body.contains("(v.pipeline.titles || {})[n]"), "landed issues' titles come from the pipeline");
+        // Houses are named by worktree and branch, with a compare link and how long in this status.
+        assert!(body.contains("title: `${houseName(v, h)} · ${h.branch || h.kind}`"));
+        assert!(body.contains("link(`Compare ${h.branch} with ${br}`, `${repo}/compare/"));
+        assert!(body.contains("since ${since}` : null"));
+        assert!(!body.contains("h.action ? `Now: ${h.action}` : null],\n          links: [...(h.links || []), issue"), "no separate Now line in the house dialog");
+    }
+
+    #[test]
     fn village_html_links_only_what_it_knows() {
         let body = VILLAGE_HTML;
         // The repo's pages only when a real issue URL names the repo.
