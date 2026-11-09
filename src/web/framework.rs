@@ -375,7 +375,9 @@ pub struct ReportPipeline {
     /// The branch or queue finished work lands on.
     #[serde(default)]
     pub integration: String,
-    /// `green`, `pending` or `unknown`: whether the gate has passed the latest work.
+    /// `green`, `pending` or `unknown`: whether the gate has passed the latest
+    /// work. `absent` when there is no gate, so the first stage takes work
+    /// straight from the integration branch.
     #[serde(default)]
     pub gate: String,
     /// Landed, not yet through the first stage.
