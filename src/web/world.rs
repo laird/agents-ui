@@ -18,7 +18,7 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 
 use super::IssueSnapshot;
-use super::village::VillageSnapshot;
+use super::village::{Health, HealthState, StopKind, VillageSnapshot};
 
 pub const DEFAULT_INCIDENT_LABEL: &str = "incident";
 
@@ -30,6 +30,9 @@ pub struct WorldConfig {
     /// The platform village's project, e.g. `temporal:agents`.
     pub platform: String,
     pub incident_label: String,
+    /// The environment the platform runs (`shop=temporal:agents@nuc-1`):
+    /// its village in the environment row. `None`: the last environment.
+    pub environment: Option<String>,
 }
 
 impl WorldConfig {
@@ -37,10 +40,15 @@ impl WorldConfig {
     pub fn parse(spec: &str, incident_label: &str) -> Option<Self> {
         let (dev, platform) = spec.split_once('=')?;
         let (dev, platform) = (dev.trim(), platform.trim());
+        let (platform, environment) = match platform.rsplit_once('@') {
+            Some((p, env)) if !env.trim().is_empty() => (p.trim(), Some(env.trim().to_string())),
+            _ => (platform, None),
+        };
         (!dev.is_empty() && !platform.is_empty()).then(|| Self {
             dev: dev.to_string(),
             platform: platform.to_string(),
             incident_label: incident_label.to_string(),
+            environment,
         })
     }
 }
@@ -75,6 +83,26 @@ pub struct WorldSnapshot {
     pub landed: Option<bool>,
     /// Issues released but not yet running on the platform: on the road up.
     pub shipping: Vec<u32>,
+    /// The dev village's environment the platform is: its village in the
+    /// environment row, with the platform's workloads as its houses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
+}
+
+/// Mark the environment a world's platform runs: open incidents against the
+/// platform are its health.
+pub fn mark_incidents(dev: &mut VillageSnapshot, world: &WorldSnapshot) {
+    let (Some(env), n) = (&world.environment, world.incidents.len()) else { return };
+    if n == 0 {
+        return;
+    }
+    if let Some(stop) = dev.pipeline.stops.iter_mut().find(|s| &s.name == env) {
+        stop.health = Some(Health {
+            state: HealthState::Incident,
+            reason: Some(format!("{n} open {}", if n == 1 { "incident" } else { "incidents" })),
+            url: None,
+        });
+    }
 }
 
 /// One build ID matches another when either is a prefix of the other and the
@@ -124,6 +152,10 @@ pub fn build_world(config: &WorldConfig, dev: &VillageSnapshot, dev_issues: &[Is
         platform_builds: platform.builds.clone(),
         landed,
         shipping,
+        environment: config
+            .environment
+            .clone()
+            .or_else(|| dev.pipeline.stops.iter().rev().find(|s| s.kind == StopKind::Environment).map(|s| s.name.clone())),
     }
 }
 
@@ -222,6 +254,38 @@ mod tests {
         assert_eq!(got, vec![(501, Some("procurement-118"), false), (502, Some("bugfix-52"), true), (503, None, false)]);
         assert_eq!(w.damaged, vec!["bugfix-52", "procurement-118"]);
         assert_eq!(w.name, "world:shop");
+    }
+
+    #[test]
+    fn a_platform_is_the_environment_it_runs() {
+        use crate::web::village::{HealthState, StopKind};
+        let mut dev = village("shop", vec![]);
+        dev.pipeline.stops = vec![
+            Stop { name: "master-green".into(), kind: StopKind::Gate, ..Stop::default() },
+            Stop { name: "nuc-1".into(), ..Stop::default() },
+            Stop { name: "release".into(), ..Stop::default() },
+        ];
+        let platform = village("temporal:agents", vec![house("procurement-118", "ProcurementWorkstream", None)]);
+        // By default the platform is the production village: the last environment.
+        let w = build_world(&config(), &dev, &[], &platform);
+        assert_eq!(w.environment.as_deref(), Some("release"));
+        // `@env` attaches it to another, and the platform name is what comes before it.
+        let at = WorldConfig::parse("shop=temporal:agents@nuc-1", DEFAULT_INCIDENT_LABEL).unwrap();
+        assert_eq!((at.platform.as_str(), at.environment.as_deref()), ("temporal:agents", Some("nuc-1")));
+        assert_eq!(WorldConfig::parse("shop=k8s:shop-prod@", "incident").unwrap().environment, None);
+        // Open incidents are that environment's health; none leaves it alone.
+        let issues = vec![issue(501, "procurement-118 failed", &["incident"]), issue(502, "BugFix timed out", &["incident"])];
+        let w = build_world(&at, &dev, &issues, &platform);
+        mark_incidents(&mut dev, &w);
+        let h = dev.pipeline.stops[1].health.clone().unwrap();
+        assert_eq!((h.state, h.reason.as_deref()), (HealthState::Incident, Some("2 open incidents")));
+        assert!(dev.pipeline.stops[2].health.is_none());
+        let quiet = build_world(&config(), &dev, &[], &platform);
+        let before = dev.clone();
+        mark_incidents(&mut dev, &quiet);
+        assert_eq!(dev, before);
+        // The snapshot says so.
+        assert_eq!(serde_json::to_value(&w).unwrap()["environment"], "nuc-1");
     }
 
     #[test]

@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::transport::ServerTransport;
 
@@ -28,6 +28,15 @@ pub struct Deployment {
     /// `tools/release.sh` writes "Release vX.Y.Z" here.
     #[serde(default)]
     pub description: Option<String>,
+    /// Who created the deployment.
+    #[serde(default)]
+    pub creator: Option<Login>,
+}
+
+/// A GitHub user as the API nests one (`creator`, `author`).
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+pub struct Login {
+    pub login: String,
 }
 
 /// One entry of `GET /repos/{owner}/{repo}/deployments/{id}/statuses`.
@@ -50,6 +59,66 @@ pub struct Deployed {
     pub tag: Option<String>,
     /// The page the successful status links to, such as the GitHub Release.
     pub url: Option<String>,
+    /// When it was deployed (the success status's time, a Release's
+    /// `published_at`), RFC 3339.
+    pub deployed_at: Option<String>,
+    /// Who deployed it (the deployment's creator, a Release's author).
+    pub deployed_by: Option<String>,
+}
+
+/// Where the newest deployment to an environment is, as a ship between two
+/// villages: loading at the source, sailing, docked at the target, or failed.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum VoyageState {
+    /// `queued` or `pending`: the cargo is being loaded.
+    #[default]
+    Loading,
+    /// `in_progress`: under sail.
+    Sailing,
+    /// `success`: arrived; the target runs it.
+    Docked,
+    /// `failure` or `error`: turned back; the target keeps its old version.
+    Failed,
+}
+
+impl VoyageState {
+    /// The voyage a deployment status means. `inactive` (superseded) and
+    /// anything unknown is no voyage.
+    pub fn of(status: &str) -> Option<Self> {
+        match status {
+            "queued" | "pending" => Some(Self::Loading),
+            "in_progress" => Some(Self::Sailing),
+            "success" => Some(Self::Docked),
+            "failure" | "error" => Some(Self::Failed),
+            _ => None,
+        }
+    }
+}
+
+/// The newest deployment to an environment that is a voyage.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DeploymentVoyage {
+    pub sha: String,
+    pub tag: Option<String>,
+    pub state: VoyageState,
+    /// When the deployment was created.
+    pub started_at: String,
+    /// When it docked or failed: the finishing status's time.
+    pub finished_at: Option<String>,
+    /// The latest status's `log_url` (e.g. the GitHub Release).
+    pub url: Option<String>,
+    /// The sha of the newest successful deployment before this one: what the
+    /// target ran before, so the cargo is what this one adds.
+    pub previous: Option<String>,
+}
+
+/// What Deployments say about one environment: what it runs, and the newest
+/// deployment as a voyage.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DeploymentState {
+    pub deployed: Option<Deployed>,
+    pub voyage: Option<DeploymentVoyage>,
 }
 
 /// The tag in a deployment description of the form "Release <tag>".
@@ -92,11 +161,35 @@ fn latest(statuses: &[DeploymentStatus]) -> Option<&DeploymentStatus> {
 pub fn newest_deployed(deployments: &[Deployment], statuses: &HashMap<u64, Vec<DeploymentStatus>>) -> Option<Deployed> {
     newest_first(deployments).into_iter().find_map(|d| {
         let s = statuses.get(&d.id).filter(|s| succeeded(s))?;
+        let done = latest(s);
         Some(Deployed {
             sha: d.sha.clone(),
             tag: release_tag(d.description.as_deref()),
-            url: latest(s).and_then(|s| s.log_url.clone()).filter(|u| u.starts_with("https://")),
+            url: done.and_then(|s| s.log_url.clone()).filter(|u| u.starts_with("https://")),
+            deployed_at: done.map(|s| s.created_at.clone()).filter(|t| !t.is_empty()),
+            deployed_by: d.creator.as_ref().map(|c| c.login.clone()),
         })
+    })
+}
+
+/// The newest deployment whose latest status is a voyage (not `inactive`),
+/// with the newest successful sha before it. Deployments without statuses
+/// are skipped.
+pub fn newest_voyage(deployments: &[Deployment], statuses: &HashMap<u64, Vec<DeploymentStatus>>) -> Option<DeploymentVoyage> {
+    let sorted = newest_first(deployments);
+    let (at, d, status, state) = sorted.iter().enumerate().find_map(|(i, d)| {
+        let s = latest(statuses.get(&d.id)?)?;
+        Some((i, *d, s, VoyageState::of(&s.state)?))
+    })?;
+    let previous = sorted[at + 1..].iter().find(|o| statuses.get(&o.id).is_some_and(|s| succeeded(s))).map(|o| o.sha.clone());
+    Some(DeploymentVoyage {
+        sha: d.sha.clone(),
+        tag: release_tag(d.description.as_deref()),
+        state,
+        started_at: d.created_at.clone(),
+        finished_at: matches!(state, VoyageState::Docked | VoyageState::Failed).then(|| status.created_at.clone()).filter(|t| !t.is_empty()),
+        url: status.log_url.clone().filter(|u| u.starts_with("https://")),
+        previous,
     })
 }
 
@@ -205,6 +298,8 @@ pub struct Release {
     pub html_url: Option<String>,
     #[serde(default)]
     pub published_at: Option<String>,
+    #[serde(default)]
+    pub author: Option<Login>,
 }
 
 /// The latest published release: drafts and prereleases don't count.
@@ -303,18 +398,24 @@ pub async fn locate(transport: &ServerTransport, repo: &Path, environment: &str,
         EnvSource::Release => {
             let release = latest_release(&gh_api(transport, repo, "repos/{owner}/{repo}/releases?per_page=20").await?)?;
             let sha = commit_sha(&gh_api(transport, repo, &format!("repos/{{owner}}/{{repo}}/commits/{}", encode(&release.tag_name))).await?)?;
-            Some(Deployed { sha, url: release.html_url.filter(|u| u.starts_with("https://")), tag: Some(release.tag_name) })
+            Some(Deployed {
+                sha,
+                url: release.html_url.filter(|u| u.starts_with("https://")),
+                tag: Some(release.tag_name),
+                deployed_at: release.published_at,
+                deployed_by: release.author.map(|a| a.login),
+            })
         }
         EnvSource::Tag(glob) => {
             let tags = parse_tags(&gh_api(transport, repo, "repos/{owner}/{repo}/tags?per_page=100").await?);
             let tag = newest_matching(&tags, glob)?;
-            Some(Deployed { sha: tag.commit.sha.clone(), tag: Some(tag.name.clone()), url: None })
+            Some(Deployed { sha: tag.commit.sha.clone(), tag: Some(tag.name.clone()), ..Deployed::default() })
         }
         EnvSource::Url(url) => {
             let args: Vec<String> = ["-fsS", "--max-time", "5", url.as_str()].iter().map(|s| s.to_string()).collect();
             let out = transport.output("curl", &args, Some(repo)).await.ok()?;
             let sha = out.status.success().then(|| version_sha(&String::from_utf8_lossy(&out.stdout)))??;
-            Some(Deployed { sha, tag: None, url: None })
+            Some(Deployed { sha, ..Deployed::default() })
         }
         EnvSource::Branch => None,
     };
@@ -331,6 +432,14 @@ async fn gh_api(transport: &ServerTransport, repo: &Path, path: &str) -> Option<
 /// What `environment` runs according to GitHub Deployments, or `None` when it
 /// has no successful deployment (or GitHub can't be asked).
 pub async fn deployed(transport: &ServerTransport, repo: &Path, environment: &str) -> Option<Deployed> {
+    deployment_state(transport, repo, environment).await?.deployed
+}
+
+/// What `environment` runs and its newest deployment as a voyage, from one
+/// listing. Statuses are fetched newest first until two successful
+/// deployments are found (what runs, and what ran before it), at most
+/// `DEPLOYMENTS_CHECKED`. `None` when GitHub can't be asked.
+pub async fn deployment_state(transport: &ServerTransport, repo: &Path, environment: &str) -> Option<DeploymentState> {
     let listing = gh_api(
         transport,
         repo,
@@ -339,19 +448,23 @@ pub async fn deployed(transport: &ServerTransport, repo: &Path, environment: &st
     .await?;
     let deployments = parse_deployments(&listing);
     let mut statuses = HashMap::new();
+    let mut successes = 0;
     for d in newest_first(&deployments).into_iter().take(DEPLOYMENTS_CHECKED) {
         let Some(json) = gh_api(transport, repo, &format!("repos/{{owner}}/{{repo}}/deployments/{}/statuses", d.id)).await else {
             continue;
         };
         let these = parse_statuses(&json);
-        let done = succeeded(&these);
+        successes += succeeded(&these) as usize;
         statuses.insert(d.id, these);
-        if done {
+        if successes == 2 {
             break;
         }
     }
     // The sha is handed to git; anything but a commit id is no answer.
-    newest_deployed(&deployments, &statuses).filter(|d| !d.sha.is_empty() && d.sha.chars().all(|c| c.is_ascii_hexdigit()))
+    Some(DeploymentState {
+        deployed: newest_deployed(&deployments, &statuses).filter(|d| is_sha(&d.sha)),
+        voyage: newest_voyage(&deployments, &statuses).filter(|v| is_sha(&v.sha)),
+    })
 }
 
 #[cfg(test)]
@@ -373,7 +486,7 @@ mod tests {
     fn parses_deployments_and_statuses_from_the_api() {
         let d = parse_deployments(DEPLOYMENTS);
         assert_eq!(d.len(), 4);
-        assert_eq!(d[0], Deployment { id: 30, sha: "ccc333".into(), created_at: "2026-11-03T10:00:00Z".into(), description: None });
+        assert_eq!(d[0], Deployment { id: 30, sha: "ccc333".into(), created_at: "2026-11-03T10:00:00Z".into(), description: None, creator: None });
         let s = parse_statuses(r#"[{"id": 1, "state": "success", "created_at": "2026-11-01T10:05:00Z", "environment": "prod"}]"#);
         assert_eq!(s, vec![DeploymentStatus { state: "success".into(), created_at: "2026-11-01T10:05:00Z".into(), log_url: None }]);
         assert!(parse_deployments("not json").is_empty());
@@ -435,10 +548,70 @@ mod tests {
         ]);
         assert_eq!(
             newest_deployed(&d, &s),
-            Some(Deployed { sha: "ddd444".into(), tag: Some("v0.5.0".into()), url: Some("https://github.com/o/r/releases/tag/v0.5.0".into()) })
+            Some(Deployed {
+                sha: "ddd444".into(),
+                tag: Some("v0.5.0".into()),
+                url: Some("https://github.com/o/r/releases/tag/v0.5.0".into()),
+                deployed_at: Some("2026-11-04T10:05:00Z".into()),
+                deployed_by: None,
+            })
         );
         // Not a release: no tag, and no page to link.
-        assert_eq!(newest_deployed(&d[1..], &s), Some(Deployed { sha: "ccc333".into(), tag: None, url: None }));
+        assert_eq!(newest_deployed(&d[1..], &s), Some(Deployed { sha: "ccc333".into(), deployed_at: Some("2026-11-03T10:05:00Z".into()), ..Deployed::default() }));
+    }
+
+    /// One environment's deployments, newest first, each with a status list.
+    fn history(rows: &[(u64, &str, &str)]) -> (Vec<Deployment>, HashMap<u64, Vec<DeploymentStatus>>) {
+        let deployments = rows
+            .iter()
+            .map(|(id, sha, _)| Deployment {
+                id: *id,
+                sha: sha.to_string(),
+                created_at: format!("2026-11-0{id}T10:00:00Z"),
+                description: (*id == 4).then(|| "Release v0.7.0".into()),
+                creator: Some(Login { login: "laird".into() }),
+            })
+            .collect();
+        let statuses = rows
+            .iter()
+            .map(|(id, _, state)| (*id, parse_statuses(&format!(r#"[{{"state": "{state}", "created_at": "2026-11-0{id}T10:05:00Z", "log_url": "https://github.com/o/r/releases/tag/v0.{id}.0"}}]"#))))
+            .collect();
+        (deployments, statuses)
+    }
+
+    #[test]
+    fn the_newest_deployment_is_a_voyage_in_every_state() {
+        for (state, want) in [("queued", VoyageState::Loading), ("pending", VoyageState::Loading), ("in_progress", VoyageState::Sailing),
+            ("success", VoyageState::Docked), ("failure", VoyageState::Failed), ("error", VoyageState::Failed)] {
+            let (d, s) = history(&[(4, "ddd444", state), (3, "ccc333", "success"), (2, "bbb222", "success")]);
+            let v = newest_voyage(&d, &s).unwrap();
+            assert_eq!((v.sha.as_str(), v.state), ("ddd444", want), "{state}");
+            assert_eq!(v.tag.as_deref(), Some("v0.7.0"));
+            assert_eq!(v.started_at, "2026-11-04T10:00:00Z");
+            // What the target ran before: the newest success older than this one, never itself.
+            assert_eq!(v.previous.as_deref(), Some("ccc333"), "{state}");
+            let finished = matches!(want, VoyageState::Docked | VoyageState::Failed);
+            assert_eq!(v.finished_at.is_some(), finished, "{state}");
+        }
+    }
+
+    #[test]
+    fn superseded_deployments_are_history_not_voyages() {
+        let (d, s) = history(&[(4, "ddd444", "inactive"), (3, "ccc333", "success")]);
+        let v = newest_voyage(&d, &s).unwrap();
+        assert_eq!((v.sha.as_str(), v.state, v.previous), ("ccc333", VoyageState::Docked, None), "the first deployment docks from nowhere");
+        assert_eq!(newest_voyage(&d, &HashMap::new()), None, "no statuses, no voyage");
+    }
+
+    #[test]
+    fn a_deployment_says_who_and_when() {
+        let (d, s) = history(&[(3, "ccc333", "success")]);
+        let found = newest_deployed(&d, &s).unwrap();
+        assert_eq!((found.deployed_at.as_deref(), found.deployed_by.as_deref()), (Some("2026-11-03T10:05:00Z"), Some("laird")));
+        let d = parse_deployments(r#"[{"id": 1, "sha": "a1", "creator": {"login": "octo", "id": 9}}]"#);
+        assert_eq!(d[0].creator, Some(Login { login: "octo".into() }));
+        let r: Release = serde_json::from_str(r#"{"tag_name": "v1", "author": {"login": "octo"}, "published_at": "2026-11-09T10:00:00Z"}"#).unwrap();
+        assert_eq!((r.author.map(|a| a.login), r.published_at.as_deref()), (Some("octo".to_string()), Some("2026-11-09T10:00:00Z")));
     }
 
     #[test]

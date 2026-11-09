@@ -170,17 +170,21 @@ States, from the deployment's latest status:
 
 Only Deployments have in-progress statuses. An environment whose version
 comes from a Release, tag, version URL or branch has no `loading` or
-`sailing`: when its sha changes the server reports a `docked` voyage, with
-`started_at` = `finished_at` = the moment it saw the change. The ship then
-sails in as #362's does today. The page plays a voyage once, keyed by
-(`to`, `sha`, `state`), so a reload doesn't replay a finished one. This is
-how #362 handles releases.
+`sailing`, and the server reports no voyage for it. A server with no memory
+between polls can't tell when such a version changed. The page does that
+instead, as #362's ship does today: when the stop's `sha` (or `tag`) changes
+between two polls, it plays a voyage from the source village with the issues
+the target's `cargo` gained. The page also plays a reported voyage only once,
+keyed by (`to`, `sha`, `state`), so a reload doesn't replay a finished one.
 
-Cost: listing voyages needs no new API calls for the newest deployment per
-environment, because `deployed` already fetches its statuses. The previous
-successful sha needs one more `rev-list` per voyage (local, bounded by
-`HISTORY_DEPTH` = 400 commits). A voyage beyond that depth reports the issues
-it can see, and `issues_more: true`.
+Cost: `deployments::deployment_state` reads each environment's deployments
+once, for both what runs and the voyage. It fetches statuses newest first
+until it finds two successful deployments (what runs, and what ran before
+it), at most `DEPLOYMENTS_CHECKED` (10), so a successful voyage costs at most
+one more status call than before. Its cargo needs `rev-list` on the
+deployed and previous shas (local, bounded by `HISTORY_DEPTH` = 400
+commits). `issues_more` is true when the deployed commit isn't fetched yet,
+or its history reaches that depth, so the list may be short.
 
 ## Worlds
 
@@ -201,8 +205,10 @@ dev village today. In the row:
   "shipping".
 - **Incidents still come back to the dev village's docks.** A crate floats
   down the river from the burning building, right to left along the row,
-  past the villages in between, and lands at the dev docks as an issue. A
-  platform with an open incident has health `incident`.
+  past the villages in between, and lands at the dev docks as an issue.
+  While the platform has open incidents, the environment it runs has health
+  `incident` ("2 open incidents"). That is set when the worlds are built
+  (`world::mark_incidents`, from `Villages::snapshot` in `src/web/source.rs`).
 - `WorldSnapshot` keeps its fields. It gains `environment` (the stop it
   attaches to), and the renderer places the platform scene there instead of
   above.

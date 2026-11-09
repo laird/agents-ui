@@ -166,7 +166,13 @@ Matching ignores case. Anything else counts as `unknown`.
   - `source`: what says what the stage runs: `deployment` (a deployment record), `release` (a published release), `tag` (a version tag), `url` (a version endpoint of the running service), `branch` (a branch or ref, the default), or `unknown` (nothing does, so the village can't tell, which is not the same as "nothing has reached it");
   - `sha`: the commit the stage runs, when a deployment, release, tag or endpoint names it;
   - `tag`: the release the stage runs, such as `v0.5.0` (the harbour's ship says "next release: N issues since v0.5.0");
-  - `url`: a page about that release, such as its GitHub Release.
+  - `url`: a page about that release, such as its GitHub Release;
+  - `kind`: `environment` (the default: a village of its own in the environment row) or `gate` (a check such as a green ref, drawn as a lock);
+  - `deployed_at` and `deployed_by`: when the running version was deployed (RFC 3339) and by whom;
+  - `deployment_url`: the page listing the stage's deployments;
+  - `cargo`: every task the stage runs, newest first, and `cargo_more`, how many more were left out. When no stage gives `cargo`, the village works it out from `tasks`: a stage runs its own tasks and every later stage's;
+  - `health`: `{state, reason, url}`, where `state` is `ok`, `failed` (its newest deployment failed), `incident` or `unknown`.
+- `voyages`: deployments between stages, newest first, each `{from, to, state, sha, tag, started_at, finished_at, url, tasks, tasks_more}`. `from` is a stage's name, or `dev` for the village that builds the work. `state` is `loading` (queued or pending), `sailing` (in progress), `docked` (succeeded) or `failed`. `tasks` are what the deployment adds to what `to` ran before; `tasks_more` says there is more than the adapter could list. See [the environment row](environment-row.md).
 - `release`: the version at the last stage. A world compares it with the platform's `builds`, and either may be a prefix of the other (at least 7 characters).
 - `promotion`: `subtask` (the default: each task moves through the stages on its own) or `feature` (a feature's landed tasks wait at the quay and move together).
 - `merge`: the merge gate on the host that lands the work:
@@ -175,6 +181,7 @@ Matching ignores case. Anything else counts as `unknown`.
   - `trains`: merge trains, the branches gated together as one tree. Each is `{id, task, members, state}`, where `task` is the task the train's merge job runs under, `members` the tasks it carries, and `state` a gate state as above.
 
 `/api/village` reports the same per village: `pipeline.gates` (one `{issue, state, ...}` per task in the gate) and `pipeline.merge`.
+Each stage is a `pipeline.stops` entry with the fields above (`cargo` as issue numbers), and `pipeline.voyages` lists the voyages with `issues` and `issues_more` in place of `tasks` and `tasks_more`.
 
 ## Replaying history
 

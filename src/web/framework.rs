@@ -31,7 +31,10 @@ use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 
 use super::source::{Reading, TtlCache, VillageSource};
-use super::village::{Action, Crate, GateEntry, House, HouseKind, HouseStatus, Note, Pipeline, Promotion, Stop, StopSource, Subagent, VillageSnapshot, house_kind};
+use super::village::{
+    Action, Crate, GateEntry, Health, House, HouseKind, HouseStatus, Note, Pipeline, Promotion, Stop, StopKind, StopSource, Subagent, VillageSnapshot, Voyage,
+    house_kind,
+};
 use super::{IssueSnapshot, SwarmSnapshot};
 use crate::transport::ServerTransport;
 
@@ -384,6 +387,78 @@ pub struct Stage {
     /// A page about that release, such as its GitHub Release.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// `environment` (the default: a village of its own in the environment
+    /// row) or `gate` (a check such as a green ref, drawn as a lock).
+    #[serde(default)]
+    pub kind: StopKind,
+    /// When the running version was deployed, RFC 3339.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deployed_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deployed_by: Option<String>,
+    /// The page listing this stage's deployments.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deployment_url: Option<String>,
+    /// Every task the stage runs, newest first. When no stage gives one, the
+    /// village works it out from the stages' `tasks`: a stage runs its own
+    /// tasks and every later stage's.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cargo: Vec<String>,
+    /// More tasks it runs, cut from `cargo`.
+    #[serde(default, skip_serializing_if = "is_zero_usize")]
+    pub cargo_more: usize,
+    /// `{state: ok | failed | incident | unknown, reason, url}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health: Option<Health>,
+}
+
+fn is_zero_usize(n: &usize) -> bool {
+    *n == 0
+}
+
+/// One deployment to one stage, as a ship between two villages.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct ReportVoyage {
+    /// A stage's name, or `dev` for the village that builds the work.
+    pub from: String,
+    pub to: String,
+    /// `loading`, `sailing`, `docked` or `failed`.
+    pub state: super::deployments::VoyageState,
+    #[serde(default)]
+    pub sha: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+    #[serde(default)]
+    pub started_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// The tasks it carries: new to the target.
+    #[serde(default)]
+    pub tasks: Vec<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub tasks_more: bool,
+}
+
+/// The cargo of stage `i` when a report gives none: its own tasks and every
+/// later stage's (work only reaches a stage after the ones before it), in
+/// stage order from the furthest, once each.
+fn derived_cargo(stages: &[Stage], i: usize) -> Vec<u32> {
+    let mut out = Vec::new();
+    for s in stages[i..].iter().rev() {
+        for n in s.tasks.iter().map(|t| task_number(t)) {
+            if !out.contains(&n) {
+                out.push(n);
+            }
+        }
+    }
+    out
+}
+
+/// A URL a report gives, if it is a web link.
+fn web_url(u: &Option<String>) -> Option<String> {
+    u.clone().filter(|u| u.starts_with("https://") || u.starts_with("http://"))
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -411,6 +486,9 @@ pub struct ReportPipeline {
     /// The merge gate on the host that lands the work: its slots and trains.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge: Option<super::gate::MergeGate>,
+    /// Deployments between the stages, newest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub voyages: Vec<ReportVoyage>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -605,6 +683,8 @@ pub fn to_village(report: &Report) -> Reading {
     // The quay is for landed work: a task still in the merge gate isn't there yet.
     let gates: Vec<GateEntry> = report.tasks.iter().filter_map(|t| t.gate.clone().map(|gate| GateEntry { issue: task_number(&t.id), gate })).collect();
     let gating: HashSet<u32> = gates.iter().filter(|g| g.gate.state.in_flight() || g.gate.state.handed_back()).map(|g| g.issue).collect();
+    // A report that lists no cargo at all: a stage runs its own tasks and every later stage's.
+    let derive_cargo = p.stages.iter().all(|s| s.cargo.is_empty());
     let pipeline = Pipeline {
         integration: p.integration.clone(),
         sentinel: if p.gate.is_empty() { "unknown".to_string() } else { p.gate.clone() },
@@ -614,17 +694,41 @@ pub fn to_village(report: &Report) -> Reading {
         stops: p
             .stages
             .iter()
-            .map(|s| Stop {
+            .enumerate()
+            .map(|(i, s)| Stop {
                 name: s.name.clone(),
                 issues: numbers(&s.tasks),
                 source: s.source,
                 sha: s.sha.clone(),
                 tag: s.tag.clone(),
-                url: s.url.clone().filter(|u| u.starts_with("https://") || u.starts_with("http://")),
+                url: web_url(&s.url),
+                kind: s.kind,
+                deployed_at: s.deployed_at.clone(),
+                deployed_by: s.deployed_by.clone(),
+                deployment_url: web_url(&s.deployment_url),
+                cargo: if derive_cargo { derived_cargo(&p.stages, i) } else { numbers(&s.cargo) },
+                cargo_more: s.cargo_more,
+                health: s.health.clone().map(|h| Health { url: web_url(&h.url), ..h }),
             })
             .collect(),
         release: p.release.clone(),
         promotion: p.promotion,
+        voyages: p
+            .voyages
+            .iter()
+            .map(|v| Voyage {
+                from: v.from.clone(),
+                to: v.to.clone(),
+                state: v.state,
+                sha: v.sha.clone(),
+                tag: v.tag.clone(),
+                started_at: v.started_at.clone(),
+                finished_at: v.finished_at.clone(),
+                url: web_url(&v.url),
+                issues: numbers(&v.tasks),
+                issues_more: v.tasks_more,
+            })
+            .collect(),
         ..Pipeline::default()
     };
 
@@ -849,11 +953,34 @@ pub fn swarm_report_gated(swarm: &SwarmSnapshot, issues: &[IssueSnapshot], pipel
                     sha: s.sha.clone(),
                     tag: s.tag.clone(),
                     url: s.url.clone(),
+                    kind: s.kind,
+                    deployed_at: s.deployed_at.clone(),
+                    deployed_by: s.deployed_by.clone(),
+                    deployment_url: s.deployment_url.clone(),
+                    cargo: ids(&s.cargo),
+                    cargo_more: s.cargo_more,
+                    health: s.health.clone(),
                 })
                 .collect(),
             release: pipeline.release.clone(),
             promotion: pipeline.promotion,
             merge,
+            voyages: pipeline
+                .voyages
+                .iter()
+                .map(|v| ReportVoyage {
+                    from: v.from.clone(),
+                    to: v.to.clone(),
+                    state: v.state,
+                    sha: v.sha.clone(),
+                    tag: v.tag.clone(),
+                    started_at: v.started_at.clone(),
+                    finished_at: v.finished_at.clone(),
+                    url: v.url.clone(),
+                    tasks: ids(&v.issues),
+                    tasks_more: v.issues_more,
+                })
+                .collect(),
         },
         builds: Vec::new(),
     }
@@ -1188,6 +1315,41 @@ mod tests {
     }
 
     #[test]
+    fn an_outside_report_describes_the_environment_row() {
+        let report: Report = serde_json::from_value(serde_json::json!({
+            "project": "x",
+            "pipeline": {
+                "stages": [
+                    {"name": "green", "kind": "gate", "tasks": ["5"]},
+                    {"name": "staging", "tasks": ["3"], "deployed_at": "2026-11-09T10:00:00Z", "deployed_by": "ci",
+                     "deployment_url": "https://ci.example/staging", "health": {"state": "failed", "reason": "smoke test", "url": "javascript:x"}},
+                    {"name": "prod", "tasks": ["1", "2"]}
+                ],
+                "voyages": [{"from": "staging", "to": "prod", "state": "sailing", "sha": "abc1234", "tasks": ["3"], "url": "https://ci.example/run/9"},
+                            {"from": "dev", "to": "staging", "state": "failed", "sha": "def5678", "tasks": ["4"], "tasks_more": true}]
+            }
+        }))
+        .unwrap();
+        let p = to_village(&report).village.pipeline;
+        assert_eq!(p.stops[0].kind, StopKind::Gate);
+        assert_eq!(p.stops[1].kind, StopKind::Environment, "the default");
+        // No stage gave cargo: each runs its own tasks and every later stage's.
+        let cargo: Vec<Vec<u32>> = p.stops.iter().map(|s| s.cargo.clone()).collect();
+        assert_eq!(cargo, vec![vec![1, 2, 3, 5], vec![1, 2, 3], vec![1, 2]]);
+        assert_eq!((p.stops[1].deployed_by.as_deref(), p.stops[1].deployment_url.as_deref()), (Some("ci"), Some("https://ci.example/staging")));
+        let health = p.stops[1].health.clone().unwrap();
+        assert_eq!((health.state, health.url), (super::super::village::HealthState::Failed, None), "a page that isn't a web link is dropped");
+        let voyages: Vec<(&str, &str, super::super::deployments::VoyageState, Vec<u32>, bool)> =
+            p.voyages.iter().map(|v| (v.from.as_str(), v.to.as_str(), v.state, v.issues.clone(), v.issues_more)).collect();
+        use super::super::deployments::VoyageState::{Failed, Sailing};
+        assert_eq!(voyages, vec![("staging", "prod", Sailing, vec![3], false), ("dev", "staging", Failed, vec![4], true)]);
+        // A report that lists cargo keeps it as given.
+        let mut given = report.clone();
+        given.pipeline.stages[2].cargo = vec!["2".into()];
+        assert_eq!(to_village(&given).village.pipeline.stops[2].cargo, vec![2]);
+    }
+
+    #[test]
     fn a_release_tag_and_page_reach_the_village() {
         let swarm: SwarmSnapshot = serde_json::from_value(serde_json::json!({
             "project_name": "shop", "repo_path": "", "agent_type": "claude", "workflow": null, "tmux_session": "",
@@ -1204,9 +1366,18 @@ mod tests {
             sha: Some("abc1234".into()),
             tag: Some("v0.5.0".into()),
             url: Some("https://github.com/acme/shop/releases/tag/v0.5.0".into()),
+            ..Stop::default()
         };
-        let pipeline = Pipeline { stops: vec![Stop { name: "nuc-1".into(), issues: vec![8], ..Stop::default() }, release.clone()], ..Pipeline::default() };
+        let voyage = Voyage { from: "nuc-1".into(), to: "release".into(), sha: "abc1234".into(), issues: vec![7], ..Voyage::default() };
+        let pipeline = Pipeline {
+            stops: vec![Stop { name: "nuc-1".into(), issues: vec![8], cargo: vec![8, 7], ..Stop::default() }, release.clone()],
+            voyages: vec![voyage.clone()],
+            ..Pipeline::default()
+        };
         let report = swarm_report(&swarm, &[], &pipeline);
+        // Autocoder's own cargo and voyages go through the report unchanged.
+        let through = to_village(&report).village.pipeline;
+        assert_eq!((through.stops[0].cargo.clone(), through.voyages.clone()), (vec![8, 7], vec![voyage]));
         assert_eq!(report.pipeline.stages[1].tag.as_deref(), Some("v0.5.0"));
         assert_eq!(to_village(&report).village.pipeline.stops[1], release);
         // An outside adapter's page that isn't a web link is dropped.
@@ -1271,6 +1442,13 @@ mod tests {
         assert_eq!(reports.len(), 2);
         let dev = to_village(&reports[0]).village;
         assert_eq!(dev.plane, Plane::Development);
+        // The environment row: a gate, two environments with what they run, and a voyage under sail.
+        let kinds: Vec<StopKind> = dev.pipeline.stops.iter().map(|s| s.kind).collect();
+        assert_eq!(kinds, vec![StopKind::Gate, StopKind::Environment, StopKind::Environment]);
+        assert_eq!((dev.pipeline.stops[2].tag.as_deref(), dev.pipeline.stops[2].deployed_by.as_deref()), (Some("v2.3.0"), Some("deploy-bot")));
+        assert_eq!(dev.pipeline.stops[2].cargo, vec![37], "derived: prod runs only what reached it");
+        assert_eq!(dev.pipeline.voyages.len(), 1);
+        assert_eq!((dev.pipeline.voyages[0].from.as_str(), dev.pipeline.voyages[0].issues.clone()), ("staging", vec![39]));
         assert!(dev.houses.iter().any(|h| h.status == HouseStatus::Blocked));
         let run = to_village(&reports[1]).village;
         assert_eq!(run.plane, Plane::Runtime);

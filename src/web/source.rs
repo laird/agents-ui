@@ -384,15 +384,22 @@ impl Villages {
         for source in self.sources.iter() {
             readings.extend(source.read(transport, swarms).await);
         }
-        let worlds = self
+        let built: Vec<_> = self
             .worlds
             .iter()
             .filter_map(|w| {
                 let dev = readings.iter().find(|r| r.village.project == w.dev)?;
                 let platform = readings.iter().find(|r| r.village.project == w.platform)?;
-                Some(build_world(w, &dev.village, &dev.issues, &platform.village))
+                Some((w.dev.clone(), build_world(w, &dev.village, &dev.issues, &platform.village)))
             })
             .collect();
+        // A platform's open incidents are the health of the environment it runs.
+        for (dev_name, world) in &built {
+            if let Some(dev) = readings.iter_mut().find(|r| &r.village.project == dev_name) {
+                super::world::mark_incidents(&mut dev.village, world);
+            }
+        }
+        let worlds = built.into_iter().map(|(_, w)| w).collect();
         VillageResponse { villages: readings.into_iter().map(|r| r.village).collect(), worlds }
     }
 }

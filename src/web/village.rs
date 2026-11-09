@@ -246,6 +246,159 @@ pub struct Stop {
     /// A page about what this stop runs, such as its GitHub Release.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// The sentinel's green ref (a lock in the dev village) or a deploy
+    /// environment (a village of its own in the environment row).
+    #[serde(default)]
+    pub kind: StopKind,
+    /// When the running version was deployed, RFC 3339.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deployed_at: Option<String>,
+    /// Who deployed it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deployed_by: Option<String>,
+    /// The page listing this environment's deployments, when a report knows it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deployment_url: Option<String>,
+    /// Every issue the stop runs, newest first: cumulative, unlike `issues`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cargo: Vec<u32>,
+    /// Older issues it also runs, cut from `cargo`.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub cargo_more: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health: Option<Health>,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
+}
+
+/// What a stop is in the environment row (`docs/environment-row.md`).
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum StopKind {
+    /// The sentinel's `<integration>-green` ref: a gate, drawn as a lock.
+    Gate,
+    /// A configured deploy environment.
+    #[default]
+    Environment,
+}
+
+/// How an environment is doing, where something can tell.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct Health {
+    pub state: HealthState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum HealthState {
+    #[default]
+    Ok,
+    /// The newest deployment failed.
+    Failed,
+    /// A world's platform has open incidents against it.
+    Incident,
+    /// Nothing says what it runs.
+    Unknown,
+}
+
+/// One deployment to one environment, as a ship between two villages.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct Voyage {
+    /// The village it leaves: the previous environment, or `dev`.
+    pub from: String,
+    pub to: String,
+    pub state: super::deployments::VoyageState,
+    pub sha: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+    #[serde(default)]
+    pub started_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// The issues new to the target: in `sha` but not in what it ran before.
+    #[serde(default)]
+    pub issues: Vec<u32>,
+    /// Some of what it carries is beyond the history the village reads.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub issues_more: bool,
+}
+
+/// Issues an environment's `cargo` lists before the rest are counted.
+pub const CARGO_KEEP: usize = 40;
+/// How long a docked voyage stays reported after it arrives.
+pub const DOCKED_FOR_SECS: i64 = 3600;
+
+/// Per stop, every issue it runs (newest first, capped at `CARGO_KEEP`) and
+/// how many more: issues whose tip reached past it. `reached` counts stops
+/// reached per issue (0: the quay), as `place_tips` leaves it.
+pub fn cargo_of(tips: &[(String, u32)], reached: &HashMap<u32, usize>, stops: usize) -> Vec<(Vec<u32>, usize)> {
+    let mut order: Vec<u32> = Vec::new();
+    for (_, n) in tips {
+        if !order.contains(n) {
+            order.push(*n);
+        }
+    }
+    (0..stops)
+        .map(|i| {
+            let all: Vec<u32> = order.iter().copied().filter(|n| reached.get(n).is_some_and(|r| *r > i)).collect();
+            let more = all.len().saturating_sub(CARGO_KEEP);
+            (all.into_iter().take(CARGO_KEEP).collect(), more)
+        })
+        .collect()
+}
+
+/// The issues a deployment of `new` adds to an environment that ran `old`:
+/// tips in the new history but not the old, newest first, once each. With no
+/// old version every tip in the new history is new.
+pub fn voyage_issues(tips: &[(String, u32)], new: &HashSet<String>, old: Option<&HashSet<String>>) -> Vec<u32> {
+    let mut out = Vec::new();
+    for (sha, n) in tips {
+        if new.contains(sha) && !old.is_some_and(|o| o.contains(sha)) && !out.contains(n) {
+            out.push(*n);
+        }
+    }
+    out
+}
+
+/// The village a deployment to `env` sails from: the environment it
+/// requires, or the dev village for `integration`, `green` or nothing.
+pub fn voyage_from(env: &Environment, envs: &[Environment]) -> String {
+    match env.requires.as_deref() {
+        Some(r) if envs.iter().any(|e| e.name == r && e.name != env.name) => r.to_string(),
+        _ => "dev".to_string(),
+    }
+}
+
+/// An environment's health: failed when its newest deployment failed,
+/// unknown when nothing says what it runs, else ok.
+pub fn health_of(source: StopSource, voyage: Option<&Voyage>) -> Health {
+    match voyage {
+        Some(v) if v.state == super::deployments::VoyageState::Failed => Health {
+            state: HealthState::Failed,
+            reason: Some(format!("deployment of {} failed", &v.sha[..v.sha.len().min(7)])),
+            url: v.url.clone(),
+        },
+        _ if source == StopSource::Unknown => Health { state: HealthState::Unknown, ..Health::default() },
+        _ => Health::default(),
+    }
+}
+
+/// Whether a voyage is still worth showing at `now`: in flight or failed, or
+/// docked within `DOCKED_FOR_SECS`.
+pub fn voyage_current(v: &Voyage, now: chrono::DateTime<chrono::Utc>) -> bool {
+    if v.state != super::deployments::VoyageState::Docked {
+        return true;
+    }
+    let at = v.finished_at.as_deref().unwrap_or(&v.started_at);
+    chrono::DateTime::parse_from_rfc3339(at).is_ok_and(|t| (now - t.with_timezone(&chrono::Utc)).num_seconds() <= DOCKED_FOR_SECS)
 }
 
 /// How landed work moves through the environments, from `.autocoder.json`'s
@@ -290,6 +443,9 @@ pub struct Pipeline {
     /// The host's merge gate: slots, the busy ones, and merge trains.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge: Option<super::gate::MergeGate>,
+    /// Deployments as ships between the villages of the environment row.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub voyages: Vec<Voyage>,
 }
 
 /// A task's trip through the merge gate, by issue number.
@@ -659,6 +815,8 @@ pub struct StopHistory {
     /// The deployment's release tag and page, passed on to the stop.
     pub tag: Option<String>,
     pub url: Option<String>,
+    pub deployed_at: Option<String>,
+    pub deployed_by: Option<String>,
     /// The commits the stop contains, or `None` when nothing says (no
     /// deployment, no ref): the stop is unknown.
     pub commits: Option<HashSet<String>>,
@@ -673,7 +831,16 @@ pub fn stop_from_hit(hit: Option<(EnvSource, (Option<super::deployments::Deploye
     let head = commits.first().cloned();
     let found = found.unwrap_or_default();
     let sha = (!found.sha.is_empty()).then_some(found.sha);
-    (StopHistory { source: stop_source(&source), sha, tag: found.tag, url: found.url, commits: Some(commits.into_iter().collect()) }, head)
+    let stop = StopHistory {
+        source: stop_source(&source),
+        sha,
+        tag: found.tag,
+        url: found.url,
+        deployed_at: found.deployed_at,
+        deployed_by: found.deployed_by,
+        commits: Some(commits.into_iter().collect()),
+    };
+    (stop, head)
 }
 
 /// Where each pushed tip ended up.
@@ -702,6 +869,9 @@ pub fn place_tips(tips: &[(String, u32)], stop_names: &[String], stops: &[StopHi
             sha: h.sha.clone(),
             tag: h.tag.clone(),
             url: h.url.clone(),
+            deployed_at: h.deployed_at.clone(),
+            deployed_by: h.deployed_by.clone(),
+            ..Stop::default()
         })
         .collect();
     let mut reached_by = HashMap::new();
@@ -850,15 +1020,28 @@ pub async fn read_pipeline(transport: &ServerTransport, repo: &Path) -> Pipeline
             (Vec::new(), Vec::new())
         }
     };
+    let gated = !stops.is_empty();
+    let mut voyages = Vec::new();
     for (i, env) in envs.iter().enumerate() {
         names.push(env.name.clone());
         // The environment's sources, in order: the first that names a commit
         // this clone has wins. A commit it hasn't fetched can't place
         // anything, so that source falls through to the next one too.
         let chain = if env.sources.is_empty() { super::deployments::default_chain(i + 1 == envs.len()) } else { env.sources.clone() };
+        // Deployments are read once: what runs, and the newest deployment as a voyage.
+        let deployments = match chain.contains(&EnvSource::Deployment) {
+            true => super::deployments::deployment_state(transport, repo, &env.name).await,
+            false => None,
+        };
+        let deployments = &deployments;
         let hit = super::deployments::first_hit(&chain, |source| async move {
             match source {
                 EnvSource::Branch => history(format!("origin/{}", env.branch)).await.map(|commits| (None, commits)),
+                EnvSource::Deployment => {
+                    let found = deployments.as_ref()?.deployed.clone()?;
+                    let commits = history(found.sha.clone()).await?;
+                    Some((Some(found), commits))
+                }
                 other => {
                     let found = super::deployments::locate(transport, repo, &env.name, &other).await?;
                     let commits = history(found.sha.clone()).await?;
@@ -870,16 +1053,50 @@ pub async fn read_pipeline(transport: &ServerTransport, repo: &Path) -> Pipeline
         let (stop, head) = stop_from_hit(hit);
         release = head;
         stops.push(stop);
+        // The voyage's cargo is what it adds to what the target ran before.
+        if let Some(v) = deployments.as_ref().and_then(|d| d.voyage.clone()) {
+            let new = history(v.sha.clone()).await.map(|c| c.into_iter().collect::<HashSet<String>>());
+            let old = match &v.previous {
+                Some(p) => history(p.clone()).await.map(|c| c.into_iter().collect::<HashSet<String>>()),
+                None => None,
+            };
+            let short = new.as_ref().is_some_and(|c| c.len() >= HISTORY_DEPTH) || (v.previous.is_some() && old.is_none());
+            voyages.push(Voyage {
+                from: voyage_from(env, &envs),
+                to: env.name.clone(),
+                state: v.state,
+                issues: new.as_ref().map(|c| voyage_issues(&tips, c, old.as_ref())).unwrap_or_default(),
+                issues_more: new.is_none() || short,
+                sha: v.sha,
+                tag: v.tag,
+                started_at: v.started_at,
+                finished_at: v.finished_at,
+                url: v.url,
+            });
+        }
     }
     let placement = place_tips(&tips, &names, &stops);
+    let now = chrono::Utc::now();
+    voyages.retain(|v| voyage_current(v, now));
+    let cargo = cargo_of(&tips, &placement.reached, placement.stops.len());
+    let mut placed = placement.stops;
+    for (i, (stop, (cargo, more))) in placed.iter_mut().zip(cargo).enumerate() {
+        stop.kind = if gated && i == 0 { StopKind::Gate } else { StopKind::Environment };
+        stop.cargo = cargo;
+        stop.cargo_more = more;
+        if stop.kind == StopKind::Environment {
+            stop.health = Some(health_of(stop.source, voyages.iter().find(|v| v.to == stop.name)));
+        }
+    }
     Pipeline {
         integration,
         sentinel,
         quay: placement.quay,
-        stops: placement.stops,
+        stops: placed,
         release,
         promotion,
         reached: placement.reached,
+        voyages,
         ..Pipeline::default()
     }
 }
@@ -1233,6 +1450,109 @@ mod tests {
         StopHistory { source: StopSource::Unknown, ..StopHistory::default() }
     }
 
+    fn env(name: &str, requires: Option<&str>) -> Environment {
+        Environment { name: name.into(), branch: format!("env/{name}"), requires: requires.map(str::to_string), sources: Vec::new() }
+    }
+
+    fn shas(items: &[&str]) -> HashSet<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn an_environment_carries_everything_it_runs() {
+        // nuc-1 runs c, b, a; release runs a. Cargo is cumulative, unlike `issues`.
+        let tips = vec![("d".to_string(), 4), ("c".to_string(), 3), ("b".to_string(), 2), ("a".to_string(), 1)];
+        let names = vec!["nuc-1".to_string(), "release".to_string()];
+        let p = place_tips(&tips, &names, &[set(&["c", "b", "a"]), set(&["a"])]);
+        let cargo = cargo_of(&tips, &p.reached, 2);
+        assert_eq!(cargo, vec![(vec![3, 2, 1], 0), (vec![1], 0)]);
+        assert_eq!((p.stops[0].issues.clone(), p.stops[1].issues.clone()), (vec![3, 2], vec![1]));
+        // Past CARGO_KEEP the rest are counted, newest kept.
+        let many: Vec<(String, u32)> = (0..50).map(|k| (format!("s{k}"), 100 + k)).collect();
+        let reached: HashMap<u32, usize> = many.iter().map(|(_, n)| (*n, 1)).collect();
+        let (kept, more) = &cargo_of(&many, &reached, 1)[0];
+        assert_eq!((kept.len(), *more, kept[0]), (CARGO_KEEP, 10, 100));
+    }
+
+    #[test]
+    fn a_promotion_carries_what_is_new_to_the_target() {
+        // release ran a; the promotion deploys what nuc-1 runs (c, b, a): it carries 3 and 2.
+        let tips = vec![("d".to_string(), 4), ("c".to_string(), 3), ("b".to_string(), 2), ("a".to_string(), 1)];
+        assert_eq!(voyage_issues(&tips, &shas(&["c", "b", "a"]), Some(&shas(&["a"]))), vec![3, 2]);
+        // A first deployment carries everything in it.
+        assert_eq!(voyage_issues(&tips, &shas(&["b", "a"]), None), vec![2, 1]);
+        // An issue with two tips is carried once.
+        let twice = vec![("c".to_string(), 3), ("b".to_string(), 3), ("a".to_string(), 1)];
+        assert_eq!(voyage_issues(&twice, &shas(&["c", "b", "a"]), None), vec![3, 1]);
+    }
+
+    #[test]
+    fn a_voyage_sails_from_the_environment_it_requires() {
+        let envs = vec![env("nuc-1", Some("integration")), env("release", Some("nuc-1")), env("canary", None), env("odd", Some("green"))];
+        let from: Vec<String> = envs.iter().map(|e| voyage_from(e, &envs)).collect();
+        assert_eq!(from, vec!["dev", "nuc-1", "dev", "dev"]);
+        // A requires naming nothing configured (or itself) sails from the dev village.
+        assert_eq!(voyage_from(&env("x", Some("x")), &[env("x", Some("x"))]), "dev");
+    }
+
+    #[test]
+    fn health_says_failed_unknown_or_ok() {
+        use super::super::deployments::VoyageState;
+        let v = |state| Voyage { to: "release".into(), state, sha: "9b1e4401234".into(), url: Some("https://x/log".into()), ..Voyage::default() };
+        let failed = health_of(StopSource::Deployment, Some(&v(VoyageState::Failed)));
+        assert_eq!((failed.state, failed.reason.as_deref(), failed.url.as_deref()), (HealthState::Failed, Some("deployment of 9b1e440 failed"), Some("https://x/log")));
+        assert_eq!(health_of(StopSource::Deployment, Some(&v(VoyageState::Sailing))).state, HealthState::Ok, "in flight is not a failure");
+        assert_eq!(health_of(StopSource::Unknown, None).state, HealthState::Unknown);
+        assert_eq!(health_of(StopSource::Release, None).state, HealthState::Ok);
+    }
+
+    #[test]
+    fn docked_voyages_are_reported_for_an_hour_others_until_superseded() {
+        use super::super::deployments::VoyageState;
+        let now = chrono::DateTime::parse_from_rfc3339("2026-11-09T12:00:00Z").unwrap().with_timezone(&chrono::Utc);
+        let at = |state, finished: &str| Voyage { state, started_at: "2026-11-09T09:00:00Z".into(), finished_at: Some(finished.into()), ..Voyage::default() };
+        assert!(voyage_current(&at(VoyageState::Docked, "2026-11-09T11:30:00Z"), now));
+        assert!(!voyage_current(&at(VoyageState::Docked, "2026-11-09T10:30:00Z"), now));
+        assert!(voyage_current(&at(VoyageState::Failed, "2026-11-01T10:30:00Z"), now), "a failure stays until a newer deployment");
+        assert!(voyage_current(&Voyage { state: VoyageState::Sailing, ..Voyage::default() }, now));
+    }
+
+    #[test]
+    fn the_environment_row_serializes_as_the_design_note_says() {
+        use super::super::deployments::VoyageState;
+        let p = Pipeline {
+            stops: vec![
+                Stop { name: "master-green".into(), kind: StopKind::Gate, ..Stop::default() },
+                Stop {
+                    name: "release".into(),
+                    tag: Some("v0.6.0".into()),
+                    deployed_at: Some("2026-11-09T17:40:02Z".into()),
+                    deployed_by: Some("laird".into()),
+                    cargo: vec![362, 361],
+                    cargo_more: 41,
+                    health: Some(Health::default()),
+                    ..Stop::default()
+                },
+            ],
+            voyages: vec![Voyage { from: "nuc-1".into(), to: "release".into(), state: VoyageState::Sailing, sha: "c0ffee1".into(), issues: vec![363], ..Voyage::default() }],
+            ..Pipeline::default()
+        };
+        let json = serde_json::to_value(&p).unwrap();
+        assert_eq!(json["stops"][0]["kind"], "gate");
+        assert_eq!(json["stops"][1]["kind"], "environment");
+        assert_eq!(json["stops"][1]["cargo"], serde_json::json!([362, 361]));
+        assert_eq!(json["stops"][1]["cargo_more"], 41);
+        assert_eq!(json["stops"][1]["health"], serde_json::json!({"state": "ok"}));
+        assert_eq!(json["stops"][1]["deployed_by"], "laird");
+        assert_eq!(json["voyages"][0], serde_json::json!({"from": "nuc-1", "to": "release", "state": "sailing", "sha": "c0ffee1", "started_at": "", "issues": [363]}));
+        assert!(json["stops"][0].get("cargo").is_none() && json["stops"][0].get("health").is_none(), "empty fields stay out");
+        let back: Pipeline = serde_json::from_value(json).unwrap();
+        assert_eq!(back.voyages, p.voyages);
+        // An older snapshot without the new fields still reads: every stop an environment.
+        let old: Stop = serde_json::from_str(r#"{"name": "prod", "issues": [1]}"#).unwrap();
+        assert_eq!((old.kind, old.cargo.len(), old.health), (StopKind::Environment, 0, None));
+    }
+
     #[test]
     fn tips_stop_at_the_furthest_consecutive_stop() {
         let tips = vec![
@@ -1289,7 +1609,7 @@ mod tests {
     }
 
     fn found(sha: &str, tag: Option<&str>) -> Option<super::super::deployments::Deployed> {
-        Some(super::super::deployments::Deployed { sha: sha.into(), tag: tag.map(str::to_string), url: None })
+        Some(super::super::deployments::Deployed { sha: sha.into(), tag: tag.map(str::to_string), url: None, ..super::super::deployments::Deployed::default() })
     }
 
     #[tokio::test]
@@ -1402,7 +1722,7 @@ mod tests {
     fn stop_source_serializes_and_old_stops_still_parse() {
         let stop = Stop { name: "uat".into(), issues: vec![461], source: StopSource::Unknown, ..Stop::default() };
         let json = serde_json::to_value(&stop).unwrap();
-        assert_eq!(json, serde_json::json!({"name": "uat", "issues": [461], "source": "unknown"}));
+        assert_eq!(json, serde_json::json!({"name": "uat", "issues": [461], "source": "unknown", "kind": "environment"}));
         let deployed = Stop { source: StopSource::Deployment, sha: Some("9b1e440".into()), ..stop.clone() };
         assert_eq!(serde_json::to_value(&deployed).unwrap()["sha"], "9b1e440");
 
@@ -1426,7 +1746,11 @@ mod tests {
             ..Pipeline::default()
         };
         let v = build(&swarm(vec![]), &[], pipeline.clone());
-        assert_eq!(v.pipeline.stops, pipeline.stops);
+        // With no cargo given, each stop runs its own issues and every later stop's.
+        let mut want = pipeline.stops.clone();
+        want[0].cargo = vec![3];
+        want[1].cargo = vec![3];
+        assert_eq!(v.pipeline.stops, want);
         assert_eq!(v.pipeline.promotion, Promotion::Feature);
         assert_eq!(v.pipeline.reached, pipeline.reached);
     }
