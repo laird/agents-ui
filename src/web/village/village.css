@@ -133,3 +133,8 @@
   .dialog dt { color: var(--ink-dim); }
   .dialog .fact { display: block; }
   .dialog dd { margin: 0; }
+  /* The environment row's mini-map: a box per village, framed while in view, a dot per ship under sail. */
+  .minimap { display: flex; gap: 4px; margin-bottom: 6px; overflow-x: auto; }
+  .minimap .mm { flex: 0 0 auto; font: 700 11px/1.2 var(--mono); color: var(--ink); background: rgba(6,8,20,.6); border: 1px solid var(--hc); border-left-width: 4px; border-radius: 3px; padding: 2px 6px; cursor: pointer; }
+  .minimap .mm.in { outline: 2px solid var(--gold); outline-offset: 1px; }
+  .minimap .mm i { display: inline-block; width: 5px; height: 5px; margin-left: 4px; border-radius: 50%; background: var(--gold); vertical-align: middle; }

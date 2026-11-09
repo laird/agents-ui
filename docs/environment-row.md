@@ -246,6 +246,11 @@ voyages. The protocol gains, all optional:
   - ships loading, sailing, docking and failing;
   - the mini-map, the rank art, and worlds in their slot;
   - page tests.
+  Delivered in `envrow.js` and `voyages.js`, with two departures from the
+  layout above, left for a follow-up: the dev village keeps its environment
+  locks and harbour (so where each issue is still reads off its canal, beside
+  what each environment runs), and a world still stacks its platform over
+  the dev village rather than in the production slot.
 - **#386, demo:** the `gh` shim and `swarm_sim.py` script a deploy to
   `nuc-1` (pending → in_progress → success), a promotion `nuc-1` →
   `release`, and a failed deployment.

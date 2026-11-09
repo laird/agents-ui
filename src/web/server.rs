@@ -44,6 +44,8 @@ const VILLAGE_ASSETS: &[(&str, &str, &str)] = &[
     ("trips.js", "text/javascript; charset=utf-8", include_str!("village/trips.js")),
     ("ship.js", "text/javascript; charset=utf-8", include_str!("village/ship.js")),
     ("features.js", "text/javascript; charset=utf-8", include_str!("village/features.js")),
+    ("envrow.js", "text/javascript; charset=utf-8", include_str!("village/envrow.js")),
+    ("voyages.js", "text/javascript; charset=utf-8", include_str!("village/voyages.js")),
     ("worlds.js", "text/javascript; charset=utf-8", include_str!("village/worlds.js")),
     ("panels.js", "text/javascript; charset=utf-8", include_str!("village/panels.js")),
     ("dialogs.js", "text/javascript; charset=utf-8", include_str!("village/dialogs.js")),
@@ -1443,7 +1445,7 @@ mod tests {
         }
         // The features and the modules they lean on, two imports or more away included.
         for module in [
-            "registry.js", "layout.js", "lifecycle.js", "trips.js", "ship.js", "features.js", "worlds.js", "panels.js", "dialogs.js",
+            "registry.js", "layout.js", "lifecycle.js", "trips.js", "ship.js", "features.js", "envrow.js", "voyages.js", "worlds.js", "panels.js", "dialogs.js",
             "labels.js", "key.js", "data.js", "state.js", "palette.js", "sprites/houses.js", "scenery.js", "people.js",
             "themes/registry.js", "themes/medieval.js", "themes/modern.js", "themes/future.js",
         ] {
@@ -1489,6 +1491,8 @@ mod tests {
             ("lifecycle.js", &["registerLayer(", "registerHit(", "registerLabels(", "registerCounter("][..]),
             ("ship.js", &["registerLayer(", "registerHit(", "registerLabels(", "registerCounter("][..]),
             ("features.js", &["registerLayer(", "registerHit(", "registerOverlay("][..]),
+            ("envrow.js", &["registerLayer(", "registerHit(", "registerLabels(", "registerCounter(", "registerOverlay("][..]),
+            ("voyages.js", &["registerLayer(", "registerHit("][..]),
             ("worlds.js", &["registerCounter("][..]),
             ("dialogs.js", &["registerOverlay("][..]),
             ("labels.js", &["registerOverlay("][..]),
@@ -1995,6 +1999,54 @@ mod tests {
         assert!(body.contains("const repo = repoUrl(v), url = s.url || (repo ? `${repo}/releases/tag/${encodeURIComponent(s.tag)}` : null);"));
         // Worlds: the release cart sets off as the ship leaves the map.
         assert!(body.contains("const sailed = Ds.voyage ? Ds.voyage.t0 + SAIL : 0;"));
+    }
+
+    /// The environment row (#385, docs/environment-row.md): a village per
+    /// environment east of the dev village, production right-most, with ships
+    /// between them for each voyage.
+    #[test]
+    fn village_html_draws_the_environment_row() {
+        let body = &village_source();
+        // The row: every environment of a development village, the green gate kept as a lock.
+        assert!(body.contains("return v.pipeline.stops.map((s, i) => ({ s, i })).filter(({ s }) => s.kind !== 'gate');"));
+        assert!(body.contains("if (v.plane === 'runtime') return [];"));
+        assert!(body.contains("const envs = envStops(v).map(({ s, i }, k, all) => ({ s, i, k, x: devW + RIVER + k * (ENV_W + RIVER), w: ENV_W,"));
+        assert!(body.contains("rank: k === all.length - 1 ? 'capital' : 'town' }));"), "production is the right-most village, the capital");
+        assert!(body.contains("const W = envs.length ? envs[envs.length - 1].x + ENV_W + 6 : devW;"));
+        // Each village: its sign, its warehouse of cargo grouped by feature, its health.
+        assert!(body.contains("export const versionOf = s => s.tag || (s.sha ? String(s.sha).slice(0, 7) : null);"));
+        assert!(body.contains("const k = fs.findIndex(f => (f.subtasks || []).some(s => s.number === n));"));
+        assert!(body.contains("tap(x, y + 1, 5, 5, { kind: 'crate', n: sl.n, at: 'env', i: e.i });"));
+        assert!(body.contains("if (o.at === 'env') return `runs in ${stops[o.i] ? stops[o.i].name : 'an environment'}`;"));
+        assert!(body.contains("if (health === 'failed') {"));
+        assert!(body.contains("} else if (health === 'incident') {"));
+        assert!(body.contains("if (e.rank === 'capital') envKeep("));
+        // The sign's dialog: version and deploy time, the Release and Deployments, and the cargo.
+        assert!(body.contains("title: `${s.name} · environment village`, line: ver ? `Runs ${ver}${when ? ', deployed ' + when : ''}` : 'Nothing says what runs here',"));
+        assert!(body.contains("deploys = s.deployment_url || (repo && s.source === 'deployment' ? `${repo}/deployments/${encodeURIComponent(s.name)}` : null);"));
+        assert!(body.contains("items: issueItems(v, cargo).map(it => ({ ...it, label: label.get(it.number) })), links: envLinks(v, s) };"));
+        // Voyages: each state drawn apart, cargo loaded at the source and unloaded at the target.
+        for state in ["loading: (v, vo) => `Loading", "sailing: (v, vo) => `Deploying", "docked: (v, vo) => `${shortName(vo)} arrived at", "failed: (v, vo) => `Deploying ${shortName(vo)} to ${vo.to} failed: turned back"] {
+            assert!(body.contains(state), "no words for voyage state: {state}");
+        }
+        assert!(body.contains("if (state_ === 'sailing') { pose.x = r.start + (r.end - r.start) * ease;"));
+        assert!(body.contains("if (state_ === 'failed') pose.back = true;"));
+        assert!(body.contains("c.save(); c.translate(2 * mid, 0); c.scale(-1, 1); state.T.vessel(c, x, cy, t, 0, oy); c.restore();"), "a failed ship turns back");
+        assert!(body.contains("if (state_ === 'loading' && !still) pose.carry = { pts: [[r.a - 14, cy - 4], [r.a + 4, cy - 4]]"));
+        assert!(body.contains("if (pose.aboard) pose.carry = { pts: [[r.b - 4, cy - 4], [r.b + SHED.dx + 6, cy - 4], [r.b + SHED.dx + 6, cy - SHED.up + 16]]"));
+        assert!(body.contains("tap(left, top, hw, hh, { kind: 'voyage', id, at: pose.state, vo });"));
+        // Timed from when first seen, so a reload never replays one; a change nothing reported plays one.
+        assert!(body.contains("seen[k] = old ? t : vo.state === 'sailing' ? t - VOYAGE_SAIL / 2 : -1e9;"));
+        assert!(body.contains("sc.played.push({ from: k ? envs[k - 1].s.name : 'dev', to: s.name, state: 'sailing'"));
+        assert!(body.contains("noteVoyages(sc, sc.v, v, t);"));
+        // The mini-map, and `#shop@release` scrolls to that village.
+        assert!(body.contains(r#"<nav class="minimap" id="minimap" hidden aria-label="Villages in the environment row"></nav>"#));
+        assert!(body.contains("const wide = lay && lay.envs.length && cv.getBoundingClientRect().width > miniVp.clientWidth + 2;"));
+        assert!(body.contains("if (e && state.scrolledTo !== want) { state.scrolledTo = want; scrollToVillage(e.x); }"));
+        // Worlds: the release road leaves from the end of the row, not across it.
+        assert!(body.contains("out = SIDE + ((Ds.L.envs || []).length ? Ds.L.W - 4 : Ds.L.castleX + 34);"));
+        // The dev village's trees stop at its own edge.
+        assert!(body.contains("x < devW - 14; x += 15)"));
     }
 
     #[test]

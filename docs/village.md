@@ -216,6 +216,45 @@ Release. The tag and link come from the deployment `tools/release.sh` records
 (description `Release vX.Y.Z`, status `log_url`). In the demo,
 `touch "$AGENTS_UI_DEMO_DIR/state/release-now"` cuts a release at once.
 
+### The environment row
+
+East of the dev village stands one village per environment, in
+`.autocoder.json` order, with production right-most (design:
+[environment-row.md](environment-row.md)). The sentinel's green ref stays a
+lock in the dev village. Each environment village has:
+
+- a **sign** with the version it runs (its tag, else a short sha) and when it
+  was deployed. Click it, or anywhere in the village, for the version, who
+  deployed it, links to the Release, the environment's Deployments and the
+  commit, and the full list of issues it runs;
+- a **warehouse** holding that cargo, crates grouped behind the banner colour
+  of the feature each belongs to (grey for fixes), with "+N" past the bay;
+- a **health mark**: smoke and a red flag when its newest deployment failed,
+  a fire for an open incident, a "?" when nothing says what it runs;
+- its **rank**: a town, and production a capital with a keep, in the current
+  theme.
+
+Between villages, a ship (a rocket downtown, a shuttle in the future) for
+each deployment in `pipeline.voyages`:
+
+| Voyage | On the map |
+|---|---|
+| `loading` | at the source's east dock, crates carried aboard |
+| `sailing` | under sail on the river (a rocket in flight), leaving a wake |
+| `docked` | at the target's west dock, crates carried into its warehouse |
+| `failed` | turned back to the source, sail torn and a red flag, cargo still aboard |
+
+Click a ship for what it carries and its Deployment. A voyage is timed from
+when the page first saw it, so a page opened later never replays one. When
+what an environment runs changes and no Deployment says so (a Release, tag,
+version URL or branch), the page plays a voyage of its own from the village
+before.
+
+When the row is wider than the panel (zoomed in, or on a phone), a mini-map
+over the map has a box per village, coloured by health, with a dot per ship
+under sail. The boxes in view are framed, and clicking one scrolls to it.
+`/village#shop@release` opens with `release` in view.
+
 ## Following a feature
 
 A **feature** is a parent issue split into subtasks. The village answers "is

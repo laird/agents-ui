@@ -35,14 +35,19 @@ export function layout(v) {
   // Feature banners stand in a strip cleared out of the forest, east of the
   // houses; the map widens if they need the room. No features, no strip.
   const banners = (v.features || []).map((f, k) => ({ f, x: forestX + 12 + k * 30, y: 14, col: FEATURE_COLS[k % FEATURE_COLS.length] }));
-  const W = Math.max(cx0 + vw + 40, roadX + 70, castleX + 46, banners.length ? forestX + 12 + banners.length * 30 : 0);
+  const devW = Math.max(cx0 + vw + 40, roadX + 70, castleX + 46, banners.length ? forestX + 12 + banners.length * 30 : 0);
+  // The environment row: a village per environment east of the dev village,
+  // a stretch of river before each, production right-most (docs/environment-row.md).
+  const envs = envStops(v).map(({ s, i }, k, all) => ({ s, i, k, x: devW + RIVER + k * (ENV_W + RIVER), w: ENV_W,
+    rank: k === all.length - 1 ? 'capital' : 'town' }));
+  const W = envs.length ? envs[envs.length - 1].x + ENV_W + 6 : devW;
   const H = canalY + 34;
   // What's built on: river, docks, plaza, roads, house rows, canal and its
   // stations. Every free 9×8 cell may get a decoration.
   const taken = [
     [0, 0, W, 14], [4, 8, 62, 46], [4, 46, cx0 + vw, 14], [hallX - 10, 4, 74, 46],
     [roadX - 2, 46, RD + 4, quayY - 40], [roadX - 18, quayY - 12, W, H],
-    [forestX - 2, 12, W, canalY - 46]
+    [forestX - 2, 12, W, canalY - 46], [devW, 0, W, H]
   ];
   for (let r = 0; r < rows; r++) {
     const left = roadX - per * LW, right = roadX + RD + per * LW;
@@ -63,7 +68,16 @@ export function layout(v) {
     const zone = Math.floor(hash(x >> 5, y >> 5) * 6), k = hash(x + 11, y + 7) < 0.7 ? zone : Math.floor(hash(y, x + 3) * 6);
     decor.push({ x: x + Math.floor(hash(y, x) * 4), y: y + Math.floor(hash(x, y + 1) * 3), k });
   }
-  return { per, rows, cx0, vw, roadX, hallX, top, lots, quayY, canalY, lockStart, castleX, W, H, decor, banners };
+  return { per, rows, cx0, vw, roadX, hallX, top, lots, quayY, canalY, lockStart, castleX, W, H, decor, banners, devW, envs };
+}
+/* The environment row's sizes: each environment village, and the river before it. */
+export const ENV_W = 120, RIVER = 56;
+/* The stops drawn as villages of their own: every environment of a
+ * development village. The sentinel's green ref stays a lock (a gate), and a
+ * runtime's stages stay its pipeline. */
+export function envStops(v) {
+  if (v.plane === 'runtime') return [];
+  return v.pipeline.stops.map((s, i) => ({ s, i })).filter(({ s }) => s.kind !== 'gate');
 }
 /* Where backlog crate i rests at the docks. */
 export const slotPos = i => ({ x: 10 + (i % 8) * 6, y: 22 + Math.floor(i / 8) * 6 });
@@ -124,8 +138,8 @@ registerLayer({ z: 20, draw(c, { lay }) {
 } });
 /* The forest east of the houses (clear of the banner strip), groves and props on free ground. */
 registerLayer({ z: 40, draw(c, { lay }, t) {
-  const { W, hallX, canalY, cx0, vw } = lay;
-  for (let x = Math.max(cx0 + vw + 6, hallX + 64); x < W - 14; x += 15) for (let y = 16; y < canalY - 38; y += 16) if (hash(x, y) < 0.55 && !inBannerStrip(lay, x, y)) state.T.tree(c, x + Math.floor(hash(y, x) * 4), y);
+  const { devW, hallX, canalY, cx0, vw } = lay;
+  for (let x = Math.max(cx0 + vw + 6, hallX + 64); x < devW - 14; x += 15) for (let y = 16; y < canalY - 38; y += 16) if (hash(x, y) < 0.55 && !inBannerStrip(lay, x, y)) state.T.tree(c, x + Math.floor(hash(y, x) * 4), y);
   lay.decor.forEach(d => d.tree ? state.T.tree(c, d.x, d.y) : state.T.decor && state.T.decor(c, d.x, d.y, d.k, state.reduce ? 0 : t));
   shadow(c, hallX - 2, 40, 42, 2);
 } });

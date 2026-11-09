@@ -115,6 +115,8 @@ src/
       trips.js      #   what each change between two polls sets off: diff(), the queued trips and where each is
       ship.js       #   the canal: quay, locks, harbour and the ship that sails on a release
       features.js   #   feature banners, trails, barges, fog, the strip and the feature dialog
+      envrow.js     #   the environment row: a village per environment (sign, warehouse of cargo, health, rank), the mini-map
+      voyages.js    #   ships between the row's villages: loading, sailing, docked, failed, and voyages the page plays itself
       worlds.js     #   a world drawn as platform over dev village; draw(); the world counters
       panels.js     #   the flow strip (renderFlow walks the counters), toast, zoom
       dialogs.js    #   explain()/act() dispatch on registered hits; the hit test; keyboard targets

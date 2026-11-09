@@ -97,9 +97,10 @@ function drawWorld(t, w) {
   downstream(ctx, 5, g.srcY, 14, g.devTop + 11 - g.srcY, t);
   R(ctx, 2, g.srcY - 8, 20, 8, P.o); R(ctx, 3, g.srcY - 7, 18, 6, state.T === MODERN ? M.concrete : state.T === FUTURE ? F.hullD : P.stone); R(ctx, 9, g.srcY - 6, 6, 5, P.dark);
   // The road up: from the dev village's harbour to the platform's main road.
-  const ry = g.devTop + Ds.L.canalY + 4;
+  // With an environment row it leaves from the end of the row, not across it.
+  const ry = g.devTop + Ds.L.canalY + 4, out = SIDE + ((Ds.L.envs || []).length ? Ds.L.W - 4 : Ds.L.castleX + 34);
   state.T.road(ctx, g.W - 20, g.roadY - 3, 16, ry - g.roadY + 9);
-  state.T.road(ctx, SIDE + Ds.L.castleX + 36, ry, g.W - 20 - (SIDE + Ds.L.castleX + 36), 6);
+  state.T.road(ctx, out + 2, ry, g.W - 20 - (out + 2), 6);
   const roadEnd = SIDE + Ps.L.cx0 + Ps.L.vw - 4;
   state.T.road(ctx, roadEnd, g.roadY - 3, g.W - 20 - roadEnd, 6);
 
@@ -108,7 +109,7 @@ function drawWorld(t, w) {
   // ship sails off the dev village's edge, and none while the ship is still in sight.
   const sailed = Ds.voyage ? Ds.voyage.t0 + SAIL : 0;
   if (w.shipping.length && t >= sailed) {
-    const pts = [[SIDE + Ds.L.castleX + 34, ry], [g.W - 12, ry], [g.W - 12, g.roadY], [roadEnd, g.roadY]];
+    const pts = [[out, ry], [g.W - 12, ry], [g.W - 12, g.roadY], [roadEnd, g.roadY]];
     const len = pts.slice(1).reduce((n, p, k) => n + Math.hypot(p[0] - pts[k][0], p[1] - pts[k][1]), 0);
     const d = state.reduce ? len / 2 : ((t - sailed) / 30) % len;
     const at = porterPos({ t0: 0, speed: 1, pts }, d) || pts[0];

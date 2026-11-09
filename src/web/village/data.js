@@ -10,6 +10,8 @@ import { esc, fit, renderFlow, toast } from './panels.js';
 import { kbox, kbuttons, placeKeys, repoUrl } from './dialogs.js';
 import { diff } from './trips.js';
 import { releaseOf, sail } from './ship.js';
+import { noteVoyages } from './voyages.js';
+import { scrollToVillage } from './envrow.js';
 import { fadeLive } from './features.js';
 import { draw, updateWorld } from './worlds.js';
 import { legend, renderLegend } from './key.js';
@@ -37,6 +39,7 @@ function updateScene(v, t) {
   if (rel) { if (sc.v && sameSource && rel !== was) sail(sc, v, t); sc.lastRelease = rel; }
   else if (!was && sc.lastDelivered !== null && sc.v && delivered !== sc.lastDelivered && delivered) sc.fireworks = t;
   sc.lastDelivered = delivered;
+  noteVoyages(sc, sc.v, v, t);
   sc.v = v; sc.L = lay;
   return sc;
 }
@@ -57,9 +60,10 @@ function describe(v) {
   const fw = v.workflow || v.framework;
   return [fw, v.plane].filter(Boolean).map(x => '· ' + x).join(' ');
 }
-/* Show a village (`shop`) or a world (`world:shop`). */
-function select(name) {
-  const { villages, worlds } = state;
+/* Show a village (`shop`) or a world (`world:shop`); `shop@release` scrolls
+ * to that environment's village. */
+function select(want) {
+  const { villages, worlds } = state, [name, env] = String(want).split('@');
   const w = worlds.find(x => x.name === name);
   const v = villages.find(x => x.project === name);
   if (w) state.view = { world: w.name };
@@ -79,6 +83,8 @@ function select(name) {
   }
   fit();
   if (state.reduce) draw(0);
+  const sc = !view.world && state.scenes[view.village], e = env && sc && sc.L.envs.find(x => x.s.name === env);
+  if (e && state.scrolledTo !== want) { state.scrolledTo = want; scrollToVillage(e.x); }
   placeOverlays();
 }
 
@@ -99,12 +105,12 @@ async function poll() {
       pick.innerHTML = names.map(n => `<option value="${esc(n)}">${esc(label(n))}</option>`).join('');
     }
     const view = state.view;
-    const want = decodeURIComponent(location.hash.slice(1)) || (view && (view.world || view.village)) || names[0];
-    if (names.includes(want)) pick.value = want;
+    const want = String(decodeURIComponent(location.hash.slice(1)) || (view && (view.world || view.village)) || names[0] || '');
+    if (names.includes(want.split('@')[0])) pick.value = want.split('@')[0];
     document.getElementById('empty').hidden = villages.length > 0;
     cv.hidden = villages.length === 0;
     if (!villages.length) document.getElementById('empty').textContent = 'No swarms running. Start one from the dashboard or the agents-tui terminal.';
-    else select(pick.value || names[0]);
+    else select(want.includes('@') && want.split('@')[0] === pick.value ? want : pick.value || names[0]);
     document.getElementById('status').textContent = 'Live · updated ' + new Date().toLocaleTimeString();
   } catch (e) {
     document.getElementById('status').textContent = "Can't reach agents-tui. Retrying…";
