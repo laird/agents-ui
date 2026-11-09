@@ -7,6 +7,7 @@ import './themes/future.js';
 import './layout.js';
 import './lifecycle.js';
 import './ship.js';
+import './gatehouse.js';
 import './features.js';
 import './envrow.js';
 import './voyages.js';

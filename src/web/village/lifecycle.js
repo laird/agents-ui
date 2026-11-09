@@ -142,7 +142,12 @@ registerLayer({ z: 120, draw(c, { at }, t) {
     if (a.waiting) return true;
     person(c, a.x - 4, a.y - 11, p.seed, a.carry ? (blink(t, 140) ? 'carrystep' : 'carry') : 'stand');
     tap(a.x - 4, a.y - 11, 8, 12, { kind: 'porter', seed: p.seed, n: p.issue, to: p.to, carrying: a.carry });
-    if (a.carry) { state.T.crate(c, a.x - 2, a.y - 16, p.kind, p.pr, p.sealed); tap(a.x - 2, a.y - 16, 5, 5, { kind: 'crate', n: p.issue, at: 'transit', to: p.to }); }
+    if (a.carry) {
+      state.T.crate(c, a.x - 2, a.y - 16, p.kind, p.pr, p.sealed);
+      // Handed back by the merge gate: dented.
+      if (p.dented) { R(c, a.x - 1, a.y - 15, 1, 1, P.o); R(c, a.x + 1, a.y - 14, 1, 1, P.woodD); }
+      tap(a.x - 2, a.y - 16, 5, 5, { kind: 'crate', n: p.issue, at: 'transit', to: p.to });
+    }
     return true;
   });
 } });
@@ -179,7 +184,7 @@ function crateWhere(o, v, theme) {
 /* Where a trip takes its crate, in the theme's words. */
 function tripPlace(to, theme) {
   return { house: theme.labels.houses.toLowerCase().replace(/s$/, ''), backlog: theme.labels.docks.toLowerCase(), board: theme.labels.board.toLowerCase(),
-    quay: theme.labels.quay.toLowerCase(), ship: theme.labels.ship.toLowerCase() }[to] || 'next place';
+    quay: theme.labels.quay.toLowerCase(), ship: theme.labels.ship.toLowerCase(), gate: (theme.labels.gate || 'gatehouse').toLowerCase() }[to] || 'next place';
 }
 function subWords(sa, v) {
   return `${sa.agent_type}${sa.description ? ' · ' + sa.description : ''}` +
@@ -235,6 +240,7 @@ registerHit({ kind: 'porter', key: false, dialog(o, sc, theme) {
       : !o.carrying ? 'Walking home'
       : o.to === 'ship' ? `Loading the finished work onto the ${theme.labels.ship.toLowerCase()}`
       : o.to === 'quay' ? `Taking the finished work to the ${theme.labels.quay.toLowerCase()}`
+      : o.to === 'gate' ? `Taking the finished work through the ${(theme.labels.gate || 'gatehouse').toLowerCase()}`
       : o.to === 'house' ? 'Carrying a claimed issue from the backlog to its house'
       : o.to === 'board' ? `Pinning a blocked issue to the ${theme.labels.board.toLowerCase()}`
       : o.to === 'backlog' ? `Bringing an issue to the ${theme.labels.docks.toLowerCase()}`

@@ -110,7 +110,7 @@ const FB = {
 export const FUTURE = {
   name: 'Future',
   pair: 'modern',
-  labels: { docks: 'Cargo bay', board: 'Holo-board', houses: 'Pods', quay: 'Launch rail', castle: 'Spaceport', hall: 'Command dome', ship: 'Shuttle', sails: 'launches' },
+  labels: { docks: 'Cargo bay', board: 'Holo-board', houses: 'Pods', quay: 'Launch rail', castle: 'Spaceport', hall: 'Command dome', ship: 'Shuttle', sails: 'launches', gate: 'Scanner arch' },
   towers: [[2, -58, 9, 50], [13, -55, 18, 45]],
   ground(c, x0, y0, w, h) {
     R(c, x0, y0, w, h, F.deckD);
@@ -251,6 +251,21 @@ export const FUTURE = {
   },
   hold: [[33, -14], [38, -14], [33, -19], [38, -19], [33, -24], [38, -24]], holdBadge: [31, -32], hull: [14, -58, 30, 50], flies: true,
   /* The cargo shuttle that brings new issues down the conduit, hovering. */
+  /* The scanner arch: laser grids across the walkway while anything is
+   * gating, and one scanner pad per gate slot, glowing while busy. */
+  gatehouse(c, g, t, busy) {
+    const { x0, y, w, rx, rw } = g;
+    [rx - 3, rx + rw + 1].forEach(px => { R(c, px, y + 2, 2, 20, P.o); R(c, px, y + 3, 1, 18, F.hullD); R(c, px, y + 3, 2, 1, F.cyan); });
+    R(c, rx - 4, y, rw + 8, 3, P.o); R(c, rx - 3, y + 1, rw + 6, 1, F.magenta);
+    if (busy.size && !state.reduce) for (let k = 0; k < 4; k++) if (blink(t + k * 90, 180)) R(c, rx - 1, y + 5 + k * 4, rw + 2, 1, F.magenta);
+    R(c, x0, y + 3, w, 20, P.o); R(c, x0 + 1, y + 4, w - 2, 18, F.hullD); R(c, x0 + 1, y + 4, w - 2, 1, F.hull);
+    g.tables.forEach(([tx, ty], k) => {
+      const on = busy.has(k + 1);
+      R(c, tx + 4, ty - 9, 6, 6, P.o); R(c, tx + 5, ty - 8, 4, 4, on ? F.cyanL : F.navy);
+      R(c, tx, ty + 5, 10, 3, P.o); R(c, tx + 1, ty + 5, 8, 2, on ? F.cyan : F.deckD);
+      if (on && !state.reduce && blink(t + k * 70, 140)) R(c, tx + 2 + (Math.floor(t / 140) % 6), ty + 4, 1, 1, F.cyanL);
+    });
+  },
   supply(c, x, t, load) {
     x = Math.round(x);
     const y = !state.reduce && blink(t, 500) ? 1 : 0;

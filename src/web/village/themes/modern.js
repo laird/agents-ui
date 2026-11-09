@@ -147,7 +147,7 @@ const MB = {
 export const MODERN = {
   name: 'Modern business district',
   pair: 'medieval',
-  labels: { docks: 'Mailroom', board: 'Whiteboard', houses: 'Offices', quay: 'Loading bay', castle: 'Launch pad', hall: 'Headquarters', ship: 'Rocket', sails: 'lifts off' },
+  labels: { docks: 'Mailroom', board: 'Whiteboard', houses: 'Offices', quay: 'Loading bay', castle: 'Launch pad', hall: 'Headquarters', ship: 'Rocket', sails: 'lifts off', gate: 'QA checkpoint' },
   towers: [[3, -51, 6, 43], [12, -51, 18, 43]],
   ground(c, x0, y0, w, h) {
     for (let y = y0; y < y0 + h; y += 4) R(c, x0, y, w, Math.min(4, y0 + h - y), (y >> 2) % 2 ? M.lawn : M.lawnD);
@@ -258,6 +258,21 @@ export const MODERN = {
   },
   hold: [[30, -14], [35, -14], [30, -19], [35, -19], [30, -24], [35, -24]], holdBadge: [29, -32], hull: [12, -52, 28, 46], flies: true,
   /* The delivery truck that brings new issues along the top road. */
+  /* The QA checkpoint: a security gate over the road, and a lab with one
+   * conveyor scanner per gate slot; a busy one runs and shows green. */
+  gatehouse(c, g, t, busy) {
+    const { x0, y, w, rx, rw } = g;
+    [rx - 3, rx + rw + 1].forEach(px => { R(c, px, y + 2, 2, 20, P.o); R(c, px, y + 3, 1, 18, M.steel); });
+    R(c, rx - 4, y, rw + 8, 3, P.o); R(c, rx - 3, y + 1, rw + 6, 1, busy.size ? M.led : P.p0);
+    R(c, x0, y + 3, w, 20, P.o); R(c, x0 + 1, y + 4, w - 2, 18, M.concreteL); R(c, x0 + 1, y + 4, w - 2, 2, M.concrete);
+    g.tables.forEach(([tx, ty], k) => {
+      const on = busy.has(k + 1), off = on ? Math.floor(t / 120) % 3 : 0;
+      R(c, tx + 4, ty - 9, 6, 6, P.o); R(c, tx + 5, ty - 8, 4, 4, on ? M.led : M.glassD);
+      R(c, tx, ty + 5, 10, 3, P.o); R(c, tx + 1, ty + 5, 8, 1, M.steelD);
+      for (let k2 = off; k2 < 8; k2 += 3) R(c, tx + 1 + k2, ty + 6, 1, 1, M.steel);
+      R(c, tx + 8, ty + 1, 1, 1, on ? M.led : P.dark);
+    });
+  },
   supply(c, x, t, load) {
     x = Math.round(x);
     R(c, x, 5, 20, 4, P.o); R(c, x + 1, 5, 18, 2, M.steel); R(c, x + 1, 5, 18, 1, M.concreteL);

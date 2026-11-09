@@ -8,6 +8,10 @@
  *   blocked   the crate is carried from the docks or house to the board;
  *   unblocked it is carried from the board back to the docks;
  *   landed    the worker carries it, sealed, to the quay and walks home;
+ *   gated     with a merge gate (gatehouse.js), the worker carries it to the
+ *             line instead, and the inspector moves it between the line, the
+ *             arch and the tables, then stamps it and carries it out to the
+ *             quay, or back up to the board, dented, when it is handed back;
  *   closed    (not planned) it is carried off the map's west edge.
  * Trips queue: each starts STAGGER after the one before, so many changes in
  * one poll play in order rather than at once. Past QUEUE_CAP waiting trips
@@ -16,8 +20,9 @@
  * first poll after a load animates nothing, and with reduced motion no one
  * walks: a toast says what changed. */
 import { state } from './state.js';
-import { porterPos, slotPos } from './layout.js';
+import { GATE_H, porterPos, slotPos } from './layout.js';
 import { cargoStop, placeOf, placePoint, toShip } from './ship.js';
+import { gateEntries, gateOf, gateSpots } from './gatehouse.js';
 
 const STAGGER = 700, QUEUE_CAP = 12, WALK = 0.05;
 export const ARRIVE_IN = 1800, UNLOAD = 450, SAIL_OUT = 1500;
@@ -74,10 +79,51 @@ export function diff(old, now, lay, t, sc) {
     said.push(`#${h.issue} claimed`);
     enqueue(sc, t, trip(h.id, h.issue, old.backlog[slot], 'house', [{ pts: out }, { pts: back(out), carry: true }]));
   });
+  // The merge gate: into the line or onto a table, between its places, and
+  // out again: stamped and sent on to the quay, or handed back to the board.
+  const gated = new Set(), oldGs = gateSpots(old, lay), newGs = gateSpots(now, lay);
+  const at = sp => [sp.x + 2, sp.y + 5], inspector = 'inspector:' + now.project;
+  newGs.spots.forEach((sp, n) => {
+    const was = oldGs.spots.get(n), gap = sp.lead && sp.unit.members.length === 1 ? STAGGER : 0;
+    if (was && was.state === sp.state && was.x === sp.x && was.y === sp.y) return;
+    const to = at(sp), cr = { kind: 'workshop' };
+    if (was) {
+      if (was.state !== sp.state) said.push(`#${n} ${sp.state}`);
+      enqueue(sc, t, trip(inspector, n, cr, 'gate', [{ pts: [at(was), [at(was)[0], to[1]], to], carry: true }]), gap);
+      return;
+    }
+    said.push(`#${n} ${sp.state}`);
+    const hi = oldHouse(n), lot = hi >= 0 && lotOf(old.houses[hi].id);
+    const down = [[lay.roadX + 3, to[1]], to];
+    if (lot) { const there = [...houseToRoad(lot, lay), ...down]; enqueue(sc, t, trip(old.houses[hi].id, n, cr, 'gate', [{ pts: there, carry: true }, { pts: back(there) }]), gap); }
+    else enqueue(sc, t, trip('porter:' + n, n, cr, 'gate', [{ pts: [[lay.roadX + 3, ROAD], ...down], carry: true }]), gap);
+  });
+  oldGs.spots.forEach((was, n) => {
+    if (newGs.spots.has(n)) return;
+    const e = gateOf(now, n), st = e ? e.state : now.pipeline.quay.includes(n) || now.pipeline.stops.some(s => s.issues.includes(n)) ? 'passed' : null;
+    if (!st) return;
+    const from = at(was), before = gateOf(old, n), t0 = Math.max(t, sc.nextAt || 0);
+    // A finished run's test count is what later meters fill towards.
+    if (before && before.tests_run && ['passed', 'landed-unproven', 'failed'].includes(st)) sc.testTotal = Math.max(sc.testTotal || 0, before.tests_run);
+    gated.add(n);
+    sc.stamps = sc.stamps || [];
+    if (st === 'failed' || st === 'conflict') {
+      sc.stamps.push({ x: was.x - 1, y: was.y - 7, t0, kind: st === 'conflict' ? 'knot' : 'rejected' });
+      said.push(`#${n} ${st === 'conflict' ? 'conflict' : 'failed the gate'}`);
+      enqueue(sc, t, trip(inspector, n, { kind: 'workshop' }, 'board',
+        [{ pts: [from, [lay.roadX + 3, from[1]], [lay.roadX + 3, ROAD], ...boardFromRoad(lay)], carry: true }], { dented: true }));
+    } else {
+      sc.stamps.push({ x: was.x - 1, y: was.y - 7, t0, kind: 'ok' });
+      said.push(`#${n} passed the gate`);
+      const out = lay.gate ? lay.gate.y + GATE_H - 3 : lay.quayY;
+      enqueue(sc, t, trip(inspector, n, { kind: 'workshop' }, 'quay',
+        [{ pts: [from, [from[0], out], [lay.roadX + 3, out], [lay.roadX + 3, lay.quayY]], carry: true }], { sealed: true }));
+    }
+  });
   // Blocked: from the docks or a house to the board, and the board back to the docks.
   now.board.forEach(b => {
     const n = b.number;
-    if (oldBoard.has(n)) return;
+    if (oldBoard.has(n) || gated.has(n)) return;
     const slot = oldSlot(n), hi = oldHouse(n);
     let steps = null, seed = 'porter:' + n;
     if (slot >= 0) { const s = slotPos(Math.min(slot, 39)); steps = [{ pts: [...back(slotFromRoad(s)), ...boardFromRoad(lay)], carry: true }]; }
@@ -97,7 +143,7 @@ export function diff(old, now, lay, t, sc) {
   // Landed: the worker carries the sealed crate to the quay, then walks home.
   const oldQuay = new Set(old.pipeline.quay);
   now.pipeline.quay.forEach(n => {
-    if (oldQuay.has(n)) return;
+    if (oldQuay.has(n) || gated.has(n) || oldGs.spots.has(n)) return;
     const i = oldHouse(n);
     if (i < 0) return;
     const lot = lotOf(old.houses[i].id) || lay.lots[i];
@@ -111,7 +157,7 @@ export function diff(old, now, lay, t, sc) {
   });
   // Closed without landing: carried off the map's west edge.
   const placed = n => now.backlog.some(c => c.number === n) || now.board.some(b => b.number === n) || now.houses.some(h => h.issue === n)
-    || now.pipeline.quay.includes(n) || now.pipeline.stops.some(st => st.issues.includes(n));
+    || now.pipeline.quay.includes(n) || now.pipeline.stops.some(st => st.issues.includes(n)) || gateEntries(now).some(e => e.issue === n);
   [...old.backlog.map((c, i) => ({ n: c.number, c, s: i < 40 ? slotPos(i) : null })), ...old.board.map(b => ({ n: b.number, c: b, board: true }))].forEach(o => {
     if (placed(o.n) || (!o.s && !o.board)) return;
     const from = o.board ? back(boardFromRoad(lay)) : back(slotFromRoad(o.s));

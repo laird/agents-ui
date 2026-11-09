@@ -20,6 +20,7 @@
 #   FEATURE=1 PROMOTION=feature tools/mock/demo.sh   # ... promoted as whole features (one barge)
 #   LIFECYCLE=1 tools/mock/demo.sh     # every issue transition on a loop: arrive, claim, work, block, land, close, ship
 #   VOYAGES=1 tools/mock/demo.sh       # nuc-1 and release Deployments on a 120 s loop: a deploy, a promotion, a failure
+#   GATE=1 tools/mock/demo.sh          # finished work goes through a merge gate: queue, gate, pass, fail, conflict, a train
 #   PORT=8080 tools/mock/demo.sh
 #   touch "$AGENTS_UI_DEMO_DIR/state/release-now"   # cut a release of "shop" now: its ship sails
 #   tools/mock/demo.sh --source issues=none   # extra flags go to agents-tui
@@ -53,6 +54,13 @@ feature=(); [ -n "${FEATURE:-}" ] && feature=(--feature --promotion "${PROMOTION
 [ -n "${LIFECYCLE:-}" ] && feature+=(--lifecycle)
 # VOYAGES=1: shop deploys to nuc-1 and promotes to release through scripted Deployments (see voyages.py).
 [ -n "${VOYAGES:-}" ] && feature+=(--voyages)
+# GATE=1: a simulated merge gate (see swarm_sim.py), in the demo's own tmp so
+# agents-tui reads its jobs and slots and nothing else's.
+if [ -n "${GATE:-}" ]; then
+  feature+=(--gate)
+  export AUTOCODER_TMP="$DEMO/tmp" AUTOCODER_MAX_GATES=2
+  mkdir -p "$AUTOCODER_TMP"
+fi
 python3 "$HERE/swarm_sim.py" --dir "$DEMO" "${story[@]}" "${feature[@]}" run & pids+=($!)
 # One runtime source at a time: Temporal, or a Kubernetes namespace.
 RUNTIME=${RUNTIME:-temporal}

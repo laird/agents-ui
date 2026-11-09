@@ -43,6 +43,7 @@ const VILLAGE_ASSETS: &[(&str, &str, &str)] = &[
     ("lifecycle.js", "text/javascript; charset=utf-8", include_str!("village/lifecycle.js")),
     ("trips.js", "text/javascript; charset=utf-8", include_str!("village/trips.js")),
     ("ship.js", "text/javascript; charset=utf-8", include_str!("village/ship.js")),
+    ("gatehouse.js", "text/javascript; charset=utf-8", include_str!("village/gatehouse.js")),
     ("features.js", "text/javascript; charset=utf-8", include_str!("village/features.js")),
     ("envrow.js", "text/javascript; charset=utf-8", include_str!("village/envrow.js")),
     ("voyages.js", "text/javascript; charset=utf-8", include_str!("village/voyages.js")),
@@ -1447,7 +1448,7 @@ mod tests {
         }
         // The features and the modules they lean on, two imports or more away included.
         for module in [
-            "registry.js", "layout.js", "lifecycle.js", "trips.js", "ship.js", "features.js", "envrow.js", "voyages.js", "worlds.js", "panels.js", "dialogs.js",
+            "registry.js", "layout.js", "lifecycle.js", "trips.js", "ship.js", "gatehouse.js", "features.js", "envrow.js", "voyages.js", "worlds.js", "panels.js", "dialogs.js",
             "labels.js", "key.js", "data.js", "state.js", "palette.js", "sprites/houses.js", "scenery.js", "people.js",
             "themes/registry.js", "themes/medieval.js", "themes/modern.js", "themes/future.js", "saver.js", "screensaver.js",
         ] {
@@ -1492,6 +1493,7 @@ mod tests {
             ("layout.js", &["registerLayer("][..]),
             ("lifecycle.js", &["registerLayer(", "registerHit(", "registerLabels(", "registerCounter("][..]),
             ("ship.js", &["registerLayer(", "registerHit(", "registerLabels(", "registerCounter("][..]),
+            ("gatehouse.js", &["registerLayer(", "registerHit(", "registerLabels(", "registerCounter("][..]),
             ("features.js", &["registerLayer(", "registerHit(", "registerOverlay("][..]),
             ("envrow.js", &["registerLayer(", "registerHit(", "registerLabels(", "registerCounter(", "registerOverlay("][..]),
             ("voyages.js", &["registerLayer(", "registerHit("][..]),
@@ -2108,6 +2110,57 @@ mod tests {
         assert!(body.contains("link(`Compare ${h.branch} with ${br}`, `${repo}/compare/"));
         assert!(body.contains("since ${since}` : null"));
         assert!(!body.contains("h.action ? `Now: ${h.action}` : null],\n        links: [...(h.links || []), issue"), "no separate Now line in the house dialog");
+    }
+
+    #[test]
+    fn village_draws_the_merge_gate_as_a_gatehouse() {
+        let body = &village_source();
+        let layout = village_asset("layout.js").unwrap().1;
+        // Layout: a band between the houses and the quay, one table per gate slot, only when the gate is known.
+        assert!(layout.contains("export const GATE_H = 30, GATE_TABLES = 6;"));
+        assert!(layout.contains("const tablesN = v.plane === 'runtime' || (!merge && !gates.length) ? 0"));
+        assert!(layout.contains("const quayY = top + rows * LH + 4 + (gate ? GATE_H : 0);"));
+        assert!(layout.contains("const lockStart = Math.max(roadX + 40, gate ? gate.x0 + gate.w + 10 : 0);"));
+        assert!(layout.contains("decor, banners, devW, envs, gate };"));
+        // Every theme has a gatehouse, named in its own words; busy slots are lit.
+        for (file, name) in [("themes/medieval.js", "Gatehouse"), ("themes/modern.js", "QA checkpoint"), ("themes/future.js", "Scanner arch")] {
+            let src = village_asset(file).unwrap().1;
+            assert!(src.contains("gatehouse(c, g, t, busy) {"), "{file} draws no gatehouse");
+            assert!(src.contains(&format!("gate: '{name}' }},")), "{file} does not name its gatehouse");
+            assert!(src.contains("busy.has(k + 1)"), "{file} does not light its busy tables");
+        }
+        let gate = village_asset("gatehouse.js").unwrap().1;
+        assert!(gate.contains("const busy = new Set([...(merge.busy || []), ...gs.units.filter(u => u.table !== undefined).map(u => u.table + 1)]);"));
+        // Each state's place and picture: the numbered line, the rope to the master crate, the tables with a meter.
+        assert!(gate.contains("export const IN_GATE = new Set(['queued', 'merging', 'gating']);"));
+        assert!(gate.contains("u.x = g.rx - 16 - k * 16; u.y = g.y + 20;"));
+        assert!(gate.contains("if (u.state === 'queued') numberTag(c, x + 2 - String(n).length * 2, y - 8, n);"));
+        assert!(gate.contains("if (u.state === 'merging') rope(c, x + 2, y + 1, mx + 6, my + 6, e.attempt > 1);"));
+        assert!(gate.contains("drawAction(c, x - 5, y - 8, 'searching', t + u.table * 97);"));
+        assert!(gate.contains("const total = S.testTotal || 0, ran = e.tests_run || 0, mw = 9;"));
+        assert!(gate.contains("if (!gateEntries(v).some(e => e.state === 'red-base')) return;"));
+        assert!(gate.contains("if (!e || (e.state !== 'landed-unproven' && e.state !== 'passed')) return;"));
+        // A merge train is one cart; handed-back work marks its house, one strike per attempt.
+        assert!(gate.contains("tap(x - 1, y - 1, cw + 2, 10, { kind: 'train', id: e.train });"));
+        assert!(gate.contains("if (!e || (e.state !== 'failed' && e.state !== 'conflict')) return;"));
+        assert!(gate.contains("const n = Math.min(4, Math.max(1, e.attempt || 1));"));
+        // A crate at the gate rests there: no house, board or quay draws it too.
+        assert!(gate.contains("if (gs.spots.size) scene.bound = new Set([...scene.bound, ...gs.spots.keys()]);"));
+        // Transitions: stamped out to the quay, or back to the board dented; no double trip from the landing.
+        let trips = village_asset("trips.js").unwrap().1;
+        assert!(trips.contains("kind: st === 'conflict' ? 'knot' : 'rejected' });"));
+        assert!(trips.contains("[{ pts: [from, [lay.roadX + 3, from[1]], [lay.roadX + 3, ROAD], ...boardFromRoad(lay)], carry: true }], { dented: true }));"));
+        assert!(trips.contains("if (oldQuay.has(n) || gated.has(n) || oldGs.spots.has(n)) return;"));
+        assert!(body.contains("if (p.dented) {"));
+        // Dialogs, the area label and the counter (between the houses and the quay).
+        assert!(gate.contains("return { title: `${theme.labels.gate} · merge gate`, line: `${gs.queued} queued · ${gs.gating} gating`,"));
+        assert!(gate.contains("return ['Gate', `${count('queued')} queued · ${count('gating')} gating · ${failed} failed today`,"));
+        assert!(gate.contains("link('What went wrong', e.failure_url)"));
+        assert!(gate.contains("registerCounter({ order: 45, render(v) {"));
+        for kind in ["gatehouse", "train", "redbase", "gatecrate"] {
+            assert!(gate.contains(&format!("registerHit({{ kind: '{kind}',")), "no dialog for {kind}");
+        }
+        assert!(gate.contains("text: `${theme.labels.gate} · merge gate`, sub: `${gs.queued} queued · ${gs.gating} gating`"));
     }
 
     #[test]

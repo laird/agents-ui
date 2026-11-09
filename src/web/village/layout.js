@@ -10,6 +10,21 @@ import { registerLayer } from './registry.js';
 export const cv = document.getElementById('map'), ctx = cv.getContext('2d');
 
 export const LW = 20, LH = 26, RD = 6, DOCK_W = 64;
+/* The merge gate's band between the last row of houses and the quay, and
+ * the most inspection tables its gatehouse has room for. */
+export const GATE_H = 30, GATE_TABLES = 6;
+/* The gatehouse over the road at y, with one table per gate slot (at least
+ * one, and one per job gating if more report it; a train is one job), or
+ * null: a runtime village, or one whose report says nothing about its gate. */
+function gateBand(v, roadX, y) {
+  const merge = v.pipeline.merge, gates = v.pipeline.gates || [];
+  const tablesN = v.plane === 'runtime' || (!merge && !gates.length) ? 0
+    : Math.min(GATE_TABLES, Math.max(1, (merge && merge.slots) || 0, new Set(gates.filter(e => e.state === 'gating').map(e => e.train || e.issue)).size));
+  if (!tablesN) return null;
+  const x0 = roadX + RD + 4, w = 8 + tablesN * 12;
+  return { y, x0, w, rx: roadX, rw: RD, tables: Array.from({ length: tablesN }, (_, k) => [x0 + 4 + k * 12, y + 10]),
+    queueMax: Math.max(1, Math.floor((roadX - 22) / 16) + 1) };
+}
 export function layout(v) {
   const n = v.houses.length;
   const per = Math.max(1, Math.ceil(Math.sqrt(Math.max(n, 1) / 2)));
@@ -25,17 +40,19 @@ export function layout(v) {
     const x = side === 0 ? roadX - (pos + 1) * LW + 2 : roadX + RD + pos * LW + 2;
     lots.push({ x, y: top + r * LH, lane: top + r * LH + 18 });
   }
-  const quayY = top + rows * LH + 4;
+  const gate = gateBand(v, roadX, top + rows * LH + 2);
+  const quayY = top + rows * LH + 4 + (gate ? GATE_H : 0);
   const canalY = quayY + 8;
   // Every stop but the last is a lock; the last stop is the castle.
   const locks = Math.max(0, v.pipeline.stops.length - 1);
-  const lockStart = roadX + 40;
+  // The locks start east of the gatehouse, so its tables never stand in a lock's tower.
+  const lockStart = Math.max(roadX + 40, gate ? gate.x0 + gate.w + 10 : 0);
   const castleX = lockStart + locks * 34 + 6;
   const forestX = Math.max(cx0 + vw + 6, hallX + 64);
   // Feature banners stand in a strip cleared out of the forest, east of the
   // houses; the map widens if they need the room. No features, no strip.
   const banners = (v.features || []).map((f, k) => ({ f, x: forestX + 12 + k * 30, y: 14, col: FEATURE_COLS[k % FEATURE_COLS.length] }));
-  const devW = Math.max(cx0 + vw + 40, roadX + 70, castleX + 46, banners.length ? forestX + 12 + banners.length * 30 : 0);
+  const devW = Math.max(cx0 + vw + 40, roadX + 70, castleX + 46, gate ? gate.x0 + gate.w + 4 : 0, banners.length ? forestX + 12 + banners.length * 30 : 0);
   // The environment row: a village per environment east of the dev village,
   // a stretch of river before each, production right-most (docs/environment-row.md).
   const envs = envStops(v).map(({ s, i }, k, all) => ({ s, i, k, x: devW + RIVER + k * (ENV_W + RIVER), w: ENV_W,
@@ -47,6 +64,7 @@ export function layout(v) {
   const taken = [
     [0, 0, W, 14], [4, 8, 62, 46], [4, 46, cx0 + vw, 14], [hallX - 10, 4, 74, 46],
     [roadX - 2, 46, RD + 4, quayY - 40], [roadX - 18, quayY - 12, W, H],
+    ...(gate ? [[4, gate.y - 2, gate.x0 + gate.w, GATE_H + 2]] : []),
     [forestX - 2, 12, W, canalY - 46], [devW, 0, W, H]
   ];
   for (let r = 0; r < rows; r++) {
@@ -68,7 +86,7 @@ export function layout(v) {
     const zone = Math.floor(hash(x >> 5, y >> 5) * 6), k = hash(x + 11, y + 7) < 0.7 ? zone : Math.floor(hash(y, x + 3) * 6);
     decor.push({ x: x + Math.floor(hash(y, x) * 4), y: y + Math.floor(hash(x, y + 1) * 3), k });
   }
-  return { per, rows, cx0, vw, roadX, hallX, top, lots, quayY, canalY, lockStart, castleX, W, H, decor, banners, devW, envs };
+  return { per, rows, cx0, vw, roadX, hallX, top, lots, quayY, canalY, lockStart, castleX, W, H, decor, banners, devW, envs, gate };
 }
 /* The environment row's sizes: each environment village, and the river before it. */
 export const ENV_W = 120, RIVER = 56;

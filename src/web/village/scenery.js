@@ -169,3 +169,9 @@ export function badge(c, x, y, n) {
   R(c, x - 1, y - 1, w + 2, 7, P.o); R(c, x, y, w, 5, P.gold);
   glyphs.forEach((g, j) => { for (let k = 0; k < 15; k++) if (g[k] === '1') R(c, x + 1 + j * 4 + (k % 3), y + Math.floor(k / 3), 1, 1, P.o); });
 }
+/* A number on a parchment tag (a crate's issue in a line), in the same font. */
+export function numberTag(c, x, y, n) {
+  const glyphs = String(n).split('').map(d => DIGITS[+d]), w = glyphs.length * 4 + 1;
+  R(c, x - 1, y - 1, w + 2, 7, P.o); R(c, x, y, w, 5, P.parch);
+  glyphs.forEach((g, j) => { for (let k = 0; k < 15; k++) if (g[k] === '1') R(c, x + 1 + j * 4 + (k % 3), y + Math.floor(k / 3), 1, 1, P.o); });
+}

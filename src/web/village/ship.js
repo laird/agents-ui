@@ -21,6 +21,8 @@ import { isSha, issueItems, link, repoUrl } from './dialogs.js';
 export const SAIL = 4200, ARRIVE = 3200, GATE_OPEN = 2400, SHIP_CAP = 6;
 /* Crates drawn at the quay; the rest are a "+N". */
 export const QUAY_CAP = 6;
+/* Where the k-th crate at the quay rests: three to a row, stacked back from the edge. */
+export const quaySpot = (lay, k) => [lay.roadX + 6 + (k % 3) * 6, lay.quayY - 3 - Math.floor(k / 3) * 6];
 export const cargoStop = v => v.pipeline.stops.length - 2; // -1: the quay
 export function cargoOf(v) {
   const i = cargoStop(v);
@@ -83,8 +85,9 @@ registerLayer({ z: 80, draw(c, scene) {
   const carried = scene.carried = new Set([...(scene.bound || NONE), ...state.floats.map(f => f.n)]);
   const cargo = scene.cargo = cargoOf(v), onShip = scene.onShip = new Set(cargo);
   const atQuay = v.pipeline.quay.filter(n => !carried.has(n) && !hid.has(n) && !onShip.has(n));
-  atQuay.slice(0, QUAY_CAP).forEach((n, k) => {
-    const x = roadX + 6 + (k % 3) * 6, y = quayY - 3 - Math.floor(k / 3) * 6;
+  // Which crates are drawn here, in order, for anything later layers mark on them.
+  (scene.atQuay = atQuay.slice(0, QUAY_CAP)).forEach((n, k) => {
+    const [x, y] = quaySpot(lay, k);
     state.T.crate(c, x, y, 'workshop', null, true); tap(x, y, 5, 5, { kind: 'crate', n, at: 'quay' });
   });
   // Six crates fit; a "+N" says how many more wait, and the quay's dialog lists them all.
