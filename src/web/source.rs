@@ -426,6 +426,7 @@ mod tests {
             status_timestamp: None,
             worktree_path: String::new(),
             branch: None,
+            mux: Default::default(),
         };
         SwarmSnapshot {
             project_name: project.into(),

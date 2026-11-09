@@ -112,6 +112,7 @@ fn snapshot(agent: &HerdrAgent, project: &str, role: &str, is_manager: bool, bra
         status_timestamp: None,
         worktree_path: agent.cwd.trim_end_matches('/').to_string(),
         branch: branch.cloned(),
+        mux: super::Mux::Herdr,
     }
 }
 
@@ -260,6 +261,8 @@ mod tests {
         assert_eq!(s.workers[1].state, "Working #77");
         assert_eq!(s.workers[1].worktree_path, "/src/shop-wt-2");
         assert_eq!(s.attention_count, 1);
+        // Their panes are herdr's, so the session view reads them through herdr, not tmux.
+        assert!([&s.manager].into_iter().chain(&s.workers).all(|a| a.mux == crate::web::Mux::Herdr));
     }
 
     #[test]

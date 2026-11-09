@@ -76,7 +76,7 @@ async fn api_pane_handler(
     State(state): State<WebServerState>,
 ) -> Result<Json<Value>, StatusCode> {
     // Look up the agent in the shared state to get its tmux target and cached data.
-    let (tmux_target, cached_state, cached_content) = {
+    let (pane, cached_state, cached_content) = {
         let guard = state
             .swarms
             .read()
@@ -91,29 +91,28 @@ async fn api_pane_handler(
             .ok_or(StatusCode::NOT_FOUND)?;
 
         let agent = find_agent(swarm, &role).ok_or(StatusCode::NOT_FOUND)?;
-        (agent.tmux_target.clone(), agent.state.clone(), agent.pane_content.clone())
+        (super::pane::Pane { target: agent.tmux_target.clone(), mux: agent.mux }, agent.state.clone(), agent.pane_content.clone())
     };
 
     // Do a live capture from tmux with ANSI escape codes (-e flag) to ensure
     // colors and styling are preserved in the web UI, plus the cursor position
     // so the page can draw a caret.
-    let capture =
-        match crate::tmux::proxy::capture_pane_with_cursor(&state.transport, &tmux_target, 500)
-            .await
-        {
-            Ok(capture) => capture,
-            Err(e) => {
-                tracing::warn!(
-                    "Live pane capture failed for {tmux_target}: {e}, using cached content"
-                );
-                crate::tmux::proxy::PaneCapture {
-                    content: cached_content,
-                    ..Default::default()
-                }
-            }
-        };
+    let capture = match super::pane::capture(&state.transport, &pane, 500).await {
+        Ok(capture) => capture,
+        Err(e) => {
+            tracing::warn!("Live pane capture failed for {}: {e:#}, using cached content", pane.target);
+            failed_capture(cached_content, &e)
+        }
+    };
 
-    Ok(Json(pane_frame(&role, &tmux_target, &cached_state, &capture)))
+    Ok(Json(pane_frame(&role, &pane.target, &cached_state, &capture)))
+}
+
+/// What to show when the pane can't be read: the last content we had or, with
+/// none, the error itself, so the page never shows a blank box.
+fn failed_capture(cached: String, err: &anyhow::Error) -> crate::tmux::proxy::PaneCapture {
+    let content = if cached.trim().is_empty() { format!("{err:#}") } else { cached };
+    crate::tmux::proxy::PaneCapture { content, ..Default::default() }
 }
 
 /// The JSON shape shared by the pane endpoint and the pane stream, so a frame
@@ -240,36 +239,14 @@ async fn api_key_handler(
         return Err(StatusCode::UNPROCESSABLE_ENTITY);
     };
 
-    let tmux_target = {
-        let guard = state
-            .swarms
-            .read()
-            .map_err(|e| {
-                tracing::warn!("Web state lock poisoned: {e}");
-            })
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let pane = lookup_pane(&state, &project, &role)?;
 
-        let swarm = guard
-            .iter()
-            .find(|s| s.project_name == project)
-            .ok_or(StatusCode::NOT_FOUND)?;
-
-        find_agent(swarm, &role)
-            .ok_or(StatusCode::NOT_FOUND)?
-            .tmux_target
-            .clone()
-    };
-
-    crate::tmux::proxy::send_keys_no_enter(
-        &crate::transport::ServerTransport::new(None),
-        &tmux_target,
-        &tmux_key,
-    )
-    .await
-    .map_err(|e| {
-        tracing::warn!("tmux send-keys failed for {tmux_target}: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    super::pane::send_key(&crate::transport::ServerTransport::new(None), &pane, &tmux_key)
+        .await
+        .map_err(|e| {
+            tracing::warn!("send-keys failed for {}: {e:#}", pane.target);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     Ok(Json(serde_json::json!({ "ok": true, "key": tmux_key })))
 }
@@ -303,11 +280,11 @@ async fn api_answer_handler(
     Json(body): Json<AnswerBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let fail = |code: StatusCode, msg: &str| (code, Json(json!({ "error": msg })));
-    let target = lookup_tmux_target(&state, &project, &role).map_err(|c| fail(c, "no such agent"))?;
-    let pane = crate::tmux::proxy::capture_pane(&state.transport, &target, 60)
+    let target = lookup_pane(&state, &project, &role).map_err(|c| fail(c, "no such agent"))?;
+    let screen = super::pane::capture_text(&state.transport, &target, 60)
         .await
         .map_err(|_| fail(StatusCode::BAD_GATEWAY, "could not read the agent's pane"))?;
-    let question = super::framework::parse_question(&pane)
+    let question = super::framework::parse_question(&screen)
         .ok_or_else(|| fail(StatusCode::CONFLICT, "the agent is no longer asking a question"))?;
     if question.prompt != body.prompt {
         return Err(fail(StatusCode::CONFLICT, "the question changed; look again"));
@@ -315,8 +292,8 @@ async fn api_answer_handler(
     let keys = super::framework::answer_keys(&question, body.option)
         .ok_or_else(|| fail(StatusCode::UNPROCESSABLE_ENTITY, "no such option"))?;
     for key in &keys {
-        crate::tmux::proxy::send_keys_no_enter(&state.transport, &target, key).await.map_err(|e| {
-            tracing::warn!("tmux send-keys failed for {target}: {e}");
+        super::pane::send_key(&state.transport, &target, key).await.map_err(|e| {
+            tracing::warn!("send-keys failed for {}: {e:#}", target.target);
             fail(StatusCode::INTERNAL_SERVER_ERROR, "could not send the answer")
         })?;
     }
@@ -396,20 +373,16 @@ async fn api_keys_batch_handler(
         return Err(StatusCode::UNPROCESSABLE_ENTITY);
     };
 
-    let tmux_target = lookup_tmux_target(&state, &project, &role)?;
+    let pane = lookup_pane(&state, &project, &role)?;
 
     let sent = resolved.len();
     for item in &resolved {
         let result = match item {
-            InputItem::Key { key } => {
-                crate::tmux::proxy::send_keys_no_enter(&state.transport, &tmux_target, key).await
-            }
-            InputItem::Text { text } => {
-                crate::tmux::proxy::send_literal_ordered(&state.transport, &tmux_target, text).await
-            }
+            InputItem::Key { key } => super::pane::send_key(&state.transport, &pane, key).await,
+            InputItem::Text { text } => super::pane::send_text(&state.transport, &pane, text).await,
         };
         result.map_err(|e| {
-            tracing::warn!("tmux send-keys failed for {tmux_target}: {e}");
+            tracing::warn!("send-keys failed for {}: {e:#}", pane.target);
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
     }
@@ -433,13 +406,13 @@ async fn api_pane_stream_handler(
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, StatusCode> {
     // Resolve once, up front, so an unknown agent is a 404 rather than a
     // stream that opens and then silently never yields anything.
-    let tmux_target = lookup_tmux_target(&state, &project, &role)?;
+    let pane = lookup_pane(&state, &project, &role)?;
 
     struct StreamState {
         state: WebServerState,
         project: String,
         role: String,
-        tmux_target: String,
+        pane: super::pane::Pane,
         last: Option<(crate::tmux::proxy::PaneCapture, String)>,
     }
 
@@ -448,27 +421,25 @@ async fn api_pane_stream_handler(
             state,
             project,
             role,
-            tmux_target,
+            pane,
             last: None,
         },
         |mut st| async move {
             loop {
                 tokio::time::sleep(STREAM_POLL).await;
 
-                let capture = match crate::tmux::proxy::capture_pane_with_cursor(
-                    &st.state.transport,
-                    &st.tmux_target,
-                    500,
-                )
-                .await
-                {
+                let capture = match super::pane::capture(&st.state.transport, &st.pane, 500).await {
                     Ok(capture) => capture,
                     // A failed read is usually a pane that is gone or briefly
                     // busy. Keep the stream open and try again -- tearing it
-                    // down would drop the page back to polling for good.
+                    // down would drop the page back to polling for good. Say
+                    // why once, though, rather than leaving the box blank.
                     Err(e) => {
-                        tracing::debug!("Pane stream capture failed for {}: {e}", st.tmux_target);
-                        continue;
+                        tracing::debug!("Pane stream capture failed for {}: {e:#}", st.pane.target);
+                        if st.last.is_some() {
+                            continue;
+                        }
+                        failed_capture(String::new(), &e)
                     }
                 };
 
@@ -478,7 +449,7 @@ async fn api_pane_stream_handler(
                     continue;
                 }
 
-                let frame = pane_frame(&st.role, &st.tmux_target, &agent_state, &capture);
+                let frame = pane_frame(&st.role, &st.pane.target, &agent_state, &capture);
                 st.last = Some((capture, agent_state));
                 return Some((Ok(Event::default().data(frame.to_string())), st));
             }
@@ -488,12 +459,9 @@ async fn api_pane_stream_handler(
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
 
-/// Look up an agent's tmux target, mapping the failure modes to status codes.
-fn lookup_tmux_target(
-    state: &WebServerState,
-    project: &str,
-    role: &str,
-) -> Result<String, StatusCode> {
+/// Look up an agent's pane (its target and multiplexer), mapping the failure
+/// modes to status codes.
+fn lookup_pane(state: &WebServerState, project: &str, role: &str) -> Result<super::pane::Pane, StatusCode> {
     let guard = state
         .swarms
         .read()
@@ -507,10 +475,8 @@ fn lookup_tmux_target(
         .find(|s| s.project_name == project)
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    Ok(find_agent(swarm, role)
-        .ok_or(StatusCode::NOT_FOUND)?
-        .tmux_target
-        .clone())
+    let agent = find_agent(swarm, role).ok_or(StatusCode::NOT_FOUND)?;
+    Ok(super::pane::Pane { target: agent.tmux_target.clone(), mux: agent.mux })
 }
 
 /// The agent's last known state string, or empty if it has since disappeared.
@@ -536,48 +502,25 @@ async fn api_input_handler(
     State(state): State<WebServerState>,
     Json(body): Json<SendInputBody>,
 ) -> Result<Json<Value>, StatusCode> {
-    // Look up the tmux target while holding only a read lock.
-    let tmux_target = {
-        let guard = state
-            .swarms
-            .read()
-            .map_err(|e| {
-                tracing::warn!("Web state lock poisoned: {e}");
-            })
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-        let swarm = guard
-            .iter()
-            .find(|s| s.project_name == project)
-            .ok_or(StatusCode::NOT_FOUND)?;
-
-        find_agent(swarm, &role)
-            .ok_or(StatusCode::NOT_FOUND)?
-            .tmux_target
-            .clone()
-    };
+    let pane = lookup_pane(&state, &project, &role)?;
 
     // Reject empty input.
     if body.text.is_empty() {
         return Err(StatusCode::UNPROCESSABLE_ENTITY);
     }
 
-    if body.enter {
-        crate::tmux::proxy::send_keys(
-            &crate::transport::ServerTransport::new(None),
-            &tmux_target,
-            &body.text,
-        )
-        .await
-    } else {
+    let local = crate::transport::ServerTransport::new(None);
+    match (body.enter, pane.mux) {
+        (true, _) => super::pane::send_line(&local, &pane, &body.text).await,
         // -l, so the text is taken literally. Without it tmux resolves an
         // argument that happens to match a key name -- a lone "Up", "Space"
         // or "Enter" typed by the user -- as that key instead of those
         // characters.
-        crate::tmux::proxy::send_literal(&tmux_target, &body.text).await
+        (false, super::Mux::Tmux) => crate::tmux::proxy::send_literal(&pane.target, &body.text).await,
+        (false, super::Mux::Herdr) => super::pane::send_text(&local, &pane, &body.text).await,
     }
     .map_err(|e| {
-        tracing::warn!("tmux send-keys failed for {tmux_target}: {e}");
+        tracing::warn!("send-keys failed for {}: {e:#}", pane.target);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
@@ -1127,6 +1070,8 @@ async fn reject_writes(req: axum::extract::Request, next: axum::middleware::Next
 pub async fn run(addr: SocketAddr, read_only: bool, state: WebServerState) -> Result<()> {
     let app = Router::new()
         .route("/healthz", get(|| async { "ok" }))
+        // What the pages need to know about this server: a read-only one gets no input controls.
+        .route("/api/config", get(move || async move { Json(json!({ "read_only": read_only })) }))
         .route("/", get(index_handler))
         .route("/village", get(village_handler))
         .route("/api/village", get(api_village_handler))
@@ -1261,6 +1206,7 @@ mod tests {
                 format!("/repos/test-wt-1")
             },
             branch: Some(if is_manager { "master".to_string() } else { role.to_string() }),
+            mux: Default::default(),
         }
     }
 
@@ -1496,6 +1442,37 @@ mod tests {
         // Houses are named for their worktree, less the project prefix.
         assert!(body.contains("function houseName(v, h)"));
         assert!(body.contains("base.startsWith(v.project + '-')"));
+    }
+
+    #[test]
+    fn a_failed_capture_says_why_instead_of_showing_a_blank_pane() {
+        let err = anyhow::anyhow!("couldn't read herdr pane wA:p1: no such pane");
+        assert_eq!(failed_capture(String::new(), &err).content, "couldn't read herdr pane wA:p1: no such pane");
+        // With something already on screen, keep showing it.
+        assert_eq!(failed_capture("last screen".into(), &err).content, "last screen");
+    }
+
+    #[test]
+    fn lookup_pane_carries_the_agents_multiplexer() {
+        let mut swarm = sample_swarm("p");
+        swarm.workers[0].mux = crate::web::Mux::Herdr;
+        swarm.workers[0].tmux_target = "wA:p1".into();
+        let state = make_web_state(std::sync::Arc::new(std::sync::RwLock::new(vec![swarm])));
+        let pane = lookup_pane(&state, "p", &state.swarms.read().unwrap()[0].workers[0].role.clone()).unwrap();
+        assert_eq!(pane, crate::web::pane::Pane { target: "wA:p1".into(), mux: crate::web::Mux::Herdr });
+        assert_eq!(lookup_pane(&state, "p", "manager").unwrap().mux, crate::web::Mux::Tmux);
+        assert_eq!(lookup_pane(&state, "nope", "manager"), Err(StatusCode::NOT_FOUND));
+    }
+
+    #[test]
+    fn ui_html_offers_no_input_on_a_read_only_server() {
+        let body = INDEX_HTML;
+        assert!(body.contains("fetch('/api/config')"));
+        assert!(body.contains("state.readOnly = !!c.read_only;"));
+        assert!(body.contains("'read-only: viewing only'"));
+        // The key buttons and composer are left out, and pane keystrokes are not sent.
+        assert!(body.contains("(state.readOnly ? '' :\n        '<div class=\"key-row\">'"));
+        assert!(body.contains("if (state.readOnly) return;"));
     }
 
     #[test]
