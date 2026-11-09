@@ -147,6 +147,29 @@ Deployment and no branch`.
 `promotion` says how your project moves landed work through the environments.
 It is `subtask` (the default) or `feature`; see below.
 
+### An issue's life
+
+Changes seen between two polls play out as trips across the map:
+
+- **Arrives.** A supply boat (a truck downtown, a cargo shuttle in Future)
+  comes down the river to the docks, and its crew unloads one crate per new
+  issue into its slot.
+- **Claimed.** The worker walks from its house to the docks, picks up that
+  crate and carries it home.
+- **Worked on.** The crate sits at the door, and the worker hammers at it,
+  with sparks unless the action is reading, thinking, searching or messaging.
+- **Landed.** The worker carries the sealed crate to the quay and walks home.
+- **Board.** A blocked issue is carried to the notice board, and carried back
+  to the docks when it is unblocked.
+- **Closed without landing.** The crate is carried off the map's west edge.
+
+Trips play in order, one starting 0.7 s after the last, and at most 12 wait
+at once; past that, crates simply appear where they now are. Nothing replays
+when the page loads, and a tab left in the background does not catch up on
+what it missed. With reduced motion no one walks: a notice says what changed.
+Click a crate in transit for the same dialog as at rest, plus where it is
+going. `LIFECYCLE=1 tools/mock/demo.sh` plays every transition on a 90 s loop.
+
 ### The ship
 
 A ship is moored in the harbour (a rocket stands on the launch pad). Work
