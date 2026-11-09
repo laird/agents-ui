@@ -1393,6 +1393,23 @@ mod tests {
         }
     }
 
+    /// The replay page (tools/mock/replay-build.py) bundles these modules into
+    /// one script, so a change here that it cannot bundle fails here (#392).
+    #[test]
+    fn replay_build_bundles_the_village_modules() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        let out = std::process::Command::new("python3")
+            .args(["-m", "unittest", "discover", "-s", &format!("{root}/tools/mock"), "-p", "test_replay_build.py"])
+            .output()
+            .expect("run tools/mock/test_replay_build.py");
+        assert!(
+            out.status.success(),
+            "tools/mock/test_replay_build.py failed:\n{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
     #[tokio::test]
     async fn every_module_main_js_loads_is_embedded_and_served() {
         // Follow main.js's imports, and theirs, to every module the page loads.

@@ -25,7 +25,7 @@ import { ICONS, badge, bubble, roped } from './scenery.js';
 import { QUIET_ACTIONS, actionSign, drawAction, person, wander } from './people.js';
 import { registerCounter, registerHit, registerLabels, registerLayer, tap } from './registry.js';
 import { LW, porterPos, slotPos } from './layout.js';
-import { cargoStop, placeOf, placePoint, toShip } from './ship.js';
+import { cargoStop, placeOf, placePoint, toShip, workOf } from './ship.js';
 import { houseName, issueItems, issueLabel, issueOf, link, repoUrl, sessionOf } from './dialogs.js';
 
 const STAGGER = 700, QUEUE_CAP = 12, WALK = 0.05, ARRIVE_IN = 1800, UNLOAD = 450, SAIL_OUT = 1500;
@@ -325,7 +325,6 @@ function subWords(sa, v) {
     (sa.status === 'blocked' ? ' · waiting on you' : sa.action ? ` · ${sa.action}` : '');
 }
 const isRuntime = v => v.plane === 'runtime';
-const workOf = v => (isRuntime(v) ? 'workstream' : 'issue');
 const docks = (o, sc, theme) => ({ title: theme.labels.docks, line: isRuntime(sc.v) ? 'Waiting work' : 'The backlog, highest priority first', items: sc.v.backlog });
 registerHit({ kind: 'river', key: false, dialog: docks });
 registerHit({ kind: 'docks', dialog: docks });

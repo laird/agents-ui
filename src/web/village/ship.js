@@ -181,7 +181,7 @@ function docsLink(v) {
 }
 
 /* ---------- Dialogs ---------- */
-const workOf = v => (v.plane === 'runtime' ? 'workstream' : 'issue');
+export const workOf = v => (v.plane === 'runtime' ? 'workstream' : 'issue');
 registerHit({ kind: 'quay', dialog(o, sc, theme) {
   const v = sc.v, stops = v.pipeline.stops;
   const repo = repoUrl(v), br = v.pipeline.integration;

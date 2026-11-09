@@ -12,6 +12,7 @@ runtime (Temporal or Kubernetes) or, for a feature recording, promotion mode
 """
 import gzip
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -103,27 +104,115 @@ about = (
     "Temporal or on a Kubernetes namespace. Failures raise incidents that float down to the swarm; releases ride up to the "
     "platform. Pick <b>shop ⇄</b> to see both, or one village alone.")
 
-def village_page():
-    """The village page as one self-contained file: its stylesheet and script inlined."""
-    d = ROOT / "src/web/village"
-    page = (d / "index.html").read_text()
+VILLAGE = ROOT / "src/web/village"
+IMPORT = re.compile(r"""^import\s+(?:\{([^}]*)\}\s+from\s+)?'([^']+)';[ \t]*\n""", re.M)
+EXPORT = re.compile(r"^export\s+(?=(?:async\s+)?function\b|const\b|let\b|var\b|class\b)", re.M)
+TOP = re.compile(r"^(?:export\s+)?(?:async\s+)?(?:function\*?\s+(\w+)|class\s+(\w+)|(?:const|let|var)\s+(\w+|\{[^}=]*\}|\[[^\]=]*\]))", re.M)
+
+def top_names(src):
+    """The names a module declares at its top level (a line that starts a declaration)."""
+    out = set()
+    for m in TOP.finditer(src):
+        name = m.group(1) or m.group(2) or m.group(3)
+        out.update(re.findall(r"\w+", re.sub(r":\s*\w+", "", name)) if name[0] in "{[" else [name])
+    return out
+
+def bundle(entry, patch=lambda rel, src: src):
+    """main.js and everything it imports, as one script in the order the browser
+    runs them: depth-first, each module after its imports, each module once
+    (a cycle is cut where the browser cuts it). The imports go and `export` is
+    dropped, so the modules share one scope; two modules declaring the same
+    top-level name would then clash, and that stops the build."""
+    order, seen = [], set()
+    def visit(path):
+        rel = path.relative_to(VILLAGE).as_posix()
+        if rel in seen:
+            return
+        seen.add(rel)
+        src = patch(rel, path.read_text())
+        for m in IMPORT.finditer(src):
+            if " as " in (m.group(1) or ""):
+                raise SystemExit(f"{rel}: renamed import ({m.group(0).strip()}); the bundle cannot rename")
+            visit((path.parent / m.group(2)).resolve())
+        body = EXPORT.sub("", IMPORT.sub("", src))
+        if re.search(r"^\s*(import|export)\b", body, re.M):
+            raise SystemExit(f"{rel}: an import or export the bundle does not understand")
+        order.append((rel, body))
+    visit((VILLAGE / entry).resolve())
+    owner = {}
+    for rel, body in order:
+        for name in top_names(body):
+            if name in owner:
+                raise SystemExit(f"{rel} and {owner[name]} both declare {name}; the bundle needs distinct top-level names")
+            owner[name] = rel
+    return "".join(f"// ---- {rel}\n{body}\n" for rel, body in order)
+
+def village_page(patch=lambda rel, src: src):
+    """The village page as one self-contained file: its stylesheet and its modules inlined."""
+    page = (VILLAGE / "index.html").read_text()
     for tag, inline in (
-        ('<link rel="stylesheet" href="/village/village.css">', "<style>\n" + (d / "village.css").read_text() + "</style>"),
-        ('<script type="module" src="/village/main.js"></script>', "<script>\n" + (d / "main.js").read_text() + "</script>"),
+        ('<link rel="stylesheet" href="/village/village.css">', "<style>\n" + (VILLAGE / "village.css").read_text() + "</style>"),
+        ('<script type="module" src="/village/main.js"></script>', '<script type="module">\n' + bundle("main.js", patch).replace("</script", "<\\/script") + "</script>"),
     ):
         assert tag in page, tag
         page = page.replace(tag, inline, 1)
     return page
 
-src = village_page()
+def must(old, new, where):
+    assert old in where, old[:60]
+    return where.replace(old, new, 1)
+
+def replay_patch(rel, src):
+    """The replay's hooks into the feed (data.js): its own pace, its own
+    status line and, before the first poll, its controls."""
+    if rel != "data.js":
+        return src
+    src = must("  setTimeout(poll, 3000);", "  setTimeout(poll, window.__pollMs || 3000);", src)
+    src = must("'Live · updated ' + new Date().toLocaleTimeString()", "'Replay of the simulation'", src)
+    return must("\n  poll();\n", "\n" + controls + "  poll();\n", src)
+
+controls = """
+  // Replay controls.
+  const fmt = n => `${Math.floor(n * 3 / 60)}:${String(n * 3 % 60).padStart(2, '0')}`;
+  const scrub = document.getElementById('scrub'), clock = document.getElementById('clock'), play = document.getElementById('play');
+  const showClock = () => { const n = REC[replay.run].length; scrub.max = n - 1; scrub.value = replay.i; clock.textContent = `${fmt(replay.i)} / ${fmt(n)}`; };
+  window.addEventListener('replay-tick', showClock);
+  // A story recording: one run, captions instead of the runtime choice.
+  if (CAPTIONS[replay.run]) {
+    document.getElementById('runs').hidden = true;
+    document.getElementById('story').hidden = false;
+    document.getElementById('about').textContent = 'One bug from start to finish, recorded from agents-tui and its simulators: the app crashes in prod (the cluster, top), the dev village (below) fixes it, and the fix ships back up.';
+    const steps = document.getElementById('steps'), caption = document.getElementById('caption');
+    const titles = [...new Set(CAPTIONS[replay.run].map(c => c.step))].sort((a, b) => a - b);
+    const names = {}; CAPTIONS[replay.run].forEach(c => { names[c.step] = c.title; });
+    steps.innerHTML = titles.map(s => `<li data-step="${s}">${s}. ${names[s]}</li>`).join('');
+    const showCaption = () => {
+      const c = CAPTIONS[replay.run][Math.max(0, replay.i - 1)] || CAPTIONS[replay.run][0];
+      caption.textContent = c.text;
+      steps.querySelectorAll('li').forEach(li => { const s = Number(li.dataset.step); li.className = s === c.step ? 'now' : s < c.step ? 'done' : ''; });
+    };
+    window.addEventListener('replay-tick', showCaption);
+    scrub.addEventListener('input', showCaption);
+    showCaption();
+  }
+  const press = (sel, on) => document.querySelectorAll(sel).forEach(b => b.setAttribute('aria-pressed', String(on(b))));
+  document.querySelectorAll('[data-run]').forEach(b => b.addEventListener('click', () => {
+    replay.run = b.dataset.run; replay.i = 0; press('[data-run]', x => x === b);
+    for (const k in state.scenes) delete state.scenes[k];
+    poll();
+  }));
+  document.querySelectorAll('[data-speed]').forEach(b => b.addEventListener('click', () => {
+    replay.speed = Number(b.dataset.speed); window.__pollMs = 3000 / replay.speed; press('[data-speed]', x => x === b);
+  }));
+  play.addEventListener('click', () => { replay.playing = !replay.playing; play.textContent = replay.playing ? 'Pause' : 'Play'; play.setAttribute('aria-pressed', String(replay.playing)); });
+  scrub.addEventListener('input', () => { replay.i = Number(scrub.value); showClock(); });
+  if (!location.hash) location.hash = """ + json.dumps("shop" if features else "world:shop") + """;
+"""
+src = village_page(replay_patch)
 head = src[src.index("<head>") + 6:src.index("</head>")]
 body = src[src.index("<body>") + 6:src.index("</body>")]
 head = head.replace('<meta charset="utf-8">', "").replace('<meta name="viewport" content="width=device-width, initial-scale=1">', "")
 head = head.replace("<title>Worktree Hollow</title>", '<title>' + title + '</title>\n<meta name="claude:viewport-fit-sides" content="cover">')
-
-def must(old, new, where):
-    assert old in where, old[:60]
-    return where.replace(old, new, 1)
 
 css = """
   :root { color-scheme: dark; }
@@ -183,48 +272,8 @@ window.fetch = async () => {
 };
 </script>
 """
-body = must("<script>\n(() => {", replay_js + "<script>\n(() => {", body)
+body = must('<script type="module">', replay_js + '<script type="module">', body)
 
-controls = """
-  // Replay controls.
-  const fmt = n => `${Math.floor(n * 3 / 60)}:${String(n * 3 % 60).padStart(2, '0')}`;
-  const scrub = document.getElementById('scrub'), clock = document.getElementById('clock'), play = document.getElementById('play');
-  const showClock = () => { const n = REC[replay.run].length; scrub.max = n - 1; scrub.value = replay.i; clock.textContent = `${fmt(replay.i)} / ${fmt(n)}`; };
-  window.addEventListener('replay-tick', showClock);
-  // A story recording: one run, captions instead of the runtime choice.
-  if (CAPTIONS[replay.run]) {
-    document.getElementById('runs').hidden = true;
-    document.getElementById('story').hidden = false;
-    document.getElementById('about').textContent = 'One bug from start to finish, recorded from agents-tui and its simulators: the app crashes in prod (the cluster, top), the dev village (below) fixes it, and the fix ships back up.';
-    const steps = document.getElementById('steps'), caption = document.getElementById('caption');
-    const titles = [...new Set(CAPTIONS[replay.run].map(c => c.step))].sort((a, b) => a - b);
-    const names = {}; CAPTIONS[replay.run].forEach(c => { names[c.step] = c.title; });
-    steps.innerHTML = titles.map(s => `<li data-step="${s}">${s}. ${names[s]}</li>`).join('');
-    const showCaption = () => {
-      const c = CAPTIONS[replay.run][Math.max(0, replay.i - 1)] || CAPTIONS[replay.run][0];
-      caption.textContent = c.text;
-      steps.querySelectorAll('li').forEach(li => { const s = Number(li.dataset.step); li.className = s === c.step ? 'now' : s < c.step ? 'done' : ''; });
-    };
-    window.addEventListener('replay-tick', showCaption);
-    scrub.addEventListener('input', showCaption);
-    showCaption();
-  }
-  const press = (sel, on) => document.querySelectorAll(sel).forEach(b => b.setAttribute('aria-pressed', String(on(b))));
-  document.querySelectorAll('[data-run]').forEach(b => b.addEventListener('click', () => {
-    replay.run = b.dataset.run; replay.i = 0; press('[data-run]', x => x === b);
-    for (const k in scenes) delete scenes[k];
-    poll();
-  }));
-  document.querySelectorAll('[data-speed]').forEach(b => b.addEventListener('click', () => {
-    replay.speed = Number(b.dataset.speed); window.__pollMs = 3000 / replay.speed; press('[data-speed]', x => x === b);
-  }));
-  play.addEventListener('click', () => { replay.playing = !replay.playing; play.textContent = replay.playing ? 'Pause' : 'Play'; play.setAttribute('aria-pressed', String(replay.playing)); });
-  scrub.addEventListener('input', () => { replay.i = Number(scrub.value); showClock(); });
-  if (!location.hash) location.hash = """ + json.dumps("shop" if features else "world:shop") + """;
-"""
-body = must("  poll();\n", controls + "  poll();\n", body)
-body = must("    setTimeout(poll, 3000);", "    setTimeout(poll, window.__pollMs || 3000);", body)
-body = must("'Live · updated ' + new Date().toLocaleTimeString()", "'Replay of the simulation'", body)
 
 Path(out).write_text(head.strip() + "\n" + body)
 print("built", out, len(head) + len(body), "bytes")
