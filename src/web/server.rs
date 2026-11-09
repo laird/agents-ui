@@ -1695,6 +1695,49 @@ mod tests {
     }
 
     #[test]
+    fn village_html_fits_the_map_to_the_panel_width() {
+        let body = VILLAGE_HTML;
+        // Fit by width only: the old cap by window height left a 2x map in a wide panel.
+        assert!(!body.contains("window.innerHeight - 190"), "the height cap is gone");
+        assert!(body.contains("const room = (document.getElementById('viewport').clientWidth - 8) / cv.width;"));
+        // Whole-number scales when there is room; below 1x it shrinks to the panel (phones).
+        assert!(body.contains("return room >= 1 ? Math.floor(room) : Math.max(0.1, room);"));
+        // A zoomed-in map scrolls from its left edge instead of being cut off.
+        assert!(body.contains("justify-content: safe center;"));
+    }
+
+    #[test]
+    fn village_html_zooms_and_remembers_it() {
+        let body = VILLAGE_HTML;
+        assert!(body.contains(r#"<button id="zoom-out" aria-label="Zoom out">−</button>"#));
+        assert!(body.contains(r#"<button id="zoom-in" aria-label="Zoom in">+</button>"#));
+        assert!(body.contains(r#"<button id="zoom-fit""#));
+        // +/- step the scale from the fitted one, never past the smallest or largest.
+        assert!(body.contains("return zoom ? Math.max(Math.min(1, f), Math.min(ZOOM_MAX_SCALE, Math.max(1, Math.floor(f)) + zoom)) : f;"));
+        assert!(body.contains("if (d && mapScale() === before) zoom -= d;"));
+        // Remembered, and storage that throws (private windows) never breaks the page.
+        assert!(body.contains("try { localStorage.setItem('village-zoom', String(zoom)); } catch {}"));
+        assert!(body.contains("try { zoom = Math.max(-ZOOM_MAX_SCALE, Math.min(ZOOM_MAX_SCALE, parseInt(localStorage.getItem('village-zoom'), 10) || 0)); } catch {}"));
+        assert!(body.contains("addEventListener('click', () => stepZoom(-1))"));
+        assert!(body.contains("addEventListener('click', () => stepZoom(1))"));
+        assert!(body.contains("addEventListener('click', () => stepZoom(0))"));
+    }
+
+    #[test]
+    fn village_html_names_the_village_and_links_its_repo() {
+        let body = VILLAGE_HTML;
+        assert!(body.contains(r#"<span id="vname" class="vname"></span> <a id="repo" hidden target="_blank" rel="noopener"></a>"#));
+        // The name shows whenever the picker (which also shows it) is hidden.
+        assert!(body.contains("vn.hidden = !pick.hidden;"));
+        // A village by its project, a world as `dev ⇄ platform`.
+        assert!(body.contains("nameBar(sc.v.project, sc.v);"));
+        assert!(body.contains(r"nameBar(`${w.dev} \u21c4 ${w.platform}`, villages.find(x => x.project === w.dev));"));
+        // The repo link only when a real issue URL names the repo.
+        assert!(body.contains("repo = v ? repoUrl(v) : null;"));
+        assert!(body.contains("a.hidden = !repo;"));
+    }
+
+    #[test]
     fn village_html_reaches_every_object_by_keyboard() {
         let body = VILLAGE_HTML;
         assert!(body.contains(r#"<div class="hitkeys" id="hitkeys"></div>"#));
