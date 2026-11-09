@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Worktree Hollow</title>
+<link rel="stylesheet" href="/village/village.css">
+</head>
+<body>
+  <div class="bar">
+    <div class="title">Worktree Hollow <span id="vname" class="vname"></span> <a id="repo" hidden target="_blank" rel="noopener"></a> <span id="workflow" class="status"></span> <select id="pick" aria-label="Village" hidden></select> <select id="theme" aria-label="Style"><option value="medieval">Medieval village</option><option value="modern">Modern business district</option><option value="future">Future</option></select> <label class="labels-toggle"><input type="checkbox" id="labels-on" checked> Labels</label> <span class="zoom" role="group" aria-label="Zoom"><button id="zoom-out" aria-label="Zoom out">−</button><button id="zoom-fit" title="Fit the map to the panel width">Fit</button><button id="zoom-in" aria-label="Zoom in">+</button></span> <button id="legend-btn" class="legend-btn" aria-expanded="false" aria-controls="legend" aria-label="Key: what the symbols mean" title="What the symbols mean">?</button> <a href="/">Dashboard</a></div>
+    <div class="status" id="status" aria-live="polite">Connecting…</div>
+  </div>
+  <div class="win stage">
+    <div class="viewport" id="viewport">
+      <div class="empty" id="empty">Looking for swarms…</div>
+      <canvas id="map" width="320" height="180" hidden aria-label="The swarm drawn as a village. Select a house to see its crew and issue."></canvas>
+      <div class="alabels" id="alabels"></div><div class="hitkeys" id="hitkeys"></div>
+      <div class="fbanners" id="fbanners"></div>
+      <div class="hint" id="hint" role="status" hidden>Click a building, crate or person for details</div>
+    </div>
+    <div class="fstrip" id="fstrip" hidden>
+      <h3 id="fs-title"></h3>
+      <span class="chips" id="fs-chips" aria-live="polite"></span>
+      <span class="mode" id="fs-mode"></span>
+      <button id="fs-details">Details</button><button id="fs-stop">Stop following</button>
+    </div>
+    <div class="flow" id="flow"></div>
+    <div class="legend" id="legend" hidden role="region" aria-labelledby="legend-title">
+      <h3 id="legend-title">Key</h3>
+      <div id="legend-body"></div>
+    </div>
+  </div>
+  <div class="win toast" id="toast" hidden role="status"></div>
+  <div class="win dialog" id="dialog" hidden role="dialog" aria-live="polite">
+    <button id="close" aria-label="Close">×</button>
+    <h2 id="d-title"></h2>
+    <p id="d-line"></p>
+    <p class="dim" id="d-meta"></p>
+    <div id="d-q"></div>
+    <div class="links" id="d-links"></div>
+  </div>
+
+<script type="module" src="/village/main.js"></script>
+</body>
+</html>

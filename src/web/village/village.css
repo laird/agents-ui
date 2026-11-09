@@ -1,0 +1,135 @@
+  /* SNES-style menu windows around a pixel-art canvas. One dark look on purpose. */
+  :root {
+    color-scheme: dark;
+    --night: #0c1028;
+    --win-top: #2c44a8;
+    --win-bot: #101850;
+    --win-inner: #6878c8;
+    --frame: #f8f8f8;
+    --frame-shadow: #060814;
+    --rule: #2a3470;
+    --ink: #eef0fa;
+    --ink-dim: #a8b0d8;
+    --gold: #f8d040;
+    --orange: #f07020;
+    --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  /* Room for the page scrollbar is kept, so the map's fitted width does not
+   * change when the page grows tall enough to scroll (say, the key opens). */
+  html { scrollbar-gutter: stable; }
+  html, body { margin: 0; background: var(--night); color: var(--ink); font: 14px/1.5 var(--sans); }
+  body { padding: 12px max(12px, env(safe-area-inset-right)) 24px max(12px, env(safe-area-inset-left)); }
+  a { color: var(--ink-dim); }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin: 0 auto 10px; max-width: 1400px; }
+  .title { font: 700 16px/1.2 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--gold); display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; min-width: 0; }
+  .title select { max-width: 100%; }
+  .title a { font-weight: 400; font-size: 12px; text-transform: none; letter-spacing: 0; }
+  select { background: var(--win-bot); color: var(--ink); border: 2px solid var(--win-inner); border-radius: 4px; font: 13px var(--mono); padding: 4px 6px; }
+  .status { font: 12px var(--mono); color: var(--ink-dim); }
+  .vname { color: var(--ink); text-transform: none; letter-spacing: 0; overflow-wrap: anywhere; }
+  .vname[hidden], .title a[hidden] { display: none; }
+  .zoom { display: inline-flex; gap: 2px; }
+  .zoom button { background: var(--win-bot); color: var(--ink); border: 2px solid var(--win-inner); border-radius: 4px; font: 700 13px var(--mono); min-width: 30px; padding: 2px 6px; cursor: pointer; }
+  .zoom button:disabled { opacity: .5; cursor: default; }
+  .win {
+    background: linear-gradient(180deg, var(--win-top), var(--win-bot));
+    border: 3px solid var(--frame); border-radius: 6px;
+    box-shadow: 0 0 0 3px var(--frame-shadow), inset 0 0 0 2px var(--win-inner);
+  }
+  .stage { max-width: 1400px; margin: 0 auto; padding: 8px; }
+  /* `safe center`: a zoomed-in map scrolls from its left edge instead of being cut off. */
+  .viewport { overflow: auto; display: flex; justify-content: safe center; background: var(--frame-shadow); border-radius: 2px; min-height: 200px; align-items: safe center; }
+  canvas { image-rendering: pixelated; image-rendering: crisp-edges; display: block; cursor: pointer; }
+  .flow { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .step { flex: 1 1 90px; padding: 6px 8px; background: rgba(6,8,20,.45); border: 2px solid var(--rule); border-radius: 4px; }
+  .step b { display: block; font: 700 18px/1.1 var(--mono); font-variant-numeric: tabular-nums; }
+  .step span { font: 12px var(--mono); color: var(--ink-dim); }
+  .empty { padding: 48px 16px; text-align: center; color: var(--ink-dim); font: 14px var(--mono); }
+  .toast { position: fixed; left: 50%; top: 16px; transform: translateX(-50%); max-width: calc(100vw - 32px); padding: 8px 14px; z-index: 11; font: 700 13px/1.3 var(--mono); color: var(--gold); }
+  .toast[hidden] { display: none; }
+  .dialog { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); width: min(560px, calc(100vw - 32px)); padding: 14px 16px; z-index: 10; }
+  .dialog h2 { margin: 0 0 4px; font: 700 14px var(--mono); color: var(--gold); letter-spacing: .04em; }
+  .dialog p { margin: 4px 0; font: 15px/1.4 var(--mono); }
+  .dialog .dim { color: var(--ink-dim); font-size: 13px; }
+  .dialog .links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .dialog .links a { font: 700 13px var(--mono); color: #241400; background: var(--gold); border-radius: 4px; padding: 5px 10px; text-decoration: none; }
+  .dialog .links a:hover { filter: brightness(1.1); }
+  .dialog ul { list-style: none; margin: 6px 0 0; padding: 0; max-height: 40vh; overflow: auto; }
+  .dialog li { font: 14px/1.5 var(--mono); }
+  .dialog li a { color: var(--gold); }
+  .dialog .q { font: 700 15px/1.4 var(--mono); color: var(--ink); margin: 10px 0 6px; }
+  .dialog .opts { display: flex; flex-wrap: wrap; gap: 8px; }
+  .dialog .opts button { position: static; font: 700 14px var(--mono); color: var(--ink); background: var(--win-bot); border: 2px solid var(--gold); border-radius: 4px; padding: 6px 12px; cursor: pointer; }
+  .dialog .opts button:hover:not(:disabled) { background: var(--gold); color: #241400; }
+  .dialog .opts button:disabled { opacity: .5; cursor: default; }
+  .dialog button { position: absolute; top: 8px; right: 10px; background: none; border: 0; color: var(--ink); font: 700 16px var(--mono); cursor: pointer; }
+  :focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+  /* Features: a label under each banner (a real button, so Tab reaches it),
+   * and the strip above the counters for the feature being followed. */
+  .viewport { position: relative; }
+  .fbanners { position: absolute; inset: 0; pointer-events: none; }
+  .fb { position: absolute; transform: translateX(-50%); pointer-events: auto; max-width: 118px; font: 700 11px/1.25 var(--mono); color: var(--ink); background: rgba(6,8,20,.82); border: 2px solid var(--fc); border-radius: 4px; padding: 2px 6px; cursor: pointer; text-align: center; }
+  .fb small { display: block; font-weight: 400; color: var(--ink-dim); }
+  .fb[aria-pressed="true"] { background: var(--fc); color: #0c1028; }
+  .fb[aria-pressed="true"] small { color: #0c1028; }
+  .fb.live { border-color: var(--gold); }
+  .fb.stuck small { color: #ff8070; }
+  .fb.stuck[aria-pressed="true"] small { color: #600; }
+  /* A feature's label stays hidden until its flag is clicked (followed), the
+   * button has keyboard focus, or the pointer is on the flag. Hidden, it still
+   * sits in the Tab order; clicks pass through to the map. */
+  .fb { opacity: 0; pointer-events: none; }
+  .fb[aria-pressed="true"] { opacity: 1; pointer-events: auto; }
+  .fb:focus-visible, .fb.peek { opacity: var(--fade, 1); }
+  /* Area names: a banner over each part of the map, and the worktree under each
+   * house. Pointer-transparent, so clicks still reach the map beneath. */
+  .alabels { position: absolute; inset: 0; pointer-events: none; }
+  .alabels[hidden] { display: none; }
+  /* Keyboard targets: one invisible button over each object on the map, so
+   * Tab reaches what a click does. The mouse still goes to the map. */
+  .hitkeys { position: absolute; inset: 0; pointer-events: none; }
+  .hk { position: absolute; pointer-events: none; padding: 0; margin: 0; border: 0; background: none; opacity: 0; }
+  .hk:focus-visible { opacity: 1; outline: 3px solid var(--gold); outline-offset: 1px; }
+  .al { position: absolute; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 700 var(--lf, 11px)/1.2 var(--mono); color: var(--gold); background: rgba(6,8,20,.78); border: 1px solid var(--gold); border-radius: 3px; padding: 1px 5px; }
+  .al small { font-weight: 400; color: var(--ink-dim); }
+  .alabels.compact small { display: none; }
+  .al.house { font-size: calc(var(--lf, 11px) - 1px); color: var(--ink); border-color: var(--win-inner); padding: 0 3px; }
+  .al.house.working { border-color: #38c848; }
+  .al.house.blocked { border-color: #e02828; }
+  .legend-btn { background: var(--win-bot); color: var(--gold); border: 2px solid var(--win-inner); border-radius: 50%; font: 700 14px var(--mono); width: 30px; height: 30px; padding: 0; cursor: pointer; }
+  .legend-btn[aria-expanded="true"] { background: var(--gold); color: #241400; }
+  /* The key: every symbol on the map, drawn by the renderer itself. */
+  .legend { margin-top: 8px; padding: 8px 10px; border: 2px solid var(--rule); border-radius: 4px; background: rgba(6,8,20,.55); }
+  .legend[hidden] { display: none; }
+  .legend h3 { margin: 0 0 4px; font: 700 13px var(--mono); color: var(--gold); }
+  .legend h4 { margin: 8px 0 4px; font: 700 12px var(--mono); color: var(--ink-dim); }
+  .legend ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr)); gap: 4px 12px; }
+  .legend li { display: flex; align-items: center; gap: 8px; font: 13px/1.3 var(--mono); }
+  .legend canvas { width: 42px; height: 42px; flex: none; cursor: default; background: var(--frame-shadow); border-radius: 3px; }
+  /* Said where open ground was clicked, then gone. */
+  .hint { position: absolute; transform: translate(-50%, -130%); pointer-events: none; z-index: 3; font: 700 12px var(--mono); color: var(--ink); background: rgba(6,8,20,.92); border: 2px solid var(--gold); border-radius: 4px; padding: 3px 8px; white-space: nowrap; }
+  .hint.below { transform: translate(-50%, 40%); }
+  .hint[hidden] { display: none; }
+  .labels-toggle { font: 13px var(--mono); color: var(--ink-dim); white-space: nowrap; }
+  .fstrip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 8px; padding: 6px 8px; border: 2px solid var(--fc, var(--rule)); border-radius: 4px; background: rgba(6,8,20,.55); font: 13px var(--mono); }
+  .fstrip[hidden] { display: none; }
+  .fstrip h3 { margin: 0 6px 0 0; font: 700 13px var(--mono); color: var(--fc); }
+  .fstrip .chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+  .chip { padding: 2px 8px; border-radius: 4px; border: 2px solid var(--rule); color: var(--ink-dim); white-space: nowrap; }
+  .chip.done { border-color: #38c848; color: #b8f0b8; }
+  .chip.part { border-color: var(--gold); color: var(--gold); }
+  .chip.stuck { border-color: #e02828; color: #ffb0a8; background: rgba(224,40,40,.15); }
+  .chip.unknown { border-style: dashed; border-color: var(--ink-dim); color: var(--ink); background: rgba(208,212,232,.12); }
+  .chip.live { border-color: var(--gold); background: var(--gold); color: #241400; font-weight: 700; }
+  .fstrip .sep { color: var(--ink-dim); }
+  .fstrip .mode { margin-left: auto; color: var(--ink-dim); font-size: 12px; }
+  .fstrip button { background: var(--win-bot); color: var(--ink); border: 2px solid var(--win-inner); border-radius: 4px; font: 700 12px var(--mono); padding: 3px 10px; cursor: pointer; }
+  .dialog .subs li { display: flex; flex-wrap: wrap; gap: 0 8px; }
+  .dialog .subs .w { color: var(--ink-dim); }
+  .dialog .subs .drop { text-decoration: line-through; color: var(--ink-dim); }
+  .dialog dl { margin: 8px 0 0; font: 13px/1.4 var(--mono); display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; }
+  .dialog dt { color: var(--ink-dim); }
+  .dialog .fact { display: block; }
+  .dialog dd { margin: 0; }

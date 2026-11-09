@@ -102,7 +102,10 @@ src/
     gate.rs         # The merge gate: autocoder's merge jobs on this host (queued, gating, failed, ...), slots, trains
     feature.rs      # Features: a parent issue's subtasks followed from spec to production
     world.rs        # Worlds: a dev village paired with the platform it builds (incidents down, releases up)
-    village.html    # /village: the swarm as a 16-bit village (canvas renderer, themes, worlds)
+    village/        # /village: the swarm as a 16-bit village, embedded in the binary and served from /village/<path>
+      index.html    #   the page's markup
+      village.css   #   its styles
+      main.js       #   the canvas renderer, themes, worlds (an ES module; being split further, #387)
 tools/mock/         # Simulated herdr/Temporal/Kubernetes for the village: demo.sh (RUNTIME=k8s), record.py + replay-build.py, history.py (replay from git/GitHub history)
 tools/omarchy-plugin/ # Omarchy bar widget: swarm list → village summary from /api/swarms + /api/village; install.sh
 tools/adapters/     # Outside framework adapters: example report, adapter template (docs/village-protocol.md)
@@ -172,7 +175,7 @@ the tests rather than merging with conflicts resolved blindly.
 
 1. `git fetch origin` and `git rebase origin/master` on its feature branch.
 2. Resolve any conflicts itself, keeping both sides' behaviour. Most work here
-   edits `src/web/village.html`, so other workers' changes land there
+   edits the village page (`src/web/village/`), so other workers' changes land there
    constantly; read what they added rather than taking "ours".
 3. Re-run the full suite (`source "$HOME/.cargo/env" && cargo test`) on the
    rebased branch, and only then launch the merge.

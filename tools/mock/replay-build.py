@@ -5,7 +5,7 @@
     python3 tools/mock/replay-build.py tools/mock/recordings/demo.json.gz replay.html
     python3 tools/mock/replay-build.py tools/mock/recordings/feature.json.gz replay.html   # FEATURE=1, both promotion modes
 
-The page is the real village renderer (src/web/village.html) fed with the
+The page is the real village renderer (src/web/village/) fed with the
 recorded /api/village snapshots instead of a server, with a playback bar:
 runtime (Temporal or Kubernetes) or, for a feature recording, promotion mode
 (per subtask or whole feature), play/pause, speed and a scrubber.
@@ -103,7 +103,19 @@ about = (
     "Temporal or on a Kubernetes namespace. Failures raise incidents that float down to the swarm; releases ride up to the "
     "platform. Pick <b>shop ⇄</b> to see both, or one village alone.")
 
-src = (ROOT / "src/web/village.html").read_text()
+def village_page():
+    """The village page as one self-contained file: its stylesheet and script inlined."""
+    d = ROOT / "src/web/village"
+    page = (d / "index.html").read_text()
+    for tag, inline in (
+        ('<link rel="stylesheet" href="/village/village.css">', "<style>\n" + (d / "village.css").read_text() + "</style>"),
+        ('<script type="module" src="/village/main.js"></script>', "<script>\n" + (d / "main.js").read_text() + "</script>"),
+    ):
+        assert tag in page, tag
+        page = page.replace(tag, inline, 1)
+    return page
+
+src = village_page()
 head = src[src.index("<head>") + 6:src.index("</head>")]
 body = src[src.index("<body>") + 6:src.index("</body>")]
 head = head.replace('<meta charset="utf-8">', "").replace('<meta name="viewport" content="width=device-width, initial-scale=1">', "")

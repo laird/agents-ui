@@ -21,8 +21,20 @@ use crate::transport::ServerTransport;
 /// The embedded single-page web UI.
 const INDEX_HTML: &str = include_str!("ui.html");
 
-/// The village view: the swarm drawn as a 16-bit village.
-const VILLAGE_HTML: &str = include_str!("village.html");
+/// The village view: the swarm drawn as a 16-bit village. Its page, styles
+/// and scripts are files under `village/`, embedded at compile time so the
+/// binary stays self-contained: `/village` is `index.html`, and
+/// `/village/<path>` the rest. `(path, content type, contents)`.
+const VILLAGE_ASSETS: &[(&str, &str, &str)] = &[
+    ("index.html", "text/html; charset=utf-8", include_str!("village/index.html")),
+    ("village.css", "text/css; charset=utf-8", include_str!("village/village.css")),
+    ("main.js", "text/javascript; charset=utf-8", include_str!("village/main.js")),
+];
+
+/// One of the village's embedded files, with its content type.
+fn village_asset(path: &str) -> Option<(&'static str, &'static str)> {
+    VILLAGE_ASSETS.iter().find(|(p, _, _)| *p == path).map(|(_, ty, body)| (*ty, *body))
+}
 
 /// Default port for the web server.
 pub const DEFAULT_PORT: u16 = 7878;
@@ -43,7 +55,16 @@ async fn index_handler() -> Html<&'static str> {
 }
 
 async fn village_handler() -> Html<&'static str> {
-    Html(VILLAGE_HTML)
+    Html(village_asset("index.html").map(|(_, body)| body).unwrap_or_default())
+}
+
+/// `GET /village/<path>`: the page's styles and scripts. Anything else is a 404.
+async fn village_file_handler(Path(path): Path<String>) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    match village_asset(&path).filter(|_| path != "index.html") {
+        Some((ty, body)) => ([(axum::http::header::CONTENT_TYPE, ty)], body).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 /// The village model for every swarm.
@@ -1074,6 +1095,7 @@ pub async fn run(addrs: &[SocketAddr], read_only: bool, state: WebServerState) -
         .route("/api/config", get(move || async move { Json(json!({ "read_only": read_only })) }))
         .route("/", get(index_handler))
         .route("/village", get(village_handler))
+        .route("/village/{*path}", get(village_file_handler))
         .route("/api/village", get(api_village_handler))
         .route("/api/swarms", get(api_swarms_handler).post(api_launch_swarm_handler))
         .route("/api/repos", get(api_repos_handler))
@@ -1175,6 +1197,7 @@ mod tests {
         Router::new()
             .route("/", get(index_handler))
             .route("/village", get(village_handler))
+            .route("/village/{*path}", get(village_file_handler))
             .route("/api/village", get(api_village_handler))
             .route("/api/swarms", get(api_swarms_handler).post(api_launch_swarm_handler))
             .route("/api/repos", get(api_repos_handler))
@@ -1273,6 +1296,38 @@ mod tests {
         assert_eq!(app.clone().oneshot(post).await.unwrap().status(), StatusCode::FORBIDDEN);
         let get = Request::builder().uri("/api/village").body(Body::empty()).unwrap();
         assert_eq!(app.oneshot(get).await.unwrap().status(), StatusCode::OK);
+    }
+
+    /// Everything the village page is made of, for tests that look for a
+    /// line wherever it lives.
+    fn village_source() -> String {
+        VILLAGE_ASSETS.iter().map(|(_, _, body)| *body).collect::<Vec<_>>().join("\n")
+    }
+
+    #[tokio::test]
+    async fn village_files_are_served_with_their_types() {
+        for (path, ty) in [("main.js", "text/javascript; charset=utf-8"), ("village.css", "text/css; charset=utf-8")] {
+            let app = make_app(make_web_state(new_shared_state()));
+            let resp = app.oneshot(Request::builder().uri(format!("/village/{path}")).body(Body::empty()).unwrap()).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::OK, "{path}");
+            assert_eq!(resp.headers()["content-type"], ty, "{path}");
+            let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+            assert_eq!(body, village_asset(path).unwrap().1.as_bytes(), "{path} is served as embedded");
+        }
+        for path in ["missing.js", "index.html", "../server.rs", "sprites/none.js"] {
+            let app = make_app(make_web_state(new_shared_state()));
+            let resp = app.oneshot(Request::builder().uri(format!("/village/{path}")).body(Body::empty()).unwrap()).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::NOT_FOUND, "{path}");
+        }
+        // The page loads its own styles and script from the paths served above.
+        let index = village_asset("index.html").unwrap().1;
+        assert!(index.contains(r#"<link rel="stylesheet" href="/village/village.css">"#));
+        assert!(index.contains(r#"<script type="module" src="/village/main.js"></script>"#));
+        assert!(!index.contains("<style>") && !index.contains("<script>\n"), "no inline styles or script left");
+        // Every embedded file other than the page is one the page loads.
+        for (path, _, _) in VILLAGE_ASSETS.iter().filter(|(p, _, _)| *p != "index.html") {
+            assert!(index.contains(&format!("/village/{path}")), "{path} is embedded but not loaded");
+        }
     }
 
     #[tokio::test]
@@ -1452,7 +1507,7 @@ mod tests {
 
     #[test]
     fn village_html_labels_each_area_and_house() {
-        let body = VILLAGE_HTML;
+        let body = &village_source();
         // One overlay of area names, switchable, placed with the map.
         assert!(body.contains(r#"<div class="alabels" id="alabels"></div>"#));
         assert!(body.contains(r#"id="labels-on" checked"#));
@@ -1496,7 +1551,7 @@ mod tests {
 
     #[test]
     fn village_html_hit_tests_what_it_draws() {
-        let body = VILLAGE_HTML;
+        let body = &village_source();
         // paint() records a rectangle per sprite; hit() reads them back, topmost first.
         assert!(body.contains("const tap = (x, y, w, h, o) =>"));
         assert!(body.contains("sc.hits = hits; hits = null;"));
@@ -1527,7 +1582,7 @@ mod tests {
 
     #[test]
     fn village_html_hides_feature_labels_until_their_flag_is_clicked() {
-        let body = VILLAGE_HTML;
+        let body = &village_source();
         // Hidden and click-through until followed; shown while followed, focused or hovered.
         assert!(body.contains(".fb { opacity: 0; pointer-events: none; }"));
         assert!(body.contains(r#".fb[aria-pressed="true"] { opacity: 1; pointer-events: auto; }"#));
@@ -1544,7 +1599,7 @@ mod tests {
 
     #[test]
     fn village_html_hints_when_open_ground_is_clicked() {
-        let body = VILLAGE_HTML;
+        let body = &village_source();
         assert!(body.contains(r#"<div class="hint" id="hint" role="status" hidden>Click a building, crate or person for details</div>"#));
         // act() says whether a click did anything; when it did not, the hint shows.
         assert!(body.contains("if (!(h && act(h.o, h.sc, h.theme))) groundHint(e);"));
@@ -1554,7 +1609,7 @@ mod tests {
 
     #[test]
     fn village_html_keeps_labels_clear_of_the_art_and_each_other() {
-        let body = VILLAGE_HTML;
+        let body = &village_source();
         // Size follows the map; subtitles drop below 3x.
         assert!(body.contains("abox.style.setProperty('--lf', Math.round(Math.max(9, Math.min(14, 2 + 2.5 * s))) + 'px');"));
         assert!(body.contains("abox.classList.toggle('compact', s < 3);"));
@@ -1572,7 +1627,7 @@ mod tests {
 
     #[test]
     fn village_html_has_a_key_drawn_from_the_renderer() {
-        let body = VILLAGE_HTML;
+        let body = &village_source();
         assert!(body.contains(r#"<button id="legend-btn" class="legend-btn" aria-expanded="false" aria-controls="legend""#));
         assert!(body.contains(r#"<div class="legend" id="legend" hidden role="region" aria-labelledby="legend-title">"#));
         // The rows come from the renderer's own tables, so a new kind or icon appears in the key.
@@ -1682,7 +1737,7 @@ mod tests {
 
     #[test]
     fn village_html_future_theme_fills_every_slot() {
-        let body = VILLAGE_HTML;
+        let body = &village_source();
         // Registered, offered in the Style picker, and remembered like the others.
         assert!(body.contains("const THEMES = { medieval: MEDIEVAL, modern: MODERN, future: FUTURE };"));
         assert!(body.contains(r#"<option value="future">Future</option>"#));
@@ -1729,7 +1784,7 @@ mod tests {
 
     #[test]
     fn village_html_loads_the_ship_and_sails_it_on_a_release() {
-        let body = VILLAGE_HTML;
+        let body = &village_source();
         // Loading: the stop before the harbour (or the quay) is the ship's cargo, capped with a count.
         assert!(body.contains("const cargoStop = v => v.pipeline.stops.length - 2; // -1: the quay"));
         assert!(body.contains("return i < -1 ? [] : i < 0 ? v.pipeline.quay : v.pipeline.stops[i].issues;"));
@@ -1766,7 +1821,7 @@ mod tests {
 
     #[test]
     fn village_html_animates_each_issues_life_in_a_queue() {
-        let body = VILLAGE_HTML;
+        let body = &village_source();
         // The queue: in order, staggered, capped; timed so a background tab never replays.
         assert!(body.contains("const STAGGER = 700, QUEUE_CAP = 12, WALK = 0.05, ARRIVE_IN = 1800, UNLOAD = 450, SAIL_OUT = 1500;"));
         assert!(body.contains("if (reduce || porters.filter(p => p.t0 > t).length >= QUEUE_CAP) return null;"));
@@ -1798,7 +1853,7 @@ mod tests {
 
     #[test]
     fn village_html_dialogs_explain_unknown_stops_the_whole_quay_and_houses_by_branch() {
-        let body = VILLAGE_HTML;
+        let body = &village_source();
         // Facts and the list each get their own line: no "branchNothing here".
         assert!(body.contains("map(m => `<span class=\"fact\">${esc(m)}</span>`).join('')"));
         assert!(body.contains(".dialog .fact { display: block; }"));
@@ -1824,7 +1879,7 @@ mod tests {
 
     #[test]
     fn village_html_links_only_what_it_knows() {
-        let body = VILLAGE_HTML;
+        let body = &village_source();
         // The repo's pages only when a real issue URL names the repo.
         assert!(body.contains(r"const ISSUE_URL = /^(https:\/\/github\.com\/[^/]+\/[^/]+)\/issues\/\d+$/;"));
         assert!(body.contains("url: (c && c.url) || (own && own.url) || (repo ? `${repo}/issues/${n}` : null)"));
@@ -1840,7 +1895,7 @@ mod tests {
 
     #[test]
     fn village_html_shows_working_agents_and_every_subagent() {
-        let body = VILLAGE_HTML;
+        let body = &village_source();
         // A working agent is one busy figure at its door, acting out its action.
         assert!(body.contains("if (st === 'working') { person(c, lot.x + 4, lot.y + 8, h.id, workFrame(tt), { status: st }); drawAction(c, lot.x + 4, lot.y + 8, h.action, tt); }"));
         assert!(body.contains("const workFrame = t => (!reduce && blink(t, 180) ? 'work2' : 'work');"));
@@ -1860,7 +1915,7 @@ mod tests {
 
     #[test]
     fn village_html_fits_the_map_to_the_panel_width() {
-        let body = VILLAGE_HTML;
+        let body = &village_source();
         // Fit by width only: the old cap by window height left a 2x map in a wide panel.
         assert!(!body.contains("window.innerHeight - 190"), "the height cap is gone");
         assert!(body.contains("const room = (document.getElementById('viewport').clientWidth - 8) / cv.width;"));
@@ -1872,7 +1927,7 @@ mod tests {
 
     #[test]
     fn village_html_zooms_and_remembers_it() {
-        let body = VILLAGE_HTML;
+        let body = &village_source();
         assert!(body.contains(r#"<button id="zoom-out" aria-label="Zoom out">−</button>"#));
         assert!(body.contains(r#"<button id="zoom-in" aria-label="Zoom in">+</button>"#));
         assert!(body.contains(r#"<button id="zoom-fit""#));
@@ -1889,7 +1944,7 @@ mod tests {
 
     #[test]
     fn village_html_names_the_village_and_links_its_repo() {
-        let body = VILLAGE_HTML;
+        let body = &village_source();
         assert!(body.contains(r#"<span id="vname" class="vname"></span> <a id="repo" hidden target="_blank" rel="noopener"></a>"#));
         // The name shows whenever the picker (which also shows it) is hidden.
         assert!(body.contains("vn.hidden = !pick.hidden;"));
@@ -1916,7 +1971,7 @@ mod tests {
 
     #[test]
     fn village_html_reaches_every_object_by_keyboard() {
-        let body = VILLAGE_HTML;
+        let body = &village_source();
         assert!(body.contains(r#"<div class="hitkeys" id="hitkeys"></div>"#));
         assert!(body.contains("function placeKeys()"));
         assert!(body.contains("placeLabels();\n    placeKeys();"));
