@@ -176,22 +176,27 @@ pub fn gate_runs(log: &str) -> u32 {
     log.lines().filter(|l| l.trim_start().starts_with("🧪 Gating the integrated tree")).count() as u32
 }
 
-/// Tests run and suites finished in the latest gate run, from the test
-/// runner's summaries (`test result: ok. 12 passed; 0 failed; ...`).
+/// Tests run and suites finished in the latest gate run: the test runner's
+/// summaries (`test result: ok. 12 passed; 0 failed; ...`) plus the per-test
+/// lines (`test a::b ... ok`) of the suite still running, since a long suite
+/// prints its summary only at the end.
 pub fn gate_progress(log: &str) -> Option<(u64, u32)> {
     let start = log.rfind("🧪 ").unwrap_or(0);
-    let mut tests = 0u64;
-    let mut suites = 0u32;
+    let (mut done, mut running, mut suites) = (0u64, 0u64, 0u32);
     for line in log[start..].lines() {
-        let Some(rest) = line.split("test result:").nth(1) else { continue };
-        let words: Vec<&str> = rest.split_whitespace().collect();
-        let count = |what: &str| {
-            words.windows(2).find(|w| w[1].trim_end_matches([';', ',']) == what).and_then(|w| w[0].parse::<u64>().ok()).unwrap_or(0)
-        };
-        tests += count("passed") + count("failed");
-        suites += 1;
+        if let Some(rest) = line.split("test result:").nth(1) {
+            let words: Vec<&str> = rest.split_whitespace().collect();
+            let count = |what: &str| {
+                words.windows(2).find(|w| w[1].trim_end_matches([';', ',']) == what).and_then(|w| w[0].parse::<u64>().ok()).unwrap_or(0)
+            };
+            done += count("passed") + count("failed");
+            suites += 1;
+            running = 0;
+        } else if line.starts_with("test ") && line.contains(" ... ") {
+            running += 1;
+        }
     }
-    (suites > 0).then_some((tests, suites))
+    (suites > 0 || running > 0).then_some((done + running, suites))
 }
 
 /// The log says the integration branch fails without this change.
@@ -223,11 +228,16 @@ pub fn job_gate(job: Option<&Job>, labels: &[String], url: Option<&str>, now: Sy
     Some(TaskGate {
         state,
         landed,
-        slot: if job.alive { job.slot } else { None },
+        // A job queued on the last slot has its file open too; only a gating job holds one.
+        slot: if job.alive && state == GateState::Gating { job.slot } else { None },
         started_at: job.started.map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
         elapsed_secs: if job.alive { job.started.and_then(|t| now.duration_since(t).ok()).map(|d| d.as_secs()) } else { None },
         tests_run: progress.map(|(n, _)| n),
-        progress: progress.map(|(n, s)| format!("{n} tests run ({s} suite{})", if s == 1 { "" } else { "s" })),
+        progress: progress.map(|(n, s)| match s {
+            0 => format!("{n} tests run"),
+            1 => format!("{n} tests run (1 suite)"),
+            s => format!("{n} tests run ({s} suites)"),
+        }),
         attempt: gate_runs(&job.log),
         failure_url: (state.handed_back() || state == GateState::RedBase).then(|| url.map(str::to_string)).flatten(),
         train: job.feature.as_deref().and_then(|f| f.strip_prefix("train/")).map(str::to_string),
@@ -469,10 +479,49 @@ pub fn read_local(repo: &Path) -> GateReading {
             std::fs::metadata(tmp.join(format!("autocoder-gate-slot-{k}.lock"))).ok().map(|m| (k, m.ino()))
         })
         .collect();
-    let holders = lock_holders(&std::fs::read_to_string("/proc/locks").unwrap_or_default());
-    let parent = |pid: u32| std::fs::read_to_string(format!("/proc/{pid}/stat")).ok().and_then(|s| parent_pid(&s));
     let job_pids: Vec<(u32, u32)> = jobs.iter().filter(|(_, j)| j.alive).filter_map(|(p, j)| p.map(|p| (j.issue, p))).collect();
-    let (busy, owner) = slot_owners(&slot_inodes, &holders, &parent, &job_pids);
+    // /proc/locks says which slots are busy, but names the pid that took the
+    // lock: `flock(1)`, which has exited by now. The lock stays with the
+    // subshell that opened the file on fd 9, so find who in each job's
+    // process tree has a slot file open.
+    let busy = slot_owners(&slot_inodes, &lock_holders(&std::fs::read_to_string("/proc/locks").unwrap_or_default()), &|_| None, &[]).0;
+    let parents: HashMap<u32, u32> = std::fs::read_dir("/proc")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| e.file_name().to_str()?.parse::<u32>().ok())
+        .filter_map(|pid| Some((pid, parent_pid(&std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)?)))
+        .collect();
+    let parent = |pid: u32| parents.get(&pid).copied();
+    let roots: HashSet<u32> = job_pids.iter().map(|(_, p)| *p).collect();
+    let in_a_job = |pid: u32| {
+        let mut p = Some(pid);
+        for _ in 0..64 {
+            match p {
+                Some(cur) if roots.contains(&cur) => return true,
+                Some(cur) if cur > 1 => p = parent(cur),
+                _ => return false,
+            }
+        }
+        false
+    };
+    let inodes: HashSet<u64> = slot_inodes.iter().map(|(_, i)| *i).collect();
+    let mut open: HashMap<u64, Vec<u32>> = HashMap::new();
+    for pid in parents.keys().copied().filter(|p| in_a_job(*p)) {
+        for fd in std::fs::read_dir(format!("/proc/{pid}/fd")).into_iter().flatten().flatten() {
+            use std::os::unix::fs::MetadataExt;
+            if let Ok(ino) = std::fs::metadata(fd.path()).map(|m| m.ino()) {
+                if inodes.contains(&ino) {
+                    open.entry(ino).or_default().push(pid);
+                }
+            }
+        }
+    }
+    // A slot is a job's only while it is busy: a file left open by a job
+    // that is waiting for the lock is not holding it.
+    let busy_inodes: HashSet<u64> = slot_inodes.iter().filter(|(k, _)| busy.contains(k)).map(|(_, i)| *i).collect();
+    open.retain(|ino, _| busy_inodes.contains(ino));
+    let owner = slot_owners(&slot_inodes, &open, &parent, &job_pids).1;
     reading.busy = busy;
     reading.jobs = jobs
         .into_iter()
@@ -529,7 +578,8 @@ mod tests {
 
     #[test]
     fn progress_counts_the_latest_gate_run() {
-        assert_eq!(gate_progress(GATING), Some((12, 1)));
+        assert_eq!(gate_progress(GATING), Some((13, 1)), "12 in the finished suite, 1 so far in the next");
+        assert_eq!(gate_progress("🧪 Gating the integrated tree a\nrunning 700 tests\ntest a ... ok\ntest b ... FAILED\n"), Some((2, 0)));
         assert_eq!(gate_progress(FAILED), Some((700, 1)));
         assert_eq!(gate_progress(RESYNC), None, "the re-gate has no summaries yet; the first run's don't count");
         assert_eq!(gate_progress(PREPARING), None);
@@ -571,8 +621,11 @@ mod tests {
         assert_eq!(g.elapsed_secs, Some(125));
         assert_eq!(g.attempt, 2);
         assert_eq!(g.failure_url, None);
+        let mut waiting = job(9, true, None, WAITING);
+        waiting.slot = Some(3);
+        assert_eq!(job_gate(Some(&waiting), &[], None, at(T0)).unwrap().slot, None, "queued on slot 3, not holding it");
         let g = job_gate(Some(&job(9, true, None, GATING)), &[], None, at(T0)).unwrap();
-        assert_eq!((g.tests_run, g.progress.as_deref()), (Some(12), Some("12 tests run (1 suite)")));
+        assert_eq!((g.tests_run, g.progress.as_deref()), (Some(13), Some("13 tests run (1 suite)")));
         // A finished job keeps when it started, but not a slot or a clock.
         let mut done = job(9, false, Some(2), FAILED);
         done.slot = Some(1);
