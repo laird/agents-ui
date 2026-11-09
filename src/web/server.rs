@@ -1737,7 +1737,7 @@ mod tests {
         assert!(body.contains("if (load.length > SHIP_CAP) badge("));
         assert!(body.contains("tap(x, y, 5, 5, { kind: 'crate', n, at: 'ship' });"));
         // Porters carry newly arrived work to the ship; lock gates open as crates pass.
-        assert!(body.contains("to: 'ship', pts: toShip(from, lay) });"));
+        assert!(body.contains("if (i === cs) enqueue(sc, t, trip('porter:' + n, n, null, 'ship', [{ pts: toShip(from, lay), carry: true }], { sealed: true, speed: 0.04 }), 300);"));
         assert!(body.contains("for (let g = was + 1; g <= i; g++) sc.gates[g] = t;"));
         assert!(body.contains("const open = !reduce && t - (S.gates[i] ?? -1e9) < GATE_OPEN;"));
         // Sailing: from the last stop's sha, once per change, never on first load.
@@ -1762,6 +1762,38 @@ mod tests {
         assert!(body.contains("const repo = repoUrl(v), url = s.url || (repo ? `${repo}/releases/tag/${encodeURIComponent(s.tag)}` : null);"));
         // Worlds: the release cart sets off as the ship leaves the map.
         assert!(body.contains("const sailed = Ds.voyage ? Ds.voyage.t0 + SAIL : 0;"));
+    }
+
+    #[test]
+    fn village_html_animates_each_issues_life_in_a_queue() {
+        let body = VILLAGE_HTML;
+        // The queue: in order, staggered, capped; timed so a background tab never replays.
+        assert!(body.contains("const STAGGER = 700, QUEUE_CAP = 12, WALK = 0.05, ARRIVE_IN = 1800, UNLOAD = 450, SAIL_OUT = 1500;"));
+        assert!(body.contains("if (reduce || porters.filter(p => p.t0 > t).length >= QUEUE_CAP) return null;"));
+        assert!(body.contains("trip.t0 = Math.max(t, sc.nextAt || 0);"));
+        // No replay on load; reduced motion walks no one and says what changed.
+        assert!(body.contains("if (!old || old.project !== now.project) return [];"));
+        assert!(body.contains("if (reduce && said.length && shownScenes().some(([x]) => x === sc)) toast("));
+        // Arrives: a supply vessel in every theme, its crew unloading one crate each.
+        assert_eq!(body.matches("supply(c, x, t, load) {").count(), 2, "modern truck and future shuttle");
+        assert!(body.contains("vessel: ship, supply: boat,"));
+        assert!(body.contains("sc.supplies.push(job);"));
+        assert!(body.contains("T.supply(c, x, t, load);"));
+        // Claimed: walk out empty, then carry it home; the crate waits at the docks meanwhile.
+        assert!(body.contains("enqueue(sc, t, trip(h.id, h.issue, old.backlog[slot], 'house', [{ pts: out }, { pts: back(out), carry: true }]));"));
+        assert!(body.contains("if (!a.fetched && p.issue && !p.crew) {"));
+        // Worked on: the crate at the door, sparking unless the action is a quiet one.
+        assert!(body.contains("tap(lot.x + 11, lot.y + 16, 5, 5, { kind: 'crate', n: h.issue, at: 'house', i });"));
+        assert!(body.contains("const QUIET_ACTIONS = new Set(['thinking', 'reading', 'searching', 'messaging']);"));
+        // Board both ways, landing with the walk home, and closed issues carried off the map.
+        assert!(body.contains("'board', steps));"));
+        assert!(body.contains("said.push(`#${c.number} back in the backlog`);"));
+        assert!(body.contains("[{ pts, carry: true }, { pts: back(pts) }], { sealed: true }));"));
+        assert!(body.contains("'away', [{ pts: [...from, [-10, ROAD]], carry: true }]));"));
+        // A crate in transit is hidden at rest and opens the crate dialog.
+        assert!(body.contains("const bound = new Set(porters.filter(p => p.issue && at.get(p) && !(at.get(p).fetched && !at.get(p).carry)).map(p => p.issue));"));
+        assert!(body.contains("tap(a.x - 2, a.y - 16, 5, 5, { kind: 'crate', n: p.issue, at: 'transit', to: p.to });"));
+        assert!(body.contains("if (o.at === 'transit') return o.to === 'away' ? 'closed without landing: carried away' : `on its way to the ${tripPlace(o.to, theme)}`;"));
     }
 
     #[test]

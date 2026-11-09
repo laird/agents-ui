@@ -25,6 +25,13 @@ sails with a tag. To cut a release now instead of waiting for the next one:
 
     touch DEMO/state/release-now
 
+With --lifecycle, "shop" plays every part of an issue's life on a loop, so
+the village's animations (#368) can be watched without waiting on chance:
+every 90 s three issues arrive together (the supply boat), one is blocked
+and then unblocked (to the board and back), one is closed as not planned
+(carried off), workers claim, work on and land the rest, and a release
+ships what has landed.
+
 Linked to the platform (temporal_sim.py): every prod promotion of "shop"
 writes the released commit to <dir>/state/release, and every line the
 platform appends to <dir>/state/incidents.jsonl becomes an `incident` issue
@@ -35,6 +42,7 @@ in "shop" naming the workstream that failed.
     swarm_sim.py --dir DEMO --story run   # the incident story: one bug, start to finish
     swarm_sim.py --dir DEMO --feature run                       # two features, spec to prod
     swarm_sim.py --dir DEMO --feature --promotion feature run   # ... promoted as whole features
+    swarm_sim.py --dir DEMO --lifecycle run                     # every issue transition, on a loop
 
 With --story the demo tells one story cleanly: an incident from the platform
 becomes a P0 bug, a worker fixes it (asking once for permission on the way),
@@ -74,6 +82,7 @@ from pathlib import Path
 SWARMS = [("shop", 5, "autocoder"), ("billing", 2, "modernize")]
 STORY = False
 FEATURE = False
+LIFECYCLE = False
 PROMOTION = "subtask"
 REPO_URL = "https://github.com/sim/shop"
 # The feature story's two features (see the module docstring). Numbers sit
@@ -499,6 +508,51 @@ class FeatureStory:
             tmp.replace(path)
 
 
+class Lifecycle:
+    """--lifecycle: every transition of an issue's life, on a 90 s loop."""
+    PERIOD = 90
+    SCRIPT = [(0, "arrive"), (12, "block"), (30, "unblock"), (40, "close"), (75, "release")]
+
+    def __init__(self, swarm, t0):
+        self.s, self.t0, self.cycle, self.done, self.blocked = swarm, t0, -1, set(), None
+        swarm.next_arrival = float("inf")  # arrivals come only from the script
+
+    def tick(self, t):
+        cycle, at = divmod(t - self.t0, self.PERIOD)
+        if cycle != self.cycle:
+            self.cycle, self.done = cycle, set()
+        for when, what in self.SCRIPT:
+            if at >= when and what not in self.done:
+                self.done.add(what)
+                getattr(self, what)()
+
+    def waiting(self):
+        return [i for i in self.s.claimable() if not i.get("hold")]
+
+    def arrive(self):
+        for _ in range(3):
+            self.s.new_issue(random.choice(LABELS))
+
+    def block(self):
+        todo = self.waiting()
+        if todo:
+            self.blocked = todo[-1]
+            self.blocked["labels"].append("needs-design")
+
+    def unblock(self):
+        if self.blocked:
+            self.blocked["labels"] = [l for l in self.blocked["labels"] if l != "needs-design"]
+            self.blocked = None
+
+    def close(self):
+        todo = self.waiting()
+        if todo:
+            self.s.issues.remove(todo[-1])  # closed as not planned
+
+    def release(self):
+        (self.s.state / "release-now").touch()
+
+
 def main():
     ap = argparse.ArgumentParser(description="Simulated coding swarms under herdr.")
     ap.add_argument("--dir", required=True, type=Path)
@@ -508,11 +562,12 @@ def main():
     ap.add_argument("--feature", action="store_true", help="follow two features from spec to prod (see the module docstring)")
     ap.add_argument("--promotion", choices=["subtask", "feature"], default="subtask",
                     help="with --feature: promote each subtask on its own, or each feature as a whole")
+    ap.add_argument("--lifecycle", action="store_true", help="play every transition of an issue's life on a loop (see the module docstring)")
     ap.add_argument("command", choices=["setup", "run"])
     args = ap.parse_args()
-    global STORY, FEATURE, PROMOTION
-    STORY, FEATURE, PROMOTION = args.story, args.feature, args.promotion
-    quiet = STORY or FEATURE
+    global STORY, FEATURE, PROMOTION, LIFECYCLE
+    STORY, FEATURE, PROMOTION, LIFECYCLE = args.story, args.feature, args.promotion, args.lifecycle
+    quiet = STORY or FEATURE or LIFECYCLE
     if args.seed is not None:
         random.seed(args.seed)
     root = args.dir.resolve()
@@ -533,6 +588,7 @@ def main():
     shop.write_release()
     if FEATURE:
         shop.story = FeatureStory(shop, time.time())
+    lifecycle = Lifecycle(shop, time.time() + 5) if LIFECYCLE else None
     incident_offset = 0
     print(f"simulating {', '.join(s.name for s in swarms)} in {root}", flush=True)
     next_green, next_staging, next_prod, red_until, next_red = 0, 0, 0, 0, time.time() + 150
@@ -556,6 +612,8 @@ def main():
             for s in swarms:
                 s.sentinel(red=t < red_until or (s.story is not None and s.story.hold()))
             next_green = t + 12
+        if lifecycle:
+            lifecycle.tick(t)
         if shop.story:
             shop.story.tick(t)
         else:
