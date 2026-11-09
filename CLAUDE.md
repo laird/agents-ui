@@ -173,9 +173,11 @@ what `src/web/deployments.rs` reads to place each stop:
   to check without changing anything). It runs `cargo install`, restarts the
   served `agents-tui`, and records the Deployment as `success`. If the install
   or restart fails, it records `failure`.
-- **`release`**: run `gh release create vX.Y.Z --generate-notes`. Publishing
-  the release runs `.github/workflows/release.yml`, which records a Deployment
-  of the tag's commit.
+- **`release`**: run `tools/release.sh vX.Y.Z` (or add `--dry-run`). It runs
+  `gh release create --generate-notes` at `origin/master`'s tip, or at
+  `--commit`, and records a Deployment of that commit. For a release made by
+  hand, run the same command afterwards: when the release already exists, it
+  only records the Deployment.
 
 There is no sentinel here, so no `master-green` ref exists. `nuc-1` is marked
 `"requires": "integration"`, which drops the green stop, and the village shows
