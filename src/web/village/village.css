@@ -104,6 +104,7 @@
   .al.bounce { color: #fff; background: #b02020; border-color: #ff6a5a; font-size: calc(var(--lf, 11px) - 2px); padding: 0 3px; }
   .al.buildsign { color: #fff; background: #c02020; border-color: #ff6060; font-weight: bold; letter-spacing: .06em; }
   .al.buildsign small { color: #ffe0e0; letter-spacing: 0; font-weight: normal; }
+  .al.flag { font-size: calc(var(--lf, 11px) - 1px); color: var(--ink); border-width: 2px; padding: 0 3px; white-space: normal; text-align: center; }
   .al.house { font-size: calc(var(--lf, 11px) - 1px); color: var(--ink); border-color: var(--win-inner); padding: 0 3px; }
   .al.house { white-space: normal; text-align: center; }
   .al.house span { white-space: nowrap; }

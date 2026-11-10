@@ -218,6 +218,10 @@ export const numberTagSize = n => tagSize(String(n).length);
 export function badge(c, x, y, n) {
   glyphTag(c, x, y, [PLUS, ...String(n).split('').map(d => DIGITS[+d])], P.gold);
 }
+/* A number in the 3x5 font, straight onto whatever is under it (a flag's cloth). */
+export function digits(c, x, y, n, col) {
+  String(n).split('').forEach((d, j) => { const g = DIGITS[+d]; for (let k = 0; k < 15; k++) if (g[k] === '1') R(c, x + j * 4 + (k % 3), y + Math.floor(k / 3), 1, 1, col); });
+}
 /* A number on a parchment tag (a crate's issue in a line), in the same font. */
 export function numberTag(c, x, y, n) {
   glyphTag(c, x, y, String(n).split('').map(d => DIGITS[+d]), P.parch);

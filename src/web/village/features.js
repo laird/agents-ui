@@ -10,11 +10,12 @@
 import { state } from './state.js';
 import { F, P, R, blink } from './palette.js';
 import { puffs } from './sprites/houses.js';
-import { bubble } from './scenery.js';
+import { bubble, digits } from './scenery.js';
+import { flagLabel } from './houselabel.js';
 import { MEDIEVAL } from './themes/medieval.js';
 import { M, MODERN } from './themes/modern.js';
 import { FUTURE } from './themes/future.js';
-import { placeOverlays, registerHit, registerLayer, registerOverlay, tap } from './registry.js';
+import { placeOverlays, registerHit, registerLabels, registerLayer, registerOverlay, tap } from './registry.js';
 import { cv, shownScenes, slotPos } from './layout.js';
 import { SHIP_CAP, cargoOf, holdPos, placeOf, sourceWords } from './ship.js';
 import { esc } from './panels.js';
@@ -104,14 +105,21 @@ function drawBanner(c, g, on, t) {
   if (f.live) { R(c, x - 1, top - 3, 3, 3, P.o); R(c, x, top - 2, 1, 1, P.gold); R(c, x - 1, top - 2, 3, 1, P.gold); R(c, x, top - 3, 1, 1, P.gold); }
   else R(c, x, top - 1, 1, 1, modern ? M.steel : P.stoneL);
   R(c, x + 1, y, 14, 10, P.o); R(c, x + 1, y + 1, 13, 8, col); R(c, x + 1, y + 1, 13, 1, P.white);
-  if (!modern) R(c, x + 12, y + 4 + wave, 3, 2, P.o);
-  R(c, x + 4, y + 4, 6, 1, P.white); R(c, x + 4, y + 6, 4, 1, P.white);
+  if (!modern) R(c, x + 13, y + 4 + wave, 2, 2, P.o);
+  // Its issue number on the cloth (#441), when three digits fit; else two lines.
+  if (String(f.number).length <= 3 && f.number >= 0) digits(c, x + 2, y + 2, f.number, P.white);
+  else { R(c, x + 4, y + 4, 6, 1, P.white); R(c, x + 4, y + 6, 4, 1, P.white); }
   if (stuck) { const w = !state.reduce && blink(t, 260) ? 1 : 0; R(c, x + 1, y - 7, 7 + w, 4, P.o); R(c, x + 1, y - 6, 6 + w, 2, P.p0); }
   if (modern) { R(c, x + 4, y + 18, 7, 7, P.o); R(c, x + 5, y + 19, 5, 5, P.white); R(c, x + 6, y + 18, 3, 1, M.steel); R(c, x + 6, y + 21, 3, 1, M.concreteD); R(c, x + 6, y + 23, 2, 1, M.concreteD); }
   else { R(c, x + 3, y + 19, 8, 5, P.o); R(c, x + 4, y + 20, 6, 3, P.parch); R(c, x + 5, y + 21, 4, 1, P.pathS); }
   if (f.live && !state.reduce) for (let k = 0; k < 3; k++) if (blink(t + k * 170, 220)) R(c, x + 3 + k * 5, y - 3 - (k % 2) * 2, 1, 1, P.gold);
   if (on) { const o = !state.reduce && blink(t, 400) ? col : P.white; R(c, x - 3, y - 9, 20, 1, o); R(c, x - 3, y + 26, 20, 1, o); R(c, x - 3, y - 9, 1, 36, o); R(c, x + 16, y - 9, 1, 36, o); }
 }
+/* Under each flag, with LABELS on: "#417 Hi-res · 1/6", edged in its colour (#441). */
+registerLabels(sc => (sc.L.banners || []).map(g => {
+  const f = g.f, b = f.build || { landed: 0, total: counted(f).length };
+  return { x: g.x + 8, y: g.y + 27, anchor: 'top', text: flagLabel(f.number, f.title, b), cls: 'flag', edge: g.col, width: 29 };
+}), 15);
 function drawTrail(c, x0, y0, x1, y1, col, t) {
   const off = state.reduce ? 0 : Math.floor(t / 110) % 4, pts = [];
   x1 = Math.round(x1); y1 = Math.round(y1);
