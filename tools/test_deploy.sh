@@ -91,7 +91,8 @@ hasnt() { ! grep -qF -- "$1" <<< "$2"; }
 run missing-unit STUB_UNIT=missing --
 check "exits 1" test "$RC" -eq 1
 check "says the unit is missing" has "agents-tui.service is not installed" "$OUT"
-check "says how to install it" has "cp docs/agents-tui.service ~/.config/systemd/user/" "$OUT"
+check "says how to install it" has "agents-tui service install" "$OUT"
+check "keeps the manual steps as a fallback" has "cp docs/agents-tui.service ~/.config/systemd/user/" "$OUT"
 check "opens no Deployment" hasnt "gh " "$LOG"
 check "installs nothing" hasnt "cargo " "$LOG"
 check "restarts nothing" hasnt "restart" "$LOG"

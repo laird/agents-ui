@@ -700,6 +700,8 @@ mod tests {
             assert!(!script.contains(gone), "deploy.sh still has {gone}");
         }
         assert!(script.contains("systemctl --user cat \"$UNIT\""));
+        // The way to get the unit is `agents-tui service install`; the manual steps stay as a fallback.
+        assert!(script.contains("agents-tui service install"));
         assert!(script.contains("cp docs/agents-tui.service ~/.config/systemd/user/"));
         let unit = include_str!("../../docs/agents-tui.service");
         assert!(unit.contains("ExecStart=%h/.cargo/bin/agents-tui --headless --web-port 7890 --web-bind 127.0.0.1,tailscale"));

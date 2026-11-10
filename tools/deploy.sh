@@ -29,7 +29,8 @@
 #   - a HEAD that is not on origin/<integration> (only landed work deploys)
 #   - no systemd user unit `agents-tui.service`. The served instance is that
 #     unit and nothing else: this script never starts a server of its own.
-#     The reference unit is docs/agents-tui.service (install steps in it).
+#     Install it with `agents-tui service install`; the reference unit is
+#     docs/agents-tui.service (manual install steps in it).
 #
 # The served instance:
 #   `systemctl --user restart agents-tui.service`, active or not, then wait until
@@ -89,7 +90,13 @@ UNIT="agents-tui.service"
 UNIT_TEXT=$(systemctl --user cat "$UNIT" 2>/dev/null) || {
   cat >&2 <<EOF
 deploy.sh: refusing: the systemd user unit $UNIT is not installed, so there is no served
-agents-tui to deploy to. Nothing was installed or recorded. Install the unit, then deploy again:
+agents-tui to deploy to. Nothing was installed or recorded. Install the service, then deploy again:
+
+  cargo install --path . --locked
+  agents-tui service install            # add --web-bind 127.0.0.1,tailscale --source swarms=herdr as nuc-1 runs it;
+                                        # --dry-run shows the unit first, --linger keeps it up after logout
+
+Or by hand, from the reference unit:
 
   mkdir -p ~/.config/systemd/user
   cp docs/agents-tui.service ~/.config/systemd/user/   # edit ExecStart's port and bind if needed

@@ -11,6 +11,7 @@ source "$HOME/.cargo/env"
 cargo build          # Build
 cargo run            # Run the TUI
 cargo install --path . # Install globally as `agents-tui`
+agents-tui service install  # ...and serve the village as a systemd user service (--dry-run, --linger; see README)
 ```
 
 To serve the web UI to tailnet devices and this machine together, give
@@ -110,6 +111,9 @@ src/
     theme.rs        # Color/style constants
   config/
     persistence.rs  # Swarm state save/load (~/.agents-ui/)
+  service/          # `agents-tui service install|uninstall|status|restart`: the served UI as a user service
+    unit.rs         #   options → systemd unit text (pure; docs/agents-tui.service is its nuc-1 output)
+    systemd.rs      #   write, enable, wait for the village, linger, through an injectable runner
   web/
     server.rs       # HTTP API + embedded pages (`--web` / `--headless`)
     framework.rs    # Neutral agents-village report: every village is drawn from one; --framework reads outside adapters

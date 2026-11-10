@@ -4,7 +4,16 @@
 # refuses to deploy when the unit is not installed, and never starts a server
 # of its own.
 #
-# Install:
+# This is the reference: every section below is what the installed
+# binary (~/.cargo/bin/agents-tui) generates with nuc-1's options,
+#   agents-tui service install --web-bind 127.0.0.1,tailscale --source swarms=herdr --dry-run
+# and a test fails if the two drift apart.
+#
+# Install (writes the unit with the running binary's path, enables and starts
+# it, and waits until the village answers; --linger keeps it up after logout):
+#   cargo install --path . && agents-tui service install
+#
+# Or by hand:
 #   mkdir -p ~/.config/systemd/user
 #   cp docs/agents-tui.service ~/.config/systemd/user/
 #   systemctl --user daemon-reload
