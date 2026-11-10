@@ -335,6 +335,50 @@ pub async fn fetch_closed_issues(transport: &ServerTransport, repo_path: &Path) 
     parse_issues_json(&output.stdout).map_err(|e| GhError::Transient(e.to_string()))
 }
 
+/// The merge job's comments on issues updated in the last two days, as
+/// `(issue, createdAt, body)`: where the gate handed work back (#431). One
+/// search, not a call per issue; only comments that look like the job's.
+pub async fn fetch_merge_comments(transport: &ServerTransport, repo_path: &Path) -> std::result::Result<Vec<(u32, String, String)>, GhError> {
+    let since = (chrono::Utc::now() - chrono::Duration::days(2)).format("%Y-%m-%d").to_string();
+    let search = format!("\"Auto-merge to\" in:comments updated:>={since}");
+    let args: Vec<String> = ["issue", "list", "--state", "all", "--limit", "50", "--search", &search, "--json", "number,comments"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let output = gh_repo_output(transport, repo_path, &args).await.map_err(|e| GhError::Transient(e.to_string()))?;
+    if !output.status.success() {
+        return Err(classify_gh_error(&String::from_utf8_lossy(&output.stderr)));
+    }
+    Ok(parse_merge_comments(&output.stdout))
+}
+
+/// `gh issue list --json number,comments` → the comments that start like the merge job's.
+pub fn parse_merge_comments(bytes: &[u8]) -> Vec<(u32, String, String)> {
+    #[derive(serde::Deserialize)]
+    struct Comment {
+        #[serde(default)]
+        body: String,
+        #[serde(default, rename = "createdAt")]
+        created_at: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct Issue {
+        number: u32,
+        #[serde(default)]
+        comments: Vec<Comment>,
+    }
+    let issues: Vec<Issue> = serde_json::from_slice(bytes).unwrap_or_default();
+    issues
+        .into_iter()
+        .flat_map(|i| {
+            i.comments
+                .into_iter()
+                .filter(|c| c.body.contains("**Auto-merge to "))
+                .map(move |c| (i.number, c.created_at, c.body))
+        })
+        .collect()
+}
+
 /// Spawn a background task that periodically fetches issues.
 /// Stops retrying on permanent errors (auth, repo not found) and sends a warning event.
 pub fn spawn_issue_fetcher(
@@ -499,6 +543,22 @@ fn parse_issues_json(bytes: &[u8]) -> Result<Vec<GitHubIssue>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn merge_comments_are_the_jobs_own_with_their_times() {
+        let json = br#"[
+            {"number": 405, "comments": [
+                {"body": "\u2699 claim", "createdAt": "2026-11-10T01:36:52Z"},
+                {"body": "\u26a0\ufe0f **Auto-merge to `master` hit a conflict** on branch `feature/issue-405`", "createdAt": "2026-11-10T01:46:14Z"}
+            ]},
+            {"number": 12, "comments": []}
+        ]"#;
+        let got = crate::github::parse_merge_comments(json);
+        assert_eq!(got.len(), 1);
+        assert_eq!((got[0].0, got[0].1.as_str()), (405, "2026-11-10T01:46:14Z"));
+        assert!(got[0].2.contains("hit a conflict"));
+        assert!(crate::github::parse_merge_comments(b"not json").is_empty());
+    }
+
     use super::{
         GhError, classify_gh_error, feature_link_args, parse_issues_json, repo_owner_from_remote,
         repo_web_url,
