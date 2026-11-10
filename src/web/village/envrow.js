@@ -4,10 +4,12 @@
  * order, production right-most (docs/environment-row.md).
  * Each has a sign with the version it runs, a warehouse holding what it runs
  * (its cargo, grouped under the banners of the features it belongs to), a
- * dock each side on the river, and a health mark: smoke and a red flag when
- * its newest deployment failed, a fire for an open incident, a "?" when
- * nothing says what it runs. Its look follows its rank: a town, and the
- * capital (production) with a keep. A world's platform stands in the slot
+ * house per feature it runs flying that feature's colour, a dock each side
+ * on the river, and a health mark: smoke and a red flag when its newest
+ * deployment failed, a fire for an open incident, a "?" when nothing says
+ * what it runs. Its look follows its rank: a town, and the capital
+ * (production) with a keep. One label names it, at its warehouse, with the
+ * version it runs (#440). A world's platform stands in the slot
  * of the environment it runs (worlds.js): that slot has no houses or keep of
  * its own, and its sign stands by the warehouse, under the platform. The
  * ships between them are voyages.js; the strip of villages over the map is
@@ -23,22 +25,12 @@ import { cv, shownScenes } from './layout.js';
 import { issueItems, isSha, link, repoUrl } from './dialogs.js';
 import { sourceWords } from './ship.js';
 import { esc } from './panels.js';
+import { agoWords, envHouses, envLabel, versionOf } from './envlabels.js';
+import { showFeature } from './features.js';
 
 /* Where things stand in an environment village, from its left edge and the canal. */
 export const SHED = { dx: 30, w: 60, h: 32, up: 44 }, ENV_DOCK = 20, BAY_COLS = 9, BAY_ROWS = 3;
 
-/* What an environment runs, in a word: its release tag, else its commit. */
-export const versionOf = s => s.tag || (s.sha ? String(s.sha).slice(0, 7) : null);
-/* How long ago an RFC 3339 time was, in a few words; null when it isn't one. */
-export function agoWords(iso, now = Date.now()) {
-  const at = Date.parse(iso || '');
-  if (Number.isNaN(at)) return null;
-  const s = Math.max(0, (now - at) / 1000);
-  if (s < 90) return 'just now';
-  if (s < 5400) return `${Math.round(s / 60)} min ago`;
-  if (s < 129600) return `${Math.round(s / 3600)} h ago`;
-  return `${Math.round(s / 86400)} days ago`;
-}
 /* An environment's cargo, grouped by the feature each issue belongs to (in
  * the order the village lists its features), then the fixes that belong to
  * none. Each group keeps its banner colour from the feature strip. */
@@ -111,10 +103,19 @@ registerLayer({ z: 60, draw(c, { v, lay }, t) {
     state.T.road(c, x + ENV_DOCK - 2, cy - 10, w - 2 * ENV_DOCK + 4, 5);
     state.T.dock(c, x, cy - 7, ENV_DOCK); state.T.dock(c, x + w - ENV_DOCK, cy - 7, ENV_DOCK);
     tap(x, cy - 7, ENV_DOCK, 7, { kind: 'env', i: e.i });
-    // A town has two houses; the capital three and a keep. A platform's are its workloads.
-    const houses = e.platform ? 0 : e.rank === 'capital' ? 3 : 2;
-    // Beside the warehouse, not over it, so the row stays low (#445).
-    for (let k = 0; k < houses; k++) state.T.B.cottage(c, x + SHED.dx + SHED.w + 4 + k * 18, cy - 30, 'idle', t);
+    // A house per feature it runs, flying its colour (#440), beside the
+    // warehouse so the row stays low (#445); the capital has a keep too.
+    // A platform's houses are its workloads.
+    if (!e.platform) {
+      const { houses, more } = envHouses(cargoGroups(v, s.cargo || []), e.rank);
+      houses.forEach((h, k) => {
+        const hx = x + SHED.dx + SHED.w + 4 + k * 18;
+        state.T.B.cottage(c, hx, cy - 30, 'idle', t);
+        R(c, hx + 2, cy - 38, 1, 9, P.woodD); R(c, hx + 3, cy - 38 + (blink(t + k * 250, 900) ? 1 : 0), 4, 3, h.col);
+        tap(hx, cy - 38, 16, 24, { kind: 'envhouse', f: h.f.number });
+      });
+      if (more > 0) badge(c, x + SHED.dx + SHED.w + 4 + houses.length * 18, cy - 34, more);
+    }
     if (e.rank === 'capital' && !e.platform) envKeep(c, x + w - 18, cy - 42, 32, HEALTH_COL[health], t);
     envSign(c, x + 4, signY, health === 'unknown' ? P.stoneL : null);
     tap(x + 2, signY - 2, 19, 22, { kind: 'env', i: e.i });
@@ -171,10 +172,13 @@ registerHit({ kind: 'env', dialog(o, sc) {
     items: issueItems(v, cargo).map(it => ({ ...it, label: label.get(it.number) })), links: envLinks(v, s) };
 } });
 
-/* ---------- Labels: each village's name and version, over it ---------- */
+/* A feature's house: the feature's dialog. */
+registerHit({ kind: 'envhouse', act(o, sc) { const v = sc.v, f = (v.features || []).find(f => f.number === o.f); if (f) showFeature(f, v); return !!f; } });
+
+/* ---------- Labels: one per village, over its warehouse, with its version (#440) ---------- */
 registerLabels(sc => (sc.L.envs || []).map(e => {
-  const ver = versionOf(e.s), when = agoWords(e.s.deployed_at);
-  return { x: e.x + e.w / 2, y: e.top - 1, anchor: 'bottom', text: e.s.name, sub: ver ? `${ver}${when ? ' · ' + when : ''}` : 'unknown', width: e.w - 8 };
+  const { text, sub } = envLabel(e.s);
+  return { x: e.x + SHED.dx + SHED.w / 2, y: e.cy - SHED.up - 3, anchor: 'bottom', text, sub, width: e.w - 8 };
 }), 25);
 
 /* ---------- The mini-map ----------
