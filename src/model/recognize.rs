@@ -399,6 +399,110 @@ pub fn choose_manager(swarm: &RepoSwarm, evidence: &[Evidence], manifests: &[Swa
     None
 }
 
+/// Why one agent was, or wasn't, made part of a swarm: what
+/// `GET /api/swarms?explain=1` lists, one per agent each source saw.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct AgentExplanation {
+    /// The source that saw it: `tmux`, `herdr`, `saved`, ...
+    pub source: String,
+    pub pane: String,
+    pub cwd: String,
+    /// Its pane's name or workspace label (tmux: the window's name).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The swarm it was put in (the project's name), when it was.
+    pub swarm: Option<String>,
+    /// That swarm's repo identity (its git common directory).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo: Option<String>,
+    /// `manager` or `worker-<N>`, when it was given one.
+    pub role: Option<String>,
+    /// For the manager: the evidence rule that picked it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub manager_rule: Option<ManagerRule>,
+    /// For the manager: that rule, in words.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub manager_because: Option<String>,
+    /// For the manager: several agents matched the rule and one was picked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ambiguous: Option<bool>,
+    /// Why it was left out of every swarm, or given no role in one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub left_out: Option<String>,
+}
+
+impl AgentExplanation {
+    /// The agent as its source saw it, before any judgement.
+    pub fn seen(fact: &AgentFact, name: Option<String>) -> Self {
+        Self {
+            source: fact.source.clone(),
+            pane: fact.pane.clone(),
+            cwd: fact.cwd.to_string_lossy().into_owned(),
+            name,
+            ..Self::default()
+        }
+    }
+
+    /// Mark it as its swarm's manager, picked by `choice`.
+    pub fn managing(&mut self, choice: &ManagerChoice) {
+        self.role = Some("manager".to_string());
+        self.manager_rule = Some(choice.rule);
+        self.manager_because = Some(choice.rule.describe().to_string());
+        self.ambiguous = Some(choice.ambiguous());
+    }
+}
+
+/// Why an agent whose cwd no repo holds was left out.
+pub const OUTSIDE_ANY_REPO: &str = "cwd is outside any git worktree (or git could not read it)";
+/// Why a repo with a lone, unmarked agent in its main checkout is no swarm.
+pub const LONE_AGENT: &str =
+    "lone agent in the main checkout: no worker, no swarm manifest, no AUTOCODER_MANAGER marker and no manager label, so an ordinary session, not a swarm";
+
+/// How the recognizer judged one repo's agents.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Judged {
+    pub swarm: RepoSwarm,
+    pub choice: Option<ManagerChoice>,
+    /// Whether the repo counts as a swarm; when not, why not.
+    pub left_out: Option<String>,
+}
+
+/// Every agent and what became of it: its swarm and role, the rule that made
+/// a manager, or why it was left out. `names` is indexed like `agents`.
+pub fn explain(agents: &[AgentFact], names: &[Option<String>], judged: &[Judged]) -> Vec<AgentExplanation> {
+    agents
+        .iter()
+        .enumerate()
+        .map(|(i, fact)| {
+            let mut out = AgentExplanation::seen(fact, names.get(i).cloned().flatten());
+            let Some((j, k)) = judged
+                .iter()
+                .find_map(|j| j.swarm.members.iter().position(|m| m.agent == i).map(|k| (j, k)))
+            else {
+                out.left_out = Some(OUTSIDE_ANY_REPO.to_string());
+                return out;
+            };
+            if let Some(why) = &j.left_out {
+                out.left_out = Some(why.clone());
+                return out;
+            }
+            out.swarm = Some(j.swarm.name());
+            out.repo = Some(j.swarm.key.to_string_lossy().into_owned());
+            let member = &j.swarm.members[k];
+            match (&j.choice, member.place) {
+                (Some(c), _) if c.member == k => out.managing(c),
+                (Some(c), Place::Main) => {
+                    let manager = &agents[j.swarm.members[c.member].agent].pane;
+                    out.left_out = Some(format!("in the main checkout, but {manager} is the manager ({})", c.rule.describe()));
+                }
+                (None, Place::Main) => out.left_out = Some("in the main checkout, but no manager was chosen".to_string()),
+                (_, Place::Worker(n)) => out.role = Some(format!("worker-{n}")),
+            }
+            out
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
