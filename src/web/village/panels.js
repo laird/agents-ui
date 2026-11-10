@@ -4,6 +4,7 @@
 import { COUNTERS, placeOverlays } from './registry.js';
 import { cv } from './layout.js';
 import { state } from './state.js';
+import { chooseScale } from './fitscale.js';
 
 export const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 
@@ -25,20 +26,21 @@ export function toast(text) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 5000);
 }
 
-/* The map fills the panel's width; a tall map scrolls the page rather than
- * shrinking. Whole-number scales keep the pixels square; below 1× (a phone)
- * it shrinks to the panel so the page never scrolls sideways. +/− step the
- * scale from the fitted one, and the step is remembered. */
+/* Fit (#400): the map fills the window, width and height, with no scrolling.
+ * The page is a column the window's height (village.css), so the viewport is
+ * exactly the room left after the bar, minimap and strips; chooseScale picks
+ * the scale for it. On a phone (NARROW) the page scrolls down instead, and
+ * only the width bounds the map. +/− step the scale from the fitted one,
+ * scrolling inside the viewport, and the step is remembered. */
 const ZOOM_MAX_SCALE = 16;
+const NARROW = '(max-width: 640px)';
 let zoom = 0;
 try { zoom = Math.max(-ZOOM_MAX_SCALE, Math.min(ZOOM_MAX_SCALE, parseInt(localStorage.getItem('village-zoom'), 10) || 0)); } catch {}
 function fitScale() {
-  const room = (document.getElementById('viewport').clientWidth - 8) / cv.width;
-  // The screensaver fits the whole display: its height bounds the scale too.
-  if (state.screensaver) return fitRoom(Math.min(room, (document.getElementById('viewport').clientHeight - 8) / cv.height));
-  return room >= 1 ? Math.floor(room) : Math.max(0.1, room);
+  const vp = document.getElementById('viewport');
+  const tall = state.screensaver || !matchMedia(NARROW).matches;
+  return chooseScale(cv.width, cv.height, vp.clientWidth - 8, tall ? vp.clientHeight - 8 : Infinity);
 }
-const fitRoom = room => (room >= 1 ? Math.floor(room) : Math.max(0.1, room));
 function mapScale() {
   const f = fitScale();
   if (state.screensaver) return f;
@@ -46,7 +48,8 @@ function mapScale() {
 }
 export function fit() {
   const W = cv.width, H = cv.height, s = mapScale();
-  cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
+  // Whole CSS pixels, rounded down, so a fractional fit never overflows by one.
+  cv.style.width = Math.floor(W * s) + 'px'; cv.style.height = Math.floor(H * s) + 'px';
   const fitBtn = document.getElementById('zoom-fit');
   fitBtn.textContent = zoom ? (Number.isInteger(s) ? s : s.toFixed(1)) + '×' : 'Fit';
   fitBtn.disabled = !zoom;
@@ -63,4 +66,16 @@ function stepZoom(d) {
 document.getElementById('zoom-out').addEventListener('click', () => stepZoom(-1));
 document.getElementById('zoom-in').addEventListener('click', () => stepZoom(1));
 document.getElementById('zoom-fit').addEventListener('click', () => stepZoom(0));
-window.addEventListener('resize', () => { fit(); placeOverlays(); });
+/* Fit again when the room changes: the window, fullscreen, or the chrome
+ * around the map (the minimap or feature strip appearing, the flow strip
+ * wrapping). The viewport's size doesn't follow the canvas (village.css), so
+ * fitting never feeds back into the observer. Debounced: a drag-resize fits
+ * once it settles. A new map size (houses added) fits at once (data.js). */
+let refitSoonTimer = 0;
+const refitSoon = () => {
+  clearTimeout(refitSoonTimer);
+  refitSoonTimer = setTimeout(() => { if (!cv.hidden) { fit(); placeOverlays(); } }, 80);
+};
+window.addEventListener('resize', refitSoon);
+document.addEventListener('fullscreenchange', refitSoon);
+if (typeof ResizeObserver === 'function') new ResizeObserver(refitSoon).observe(document.getElementById('viewport'));

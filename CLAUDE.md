@@ -56,6 +56,7 @@ For the village UI, `tools/mock/demo.sh` runs agents-tui against simulated herdr
 `VOYAGES=1 tools/mock/demo.sh` scripts Deployments for this repo's own environments (`nuc-1`, then `release`): a deploy, a promotion and a failed deploy on a 120 s loop, so the environment row's voyages can be seen without real ones (`tools/mock/voyages.py`; tests: `python3 -m unittest discover -s tools/mock -p 'test_voyages.py'`).
 The village screensaver (`/village?screensaver=1`, `src/web/village/saver.js` + `screensaver.js`; the Omarchy service, launcher and installer in `tools/omarchy-plugin/agents-village-screensaver/`): `node --test tools/omarchy-plugin/agents-village-screensaver/tests/` and `bash tools/omarchy-plugin/agents-village-screensaver/tests/test_install.sh` (both run by `cargo test screensaver`), and `python3 tools/omarchy-plugin/agents-village-screensaver/tests/qml_check.py` (the real `Service.qml` in Quickshell, offscreen). Install with `tools/omarchy-plugin/install.sh --screensaver [--never-sleep] [--host <ssh host>]`.
 The Omarchy bar widget (`tools/omarchy-plugin/agents-village/`): `node --test tools/omarchy-plugin/agents-village/tests/` (its model, against recorded `/api/swarms` and `/api/village`) and `python3 tools/omarchy-plugin/agents-village/tests/qml_check.py` (the real `Panel.qml` in Quickshell, offscreen). Install with `tools/omarchy-plugin/install.sh [--host <ssh host>] [--enable]`.
+The village's Fit scale (`src/web/village/fitscale.js`): `node --test tools/village-tests/` (also run by `cargo test village_fit_scale`).
 `tools/mock/replay-build.py` bundles the village's modules into one self-contained replay page (each module after its imports; two modules declaring the same top-level name stop the build); its tests: `python3 -m unittest discover -s tools/mock -p 'test_replay_build.py'` (also run by `cargo test replay_build`).
 `tools/mock/history.py` rebuilds a replay of a repo's real development from git and GitHub history (`--no-github` for git only); its tests: `python3 -m unittest discover -s tools/mock -p 'test_history.py'`.
 
@@ -122,6 +123,7 @@ src/
       voyages.js    #   ships between the row's villages: loading, sailing, docked, failed, and voyages the page plays itself
       worlds.js     #   a world drawn as platform over dev village; draw(); the world counters
       panels.js     #   the flow strip (renderFlow walks the counters), toast, zoom
+      fitscale.js   #   Fit's scale for a map in the room left for it (no DOM; tools/village-tests/)
       dialogs.js    #   explain()/act() dispatch on registered hits; the hit test; keyboard targets
       labels.js     #   area labels from registerLabels, kept clear of the art and each other
       key.js        #   the Key (legend), drawn with the renderer's own functions
