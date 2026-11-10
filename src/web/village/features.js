@@ -16,7 +16,7 @@ import { MEDIEVAL } from './themes/medieval.js';
 import { M, MODERN } from './themes/modern.js';
 import { FUTURE } from './themes/future.js';
 import { placeOverlays, registerHit, registerLabels, registerLayer, registerOverlay, tap } from './registry.js';
-import { cv, shownScenes, slotPos } from './layout.js';
+import { cv, shownScale, shownScenes, slotPos } from './layout.js';
 import { SHIP_CAP, cargoOf, holdPos, placeOf, sourceWords } from './ship.js';
 import { esc } from './panels.js';
 import { ask, dialog, links, objAt } from './dialogs.js';
@@ -208,7 +208,7 @@ cv.addEventListener('mousemove', e => {
 cv.addEventListener('mouseleave', () => peek(null));
 function placeBanners() {
   const vp = document.getElementById('viewport'), r = cv.getBoundingClientRect(), vr = vp.getBoundingClientRect();
-  const s = r.width / cv.width, keep = new Set();
+  const s = shownScale(), keep = new Set();
   let strip = null;
   if (!cv.hidden) shownScenes().forEach(([sc, ox, oy]) => sc.L.banners.forEach((g, k) => {
     const f = g.f, key = `${sc.v.project}#${f.number}`, on = isFollowed(sc.v, f), col = g.col;

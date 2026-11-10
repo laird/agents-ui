@@ -16,13 +16,15 @@ import { MEDIEVAL } from './themes/medieval.js';
 import { M, MODERN } from './themes/modern.js';
 import { FUTURE } from './themes/future.js';
 import { drawVillage } from './registry.js';
-import { ctx, cv, otherTheme, porterPos, worldGeom, worldScenes } from './layout.js';
+import { ctx, otherTheme, porterPos, sizeCanvas, worldGeom, worldScenes } from './layout.js';
+import { DETAIL, prepare } from './detail.js';
 import { SAIL } from './ship.js';
 import { fit } from './panels.js';
 
 function offscreen(sc) {
   if (!sc.canvas) { sc.canvas = document.createElement('canvas'); sc.cx = sc.canvas.getContext('2d'); }
-  if (sc.canvas.width !== sc.L.W || sc.canvas.height !== sc.L.H) { sc.canvas.width = sc.L.W; sc.canvas.height = sc.L.H; }
+  if (sc.canvas.width !== sc.L.W * DETAIL || sc.canvas.height !== sc.L.H * DETAIL) { sc.canvas.width = sc.L.W * DETAIL; sc.canvas.height = sc.L.H * DETAIL; }
+  prepare(sc.cx);
   return sc.cx;
 }
 /* A channel that flows down: water in the village, a conveyor road in the district. */
@@ -73,16 +75,17 @@ function drawWorld(t, w) {
   const both = worldScenes(w);
   if (!both) return;
   const [Ps, Ds] = both, g = worldGeom(w, Ps, Ds), st = state.worldState[w.name] || { floaters: [], upgradedAt: -1e9 };
-  if (cv.width !== g.W || cv.height !== g.H) { cv.width = g.W; cv.height = g.H; fit(); }
+  if (sizeCanvas(g.W, g.H)) fit();
+  prepare(ctx);
   const devTheme = state.T;
   state.T.ground(ctx, 0, 0, g.W, g.H);
   drawVillage(offscreen(Ds), Ds, t);
-  ctx.drawImage(Ds.canvas, g.dx, g.devTop);
+  ctx.drawImage(Ds.canvas, g.dx, g.devTop, Ds.L.W, Ds.L.H);
 
   state.T = otherTheme();
   if (!g.row) state.T.ground(ctx, 0, 0, g.W, Ps.L.H);
   drawVillage(offscreen(Ps), Ps, t);
-  ctx.drawImage(Ps.canvas, g.px, g.py);
+  ctx.drawImage(Ps.canvas, g.px, g.py, Ps.L.W, Ps.L.H);
   // Platform buildings with an open incident against them are on fire.
   w.damaged.forEach(id => {
     const i = Ps.v.houses.findIndex(h => h.id === id), lot = Ps.L.lots[i];
@@ -144,7 +147,7 @@ function roadUp(t, w, g, Ps, Ds) {
 export function draw(t) {
   const view = state.view;
   if (!view) return;
-  ctx.imageSmoothingEnabled = false;
+  prepare(ctx);
   if (view.world) { const w = state.worlds.find(x => x.name === view.world); if (w) drawWorld(t, w); return; }
   const sc = state.scenes[view.village];
   if (sc && sc.v) drawVillage(ctx, sc, t);

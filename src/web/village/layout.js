@@ -3,12 +3,21 @@
  * where each village shown sits on the canvas (alone, or both halves of a
  * world). */
 import { state } from './state.js';
+import { DETAIL, sceneScale } from './detail.js';
 import { featureColours, hash, shadow } from './palette.js';
 import { THEMES } from './themes/registry.js';
 import { registerLayer } from './registry.js';
 import { inRow } from './envlabels.js';
 
 export const cv = document.getElementById('map'), ctx = cv.getContext('2d');
+/* On-screen pixels per scene pixel on the map (its canvas is DETAIL times finer). */
+export const shownScale = () => sceneScale(cv.getBoundingClientRect().width, cv.width);
+/* The map canvas sized for a scene of w × h scene pixels; true when it changed. */
+export function sizeCanvas(w, h) {
+  if (cv.width === w * DETAIL && cv.height === h * DETAIL) return false;
+  cv.width = w * DETAIL; cv.height = h * DETAIL;
+  return true;
+}
 
 export const LW = 20, LH = 26, RD = 6, DOCK_W = 64;
 /* The merge gate's band between the last row of houses and the quay, and

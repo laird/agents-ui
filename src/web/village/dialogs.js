@@ -7,7 +7,8 @@
  * real issue URL shows which GitHub repo this is, never a guess. */
 import { state } from './state.js';
 import { HITS, hitAt, registerOverlay } from './registry.js';
-import { cv, shownScenes, themeAt } from './layout.js';
+import { cv, shownScale, shownScenes, themeAt } from './layout.js';
+import { toScene } from './detail.js';
 import { esc } from './panels.js';
 
 export const dialog = document.getElementById('dialog');
@@ -110,7 +111,7 @@ export function objAt(e) {
   const { view, scenes } = state;
   if (!view) return null;
   const r = cv.getBoundingClientRect();
-  const x = (e.clientX - r.left) / r.width * cv.width, y = (e.clientY - r.top) / r.height * cv.height;
+  const x = toScene((e.clientX - r.left) / r.width * cv.width), y = toScene((e.clientY - r.top) / r.height * cv.height);
   if (!view.world) { const sc = scenes[view.village], o = sc && sc.v && hitAt(sc, x, y); return o ? { o, sc, theme: state.T } : null; }
   // A world: the scene on top at that point (the platform over its slot) answers.
   const at = shownScenes().reverse().find(([sc, ox, oy]) => x >= ox && y >= oy && x < ox + sc.L.W && y < oy + sc.L.H);
@@ -171,7 +172,7 @@ export const kbox = document.getElementById('hitkeys'), kbuttons = new Map();
 const keyOf = o => [o.kind, o.i ?? '', o.n ?? '', o.at ?? '', o.who ?? '', o.house ?? '', o.id ?? '', o.f ?? ''].join(':');
 export function placeKeys() {
   const vp = document.getElementById('viewport'), r = cv.getBoundingClientRect(), vr = vp.getBoundingClientRect();
-  const s = r.width / cv.width, ox0 = r.left - vr.left + vp.scrollLeft, oy0 = r.top - vr.top + vp.scrollTop, keep = new Set();
+  const s = shownScale(), ox0 = r.left - vr.left + vp.scrollLeft, oy0 = r.top - vr.top + vp.scrollTop, keep = new Set();
   if (!cv.hidden) shownScenes().forEach(([sc, ox, oy]) => {
     const theme = themeAt(sc);
     (sc.hits || []).forEach(h => {
