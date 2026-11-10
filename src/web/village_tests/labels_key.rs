@@ -61,8 +61,9 @@ fn village_html_has_a_key_drawn_from_the_renderer() {
     assert!(body.contains(r#"<div class="legend" id="legend" hidden role="region" aria-labelledby="legend-title">"#));
     // The rows come from the renderer's own tables, so a new kind or icon appears in the key.
     assert!(body.contains("Object.keys(KINDCOL).map(k => [c => state.T.crate(c, 1, 1, k, null, k === 'workshop')"));
-    // Waiting on you and failed are drawn as trouble (#439); the quiet icons stay bubbles.
-    assert!(body.contains("Object.keys(ICONS).filter(k => k !== 'blocked' && k !== 'stalled').map(k => [c => bubble(c, 2, 1, k)"));
+    // Waiting on you, done and failed are States (#439, #442); the rest stay bubbles.
+    assert!(body.contains("const IN_STATES = new Set(['blocked', 'done', 'stalled']);"));
+    assert!(body.contains("Object.keys(ICONS).filter(k => !IN_STATES.has(k)).map(k => [c => bubble(c, 2, 1, k)"));
     assert!(body.contains("...SPECIALTIES.map(([name, kind]) => [c => person(c, 3, 1, 'key:' + name"));
     assert!(body.contains("Object.keys(NOTECOL).map(k =>"));
     assert!(body.contains("c => pennant(c, 5, 7, p, 0)"));
@@ -79,6 +80,24 @@ fn village_html_has_a_key_drawn_from_the_renderer() {
     // Redrawn in the theme being shown.
     assert!(body.contains("if (!legend.hidden) renderLegend();\n    if (view) select("));
     assert!(body.contains("`Key · ${state.T.name}`"));
+    // Places lead (#442): a sprite and a line for each part of the map, drawn
+    // by the theme, then States, then the marks.
+    assert!(body.contains("export const SECTIONS = ['Places', 'States', 'Marks'];"));
+    assert!(body.contains("['places', 'What each part of the map is', placeRows(L)"));
+    // Each place framed to fit its swatch, whatever the theme draws.
+    assert!(body.contains("const [paint, size] = framed(PLACE_ART[r.id]);"));
+    assert!(body.contains("['states', 'What a worker is doing, trouble loudest', stateRows(FRESH_DONE_MS / 60000)"));
+    // A heading over each section; every other group (registerKey's too) is a mark.
+    assert!(body.contains("const SECTION_OF = { places: 'Places', states: 'States' };"));
+    assert!(body.contains("const now = SECTION_OF[id] || 'Marks';"));
+    for place in ["house", "hall", "docks", "board", "gatehouse", "quay", "lock", "harbour", "env", "ship", "flag"] {
+        assert!(body.contains(&format!("  {place}: c => ")), "no sprite for the {place} in the key");
+    }
+    // No blank swatches: every row draws something.
+    assert!(!body.contains("[() => {}, "), "a key row with a blank swatch");
+    // Priority crates drawn twice their size, the P-number first.
+    assert!(body.contains("const bigCrate = (c, pr) => { c.save(); c.scale(2, 2); state.T.crate(c, 1, 1, 'feature', pr); c.restore(); };"));
+    assert!(body.contains("...PRIO_ROWS.map(({ p, words }) => [c => bigCrate(c, p), words, 12])"));
     // Every kind, icon and pennant the map draws has words in the key.
     for table in ["KINDCOL", "ICONS"] {
         let words = if table == "KINDCOL" { "KIND_WORDS" } else { "ICON_WORDS" };
