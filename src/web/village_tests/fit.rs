@@ -39,7 +39,8 @@ fn village_html_fits_the_map_to_the_window() {
 /// its height: pickers are as wide as what they show, and the workflow words,
 /// the repo link and the live status ellipsize instead of wrapping. Measured
 /// in headless Chromium when it landed: one 31 px row at 1280 and at 1100,
-/// wrapping below. Fit needs nothing more: it measures the viewport, which a
+/// wrapping below, with a 31-letter village name shown or picked as well.
+/// Fit needs nothing more: it measures the viewport, which a
 /// ResizeObserver watches, so the bar's real height is what it gets.
 #[test]
 fn village_bar_stays_one_row() {
@@ -48,6 +49,8 @@ fn village_bar_stays_one_row() {
     assert!(body.contains("@media (min-width: 1100px) {\n    .bar { flex-wrap: nowrap; }"));
     assert!(body.contains(".title { flex-wrap: nowrap; flex: 0 1 auto; white-space: nowrap; }"));
     assert!(body.contains(".title > .status, .title > #repo { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }"));
+    // A long village name, shown or picked, gives way too, so nothing spills over the status.
+    assert!(body.contains(".title > .vname, .title > #pick { flex: 0 1 auto; min-width: 8ch; max-width: 32ch; overflow: hidden; text-overflow: ellipsis; }"));
     assert!(body.contains(".bar > .status { flex: 1 1 0; min-width: 15em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }"));
     // The status and the workflow words are still where the page writes them.
     assert!(body.contains(r#"<span id="workflow" class="status"></span>"#));
