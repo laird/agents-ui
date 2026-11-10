@@ -25,7 +25,7 @@ function gateBand(v, roadX, y) {
   return { y, x0, w, rx: roadX, rw: RD, tables: Array.from({ length: tablesN }, (_, k) => [x0 + 4 + k * 12, y + 10]),
     queueMax: Math.max(1, Math.floor((roadX - 22) / 16) + 1) };
 }
-export function layout(v) {
+export function layout(v, slot = null) {
   const n = v.houses.length;
   const per = Math.max(1, Math.ceil(Math.sqrt(Math.max(n, 1) / 2)));
   const rows = Math.max(1, Math.ceil(n / (2 * per)));
@@ -56,9 +56,15 @@ export function layout(v) {
   const devW = Math.max(cx0 + vw + 40, roadX + 70, castleX + 46, gate ? gate.x0 + gate.w + 4 : 0, banners.length ? forestX + 12 + banners.length * 30 : 0);
   // The environment row: a village per environment east of the dev village,
   // a stretch of river before each, production right-most (docs/environment-row.md).
-  const envs = envStops(v).map(({ s, i }, k, all) => ({ s, i, k, x: devW + RIVER + k * (ENV_W + RIVER), w: ENV_W,
-    rank: k === all.length - 1 ? 'capital' : 'town' }));
-  const W = envs.length ? envs[envs.length - 1].x + ENV_W + 6 : devW;
+  // A world's platform widens the slot of the environment it runs (`slot`).
+  let ex = devW + RIVER;
+  const envs = envStops(v).map(({ s, i }, k, all) => {
+    const platform = !!slot && s.name === slot.name, w = platform ? Math.max(ENV_W, slot.w) : ENV_W;
+    const e = { s, i, k, x: ex, w, rank: k === all.length - 1 ? 'capital' : 'town', platform };
+    ex += w + RIVER;
+    return e;
+  });
+  const W = envs.length ? envs[envs.length - 1].x + envs[envs.length - 1].w + 6 : devW;
   const H = canalY + 34;
   // What's built on: river, docks, plaza, roads, house rows, canal and its
   // stations. Every free 9×8 cell may get a decoration.
@@ -87,7 +93,7 @@ export function layout(v) {
     const zone = Math.floor(hash(x >> 5, y >> 5) * 6), k = hash(x + 11, y + 7) < 0.7 ? zone : Math.floor(hash(y, x + 3) * 6);
     decor.push({ x: x + Math.floor(hash(y, x) * 4), y: y + Math.floor(hash(x, y + 1) * 3), k });
   }
-  return { per, rows, cx0, vw, roadX, hallX, top, lots, quayY, canalY, lockStart, castleX, W, H, decor, banners, devW, envs, gate };
+  return { per, rows, cx0, vw, roadX, hallX, top, lots, quayY, canalY, lockStart, castleX, W, H, decor, banners, devW, envs, gate, slot };
 }
 /* The environment row's sizes: each environment village, and the river before it. */
 export const ENV_W = 120, RIVER = 56;
@@ -121,25 +127,55 @@ export function porterPos(p, t) {
   return null;
 }
 
-/* A world stacks its platform over its dev village, with a margin each side
- * for the river down and the road up. */
-export const SIDE = 24, GAP = 28;
+/* A world: its platform is the village of the environment it runs (#407),
+ * by default production, the right-most. It stands in that environment's
+ * slot of the row, widened to fit it, over the slot's sign, warehouse and
+ * docks; the dev row moves down only as far as that needs (OVER: the
+ * warehouse's band above the river). A dev village with no environments
+ * stacks the platform over it instead, with a margin each side for the
+ * river down and the road up. */
+export const SIDE = 24, GAP = 28, OVER = 50;
 export const otherTheme = () => THEMES[state.T.pair] || THEMES.medieval;
-export function worldGeom(Ps, Ds) {
-  const W = Math.max(Ps.L.W, Ds.L.W) + 2 * SIDE, devTop = Ps.L.H + GAP;
-  return { W, H: devTop + Ds.L.H, devTop, srcY: Ps.L.top, roadY: 53 };
+/* A world's [platform, dev] scenes, once both have been read. */
+export function worldScenes(w) {
+  const Ps = w && state.scenes[w.platform], Ds = w && state.scenes[w.dev];
+  return Ps && Ds && Ps.v && Ds.v ? [Ps, Ds] : null;
 }
-/* The scenes on screen and where each sits on the canvas. */
+/* The environment a world's platform runs: the one it names, else the last. */
+export function platformEnv(w, v) {
+  const envs = envStops(v);
+  if (!envs.length) return null;
+  return envs.some(({ s }) => s.name === w.environment) ? w.environment : envs[envs.length - 1].s.name;
+}
+export function worldGeom(w, Ps, Ds) {
+  const name = platformEnv(w, Ds.v);
+  if (name) {
+    const need = Ps.L.W + 8;
+    if (!Ds.L.slot || Ds.L.slot.name !== name || Ds.L.slot.w !== need) Ds.L = layout(Ds.v, { name, w: need });
+    const e = Ds.L.envs.find(x => x.platform);
+    if (e) {
+      const devTop = Math.max(0, Ps.L.H + OVER - Ds.L.canalY);
+      return { row: true, e, W: Ds.L.W, H: devTop + Ds.L.H, devTop, dx: 0, px: e.x + ((e.w - Ps.L.W) >> 1), py: 0, srcY: Ps.L.top };
+    }
+  }
+  const W = Math.max(Ps.L.W, Ds.L.W) + 2 * SIDE, devTop = Ps.L.H + GAP;
+  return { row: false, W, H: devTop + Ds.L.H, devTop, dx: SIDE, px: SIDE, py: 0, srcY: Ps.L.top, roadY: 53 };
+}
+/* The scenes on screen and where each sits on the canvas, the one drawn on top last. */
 export function shownScenes() {
   const { view, scenes, worlds } = state;
   if (!view) return [];
   if (!view.world) { const sc = scenes[view.village]; return sc && sc.v ? [[sc, 0, 0]] : []; }
-  const w = worlds.find(x => x.name === view.world), Ps = w && scenes[w.platform], Ds = w && scenes[w.dev];
-  if (!Ps || !Ds || !Ps.v || !Ds.v) return [];
-  return [[Ps, SIDE, 0], [Ds, SIDE, worldGeom(Ps, Ds).devTop]];
+  const w = worlds.find(x => x.name === view.world), both = worldScenes(w);
+  if (!both) return [];
+  const [Ps, Ds] = both, g = worldGeom(w, Ps, Ds);
+  return [[Ds, g.dx, g.devTop], [Ps, g.px, g.py]];
 }
 /* The theme a shown scene is drawn in: a world's platform takes the other one. */
-export const themeAt = oy => (state.view.world && oy === 0 ? otherTheme() : state.T);
+export const themeAt = sc => {
+  const w = state.view && state.view.world && state.worlds.find(x => x.name === state.view.world);
+  return w && sc.v && sc.v.project === w.platform ? otherTheme() : state.T;
+};
 
 /* The ground: grass, the river and the docks' yard. */
 registerLayer({ z: 0, draw(c, { lay }, t) {

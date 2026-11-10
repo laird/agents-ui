@@ -188,8 +188,8 @@ or its history reaches that depth, so the list may be short.
 
 ## Worlds
 
-A world (`--world shop=temporal:agents`) stacks a platform village above the
-dev village today. In the row:
+A world (`--world shop=temporal:agents`) puts its platform village in the
+row (#407). A dev village with no environments still stacks it above. In the row:
 
 - **The platform is the production village with runtime detail.** It is
   drawn at the right-most slot, and its houses are the live workloads
@@ -246,11 +246,13 @@ voyages. The protocol gains, all optional:
   - ships loading, sailing, docking and failing;
   - the mini-map, the rank art, and worlds in their slot;
   - page tests.
-  Delivered in `envrow.js` and `voyages.js`, with two departures from the
-  layout above, left for a follow-up: the dev village keeps its environment
-  locks and harbour (so where each issue is still reads off its canal, beside
-  what each environment runs), and a world still stacks its platform over
-  the dev village rather than in the production slot.
+  Delivered in `envrow.js` and `voyages.js`, with one departure from the
+  layout above: the dev village keeps its environment locks and harbour (so
+  where each issue is still reads off its canal, beside what each
+  environment runs). Worlds took their slot in #407: the platform stands in
+  its environment's slot, widened to fit it (`worldGeom` in `layout.js`,
+  `drawWorld` in `worlds.js`); a dev village with no environments still
+  stacks it above.
 - **#386, demo:** the `gh` shim and `swarm_sim.py` script a deploy to
   `nuc-1` (pending → in_progress → success), a promotion `nuc-1` →
   `release`, and a failed deployment.
