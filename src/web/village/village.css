@@ -100,6 +100,8 @@
   .alabels.compact small { display: none; }
   .al.num { background: none; border: 0; padding: 0; line-height: 1; letter-spacing: -.04em; color: #f8f8f8; text-shadow: 0 0 2px #000, 0 0 1px #000, 0 0 1px #000; overflow: visible; }
   /* The BUILD BROKEN sign over the quay (weather.js). */
+  /* A crate the gate handed back (#433): why, and how often. */
+  .al.bounce { color: #fff; background: #b02020; border-color: #ff6a5a; font-size: calc(var(--lf, 11px) - 2px); padding: 0 3px; }
   .al.buildsign { color: #fff; background: #c02020; border-color: #ff6060; font-weight: bold; letter-spacing: .06em; }
   .al.buildsign small { color: #ffe0e0; letter-spacing: 0; font-weight: normal; }
   .al.flag { font-size: calc(var(--lf, 11px) - 1px); color: var(--ink); border-width: 2px; padding: 0 3px; white-space: normal; text-align: center; }
