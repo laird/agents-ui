@@ -70,3 +70,19 @@ fn village_html_marks_bounced_crates_at_their_house() {
     assert!(body.contains("registerHit({ kind: 'bounce', dialog(o, sc) {"));
     assert!(body.contains("meta: bounceLines(bs),"));
 }
+
+/// The bounce itself (#434): first seen between two polls, the crate is
+/// carried to the gate, jams there under a red ✗ (a knot for a conflict)
+/// and is carried home again, once. Which bounces are new is tested under
+/// node (bouncemarks.test.mjs).
+#[test]
+fn village_html_plays_a_new_bounce_from_the_gate_back_to_the_house() {
+    let body = &village_source();
+    assert!(body.contains("import { newBounces } from './bouncemarks.js';"));
+    assert!(body.contains("newBounces(old, now).forEach(b => {"));
+    assert!(body.contains("if (gated.has(b.n) || !lot || !h) return;"), "the gate's own entries already carried it");
+    assert!(body.contains("[{ pts: there, carry: true }, { pts: back(there), carry: true }], { dented: true, bounce: b.kind }));"));
+    assert!(body.contains("kind: b.kind === 'conflict' ? 'knot' : 'rejected' });"));
+    // Played once: only bounces `old` didn't have.
+    assert!(body.contains(".filter(m => m.count > bouncesOf(old, m.n).length)"));
+}

@@ -30,6 +30,16 @@ export function bounceMarks(v) {
   });
 }
 
+/* The bounces first seen in `now` (#434): each house whose issue has more
+ * bounces than `old` showed, and hasn't landed: { i, n, kind, count }. The
+ * first poll after a load has no `old`, so it plays none. */
+export function newBounces(old, now) {
+  if (!old) return [];
+  return bounceMarks(now)
+    .filter(m => m.count > bouncesOf(old, m.n).length)
+    .map(m => ({ i: m.i, n: m.n, kind: m.last.kind, count: m.count }));
+}
+
 /* "2 Nov 21:40": when, in this machine's time. "" when unknown. */
 export function when(iso) {
   const t = Date.parse(iso || '');
