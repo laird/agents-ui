@@ -11,6 +11,7 @@ import './gatehouse.js';
 import './weather.js';
 import './bounces.js';
 import './scoreboard.js';
+import './barrels.js';
 import './features.js';
 import './envrow.js';
 import './voyages.js';

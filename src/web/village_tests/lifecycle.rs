@@ -158,3 +158,24 @@ fn village_draws_trouble_loudest() {
     // And the Key says so.
     assert!(body.contains("['waiting', 'Waiting on you: a big red \"!\" and a ring at the door"));
 }
+
+/// #412: a barrel per house (and the hall) filling with the agent's context,
+/// in each theme's form; the retry and failure markers are #433's.
+#[test]
+fn village_html_shows_context_barrels() {
+    let body = &village_source();
+    assert!(body.contains("export const CTX_WARN = 70, CTX_FULL = 90, CTX_WEDGE = 95;"));
+    assert!(body.contains("return pct >= CTX_FULL ? P.p0 : pct >= CTX_WARN ? '#f0a020' : '#38c848';"));
+    assert!(body.contains("const flash = pct >= CTX_WEDGE && !state.reduce && blink(t, 300);"));
+    assert!(body.contains("if (theme === FUTURE) {") && body.contains("} else if (theme === MODERN) {"));
+    assert!(body.contains("barrel(c, lot.x + 16, lot.y + 8, h.context_pct, t + i * 97);"));
+    assert!(body.contains("barrel(c, lay.hallX + 34, 30, m.context_pct, t);"));
+    // The house and hall dialogs say how full it is.
+    assert!(body.contains("return `Context ${h.context_pct}%${of}${note}`;"));
+    assert!(body.contains("contextWords(h),"));
+    assert!(body.contains("meta: [`Status: ${m.status}`, contextWords(m),"));
+    // And the Key explains it, through registerKey.
+    assert!(body.contains("registerKey({ group: \"Beside a house: its agent's context\", rows: theme => ["));
+    assert!(body.contains("`${CTX_FULL}% or more, red; flashing from ${CTX_WEDGE}%: about to wedge`"));
+    assert!(!body.contains("retryTag(") && !body.contains("brokenCrate("), "the gate markers are #433's bounces");
+}

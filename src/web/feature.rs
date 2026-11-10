@@ -286,6 +286,8 @@ mod tests {
             answer_url: None,
             branch: None,
             since: None,
+            context_pct: None,
+            context_window: None,
         }
     }
 

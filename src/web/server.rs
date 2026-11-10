@@ -112,6 +112,7 @@ async fn api_swarms_handler(State(state): State<WebServerState>, Query(q): Query
     Json(json!({ "swarms": swarms, "agents": agents }))
 }
 
+
 /// Returns the pane content for a specific agent, captured live from tmux.
 /// `GET /api/swarms/:project/agents/:role/pane`
 async fn api_pane_handler(
@@ -1278,6 +1279,8 @@ mod tests {
             },
             branch: Some(if is_manager { "master".to_string() } else { role.to_string() }),
             mux: Default::default(),
+            context_pct: None,
+            context_window: None,
         }
     }
 
@@ -1438,7 +1441,7 @@ mod tests {
         }
         // The features and the modules they lean on, two imports or more away included.
         for module in [
-            "registry.js", "layout.js", "detail.js", "lifecycle.js", "docks.js", "trips.js", "ship.js", "gatehouse.js", "weather.js", "buildweather.js", "bounces.js", "bouncemarks.js", "features.js", "envrow.js", "envlabels.js", "voyages.js", "worlds.js", "panels.js", "dialogs.js",
+            "registry.js", "layout.js", "detail.js", "lifecycle.js", "docks.js", "barrels.js", "trips.js", "ship.js", "gatehouse.js", "weather.js", "buildweather.js", "bounces.js", "bouncemarks.js", "features.js", "envrow.js", "envlabels.js", "voyages.js", "worlds.js", "panels.js", "dialogs.js",
             "labels.js", "houselabel.js", "alarms.js", "key.js", "keyrows.js", "data.js", "state.js", "palette.js", "sprites/houses.js", "scenery.js", "people.js",
             "themes/registry.js", "themes/medieval.js", "themes/modern.js", "themes/future.js", "saver.js", "screensaver.js", "rest.js",
         ] {
@@ -1553,6 +1556,19 @@ mod tests {
         assert!(body.contains("text: flagLabel(f.number, f.title, b), cls: 'flag', edge: g.col, width: 29 };"));
         assert!(body.contains("return `#${n}${name ? ' ' + name : ''} · ${b.landed}/${b.total}`;"));
         assert!(body.contains("const edge = l.edge && /^#[0-9a-f]{3,8}$/i.test(l.edge) ? `border-color:${l.edge};` : '';"));
+    }
+
+    #[tokio::test]
+    async fn api_swarms_reports_each_agents_context_use() {
+        let shared = new_shared_state();
+        let mut swarm = sample_swarm("my-project");
+        swarm.workers[0] = AgentSnapshot { pane_content: "busy\n  ctx 88% of 1M | Opus 5 (1M context)\n".into(), ..swarm.workers[0].clone() }
+            .with_context_from_pane();
+        shared.write().unwrap().push(swarm);
+        let body = get_json(make_app(make_web_state(shared)), "/api/swarms").await;
+        let w = &body["swarms"][0]["workers"][0];
+        assert_eq!((w["context_pct"].as_u64(), w["context_window"].as_str()), (Some(88), Some("1M")));
+        assert!(body["swarms"][0]["manager"].get("context_pct").is_none(), "no status line, no number");
     }
 
     #[tokio::test]

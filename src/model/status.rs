@@ -168,6 +168,44 @@ pub fn read_status_file(path: &Path) -> AgentStatus {
     }
 }
 
+/// How much of its context window an agent has used, from the status line
+/// autocoder's `install-statusline.sh` puts under Claude Code's input box:
+/// `ctx 82% of 1M | Opus 5 (1M context) | ...`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextUse {
+    pub pct: u8,
+    /// The window's size as the status line writes it (`1M`, `200k`), when it does.
+    pub window: Option<String>,
+}
+
+/// The newest `ctx NN%` in a pane (the status line is at the bottom), or
+/// `None` when the pane has no status line.
+pub fn parse_context(pane: &str) -> Option<ContextUse> {
+    pane.lines().rev().find_map(|line| {
+        let mut rest = line;
+        while let Some(i) = rest.find("ctx ") {
+            // A word on its own: not "ctx " inside "myctx ".
+            let before = rest[..i].chars().next_back();
+            let after = &rest[i + 4..];
+            rest = after;
+            if before.is_some_and(|c| c.is_alphanumeric()) {
+                continue;
+            }
+            let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if digits.is_empty() || !after[digits.len()..].starts_with('%') {
+                continue;
+            }
+            let Ok(pct) = digits.parse::<u32>() else { continue };
+            let window = after[digits.len() + 1..]
+                .strip_prefix(" of ")
+                .map(|w| w.split(|c: char| c.is_whitespace() || c == '|').next().unwrap_or("").to_string())
+                .filter(|w| !w.is_empty());
+            return Some(ContextUse { pct: pct.min(100) as u8, window });
+        }
+        None
+    })
+}
+
 /// True when the pane is waiting on a human keypress.
 ///
 /// One detector, because there used to be two: the TUI checked for the strings
@@ -794,6 +832,20 @@ mod tests {
         "  5. Chat about this\n",
         "Enter to select \u{00b7} \u{2191}/\u{2193} to navigate \u{00b7} Esc to cancel\n",
     );
+
+    #[test]
+    fn context_use_comes_from_the_status_line() {
+        assert_eq!(parse_context(BUSY_WORKER_PANE), Some(ContextUse { pct: 26, window: Some("1M".into()) }));
+        assert_eq!(parse_context("  ctx 97%\n"), Some(ContextUse { pct: 97, window: None }), "no window size");
+        assert_eq!(parse_context("ctx 41% of 200k|Sonnet"), Some(ContextUse { pct: 41, window: Some("200k".into()) }));
+        // The newest line wins: an older status line scrolled up in the pane is stale.
+        assert_eq!(parse_context("ctx 10% of 1M\nwork\nctx 55% of 1M\n").map(|c| c.pct), Some(55));
+        assert_eq!(parse_context("ctx 140%").map(|c| c.pct), Some(100), "clamped");
+        assert_eq!(parse_context(BLOCKED_MANAGER_PANE), None, "no status line");
+        assert_eq!(parse_context("myctx 50%"), None, "not a word on its own");
+        assert_eq!(parse_context("ctx high"), None);
+        assert_eq!(parse_context(""), None);
+    }
 
     #[test]
     fn spinner_above_the_footer_counts_as_busy() {

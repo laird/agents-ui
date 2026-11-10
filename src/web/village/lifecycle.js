@@ -14,6 +14,7 @@ import { LW, slotPos } from './layout.js';
 import { ARRIVE_IN, SAIL_OUT, UNLOAD, pickup, tripAt } from './trips.js';
 import { workOf } from './ship.js';
 import { crateState, whereWaitedOn } from './docks.js';
+import { contextWords } from './barrels.js';
 import { houseName, issueItems, issueLabel, issueOf, link, repoUrl, sessionOf } from './dialogs.js';
 import { houseLabel, managerSub } from './houselabel.js';
 import { ALARM, alarm, boardAlert, boardFrame, failed, ring } from './alarms.js';
@@ -231,7 +232,7 @@ registerHit({ kind: 'hall', dialog(o, sc, theme) {
   const v = sc.v, runtime = isRuntime(v);
   const m = v.manager, s = sessionOf(m), swarm = s && s.url.replace(/\/agent\/[^/]+$/, '');
   return { title: `${theme.labels.hall} · manager`, line: m.issue ? `#${m.issue} ${m.issue_title || ''}` : (m.issue_title || 'The manager of this swarm'),
-    meta: [`Status: ${m.status}`, `Crew: ${m.crew.join(', ') || '—'}`, ...(m.subagents || []).map(sa => `${runtime ? 'Worker' : 'Sub-agent'}: ${subWords(sa, v)}`), m.action ? `Now: ${m.action}` : null],
+    meta: [`Status: ${m.status}`, contextWords(m), `Crew: ${m.crew.join(', ') || '—'}`, ...(m.subagents || []).map(sa => `${runtime ? 'Worker' : 'Sub-agent'}: ${subWords(sa, v)}`), m.action ? `Now: ${m.action}` : null],
     links: [...(m.links || []), link('Swarm view', swarm)], house: m };
 } });
 registerHit({ kind: 'house', dialog(o, sc) {
@@ -245,7 +246,7 @@ registerHit({ kind: 'house', dialog(o, sc) {
   return { title: `${houseName(v, h)} · ${h.branch || h.kind}`, line: h.issue ? `#${h.issue} ${h.issue_title || ''}` : (h.issue_title || `No ${work} claimed`),
     meta: [`${runtime ? 'Workstream' : 'Worktree'}: ${h.id}`, h.branch ? `Branch: ${h.branch}` : null, `Agent: ${h.role}`,
       `Status: ${h.status}${h.action && h.action !== h.status ? ' · ' + h.action : ''}${h.priority ? ' · ' + h.priority : ''}`,
-      since ? `${h.status.charAt(0).toUpperCase() + h.status.slice(1)} since ${since}` : null,
+      since ? `${h.status.charAt(0).toUpperCase() + h.status.slice(1)} since ${since}` : null, contextWords(h),
       `Crew: ${h.crew.join(', ') || '—'}`, ...(h.subagents || []).map(sa => `${runtime ? 'Agent' : 'Sub-agent'}: ${subWords(sa, v)}`)],
     links: [...(h.links || []), issue, compare], house: h };
 } });
