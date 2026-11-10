@@ -203,10 +203,10 @@ const PLUS = '000010111010000';
  * it a pixel of `bg` all round the ink (#436). Without that pixel above and
  * below, a digit's top and bottom strokes merged into the outline and only the
  * gaps were left to read: "+31" came out as "+=fl". */
-function glyphTag(c, x, y, glyphs, bg) {
+function glyphTag(c, x, y, glyphs, bg, ink = P.o) {
   const { w, h } = tagSize(glyphs.length);
   R(c, x - 1, y - 2, w, h, P.o); R(c, x, y - 1, w - 2, h - 2, bg);
-  glyphs.forEach((g, j) => { for (let k = 0; k < 15; k++) if (g[k] === '1') R(c, x + 1 + j * 4 + (k % 3), y + Math.floor(k / 3), 1, 1, P.o); });
+  glyphs.forEach((g, j) => { for (let k = 0; k < 15; k++) if (g[k] === '1') R(c, x + 1 + j * 4 + (k % 3), y + Math.floor(k / 3), 1, 1, ink); });
 }
 /* A tag's outer size for `glyphs` glyphs: 3-wide glyphs a pixel apart, a
  * pixel of padding and a pixel of outline on every side. */
@@ -222,7 +222,8 @@ export function badge(c, x, y, n) {
 export function digits(c, x, y, n, col) {
   String(n).split('').forEach((d, j) => { const g = DIGITS[+d]; for (let k = 0; k < 15; k++) if (g[k] === '1') R(c, x + j * 4 + (k % 3), y + Math.floor(k / 3), 1, 1, col); });
 }
-/* A number on a parchment tag (a crate's issue in a line), in the same font. */
-export function numberTag(c, x, y, n) {
-  glyphTag(c, x, y, String(n).split('').map(d => DIGITS[+d]), P.parch);
+/* A number on a parchment tag (a crate's issue in a line), in the same font;
+ * `bg` and `ink` recolour it (the board's red count). */
+export function numberTag(c, x, y, n, bg = P.parch, ink = P.o) {
+  glyphTag(c, x, y, String(n).split('').map(d => DIGITS[+d]), bg, ink);
 }

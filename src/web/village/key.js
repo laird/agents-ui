@@ -7,6 +7,7 @@ import { state } from './state.js';
 import { FEATURE_COLS, KINDCOL, NOTECOL, P, PRIOCOL, R, SPECIALTIES } from './palette.js';
 import { cobwebs, pennant } from './sprites/houses.js';
 import { ICONS, bubble, glint, ribbon, roped, tether, zzz } from './scenery.js';
+import { alarm, boardFrame, failed, lamp, ring } from './alarms.js';
 import { FRESH_DONE_MS } from './rest.js';
 import { person } from './people.js';
 import { fogCol } from './features.js';
@@ -37,7 +38,12 @@ export function renderLegend() {
       [c => { tether(c, { x: 1, y: 8 }, { x: 8, y: 1 }); state.T.crate(c, 8, 1, 'feature', null); state.T.crate(c, 1, 8, 'feature', null); roped(c, 1, 8); }, 'Rope between crates: the roped one waits on the other', 14],
       [() => {}, 'Order: highest priority first; a crate stands after what it waits on, so a chain reads as one run'],
       [() => {}, `#N under a crate: its issue. Blocked issues are notes on the ${L.board}`]]],
-    ['Bubbles over people and stops', Object.keys(ICONS).map(k => [c => bubble(c, 2, 1, k), ICON_WORDS[k] || k])],
+    ['Trouble, loudest first', [
+      [c => { ring(c, 11, 20, 0); alarm(c, 6, 0, 0); }, 'Big red "!" and a ring at the door: waiting on you (a question or a permission prompt)', 23],
+      [c => failed(c, 2, 1), 'Red ✗: failed or stalled'],
+      [c => { state.T.board(c, 3, 7, [{ label: 'needs-design' }, { label: 'failed' }]); boardFrame(c, 3, 7, 2, 0); }, `Red frame and count on the ${L.board}: notes waiting on you`, 24],
+      [c => lamp(c, 6, 4, 0), 'Red lamp on the gatehouse: a merge failed or conflicted']]],
+    ['Bubbles over people and stops', Object.keys(ICONS).filter(k => k !== 'blocked' && k !== 'stalled').map(k => [c => bubble(c, 2, 1, k), ICON_WORDS[k] || k])],
     ['Other marks', [[c => { person(c, 1, 6, 'key:asleep', 'sit', { status: 'asleep' }); zzz(c, 9, 9, 0); }, 'Sitting on the doorstep under "zzz": idle, nothing claimed, waiting for work', 18],
       [c => { state.T.crate(c, 1, 1, 'feature', null); roped(c, 1, 1); }, 'Roped crate: waits on another issue ("Depends on")', 7], [c => cobwebs(c, -1, -6), 'Cobwebs on a house: stalled'],
       [c => { R(c, 0, 0, 14, 14, fogCol(state.T)); bubble(c, 2, 1, 'unknown'); }, 'Grey fog over a stage: nothing says what runs there (no Deployment, no branch)'],

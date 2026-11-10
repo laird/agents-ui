@@ -61,7 +61,8 @@ fn village_html_has_a_key_drawn_from_the_renderer() {
     assert!(body.contains(r#"<div class="legend" id="legend" hidden role="region" aria-labelledby="legend-title">"#));
     // The rows come from the renderer's own tables, so a new kind or icon appears in the key.
     assert!(body.contains("Object.keys(KINDCOL).map(k => [c => state.T.crate(c, 1, 1, k, null, k === 'workshop')"));
-    assert!(body.contains("Object.keys(ICONS).map(k => [c => bubble(c, 2, 1, k)"));
+    // Waiting on you and failed are drawn as trouble (#439); the quiet icons stay bubbles.
+    assert!(body.contains("Object.keys(ICONS).filter(k => k !== 'blocked' && k !== 'stalled').map(k => [c => bubble(c, 2, 1, k)"));
     assert!(body.contains("...SPECIALTIES.map(([name, kind]) => [c => person(c, 3, 1, 'key:' + name"));
     assert!(body.contains("Object.keys(NOTECOL).map(k =>"));
     assert!(body.contains("c => pennant(c, 5, 7, p, 0)"));

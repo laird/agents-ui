@@ -7,9 +7,22 @@ http://127.0.0.1:7878/village.
 Pick a style in the title bar: **Medieval village** or **Modern business
 district**. The choice is remembered per browser; `?theme=modern` or
 `?theme=medieval` in a link overrides it. Styles change the art, never the
-meaning: lit windows mean working, an open door, an orange `!` and a villager
-waving at you (arm up, hand swinging) mean an
-agent is waiting on you, dust means stalled, fog means unknown.
+meaning: lit windows and chimney smoke mean working, "zzz" means idle,
+dust means stalled, fog means unknown.
+
+Trouble is the loudest thing on the map, loudest first:
+
+- **Waiting on you** (a question or a permission prompt): a big red pulsing
+  `!` over the house or the hall, a ring on the ground at its door, and the
+  agent waving at you (arm up, hand swinging). With reduced motion the `!`
+  stays still but stays large.
+- **Failed or stalled**: a red bubble with a white ✗.
+- **The notice board** gets a red frame and its count while it holds notes
+  (blocked, needs-…, failed). An empty board stays plain.
+- **The gatehouse** shows a red lamp while any merge has failed or conflicted.
+
+Together these are the strip's "waiting on you": count the `!`s, the board's
+number and the lamp.
 
 The server listens on 127.0.0.1 only. To watch a swarm on another machine,
 tunnel to it: `ssh -L 7878:localhost:7878 swarm-host`.

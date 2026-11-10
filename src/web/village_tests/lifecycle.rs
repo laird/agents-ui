@@ -134,3 +134,25 @@ fn village_html_shows_each_crates_priority_epic_state_and_number() {
     assert!(body.contains("'Glinting crate: ready to pick up'"));
     assert!(body.contains("\"Crate edged in a flag's colour: part of that feature (its epic)\""));
 }
+
+/// Trouble is the loudest thing on the map (#439): sizes are measured
+/// under node (tools/village-tests/alarms.test.mjs); this checks each mark
+/// is drawn where its trouble is.
+#[test]
+fn village_draws_trouble_loudest() {
+    let body = &village_source();
+    // Waiting on you: a "!" over the house or the hall and a ring at the door, drawn last.
+    assert!(body.contains("if (st === 'blocked') alarms.push([lot.x + 8 - (ALARM.w >> 1), lot.y - ALARM.h - 2]);"));
+    assert!(body.contains("if (v.manager.status === 'blocked') alarms.push([hallX + 25, 0]);"));
+    assert!(body.contains("if (st === 'blocked') ring(c, lot.x + 8, lot.y + 19, tt);"));
+    assert!(body.contains("(alarms || []).forEach(([x, y], k) => alarm(c, x, y, t + k * 120));"));
+    // Failed is red and crossed; busy is smoke from the chimney.
+    assert!(body.contains("bubbles.forEach(([x, y, s]) => (s === 'stalled' ? failed : bubble)(c, x, y, s));"));
+    assert!(body.contains("if ((st === 'working' || (h.subagents || []).length) && !state.reduce) puffs("));
+    // The board's alert follows its notes; the gatehouse lamps a failed merge.
+    assert!(body.contains("const notes = v.board.filter(b => !bound.has(b.number)), alert = boardAlert(notes);"));
+    assert!(body.contains("if (alert) boardFrame(c, hallX + 42, 28, alert.n, t);"));
+    assert!(body.contains("if (gateEntries(v).some(e => e.state === 'failed' || e.state === 'conflict')) lamp(c, g.x0 + g.w - 2, g.y - 4, t);"));
+    // And the Key says so.
+    assert!(body.contains("['Trouble, loudest first', ["));
+}

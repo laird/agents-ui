@@ -16,6 +16,7 @@ import { workOf } from './ship.js';
 import { crateState, whereWaitedOn } from './docks.js';
 import { houseName, issueItems, issueLabel, issueOf, link, repoUrl, sessionOf } from './dialogs.js';
 import { houseLabel, managerSub } from './houselabel.js';
+import { ALARM, alarm, boardAlert, boardFrame, failed, ring } from './alarms.js';
 
 /* Where a house's sub-agents stand: two beside the door, then a row on the
  * lane in front. Past that, a "+N" badge counts the rest, so every running
@@ -52,7 +53,10 @@ registerLayer({ z: 10, draw(c, scene, t) {
 registerLayer({ z: 50, draw(c, { v, lay, bound }, t) {
   const { hallX } = lay;
   state.T.hall(c, hallX, 18, v.manager.status); tap(hallX - 4, 6, 40, 36, { kind: 'hall' });
-  state.T.board(c, hallX + 42, 28, v.board.filter(b => !bound.has(b.number))); tap(hallX + 42, 28, 18, 16, { kind: 'board' });
+  const notes = v.board.filter(b => !bound.has(b.number)), alert = boardAlert(notes);
+  state.T.board(c, hallX + 42, 28, notes); tap(hallX + 42, 28, 18, 16, { kind: 'board' });
+  // Notes waiting on you: the board is framed in red with its count (#439).
+  if (alert) boardFrame(c, hallX + 42, 28, alert.n, t);
   if (v.manager.status !== 'stopped') {
     const busy = v.manager.status === 'working';
     person(c, hallX + 26, 30, 'manager:' + v.project, v.manager.status === 'blocked' ? waveFrame(t) : busy ? workFrame(t) : 'stand', { mayor: true, status: v.manager.status });
@@ -87,8 +91,10 @@ registerLayer({ z: 60, draw(c, { v, lay, bound }, t) {
  * crate being worked on. Status bubbles are drawn last, over everything. */
 registerLayer({ z: 70, draw(c, scene, t) {
   const { v, lay, at, bound } = scene, { hallX, lots } = lay;
-  const bubbles = scene.bubbles = [], sleepers = scene.sleepers = [], wall = Date.now();
-  if (['blocked', 'done', 'unknown', 'stalled'].includes(v.manager.status)) bubbles.push([hallX + 26, 18, v.manager.status]);
+  const bubbles = scene.bubbles = [], sleepers = scene.sleepers = [], alarms = scene.alarms = [], wall = Date.now();
+  // Waiting on you is the loudest mark; the quiet bubbles are for the rest (#439).
+  if (v.manager.status === 'blocked') alarms.push([hallX + 25, 0]);
+  else if (['done', 'unknown', 'stalled'].includes(v.manager.status)) bubbles.push([hallX + 26, 18, v.manager.status]);
   v.houses.forEach((h, i) => {
     const lot = lots[i]; if (!lot) return;
     const st = h.status, tt = t + i * 311, rest = restOf(h, wall);
@@ -98,6 +104,9 @@ registerLayer({ z: 70, draw(c, scene, t) {
     else (state.T.B[h.kind] || state.T.B.workshop)(c, lot.x, lot.y, st, state.reduce ? 0 : tt);
     pennant(c, lot.x, lot.y, h.priority, tt);
     if (st === 'stalled') cobwebs(c, lot.x, lot.y);
+    if (st === 'blocked') ring(c, lot.x + 8, lot.y + 19, tt);
+    // Busy: smoke from the chimney while anyone works inside.
+    if ((st === 'working' || (h.subagents || []).length) && !state.reduce) puffs(c, lot.x + 3, lot.y - 3, tt + 400, ...state.T.steam);
     if (st === 'unknown') R(c, lot.x - 1, lot.y - 6, 18, 23, 'rgba(32,34,60,.6)');
     const away = state.porters.some(p => p.seed === h.id && t >= p.t0 && at.get(p));
     if (!away) {
@@ -117,7 +126,6 @@ registerLayer({ z: 70, draw(c, scene, t) {
     // Sub-agents keep the house busy: one figure each out front (SUB_SLOTS),
     // and a "+N" badge for any that don't fit.
     const subs = h.subagents || [];
-    if (subs.length && !state.reduce) puffs(c, lot.x + 3, lot.y - 3, tt + 400, ...state.T.steam);
     // Anyone waiting on a person is shown first, waving.
     [...subs].sort((a, b) => (b.status === 'blocked') - (a.status === 'blocked')).slice(0, SUB_SLOTS.length).forEach((sa, k) => {
       const bob = !state.reduce && blink(t + k * 190, 210) ? -1 : 0;
@@ -138,7 +146,8 @@ registerLayer({ z: 70, draw(c, scene, t) {
     }
     if (st === 'working' && h.action) actionSign(c, lot.x + 4, lot.y - 4, h.action);
     if (subs.length > SUB_SLOTS.length) { const more = subs.length - SUB_SLOTS.length, { w, h } = badgeSize(more); badge(c, lot.x + 12, lot.y + 4, more); tap(lot.x + 11, lot.y + 2, w, h, { kind: 'house', i }); }
-    if (ICONS[st] && rest !== 'asleep') bubbles.push([lot.x + 4, lot.y - (st === 'blocked' ? 1 : 3) + (st === 'blocked' && blink(t, 200) ? -1 : 0), st]);
+    if (st === 'blocked') alarms.push([lot.x + 8 - (ALARM.w >> 1), lot.y - ALARM.h - 2]);
+    else if (ICONS[st] && rest !== 'asleep') bubbles.push([lot.x + 4, lot.y - 3, st]);
   });
 } });
 /* Trips: whoever is walking, with the crate carried overhead, or still
@@ -163,9 +172,11 @@ registerLayer({ z: 120, draw(c, { at }, t) {
     return true;
   });
 } });
-registerLayer({ z: 130, draw(c, { bubbles, sleepers }, t) {
+registerLayer({ z: 130, draw(c, { bubbles, sleepers, alarms }, t) {
   (sleepers || []).forEach(([x, y, dt]) => zzz(c, x, y, t + dt));
-  bubbles.forEach(([x, y, s]) => bubble(c, x, y, s));
+  bubbles.forEach(([x, y, s]) => (s === 'stalled' ? failed : bubble)(c, x, y, s));
+  // Last, over everything: who is waiting on you.
+  (alarms || []).forEach(([x, y], k) => alarm(c, x, y, t + k * 120));
 } });
 
 /* ---------- Dialogs ---------- */

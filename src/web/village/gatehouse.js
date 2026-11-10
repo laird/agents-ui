@@ -22,6 +22,7 @@ import { NOTECOL, P, R, blink } from './palette.js';
 import { badge, numberTag } from './scenery.js';
 import { drawAction, person } from './people.js';
 import { registerHit, registerLabels, registerLayer, tap } from './registry.js';
+import { lamp } from './alarms.js';
 import { quaySpot } from './ship.js';
 import { issueLabel, issueOf, link } from './dialogs.js';
 
@@ -125,6 +126,8 @@ registerLayer({ z: 75, draw(c, { v, lay, gate: gs }, t) {
   const busy = new Set([...(merge.busy || []), ...gs.units.filter(u => u.table !== undefined).map(u => u.table + 1)]);
   T.gatehouse(c, g, state.reduce ? 0 : t, busy);
   tap(g.x0 - 1, g.y, g.w + 2, 24, { kind: 'gatehouse' }); tap(g.rx - 4, g.y, g.rw + 8, 22, { kind: 'gatehouse' });
+  // A red lamp on the gatehouse while any merge failed or conflicted (#439).
+  if (gateEntries(v).some(e => e.state === 'failed' || e.state === 'conflict')) lamp(c, g.x0 + g.w - 2, g.y - 4, t);
   // The master crate: the integration branch.
   const mx = g.rx - 12, my = g.y + 3;
   R(c, mx - 1, my - 1, 9, 9, P.o); R(c, mx, my, 7, 7, P.gold); R(c, mx, my, 7, 1, P.woodD); R(c, mx + 3, my, 1, 7, P.woodD);
