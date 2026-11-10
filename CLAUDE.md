@@ -186,11 +186,13 @@ modules register (`registry.js`). To add something to the village:
    - A theme registers with `registerTheme` (`themes/registry.js`).
 3. **Import it in `main.js`.** That is all `main.js` does: import the
    modules, then `start()`.
-4. **Embed it**: add the file to `VILLAGE_ASSETS` in `src/web/server.rs`.
+4. **Nothing to embed by hand**: `build.rs` embeds every file under
+   `src/web/village/` (`.html`, `.css`, `.js`; another extension stops the
+   build until `content_type()` there names it) as `VILLAGE_ASSETS`.
    `cargo test every_module_main_js_loads` fails for a module that is
-   imported but not embedded, or embedded but never imported.
-   `cargo test replay_build` fails if two modules declare the same
-   top-level name: the replay page bundles them into one script.
+   there but never imported, and `cargo test replay_build` fails if two
+   modules declare the same top-level name: the replay page bundles them
+   into one script.
 
 ## Key conventions
 
