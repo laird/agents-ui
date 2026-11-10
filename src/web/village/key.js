@@ -19,6 +19,7 @@ import { person } from './people.js';
 import { drawBanner } from './features.js';
 import { envShed, envSign } from './envrow.js';
 import { PRIO_ROWS, placeRows, stateRows } from './keyrows.js';
+import { GLYPH_WORDS, note } from './cvdmarks.js';
 
 const KIND_WORDS = { bug: 'Bug', feature: 'Feature', tests: 'Tests', security: 'Security', research: 'Research', perf: 'Performance',
   refactor: 'Refactor', docs: 'Docs', chores: 'Chore', workshop: 'Finished work, sealed (quay and stages)', cottage: 'Other work' };
@@ -104,7 +105,7 @@ export function renderLegend() {
       [c => { state.T.B.cottage(c, 3, 5, 'idle', 0); R(c, 5, 0, 1, 7, P.woodD); R(c, 6, 0, 4, 3, FEATURE_COLS[0]); }, "House in an environment village: a feature it runs, flying that feature's colour (+N: more features)", 22]]],
     ['subagents', 'Sub-agent accents: their specialty', [...SPECIALTIES.map(([name, kind]) => [c => person(c, 3, 1, 'key:' + name, 'stand', { accent: KINDCOL[kind], sub: true }), name]),
       [c => person(c, 3, 1, 'key:other', 'stand', { accent: P.white, sub: true }), 'any other']]],
-    ['notes', `Notes on the ${L.board}`, Object.keys(NOTECOL).map(k => [c => { R(c, 1, 1, 5, 5, P.o); R(c, 2, 2, 3, 3, NOTECOL[k]); }, k.replace(/-/g, ' '), 7])]
+    ['notes', `Notes on the ${L.board}`, Object.keys(NOTECOL).map(k => [c => { R(c, 1, 1, 5, 5, P.o); note(c, 2, 2, k, P.white); }, `${GLYPH_WORDS[k] || ''} ${k.replace(/-/g, ' ')}`.trim(), 7])]
   ];
   // Each feature's own rows (registerKey): into its group, or a new one after them.
   KEYS.forEach(k => {

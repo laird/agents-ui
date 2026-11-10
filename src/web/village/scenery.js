@@ -5,6 +5,7 @@ import { DIGITS, NOTECOL, P, R, ROPE, STATE, blink, glassOf, hash, shadow } from
 import { crate } from './crates.js';
 import { detail } from './detail.js';
 import { bricks, disc, planks, px } from './art2x.js';
+import { note } from './cvdmarks.js';
 
 /* ---------- People and things ---------- */
 export const ICONS = {
@@ -148,7 +149,7 @@ export function hall(c, x, y, st) {
 export function board(c, x, y, notes) {
   R(c, x + 1, y + 9, 1, 6, P.woodD); R(c, x + 16, y + 9, 1, 6, P.woodD);
   R(c, x, y, 18, 11, P.o); R(c, x + 1, y + 1, 16, 9, P.wood);
-  notes.slice(0, 8).forEach((n, i) => R(c, x + 2 + (i % 4) * 4, y + 2 + Math.floor(i / 4) * 4, 3, 3, NOTECOL[n.label] || P.white));
+  notes.slice(0, 8).forEach((n, i) => note(c, x + 2 + (i % 4) * 4, y + 2 + Math.floor(i / 4) * 4, n.label, P.white));
 }
 export function lock(c, x, cy, open, flag) {
   R(c, x - 1, cy - 4, 8, 4, P.o); R(c, x, cy - 3, 6, 2, P.stone);

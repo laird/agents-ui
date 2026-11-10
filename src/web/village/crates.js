@@ -19,6 +19,7 @@
  * number of four digits or more does not fit and is left off (the crate's
  * dialog still names it). */
 import { detail } from './detail.js';
+import { prioRun } from './cvdmarks.js';
 import { DIGITS, KINDCOL, P, PRIOCOL, R, ROPE } from './palette.js';
 
 export const CRATE_W = 11, CRATE_H = 10;
@@ -61,7 +62,8 @@ export function crate(c, x, y, kind, pr, sealed, n) {
     R(d, 0, 0, CRATE_W, CRATE_H, P.o);
     for (let k = 0; k < 3; k++) R(d, FACE_X + k * 3, 1, 3, 8, k % 2 ? P.plank : P.woodL);
     R(d, FACE_X, 1, FACE_W, 1, KINDCOL[kind] || P.woodD);
-    if (PRIOCOL[pr]) R(d, FACE_X, 8, FACE_W, 1, PRIOCOL[pr]);
+    // Its priority band, patterned by level as well as coloured (#443).
+    if (PRIOCOL[pr]) prioRun(d, FACE_X, 8, FACE_W, pr, PRIOCOL[pr]);
     stencil(d, n);
     if (sealed) seal(d);
   });

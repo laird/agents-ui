@@ -118,7 +118,12 @@ fn village_html_shows_each_crates_priority_epic_state_and_number() {
     // Every theme marks all four priorities, each its own way.
     assert!(body.contains("export const PRIOCOL = { P0: '#e02828', P1: '#f07020', P2: '#f8d040', P3: '#9898a8' };"));
     // (crates are 2× sprites, crates.js: tools/village-tests/crates.test.mjs reads each theme's marks back.)
-    assert_eq!(body.matches("if (PRIOCOL[pr]) R(d, ").count() + body.matches("R(d, 1, 8, 9, 1, PRIOCOL[pr] || F.hullD);").count(), 3, "medieval, modern and future");
+    assert_eq!(body.matches("if (PRIOCOL[pr]) prioRun(d, ").count(), 3, "medieval, modern and future");
+    // Not by colour alone (#443): each level is its own pattern, and each note its own glyph.
+    assert!(body.contains("P1: k => k < end || k >= len - end,"));
+    assert_eq!(body.matches("notes.slice(0, 8).forEach((n, i) => note(c, x + 2 + (i % 4) * 4, y + 2 + Math.floor(i / 4) * 4, n.label, ").count(), 3, "every theme's board");
+    assert!(!body.contains("3, 3, NOTECOL[n.label]"), "a note drawn by colour alone");
+    assert!(body.contains("note(c, 2, 2, k, P.white); }, `${GLYPH_WORDS[k] || ''} ${k.replace(/-/g, ' ')}`.trim(), 7]"), "the Key shows each glyph");
     // The docks stand in dock order; a crate carries its epic's flag colour and glints when ready.
     assert!(body.contains("v.backlog = arrangeDocks(v.backlog);"));
     assert!(body.contains("if (cols.has(cr.parent)) ribbon(c, s.x, s.y, cols.get(cr.parent));"));

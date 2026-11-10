@@ -1,5 +1,6 @@
 /* The Modern business district theme. */
-import { KINDCOL, NOTECOL, P, PRIOCOL, R, blink, hash, shadow } from '../palette.js';
+import { KINDCOL, P, PRIOCOL, R, blink, hash, shadow } from '../palette.js';
+import { note, prioRun } from '../cvdmarks.js';
 import { puffs } from '../sprites/houses.js';
 import { detail } from '../detail.js';
 import { CRATE_W, CRATE_H, seal, stencil } from '../crates.js';
@@ -206,7 +207,7 @@ export const MODERN = {
   board(c, x, y, notes) {
     R(c, x + 2, y + 9, 1, 6, M.steelD); R(c, x + 15, y + 9, 1, 6, M.steelD);
     R(c, x, y, 18, 11, P.o); R(c, x + 1, y + 1, 16, 9, P.white);
-    notes.slice(0, 8).forEach((n, i) => R(c, x + 2 + (i % 4) * 4, y + 2 + Math.floor(i / 4) * 4, 3, 3, NOTECOL[n.label] || P.gold));
+    notes.slice(0, 8).forEach((n, i) => note(c, x + 2 + (i % 4) * 4, y + 2 + Math.floor(i / 4) * 4, n.label, P.gold));
   },
   /* A parcel at 2× (crates.js): taped shut along the top in the kind's
    * colour, the issue number stencilled on, a shipping tag for its priority. */
@@ -215,7 +216,7 @@ export const MODERN = {
       R(d, 0, 0, CRATE_W, CRATE_H, P.o); R(d, 1, 1, 9, 8, M.box); R(d, 1, 8, 9, 1, M.boxD);
       R(d, 1, 1, 9, 1, KINDCOL[kind] || M.boxD);
       // Its priority: a shipping tag on the lower left (none when unprioritised).
-      if (PRIOCOL[pr]) R(d, 1, 8, 4, 1, PRIOCOL[pr]);
+      if (PRIOCOL[pr]) prioRun(d, 1, 8, 4, pr, PRIOCOL[pr]);
       stencil(d, n, P.o, P.o, P.white);
       if (sealed) seal(d);
     });

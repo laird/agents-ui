@@ -36,12 +36,13 @@ export function stateRows(freshDoneMinutes) {
   ].map(([id, words]) => ({ id, words }));
 }
 
-/* The priority marks, with the P-number first so each reads at a glance. */
+/* The priority marks, with the P-number first so each reads at a glance;
+ * each level has its own pattern too, not just its colour (#443). */
 export const PRIO_ROWS = [
-  ['P0', 'P0 · urgent: a red band along the crate\'s foot'],
-  ['P1', 'P1 · high: an orange band'],
-  ['P2', 'P2 · normal: a yellow band'],
-  ['P3', 'P3 · low: a grey band']
+  ['P0', 'P0 · urgent: a solid red mark on the crate'],
+  ['P1', 'P1 · high: an orange mark, its two ends'],
+  ['P2', 'P2 · normal: a yellow mark, dashed'],
+  ['P3', 'P3 · low: a grey dot in the middle']
 ].map(([p, words]) => ({ p, words }));
 
 /* The Key's sections, in order. */

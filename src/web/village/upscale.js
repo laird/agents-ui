@@ -26,11 +26,22 @@ export function opaque(col) {
  * nothing), with its top-left at (x0, y0). A see-through colour over
  * another keeps both, as "under|over", so painting lays them down in order. */
 export function record(draw) {
-  const px = new Map();
+  const px = new Map(), over = [];
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  // A building may draw a little at 2× itself, through detail() (a note's
+  // glyph on the board, #443): scale and translate are followed, and what is
+  // drawn finer than a scene pixel is kept apart, in `over`, to be painted
+  // over the scaled building as it was drawn.
+  let m = { s: 1, x: 0, y: 0 };
+  const stack = [];
   const ctx = {
     fillStyle: '#000',
+    save() { stack.push({ ...m }); }, restore() { m = stack.pop() || { s: 1, x: 0, y: 0 }; },
+    translate(x, y) { m = { s: m.s, x: m.x + m.s * x, y: m.y + m.s * y }; },
+    scale(sx) { m = { s: m.s * sx, x: m.x, y: m.y }; },
     fillRect(x, y, w, h) {
+      if (m.s !== 1) { over.push([m.x + m.s * x, m.y + m.s * y, m.s * w, m.s * h, ctx.fillStyle]); return; }
+      x += m.x; y += m.y;
       const xa = Math.round(x), ya = Math.round(y);
       const col = ctx.fillStyle, see = !opaque(col);
       for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
@@ -41,9 +52,9 @@ export function record(draw) {
     },
   };
   draw(ctx);
-  if (!px.size) return { x0: 0, y0: 0, grid: [] };
+  if (!px.size) return { x0: 0, y0: 0, grid: [], over };
   const grid = Array.from({ length: y1 - y0 }, (_, j) => Array.from({ length: x1 - x0 }, (_, i) => px.get(`${x0 + i},${y0 + j}`) ?? null));
-  return { x0, y0, grid };
+  return { x0, y0, grid, over };
 }
 
 /* Scale2x (EPX): each pixel becomes four. A corner of the four takes the
@@ -79,6 +90,8 @@ export function hd(fn) {
     const parts = runs(scale2x(rec.grid));
     // Two detail pixels per scene pixel: x and y in detail pixels from (x0, y0).
     detail(c, rec.x0, rec.y0, g => parts.forEach(([x, y, w, col]) => col.split('|').forEach(layer => { g.fillStyle = layer; g.fillRect(x, y, w, 1); })));
+    // What the building drew at 2× itself, on top, where it drew it.
+    if (rec.over.length) detail(c, 0, 0, g => rec.over.forEach(([x, y, w, h, col]) => { g.fillStyle = col; g.fillRect(x * 2, y * 2, w * 2, h * 2); }));
   };
   wrapped.hd = true;
   return wrapped;

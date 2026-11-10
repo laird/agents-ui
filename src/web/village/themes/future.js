@@ -1,6 +1,7 @@
 /* The Future theme. */
 import { state, now } from '../state.js';
-import { F, KINDCOL, NOTECOL, P, PRIOCOL, R, SHADE, blink, hash, shadow } from '../palette.js';
+import { F, KINDCOL, P, PRIOCOL, R, SHADE, blink, hash, shadow } from '../palette.js';
+import { note, prioRun } from '../cvdmarks.js';
 import { puffs } from '../sprites/houses.js';
 import { detail } from '../detail.js';
 import { CRATE_W, CRATE_H, seal, stencil } from '../crates.js';
@@ -188,7 +189,7 @@ export const FUTURE = {
     R(c, x + 1, y + 11, 3, 4, P.o); R(c, x + 2, y + 11, 1, 3, F.cyan); R(c, x + 14, y + 11, 3, 4, P.o); R(c, x + 15, y + 11, 1, 3, F.cyan);
     R(c, x, y, 18, 11, 'rgba(64,224,240,.28)');
     R(c, x, y, 18, 1, F.cyan); R(c, x, y + 10, 18, 1, F.cyanD); R(c, x, y, 1, 11, F.cyanD); R(c, x + 17, y, 1, 11, F.cyanD);
-    notes.slice(0, 8).forEach((n, i) => R(c, x + 2 + (i % 4) * 4, y + 2 + Math.floor(i / 4) * 4, 3, 3, NOTECOL[n.label] || F.cyanL));
+    notes.slice(0, 8).forEach((n, i) => note(c, x + 2 + (i % 4) * 4, y + 2 + Math.floor(i / 4) * 4, n.label, F.cyanL));
   },
   /* A cargo crate riding a little hover-pad. */
   crate(c, x, y, kind, pr, sealed, n) {
@@ -196,7 +197,7 @@ export const FUTURE = {
       R(d, 0, 0, CRATE_W, CRATE_H, P.o); R(d, 1, 1, 9, 8, F.hull); R(d, 1, 7, 9, 1, F.hullL);
       R(d, 1, 1, 9, 1, KINDCOL[kind] || F.hullD);
       // Its priority: a status light along the foot (none when unprioritised).
-      R(d, 1, 8, 9, 1, PRIOCOL[pr] || F.hullD);
+      R(d, 1, 8, 9, 1, F.hullD); if (PRIOCOL[pr]) prioRun(d, 1, 8, 9, pr, PRIOCOL[pr]);
       // The hover-pad's glow under it.
       R(d, 2, CRATE_H, 7, 1, F.cyan);
       stencil(d, n, F.navy, F.navy, F.cyan);

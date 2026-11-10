@@ -59,3 +59,22 @@ test('hd draws a slot at 2× once, even when it draws another wrapped slot', () 
   assert.ok(rects.every(([x, y]) => x >= 10 && y >= 20 && x < 12 && y < 22));
   assert.ok(rects.some(([, , , col]) => col === 'b'), 'the inner slot is in it');
 });
+
+test('what a building draws at 2× itself (a note glyph, #443) is kept apart and painted on top', async () => {
+  const { detail } = await import('../../src/web/village/detail.js');
+  const rec = record(c => {
+    c.fillStyle = 'w'; c.fillRect(10, 20, 3, 3);
+    detail(c, 10, 20, d => { d.fillStyle = 'ink'; d.fillRect(1, 1, 1, 1); });
+    c.fillStyle = 'x'; c.fillRect(13, 20, 1, 1); // the transform is back to scene pixels after
+  });
+  assert.deepEqual(rec.grid, [['w', 'w', 'w', 'x'], ['w', 'w', 'w', null], ['w', 'w', 'w', null]], 'the 2× drawing is not in the scaled grid');
+  assert.deepEqual(rec.over, [[10.5, 20.5, 0.5, 0.5, 'ink']], 'it is kept, in scene units, where it was drawn');
+  // And hd paints it after the building, one detail pixel at (21, 41).
+  const rects = [];
+  let m = [2, 0, 0, 2, 0, 0]; const st = [];
+  const c = { fillStyle: '', save() { st.push([...m]); }, restore() { m = st.pop(); },
+    translate(x, y) { m = [m[0], 0, 0, m[3], m[4] + m[0] * x, m[5] + m[3] * y]; }, scale(s) { m = [m[0] * s, 0, 0, m[3] * s, m[4], m[5]]; },
+    fillRect(x, y, w, h) { rects.push([m[0] * x + m[4], m[3] * y + m[5], m[0] * w, m[3] * h, c.fillStyle]); } };
+  hd((g, x, y) => { g.fillStyle = 'w'; g.fillRect(x, y, 3, 3); detail(g, x, y, d => { d.fillStyle = 'ink'; d.fillRect(1, 1, 1, 1); }); })(c, 10, 20);
+  assert.deepEqual(rects[rects.length - 1], [21, 41, 1, 1, 'ink']);
+});
