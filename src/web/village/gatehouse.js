@@ -146,11 +146,11 @@ registerLayer({ z: 75, draw(c, { v, lay, gate: gs }, t) {
       const shown = u.members.slice(0, 3), cw = shown.length * 6;
       R(c, x - 1, y + 5, cw + 1, 2, P.o); R(c, x, y + 5, cw - 1, 1, P.woodL);
       R(c, x, y + 7, 2, 2, P.o); R(c, x + cw - 3, y + 7, 2, 2, P.o);
-      shown.forEach((mm, i) => { T.crate(c, x + i * 6, y, 'workshop', null, false); if (i) R(c, x + i * 6 - 1, y + 2, 1, 1, P.stoneD); });
+      shown.forEach((mm, i) => { T.crate(c, x + i * 6, y, 'workshop', null, false, mm.issue); if (i) R(c, x + i * 6 - 1, y + 2, 1, 1, P.stoneD); });
       if (u.members.length > 3) badge(c, x + cw + 1, y - 1, u.members.length - 3);
       tap(x - 1, y - 1, cw + 2, 10, { kind: 'train', id: e.train });
     } else {
-      T.crate(c, x, y, 'workshop', null, false);
+      T.crate(c, x, y, 'workshop', null, false, n);
       tap(x, y, 5, 5, { kind: 'gatecrate', n, at: 'gate' });
     }
     if (u.state === 'queued') numberTag(c, x + 2 - String(n).length * 2, y - 8, n);

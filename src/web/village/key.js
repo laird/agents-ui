@@ -11,7 +11,8 @@ import { DETAIL, prepare } from './detail.js';
 import { KEYS } from './registry.js';
 import { FEATURE_COLS, KINDCOL, NOTECOL, P, R, SPECIALTIES, STOPCOL } from './palette.js';
 import { cobwebs, pennant } from './sprites/houses.js';
-import { ICONS, bubble, glint, numberTag, ribbon, roped, tether, zzz } from './scenery.js';
+import { ICONS, bubble, tether, zzz } from './scenery.js';
+import { glint, ribbon, roped } from './crates.js';
 import { alarm, boardFrame, failed, lamp, ring } from './alarms.js';
 import { FRESH_DONE_MS } from './rest.js';
 import { person } from './people.js';
@@ -92,7 +93,7 @@ export function renderLegend() {
       [c => { state.T.crate(c, 1, 1, 'feature', null); ribbon(c, 1, 1, FEATURE_COLS[0]); }, "Crate edged in a flag's colour: part of that feature (its epic)", 7],
       [c => { tether(c, { x: 1, y: 8 }, { x: 8, y: 1 }); state.T.crate(c, 8, 1, 'feature', null); state.T.crate(c, 1, 8, 'feature', null); roped(c, 1, 8); }, 'Rope between crates: the roped one waits on the other', 14],
       [c => ['P0', 'P1', 'P2'].forEach((p, j) => state.T.crate(c, 1 + j * 6, 7, 'feature', p)), 'Order: highest priority first; a crate stands after what it waits on, so a chain reads as one run', 19],
-      [c => { state.T.crate(c, 5, 1, 'feature', null); numberTag(c, 2, 10, 12); }, `#N under a crate: its issue. Blocked issues are notes on the ${L.board}`, 16]]],
+      [c => state.T.crate(c, 1, 1, 'feature', null, false, 420), `Number on a crate: its issue. Blocked issues are notes on the ${L.board}`, 7]]],
     ['trouble', 'Trouble elsewhere', [
       [c => { state.T.board(c, 3, 7, [{ label: 'needs-design' }, { label: 'failed' }]); boardFrame(c, 3, 7, 2, 0); }, `Red frame and count on the ${L.board}: notes waiting on you`, 24],
       [c => lamp(c, 6, 4, 0), `Red lamp on the ${L.gate}: a merge failed or conflicted`]]],

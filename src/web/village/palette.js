@@ -21,6 +21,11 @@ export const P = {
 export const STATE = { blocked: '#f07020', done: '#3878e0', unknown: '#585870', stalled: '#8088a8' };
 export const KINDCOL = { bug: '#e03838', feature: '#40b8e8', tests: '#e070d0', security: '#3058b0', research: '#c0a8f0', perf: '#d8c8a8', refactor: '#6878a0', docs: '#2878a0', chores: '#a83028', workshop: '#c88848', cottage: '#c8a048' };
 export const NOTECOL = { 'needs-design': '#f8c800', 'needs-clarification': '#d0c0f8', 'needs-approval': '#e89890', 'too-complex': '#b02010', 'future': '#8088a8', 'proposal': '#c0a8f0', 'failed': '#e02828', 'conflict': '#f07020', 'unreachable': '#585870' };
+/* A 3x5 pixel font, 0–9: tags, badges and the number stencilled on a crate. */
+export const DIGITS = ['111101101101111', '010110010010111', '111001111100111', '111001111001111', '101101111001001',
+  '111100111001111', '111100111101111', '111001001001001', '111101111101111', '111101111001111'];
+/* Rope: a waiting crate's, and the tether to what it waits on. */
+export const ROPE = '#d8b070';
 /* A crate's priority mark: P0 red, P1 orange, P2 yellow, P3 grey; none unmarked. */
 export const PRIOCOL = { P0: '#e02828', P1: '#f07020', P2: '#f8d040', P3: '#9898a8' };
 export const STOPCOL = ['#38c848', '#f8d040', '#f8f8f8', '#4868e8', '#e070d0'];

@@ -117,7 +117,7 @@ function drawVoyage(c, v, lay, vo, seen, t) {
     let x = Math.round(pose.x + state.T.hold[k][0]);
     if (pose.back) x = 2 * (left + hw / 2) - x - 5;
     const y = Math.round(cy + state.T.hold[k][1] + oy);
-    state.T.crate(c, x, y, 'workshop', null, true); tap(x, y, 5, 5, { kind: 'crate', n, at: 'voyage', to: vo.to });
+    state.T.crate(c, x, y, 'workshop', null, true, n); tap(x, y, 5, 5, { kind: 'crate', n, at: 'voyage', to: vo.to });
   });
   if (load.length > VOYAGE_CAP) badge(c, Math.round(pose.x + state.T.holdBadge[0]), Math.round(cy + state.T.holdBadge[1] + oy), load.length - VOYAGE_CAP);
   if (pose.carry && load.length) {

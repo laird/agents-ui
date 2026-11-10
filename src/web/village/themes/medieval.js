@@ -1,7 +1,8 @@
 /* The Medieval village theme. */
 import { P, R, hash, shadow } from '../palette.js';
 import { B, scaffold } from '../sprites/houses.js';
-import { FLOWERS, board, boat, crate, grass, hall, harbour, lock, path, ship, tree, water } from '../scenery.js';
+import { crate } from '../crates.js';
+import { FLOWERS, board, boat, grass, hall, harbour, lock, path, ship, tree, water } from '../scenery.js';
 import { registerTheme } from './registry.js';
 
 /* ---------- Decoration ----------

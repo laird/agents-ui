@@ -98,7 +98,6 @@
   .al { position: absolute; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 700 var(--lf, 11px)/1.2 var(--mono); color: var(--gold); background: rgba(6,8,20,.78); border: 1px solid var(--gold); border-radius: 3px; padding: 1px 5px; }
   .al small { font-weight: 400; color: var(--ink-dim); }
   .alabels.compact small { display: none; }
-  .al.num { background: none; border: 0; padding: 0; line-height: 1; letter-spacing: -.04em; color: #f8f8f8; text-shadow: 0 0 2px #000, 0 0 1px #000, 0 0 1px #000; overflow: visible; }
   /* The BUILD BROKEN sign over the quay (weather.js). */
   /* A crate the gate handed back (#433): why, and how often. */
   .al.bounce { color: #fff; background: #b02020; border-color: #ff6a5a; font-size: calc(var(--lf, 11px) - 2px); padding: 0 3px; }

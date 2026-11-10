@@ -120,7 +120,7 @@ function drawWorld(t, w) {
       : [[ox, oy], [rx + 7, oy], [rx + 7, ry], [g.dx + 30, ry]];
     const at = porterPos({ t0: f.t0, speed: 0.04, pts }, t);
     if (!at) return false;
-    state.T.crate(ctx, at[0] - 2, at[1] - 2, 'bug', 'P0');
+    state.T.crate(ctx, at[0] - 2, at[1] - 2, 'bug', 'P0', false, f.n);
     return true;
   });
 }

@@ -89,7 +89,7 @@ registerLayer({ z: 80, draw(c, scene) {
   // Which crates are drawn here, in order, for anything later layers mark on them.
   (scene.atQuay = atQuay.slice(0, QUAY_CAP)).forEach((n, k) => {
     const [x, y] = quaySpot(lay, k);
-    state.T.crate(c, x, y, 'workshop', null, true); tap(x, y, 5, 5, { kind: 'crate', n, at: 'quay' });
+    state.T.crate(c, x, y, 'workshop', null, true, n); tap(x, y, 5, 5, { kind: 'crate', n, at: 'quay' });
   });
   // Six crates fit; a "+N" says how many more wait, and the quay's dialog lists them all.
   if (atQuay.length > QUAY_CAP) { const more = atQuay.length - QUAY_CAP, { w, h } = badgeSize(more); badge(c, roadX + 25, quayY - 9, more); tap(roadX + 24, quayY - 11, w, h, { kind: 'quay' }); }
@@ -108,7 +108,7 @@ registerLayer({ z: 90, draw(c, scene, t) {
     state.T.gate(c, lx, canalY, open, flagOf(i)); tap(lx - 7, canalY - 28, 32, H - canalY + 28, { kind: 'stop', i });
     s.issues.filter(n => !hid.has(n) && !onShip.has(n) && !carried.has(n)).slice(0, 4).forEach((n, k) => {
       const x = lx + 8 + (k % 2) * 6, y = canalY + 18 + Math.floor(k / 2) * 6;
-      state.T.crate(c, x, y, 'workshop', null, true); tap(x, y, 5, 5, { kind: 'crate', n, at: 'stop', i });
+      state.T.crate(c, x, y, 'workshop', null, true, n); tap(x, y, 5, 5, { kind: 'crate', n, at: 'stop', i });
     });
   });
 } });
@@ -117,7 +117,7 @@ registerLayer({ z: 100, draw(c, scene, t) {
   state.floats = state.floats.filter(f => {
     const pos = porterPos({ t0: f.t0, speed: 0.03, pts: f.pts }, t);
     if (!pos) return false;
-    state.T.crate(c, pos[0] - 2, pos[1] - 2, 'workshop', null, true);
+    state.T.crate(c, pos[0] - 2, pos[1] - 2, 'workshop', null, true, f.n);
     return true;
   });
 } });
@@ -140,7 +140,7 @@ registerLayer({ z: 110, draw(c, scene, t) {
     tap(lay.castleX + hx + at.ox, canalY + hy + at.oy, hw, hh, at.leaving ? { kind: 'ship', at: 'away' } : { kind: 'ship' });
     load.slice(0, SHIP_CAP).forEach((n, k) => {
       const [x, y] = holdPos(lay, k, at.ox, oy);
-      state.T.crate(c, x, y, 'workshop', null, true);
+      state.T.crate(c, x, y, 'workshop', null, true, n);
       if (!at.leaving) tap(x, y, 5, 5, { kind: 'crate', n, at: 'ship' });
     });
     if (load.length > SHIP_CAP) badge(c, Math.round(lay.castleX + state.T.holdBadge[0] + at.ox), Math.round(canalY + state.T.holdBadge[1] + oy), load.length - SHIP_CAP);

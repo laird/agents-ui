@@ -41,7 +41,7 @@ fn village_draws_the_merge_gate_as_a_gatehouse() {
     assert!(trips.contains("kind: st === 'conflict' ? 'knot' : 'rejected' });"));
     assert!(trips.contains("[{ pts: [from, [lay.roadX + 3, from[1]], [lay.roadX + 3, ROAD], ...boardFromRoad(lay)], carry: true }], { dented: true }));"));
     assert!(trips.contains("if (oldQuay.has(n) || gated.has(n) || oldGs.spots.has(n)) return;"));
-    assert!(body.contains("if (p.dented) {"));
+    assert!(body.contains("if (p.dented) dent(c, a.x - 2, a.y - 16);"));
     // Dialogs and the area label, which also counts today's failures (#405: no counter row).
     assert!(gate.contains("return { title: `${theme.labels.gate} · merge gate`, line: `${gs.queued} queued · ${gs.gating} gating`,"));
     assert!(gate.contains("link('What went wrong', e.failure_url)"));

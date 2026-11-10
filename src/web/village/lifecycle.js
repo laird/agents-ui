@@ -6,7 +6,8 @@
 import { state } from './state.js';
 import { P, R, blink, shadow, subHat, waveFrame } from './palette.js';
 import { cobwebs, pennant, puffs } from './sprites/houses.js';
-import { ICONS, badge, badgeSize, bubble, glint, ribbon, roped, tether, zzz } from './scenery.js';
+import { ICONS, badge, badgeSize, bubble, tether, zzz } from './scenery.js';
+import { dent, glint, ribbon, roped } from './crates.js';
 import { restOf } from './rest.js';
 import { QUIET_ACTIONS, actionSign, drawAction, person, wander } from './people.js';
 import { registerHit, registerLabels, registerLayer, tap } from './registry.js';
@@ -74,7 +75,8 @@ registerLayer({ z: 50, draw(c, { v, lay, bound }, t) {
   });
 } });
 /* The backlog's crates at the docks, in dock order (docks.js: prerequisites
- * first, a chain as one run). Each is ribboned in its epic's flag colour,
+ * first, a chain as one run), each with its issue number stencilled on (#420).
+ * Each is ribboned in its epic's flag colour,
  * roped and tethered to what it waits on, or, ready to pick up, glinting. */
 const epicCols = lay => new Map((lay.banners || []).map(g => [g.f.number, g.col]));
 registerLayer({ z: 60, draw(c, { v, lay, bound }, t) {
@@ -82,7 +84,7 @@ registerLayer({ z: 60, draw(c, { v, lay, bound }, t) {
   const spot = new Map(docked.map(({ cr, s }) => [cr.number, s])), cols = epicCols(lay);
   docked.forEach(({ cr, s }) => (cr.waits_on || []).forEach(d => { if (spot.has(d)) tether(c, s, spot.get(d)); }));
   docked.forEach(({ cr, s }) => {
-    state.T.crate(c, s.x, s.y, cr.kind, cr.priority);
+    state.T.crate(c, s.x, s.y, cr.kind, cr.priority, false, cr.number);
     if (cols.has(cr.parent)) ribbon(c, s.x, s.y, cols.get(cr.parent));
     if ((cr.waits_on || []).length) roped(c, s.x, s.y); else if (!state.reduce) glint(c, s.x, s.y, t + cr.number * 263);
     tap(s.x, s.y, 5, 5, { kind: 'crate', n: cr.number, at: 'backlog' });
@@ -138,7 +140,7 @@ registerLayer({ z: 70, draw(c, scene, t) {
     });
     // The issue's crate at the door while it is worked on: hammered, sawn, sparking.
     if (st === 'working' && h.issue && !away && !bound.has(h.issue)) {
-      state.T.crate(c, lot.x + 11, lot.y + 16, h.kind, h.priority);
+      state.T.crate(c, lot.x + 11, lot.y + 16, h.kind, h.priority, false, h.issue);
       tap(lot.x + 11, lot.y + 16, 5, 5, { kind: 'crate', n: h.issue, at: 'house', i });
       if (!state.reduce && !QUIET_ACTIONS.has(h.action) && blink(tt, 150)) {
         const k = Math.floor(tt / 150) % 3;
@@ -159,15 +161,15 @@ registerLayer({ z: 120, draw(c, { at }, t) {
     if (!a) return false;
     if (!a.fetched && p.issue && !p.crew) {
       const [px, py] = pickup(p);
-      state.T.crate(c, px - 2, py - 6, p.kind, p.pr); tap(px - 2, py - 6, 5, 5, { kind: 'crate', n: p.issue, at: 'transit', to: p.to });
+      state.T.crate(c, px - 2, py - 6, p.kind, p.pr, false, p.issue); tap(px - 2, py - 6, 5, 5, { kind: 'crate', n: p.issue, at: 'transit', to: p.to });
     }
     if (a.waiting) return true;
     person(c, a.x - 4, a.y - 11, p.seed, a.carry ? (blink(t, 140) ? 'carrystep' : 'carry') : 'stand');
     tap(a.x - 4, a.y - 11, 8, 12, { kind: 'porter', seed: p.seed, n: p.issue, to: p.to, carrying: a.carry });
     if (a.carry) {
-      state.T.crate(c, a.x - 2, a.y - 16, p.kind, p.pr, p.sealed);
+      state.T.crate(c, a.x - 2, a.y - 16, p.kind, p.pr, p.sealed, p.issue);
       // Handed back by the merge gate: dented.
-      if (p.dented) { R(c, a.x - 1, a.y - 15, 1, 1, P.o); R(c, a.x + 1, a.y - 14, 1, 1, P.woodD); }
+      if (p.dented) dent(c, a.x - 2, a.y - 16);
       tap(a.x - 2, a.y - 16, 5, 5, { kind: 'crate', n: p.issue, at: 'transit', to: p.to });
     }
     return true;
@@ -302,11 +304,8 @@ registerLabels((sc, theme) => {
   (sc.hits || []).filter(h => h.o.kind === 'board').forEach(h => out.push({ avoid: h }));
   const add = (x, y, anchor, text, sub, cls, width) => out.push({ x, y, anchor, text, sub, cls, width });
   add(34, 51, 'top', theme.labels.docks, runtime ? 'waiting' : `backlog · ${v.backlog.length}`);
-  // Each crate's number just under it, fixed to its crate (never moved);
-  // smaller when the docks are packed 6 pixels apart (slotPos).
-  const roomy = v.backlog.length <= 24, size = roomy ? 3 : 2.2;
-  (sc.hits || []).filter(h => h.o.kind === 'crate' && h.o.at === 'backlog')
-    .forEach(h => out.push({ x: h.x + 2.5, y: h.y + (roomy ? 6.5 : 6), anchor: 'center', text: '#' + h.o.n, short: String(h.o.n), cls: 'num', fixed: true, size }));
+  // A crate's number is stencilled on it (crates.js, #420), so no label is
+  // laid over the docks: hovering a crate still names it in full.
   add(lay.hallX + 16, 43, 'top', theme.labels.hall, managerSub(v.manager));
   add(lay.hallX + 51, 45, 'top', theme.labels.board, runtime ? 'failed' : `blocked · ${v.board.length}`);
   // A house label may be no wider than its lot, so neighbours never overlap:

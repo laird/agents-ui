@@ -117,7 +117,8 @@ fn village_html_shows_each_crates_priority_epic_state_and_number() {
     let body = &village_source();
     // Every theme marks all four priorities, each its own way.
     assert!(body.contains("export const PRIOCOL = { P0: '#e02828', P1: '#f07020', P2: '#f8d040', P3: '#9898a8' };"));
-    assert_eq!(body.matches("if (PRIOCOL[pr]) R(c, x + 1, y + ").count(), 3, "medieval, modern and future");
+    // (crates are 2× sprites, crates.js: tools/village-tests/crates.test.mjs reads each theme's marks back.)
+    assert_eq!(body.matches("if (PRIOCOL[pr]) R(d, ").count() + body.matches("R(d, 1, 8, 9, 1, PRIOCOL[pr] || F.hullD);").count(), 3, "medieval, modern and future");
     // The docks stand in dock order; a crate carries its epic's flag colour and glints when ready.
     assert!(body.contains("v.backlog = arrangeDocks(v.backlog);"));
     assert!(body.contains("if (cols.has(cr.parent)) ribbon(c, s.x, s.y, cols.get(cr.parent));"));
@@ -129,12 +130,22 @@ fn village_html_shows_each_crates_priority_epic_state_and_number() {
     assert!(body.contains("if (crateState(cr) === 'ready') return 'Ready to pick up';"));
     assert!(body.contains("hoverTo(h && (HITS[h.o.kind] || {}).hover ? h : null);"));
     assert!(body.contains("cv.addEventListener('pointerleave', () => hoverTo(null));"));
-    // Each crate's number under it, fixed in place.
-    assert!(body.contains("text: '#' + h.o.n, short: String(h.o.n), cls: 'num', fixed: true, size }"));
+    // Each crate's number is stencilled on it (#420), not laid over it as a label.
+    assert!(body.contains("state.T.crate(c, s.x, s.y, cr.kind, cr.priority, false, cr.number);"));
+    assert!(body.contains("export function stencil(d, n, ink = P.o, plate = P.woodD, light = P.parch)"));
+    assert_eq!(["stencil(d, n);", "stencil(d, n, P.o, P.o, P.white);", "stencil(d, n, F.navy, F.navy, F.cyan);"].iter().map(|s| body.matches(s).count()).sum::<usize>(), 3, "every theme stencils the number");
+    assert!(!body.contains("cls: 'num'"), "no #N label over the docks' crates");
+    for cargo in ["'workshop', null, true, n); tap(x, y, 5, 5, { kind: 'crate', n, at: 'quay' });",
+                  "'workshop', null, true, n); tap(x, y, 5, 5, { kind: 'crate', n, at: 'stop', i });",
+                  "state.T.crate(c, x, y, 'workshop', null, true, n);\n      if (!at.leaving)",
+                  "state.T.crate(c, x + 2 + k * 5, y + 1, 'workshop', null, true, n));"] {
+        assert!(body.contains(cargo), "quay, stop, ship and barge cargo carry their numbers too: {cargo}");
+    }
     assert!(body.contains("export const slotPos = (i, n = 40) => (n <= 24"));
     // And the key explains it all.
     assert!(body.contains("'Glinting crate: ready to pick up'"));
     assert!(body.contains("\"Crate edged in a flag's colour: part of that feature (its epic)\""));
+    assert!(body.contains("`Number on a crate: its issue. Blocked issues are notes on the ${L.board}`"));
 }
 
 /// Trouble is the loudest thing on the map (#439): sizes are measured

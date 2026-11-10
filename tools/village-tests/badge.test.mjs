@@ -4,7 +4,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 globalThis.window = {};  // state.js reads window.matchMedia
-const { badge, badgeSize, numberTag, numberTagSize, DIGITS } = await import('../../src/web/village/scenery.js');
+const { badge, badgeSize, numberTag, numberTagSize } = await import('../../src/web/village/scenery.js');
+const { DIGITS } = await import('../../src/web/village/palette.js');
 const { P } = await import('../../src/web/village/palette.js');
 
 const PLUS = '000010111010000';
