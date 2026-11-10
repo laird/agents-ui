@@ -73,6 +73,40 @@ cargo install --path .
 agents-tui
 ```
 
+### Run the village and dashboard as a service
+
+To keep the web UI serving (started at login, restarted on failure), install
+it as a user service:
+
+```bash
+cargo install --path . && agents-tui service install
+```
+
+On Linux this writes the systemd user unit
+`~/.config/systemd/user/agents-tui.service` (with the installed binary's
+path, and a `PATH` that finds `gh`, `git`, `herdr` and `claude`), enables and
+starts it, and waits until `/village` answers. (macOS's launchd is not
+supported yet.) Options mirror the server's flags:
+
+- `--web-port N` (default 7890) and `--web-bind ADDR[,ADDR]` (default
+  `127.0.0.1`). When tailscale is up it suggests `127.0.0.1,tailscale`, which
+  also serves your tailnet devices.
+- `--source LAYER=NAME`, repeatable (default `swarms=herdr` when herdr is on
+  `PATH`), and `--read-only`.
+- `--dry-run` prints the unit and the commands and changes nothing.
+
+**Linger:** systemd stops user services when you log out. Pass `--linger` (it
+runs `loginctl enable-linger $USER`) to keep the village serving while you're
+logged out. Without it, `install` tells you, but never turns it on by itself.
+
+**No LAN by default:** the UI has no authentication, so `install` refuses
+`0.0.0.0` or `::` unless you pass `--allow-lan`. Prefer `127.0.0.1,tailscale`.
+
+Re-run `install` to change options (it shows what changed and restarts).
+`agents-tui service status` shows its state, URL and binary;
+`agents-tui service restart` restarts it; `agents-tui service uninstall`
+stops and removes it. `tools/deploy.sh` deploys to this unit.
+
 The binary is written to `target/debug/agents-tui` or `target/release/agents-tui`.
 
 ## CLI Options

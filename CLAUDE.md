@@ -11,6 +11,7 @@ source "$HOME/.cargo/env"
 cargo build          # Build
 cargo run            # Run the TUI
 cargo install --path . # Install globally as `agents-tui`
+agents-tui service install  # ...and serve the village as a systemd user service (--dry-run, --linger; see README)
 ```
 
 To serve the web UI to tailnet devices and this machine together, give
@@ -110,6 +111,9 @@ src/
     theme.rs        # Color/style constants
   config/
     persistence.rs  # Swarm state save/load (~/.agents-ui/)
+  service/          # `agents-tui service install|uninstall|status|restart`: the served UI as a user service
+    unit.rs         #   options → systemd unit text (pure; docs/agents-tui.service is its nuc-1 output)
+    systemd.rs      #   write, enable, wait for the village, linger, through an injectable runner
   web/
     server.rs       # HTTP API + embedded pages (`--web` / `--headless`)
     framework.rs    # Neutral agents-village report: every village is drawn from one; --framework reads outside adapters
@@ -137,6 +141,7 @@ src/
       docks.js      #   no DOM: the docks' crate order (prerequisites first, a chain as one run) and each crate's state
       trips.js      #   what each change between two polls sets off: diff(), the queued trips and where each is
       ship.js       #   the canal: quay, locks, harbour and the ship that sails on a release
+      bounces.js    #   crates the gate handed back: dressed for rework at their house, a red ↺ tag, debris (what they say: bouncemarks.js)
       features.js   #   feature banners, trails, barges, fog, the strip and the feature dialog
       envrow.js     #   the environment row under the dev village: a village per environment (sign, warehouse of cargo, health, rank), the mini-map
       voyages.js    #   ships between the row's villages: loading, sailing, docked, failed, and voyages the page plays itself

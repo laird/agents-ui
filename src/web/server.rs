@@ -1484,7 +1484,7 @@ mod tests {
         }
         // The features and the modules they lean on, two imports or more away included.
         for module in [
-            "registry.js", "layout.js", "lifecycle.js", "docks.js", "trips.js", "ship.js", "gatehouse.js", "weather.js", "buildweather.js", "features.js", "envrow.js", "voyages.js", "worlds.js", "panels.js", "dialogs.js",
+            "registry.js", "layout.js", "lifecycle.js", "docks.js", "trips.js", "ship.js", "gatehouse.js", "weather.js", "buildweather.js", "bounces.js", "bouncemarks.js", "features.js", "envrow.js", "voyages.js", "worlds.js", "panels.js", "dialogs.js",
             "labels.js", "houselabel.js", "key.js", "data.js", "state.js", "palette.js", "sprites/houses.js", "scenery.js", "people.js",
             "themes/registry.js", "themes/medieval.js", "themes/modern.js", "themes/future.js", "saver.js", "screensaver.js", "rest.js",
         ] {
@@ -2391,6 +2391,26 @@ mod tests {
             Ok(out) => assert!(out.status.success(), "tools/village-tests failed:\n{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)),
             Err(e) => eprintln!("node is not installed ({e}); skipping tools/village-tests"),
         }
+    }
+
+    /// A crate the gate handed back (#433): dressed for rework at its house,
+    /// a red tag saying why and how often, debris from the second bounce,
+    /// all gone once the issue lands. What the marks say is tested under node
+    /// (bouncemarks.test.mjs).
+    #[test]
+    fn village_html_marks_bounced_crates_at_their_house() {
+        let body = &village_source();
+        assert!(body.contains("import './bounces.js';"));
+        // Drawn from #431's pipeline.bounces, one mark per house that hasn't landed.
+        assert!(body.contains("export const bouncesOf = (v, n) => ((v && v.pipeline && v.pipeline.bounces) || {})[n] || [];"));
+        assert!(body.contains("if (!bs.length || landed(v, h.issue)) return [];"));
+        assert!(body.contains("debris: bs.length >= 2"));
+        // The tag over the house, red; each theme its own art; a click lists every attempt.
+        assert!(body.contains("text: m.tag, cls: 'bounce', fixed: true"));
+        assert!(body.contains(".al.bounce { color: #fff; background: #b02020;"));
+        assert!(body.contains("if (state.T === FUTURE) {") && body.contains("} else if (state.T === MODERN) {"));
+        assert!(body.contains("registerHit({ kind: 'bounce', dialog(o, sc) {"));
+        assert!(body.contains("meta: bounceLines(bs),"));
     }
 
     /// `/village?screensaver=1` (#382): the idle display the Omarchy
