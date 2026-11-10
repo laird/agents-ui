@@ -52,6 +52,7 @@ Tests are inline `#[cfg(test)]` modules in each source file:
 - `src/web/kubernetes.rs` — runtime specs, pod states and why they need you, image versions, workloads → houses, from JSON fixtures
 - `src/web/herdr.rs`, `src/web/temporal.rs` — herdr and Temporal parsing and village building, from JSON fixtures
 - `src/web/world.rs` — world specs, build-ID matching, incident origins, shipping vs landed
+- `src/web/dormant.rs` — dormant swarms: a manifest with nothing live, live winning over it, no manifest no swarm
 
 For the village UI, `tools/mock/demo.sh` runs agents-tui against simulated herdr and Temporal swarms.
 `VOYAGES=1 tools/mock/demo.sh` scripts Deployments for this repo's own environments (`nuc-1`, then `release`): a deploy, a promotion and a failed deploy on a 120 s loop, so the environment row's voyages can be seen without real ones (`tools/mock/voyages.py`; tests: `python3 -m unittest discover -s tools/mock -p 'test_voyages.py'`).
@@ -100,6 +101,7 @@ src/
     framework.rs    # Neutral agents-village report: every village is drawn from one; --framework reads outside adapters
     source.rs       # Swappable source layers (villages, swarms, issues, pipeline, activity), `--source`
     discovery.rs    # Polls the swarm sources; the tmux and saved-swarm sources
+    dormant.rs      # Dormant swarms: a known repo with a swarm manifest but nothing running
     herdr.rs        # Swarms under herdr: `herdr agent list`, grouped by worktree cwd
     pane.rs         # Read and type into an agent's pane through its multiplexer (tmux or herdr)
     temporal.rs     # Temporal namespaces as villages, via the frontend HTTP API

@@ -1,6 +1,7 @@
 pub mod build;
 pub mod deployments;
 pub mod discovery;
+pub mod dormant;
 pub mod feature;
 pub mod framework;
 pub mod gate;

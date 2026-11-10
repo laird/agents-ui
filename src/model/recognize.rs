@@ -260,6 +260,8 @@ pub struct SwarmManifest {
     /// The manager's pane in every multiplexer the manifest names
     /// (`herdrPane`, `tmuxTarget`, `cmuxWorkspace`).
     pub manager_panes: Vec<String>,
+    /// What the swarm says it is doing (`running`, `paused`, ...), if it says.
+    pub state: Option<String>,
 }
 
 /// Every manifest in `text`: the `.autocoder/swarm/*.json` files one after
@@ -277,7 +279,8 @@ pub fn parse_manifests(text: &str) -> Vec<SwarmManifest> {
                 .filter(|p| !p.is_empty())
                 .map(str::to_string)
                 .collect();
-            Some(SwarmManifest { session, manager_panes })
+            let state = v.get("state").and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string);
+            Some(SwarmManifest { session, manager_panes, state })
         })
         .collect()
 }
@@ -614,7 +617,7 @@ worktree /nonexistent/shop-wt-1\nHEAD 123\nbranch refs/heads/feature/issue-7\n";
     }
 
     fn manifest(session: &str, pane: &str) -> SwarmManifest {
-        SwarmManifest { session: session.into(), manager_panes: vec![pane.into()] }
+        SwarmManifest { session: session.into(), manager_panes: vec![pane.into()], state: None }
     }
 
     /// Three agents in the main checkout and one worker, each with `evidence`.

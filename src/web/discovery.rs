@@ -43,8 +43,12 @@ pub async fn run(state: SharedWebState, sources: Vec<Box<dyn SwarmSource>>) {
     let transport = ServerTransport::new(None);
     let names: Vec<&str> = sources.iter().map(|s| s.name()).collect();
     tracing::info!("Swarm sources: {}", if names.is_empty() { "none".to_string() } else { names.join(", ") });
+    // Repos seen live in this run, and saved swarms': where a dormant swarm (a
+    // manifest with nothing running, #398) is looked for.
+    let mut dormant = super::dormant::DormantSwarms::default();
     loop {
-        let snapshots = super::source::discover(&sources, &transport).await;
+        let mut snapshots = super::source::discover(&sources, &transport).await;
+        dormant.add(&transport, &mut snapshots).await;
         if let Ok(mut guard) = state.write() {
             *guard = snapshots;
         }

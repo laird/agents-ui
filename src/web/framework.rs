@@ -820,7 +820,8 @@ pub fn swarm_agent_state(agent: &super::AgentSnapshot) -> AgentState {
         AgentState::Done
     } else if s == "Starting" {
         AgentState::Starting
-    } else if s == "Stopped" {
+    } else if s == "Stopped" || s.starts_with(super::dormant::DORMANT) {
+        // A dormant swarm's manager (#398): at rest, so drawn like a stopped one.
         AgentState::Stopped
     } else {
         AgentState::Unknown
