@@ -154,5 +154,5 @@ fn village_draws_trouble_loudest() {
     assert!(body.contains("if (alert) boardFrame(c, hallX + 42, 28, alert.n, t);"));
     assert!(body.contains("if (gateEntries(v).some(e => e.state === 'failed' || e.state === 'conflict')) lamp(c, g.x0 + g.w - 2, g.y - 4, t);"));
     // And the Key says so.
-    assert!(body.contains("['Trouble, loudest first', ["));
+    assert!(body.contains("['trouble', 'Trouble, loudest first', ["));
 }

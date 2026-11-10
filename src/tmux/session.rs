@@ -1,3 +1,5 @@
+//! tmux session discovery and pane listing (`list-panes`, with each pane's id, pid and cwd).
+
 use anyhow::{Context, Result};
 use crate::transport::ServerTransport;
 

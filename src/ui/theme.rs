@@ -1,3 +1,5 @@
+//! The terminal UI's colour and style constants.
+
 use ratatui::style::{Color, Modifier, Style};
 
 use crate::model::issue::{IssuePriority, IssueType};

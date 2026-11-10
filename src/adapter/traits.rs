@@ -1,3 +1,5 @@
+//! The `AgentRuntime` trait every agent adapter implements.
+
 use crate::model::swarm::{AgentType, Swarm};
 use anyhow::Result;
 use std::collections::HashMap;

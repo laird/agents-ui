@@ -1,3 +1,5 @@
+//! tmux pane capture (`capture-pane -e`), send-keys, and background pane watchers.
+
 use anyhow::{Context, Result};
 use std::time::Duration;
 use tokio::process::Command;

@@ -1,3 +1,6 @@
+//! The Claude Code adapter: worktrees, tmux windows, launching manager and workers.
+//! `recognized_tests`: the terminal view's swarms come from the shared recognizer (`/api/swarms`'s).
+
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use tokio::process::Command;

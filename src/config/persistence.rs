@@ -1,3 +1,5 @@
+//! Swarm state saved under `~/.agents-ui/` (TOML): save, load, list, stopped swarms.
+
 #![allow(dead_code)]
 
 use anyhow::Result;

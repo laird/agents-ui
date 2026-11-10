@@ -46,38 +46,27 @@ cargo test swarm     # Run tests matching "swarm"
 
 ### Test structure
 
-Tests are inline `#[cfg(test)]` modules in each source file:
+Each module's tests are in its own `#[cfg(test)]` block, and its header comment
+says what it is. Don't list modules here: a new module needs no edit to this
+file.
 
-- `src/model/status.rs` — Status line parsing, state detection, issue extraction, file I/O
-- `src/model/swarm.rs` — Agent counting, lookups, state queries, type methods
-- `src/model/recognize.rs` — swarm recognition: repo identity (git common dir), worktree membership at any depth, worker numbers, same-name repos, one repo through two sources; the manager by evidence (manifest pane, `AUTOCODER_MANAGER` marker in a descendant process, label, main checkout), ties marked ambiguous, manifest parsing
-- `src/config/persistence.rs` — TOML save/load round-trips, listing, missing files
-- `src/app.rs` — Key-to-tmux conversion, pane status inference, tab completion helpers
-- `src/adapter/claude.rs` — `recognized_tests`: the terminal view's swarms come from the shared recognizer (`/api/swarms`'s), herdr swarms included, from the same herdr fixtures
-- `src/web/village.rs` — House kinds and statuses, crew grouping, backlog/board sorting, tip-ref and environment parsing, transcript actions
-- `src/web/framework.rs` — state words, task numbers, report → village mapping, autocoder labels, outside adapters (`tools/adapters/example-report.json`)
-- `src/web/source.rs` — `--source` parsing, swarm-source precedence, any village source as a world's platform
-- `src/web/deployments.rs` — newest successful GitHub Deployment per environment, from JSON fixtures
-- `src/service/unit.rs`, `src/service/systemd.rs`, `src/service/launchd.rs`, `src/service/mod.rs` — the service unit and plist from the options; `service install|uninstall|status|restart` for systemd and launchd (either tested on any OS) against a recording runner (command order, re-install diff and restart, dry run, linger, 0.0.0.0 refused, village up and down); argument parsing
-- `src/web/gate.rs` — the merge gate from a merge job's `.pid`/`.log`/`.exit` files and labels: every state, slots from `/proc/locks`, test progress, trains, repo ids; bounces (#431): conflicts and failed gates from the job's comments, push retries from the re-sync commits, conflict files remembered from logs, today's tally and hotspots
-- `src/web/build.rs` — the integration branch's build health from recorded check runs (green, red, running, one OS red, none), red-since and blame from workflow runs, failing tests from a job log, the sentinel's state file, a merge job red on the branch alone
-- `src/web/feature.rs` — features from links and the village: where each subtask is, Build/stage counts, not-planned leaves the total, stuck, live, one-day retention, report tasks with a `parent`
-- `src/model/issue.rs` — feature links: sub-issues else `Sub-task of #N` bodies, spec links in the parent body
-- `src/web/kubernetes.rs` — runtime specs, pod states and why they need you, image versions, workloads → houses, from JSON fixtures
-- `src/web/herdr.rs`, `src/web/temporal.rs` — herdr and Temporal parsing and village building, from JSON fixtures
-- `src/web/world.rs` — world specs, build-ID matching, incident origins, shipping vs landed
-- `src/web/dormant.rs` — dormant swarms: a manifest with nothing live, live winning over it, no manifest no swarm
+- **Rust:** `cargo test` runs them all. The village page's tests (what the page
+  embeds and wires up) are in `src/web/village_tests/`, one file per feature
+  area.
+- **The village's DOM-free decisions** (modules with no DOM, such as the Fit
+  scale, the dock order, house labels, build weather and bounce marks) run
+  under node: `node --test tools/village-tests/`, every `*.test.mjs` there,
+  also run by `cargo test village_node_tests`.
 
 For the village UI, `tools/mock/demo.sh` runs agents-tui against simulated herdr and Temporal swarms.
 `VOYAGES=1 tools/mock/demo.sh` scripts Deployments for this repo's own environments (`nuc-1`, then `release`): a deploy, a promotion and a failed deploy on a 120 s loop, so the environment row's voyages can be seen without real ones (`tools/mock/voyages.py`; tests: `python3 -m unittest discover -s tools/mock -p 'test_voyages.py'`).
 `CONFLICTS=1 tools/mock/demo.sh` scripts the merge gate's bounces for #430: each issue at the gate takes the next story (a conflict fixed on the second attempt, a failed gate, a push rejected and re-synced twice, a hotspot file that conflicts three times), as autocoder's merge-job files (`tools/mock/conflicts.py`; tests: `python3 -m unittest discover -s tools/mock -p 'test_conflicts.py'`, and `cargo test conflicts_demo` reads its files as `gate.rs` does).
 The village screensaver (`/village?screensaver=1`, `src/web/village/saver.js` + `screensaver.js`; the Omarchy service, launcher and installer in `tools/omarchy-plugin/agents-village-screensaver/`): `node --test tools/omarchy-plugin/agents-village-screensaver/tests/` and `bash tools/omarchy-plugin/agents-village-screensaver/tests/test_install.sh` (both run by `cargo test screensaver`), and `python3 tools/omarchy-plugin/agents-village-screensaver/tests/qml_check.py` (the real `Service.qml` in Quickshell, offscreen). Install with `tools/omarchy-plugin/install.sh --screensaver [--never-sleep] [--host <ssh host>]`.
 The Omarchy bar widget (`tools/omarchy-plugin/agents-village/`): `node --test tools/omarchy-plugin/agents-village/tests/` (its model, against recorded `/api/swarms` and `/api/village`) and `python3 tools/omarchy-plugin/agents-village/tests/qml_check.py` (the real `Panel.qml` in Quickshell, offscreen). Install with `tools/omarchy-plugin/install.sh [--host <ssh host>] [--enable]`.
-The village's DOM-free decisions, the Fit scale (`src/web/village/fitscale.js`), each epic's flag colour (`featureColours` in `palette.js`) and the dock arrangement (`docks.js`: crates in dependency order, ready or waiting), what each house's label says (`houselabel.js`), the environment row's labels and houses (`envlabels.js`), the 2× detail grid (`detail.js`: a 1× scene drawn on it is the same scene, doubled), and the build's weather (`buildweather.js`: storm, squall, drizzle, the BUILD BROKEN sign, the status words): `node --test tools/village-tests/` (also run by `cargo test village_node_tests`).
 `tools/mock/replay-build.py` bundles the village's modules into one self-contained replay page (each module after its imports; two modules declaring the same top-level name stop the build); its tests: `python3 -m unittest discover -s tools/mock -p 'test_replay_build.py'` (also run by `cargo test replay_build`).
 `tools/mock/history.py` rebuilds a replay of a repo's real development from git and GitHub history (`--no-github` for git only); its tests: `python3 -m unittest discover -s tools/mock -p 'test_history.py'`.
 
-Tests use `tempfile` for filesystem tests. No mocking of tmux — integration-level tmux testing is done manually via `tmux new-session -d` + `cargo run`.
+Filesystem tests use unique paths under `std::env::temp_dir()` (there is no `tempfile` crate). No mocking of tmux — integration-level tmux testing is done manually via `tmux new-session -d` + `cargo run`.
 
 ### Adding tests
 
@@ -85,88 +74,25 @@ Add tests to the `#[cfg(test)] mod tests` block in the relevant source file. For
 
 ## Architecture
 
+Directory by directory; each file's header comment says what it does.
+
 ```
 src/
-  main.rs           # Entry point, logging, terminal init
-  app.rs            # App state, event loop, key handling, navigation
-  event.rs          # Async event system (keys, ticks, pane updates)
-  tui.rs            # Terminal raw mode setup/teardown
-  model/
-    status.rs       # AgentState/AgentStatus types, status file parsing
-    swarm.rs        # Swarm/AgentInfo types, AgentType, Workflow
-    recognize.rs    # Swarm recognition: agents → repos by git common dir and worktree (shared by every source)
-  tmux/
-    session.rs      # Session discovery, pane listing
-    proxy.rs        # Pane capture, send-keys, background watchers
-  adapter/
-    traits.rs       # AgentRuntime trait
-    claude.rs       # Claude Code adapter (worktrees, tmux, launch)
-  scripts/
-    launcher.rs     # Script/plugin path resolution
-  ui/
-    repos_list.rs   # Level 1: repos dashboard
-    repo_view.rs    # Level 2: manager + workers
-    agent_view.rs   # Level 3: live agent session (passthrough)
-    new_swarm.rs    # Launch dialog
-    theme.rs        # Color/style constants
-  config/
-    persistence.rs  # Swarm state save/load (~/.agents-ui/)
-  service/          # `agents-tui service install|uninstall|status|restart`: the served UI as a user service
-    unit.rs         #   options → systemd unit text (pure; docs/agents-tui.service is its nuc-1 output)
-    systemd.rs      #   write, enable, wait for the village, linger, through an injectable runner
-  web/
-    server.rs       # HTTP API + embedded pages (`--web` / `--headless`)
-    framework.rs    # Neutral agents-village report: every village is drawn from one; --framework reads outside adapters
-    source.rs       # Swappable source layers (villages, swarms, issues, pipeline, activity), `--source`
-    discovery.rs    # Polls the swarm sources; the tmux and saved-swarm sources
-    dormant.rs      # Dormant swarms: a known repo with a swarm manifest but nothing running
-    herdr.rs        # Swarms under herdr: `herdr agent list`, grouped by worktree cwd
-    pane.rs         # Read and type into an agent's pane through its multiplexer (tmux or herdr)
-    temporal.rs     # Temporal namespaces as villages, via the frontend HTTP API
-    kubernetes.rs   # A Kubernetes namespace as a runtime village (alternative to Temporal), via kubectl JSON
-    village.rs      # Village model: houses per worktree, issue crates, pipeline from git
-    deployments.rs  # What each environment runs: newest successful GitHub Deployment (else its branch ref)
-    gate.rs         # The merge gate: autocoder's merge jobs on this host (queued, gating, failed, ...), slots, trains
-    build.rs        # Build health of the integration branch: CI check runs, then the sentinel, then the merge gate
-    feature.rs      # Features: a parent issue's subtasks followed from spec to production
-    world.rs        # Worlds: a dev village paired with the platform it builds (incidents down, releases up)
-    village/        # /village: the swarm as a 16-bit village, embedded in the binary and served from /village/<path>
-      index.html    #   the page's markup
-      village.css   #   its styles
-      main.js       #   only imports the modules (each registers itself) and starts the page
-      registry.js   #   registerLayer/Hit/Labels/Overlay, and the feature-free core: paint(), tap(), hitAt()
-      state.js      #   what the drawing reads and the page sets: `state.T` (theme), the scene being drawn, scenes, view
-      layout.js     #   where things stand (layout(), world geometry, shownScenes) and the ground layers
-      detail.js     #   no DOM: the 2× detail grid (DETAIL canvas pixels a scene pixel), prepare() and detail() for 2× sprites
-      lifecycle.js  #   each issue's life: docks, hall, board, houses, walkers (layers, hits, labels)
-      docks.js      #   no DOM: the docks' crate order (prerequisites first, a chain as one run) and each crate's state
-      trips.js      #   what each change between two polls sets off: diff(), the queued trips and where each is
-      ship.js       #   the canal: quay, locks, harbour and the ship that sails on a release
-      bounces.js    #   crates the gate handed back: dressed for rework at their house, a red ↺ tag, debris (what they say: bouncemarks.js)
-      features.js   #   feature banners, trails, barges, fog, the strip and the feature dialog
-      envrow.js     #   the environment row under the dev village: a village per environment (sign, warehouse of cargo, a house per feature, health, rank), the mini-map
-      envlabels.js  #   no DOM: the row's words (one label per village with its version), which locks the canal still names, the feature houses
-      voyages.js    #   ships between the row's villages: loading, sailing, docked, failed, and voyages the page plays itself
-      worlds.js     #   a world drawn as platform over dev village; draw(); the bar's line for a world (worldWords)
-      panels.js     #   toast, zoom and Fit
-      fitscale.js   #   Fit's scale for a map in the room left for it (no DOM; tools/village-tests/)
-      rest.js       #   a worker at rest: ✓ just after finishing, then asleep ("zzz") (no DOM; tools/village-tests/)
-      weather.js    #   the build's health as weather: storm, squall over the gatehouse, drizzle; the BUILD BROKEN sign and blame crate
-      buildweather.js # which weather, the sign's and the status line's words (no DOM; tools/village-tests/)
-      dialogs.js    #   explain()/act() dispatch on registered hits; the hit test; keyboard targets
-      labels.js     #   area labels from registerLabels, kept clear of the art and each other
-      key.js        #   the Key (legend), drawn with the renderer's own functions
-      data.js       #   the feed: poll, scenes, select a village or world, the theme picker, the loop
-      saver.js      #   the screensaver's decisions (no DOM: options, strip counts, cycling, drift, night dimming)
-      screensaver.js #  ?screensaver=1: the map full screen, the big status strip, "can't reach", burn-in care
-      palette.js    #   colours and drawing primitives (`P`, `R`, `hash`, `blink`, `shadow`)
-      sprites/houses.js # houses, one sprite per kind
-      scenery.js    #   crates, bubbles, +N badges, grass, paths, water, trees, castle, board, locks, harbour, ship, boat
-      people.js     #   people, robots, drones and what they act out
-      themes/       #   registry.js (`registerTheme`, `THEMES`: the Style picker lists them) and medieval/modern/future.js, each registering itself
-tools/mock/         # Simulated herdr/Temporal/Kubernetes for the village: demo.sh (RUNTIME=k8s), record.py + replay-build.py, history.py (replay from git/GitHub history)
-tools/omarchy-plugin/ # Omarchy bar widget (agents-village/) and the village as the screensaver (agents-village-screensaver/); install.sh
-tools/adapters/     # Outside framework adapters: example report, adapter template (docs/village-protocol.md)
+  main.rs app.rs event.rs tui.rs   # entry point, the terminal UI's state, event loop and raw mode
+  model/        # swarms, agent status, issues; recognize.rs: which agents make which swarm (every source shares it)
+  tmux/         # tmux sessions, pane capture, send-keys
+  adapter/      # agent runtimes (Claude Code): worktrees, tmux windows, launch
+  ui/           # the terminal UI's screens: repos, a swarm, an agent, dialogs
+  config/       # saved swarm state (~/.agents-ui/), keybindings, shortcuts
+  service/      # `agents-tui service`: the served UI as a systemd unit or a launchd agent
+  web/          # the HTTP server and API, the swarm and village sources, the village model
+    village/        # /village: the swarm as a 16-bit village, one module per feature ("Adding to the village")
+    village_tests/  # the village page's tests, one file per feature area
+build.rs        # embeds every file under src/web/village/ as VILLAGE_ASSETS
+tools/mock/         # simulated herdr/Temporal/Kubernetes swarms for the village; replay pages
+tools/omarchy-plugin/ # the Omarchy bar widget and the village screensaver; install.sh
+tools/adapters/     # outside framework adapters (docs/village-protocol.md)
+tools/village-tests/ # node tests for the village's DOM-free modules
 ```
 
 ### Adding to the village
@@ -193,7 +119,10 @@ modules register (`registry.js`). To add something to the village:
    - A theme registers with `registerTheme` (`themes/registry.js`).
 3. **Import it in `main.js`.** That is all `main.js` does: import the
    modules, then `start()`.
-4. **Nothing to embed by hand**: `build.rs` embeds every file under
+4. **Tests next to the work**: page tests in `src/web/village_tests/` (the
+   feature area's file, or a new one), and a DOM-free module's in
+   `tools/village-tests/<module>.test.mjs`. No list to add them to.
+5. **Nothing to embed by hand**: `build.rs` embeds every file under
    `src/web/village/` (`.html`, `.css`, `.js`; another extension stops the
    build until `content_type()` there names it) as `VILLAGE_ASSETS`.
    `cargo test every_module_main_js_loads` fails for a module that is

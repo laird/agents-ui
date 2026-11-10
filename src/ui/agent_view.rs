@@ -1,3 +1,5 @@
+//! Level 3 of the terminal UI: a live agent session, keys passed through.
+
 use ansi_to_tui::IntoText;
 use ratatui::{
     Frame,

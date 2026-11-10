@@ -1,3 +1,5 @@
+//! Level 1 of the terminal UI: the repos dashboard.
+
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},

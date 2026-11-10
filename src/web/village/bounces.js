@@ -11,7 +11,7 @@
  * bouncemarks.js. */
 import { state } from './state.js';
 import { P, R, blink } from './palette.js';
-import { registerHit, registerLabels, registerLayer, tap } from './registry.js';
+import { registerHit, registerKey, registerLabels, registerLayer, tap } from './registry.js';
 import { issueLabel, issueOf, link } from './dialogs.js';
 import { MODERN } from './themes/modern.js';
 import { FUTURE } from './themes/future.js';
@@ -73,3 +73,9 @@ registerLabels(sc => {
     return { x: lot.x + 8, y: lot.y - 1 - levels[k] * 8, anchor: 'bottom', text: m.tag, cls: 'bounce', fixed: true };
   });
 }, 30);
+
+/* The Key's row: the crate as this theme dresses it for rework. */
+registerKey({ group: 'other', rows: theme => [
+  [c => { theme.crate(c, 3, 4, 'feature', null); reworked(c, 3, 4, 0); },
+    'Crate dressed for rework at a house, a red ↺ tag over it: the merge gate handed it back (↺2: the second time; broken boards from then on)', 13]] });
+

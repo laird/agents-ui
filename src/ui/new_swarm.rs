@@ -1,3 +1,5 @@
+//! The launch dialog for a new swarm.
+
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},

@@ -1,3 +1,5 @@
+//! Entry point: argument parsing, logging, the terminal UI or `--headless` server, and the `service` subcommand.
+
 mod adapter;
 mod app;
 mod config;

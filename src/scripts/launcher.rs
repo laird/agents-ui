@@ -1,3 +1,5 @@
+//! Script and plugin path resolution.
+
 use std::path::PathBuf;
 use std::sync::OnceLock;
 

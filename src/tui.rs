@@ -1,3 +1,5 @@
+//! Terminal raw mode setup and teardown.
+
 use anyhow::Result;
 use crossterm::{
     execute,

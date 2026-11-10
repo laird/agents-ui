@@ -1,3 +1,5 @@
+//! Level 2 of the terminal UI: a swarm's manager and workers.
+
 #![allow(dead_code)]
 
 use ansi_to_tui::IntoText;

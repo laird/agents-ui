@@ -1,3 +1,6 @@
+//! Swarms and their agents: `Swarm`, `AgentInfo`, `AgentType`, `Workflow`; agent counting, lookups,
+//! state queries.
+
 use super::issue::IssueCache;
 use super::status::AgentStatus;
 use std::path::{Path, PathBuf};

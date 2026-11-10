@@ -1,3 +1,6 @@
+//! Agent state and status: `AgentState`/`AgentStatus`, status-file parsing, state detection from pane
+//! content, issue extraction, file I/O.
+
 use chrono::NaiveDateTime;
 use std::collections::HashMap;
 use std::path::Path;

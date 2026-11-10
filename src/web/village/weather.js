@@ -13,7 +13,7 @@
  * motion reduced the rain stands still and nothing flashes. */
 import { state } from './state.js';
 import { P, R, blink, shadow } from './palette.js';
-import { registerHit, registerLabels, registerLayer, tap } from './registry.js';
+import { registerHit, registerKey, registerLabels, registerLayer, tap } from './registry.js';
 import { link, repoUrl } from './dialogs.js';
 import { buildSign, buildWords, failingJobs, shortSha, weatherOf } from './buildweather.js';
 
@@ -141,3 +141,19 @@ registerHit({ kind: 'blame', dialog(o, sc) {
   return { title: `Commit ${shortSha(b.blame)}`, line: `turned ${v.pipeline.integration || 'the build'} red${b.since ? ` · ${buildWords({ state: 'red', since: b.since }).replace('build red · ', '')}` : ''}`,
     meta: [failingJobs(b) || null], links: [link('Open the run', b.url), base ? link('Open the commit', `${base}/commit/${b.blame}`) : null] };
 } });
+
+/* ---------- The Key's rows, in the theme's own weather ---------- */
+const STORM_WORDS = { storm: 'Storm over the village', smog: 'Smog and alarm lights over the town', alert: 'Red alert over the base' };
+registerKey({ group: 'Weather: the build', rows: theme => {
+  const wx = (theme && theme.weather) || STORM;
+  const cloud = (c, x, y) => { R(c, x, y + 1, 9, 4, wx.cloudD); R(c, x + 2, y, 5, 3, wx.cloud); };
+  return [
+    [c => { R(c, 0, 0, 14, 14, wx.tint); cloud(c, 2, 1); [3, 7, 11].forEach((x, k) => R(c, x, 7 + (k % 2) * 2, 1, 3, wx.rain)); },
+      `${STORM_WORDS[wx.style] || STORM_WORDS.storm}: the build is red on every OS (lightning now and then)`],
+    [c => { cloud(c, 2, 2); R(c, 5, 8, 1, 2, wx.rain); R(c, 8, 9, 1, 2, wx.rain); }, 'A cloud over the gatehouse only: red on one OS or one job'],
+    [c => [[3, 3], [9, 5], [5, 9], [11, 11]].forEach(([x, y]) => R(c, x, y, 1, 2, wx.rain)), 'Drizzle: the build is running'],
+    [c => { R(c, 3, 9, 1, 4, P.woodD); R(c, 10, 9, 1, 4, P.woodD); R(c, 0, 3, 14, 7, P.o); R(c, 1, 4, 12, 5, '#d02828'); }, 'BUILD BROKEN sign on the quay: the failing jobs; click for the tests and the run'],
+    [c => { R(c, 3, 6, 7, 7, P.o); R(c, 4, 7, 5, 5, P.wood); R(c, 8, 0, 1, 7, P.woodD); R(c, 4, 0, 4, 3, '#e02828'); }, 'A crate under a red flag on the quay: the commit that turned the build red'],
+  ];
+} });
+

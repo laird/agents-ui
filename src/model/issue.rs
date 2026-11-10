@@ -1,3 +1,5 @@
+//! Issues, and feature links: sub-issues, else `Sub-task of #N` in bodies; spec links in the parent body.
+
 use serde::Deserialize;
 use std::time::Instant;
 use std::path::Path;

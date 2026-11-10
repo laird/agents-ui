@@ -15,7 +15,7 @@ import { flagLabel } from './houselabel.js';
 import { MEDIEVAL } from './themes/medieval.js';
 import { M, MODERN } from './themes/modern.js';
 import { FUTURE } from './themes/future.js';
-import { placeOverlays, registerHit, registerLabels, registerLayer, registerOverlay, tap } from './registry.js';
+import { placeOverlays, registerHit, registerKey, registerLabels, registerLayer, registerOverlay, tap } from './registry.js';
 import { cv, shownScale, shownScenes, slotPos } from './layout.js';
 import { SHIP_CAP, cargoOf, holdPos, placeOf, sourceWords } from './ship.js';
 import { esc } from './panels.js';
@@ -86,6 +86,8 @@ function drawBarge(c, b, t) {
 }
 /* The fog wash per theme, shared with the key. */
 export const fogCol = th => th === MODERN ? 'rgba(170,176,196,.75)' : th === FUTURE ? 'rgba(60,52,110,.78)' : 'rgba(206,210,230,.72)';
+registerKey({ group: 'other', rows: theme => [
+  [c => { R(c, 0, 0, 14, 14, fogCol(theme)); bubble(c, 2, 1, 'unknown'); }, 'Grey fog over a stage: nothing says what runs there (no Deployment, no branch)']] });
 /* Fog over a stop with neither a Deployment nor a branch: "?", never "not live". */
 function fogStop(c, v, i, lay, t) {
   const last = v.pipeline.stops.length - 1, x = i === last ? lay.castleX - 4 : lay.lockStart + i * 34 - 7, w = i === last ? 46 : 32;

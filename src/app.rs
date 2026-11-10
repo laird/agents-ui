@@ -1,3 +1,6 @@
+//! The terminal UI's state, event loop, key handling and navigation (repos → swarm → agent).
+//! Tests: key-to-tmux conversion, pane status inference, tab completion helpers.
+
 use anyhow::{Context, Result};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::path::PathBuf;

@@ -1,3 +1,5 @@
+//! The async event system: keys, ticks and pane updates.
+
 use crossterm::event::{self, Event as CrosstermEvent, KeyEvent, KeyEventKind};
 use futures::StreamExt;
 use std::time::Duration;

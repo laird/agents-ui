@@ -11,6 +11,11 @@
  *   registerLabels(fn, order)   fn(scene, theme) lists the names over one
  *       village: { x, y, anchor, text, sub, cls, width } in scene pixels, or
  *       { avoid: { x, y, w, h } }, a sprite no label may cover.
+ *   registerKey({ group, order, rows(theme) })   a feature's own rows in the
+ *       Key (key.js): rows(theme) gives [paint(c), words, size?] each, drawn
+ *       with the feature's own sprites. `group` is a group the Key already
+ *       has ('kinds', 'priority', 'docks', 'trouble', 'bubbles', 'other',
+ *       'subagents', 'notes') or a new heading, shown after them.
  *   registerOverlay(fn, order)   fn() places something over the map (feature
  *       banners, area labels, keyboard targets) after it moves or changes.
  *
@@ -34,6 +39,12 @@ export const LABELS = [];
 export function registerLabels(fn, order = 0) {
   LABELS.push({ fn, order });
   byOrder(LABELS);
+}
+
+export const KEYS = [];
+export function registerKey(entry) {
+  KEYS.push({ order: 0, ...entry });
+  byOrder(KEYS);
 }
 
 export const OVERLAYS = [];

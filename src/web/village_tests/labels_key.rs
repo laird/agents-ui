@@ -67,8 +67,14 @@ fn village_html_has_a_key_drawn_from_the_renderer() {
     assert!(body.contains("Object.keys(NOTECOL).map(k =>"));
     assert!(body.contains("c => pennant(c, 5, 7, p, 0)"));
     assert!(body.contains("c => cobwebs(c, -1, -6)"));
-    // The fog swatch uses the same colour as the map's fog.
-    assert!(body.contains("R(c, 0, 0, 14, 14, fogCol(state.T));"));
+    // The fog swatch (features.js's row) uses the same colour as the map's fog.
+    // A feature adds its own rows where it draws them (registerKey), into a
+    // group the key has or a new one, so a new feature needs no edit to key.js.
+    assert!(body.contains("export function registerKey(entry) {"));
+    assert!(body.contains("KEYS.forEach(k => {"));
+    assert!(body.contains("registerKey({ group: 'Weather: the build', rows: theme => {"));
+    assert!(body.contains("registerKey({ group: 'other', rows: theme => [\n  [c => { theme.crate(c, 3, 4, 'feature', null); reworked(c, 3, 4, 0); },"));
+    assert!(body.contains("R(c, 0, 0, 14, 14, fogCol(theme));"));
     assert!(body.contains("lay.devH - lay.canalY + 28, fogCol(state.T));"));
     // Redrawn in the theme being shown.
     assert!(body.contains("if (!legend.hidden) renderLegend();\n    if (view) select("));
