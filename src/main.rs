@@ -8,6 +8,9 @@ mod model;
 mod project_management;
 mod runtime;
 mod scripts;
+// Used by the `service` subcommand (#426); until then only its tests call it.
+#[allow(dead_code)]
+mod service;
 #[cfg(test)]
 mod testutil;
 mod tmux;
