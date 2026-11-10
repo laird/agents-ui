@@ -12,6 +12,10 @@
  *             line instead, and the inspector moves it between the line, the
  *             arch and the tables, then stamps it and carries it out to the
  *             quay, or back up to the board, dented, when it is handed back;
+ *   bounced   the gate handed it back (#434): the worker carries the crate
+ *             down to the gate, where it jams in the arch under a red ✗ (a
+ *             knot for a conflict), and carries it home for rework, where
+ *             bounces.js marks it;
  *   closed    (not planned) it is carried off the map's west edge.
  * Trips queue: each starts STAGGER after the one before, so many changes in
  * one poll play in order rather than at once. Past QUEUE_CAP waiting trips
@@ -23,6 +27,7 @@ import { state } from './state.js';
 import { GATE_H, porterPos, slotPos } from './layout.js';
 import { cargoStop, placeOf, placePoint, toShip } from './ship.js';
 import { gateEntries, gateOf, gateSpots } from './gatehouse.js';
+import { newBounces } from './bouncemarks.js';
 
 const STAGGER = 700, QUEUE_CAP = 12, WALK = 0.05;
 export const ARRIVE_IN = 1800, UNLOAD = 450, SAIL_OUT = 1500;
@@ -34,6 +39,7 @@ function enqueue(sc, t, trip, gap = STAGGER) {
   return trip;
 }
 const back = pts => [...pts].reverse();
+const routeLength = pts => pts.slice(1).reduce((n, q, k) => n + Math.hypot(q[0] - pts[k][0], q[1] - pts[k][1]), 0);
 /* Routes on the map, from the lane in front of a house (lot) or a docks slot (s). */
 const ROAD = 53;
 const houseToRoad = (lot, lay) => [[lot.x + 8, lot.lane], [lay.roadX + 3, lot.lane], [lay.roadX + 3, ROAD]];
@@ -119,6 +125,20 @@ export function diff(old, now, lay, t, sc) {
       enqueue(sc, t, trip(inspector, n, { kind: 'workshop' }, 'quay',
         [{ pts: [from, [from[0], out], [lay.roadX + 3, out], [lay.roadX + 3, lay.quayY]], carry: true }], { sealed: true }));
     }
+  });
+  // Bounced (#434): seen as a new entry in `pipeline.bounces`, unless the
+  // gate's own entries already carried it out above. With motion reduced no
+  // one walks, and bounces.js's marks at the house say it.
+  newBounces(old, now).forEach(b => {
+    const lot = lay.lots[b.i], h = now.houses[b.i];
+    if (gated.has(b.n) || !lot || !h) return;
+    const g = lay.gate, jam = g ? [g.rx + 3, g.y + 11] : [lay.roadX + 3, lay.quayY - 4];
+    const there = [...houseToRoad(lot, lay), [lay.roadX + 3, jam[1]], jam];
+    said.push(`#${b.n} bounced: ${b.kind === 'conflict' ? 'merge conflict' : b.kind === 'gate-failed' ? 'gate failed' : b.kind}`);
+    const tr = enqueue(sc, t, trip(h.id, b.n, { kind: h.kind, priority: h.priority }, 'house',
+      [{ pts: there, carry: true }, { pts: back(there), carry: true }], { dented: true, bounce: b.kind }));
+    // The jam: a red ✗ (or a knot) over the arch the moment the crate gets there.
+    if (tr) (sc.stamps = sc.stamps || []).push({ x: jam[0] - 3, y: jam[1] - 10, t0: tr.t0 + routeLength(there) / WALK, kind: b.kind === 'conflict' ? 'knot' : 'rejected' });
   });
   // Blocked: from the docks or a house to the board, and the board back to the docks.
   now.board.forEach(b => {

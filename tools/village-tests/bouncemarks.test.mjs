@@ -2,7 +2,7 @@
 //   node --test tools/village-tests/
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bounceLines, bounceMarks, bounceWord, landed, tagLevels } from '../../src/web/village/bouncemarks.js';
+import { bounceLines, bounceMarks, bounceWord, landed, newBounces, tagLevels } from '../../src/web/village/bouncemarks.js';
 
 const b = (kind, at, files = []) => ({ kind, at, files });
 const village = (bounces, pipeline = {}) => ({
@@ -60,4 +60,18 @@ test('tags over neighbouring houses stand at different heights; far ones stay le
   assert.deepEqual(tagLevels([{ x: 0, y: 60 }, { x: 100, y: 60 }]), [0, 0], 'far apart');
   assert.deepEqual(tagLevels([{ x: 0, y: 60 }, { x: 0, y: 86 }]), [0, 0], 'different rows');
   assert.deepEqual(tagLevels([{ x: 0, y: 60 }, { x: 60, y: 60 }, { x: 20, y: 60 }]), [0, 0, 1]);
+});
+
+test('a bounce plays once: when it is first seen between two polls (#434)', () => {
+  const one = village({ 412: [b('conflict', '2026-11-09T20:40:00Z')] });
+  const two = village({ 412: [b('conflict', '2026-11-09T20:40:00Z'), b('gate-failed', '2026-11-09T21:10:00Z')] });
+  // New: a bounce trip from the gate back to house 0, for the latest kind.
+  assert.deepEqual(newBounces(village({}), one), [{ i: 0, n: 412, kind: 'conflict', count: 1 }]);
+  assert.deepEqual(newBounces(one, two), [{ i: 0, n: 412, kind: 'gate-failed', count: 2 }]);
+  // Already seen: none, poll after poll.
+  assert.deepEqual(newBounces(one, one), []);
+  assert.deepEqual(newBounces(two, two), []);
+  // The first poll after a load replays nothing, and a landed issue has no trip.
+  assert.deepEqual(newBounces(null, one), []);
+  assert.deepEqual(newBounces(village({}), village({ 412: [b('conflict')] }, { quay: [412] })), []);
 });
