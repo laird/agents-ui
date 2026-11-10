@@ -7,10 +7,17 @@
 //! `<repo>-wt-<N>` worktree is worker N of `<repo>`, and the agent in `<repo>`
 //! itself is the manager. Agents anywhere else aren't part of a swarm.
 //!
+//! A manager with no workers is still a swarm (one scaled to zero between
+//! waves) when its pane is named `manager-…` or its repo holds an autocoder
+//! swarm manifest (`.autocoder/swarm/*.json`). Without either, a lone agent
+//! in a repo is just someone's Claude session, not a swarm. An agent with no
+//! name of its own takes its workspace's label (`herdr workspace list`), which
+//! is where swarm launchers put `manager-<project>`.
+//!
 //! herdr doesn't know issues, so a worker's issue comes from its branch
 //! (`feature/issue-412`, `fix/412-crash`).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use futures::future::BoxFuture;
@@ -27,6 +34,37 @@ pub struct HerdrAgent {
     pub status: String,
     pub cwd: String,
     pub agent: Option<String>,
+}
+
+/// `herdr workspace list` output → workspace id (`w5`) to its label
+/// (`manager-agents-ui`).
+pub fn parse_workspace_labels(json: &str) -> HashMap<String, String> {
+    let Ok(v) = serde_json::from_str::<Value>(json) else {
+        return HashMap::new();
+    };
+    v.pointer("/result/workspaces")
+        .or_else(|| v.get("workspaces"))
+        .and_then(Value::as_array)
+        .map(|list| {
+            list.iter()
+                .filter_map(|w| {
+                    let id = w.get("workspace_id")?.as_str()?;
+                    let label = w.get("label")?.as_str()?;
+                    Some((id.to_string(), label.to_string()))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Name each unnamed agent after its workspace's label. Swarm launchers label
+/// the manager's workspace `manager-<project>` while `herdr agent list` leaves
+/// the pane itself unnamed.
+pub fn name_from_workspaces(agents: &mut [HerdrAgent], labels: &HashMap<String, String>) {
+    for agent in agents.iter_mut().filter(|a| a.name.is_none()) {
+        let workspace = agent.pane_id.split(':').next().unwrap_or_default();
+        agent.name = labels.get(workspace).cloned();
+    }
 }
 
 /// `herdr agent list` output: `{"result": {"agents": [...]}}`.
@@ -117,8 +155,13 @@ fn snapshot(agent: &HerdrAgent, project: &str, role: &str, is_manager: bool, bra
 }
 
 /// Group herdr agents into swarms. `branches` maps worktree paths to their
-/// checked-out branch.
-pub fn swarms_from_agents(agents: &[HerdrAgent], branches: &HashMap<PathBuf, String>) -> Vec<SwarmSnapshot> {
+/// checked-out branch; `manifests` holds the repos with an autocoder swarm
+/// manifest, whose manager makes a swarm even with zero workers.
+pub fn swarms_from_agents(
+    agents: &[HerdrAgent],
+    branches: &HashMap<PathBuf, String>,
+    manifests: &BTreeSet<PathBuf>,
+) -> Vec<SwarmSnapshot> {
     let mut groups: BTreeMap<PathBuf, (Option<&HerdrAgent>, Vec<(u32, &HerdrAgent)>)> = BTreeMap::new();
     for agent in agents {
         let (repo, worker) = place(&agent.cwd);
@@ -132,7 +175,12 @@ pub fn swarms_from_agents(agents: &[HerdrAgent], branches: &HashMap<PathBuf, Str
     }
     groups
         .into_iter()
-        .filter(|(_, (manager, workers))| !workers.is_empty() || manager.and_then(|m| m.name.as_deref()).is_some_and(|n| n.starts_with("manager")))
+        .filter(|(repo, (manager, workers))| {
+            !workers.is_empty()
+                || manager.is_some_and(|m| {
+                    m.name.as_deref().is_some_and(|n| n.starts_with("manager")) || manifests.contains(repo)
+                })
+        })
         .map(|(repo, (manager, mut workers))| {
             workers.sort_by_key(|(n, a)| (*n, a.pane_id.clone()));
             let project = repo.file_name().and_then(|b| b.to_str()).unwrap_or("swarm").to_string();
@@ -199,10 +247,23 @@ async fn collect(transport: &ServerTransport) -> Vec<SwarmSnapshot> {
     if !out.status.success() {
         return Vec::new();
     }
-    let agents = parse_agents(&String::from_utf8_lossy(&out.stdout));
+    let mut agents = parse_agents(&String::from_utf8_lossy(&out.stdout));
+    let args = ["workspace".to_string(), "list".to_string()];
+    if let Ok(out) = transport.output("herdr", &args, None).await {
+        // herdr exits 1 here even when it prints the list, so read stdout either way.
+        name_from_workspaces(&mut agents, &parse_workspace_labels(&String::from_utf8_lossy(&out.stdout)));
+    }
     let mut branches = HashMap::new();
-    let repos: std::collections::BTreeSet<PathBuf> = agents.iter().map(|a| place(&a.cwd).0).collect();
+    let repos: BTreeSet<PathBuf> = agents.iter().map(|a| place(&a.cwd).0).collect();
+    let mut manifests = BTreeSet::new();
     for repo in repos {
+        // An autocoder swarm manifest makes a lone manager a swarm of zero workers.
+        let probe = ["-c".to_string(), "ls .autocoder/swarm/*.json >/dev/null 2>&1".to_string()];
+        if let Ok(out) = transport.output("sh", &probe, Some(&repo)).await
+            && out.status.success()
+        {
+            manifests.insert(repo.clone());
+        }
         let args: Vec<String> = ["worktree", "list", "--porcelain"].iter().map(|s| s.to_string()).collect();
         if let Ok(out) = transport.output("git", &args, Some(&repo)).await
             && out.status.success()
@@ -210,7 +271,7 @@ async fn collect(transport: &ServerTransport) -> Vec<SwarmSnapshot> {
             branches.extend(crate::model::swarm::parse_worktree_porcelain(&String::from_utf8_lossy(&out.stdout)));
         }
     }
-    swarms_from_agents(&agents, &branches)
+    swarms_from_agents(&agents, &branches, &manifests)
 }
 
 #[cfg(test)]
@@ -248,7 +309,7 @@ mod tests {
     fn groups_agents_into_swarms_by_cwd() {
         let mut branches = HashMap::new();
         branches.insert(PathBuf::from("/src/shop-wt-2"), "feature/issue-77".to_string());
-        let swarms = swarms_from_agents(&parse_agents(LIST), &branches);
+        let swarms = swarms_from_agents(&parse_agents(LIST), &branches, &BTreeSet::new());
         assert_eq!(swarms.len(), 1, "the stray agent in ~/notes is not a swarm");
         let s = &swarms[0];
         assert_eq!(s.project_name, "shop");
@@ -268,8 +329,55 @@ mod tests {
     #[test]
     fn workers_without_a_manager_still_make_a_swarm() {
         let json = r#"{"result":{"agents":[{"pane_id":"w2:p1","agent_status":"idle","cwd":"/src/x-wt-1"}]}}"#;
-        let swarms = swarms_from_agents(&parse_agents(json), &HashMap::new());
+        let swarms = swarms_from_agents(&parse_agents(json), &HashMap::new(), &BTreeSet::new());
         assert_eq!(swarms.len(), 1);
         assert_eq!(swarms[0].manager.state, "Missing");
+    }
+
+    #[test]
+    fn a_manager_with_zero_workers_is_a_swarm_when_its_repo_has_a_manifest() {
+        // An unnamed agent alone in a repo: a swarm scaled to zero, but only if
+        // autocoder left a swarm manifest there.
+        let json = r#"{"result":{"agents":[{"pane_id":"w5:p1","agent_status":"working","cwd":"/src/shop"}]}}"#;
+        let agents = parse_agents(json);
+        assert!(swarms_from_agents(&agents, &HashMap::new(), &BTreeSet::new()).is_empty());
+
+        let manifests = BTreeSet::from([PathBuf::from("/src/shop")]);
+        let swarms = swarms_from_agents(&agents, &HashMap::new(), &manifests);
+        assert_eq!(swarms.len(), 1);
+        assert_eq!(swarms[0].project_name, "shop");
+        assert_eq!(swarms[0].manager.tmux_target, "w5:p1");
+        assert_eq!(swarms[0].manager.state, "Working");
+        assert!(swarms[0].workers.is_empty());
+        assert_eq!((swarms[0].busy_count, swarms[0].idle_count), (0, 0));
+    }
+
+    #[test]
+    fn unnamed_agents_take_their_workspace_label() {
+        let ws = r#"{"id":"cli:workspace:list","result":{"type":"workspace_list","workspaces":[
+            {"label":"agents-ui","workspace_id":"w1"},{"label":"manager-agents-ui","workspace_id":"w5"}]}}"#;
+        let labels = parse_workspace_labels(ws);
+        assert_eq!(labels.get("w5").map(String::as_str), Some("manager-agents-ui"));
+        let json = r#"{"result":{"agents":[
+            {"pane_id":"w1:p1","agent_status":"done","cwd":"/src/agents-ui"},
+            {"pane_id":"w5:p1","agent_status":"working","cwd":"/src/agents-ui"},
+            {"pane_id":"w6:p1","name":"kept","agent_status":"idle","cwd":"/elsewhere"}]}}"#;
+        let mut agents = parse_agents(json);
+        name_from_workspaces(&mut agents, &labels);
+        assert_eq!(agents[1].name.as_deref(), Some("manager-agents-ui"));
+        assert_eq!(agents[2].name.as_deref(), Some("kept"));
+        // The labelled manager wins over the other session in the repo, and makes a swarm.
+        let swarms = swarms_from_agents(&agents, &HashMap::new(), &BTreeSet::new());
+        assert_eq!(swarms.len(), 1);
+        assert_eq!(swarms[0].manager.tmux_target, "w5:p1");
+        assert!(swarms[0].workers.is_empty());
+    }
+
+    #[test]
+    fn a_manager_named_manager_is_a_swarm_without_a_manifest() {
+        let json = r#"{"result":{"agents":[{"pane_id":"w1:p1","name":"manager-shop","agent_status":"idle","cwd":"/src/shop"}]}}"#;
+        let swarms = swarms_from_agents(&parse_agents(json), &HashMap::new(), &BTreeSet::new());
+        assert_eq!(swarms.len(), 1);
+        assert!(swarms[0].workers.is_empty());
     }
 }

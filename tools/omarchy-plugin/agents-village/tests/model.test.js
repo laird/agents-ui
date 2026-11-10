@@ -143,3 +143,13 @@ test("repo link and timestamps", () => {
   assert.strictEqual(M.ago(1000, 46000), "45s ago")
   assert.strictEqual(M.ago(1000, 1000 + 3 * 60000), "3m ago")
 })
+
+test("a swarm of only its manager (zero workers) is still listed", () => {
+  const s = { swarms: [{ project_name: "solo", workflow: "autocoder", stopped: false, busy_count: 0, attention_count: 0, workers: [] }] }
+  const v = { villages: [{ project: "solo", framework: "autocoder", manager: { role: "manager", status: "idle" }, houses: [], board: [], backlog: [], pipeline: { quay: [], stops: [] } }] }
+  assert.deepStrictEqual(M.swarmRows(s, v), [{ project: "solo", workflow: "autocoder", houses: 0, working: 0, waiting: 0, stopped: false }])
+  assert.deepStrictEqual(M.swarmRows(s, { villages: [] }).map(r => r.houses), [0], "before its village arrives")
+  assert.deepStrictEqual(M.houseRows(BASE, v.villages[0], s.swarms[0]), [])
+  assert.strictEqual(M.chooseProject(M.swarmRows(s, v), "", ""), "solo")
+  assert.strictEqual(M.badge(v, "", true).working, 0)
+})
