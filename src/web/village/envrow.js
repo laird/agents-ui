@@ -14,7 +14,7 @@
 import { state } from './state.js';
 import { F, P, R, blink, featureColours, shadow } from './palette.js';
 import { puffs } from './sprites/houses.js';
-import { badge, bubble } from './scenery.js';
+import { badge, badgeSize, bubble } from './scenery.js';
 import { MODERN, M } from './themes/modern.js';
 import { FUTURE } from './themes/future.js';
 import { registerHit, registerLabels, registerLayer, registerOverlay, tap } from './registry.js';
@@ -136,7 +136,11 @@ registerLayer({ z: 85, draw(c, { v, lay }) {
       if (sl.banner) { R(c, x + 1, y, 1, 6, P.woodL); R(c, x + 2, y, 3, 3, sl.banner.col); return; }
       state.T.crate(c, x, y + 1, 'workshop', null, true); tap(x, y + 1, 5, 5, { kind: 'crate', n: sl.n, at: 'env', i: e.i });
     });
-    if (more > 0) { badge(c, sx + SHED.w - 14, sy - 3, more); tap(sx + SHED.w - 15, sy - 4, 16, 7, { kind: 'env', i: e.i }); }
+    // Right-aligned to the shed, so even three digits stay on it (#436).
+    if (more > 0) {
+      const { w, h } = badgeSize(more), bx = sx + SHED.w - w + 1;
+      badge(c, bx, sy - 3, more); tap(bx - 1, sy - 5, w, h, { kind: 'env', i: e.i });
+    }
   });
 } });
 

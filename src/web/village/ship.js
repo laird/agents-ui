@@ -12,7 +12,7 @@
 import { state } from './state.js';
 import { P, R, STOPCOL, blink } from './palette.js';
 import { puffs } from './sprites/houses.js';
-import { badge } from './scenery.js';
+import { badge, badgeSize } from './scenery.js';
 import { registerHit, registerLabels, registerLayer, tap } from './registry.js';
 import { porterPos, shownScenes } from './layout.js';
 import { toast } from './panels.js';
@@ -91,7 +91,7 @@ registerLayer({ z: 80, draw(c, scene) {
     state.T.crate(c, x, y, 'workshop', null, true); tap(x, y, 5, 5, { kind: 'crate', n, at: 'quay' });
   });
   // Six crates fit; a "+N" says how many more wait, and the quay's dialog lists them all.
-  if (atQuay.length > QUAY_CAP) { badge(c, roadX + 25, quayY - 9, atQuay.length - QUAY_CAP); tap(roadX + 24, quayY - 10, 14, 7, { kind: 'quay' }); }
+  if (atQuay.length > QUAY_CAP) { const more = atQuay.length - QUAY_CAP, { w, h } = badgeSize(more); badge(c, roadX + 25, quayY - 9, more); tap(roadX + 24, quayY - 11, w, h, { kind: 'quay' }); }
 } });
 /* A lock per stop but the last, with the crates in its basin. */
 registerLayer({ z: 90, draw(c, scene, t) {

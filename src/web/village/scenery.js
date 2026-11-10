@@ -196,17 +196,29 @@ export function ship(c, x, cy, t, ox, oy) {
   R(c, x + 13, cy - 17, 5, 3, P.o); R(c, x + 13, cy - 16, 4, 1, '#804098');
 }
 
-const DIGITS = ['111101101101111', '010110010010111', '111001111100111', '111001111001111', '101101111001001',
+export const DIGITS = ['111101101101111', '010110010010111', '111001111100111', '111001111001111', '101101111001001',
   '111100111001111', '111100111101111', '111001001001001', '111101111101111', '111101111001111'];
+const PLUS = '000010111010000';
+/* A tag of 3x5 glyphs whose ink starts at (x + 1, y): an outline, and inside
+ * it a pixel of `bg` all round the ink (#436). Without that pixel above and
+ * below, a digit's top and bottom strokes merged into the outline and only the
+ * gaps were left to read: "+31" came out as "+=fl". */
+function glyphTag(c, x, y, glyphs, bg) {
+  const { w, h } = tagSize(glyphs.length);
+  R(c, x - 1, y - 2, w, h, P.o); R(c, x, y - 1, w - 2, h - 2, bg);
+  glyphs.forEach((g, j) => { for (let k = 0; k < 15; k++) if (g[k] === '1') R(c, x + 1 + j * 4 + (k % 3), y + Math.floor(k / 3), 1, 1, P.o); });
+}
+/* A tag's outer size for `glyphs` glyphs: 3-wide glyphs a pixel apart, a
+ * pixel of padding and a pixel of outline on every side. */
+const tagSize = glyphs => ({ w: glyphs * 4 + 3, h: 9 });
+/* The outer size of badge(n), and of numberTag(n), from (x - 1, y - 2). */
+export const badgeSize = n => tagSize(String(n).length + 1);
+export const numberTagSize = n => tagSize(String(n).length);
 /* A gold tag reading "+N" in a 3x5 pixel font. */
 export function badge(c, x, y, n) {
-  const glyphs = ['000010111010000', ...String(n).split('').map(d => DIGITS[+d])], w = glyphs.length * 4 + 1;
-  R(c, x - 1, y - 1, w + 2, 7, P.o); R(c, x, y, w, 5, P.gold);
-  glyphs.forEach((g, j) => { for (let k = 0; k < 15; k++) if (g[k] === '1') R(c, x + 1 + j * 4 + (k % 3), y + Math.floor(k / 3), 1, 1, P.o); });
+  glyphTag(c, x, y, [PLUS, ...String(n).split('').map(d => DIGITS[+d])], P.gold);
 }
 /* A number on a parchment tag (a crate's issue in a line), in the same font. */
 export function numberTag(c, x, y, n) {
-  const glyphs = String(n).split('').map(d => DIGITS[+d]), w = glyphs.length * 4 + 1;
-  R(c, x - 1, y - 1, w + 2, 7, P.o); R(c, x, y, w, 5, P.parch);
-  glyphs.forEach((g, j) => { for (let k = 0; k < 15; k++) if (g[k] === '1') R(c, x + 1 + j * 4 + (k % 3), y + Math.floor(k / 3), 1, 1, P.o); });
+  glyphTag(c, x, y, String(n).split('').map(d => DIGITS[+d]), P.parch);
 }

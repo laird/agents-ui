@@ -6,7 +6,7 @@
 import { state } from './state.js';
 import { P, R, blink, shadow, subHat, waveFrame } from './palette.js';
 import { cobwebs, pennant, puffs } from './sprites/houses.js';
-import { ICONS, badge, bubble, glint, ribbon, roped, tether, zzz } from './scenery.js';
+import { ICONS, badge, badgeSize, bubble, glint, ribbon, roped, tether, zzz } from './scenery.js';
 import { restOf } from './rest.js';
 import { QUIET_ACTIONS, actionSign, drawAction, person, wander } from './people.js';
 import { registerHit, registerLabels, registerLayer, tap } from './registry.js';
@@ -137,7 +137,7 @@ registerLayer({ z: 70, draw(c, scene, t) {
       }
     }
     if (st === 'working' && h.action) actionSign(c, lot.x + 4, lot.y - 4, h.action);
-    if (subs.length > SUB_SLOTS.length) { badge(c, lot.x + 12, lot.y + 4, subs.length - SUB_SLOTS.length); tap(lot.x + 11, lot.y + 3, 12, 7, { kind: 'house', i }); }
+    if (subs.length > SUB_SLOTS.length) { const more = subs.length - SUB_SLOTS.length, { w, h } = badgeSize(more); badge(c, lot.x + 12, lot.y + 4, more); tap(lot.x + 11, lot.y + 2, w, h, { kind: 'house', i }); }
     if (ICONS[st] && rest !== 'asleep') bubbles.push([lot.x + 4, lot.y - (st === 'blocked' ? 1 : 3) + (st === 'blocked' && blink(t, 200) ? -1 : 0), st]);
   });
 } });
