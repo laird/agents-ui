@@ -61,7 +61,7 @@ const envLook = () => {
     wall: fut ? F.hullD : mod ? M.concrete : P.wood, bay: fut ? F.navy : mod ? M.asphaltD : P.woodD,
     keep: fut ? F.hull : mod ? M.glass : P.stone, keepD: fut ? F.hullD : mod ? M.glassD : P.stoneD };
 };
-function envShed(c, x, y, w, h) {
+export function envShed(c, x, y, w, h) {
   const k = envLook();
   shadow(c, x + 2, y + h, w, 2);
   R(c, x, y, w, h, P.o);
@@ -79,7 +79,7 @@ function envKeep(c, x, y, h, flag, t) {
   for (let yy = y + 5; yy < y + h - 6; yy += 7) R(c, x + 5, yy, 2, 3, P.dark);
   R(c, x + 5, y - 10, 1, 8, P.woodD); R(c, x + 6, y - 10 + (blink(t, 700) ? 1 : 0), 5, 3, flag);
 }
-function envSign(c, x, y, face) {
+export function envSign(c, x, y, face) {
   const [frame, board, ink] = state.T.sign || [P.woodD, P.parch, P.woodD];
   R(c, x + 6, y + 8, 2, 12, frame);
   R(c, x, y, 15, 9, P.o); R(c, x + 1, y + 1, 13, 7, face || board);
