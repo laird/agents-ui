@@ -49,6 +49,7 @@ const VILLAGE_ASSETS: &[(&str, &str, &str)] = &[
     ("voyages.js", "text/javascript; charset=utf-8", include_str!("village/voyages.js")),
     ("worlds.js", "text/javascript; charset=utf-8", include_str!("village/worlds.js")),
     ("panels.js", "text/javascript; charset=utf-8", include_str!("village/panels.js")),
+    ("fitscale.js", "text/javascript; charset=utf-8", include_str!("village/fitscale.js")),
     ("dialogs.js", "text/javascript; charset=utf-8", include_str!("village/dialogs.js")),
     ("labels.js", "text/javascript; charset=utf-8", include_str!("village/labels.js")),
     ("key.js", "text/javascript; charset=utf-8", include_str!("village/key.js")),
@@ -2199,16 +2200,36 @@ mod tests {
         assert!(body.contains("busy ? workFrame(t) : 'stand', { mayor: true, status: v.manager.status });"));
     }
 
+    /// Fit (#400): the map fills the window, width and height, with no
+    /// scrolling. The scale choice itself is tested under node (fitscale.js).
     #[test]
-    fn village_html_fits_the_map_to_the_panel_width() {
+    fn village_html_fits_the_map_to_the_window() {
         let body = &village_source();
-        // Fit by width only: the old cap by window height left a 2x map in a wide panel.
-        assert!(!body.contains("window.innerHeight - 190"), "the height cap is gone");
-        assert!(body.contains("const room = (document.getElementById('viewport').clientWidth - 8) / cv.width;"));
-        // Whole-number scales when there is room; below 1x it shrinks to the panel (phones).
-        assert!(body.contains("return room >= 1 ? Math.floor(room) : Math.max(0.1, room);"));
+        // The room is the viewport's width and height; a phone is bounded by width alone.
+        assert!(body.contains("return chooseScale(cv.width, cv.height, vp.clientWidth - 8, tall ? vp.clientHeight - 8 : Infinity);"));
+        assert!(body.contains("const NARROW = '(max-width: 640px)';"));
+        assert!(body.contains("return bareW > FIT_SLACK && bareH > FIT_SLACK ? most : whole;"));
+        // The page is a column the window's height; the viewport takes the rest, at any width.
+        assert!(body.contains("body { height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: auto;"));
+        assert!(body.contains(".stage > .viewport { flex: 1; }"));
+        assert!(!body.contains("max-width: 1400px"), "the stage uses the whole window");
+        assert!(!body.contains("scrollbar-gutter"), "no room is kept for a page scrollbar");
+        // The key floats over the map instead of pushing it down.
+        assert!(body.contains(".legend { position: absolute;"));
+        // Fit again, debounced, when the window, fullscreen or the chrome around the map changes.
+        assert!(body.contains("new ResizeObserver(refitSoon).observe(document.getElementById('viewport'));"));
+        assert!(body.contains("document.addEventListener('fullscreenchange', refitSoon);"));
         // A zoomed-in map scrolls from its left edge instead of being cut off.
         assert!(body.contains("justify-content: safe center;"));
+    }
+
+    #[test]
+    fn village_fit_scale_tests_pass() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        match std::process::Command::new("node").args(["--test", &format!("{root}/tools/village-tests/fitscale.test.mjs")]).output() {
+            Ok(out) => assert!(out.status.success(), "fitscale.test.mjs failed:\n{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)),
+            Err(e) => eprintln!("node is not installed ({e}); skipping fitscale.test.mjs"),
+        }
     }
 
     /// `/village?screensaver=1` (#382): the idle display the Omarchy
@@ -2217,7 +2238,7 @@ mod tests {
     fn village_html_has_a_screensaver_mode() {
         let body = &village_source();
         // Fitted to the whole display: the height bounds the scale too, and zoom is ignored.
-        assert!(body.contains("if (state.screensaver) return fitRoom(Math.min(room, (document.getElementById('viewport').clientHeight - 8) / cv.height));"));
+        assert!(body.contains("const tall = state.screensaver || !matchMedia(NARROW).matches;"));
         assert!(body.contains("if (state.screensaver) return f;"));
         // No bar, picker or buttons; no cursor; the labels stay on.
         assert!(body.contains("html.screensaver .bar, html.screensaver .fstrip, html.screensaver .flow"));
