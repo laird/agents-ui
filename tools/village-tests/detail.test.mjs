@@ -48,8 +48,9 @@ function drawn(paint, d) {
 const doubled = rects => rects.map(([x, y, w, h, col, a]) => [x * DETAIL, y * DETAIL, w * DETAIL, h * DETAIL, col, a]);
 
 /* 1×-only sprites from every corner of the village: crates and their marks,
- * tags, houses and each theme's buildings. (People are drawn at 2× since
- * #419: their test is below and in people2x.test.mjs.) */
+ * tags, pennants and cobwebs. (People are drawn at 2× since #419, and
+ * buildings since #421: their tests are below, in people2x.test.mjs and in
+ * upscale.test.mjs.) */
 const SCENE = c => {
   state.T = THEMES.medieval;
   scenery.crate(c, 3, 4, 'bug', 'P1', true);
@@ -61,15 +62,12 @@ const SCENE = c => {
   for (const T of Object.values(THEMES)) {
     state.T = T;
     T.crate(c, 80, 4, 'feature', 'P2', false);
-    for (const kind of Object.keys(T.B)) T.B[kind](c, 90, 20, 'working', 0);
-    T.hall(c, 120, 18, 'working');
-    T.board(c, 160, 28, [{ label: 'needs-design' }, { label: 'proposal' }]);
   }
 };
 
 test('a 1×-only scene drawn on the 2× grid is the same scene, doubled', () => {
   const one = drawn(SCENE, 1), two = drawn(SCENE, DETAIL);
-  assert.ok(one.length > 200, `the scene draws plenty (${one.length} rectangles)`);
+  assert.ok(one.length > 60, `the scene draws plenty (${one.length} rectangles)`);
   assert.deepEqual(two, doubled(one));
 });
 
@@ -111,6 +109,18 @@ test('people are drawn at 2× (#419): in half scene pixels, inside their 8×12 f
       assert.ok(Math.min(...xs) >= 40 * DETAIL - 2 && Math.max(...xs) <= 48 * DETAIL + 2, `${T.name}: ${seed} keeps its width`);
       // (A robot manager's crown stands up to 4 scene pixels over it, as at 1×.)
       assert.ok(Math.min(...ys) >= (10 - 4) * DETAIL && Math.max(...ys) <= 22 * DETAIL + 2, `${T.name}: ${seed} keeps its height`);
+    }
+  }
+});
+
+test('buildings are drawn at 2× (#421): in half scene pixels, where the 1× building stood', () => {
+  for (const T of Object.values(THEMES)) {
+    state.T = T;
+    for (const [what, paint] of [['a house', c => T.B.feature(c, 90, 20, 'working', 0)], ['the hall', c => T.hall(c, 120, 18, 'working')],
+      ['the board', c => T.board(c, 160, 28, [{ label: 'needs-design' }])]]) {
+      const rects = drawn(paint, DETAIL);
+      assert.ok(rects.length > 10, `${T.name}: ${what} draws`);
+      assert.ok(rects.every(([, , , h]) => h === 1), `${T.name}: ${what} is painted in detail pixels, row by row`);
     }
   }
 });
