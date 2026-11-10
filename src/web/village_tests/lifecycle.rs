@@ -95,7 +95,9 @@ fn village_idle_workers_sleep_instead_of_a_lingering_tick() {
     assert!(body.contains("const bob = st === 'idle' && kind === 'stand'"), "only an awake idle robot hovers");
     // The key shows the sleeper and how long the tick lasts.
     assert!(body.contains("done: `Done: just finished (for ${FRESH_DONE_MS / 60000} minutes)`"));
-    assert!(body.contains("'Sitting on the doorstep under \"zzz\": idle, nothing claimed, waiting for work'"));
+    assert!(body.contains("['idle', 'Idle: sitting on the doorstep under \"zzz\", nothing claimed']"));
+    assert!(body.contains("['done', `Done: a ✓ for ${freshDoneMinutes} minutes after finishing`]"));
+    assert!(body.contains("stateRows(FRESH_DONE_MS / 60000)"));
 }
 
 #[test]
@@ -154,5 +156,5 @@ fn village_draws_trouble_loudest() {
     assert!(body.contains("if (alert) boardFrame(c, hallX + 42, 28, alert.n, t);"));
     assert!(body.contains("if (gateEntries(v).some(e => e.state === 'failed' || e.state === 'conflict')) lamp(c, g.x0 + g.w - 2, g.y - 4, t);"));
     // And the Key says so.
-    assert!(body.contains("['trouble', 'Trouble, loudest first', ["));
+    assert!(body.contains("['waiting', 'Waiting on you: a big red \"!\" and a ring at the door"));
 }

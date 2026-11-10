@@ -99,7 +99,7 @@ function fogStop(c, v, i, lay, t) {
  * (#406), a red pennant when a subtask is stuck, and once live a gold finial
  * and sparkles, never a gold cloth. The spec lies at its foot: a scroll in
  * the village, a clipboard downtown. */
-function drawBanner(c, g, on, t) {
+export function drawBanner(c, g, on, t) {
   const { x, y, f } = g, col = g.col, wave = !state.reduce && blink(t + f.number * 7, 320) ? 1 : 0;
   const stuck = (f.stuck || []).length > 0, top = stuck ? y - 7 : y - 1, modern = state.T !== MEDIEVAL;
   R(c, x - 2, y + 23, 5, 2, P.o); R(c, x - 1, y + 23, 3, 1, modern ? M.concrete : P.stoneD);
