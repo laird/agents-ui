@@ -41,6 +41,7 @@ Tests are inline `#[cfg(test)]` modules in each source file:
 - `src/model/recognize.rs` — swarm recognition: repo identity (git common dir), worktree membership at any depth, worker numbers, same-name repos, one repo through two sources; the manager by evidence (manifest pane, `AUTOCODER_MANAGER` marker in a descendant process, label, main checkout), ties marked ambiguous, manifest parsing
 - `src/config/persistence.rs` — TOML save/load round-trips, listing, missing files
 - `src/app.rs` — Key-to-tmux conversion, pane status inference, tab completion helpers
+- `src/adapter/claude.rs` — `recognized_tests`: the terminal view's swarms come from the shared recognizer (`/api/swarms`'s), herdr swarms included, from the same herdr fixtures
 - `src/web/village.rs` — House kinds and statuses, crew grouping, backlog/board sorting, tip-ref and environment parsing, transcript actions
 - `src/web/framework.rs` — state words, task numbers, report → village mapping, autocoder labels, outside adapters (`tools/adapters/example-report.json`)
 - `src/web/source.rs` — `--source` parsing, swarm-source precedence, any village source as a world's platform

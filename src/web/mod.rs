@@ -51,14 +51,8 @@ pub struct AgentSnapshot {
     pub mux: Mux,
 }
 
-/// Where an agent's terminal lives.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum Mux {
-    #[default]
-    Tmux,
-    Herdr,
-}
+/// Where an agent's terminal lives (shared with the terminal view's model).
+pub use crate::model::swarm::Mux;
 
 /// A single GitHub issue suitable for JSON serialization.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -246,6 +240,7 @@ mod tests {
             resurrection_attempts: 0,
             completed_issue_count: 0,
             health: crate::model::swarm::WorkerHealth::default(),
+            mux: Default::default(),
         }
     }
 

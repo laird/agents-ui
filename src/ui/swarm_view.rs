@@ -1010,6 +1010,7 @@ mod tests {
             resurrection_attempts: 0,
             completed_issue_count: 0,
             health: crate::model::swarm::WorkerHealth::default(),
+            mux: Default::default(),
         }
     }
 
