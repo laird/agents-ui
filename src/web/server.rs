@@ -2300,8 +2300,14 @@ mod tests {
     #[test]
     fn village_html_fits_the_map_to_the_window() {
         let body = &village_source();
-        // The room is the viewport's width and height; a phone is bounded by width alone.
-        assert!(body.contains("return chooseScale(cv.width, cv.height, vp.clientWidth - 8, tall ? vp.clientHeight - 8 : Infinity);"));
+        // The room is the viewport's width and height; a phone gets its own scale (below).
+        assert!(body.contains("return chooseScale(cv.width, cv.height, vp.clientWidth - 8, vp.clientHeight - 8);"));
+        // A phone (#437): a readable minimum scale, scrolling sideways, not a sliver.
+        assert!(body.contains("if (!tall) return phoneScale(cv.width, cv.height, vp.clientWidth - 8);"));
+        assert!(body.contains("keepInside([...abox.children], cv.getBoundingClientRect());"), "labels stay inside the map");
+        assert!(body.contains(".legend { position: fixed; inset: 0; max-height: none;"), "the key is a full-screen sheet on a phone");
+        assert!(body.contains("document.getElementById('legend-close').addEventListener('click'"));
+        assert!(body.contains("html:not(.screensaver) .viewport { min-height: 200px; overflow-x: auto; overflow-y: hidden; }"), "a phone's map scrolls sideways only");
         assert!(body.contains("const NARROW = '(max-width: 640px)';"));
         assert!(body.contains("return bareW > FIT_SLACK && bareH > FIT_SLACK ? most : whole;"));
         // The page is a column the window's height; the viewport takes the rest, at any width.

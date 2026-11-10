@@ -65,3 +65,10 @@ legendBtn.addEventListener('click', () => {
   legendBtn.setAttribute('aria-expanded', String(!legend.hidden));
   if (!legend.hidden) renderLegend();
 });
+
+// The sheet's own close button: on a phone the key covers the bar and its "?".
+document.getElementById('legend-close').addEventListener('click', () => {
+  legend.hidden = true;
+  legendBtn.setAttribute('aria-expanded', 'false');
+  legendBtn.focus();
+});

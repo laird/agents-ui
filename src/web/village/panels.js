@@ -4,7 +4,7 @@
 import { placeOverlays } from './registry.js';
 import { cv } from './layout.js';
 import { state } from './state.js';
-import { chooseScale } from './fitscale.js';
+import { chooseScale, phoneScale } from './fitscale.js';
 
 export const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 
@@ -18,8 +18,9 @@ export function toast(text) {
 /* Fit (#400): the map fills the window, width and height, with no scrolling.
  * The page is a column the window's height (village.css), so the viewport is
  * exactly the room left after the bar, minimap and strips; chooseScale picks
- * the scale for it. On a phone (NARROW) the page scrolls down instead, and
- * only the width bounds the map. +/− step the scale from the fitted one,
+ * the scale for it. On a phone (NARROW, #437) the map keeps a readable
+ * minimum scale (phoneScale) and scrolls sideways instead of shrinking.
+ * +/− step the scale from the fitted one,
  * scrolling inside the viewport, and the step is remembered. */
 const ZOOM_MAX_SCALE = 16;
 const NARROW = '(max-width: 640px)';
@@ -28,7 +29,9 @@ try { zoom = Math.max(-ZOOM_MAX_SCALE, Math.min(ZOOM_MAX_SCALE, parseInt(localSt
 function fitScale() {
   const vp = document.getElementById('viewport');
   const tall = state.screensaver || !matchMedia(NARROW).matches;
-  return chooseScale(cv.width, cv.height, vp.clientWidth - 8, tall ? vp.clientHeight - 8 : Infinity);
+  // A phone (#437): never a sliver; at PHONE_MIN the map scrolls sideways, from the dev village.
+  if (!tall) return phoneScale(cv.width, cv.height, vp.clientWidth - 8);
+  return chooseScale(cv.width, cv.height, vp.clientWidth - 8, vp.clientHeight - 8);
 }
 function mapScale() {
   const f = fitScale();

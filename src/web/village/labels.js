@@ -32,6 +32,15 @@ function unclutter(els, blocked) {
     placed.push(el.getBoundingClientRect());
   });
 }
+/* Keep every label within the map's left and right edges (#437): an
+ * end-anchored label near the edge would otherwise be cut off ("erge gate"). */
+function keepInside(els, map) {
+  els.forEach(el => {
+    const r = el.getBoundingClientRect();
+    const dx = r.left < map.left ? map.left - r.left : r.right > map.right ? Math.max(map.left - r.left, map.right - r.right) : 0;
+    if (dx) el.style.left = parseFloat(el.style.left) + dx + 'px';
+  });
+}
 export function placeLabels() {
   abox.hidden = !labelsOn.checked || cv.hidden;
   if (abox.hidden) return;
@@ -66,5 +75,6 @@ export function placeLabels() {
   if (abox.drawn === drawn) return;
   abox.innerHTML = html; abox.drawn = drawn;
   unclutter([...abox.children], blocked);
+  keepInside([...abox.children], cv.getBoundingClientRect());
 }
 registerOverlay(placeLabels, 20);

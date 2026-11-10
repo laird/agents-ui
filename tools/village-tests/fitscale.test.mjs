@@ -48,3 +48,18 @@ test('degenerate sizes never divide by zero', () => {
   assert.equal(chooseScale(0, 0, 800, 600), 1);
   assert.equal(chooseScale(320, 180, 0, 600), FIT_MIN);
 });
+
+// A phone (#437): never a sliver.
+import { phoneScale, PHONE_MIN } from '../../src/web/village/fitscale.js';
+
+test('on a phone a wide map stays readable and scrolls sideways', () => {
+  // A 1220×180 village in a 382 px-wide viewport would fit at 0.31×: a sliver.
+  assert.equal(PHONE_MIN, 2);
+  assert.equal(phoneScale(1220, 180, 382), 2);
+  assert.ok(1220 * phoneScale(1220, 180, 382) > 382, 'wider than the screen: it scrolls');
+});
+
+test('on a phone a map that fits readably still fills the width', () => {
+  assert.equal(phoneScale(100, 60, 382), 382 / 100);
+  assert.equal(phoneScale(190, 60, 382), 2);
+});
