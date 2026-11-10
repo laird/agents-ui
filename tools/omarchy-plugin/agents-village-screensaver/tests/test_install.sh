@@ -15,10 +15,23 @@ sandbox() {
   T=$(mktemp -d)
   export HOME="$T/home"
   mkdir -p "$HOME/.config/omarchy" "$T/bin"
-  # Stand-ins that record what was asked of them.
-  for c in omarchy omarchy-shell; do
-    printf '#!/bin/sh\necho "%s $*" >> "%s/calls"\n' "$c" "$T" > "$T/bin/$c"; chmod +x "$T/bin/$c"
-  done
+  # Stand-ins that record what was asked of them. `omarchy plugin enable`
+  # fails as "not known" while $T/enable-fails counts down (#416), as the real
+  # one does until the shell has registered a new plugin.
+  printf '#!/bin/sh\necho "omarchy-shell $*" >> "%s/calls"\n' "$T" > "$T/bin/omarchy-shell"
+  cat > "$T/bin/omarchy" <<EOF
+#!/bin/sh
+echo "omarchy \$*" >> "$T/calls"
+if [ "\$1 \$2" = "plugin enable" ]; then
+  n=\$(cat "$T/enable-fails" 2>/dev/null || echo 0)
+  if [ "\$n" -gt 0 ]; then
+    echo \$((n - 1)) > "$T/enable-fails"
+    echo "omarchy-plugin-enable: plugin '\$3' is not known; run: omarchy-shell shell rescanPlugins" >&2
+    exit 1
+  fi
+fi
+EOF
+  chmod +x "$T/bin/omarchy" "$T/bin/omarchy-shell"
   export PATH="$T/bin:$ORIG_PATH"
 }
 ORIG_PATH=$PATH
@@ -63,6 +76,42 @@ s="$HOME/.config/omarchy/shell.json"
 grep -q "still locks" <<<"$out" && ok "says the lock stays" || fail "no lock note: $out"
 bash "$INSTALL" --screensaver --uninstall >/dev/null 2>&1
 [ "$(jq -c .idle "$s")" = null ] && ok "no idle section restored as none" || fail "idle: $(jq -c .idle "$s")"
+rm -rf "$T"
+
+# --- enabling waits for Omarchy to know the plugin (#416)
+sandbox
+s="$HOME/.config/omarchy/shell.json"
+echo '{ "idle": { "screensaver": 150, "lock": 300 } }' > "$s"
+echo 3 > "$T/enable-fails"
+out=$(AGENTS_UI_ENABLE_PAUSE=0 bash "$INSTALL" --screensaver --never-sleep 2>&1) || fail "install gave up while Omarchy was still registering the plugin: $out"
+[ "$(grep -c "omarchy plugin enable agents-ui.village-screensaver" "$T/calls")" = 4 ] && ok "retries enable until Omarchy knows the plugin" || fail "enable calls: $(cat "$T/calls")"
+[ "$(grep -c "omarchy-shell shell rescanPlugins" "$T/calls")" -ge 4 ] && ok "rescans before each try" || fail "rescans: $(cat "$T/calls")"
+[ "$(jq -c .idle "$s")" = '{"screensaver":0,"lock":0}' ] && ok "then turns Omarchy's screensaver off" || fail "idle: $(jq -c .idle "$s")"
+rm -rf "$T"
+
+# --- if enabling never takes, shell.json is left alone: never no screensaver at all
+sandbox
+s="$HOME/.config/omarchy/shell.json"
+echo '{ "idle": { "screensaver": 150, "lock": 300 } }' > "$s"
+echo 99 > "$T/enable-fails"
+out=$(AGENTS_UI_ENABLE_TRIES=3 AGENTS_UI_ENABLE_PAUSE=0 bash "$INSTALL" --screensaver --never-sleep 2>&1) && fail "install claimed success without enabling: $out" || ok "fails when the plugin never gets enabled"
+[ "$(grep -c "omarchy plugin enable agents-ui.village-screensaver" "$T/calls")" = 3 ] && ok "gives up after its tries" || fail "enable calls: $(cat "$T/calls")"
+[ "$(jq -c .idle "$s")" = '{"screensaver":150,"lock":300}' ] && ok "shell.json unchanged: Omarchy's screensaver still on" || fail "idle: $(jq -c .idle "$s")"
+[ ! -e "$HOME/.config/agents-ui/screensaver.json" ] && [ ! -e "$HOME/.config/agents-ui/shell.json.before-screensaver" ] && ok "no settings or backup written" || fail "wrote settings"
+grep -q "is not known" <<<"$out" && grep -qF "omarchy-shell shell rescanPlugins && omarchy plugin enable agents-ui.village-screensaver" <<<"$out" \
+  && ok "says why and how to enable it by hand" || fail "message: $out"
+grep -q "left as they were" <<<"$out" && ok "says the idle settings were not touched" || fail "message: $out"
+rm -rf "$T"
+
+# --- the bar widget's --enable waits the same way
+sandbox
+echo 2 > "$T/enable-fails"
+out=$(AGENTS_UI_ENABLE_PAUSE=0 bash "$INSTALL" --enable 2>&1) || fail "widget --enable gave up: $out"
+[ "$(grep -c "omarchy plugin enable agents-ui.village$" "$T/calls")" = 3 ] && grep -q "Added the Agents village widget to the bar" <<<"$out" \
+  && ok "widget --enable retries until Omarchy knows it" || fail "widget: $(cat "$T/calls") / $out"
+echo 99 > "$T/enable-fails"
+out=$(AGENTS_UI_ENABLE_TRIES=2 AGENTS_UI_ENABLE_PAUSE=0 bash "$INSTALL" --enable 2>&1) && fail "widget --enable claimed success: $out" || ok "widget --enable fails when it never takes"
+grep -qF "omarchy plugin enable agents-ui.village" <<<"$out" && ok "widget says how to enable it by hand" || fail "message: $out"
 rm -rf "$T"
 
 # --- a dry run changes nothing
