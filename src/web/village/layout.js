@@ -25,9 +25,25 @@ function gateBand(v, roadX, y) {
   return { y, x0, w, rx: roadX, rw: RD, tables: Array.from({ length: tablesN }, (_, k) => [x0 + 4 + k * 12, y + 10]),
     queueMax: Math.max(1, Math.floor((roadX - 22) / 16) + 1) };
 }
+/* The shape the map aims for (#445): the room a 16:9 screen leaves it under
+ * the page's bar, so Fit fills it instead of showing a wide strip between
+ * black bars. */
+export const ASPECT = 2;
+/* A village's map. Houses stand `per` to a side in each row; of the ways to
+ * lay them out, the one whose whole map (environment row included) comes
+ * closest to ASPECT wins, the one with more rows on a tie. So a growing
+ * swarm adds rows and widens with them, and the map keeps its shape. */
 export function layout(v, slot = null) {
+  const most = Math.max(1, Math.ceil(v.houses.length / 2));
+  let best = null;
+  for (let per = 1; per <= most; per++) {
+    const L = place(v, slot, per), off = Math.abs(Math.log(L.W / L.H / ASPECT));
+    if (!best || off < best.off - 1e-9) best = { L, off };
+  }
+  return best.L;
+}
+function place(v, slot, per) {
   const n = v.houses.length;
-  const per = Math.max(1, Math.ceil(Math.sqrt(Math.max(n, 1) / 2)));
   const rows = Math.max(1, Math.ceil(n / (2 * per)));
   const cx0 = DOCK_W + 8;
   const vw = Math.max(per * LW * 2 + RD, 72);
@@ -54,25 +70,31 @@ export function layout(v, slot = null) {
   const fcols = featureColours(v.features);
   const banners = (v.features || []).map((f, k) => ({ f, x: forestX + 12 + k * 30, y: 14, col: fcols.get(f.number) }));
   const devW = Math.max(cx0 + vw + 40, roadX + 70, castleX + 46, gate ? gate.x0 + gate.w + 4 : 0, banners.length ? forestX + 12 + banners.length * 30 : 0);
-  // The environment row: a village per environment east of the dev village,
-  // a stretch of river before each, production right-most (docs/environment-row.md).
-  // A world's platform widens the slot of the environment it runs (`slot`).
-  let ex = devW + RIVER;
-  const envs = envStops(v).map(({ s, i }, k, all) => {
+  // The environment row (#445): under the dev village, a village per
+  // environment on a river of its own along the bottom, left to right,
+  // production right-most (docs/environment-row.md). Each stands just over the
+  // river, ENV_ABOVE tall. A world's platform widens the slot of the
+  // environment it runs (`slot`), and the row grows tall enough for it.
+  // Under the canal: room for a lock's cargo (ship.js), then the row.
+  const devH = canalY + 30, rowTop = devH;
+  const stops = envStops(v), hosts = !!slot && stops.some(({ s }) => s.name === slot.name);
+  const envCy = rowTop + Math.max(ENV_ABOVE, hosts ? (slot.h || 0) + OVER : 0);
+  let ex = ENV_X0;
+  const envs = stops.map(({ s, i }, k, all) => {
     const platform = !!slot && s.name === slot.name, w = platform ? Math.max(ENV_W, slot.w) : ENV_W;
-    const e = { s, i, k, x: ex, w, rank: k === all.length - 1 ? 'capital' : 'town', platform };
-    ex += w + RIVER;
+    const e = { s, i, k, x: ex, w, top: envCy - ENV_ABOVE, cy: envCy, rank: k === all.length - 1 ? 'capital' : 'town', platform };
+    ex += w + ENV_GAP;
     return e;
   });
-  const W = envs.length ? envs[envs.length - 1].x + envs[envs.length - 1].w + 6 : devW;
-  const H = canalY + 34;
+  const W = Math.max(devW, envs.length ? envs[envs.length - 1].x + envs[envs.length - 1].w + 8 : 0);
+  const H = envs.length ? envCy + ENV_BELOW : devH;
   // What's built on: river, docks, plaza, roads, house rows, canal and its
   // stations. Every free 9×8 cell may get a decoration.
   const taken = [
     [0, 0, W, 14], [4, 8, 62, 46], [4, 46, cx0 + vw, 14], [hallX - 10, 4, 74, 46],
     [roadX - 2, 46, RD + 4, quayY - 40], [roadX - 18, quayY - 12, W, H],
     ...(gate ? [[4, gate.y - 2, gate.x0 + gate.w, GATE_H + 2]] : []),
-    [forestX - 2, 12, W, canalY - 46], [devW, 0, W, H]
+    [forestX - 2, 12, devW, canalY - 46], ...(envs.length ? [[0, rowTop - 2, W, H]] : [])
   ];
   for (let r = 0; r < rows; r++) {
     const left = roadX - per * LW, right = roadX + RD + per * LW;
@@ -93,10 +115,12 @@ export function layout(v, slot = null) {
     const zone = Math.floor(hash(x >> 5, y >> 5) * 6), k = hash(x + 11, y + 7) < 0.7 ? zone : Math.floor(hash(y, x + 3) * 6);
     decor.push({ x: x + Math.floor(hash(y, x) * 4), y: y + Math.floor(hash(x, y + 1) * 3), k });
   }
-  return { per, rows, cx0, vw, roadX, hallX, top, lots, quayY, canalY, lockStart, castleX, W, H, decor, banners, devW, envs, gate, slot };
+  return { per, rows, cx0, vw, roadX, hallX, top, lots, quayY, canalY, lockStart, castleX, W, H, decor, banners, devW, devH, envs, envCy, gate, slot };
 }
-/* The environment row's sizes: each environment village, and the river before it. */
-export const ENV_W = 120, RIVER = 56;
+/* The environment row's sizes: each environment village, the river between
+ * two, where the first stands (room on its left for the stream incidents
+ * take up to the docks, worlds.js), and its band over and under its river. */
+export const ENV_W = 170, ENV_GAP = 16, ENV_X0 = 24, ENV_ABOVE = 56, ENV_BELOW = 18;
 /* The stops drawn as villages of their own: every environment of a
  * development village. The sentinel's green ref stays a lock (a gate), and a
  * runtime's stages stay its pipeline. */
@@ -129,9 +153,9 @@ export function porterPos(p, t) {
 
 /* A world: its platform is the village of the environment it runs (#407),
  * by default production, the right-most. It stands in that environment's
- * slot of the row, widened to fit it, over the slot's sign, warehouse and
- * docks; the dev row moves down only as far as that needs (OVER: the
- * warehouse's band above the river). A dev village with no environments
+ * slot of the row, under the dev village, widened and grown tall enough to
+ * fit it, over the slot's sign, warehouse and docks (OVER: the warehouse's
+ * band above the river). A dev village with no environments
  * stacks the platform over it instead, with a margin each side for the
  * river down and the road up. */
 export const SIDE = 24, GAP = 28, OVER = 50;
@@ -150,12 +174,12 @@ export function platformEnv(w, v) {
 export function worldGeom(w, Ps, Ds) {
   const name = platformEnv(w, Ds.v);
   if (name) {
-    const need = Ps.L.W + 8;
-    if (!Ds.L.slot || Ds.L.slot.name !== name || Ds.L.slot.w !== need) Ds.L = layout(Ds.v, { name, w: need });
+    const need = Ps.L.W + 8, tall = Ps.L.H;
+    if (!Ds.L.slot || Ds.L.slot.name !== name || Ds.L.slot.w !== need || Ds.L.slot.h !== tall) Ds.L = layout(Ds.v, { name, w: need, h: tall });
     const e = Ds.L.envs.find(x => x.platform);
     if (e) {
-      const devTop = Math.max(0, Ps.L.H + OVER - Ds.L.canalY);
-      return { row: true, e, W: Ds.L.W, H: devTop + Ds.L.H, devTop, dx: 0, px: e.x + ((e.w - Ps.L.W) >> 1), py: 0, srcY: Ps.L.top };
+      const py = e.cy - OVER - Ps.L.H;
+      return { row: true, e, W: Ds.L.W, H: Ds.L.H, devTop: 0, dx: 0, px: e.x + ((e.w - Ps.L.W) >> 1), py, srcY: py + Ps.L.top };
     }
   }
   const W = Math.max(Ps.L.W, Ds.L.W) + 2 * SIDE, devTop = Ps.L.H + GAP;

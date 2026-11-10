@@ -59,7 +59,7 @@ function alarms(c, lay, wx, t) {
 registerLayer({ z: 150, draw(c, { v, lay }, t) {
   const kind = weatherOf(v.build);
   if (kind === 'clear' || !lay) return;
-  const wx = weatherStyle(), W = lay.devW || lay.W, H = lay.H;
+  const wx = weatherStyle(), W = lay.devW || lay.W, H = lay.devH || lay.H;
   if (kind === 'drizzle') { rain(c, 0, 12, W, H - 12, Math.floor(W / 8), wx.rain, t, 2); return; }
   if (kind === 'squall') {
     // Over the gatehouse (or where the road meets the quay when there is none).

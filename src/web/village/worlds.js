@@ -102,15 +102,19 @@ function drawWorld(t, w) {
   });
   state.T = devTheme;
 
-  // Incidents float down beside the platform to the river along the top of
-  // the row (or down the left edge of a stack), then to the dev village's docks.
-  const ry = g.devTop + 6, rx = g.row ? g.e.x - 16 : 5;
-  if (g.row) sluice(rx, Math.min(g.srcY, ry - 6), ry, t);
-  else sluice(rx, g.srcY, g.devTop + 11, t);
+  // Incidents float down beside the platform to the row's river, along it to
+  // the map's left edge and up a stream there to the river by the dev
+  // village's docks (in a stack: down its left edge), then to the docks.
+  const ry = g.devTop + 6, rx = g.row ? g.e.x - 16 : 5, rowY = g.row ? g.e.cy + 4 : ry;
+  if (g.row) {
+    sluice(rx, g.srcY, g.e.cy, t);
+    downstream(ctx, 0, 11, 6, g.e.cy - 11, t);
+  } else sluice(rx, g.srcY, g.devTop + 11, t);
   if (!g.row) roadUp(t, w, g, Ps, Ds);
   st.floaters = st.floaters.filter(f => {
     const [ox, oy] = originPoint(Ps, f.origin, g);
-    const pts = [[ox, oy], [rx + 7, oy], [rx + 7, ry], [g.dx + 30, ry]];
+    const pts = g.row ? [[ox, oy], [rx + 7, oy], [rx + 7, rowY], [3, rowY], [3, ry], [g.dx + 30, ry]]
+      : [[ox, oy], [rx + 7, oy], [rx + 7, ry], [g.dx + 30, ry]];
     const at = porterPos({ t0: f.t0, speed: 0.04, pts }, t);
     if (!at) return false;
     state.T.crate(ctx, at[0] - 2, at[1] - 2, 'bug', 'P0');
