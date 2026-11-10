@@ -6,8 +6,11 @@
  * dock each side on the river, and a health mark: smoke and a red flag when
  * its newest deployment failed, a fire for an open incident, a "?" when
  * nothing says what it runs. Its look follows its rank: a town, and the
- * capital (production) with a keep. The ships between them are voyages.js;
- * the strip of villages over the map is the mini-map, at the end. */
+ * capital (production) with a keep. A world's platform stands in the slot
+ * of the environment it runs (worlds.js): that slot has no houses or keep of
+ * its own, and its sign stands by the warehouse, under the platform. The
+ * ships between them are voyages.js; the strip of villages over the map is
+ * the mini-map, at the end. */
 import { state } from './state.js';
 import { F, P, R, blink, featureColours, shadow } from './palette.js';
 import { puffs } from './sprites/houses.js';
@@ -96,18 +99,19 @@ const HEALTH_COL = { ok: '#38c848', failed: '#e02828', incident: '#f07020', unkn
 registerLayer({ z: 60, draw(c, { v, lay }, t) {
   const cy = lay.canalY;
   lay.envs.forEach(e => {
-    const { x, w, s } = e, health = healthOf(s);
-    tap(x, 12, w, cy - 12, { kind: 'env', i: e.i });
+    const { x, w, s } = e, health = healthOf(s), signY = e.platform ? cy - 30 : 16;
+    if (e.platform) tap(x, cy - SHED.up - 4, w, SHED.up + 4, { kind: 'env', i: e.i });
+    else tap(x, 12, w, cy - 12, { kind: 'env', i: e.i });
     state.T.road(c, x + ENV_DOCK - 2, cy - 10, w - 2 * ENV_DOCK + 4, 5);
     state.T.dock(c, x, cy - 7, ENV_DOCK); state.T.dock(c, x + w - ENV_DOCK, cy - 7, ENV_DOCK);
     tap(x, cy - 7, ENV_DOCK, 7, { kind: 'env', i: e.i });
-    // A town has two houses; the capital three and a keep.
-    const houses = e.rank === 'capital' ? 3 : 2;
+    // A town has two houses; the capital three and a keep. A platform's are its workloads.
+    const houses = e.platform ? 0 : e.rank === 'capital' ? 3 : 2;
     for (let k = 0; k < houses; k++) state.T.B.cottage(c, x + 24 + k * 20, 18, 'idle', t);
-    if (e.rank === 'capital') envKeep(c, x + w - 18, 16, 34, HEALTH_COL[health], t);
-    envSign(c, x + 4, 16, health === 'unknown' ? P.stoneL : null);
-    tap(x + 2, 14, 19, 22, { kind: 'env', i: e.i });
-    if (health === 'unknown') bubble(c, x + 20, 13, 'unknown');
+    if (e.rank === 'capital' && !e.platform) envKeep(c, x + w - 18, 16, 34, HEALTH_COL[health], t);
+    envSign(c, x + 4, signY, health === 'unknown' ? P.stoneL : null);
+    tap(x + 2, signY - 2, 19, 22, { kind: 'env', i: e.i });
+    if (health === 'unknown') bubble(c, x + 20, signY - 3, 'unknown');
     const sx = x + SHED.dx, sy = cy - SHED.up;
     envShed(c, sx, sy, SHED.w, SHED.h);
     tap(sx, sy, SHED.w, 9, { kind: 'env', i: e.i });
@@ -173,7 +177,8 @@ export function scrollToVillage(x) {
   miniVp.scrollTo({ left: Math.max(0, x * s - 8), behavior: state.reduce ? 'auto' : 'smooth' });
 }
 function placeMini() {
-  const shown = shownScenes(), sc = shown.length === 1 && !state.view.world ? shown[0][0] : null, lay = sc && sc.L;
+  // The row's own village: the one shown, or a world's dev village when its platform is in the row.
+  const row = shownScenes().find(([x, ox]) => ox === 0 && x.L.envs.length), sc = row && row[0], lay = sc && sc.L;
   const wide = lay && lay.envs.length && cv.getBoundingClientRect().width > miniVp.clientWidth + 2;
   miniBox.hidden = !wide;
   if (!wide) { miniBox.innerHTML = ''; return; }
