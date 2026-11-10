@@ -8,7 +8,7 @@ mod model;
 mod project_management;
 mod runtime;
 mod scripts;
-// Used by the `service` subcommand (#426); until then only its tests call it.
+// `agents-tui service` (#426). The launchd plist is only tested until #427 uses it.
 #[allow(dead_code)]
 mod service;
 #[cfg(test)]
@@ -343,7 +343,19 @@ fn select_initial_agent_type(
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let cli = parse_cli_options(std::env::args())?;
+    let args: Vec<String> = std::env::args().collect();
+    match args.get(1).map(String::as_str) {
+        // `agents-tui service install|uninstall|status|restart`: the served
+        // agents-tui as a user service (src/service/).
+        Some("service") => std::process::exit(service::run(&args[2..], &mut std::io::stdout())),
+        // `service status` reports the version of the binary a unit runs.
+        Some("--version" | "-V") => {
+            println!("agents-tui {}", env!("CARGO_PKG_VERSION"));
+            return Ok(());
+        }
+        _ => {}
+    }
+    let cli = parse_cli_options(args)?;
     let transport = ServerTransport::new(cli.server.clone());
 
     if cli.headless {
