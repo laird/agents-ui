@@ -43,7 +43,7 @@ export function placeLabels() {
   let html = '';
   const blocked = [];
   shownScenes().forEach(([sc, ox, oy]) => {
-    const theme = themeAt(oy);
+    const theme = themeAt(sc);
     LABELS.forEach(({ fn }) => fn(sc, theme).forEach(l => {
       const a = l.avoid;
       if (a) { blocked.push({ left: r.left + (ox + a.x) * s, top: r.top + (oy + a.y) * s, right: r.left + (ox + a.x + a.w) * s, bottom: r.top + (oy + a.y + a.h) * s }); return; }

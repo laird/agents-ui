@@ -237,8 +237,10 @@ issues still counts), the ship sails off east with what shipped, the
 fireworks go up, and an empty ship comes in; the rocket lifts off and a new
 one rolls out. This plays once per release, and a page opened afterwards just
 shows the new ship. With reduced motion the ship is swapped without a voyage
-and a "shipped vX.Y.Z" notice shows. In a world, the release cart sets off up
-the road as the ship leaves the map.
+and a "shipped vX.Y.Z" notice shows. In a world whose dev village has no
+environments, the release cart sets off up the road as the ship leaves the
+map; with environments, the release reaches the platform as the row's voyage
+into its slot.
 
 Click the ship for its cargo and "next release: N issues since vX.Y.Z"; click
 the harbour (or a departing ship's wake) for the last release and its GitHub
@@ -453,14 +455,22 @@ agents-tui --headless --temporal agents --world shop=temporal:agents
 `--world <dev>=<platform>` (repeatable) pairs a dev village (the coding swarm
 that writes the system) with the platform village (the Temporal namespace
 that runs it). Pick `shop ⇄ temporal:agents` in the title bar, or open
-`/village#world:shop`. The platform is drawn above, in the other style; work
-moves between the two in a loop:
+`/village#world:shop`.
+
+The platform is the village of the environment it runs: production, the
+right-most village of the [environment row](environment-row.md), unless the
+world names another (`--world shop=temporal:agents@nuc-1`). It stands in that
+slot, widened to fit, in the other style: its live workloads (Temporal
+workstreams, Kubernetes pods) are the village's houses, over the
+environment's version sign, warehouse and docks. A dev village with no
+environments keeps the platform stacked above it, with a road up on the
+right. Work moves between the two in a loop:
 
 | What you see | Where it comes from |
 |---|---|
 | A burning platform building | An open issue with the incident label (`--incident-label`, default `incident`) whose title names that workflow's id or type |
-| A crate floating down the river | A new incident issue, on its way from the building that raised it to the dev village's docks |
-| A cart climbing the road | Issues at the dev village's last pipeline stop that no platform worker runs yet |
+| A crate floating down the river | A new incident issue, on its way from the building that raised it, down beside the platform and right to left along the row's river, to the dev village's docks |
+| A ship sailing into the platform's slot | A deployment to that environment (see [Environments](#environments)); with no environments, a cart climbing the road carries the issues at the last stop that no platform worker runs yet |
 | Sparkles and fireworks over the platform | A platform worker reporting a build ID that matches the release |
 
 The release is the commit at the dev village's last stop. It has landed when
