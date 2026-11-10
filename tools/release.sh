@@ -60,6 +60,23 @@ origin_tags() {
     { plain[$2] = $1 }
     END { for (t in plain) print (t in peeled ? peeled[t] : plain[t]), t }'
 }
+# newest_tag, with tag names on stdin: the highest, comparing the numbers
+# between the dots (v2026.11.09.10 is after v2026.11.09.9). Not `sort -V`:
+# macOS's older sort has no -V.
+newest_tag() {
+  awk 'function newer(t,   x, y, n, m, i, a, b) {
+         x = t; y = best; sub(/^v/, "", x); sub(/^v/, "", y)
+         n = split(x, a, "."); m = split(y, b, ".")
+         for (i = 1; i <= n || i <= m; i++) {
+           if (i > m) return 1
+           if (i > n) return 0
+           if (a[i] + 0 != b[i] + 0) return a[i] + 0 > b[i] + 0
+         }
+         return 0
+       }
+       NF && (best == "" || newer($0)) { best = $0 }
+       END { if (best != "") print best }'
+}
 # next_tag <YYYY.MM.DD>, with tag names on stdin: the day's next vYYYY.MM.DD.N.
 next_tag() {
   awk -v p="v$1." 'index($0, p) == 1 { n = substr($0, length(p) + 1); if (n ~ /^[0-9]+$/ && n + 0 > max) max = n + 0 }
@@ -77,7 +94,7 @@ git fetch --quiet --tags origin "$INTEGRATION" || refuse "cannot fetch origin/$I
 # No tag given: release only what isn't released yet, under the next date tag.
 if [ -z "$TAG" ]; then
   SHA=$(git rev-parse "${COMMIT:-origin/$INTEGRATION}^{commit}") || refuse "unknown commit: ${COMMIT}"
-  NEWEST=$(awk '{ print $2 }' <<< "$TAGS" | sort -V | tail -1)
+  NEWEST=$(awk '{ print $2 }' <<< "$TAGS" | newest_tag)
   NEWEST_SHA=$(awk -v t="$NEWEST" '$2 == t { print $1 }' <<< "$TAGS")
   if [ -n "$NEWEST" ] && [ "$NEWEST_SHA" = "$SHA" ]; then
     say "${SHA:0:12} is already the newest release ($NEWEST); not releasing it again"
