@@ -16,13 +16,16 @@
     --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
   }
   * { box-sizing: border-box; }
-  /* Room for the page scrollbar is kept, so the map's fitted width does not
-   * change when the page grows tall enough to scroll (say, the key opens). */
-  html { scrollbar-gutter: stable; }
   html, body { margin: 0; background: var(--night); color: var(--ink); font: 14px/1.5 var(--sans); }
-  body { padding: 12px max(12px, env(safe-area-inset-right)) 24px max(12px, env(safe-area-inset-left)); }
+  /* The page is a column exactly the window's height (#400): the bar, then the
+   * stage, whose viewport takes all the room the chrome leaves. The viewport's
+   * size never follows the canvas, so Fit (panels.js) fills it and nothing
+   * scrolls; a map zoomed past Fit scrolls inside the viewport, not the page.
+   * The key, dialog and toasts float over the map. */
+  body { height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: auto;
+    padding: 12px max(12px, env(safe-area-inset-right)) 12px max(12px, env(safe-area-inset-left)); }
   a { color: var(--ink-dim); }
-  .bar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin: 0 auto 10px; max-width: 1400px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin: 0 0 10px; flex: none; }
   .title { font: 700 16px/1.2 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--gold); display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; min-width: 0; }
   .title select { max-width: 100%; }
   .title a { font-weight: 400; font-size: 12px; text-transform: none; letter-spacing: 0; }
@@ -38,9 +41,11 @@
     border: 3px solid var(--frame); border-radius: 6px;
     box-shadow: 0 0 0 3px var(--frame-shadow), inset 0 0 0 2px var(--win-inner);
   }
-  .stage { max-width: 1400px; margin: 0 auto; padding: 8px; }
+  .stage { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; padding: 8px; }
+  .stage > * { flex: none; }
   /* `safe center`: a zoomed-in map scrolls from its left edge instead of being cut off. */
-  .viewport { overflow: auto; display: flex; justify-content: safe center; background: var(--frame-shadow); border-radius: 2px; min-height: 200px; align-items: safe center; }
+  .viewport { overflow: auto; display: flex; justify-content: safe center; background: var(--frame-shadow); border-radius: 2px; min-height: 120px; align-items: safe center; }
+  .stage > .viewport { flex: 1; }
   canvas { image-rendering: pixelated; image-rendering: crisp-edges; display: block; cursor: pointer; }
   .flow { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   .step { flex: 1 1 90px; padding: 6px 8px; background: rgba(6,8,20,.45); border: 2px solid var(--rule); border-radius: 4px; }
@@ -101,7 +106,8 @@
   .legend-btn { background: var(--win-bot); color: var(--gold); border: 2px solid var(--win-inner); border-radius: 50%; font: 700 14px var(--mono); width: 30px; height: 30px; padding: 0; cursor: pointer; }
   .legend-btn[aria-expanded="true"] { background: var(--gold); color: #241400; }
   /* The key: every symbol on the map, drawn by the renderer itself. */
-  .legend { margin-top: 8px; padding: 8px 10px; border: 2px solid var(--rule); border-radius: 4px; background: rgba(6,8,20,.55); }
+  /* Over the map, not under it: opening the key never shrinks the map. */
+  .legend { position: absolute; left: 8px; right: 8px; bottom: 8px; max-height: calc(100% - 16px); overflow: auto; z-index: 5; padding: 8px 10px; border: 2px solid var(--rule); border-radius: 4px; background: rgba(6,8,20,.94); }
   .legend[hidden] { display: none; }
   .legend h3 { margin: 0 0 4px; font: 700 13px var(--mono); color: var(--gold); }
   .legend h4 { margin: 8px 0 4px; font: 700 12px var(--mono); color: var(--ink-dim); }
@@ -140,8 +146,7 @@
   .minimap .mm i { display: inline-block; width: 5px; height: 5px; margin-left: 4px; border-radius: 50%; background: var(--gold); vertical-align: middle; }
   /* The screensaver (screensaver.js): the map fitted to the whole display, a
    * status strip readable across the room, no controls, no cursor. */
-  html.screensaver { scrollbar-gutter: auto; }
-  html.screensaver body { padding: 0; height: 100vh; overflow: hidden; display: flex; flex-direction: column; cursor: none; transition: translate 20s linear, filter 3s; }
+  html.screensaver body { padding: 0; overflow: hidden; cursor: none; transition: translate 20s linear, filter 3s; }
   html.screensaver .bar, html.screensaver .fstrip, html.screensaver .flow, html.screensaver .legend, html.screensaver .minimap,
   html.screensaver .dialog, html.screensaver .toast, html.screensaver .hint, html.screensaver .hitkeys { display: none !important; }
   html.screensaver .stage { flex: 1; min-height: 0; max-width: none; width: 100%; margin: 0; padding: 12px; display: flex; border: 0; border-radius: 0; box-shadow: none; background: var(--night); }
@@ -162,3 +167,10 @@
   .ss-off[hidden] { display: none; }
   .ss-off-big { font: 700 clamp(28px, 4.5vw, 84px)/1.2 var(--mono); color: #ff5a4a; }
   .ss-off-small { font: clamp(18px, 2vw, 40px)/1.3 var(--mono); color: var(--ink-dim); }
+  /* A phone: the bar and strips take too much of a short window, so the page
+   * scrolls down and only the width bounds the map (NARROW in panels.js). */
+  @media (max-width: 640px) {
+    html:not(.screensaver) body { height: auto; display: block; }
+    html:not(.screensaver) .stage { display: block; }
+    html:not(.screensaver) .viewport { min-height: 200px; }
+  }
