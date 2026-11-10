@@ -31,6 +31,8 @@ common=$(cd "$top" && cd "$(git rev-parse --git-common-dir)" && pwd -P) || exit 
 main=$(cd "$common/.." && pwd -P)
 [ "$(cd "$top" && pwd -P)" = "$main" ] || exit 0
 
+# A timestamp from plain date formats: macOS's date has no ISO-8601 flag.
+now() { date +%Y-%m-%dT%H:%M:%S%z; }
 integration=$(git symbolic-ref --short "refs/remotes/$1/HEAD" 2>/dev/null | sed "s@^$1/@@")
 integration="${integration:-master}"
 
@@ -42,13 +44,13 @@ while read -r _local_ref local_sha remote_ref _remote_sha; do
   wait_s="${AGENTS_UI_RELEASE_WAIT:-120}"
   (
     cd "$main" || exit 0
-    echo "$(date -Iseconds) pushed ${local_sha:0:12} to $1/$integration; releasing once it lands"
+    echo "$(now) pushed ${local_sha:0:12} to $1/$integration; releasing once it lands"
     deadline=$((SECONDS + wait_s))
     until [ "$(git ls-remote "$1" "refs/heads/$integration" 2>/dev/null | cut -f1)" = "$local_sha" ]; do
-      [ "$SECONDS" -lt "$deadline" ] || { echo "$(date -Iseconds) ${local_sha:0:12} never reached $1/$integration; not releasing"; exit 0; }
+      [ "$SECONDS" -lt "$deadline" ] || { echo "$(now) ${local_sha:0:12} never reached $1/$integration; not releasing"; exit 0; }
       sleep 2
     done
-    bash tools/release.sh --commit "$local_sha" || echo "$(date -Iseconds) release of ${local_sha:0:12} failed; the next push or deploy releases it"
+    bash tools/release.sh --commit "$local_sha" || echo "$(now) release of ${local_sha:0:12} failed; the next push or deploy releases it"
   ) >> "$log" 2>&1 < /dev/null &
   disown 2>/dev/null || true
 done

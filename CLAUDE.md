@@ -272,6 +272,10 @@ what `src/web/deployments.rs` reads to place each stop:
   starts a server of its own. The reference unit, with install steps, is
   `docs/agents-tui.service`. Its tests: `bash tools/test_deploy.sh` (also run
   by `cargo test deploy_script`).
+  CI runs these on macOS too, so the scripts and their tests stay portable:
+  bash 3.2 (an empty array is `${a[@]+"${a[@]}"}` under `set -u`), BSD
+  `sort`/`date`/`sed` (no `sort -V`, no `date -I`, no `sed -i`). `cargo test
+  deploy_and_release_scripts_avoid_linux_only_shell` catches the known traps.
 - **`release`**: a GitHub Release, recorded as a Deployment of its commit.
   **Every deploy releases**: once `deploy.sh` has recorded `nuc-1` as
   `success`, it runs `tools/release.sh` for the same commit, so the village's
