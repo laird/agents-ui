@@ -1,6 +1,7 @@
 /* ---------- The environment row ----------
- * East of the dev village, one village per deploy environment, left to
- * right in pipeline order, production right-most (docs/environment-row.md).
+ * Under the dev village, along a river of its own across the bottom of the
+ * map (#445), one village per deploy environment, left to right in pipeline
+ * order, production right-most (docs/environment-row.md).
  * Each has a sign with the version it runs, a warehouse holding what it runs
  * (its cargo, grouped under the banners of the features it belongs to), a
  * dock each side on the river, and a health mark: smoke and a red flag when
@@ -95,20 +96,26 @@ function envSign(c, x, y, face) {
 const healthOf = s => (s.health && s.health.state) || (s.source === 'unknown' ? 'unknown' : 'ok');
 const HEALTH_COL = { ok: '#38c848', failed: '#e02828', incident: '#f07020', unknown: '#8088a8' };
 
+/* The row's river, the width of the map. */
+registerLayer({ z: 6, draw(c, { lay }, t) {
+  if (!lay.envs || !lay.envs.length) return;
+  state.T.channel(c, 0, lay.envCy, lay.W, 14, t, 0.6);
+  tap(0, lay.envCy, lay.W, 14, { kind: 'canal' });
+} });
 /* The villages: ground, road, docks, houses by rank, the sign and the warehouse. */
 registerLayer({ z: 60, draw(c, { v, lay }, t) {
-  const cy = lay.canalY;
   lay.envs.forEach(e => {
-    const { x, w, s } = e, health = healthOf(s), signY = e.platform ? cy - 30 : 16;
+    const { x, w, s, cy, top } = e, health = healthOf(s), signY = cy - 30;
     if (e.platform) tap(x, cy - SHED.up - 4, w, SHED.up + 4, { kind: 'env', i: e.i });
-    else tap(x, 12, w, cy - 12, { kind: 'env', i: e.i });
+    else tap(x, top, w, cy - top, { kind: 'env', i: e.i });
     state.T.road(c, x + ENV_DOCK - 2, cy - 10, w - 2 * ENV_DOCK + 4, 5);
     state.T.dock(c, x, cy - 7, ENV_DOCK); state.T.dock(c, x + w - ENV_DOCK, cy - 7, ENV_DOCK);
     tap(x, cy - 7, ENV_DOCK, 7, { kind: 'env', i: e.i });
     // A town has two houses; the capital three and a keep. A platform's are its workloads.
     const houses = e.platform ? 0 : e.rank === 'capital' ? 3 : 2;
-    for (let k = 0; k < houses; k++) state.T.B.cottage(c, x + 24 + k * 20, 18, 'idle', t);
-    if (e.rank === 'capital' && !e.platform) envKeep(c, x + w - 18, 16, 34, HEALTH_COL[health], t);
+    // Beside the warehouse, not over it, so the row stays low (#445).
+    for (let k = 0; k < houses; k++) state.T.B.cottage(c, x + SHED.dx + SHED.w + 4 + k * 18, cy - 30, 'idle', t);
+    if (e.rank === 'capital' && !e.platform) envKeep(c, x + w - 18, cy - 42, 32, HEALTH_COL[health], t);
     envSign(c, x + 4, signY, health === 'unknown' ? P.stoneL : null);
     tap(x + 2, signY - 2, 19, 22, { kind: 'env', i: e.i });
     if (health === 'unknown') bubble(c, x + 20, signY - 3, 'unknown');
@@ -128,9 +135,8 @@ registerLayer({ z: 60, draw(c, { v, lay }, t) {
 } });
 /* What each environment runs: crates in the warehouse bay, under their banners. */
 registerLayer({ z: 85, draw(c, { v, lay }) {
-  const cy = lay.canalY;
   lay.envs.forEach(e => {
-    const sx = e.x + SHED.dx, sy = cy - SHED.up, { slots, more } = baySlots(cargoGroups(v, e.s.cargo || []), e.s.cargo_more || 0);
+    const sx = e.x + SHED.dx, sy = e.cy - SHED.up, { slots, more } = baySlots(cargoGroups(v, e.s.cargo || []), e.s.cargo_more || 0);
     slots.forEach((sl, k) => {
       const x = sx + 3 + (k % BAY_COLS) * 6, y = sy + 10 + Math.floor(k / BAY_COLS) * 7;
       if (sl.banner) { R(c, x + 1, y, 1, 6, P.woodL); R(c, x + 2, y, 3, 3, sl.banner.col); return; }
@@ -165,37 +171,41 @@ registerHit({ kind: 'env', dialog(o, sc) {
     items: issueItems(v, cargo).map(it => ({ ...it, label: label.get(it.number) })), links: envLinks(v, s) };
 } });
 
-/* ---------- Labels: each village's name over its sign, its version under it ---------- */
+/* ---------- Labels: each village's name and version, over it ---------- */
 registerLabels(sc => (sc.L.envs || []).map(e => {
   const ver = versionOf(e.s), when = agoWords(e.s.deployed_at);
-  return { x: e.x + e.w / 2, y: sc.L.canalY + 15, anchor: 'top', text: e.s.name, sub: ver ? `${ver}${when ? ' · ' + when : ''}` : 'unknown', width: e.w - 8 };
+  return { x: e.x + e.w / 2, y: e.top - 1, anchor: 'bottom', text: e.s.name, sub: ver ? `${ver}${when ? ' · ' + when : ''}` : 'unknown', width: e.w - 8 };
 }), 25);
 
 /* ---------- The mini-map ----------
  * A strip over the map with a box per village, coloured by health, and a dot
- * per ship under sail, shown only when the row is wider than the panel. The
- * part in view is framed; a box scrolls to its village. */
+ * per ship under sail, shown only when the map is bigger than the panel
+ * (zoomed in). The part in view is framed; a box scrolls to its village,
+ * the dev village up top or one of the row's under it. */
 const miniBox = document.getElementById('minimap'), miniVp = document.getElementById('viewport');
-export function scrollToVillage(x) {
+export function scrollToVillage(x, y = 0) {
   const s = cv.getBoundingClientRect().width / cv.width;
-  miniVp.scrollTo({ left: Math.max(0, x * s - 8), behavior: state.reduce ? 'auto' : 'smooth' });
+  miniVp.scrollTo({ left: Math.max(0, x * s - 8), top: Math.max(0, y * s - 8), behavior: state.reduce ? 'auto' : 'smooth' });
 }
 function placeMini() {
   // The row's own village: the one shown, or a world's dev village when its platform is in the row.
   const row = shownScenes().find(([x, ox]) => ox === 0 && x.L.envs.length), sc = row && row[0], lay = sc && sc.L;
-  const wide = lay && lay.envs.length && cv.getBoundingClientRect().width > miniVp.clientWidth + 2;
+  const shown = cv.getBoundingClientRect();
+  const wide = lay && lay.envs.length && (shown.width > miniVp.clientWidth + 2 || shown.height > miniVp.clientHeight + 2);
   miniBox.hidden = !wide;
   if (!wide) { miniBox.innerHTML = ''; return; }
-  const s = cv.getBoundingClientRect().width / cv.width, from = miniVp.scrollLeft / s, to = from + miniVp.clientWidth / s;
+  const s = shown.width / cv.width, from = miniVp.scrollLeft / s, to = from + miniVp.clientWidth / s;
+  const fromY = miniVp.scrollTop / s, toY = fromY + miniVp.clientHeight / s;
   const sailing = (sc.v.pipeline.voyages || []).filter(vo => vo.state === 'sailing' || vo.state === 'loading');
-  const boxes = [{ name: sc.v.project, x: 0, w: lay.devW, health: 'ok' }, ...lay.envs.map(e => ({ name: e.s.name, x: e.x, w: e.w, health: healthOf(e.s) }))];
+  const boxes = [{ name: sc.v.project, x: 0, y: 0, w: lay.devW, h: lay.devH, health: 'ok' },
+    ...lay.envs.map(e => ({ name: e.s.name, x: e.x, y: e.top, w: e.w, h: lay.H - e.top, health: healthOf(e.s) }))];
   const html = boxes.map(b => {
-    const inView = b.x < to && b.x + b.w > from, ships = sailing.filter(vo => vo.to === b.name).length;
-    return `<button class="mm${inView ? ' in' : ''}" data-x="${b.x}" style="--hc:${HEALTH_COL[b.health]}" aria-label="Scroll to ${esc(b.name)}">${esc(b.name)}${'<i></i>'.repeat(ships)}</button>`;
+    const inView = b.x < to && b.x + b.w > from && b.y < toY && b.y + b.h > fromY, ships = sailing.filter(vo => vo.to === b.name).length;
+    return `<button class="mm${inView ? ' in' : ''}" data-x="${b.x}" data-y="${b.y}" style="--hc:${HEALTH_COL[b.health]}" aria-label="Scroll to ${esc(b.name)}">${esc(b.name)}${'<i></i>'.repeat(ships)}</button>`;
   }).join('');
   if (miniBox.drawn === html) return;
   miniBox.innerHTML = html; miniBox.drawn = html;
-  miniBox.querySelectorAll('button').forEach(b => b.addEventListener('click', () => scrollToVillage(+b.dataset.x)));
+  miniBox.querySelectorAll('button').forEach(b => b.addEventListener('click', () => scrollToVillage(+b.dataset.x, +b.dataset.y)));
 }
 miniVp.addEventListener('scroll', placeMini, { passive: true });
 window.addEventListener('resize', placeMini);

@@ -31,6 +31,19 @@ villages for each deployment.
 
 ## Layout
 
+Since #445 the row runs **under** the dev village, not east of it, so the
+map comes out close to a screen's shape and Fit fills the window instead of
+showing a wide strip between black bars. The dev village keeps the top of
+the map; the environment villages stand left to right along a river of
+their own across the bottom, production right-most. Ships from the dev
+village enter that river at its west end. The houses per row are chosen so
+the whole map comes closest to 2:1 (`ASPECT` in `layout.js`, the room a
+16:9 screen leaves under the page's bar), so a growing swarm adds rows and
+keeps the map's shape. A world's platform stands in its environment's slot
+of that row, and the row grows tall enough for it; incidents float down
+beside it to the row's river, along it to the left edge, and up a stream
+there to the dev village's docks.
+
 ### The row
 
 - **The dev village** is today's village: docks, houses, gatehouse (#375),
@@ -38,8 +51,9 @@ villages for each deployment.
   `<integration>-green` lock, which is a gate, not an environment. The
   environment locks leave its canal, because each environment becomes a
   village of its own.
-- **Each environment village** is a fixed-size scene, narrower than the dev
-  village (about 120 by the dev village's height in scene pixels). It has:
+- **Each environment village** is a fixed-size scene, about 170 by 56 scene
+  pixels over its river (#445: its houses stand beside its warehouse, not
+  over it, so the row stays low), its name and version over it. It has:
   - a **sign** with the running version: its tag, else a short sha, with
     the deploy time underneath;
   - a **warehouse** holding the cargo, crates grouped under the banners of
@@ -50,9 +64,7 @@ villages for each deployment.
   - a **health mark**: smoke and a red flag for a failed newest deployment,
     a fire for an open incident against it (worlds), and nothing when
     nothing says.
-- **Between villages**, a stretch of river 40 px wide carries the ships. It
-  is long enough to see a ship under sail, and short enough that the whole
-  row fits a wide screen at the "fit" zoom.
+- **Between villages**, a short stretch of river (16 px) carries the ships.
 - **Production** is the right-most village, and the last environment in the
   list. No extra configuration is needed.
 
@@ -64,8 +76,8 @@ villages for each deployment.
   the URL names another one (`/village#shop@release`).
 - A **mini-map** strip above the map draws one box per village and a dot per
   ship under sail. It is coloured by health and shows the visible part of
-  the row as a frame. Clicking a box scrolls to that village. It only
-  appears when the row is wider than the panel.
+  the map as a frame. Clicking a box scrolls to that village, across or
+  down. It only appears when the map is bigger than the panel (zoomed in).
 
 ### Rank-based look
 

@@ -90,7 +90,7 @@ function select(want) {
   fit();
   if (state.reduce) draw(0);
   const sc = state.scenes[view.world ? w.dev : view.village], e = env && sc && sc.L && sc.L.envs.find(x => x.s.name === env);
-  if (e && state.scrolledTo !== want) { state.scrolledTo = want; scrollToVillage(e.x); }
+  if (e && state.scrolledTo !== want) { state.scrolledTo = want; scrollToVillage(e.x, e.top); }
   placeOverlays();
 }
 

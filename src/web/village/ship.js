@@ -95,7 +95,7 @@ registerLayer({ z: 80, draw(c, scene) {
 } });
 /* A lock per stop but the last, with the crates in its basin. */
 registerLayer({ z: 90, draw(c, scene, t) {
-  const { v, lay } = scene, { H, canalY } = lay, hid = scene.hid || NONE, onShip = scene.onShip, carried = scene.carried;
+  const { v, lay } = scene, { devH: H, canalY } = lay, hid = scene.hid || NONE, onShip = scene.onShip, carried = scene.carried;
   // The sentinel's flag is grey while it still has newer work to test. With
   // no sentinel the first lock is an environment like any other.
   const gated = v.pipeline.sentinel !== 'absent';
@@ -123,7 +123,7 @@ registerLayer({ z: 100, draw(c, scene, t) {
 /* The harbour, and the ship in it loaded with the next release; or the last
  * one sailing off with what shipped, leaving a wake, then an empty one coming in. */
 registerLayer({ z: 110, draw(c, scene, t) {
-  const { v, lay } = scene, { H, canalY } = lay, hid = scene.hid || NONE, carried = scene.carried, cargo = scene.cargo;
+  const { v, lay } = scene, { devH: H, canalY } = lay, hid = scene.hid || NONE, carried = scene.carried, cargo = scene.cargo;
   const stops = v.pipeline.stops;
   state.T.destination(c, lay.castleX, canalY, t, state.fireworks); tap(lay.castleX - 4, canalY - 28, 46, H - canalY + 28, { kind: 'harbour' });
   if (stops.length) {

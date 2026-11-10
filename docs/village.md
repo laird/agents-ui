@@ -252,9 +252,12 @@ Release. The tag and link come from the deployment `tools/release.sh` records
 
 ### The environment row
 
-East of the dev village stands one village per environment, in
-`.autocoder.json` order, with production right-most (design:
-[environment-row.md](environment-row.md)). The sentinel's green ref stays a
+Under the dev village, along a river of its own across the bottom of the
+map, stands one village per environment, in `.autocoder.json` order, left
+to right with production right-most (design:
+[environment-row.md](environment-row.md)). The map is laid out to about a
+screen's shape (#445), so Fit fills the window: a growing swarm adds rows of
+houses rather than widening the map. The sentinel's green ref stays a
 lock in the dev village. Each environment village has:
 
 - a **sign** with the version it runs (its tag, else a short sha) and when it

@@ -58,19 +58,20 @@ export function noteVoyages(sc, old, v, t) {
   });
 }
 
-/* The river a voyage takes: from the source's east dock to the target's west
- * dock, as the vessel's x at each end (the hull clear of both docks). */
+/* The river a voyage takes along the row: from the source's east dock (from
+ * the dev village, the row river's west end) to the target's west dock, as
+ * the vessel's x at each end (the hull clear of both docks). */
 export function reach(lay, vo) {
   const src = vo.from === 'dev' ? null : lay.envs.find(e => e.s.name === vo.from), dst = lay.envs.find(e => e.s.name === vo.to);
   if (!dst || (vo.from !== 'dev' && !src)) return null;
-  const [h0, , hw] = state.T.hull, a = src ? src.x + src.w : lay.devW, b = dst.x;
+  const [h0, , hw] = state.T.hull, a = src ? src.x + src.w : 0, b = dst.x;
   return { a, b, dst, start: a + 2 - h0, end: Math.max(a + 2, b - hw - 2) - h0 };
 }
 /* Where a voyage's ship is at t, and what its crew carries. */
 export function voyagePose(vo, lay, seen, t) {
   const r = reach(lay, vo);
   if (!r) return null;
-  const cy = lay.canalY, still = state.reduce, since = t - (vo.played ? vo.t0 : seen);
+  const cy = lay.envCy, still = state.reduce, since = t - (vo.played ? vo.t0 : seen);
   let state_ = vo.state, p = 0;
   if (vo.played) { state_ = since < PLAYED_SAIL ? 'sailing' : 'docked'; p = Math.min(1, since / PLAYED_SAIL); }
   else if (state_ === 'sailing') p = still ? 0.5 : Math.max(0, Math.min(0.85, since / VOYAGE_SAIL));
@@ -99,7 +100,7 @@ function voyageVessel(c, x, cy, t, oy, back) {
 function drawVoyage(c, v, lay, vo, seen, t) {
   const pose = voyagePose(vo, lay, seen, t);
   if (!pose) return;
-  const cy = lay.canalY, [hx, hy, hw, hh] = state.T.hull, bob = state.T.flies || state.reduce || !blink(t, 900) ? 0 : 1, oy = pose.oy + bob;
+  const cy = lay.envCy, [hx, hy, hw, hh] = state.T.hull, bob = state.T.flies || state.reduce || !blink(t, 900) ? 0 : 1, oy = pose.oy + bob;
   if (pose.state === 'sailing' && !state.T.flies) for (let x = Math.round(pose.x + hx - 2); x > pose.r.start + hx; x -= 5) R(c, x, cy + 12 + ((x >> 2) % 2), 3, 1, P.white);
   voyageVessel(c, pose.x, cy, t, oy, pose.back);
   const left = Math.round(pose.x + hx), top = Math.round(cy + hy + pose.oy);
