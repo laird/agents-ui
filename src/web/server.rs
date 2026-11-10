@@ -2410,6 +2410,15 @@ mod tests {
         }
     }
 
+    /// The dialog's title keeps clear of its close × (#438).
+    #[test]
+    fn village_dialog_title_leaves_room_for_the_close_button() {
+        let body = &village_source();
+        assert!(body.contains(r#"<button id="close" aria-label="Close">×</button>"#));
+        assert!(body.contains(".dialog button { position: absolute; top: 8px; right: 10px;"));
+        assert!(body.contains(".dialog h2 { margin: 0 0 4px; padding-right: 26px; overflow-wrap: anywhere;"));
+    }
+
     #[test]
     fn village_html_zooms_and_remembers_it() {
         let body = &village_source();
