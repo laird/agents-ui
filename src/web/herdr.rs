@@ -498,7 +498,7 @@ mod tests {
     fn the_manifest_pane_is_the_manager() {
         let manifests = Manifests::from([(
             PathBuf::from("/src/agents-ui"),
-            vec![SwarmManifest { session: "claude-agents-ui".into(), manager_panes: vec!["w5:p1".into()] }],
+            vec![SwarmManifest { session: "claude-agents-ui".into(), manager_panes: vec!["w5:p1".into()], state: None }],
         )]);
         let agents = parse_agents(TWO_IN_MAIN);
         // Settled by the manifest: no process needs probing.
@@ -582,7 +582,7 @@ mod tests {
         // With the manifest naming w5:p1, it is the manager, unambiguously, by that rule.
         let manifests = Manifests::from([(
             PathBuf::from("/src/agents-ui"),
-            vec![SwarmManifest { session: "claude-agents-ui".into(), manager_panes: vec!["w5:p1".into()] }],
+            vec![SwarmManifest { session: "claude-agents-ui".into(), manager_panes: vec!["w5:p1".into()], state: None }],
         )]);
         let out = explain_agents(&parse_agents(TWO_IN_MAIN), &agents_ui(), &manifests, &HashMap::new());
         let m = out.iter().find(|e| e.pane == "w5:p1").unwrap();
