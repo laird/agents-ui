@@ -28,6 +28,22 @@
   .bar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin: 0 0 10px; flex: none; }
   .title { font: 700 16px/1.2 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--gold); display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; min-width: 0; }
   .title select { max-width: 100%; }
+  /* A picker is as wide as the option it shows, not its longest one (#444):
+   * "Medieval village" no longer takes the room of "Modern business district". */
+  .title select { field-sizing: content; }
+  /* One row down to 1100px (#444): the title keeps to its line, and what can
+   * give way does: the workflow words and the live status ellipsize instead of
+   * wrapping onto a row of their own. Narrower than that, the bar wraps. */
+  @media (min-width: 1100px) {
+    .bar { flex-wrap: nowrap; }
+    .title { flex-wrap: nowrap; flex: 0 1 auto; white-space: nowrap; }
+    .title > * { flex: none; }
+    /* The village's name stays whole; its repo link and workflow words give
+     * way, the workflow's first. */
+    .title > .status, .title > #repo { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .title > .status { flex-shrink: 4; }
+    .bar > .status { flex: 1 1 0; min-width: 15em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+  }
   .title a { font-weight: 400; font-size: 12px; text-transform: none; letter-spacing: 0; }
   select { background: var(--win-bot); color: var(--ink); border: 2px solid var(--win-inner); border-radius: 4px; font: 13px var(--mono); padding: 4px 6px; }
   .status { font: 12px var(--mono); color: var(--ink-dim); }

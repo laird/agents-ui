@@ -35,6 +35,25 @@ fn village_html_fits_the_map_to_the_window() {
     assert!(body.contains("justify-content: safe center;"));
 }
 
+/// #444: the bar stays one row at 1280 (and down to 1100), so the map keeps
+/// its height: pickers are as wide as what they show, and the workflow words,
+/// the repo link and the live status ellipsize instead of wrapping. Measured
+/// in headless Chromium when it landed: one 31 px row at 1280 and at 1100,
+/// wrapping below. Fit needs nothing more: it measures the viewport, which a
+/// ResizeObserver watches, so the bar's real height is what it gets.
+#[test]
+fn village_bar_stays_one_row() {
+    let body = &village_source();
+    assert!(body.contains(".title select { field-sizing: content; }"), "a picker fits its shown option");
+    assert!(body.contains("@media (min-width: 1100px) {\n    .bar { flex-wrap: nowrap; }"));
+    assert!(body.contains(".title { flex-wrap: nowrap; flex: 0 1 auto; white-space: nowrap; }"));
+    assert!(body.contains(".title > .status, .title > #repo { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }"));
+    assert!(body.contains(".bar > .status { flex: 1 1 0; min-width: 15em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }"));
+    // The status and the workflow words are still where the page writes them.
+    assert!(body.contains(r#"<span id="workflow" class="status"></span>"#));
+    assert!(body.contains(r#"<div class="status" id="status" aria-live="polite">"#));
+}
+
 /// #405: no row of counters under the map; the map shows the counts.
 /// A world keeps what only the row said (its release, the platform's
 /// build IDs) in the bar's line.
