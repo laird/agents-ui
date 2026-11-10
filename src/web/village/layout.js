@@ -98,8 +98,12 @@ export function envStops(v) {
   if (v.plane === 'runtime') return [];
   return v.pipeline.stops.map((s, i) => ({ s, i })).filter(({ s }) => s.kind !== 'gate');
 }
-/* Where backlog crate i rests at the docks. */
-export const slotPos = i => ({ x: 10 + (i % 8) * 6, y: 22 + Math.floor(i / 8) * 6 });
+/* Where backlog crate i of n rests at the docks: 8 to a row, 6 pixels
+ * apart, room for 40; up to 24 stand 8 apart, 6 to a row, leaving room
+ * between them for their numbers. */
+export const slotPos = (i, n = 40) => (n <= 24
+  ? { x: 11 + (i % 6) * 8, y: 22 + Math.floor(i / 6) * 8 }
+  : { x: 10 + (i % 8) * 6, y: 22 + Math.floor(i / 8) * 6 });
 /* The strip cleared out of the forest for the feature banners. */
 export function inBannerStrip(lay, x, y) {
   const b = lay.banners;

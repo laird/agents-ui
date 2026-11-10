@@ -16,6 +16,7 @@ import { fadeLive } from './features.js';
 import { draw, updateWorld, worldWords } from './worlds.js';
 import { legend, renderLegend } from './key.js';
 import { hashName } from './saver.js';
+import { arrangeDocks } from './docks.js';
 
 const pick = document.getElementById('pick');
 let themeName = 'medieval';
@@ -26,6 +27,9 @@ function updateScene(v, t) {
   const scenes = state.scenes;
   const sc = scenes[v.project] || (scenes[v.project] = { v: null, porters: [], floats: [], gates: {}, voyage: null, supplies: [], nextAt: 0, fireworks: -1e9,
     lastDelivered: null, lastRelease: null, liveSince: {}, fade: {} });
+  // The crates stand in dock order (prerequisites first) from here on, so
+  // every slot, trip and trail agrees on where each one is.
+  v.backlog = arrangeDocks(v.backlog);
   fadeLive(sc, v);
   const lay = layout(v);
   state.porters = sc.porters; state.floats = sc.floats;

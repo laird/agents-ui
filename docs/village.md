@@ -103,8 +103,12 @@ session is a house, and agents sharing a worktree are one house.
 | House shape | Labels on the worker's issue (`bug`, `enhancement`, `test-failure`, `security`, ...) |
 | Flag on a house | `P0`–`P3` label |
 | People out front | Running Claude Code sub-agents (`~/.claude/projects/<worktree>/<session>/subagents/`) |
-| Crates at the docks | Open, unclaimed, unblocked issues, highest priority first |
-| A roped crate | An issue waiting on another one: its body says "Depends on #N" or "Blocked by #N" and #N is still open. autocoder won't pick it up yet; its dialog says "waits on #N" |
+| Crates at the docks | Open, unclaimed, unblocked issues, highest priority first. A crate that waits on another stands after it, and crates waiting on the same issue stand together, so a chain (#395 → #396 → #397) reads as one run (`docks.js`; a dependency cycle keeps backlog order). Each crate's number is under it |
+| A crate's mark | Its priority: P0 red, P1 orange, P2 yellow, P3 grey, none when unprioritised. A band along the foot (medieval), a tag (modern), a light (future) |
+| A crate edged in colour | A subtask of a feature (its epic): the colour of that feature's flag |
+| A glinting crate | Ready: nothing in its way, any worker may pick it up |
+| A roped crate | An issue waiting on another one: its body says "Depends on #N" or "Blocked by #N" and #N is still open. autocoder won't pick it up yet. A dotted rope ties it to the crate it waits on when both are at the docks; its dialog says what it waits on and where that is ("Waits on #395 (being worked on at wt-2)") |
+| Hovering over a crate | Opens its dialog (number, title, priority, epic, ready or what it waits on) until the pointer leaves; a click keeps it open. Issues blocked by a label (`needs-design`, ...) are notes on the board, not crates |
 | Notes on the board | Issues with a blocking label (`needs-design`, `proposal`, ...) |
 | Crates at the quay | `refs/autocoder/tips/<integration>/<sha>-<issue>` not yet green |
 | Locks, then the harbour or launch pad | `<integration>-green`, then each environment in `.autocoder.json` (see [Environments](#environments)) |

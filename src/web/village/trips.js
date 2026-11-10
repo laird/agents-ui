@@ -61,7 +61,7 @@ export function diff(old, now, lay, t, sc) {
       const job = { t0, crates: shown.map(f => f.c.number), leave: t0 + ARRIVE_IN + shown.length * UNLOAD + 500 };
       sc.supplies.push(job);
       shown.forEach(({ c, i }, k) => {
-        const s = slotPos(i), dx = 22 + (k % 3) * 5;
+        const s = slotPos(i, now.backlog.length), dx = 22 + (k % 3) * 5;
         state.porters.push({ ...trip('crew:' + now.project + k, c.number, c, 'backlog', [
           { pts: [[dx, 13], [s.x + 2, 13], [s.x + 2, s.y + 6]], carry: true },
           { pts: [[s.x + 2, s.y + 6], [s.x + 2, 13], [dx, 13]] }]), t0: t0 + ARRIVE_IN + k * UNLOAD, crew: job });
@@ -75,7 +75,7 @@ export function diff(old, now, lay, t, sc) {
     if (!h.issue || (before && before.issue === h.issue)) return;
     const slot = oldSlot(h.issue), lot = lay.lots[i];
     if (slot < 0 || !lot) return;
-    const s = slotPos(Math.min(slot, 39)), out = [...houseToRoad(lot, lay), ...slotFromRoad(s)];
+    const s = slotPos(Math.min(slot, 39), old.backlog.length), out = [...houseToRoad(lot, lay), ...slotFromRoad(s)];
     said.push(`#${h.issue} claimed`);
     enqueue(sc, t, trip(h.id, h.issue, old.backlog[slot], 'house', [{ pts: out }, { pts: back(out), carry: true }]));
   });
@@ -126,7 +126,7 @@ export function diff(old, now, lay, t, sc) {
     if (oldBoard.has(n) || gated.has(n)) return;
     const slot = oldSlot(n), hi = oldHouse(n);
     let steps = null, seed = 'porter:' + n;
-    if (slot >= 0) { const s = slotPos(Math.min(slot, 39)); steps = [{ pts: [...back(slotFromRoad(s)), ...boardFromRoad(lay)], carry: true }]; }
+    if (slot >= 0) { const s = slotPos(Math.min(slot, 39), old.backlog.length); steps = [{ pts: [...back(slotFromRoad(s)), ...boardFromRoad(lay)], carry: true }]; }
     else if (hi >= 0 && lotOf(old.houses[hi].id)) {
       const lot = lotOf(old.houses[hi].id), there = [...houseToRoad(lot, lay), ...boardFromRoad(lay)];
       seed = old.houses[hi].id; steps = [{ pts: there, carry: true }, { pts: back(there) }];
@@ -138,7 +138,7 @@ export function diff(old, now, lay, t, sc) {
   now.backlog.forEach((c, i) => {
     if (!oldBoard.has(c.number) || i >= 40) return;
     said.push(`#${c.number} back in the backlog`);
-    enqueue(sc, t, trip('porter:' + c.number, c.number, c, 'backlog', [{ pts: [...back(boardFromRoad(lay)), ...slotFromRoad(slotPos(i))], carry: true }]));
+    enqueue(sc, t, trip('porter:' + c.number, c.number, c, 'backlog', [{ pts: [...back(boardFromRoad(lay)), ...slotFromRoad(slotPos(i, now.backlog.length))], carry: true }]));
   });
   // Landed: the worker carries the sealed crate to the quay, then walks home.
   const oldQuay = new Set(old.pipeline.quay);
@@ -158,7 +158,7 @@ export function diff(old, now, lay, t, sc) {
   // Closed without landing: carried off the map's west edge.
   const placed = n => now.backlog.some(c => c.number === n) || now.board.some(b => b.number === n) || now.houses.some(h => h.issue === n)
     || now.pipeline.quay.includes(n) || now.pipeline.stops.some(st => st.issues.includes(n)) || gateEntries(now).some(e => e.issue === n);
-  [...old.backlog.map((c, i) => ({ n: c.number, c, s: i < 40 ? slotPos(i) : null })), ...old.board.map(b => ({ n: b.number, c: b, board: true }))].forEach(o => {
+  [...old.backlog.map((c, i) => ({ n: c.number, c, s: i < 40 ? slotPos(i, old.backlog.length) : null })), ...old.board.map(b => ({ n: b.number, c: b, board: true }))].forEach(o => {
     if (placed(o.n) || (!o.s && !o.board)) return;
     const from = o.board ? back(boardFromRoad(lay)) : back(slotFromRoad(o.s));
     said.push(`#${o.n} closed`);

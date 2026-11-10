@@ -4,15 +4,16 @@
  * its own tables (KINDCOL, ICONS, STATE, SPECIALTIES, NOTECOL), and the rows
  * are listed from those tables, so the key cannot drift from the map. */
 import { state } from './state.js';
-import { KINDCOL, NOTECOL, P, R, SPECIALTIES } from './palette.js';
+import { FEATURE_COLS, KINDCOL, NOTECOL, P, PRIOCOL, R, SPECIALTIES } from './palette.js';
 import { cobwebs, pennant } from './sprites/houses.js';
-import { ICONS, bubble, roped } from './scenery.js';
+import { ICONS, bubble, glint, ribbon, roped, tether } from './scenery.js';
 import { person } from './people.js';
 import { fogCol } from './features.js';
 
 const KIND_WORDS = { bug: 'Bug', feature: 'Feature', tests: 'Tests', security: 'Security', research: 'Research', perf: 'Performance',
   refactor: 'Refactor', docs: 'Docs', chores: 'Chore', workshop: 'Finished work, sealed (quay and stages)', cottage: 'Other work' };
 const ICON_WORDS = { blocked: 'Blocked: waiting on you', done: 'Done', unknown: 'Unknown: no word from it', stalled: 'Stalled: no progress' };
+const PRIO_WORDS = { P0: 'P0: urgent', P1: 'P1: high', P2: 'P2: normal', P3: 'P3: low' };
 const PENNANT_WORDS = { P0: 'P0: urgent (waves)', P1: 'P1: high', P2: 'P2: normal' };
 function swatch(paint, size = 14) {
   const c = document.createElement('canvas');
@@ -25,9 +26,16 @@ export function renderLegend() {
   document.getElementById('legend-title').textContent = `Key · ${state.T.name}`;
   const groups = [
     [`Crates at the ${L.docks}: the kind of work`, Object.keys(KINDCOL).map(k => [c => state.T.crate(c, 1, 1, k, null, k === 'workshop'), KIND_WORDS[k] || k, 7])],
-    ['Priority', [[c => state.T.crate(c, 1, 1, 'feature', 'P0'), 'Red mark on a crate: P0', 7],
+    ['Priority', [...Object.keys(PRIOCOL).map(p => [c => state.T.crate(c, 1, 1, 'feature', p), `Mark on a crate: ${PRIO_WORDS[p]}`, 7]),
+      [c => state.T.crate(c, 1, 1, 'feature', null), 'No mark: not prioritised', 7],
       ...Object.keys(PENNANT_WORDS).map(p => [c => pennant(c, 5, 7, p, 0), `Pennant over a house: ${PENNANT_WORDS[p]}`]),
       [() => {}, 'No pennant: P3']]],
+    [`Ready or waiting, at the ${L.docks}`, [
+      [c => { state.T.crate(c, 2, 2, 'feature', null); glint(c, 2, 2, 0); }, 'Glinting crate: ready to pick up', 8],
+      [c => { state.T.crate(c, 1, 1, 'feature', null); ribbon(c, 1, 1, FEATURE_COLS[0]); }, "Crate edged in a flag's colour: part of that feature (its epic)", 7],
+      [c => { tether(c, { x: 1, y: 8 }, { x: 8, y: 1 }); state.T.crate(c, 8, 1, 'feature', null); state.T.crate(c, 1, 8, 'feature', null); roped(c, 1, 8); }, 'Rope between crates: the roped one waits on the other', 14],
+      [() => {}, 'Order: highest priority first; a crate stands after what it waits on, so a chain reads as one run'],
+      [() => {}, `#N under a crate: its issue. Blocked issues are notes on the ${L.board}`]]],
     ['Bubbles over people and stops', Object.keys(ICONS).map(k => [c => bubble(c, 2, 1, k), ICON_WORDS[k] || k])],
     ['Other marks', [[c => { state.T.crate(c, 1, 1, 'feature', null); roped(c, 1, 1); }, 'Roped crate: waits on another issue ("Depends on")', 7], [c => cobwebs(c, -1, -6), 'Cobwebs on a house: stalled'],
       [c => { R(c, 0, 0, 14, 14, fogCol(state.T)); bubble(c, 2, 1, 'unknown'); }, 'Grey fog over a stage: nothing says what runs there (no Deployment, no branch)'],

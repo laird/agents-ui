@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use super::framework::{Task, TaskState, task_number};
-use super::village::{HouseStatus, Pipeline, Promotion, StopSource, VillageSnapshot};
+use super::village::{Crate, HouseStatus, Pipeline, Promotion, StopSource, VillageSnapshot};
 use crate::model::issue::{Child, FeatureLink, LinkedBy};
 
 /// Where a subtask is in the village.
@@ -187,6 +187,16 @@ fn follow(village: &VillageSnapshot, links: &[FeatureLink]) -> Vec<Feature> {
         .collect()
 }
 
+/// Fill each backlog crate's `parent` from the feature links: the feature
+/// whose subtasks include it. A crate that already names its parent (a
+/// report task's `parent`) keeps it.
+pub fn attach_parents(backlog: &mut [Crate], links: &[FeatureLink]) {
+    let parent_of: HashMap<u32, u32> = links.iter().flat_map(|l| l.children.iter().map(move |c| (c.number, l.parent))).collect();
+    for c in backlog.iter_mut().filter(|c| c.parent.is_none()) {
+        c.parent = parent_of.get(&c.number).copied();
+    }
+}
+
 /// Feature links from a report's tasks: every task naming a `parent` is one
 /// of that parent's subtasks. The parent's title and url come from its own
 /// task when the report has it.
@@ -231,6 +241,18 @@ pub fn links_from_tasks(tasks: &[Task]) -> Vec<FeatureLink> {
 mod tests {
     use super::*;
     use crate::web::village::{House, HouseKind, Note, Stop};
+
+    #[test]
+    fn backlog_crates_learn_their_feature() {
+        let crate_n = |number: u32, parent: Option<u32>| Crate {
+            number, title: String::new(), kind: HouseKind::Feature, priority: None, url: None, waits_on: vec![], parent,
+        };
+        let mut backlog = vec![crate_n(461, None), crate_n(462, Some(7)), crate_n(500, None)];
+        attach_parents(&mut backlog, &[link(vec![child(461), child(462)])]);
+        assert_eq!(backlog[0].parent, Some(460), "a subtask of #460");
+        assert_eq!(backlog[1].parent, Some(7), "a parent the report named is kept");
+        assert_eq!(backlog[2].parent, None, "not a subtask of anything");
+    }
 
     fn child(number: u32) -> Child {
         Child { number, title: format!("Sub {number}"), url: String::new(), closed: false, not_planned: false }

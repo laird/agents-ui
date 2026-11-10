@@ -6,12 +6,13 @@
 import { state } from './state.js';
 import { P, R, blink, shadow, subHat, waveFrame } from './palette.js';
 import { cobwebs, pennant, puffs } from './sprites/houses.js';
-import { ICONS, badge, bubble, roped } from './scenery.js';
+import { ICONS, badge, bubble, glint, ribbon, roped, tether } from './scenery.js';
 import { QUIET_ACTIONS, actionSign, drawAction, person, wander } from './people.js';
 import { registerHit, registerLabels, registerLayer, tap } from './registry.js';
 import { LW, slotPos } from './layout.js';
 import { ARRIVE_IN, SAIL_OUT, UNLOAD, pickup, tripAt } from './trips.js';
 import { workOf } from './ship.js';
+import { crateState, whereWaitedOn } from './docks.js';
 import { houseName, issueItems, issueLabel, issueOf, link, repoUrl, sessionOf } from './dialogs.js';
 
 /* Where a house's sub-agents stand: two beside the door, then a row on the
@@ -65,11 +66,19 @@ registerLayer({ z: 50, draw(c, { v, lay, bound }, t) {
     drawAction(c, px, 39 + bob, sa.action, t + k * 131);
   });
 } });
-/* The backlog's crates at the docks, roped when they wait on another issue. */
-registerLayer({ z: 60, draw(c, { v, bound }) {
-  v.backlog.slice(0, 40).forEach((cr, i) => {
-    if (bound.has(cr.number)) return;
-    const s = slotPos(i); state.T.crate(c, s.x, s.y, cr.kind, cr.priority); if ((cr.waits_on || []).length) roped(c, s.x, s.y); tap(s.x, s.y, 5, 5, { kind: 'crate', n: cr.number, at: 'backlog' });
+/* The backlog's crates at the docks, in dock order (docks.js: prerequisites
+ * first, a chain as one run). Each is ribboned in its epic's flag colour,
+ * roped and tethered to what it waits on, or, ready to pick up, glinting. */
+const epicCols = lay => new Map((lay.banners || []).map(g => [g.f.number, g.col]));
+registerLayer({ z: 60, draw(c, { v, lay, bound }, t) {
+  const docked = v.backlog.slice(0, 40).map((cr, i) => ({ cr, s: slotPos(i, v.backlog.length) })).filter(({ cr }) => !bound.has(cr.number));
+  const spot = new Map(docked.map(({ cr, s }) => [cr.number, s])), cols = epicCols(lay);
+  docked.forEach(({ cr, s }) => (cr.waits_on || []).forEach(d => { if (spot.has(d)) tether(c, s, spot.get(d)); }));
+  docked.forEach(({ cr, s }) => {
+    state.T.crate(c, s.x, s.y, cr.kind, cr.priority);
+    if (cols.has(cr.parent)) ribbon(c, s.x, s.y, cols.get(cr.parent));
+    if ((cr.waits_on || []).length) roped(c, s.x, s.y); else if (!state.reduce) glint(c, s.x, s.y, t + cr.number * 263);
+    tap(s.x, s.y, 5, 5, { kind: 'crate', n: cr.number, at: 'backlog' });
   });
 } });
 /* A house per worktree: its agent at the door, its crew and sub-agents, the
@@ -164,14 +173,20 @@ function sinceWords(since) {
   const ago = m < 1 ? 'just now' : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
   return `${new Date(t).toTimeString().slice(0, 5)} (${ago})`;
 }
-/* " · waits on #361, #362" for a backlog issue with open dependencies. */
-function waitsWords(v, n) {
-  const w = (v.backlog.find(c => c.number === n) || {}).waits_on || [];
-  return w.length ? ` · waits on ${w.map(d => '#' + d).join(', ')}` : '';
+/* A backlog crate's state: "Ready to pick up", or what it waits on and
+ * where that is ("Waits on #395 (being worked on at wt-2)"). */
+function stateWords(v, cr) {
+  if (crateState(cr) === 'ready') return 'Ready to pick up';
+  return 'Waits on ' + cr.waits_on.map(d => { const w = whereWaitedOn(v, d, houseName); return `#${d}${w ? ` (${w})` : ''}`; }).join(', ');
+}
+/* "#395 Saved carts" for a crate's epic, from its feature or the issue itself. */
+function epicOf(v, n) {
+  const f = (v.features || []).find(f => f.number === n), it = issueOf(v, n);
+  return { words: `#${n} ${(f && f.title) || it.title || ''}`.trim(), url: (f && f.url) || it.url };
 }
 function crateWhere(o, v, theme) {
   const stops = v.pipeline.stops;
-  if (o.at === 'backlog') return `waiting at the ${theme.labels.docks.toLowerCase()}${waitsWords(v, o.n)}`;
+  if (o.at === 'backlog') return `waiting at the ${theme.labels.docks.toLowerCase()}`;
   if (o.at === 'quay') return `landed on ${v.pipeline.integration || 'the integration branch'}, at the ${theme.labels.quay.toLowerCase()}`;
   if (o.at === 'ship') return `on the ${theme.labels.ship.toLowerCase()}, waiting for the next release`;
   if (o.at === 'env') return `runs in ${stops[o.i] ? stops[o.i].name : 'an environment'}`;
@@ -191,7 +206,8 @@ function subWords(sa, v) {
     (sa.status === 'blocked' ? ' · waiting on you' : sa.action ? ` · ${sa.action}` : '');
 }
 const isRuntime = v => v.plane === 'runtime';
-const docks = (o, sc, theme) => ({ title: theme.labels.docks, line: isRuntime(sc.v) ? 'Waiting work' : 'The backlog, highest priority first', items: sc.v.backlog });
+const docks = (o, sc, theme) => ({ title: theme.labels.docks, line: isRuntime(sc.v) ? 'Waiting work' : 'The backlog, highest priority first, each issue after what it waits on',
+  items: sc.v.backlog.map(c => (c.parent ? { ...c, label: `epic #${c.parent}` } : c)) });
 registerHit({ kind: 'river', key: false, dialog: docks });
 registerHit({ kind: 'docks', dialog: docks });
 registerHit({ kind: 'board', dialog: (o, sc, theme) =>
@@ -252,10 +268,14 @@ registerHit({ kind: 'supply', key: false, dialog(o, sc, theme) {
   return { title: `Supply ${{ Ship: 'boat', Rocket: 'truck', Shuttle: 'shuttle' }[theme.labels.ship] || 'boat'}`, line: `Bringing ${o.n} new ${o.n === 1 ? work : work + 's'} to the ${theme.labels.docks.toLowerCase()}`,
     items: issueItems(v, o.ns || []), links: [] };
 } });
-registerHit({ kind: 'crate', dialog(o, sc, theme) {
-  const v = sc.v, it = issueOf(v, o.n);
+/* A crate says its priority, its epic and, at the docks, whether it is ready
+ * or what it waits on. Hovering over one opens this too (`hover`). */
+registerHit({ kind: 'crate', hover: true, dialog(o, sc, theme) {
+  const v = sc.v, it = issueOf(v, o.n), cr = o.at === 'backlog' ? v.backlog.find(c => c.number === o.n) : null;
+  const epic = cr && cr.parent ? epicOf(v, cr.parent) : null;
   return { title: `#${o.n} ${it.title}`.trim(), line: crateWhere(o, v, theme),
-    meta: [it.priority ? `Priority: ${it.priority}` : null], links: [link(issueLabel(o.n), it.url)] };
+    meta: [`Priority: ${it.priority || 'none'}`, epic ? `Epic: ${epic.words}` : null, cr ? stateWords(v, cr) : null],
+    links: [link(issueLabel(o.n), it.url), epic ? link(`Epic #${cr.parent}`, epic.url) : null] };
 } });
 
 /* ---------- Labels ----------
@@ -266,6 +286,11 @@ registerLabels((sc, theme) => {
   (sc.hits || []).filter(h => h.o.kind === 'board').forEach(h => out.push({ avoid: h }));
   const add = (x, y, anchor, text, sub, cls, width) => out.push({ x, y, anchor, text, sub, cls, width });
   add(34, 51, 'top', theme.labels.docks, runtime ? 'waiting' : `backlog · ${v.backlog.length}`);
+  // Each crate's number just under it, fixed to its crate (never moved);
+  // smaller when the docks are packed 6 pixels apart (slotPos).
+  const roomy = v.backlog.length <= 24, size = roomy ? 3 : 2.2;
+  (sc.hits || []).filter(h => h.o.kind === 'crate' && h.o.at === 'backlog')
+    .forEach(h => out.push({ x: h.x + 2.5, y: h.y + (roomy ? 6.5 : 6), anchor: 'center', text: '#' + h.o.n, short: String(h.o.n), cls: 'num', fixed: true, size }));
   add(lay.hallX + 16, 43, 'top', theme.labels.hall, 'manager');
   add(lay.hallX + 51, 45, 'top', theme.labels.board, runtime ? 'failed' : `blocked · ${v.board.length}`);
   // A house label may be no wider than its lot, so neighbours never overlap.
