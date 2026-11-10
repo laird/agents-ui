@@ -16,6 +16,7 @@ import { badge, badgeSize } from './scenery.js';
 import { registerHit, registerLabels, registerLayer, tap } from './registry.js';
 import { porterPos, shownScenes } from './layout.js';
 import { toast } from './panels.js';
+import { canalNames } from './envlabels.js';
 import { isSha, issueItems, link, repoUrl } from './dialogs.js';
 
 export const SAIL = 4200, ARRIVE = 3200, GATE_OPEN = 2400, SHIP_CAP = 6;
@@ -236,15 +237,16 @@ registerHit({ kind: 'canal', key: false, dialog(o, sc) {
  * towers (the lighthouse, the masts downtown and in the future), which each
  * theme lists, and of the ship (or rocket, or shuttle) where it waits. */
 registerLabels((sc, theme) => {
-  const v = sc.v, lay = sc.L, runtime = v.plane === 'runtime', stops = v.pipeline.stops, out = [];
+  const v = sc.v, lay = sc.L, runtime = v.plane === 'runtime', out = [];
   const at = ([dx, dy, w, h]) => ({ avoid: { x: lay.castleX + dx, y: lay.canalY + dy, w, h } });
   out.push(...theme.towers.map(at), at(theme.hull));
   const add = (x, y, anchor, text, sub) => out.push({ x, y, anchor, text, sub });
   if (!runtime) add(lay.roadX - 7, lay.quayY + 4, 'right', theme.labels.quay, `→ ${v.pipeline.integration || 'integration'}`);
-  stops.slice(0, -1).forEach((s, i) => add(lay.lockStart + i * 34 + 3, lay.canalY - 21, 'bottom', s.name));
-  const last = stops[stops.length - 1];
+  // A lock whose stop is a village in the environment row is named there, once (#440).
+  const names = canalNames(v);
+  names.locks.forEach((name, i) => { if (name) add(lay.lockStart + i * 34 + 3, lay.canalY - 21, 'bottom', name); });
   // Over the harbour wall, left of the lighthouse.
-  add(lay.castleX + 10, lay.canalY - 22, 'bottom', theme.labels.castle, last ? last.name : null);
+  add(lay.castleX + 10, lay.canalY - 22, 'bottom', theme.labels.castle, names.castle);
   return out;
 }, 20);
 

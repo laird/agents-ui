@@ -276,7 +276,7 @@ function whereWords(s, v, f) {
     default: return s.where || '';
   }
 }
-function showFeature(f, v) {
+export function showFeature(f, v) {
   const subs = f.subtasks || [], url = n => (f.url || '').replace(/\/issues\/\d+$/, '/issues/' + n);
   const issueLink = (n, cls) => f.url ? `<a href="${esc(url(n))}" target="_blank" rel="noopener"${cls ? ` class="${cls}"` : ''}>#${n}</a>` : `<span${cls ? ` class="${cls}"` : ''}>#${n}</span>`;
   document.getElementById('d-title').textContent = `#${f.number} ${f.title} · feature`;

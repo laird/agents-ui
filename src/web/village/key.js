@@ -41,7 +41,8 @@ export function renderLegend() {
     ['Other marks', [[c => { person(c, 1, 6, 'key:asleep', 'sit', { status: 'asleep' }); zzz(c, 9, 9, 0); }, 'Sitting on the doorstep under "zzz": idle, nothing claimed, waiting for work', 18],
       [c => { state.T.crate(c, 1, 1, 'feature', null); roped(c, 1, 1); }, 'Roped crate: waits on another issue ("Depends on")', 7], [c => cobwebs(c, -1, -6), 'Cobwebs on a house: stalled'],
       [c => { R(c, 0, 0, 14, 14, fogCol(state.T)); bubble(c, 2, 1, 'unknown'); }, 'Grey fog over a stage: nothing says what runs there (no Deployment, no branch)'],
-      [c => { R(c, 4, 2, 1, 10, P.woodD); R(c, 5, 2, 6, 4, P.p0); }, 'Red flag on a warehouse or a ship: the newest deployment failed, and the ship turned back']]],
+      [c => { R(c, 4, 2, 1, 10, P.woodD); R(c, 5, 2, 6, 4, P.p0); }, 'Red flag on a warehouse or a ship: the newest deployment failed, and the ship turned back'],
+      [c => { state.T.B.cottage(c, 3, 5, 'idle', 0); R(c, 5, 0, 1, 7, P.woodD); R(c, 6, 0, 4, 3, FEATURE_COLS[0]); }, "House in an environment village: a feature it runs, flying that feature's colour (+N: more features)", 22]]],
     ['Sub-agent accents: their specialty', [...SPECIALTIES.map(([name, kind]) => [c => person(c, 3, 1, 'key:' + name, 'stand', { accent: KINDCOL[kind], sub: true }), name]),
       [c => person(c, 3, 1, 'key:other', 'stand', { accent: P.white, sub: true }), 'any other']]],
     [`Notes on the ${L.board}`, Object.keys(NOTECOL).map(k => [c => { R(c, 1, 1, 5, 5, P.o); R(c, 2, 2, 3, 3, NOTECOL[k]); }, k.replace(/-/g, ' '), 7])]

@@ -1484,7 +1484,7 @@ mod tests {
         }
         // The features and the modules they lean on, two imports or more away included.
         for module in [
-            "registry.js", "layout.js", "lifecycle.js", "docks.js", "trips.js", "ship.js", "gatehouse.js", "weather.js", "buildweather.js", "bounces.js", "bouncemarks.js", "features.js", "envrow.js", "voyages.js", "worlds.js", "panels.js", "dialogs.js",
+            "registry.js", "layout.js", "lifecycle.js", "docks.js", "trips.js", "ship.js", "gatehouse.js", "weather.js", "buildweather.js", "bounces.js", "bouncemarks.js", "features.js", "envrow.js", "envlabels.js", "voyages.js", "worlds.js", "panels.js", "dialogs.js",
             "labels.js", "houselabel.js", "key.js", "data.js", "state.js", "palette.js", "sprites/houses.js", "scenery.js", "people.js",
             "themes/registry.js", "themes/medieval.js", "themes/modern.js", "themes/future.js", "saver.js", "screensaver.js", "rest.js",
         ] {
@@ -2101,8 +2101,8 @@ mod tests {
     fn village_html_draws_the_environment_row() {
         let body = &village_source();
         // The row: every environment of a development village, the green gate kept as a lock.
-        assert!(body.contains("return v.pipeline.stops.map((s, i) => ({ s, i })).filter(({ s }) => s.kind !== 'gate');"));
-        assert!(body.contains("if (v.plane === 'runtime') return [];"));
+        assert!(body.contains("return v.pipeline.stops.map((s, i) => ({ s, i })).filter(({ s }) => inRow(v, s));"));
+        assert!(body.contains("export const inRow = (v, s) => !!v && v.plane !== 'runtime' && !!s && s.kind !== 'gate';"));
         assert!(body.contains("const envs = stops.map(({ s, i }, k, all) => {"));
         assert!(body.contains("rank: k === all.length - 1 ? 'capital' : 'town', platform };"), "production is the right-most village, the capital");
         assert!(body.contains("ex += w + ENV_GAP;"));
@@ -2116,7 +2116,8 @@ mod tests {
         assert!(body.contains("export const ASPECT = 2;"));
         assert!(body.contains("const L = place(v, slot, per), off = Math.abs(Math.log(L.W / L.H / ASPECT));"));
         // A village's houses stand beside its warehouse, so the row stays low.
-        assert!(body.contains("state.T.B.cottage(c, x + SHED.dx + SHED.w + 4 + k * 18, cy - 30, 'idle', t);"));
+        assert!(body.contains("const hx = x + SHED.dx + SHED.w + 4 + k * 18;"));
+        assert!(body.contains("state.T.B.cottage(c, hx, cy - 30, 'idle', t);"));
         // Each village: its sign, its warehouse of cargo grouped by feature, its health.
         assert!(body.contains("export const versionOf = s => s.tag || (s.sha ? String(s.sha).slice(0, 7) : null);"));
         assert!(body.contains("const k = fs.findIndex(f => (f.subtasks || []).some(s => s.number === n));"));
@@ -2125,6 +2126,14 @@ mod tests {
         assert!(body.contains("if (health === 'failed') {"));
         assert!(body.contains("} else if (health === 'incident') {"));
         assert!(body.contains("if (e.rank === 'capital' && !e.platform) envKeep("));
+        // One label per village, over its warehouse, with its version (#440);
+        // the canal no longer names a stop that has a village, and each house is a feature it runs.
+        assert!(body.contains("return { x: e.x + SHED.dx + SHED.w / 2, y: e.cy - SHED.up - 3, anchor: 'bottom', text, sub, width: e.w - 8 };"));
+        assert!(body.contains("names.locks.forEach((name, i) => { if (name) add(lay.lockStart + i * 34 + 3, lay.canalY - 21, 'bottom', name); });"));
+        assert!(body.contains("add(lay.castleX + 10, lay.canalY - 22, 'bottom', theme.labels.castle, names.castle);"));
+        assert!(body.contains("const { houses, more } = envHouses(cargoGroups(v, s.cargo || []), e.rank);"));
+        assert!(body.contains("registerHit({ kind: 'envhouse', act(o, sc) {"));
+        assert!(!body.contains("anchor: 'top', text: e.s.name"), "the old label under the river is gone");
         // The sign's dialog: version and deploy time, the Release and Deployments, and the cargo.
         assert!(body.contains("title: `${s.name} · environment village`, line: ver ? `Runs ${ver}${when ? ', deployed ' + when : ''}` : 'Nothing says what runs here',"));
         assert!(body.contains("deploys = s.deployment_url || (repo && s.source === 'deployment' ? `${repo}/deployments/${encodeURIComponent(s.name)}` : null);"));
@@ -2155,7 +2164,7 @@ mod tests {
         assert!(body.contains("return { row: true, e, W: Ds.L.W, H: Ds.L.H, devTop: 0, dx: 0, px: e.x + ((e.w - Ps.L.W) >> 1), py, srcY: py + Ps.L.top };"));
         assert!(body.contains("return [[Ds, g.dx, g.devTop], [Ps, g.px, g.py]];"));
         // Its workloads are the slot's houses; its sign and warehouse stay under it.
-        assert!(body.contains("const houses = e.platform ? 0 : e.rank === 'capital' ? 3 : 2;"));
+        assert!(body.contains("if (!e.platform) {\n      const { houses, more } = envHouses("));
         assert!(body.contains("signY = cy - 30;"));
         // Incidents float down to the row's river, along it to the left edge and up to the dev docks.
         assert!(body.contains("const pts = g.row ? [[ox, oy], [rx + 7, oy], [rx + 7, rowY], [3, rowY], [3, ry], [g.dx + 30, ry]]"));

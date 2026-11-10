@@ -6,6 +6,7 @@ import { state } from './state.js';
 import { featureColours, hash, shadow } from './palette.js';
 import { THEMES } from './themes/registry.js';
 import { registerLayer } from './registry.js';
+import { inRow } from './envlabels.js';
 
 export const cv = document.getElementById('map'), ctx = cv.getContext('2d');
 
@@ -125,8 +126,7 @@ export const ENV_W = 170, ENV_GAP = 16, ENV_X0 = 24, ENV_ABOVE = 56, ENV_BELOW =
  * development village. The sentinel's green ref stays a lock (a gate), and a
  * runtime's stages stay its pipeline. */
 export function envStops(v) {
-  if (v.plane === 'runtime') return [];
-  return v.pipeline.stops.map((s, i) => ({ s, i })).filter(({ s }) => s.kind !== 'gate');
+  return v.pipeline.stops.map((s, i) => ({ s, i })).filter(({ s }) => inRow(v, s));
 }
 /* Where backlog crate i of n rests at the docks: 8 to a row, 6 pixels
  * apart, room for 40; up to 24 stand 8 apart, 6 to a row, leaving room

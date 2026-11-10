@@ -20,7 +20,8 @@ import { registerHit, registerLayer, tap } from './registry.js';
 import { envStops, porterPos, shownScenes } from './layout.js';
 import { issueItems, isSha, link, repoUrl } from './dialogs.js';
 import { toast } from './panels.js';
-import { agoWords, versionOf, SHED } from './envrow.js';
+import { SHED } from './envrow.js';
+import { agoWords, versionOf } from './envlabels.js';
 
 export const VOYAGE_SAIL = 9000, VOYAGE_UNLOAD = 6000, PLAYED_SAIL = 5000, PLAYED_DOCK = 5000, LOAD_TRIP = 1400, VOYAGE_CAP = 6;
 export const voyageKey = vo => `${vo.to}|${vo.sha}|${vo.state}`;
