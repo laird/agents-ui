@@ -2,6 +2,7 @@
  * The feed: poll /api/village, fold each village into its scene (starting
  * the animations its changes call for), and show the village or world the
  * URL names, in the theme picked. */
+import { buildWords } from './buildweather.js';
 import { state } from './state.js';
 import { THEMES } from './themes/registry.js';
 import { placeOverlays } from './registry.js';
@@ -119,7 +120,13 @@ async function poll() {
     cv.hidden = villages.length === 0;
     if (!villages.length) document.getElementById('empty').textContent = 'No swarms running. Start one from the dashboard or the agents-tui terminal.';
     else select(want.includes('@') && want.split('@')[0] === pick.value ? want : pick.value || names[0]);
-    document.getElementById('status').textContent = 'Live · updated ' + new Date().toLocaleTimeString();
+    // The shown village's build, in words (weather.js draws it).
+    const world = worlds.find(w => w.name === pick.value);
+    const shown = villages.find(v => v.project === (world ? world.dev : pick.value));
+    const build = shown ? buildWords(shown.build) : '';
+    const status = document.getElementById('status');
+    status.textContent = 'Live · updated ' + new Date().toLocaleTimeString() + (build ? ' · ' + build : '');
+    status.classList.toggle('red', !!(shown && shown.build && shown.build.state === 'red'));
     polled(true);
   } catch (e) {
     document.getElementById('status').textContent = "Can't reach agents-tui. Retrying…";

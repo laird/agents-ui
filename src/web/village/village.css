@@ -98,6 +98,9 @@
   .al small { font-weight: 400; color: var(--ink-dim); }
   .alabels.compact small { display: none; }
   .al.num { background: none; border: 0; padding: 0; line-height: 1; letter-spacing: -.04em; color: #f8f8f8; text-shadow: 0 0 2px #000, 0 0 1px #000, 0 0 1px #000; overflow: visible; }
+  /* The BUILD BROKEN sign over the quay (weather.js). */
+  .al.buildsign { color: #fff; background: #c02020; border-color: #ff6060; font-weight: bold; letter-spacing: .06em; }
+  .al.buildsign small { color: #ffe0e0; letter-spacing: 0; font-weight: normal; }
   .al.house { font-size: calc(var(--lf, 11px) - 1px); color: var(--ink); border-color: var(--win-inner); padding: 0 3px; }
   .al.house { white-space: normal; text-align: center; }
   .al.house span { white-space: nowrap; }
@@ -175,3 +178,5 @@
     html:not(.screensaver) .stage { display: block; }
     html:not(.screensaver) .viewport { min-height: 200px; }
   }
+/* A red build says so in the live status too (data.js). */
+#status.red { color: #ff6060; font-weight: bold; }

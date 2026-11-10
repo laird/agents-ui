@@ -55,6 +55,8 @@ const VILLAGE_ASSETS: &[(&str, &str, &str)] = &[
     ("dialogs.js", "text/javascript; charset=utf-8", include_str!("village/dialogs.js")),
     ("labels.js", "text/javascript; charset=utf-8", include_str!("village/labels.js")),
     ("houselabel.js", "text/javascript; charset=utf-8", include_str!("village/houselabel.js")),
+    ("weather.js", "text/javascript; charset=utf-8", include_str!("village/weather.js")),
+    ("buildweather.js", "text/javascript; charset=utf-8", include_str!("village/buildweather.js")),
     ("key.js", "text/javascript; charset=utf-8", include_str!("village/key.js")),
     ("data.js", "text/javascript; charset=utf-8", include_str!("village/data.js")),
     ("saver.js", "text/javascript; charset=utf-8", include_str!("village/saver.js")),
@@ -1477,7 +1479,7 @@ mod tests {
         }
         // The features and the modules they lean on, two imports or more away included.
         for module in [
-            "registry.js", "layout.js", "lifecycle.js", "docks.js", "trips.js", "ship.js", "gatehouse.js", "features.js", "envrow.js", "voyages.js", "worlds.js", "panels.js", "dialogs.js",
+            "registry.js", "layout.js", "lifecycle.js", "docks.js", "trips.js", "ship.js", "gatehouse.js", "weather.js", "buildweather.js", "features.js", "envrow.js", "voyages.js", "worlds.js", "panels.js", "dialogs.js",
             "labels.js", "houselabel.js", "key.js", "data.js", "state.js", "palette.js", "sprites/houses.js", "scenery.js", "people.js",
             "themes/registry.js", "themes/medieval.js", "themes/modern.js", "themes/future.js", "saver.js", "screensaver.js", "rest.js",
         ] {
@@ -2355,7 +2357,7 @@ mod tests {
     fn village_node_tests_pass() {
         let root = env!("CARGO_MANIFEST_DIR");
         let dir = format!("{root}/tools/village-tests");
-        let files = ["fitscale.test.mjs", "featurecolours.test.mjs", "docks.test.mjs", "houselabel.test.mjs", "rest.test.mjs"].map(|f| format!("{dir}/{f}"));
+        let files = ["fitscale.test.mjs", "featurecolours.test.mjs", "docks.test.mjs", "houselabel.test.mjs", "rest.test.mjs", "buildweather.test.mjs"].map(|f| format!("{dir}/{f}"));
         match std::process::Command::new("node").arg("--test").args(&files).output() {
             Ok(out) => assert!(out.status.success(), "tools/village-tests failed:\n{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)),
             Err(e) => eprintln!("node is not installed ({e}); skipping tools/village-tests"),

@@ -8,6 +8,7 @@ import './layout.js';
 import './lifecycle.js';
 import './ship.js';
 import './gatehouse.js';
+import './weather.js';
 import './features.js';
 import './envrow.js';
 import './voyages.js';

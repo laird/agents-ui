@@ -110,6 +110,8 @@ const FB = {
 export const FUTURE = {
   name: 'Future',
   pair: 'modern',
+  // A broken build in orbit: a red alert, pulsing, with light bars and roof alarms.
+  weather: { style: 'alert', cloud: '#501828', cloudD: '#300818', rain: '#ff7090', tint: 'rgba(224,24,48,0.20)', alarm: '#ff2040' },
   labels: { docks: 'Cargo bay', board: 'Holo-board', houses: 'Pods', quay: 'Launch rail', castle: 'Spaceport', hall: 'Command dome', ship: 'Shuttle', sails: 'launches', gate: 'Scanner arch' },
   towers: [[2, -58, 9, 50], [13, -55, 18, 45]],
   ground(c, x0, y0, w, h) {

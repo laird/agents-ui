@@ -147,6 +147,8 @@ const MB = {
 export const MODERN = {
   name: 'Modern business district',
   pair: 'medieval',
+  // A broken build downtown: brown smog, and an alarm light on every roof.
+  weather: { style: 'smog', cloud: '#8a7a5c', cloudD: '#5c5240', rain: '#b8b0a0', tint: 'rgba(96,74,40,0.30)', alarm: '#ff3030' },
   labels: { docks: 'Mailroom', board: 'Whiteboard', houses: 'Offices', quay: 'Loading bay', castle: 'Launch pad', hall: 'Headquarters', ship: 'Rocket', sails: 'lifts off', gate: 'QA checkpoint' },
   towers: [[3, -51, 6, 43], [12, -51, 18, 43]],
   ground(c, x0, y0, w, h) {
