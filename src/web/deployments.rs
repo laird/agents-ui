@@ -667,6 +667,31 @@ mod tests {
         );
     }
 
+    /// CI runs these scripts' tests on macOS too (#409), where `bash` is 3.2
+    /// and sort, date and sed are BSD's. What broke there, kept out: an empty
+    /// array as "${a[@]}" under `set -u` (unbound in bash 3.2), `sort -V`,
+    /// `date -I`, and GNU-only flags. The tests' own run on macOS is the proof;
+    /// this catches the known traps on Linux, before CI does.
+    #[test]
+    fn deploy_and_release_scripts_avoid_linux_only_shell() {
+        let scripts = [
+            ("tools/deploy.sh", include_str!("../../tools/deploy.sh")),
+            ("tools/release.sh", include_str!("../../tools/release.sh")),
+            ("tools/install-hooks.sh", include_str!("../../tools/install-hooks.sh")),
+            ("tools/hooks/pre-push", include_str!("../../tools/hooks/pre-push")),
+            ("tools/test_deploy.sh", include_str!("../../tools/test_deploy.sh")),
+            ("tools/test_release.sh", include_str!("../../tools/test_release.sh")),
+        ];
+        for (name, src) in scripts {
+            // Code only, with the safe form of an empty-able array taken out first.
+            let code = src.lines().filter(|l| !l.trim_start().starts_with('#')).collect::<Vec<_>>().join("\n");
+            let code = code.replace("${envs[@]+\"${envs[@]}\"}", "");
+            for trap in ["sort -V", "date -I", "readlink -f", "sed -i", "declare -A", "mapfile", "readarray", "grep -P", "stat -c", "\"${envs[@]}\""] {
+                assert!(!code.contains(trap), "{name} uses `{trap}`, which macOS's bash 3.2 or BSD tools do not have");
+            }
+        }
+    }
+
     /// The served instance is the systemd unit only: no detached-server fallback.
     #[test]
     fn deploy_script_never_starts_a_server_of_its_own() {
