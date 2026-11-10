@@ -1,0 +1,82 @@
+// The 2× art helpers (src/web/village/art2x.js) and the medieval scenery drawn
+// with them (scenery.js, #451): each 2× sprite keeps its 1× footprint.
+//   node --test tools/village-tests/
+// Also run by `cargo test village_node_tests`.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+
+globalThis.window = { matchMedia: () => ({ matches: false }) };
+const { bricks, disc, discRow, dither, planks, px } = await import('../../src/web/village/art2x.js');
+const S = await import('../../src/web/village/scenery.js');
+
+/* A canvas that follows translate/scale, and records each rect in scene pixels. */
+function recorder() {
+  let m = [1, 0, 0, 1, 0, 0]; const stack = [];
+  const c = { rects: [], fillStyle: null,
+    save() { stack.push(m.slice()); }, restore() { m = stack.pop(); },
+    setTransform(a, b, cc, d, e, f) { m = [a, b, cc, d, e, f]; },
+    translate(x, y) { m = [m[0], m[1], m[2], m[3], m[4] + m[0] * x, m[5] + m[3] * y]; },
+    scale(sx, sy) { m = [m[0] * sx, m[1], m[2], m[3] * sy, m[4], m[5]]; },
+    fillRect(x, y, w, h) { this.rects.push({ x: m[4] + m[0] * x, y: m[5] + m[3] * y, w: m[0] * w, h: m[3] * h, col: this.fillStyle }); } };
+  c.box = () => {
+    const xs = c.rects.flatMap(r => [r.x, r.x + r.w]), ys = c.rects.flatMap(r => [r.y, r.y + r.h]);
+    return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+  };
+  return c;
+}
+
+test('a disc row is symmetric and inside its box', () => {
+  for (const size of [6, 11, 22]) for (let j = 0; j < size; j++) {
+    const r = discRow(size, j);
+    if (!r) continue;
+    assert.ok(r[0] >= 0 && r[1] <= size && r[0] < r[1], `row ${j} of ${size}`);
+    assert.equal(r[0], size - r[1], `row ${j} of ${size} is centred`);
+  }
+  assert.ok(discRow(22, 11)[1] - discRow(22, 11)[0] >= 20, 'the middle row spans the box');
+});
+
+test('a disc fills its box with an outline, lit top left and dark bottom right', () => {
+  const c = recorder();
+  disc(c, 2, 0, 22, { outline: 'O', fill: 'F', light: 'L', dark: 'D' });
+  assert.deepEqual(c.box(), [2, 0, 24, 22]);
+  const at = (x, y) => c.rects.filter(r => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h).map(r => r.col).pop();
+  assert.equal(at(13, 0), 'O', 'the top edge is outline');
+  assert.equal(at(2, 11), 'O', 'so is the left edge');
+  assert.equal(at(7, 6), 'L');
+  assert.equal(at(18, 17), 'D');
+  assert.equal(at(13, 11), 'F');
+  assert.ok(c.rects.length < 22 * 5 + 1, 'drawn in runs: at most five per row');
+});
+
+test('dither, planks and bricks stay in their boxes', () => {
+  const c = recorder();
+  dither(c, 10, 10, 20, 8, 2, (x, y) => ((x + y) % 4 === 0 ? 'X' : null));
+  planks(c, 10, 30, 20, 6, 2, 'P');
+  bricks(c, 40, 0, 32, 16, 8, 4, 'M');
+  px(c, 0, 50, 3, 2, 'Q');
+  const inside = (r, [x0, y0, x1, y1]) => r.x >= x0 && r.y >= y0 && r.x + r.w <= x1 && r.y + r.h <= y1;
+  assert.ok(c.rects.filter(r => r.col === 'X').every(r => inside(r, [10, 10, 30, 18])));
+  assert.deepEqual(c.rects.filter(r => r.col === 'P').map(r => r.y), [32, 34], 'seams inside, not on the edges');
+  assert.ok(c.rects.filter(r => r.col === 'M').every(r => inside(r, [40, 0, 72, 16])));
+});
+
+/* Each sprite's box at 1×, in scene pixels: [x0, y0, x1, y1]. The 2× art must not move it. */
+const FOOTPRINTS = {
+  grass: [c => S.grass(c, 0, 0, 120, 80), [0, -1, 120, 80]],
+  path: [c => S.path(c, 0, 0, 120, 6), [0, 0, 120, 6]],
+  'path, upright': [c => S.path(c, 0, 0, 6, 80), [0, 0, 6, 80]],
+  water: [c => S.water(c, 0, 0, 200, 11, 1234, 1), [0, 0, 200, 11]],
+  tree: [c => S.tree(c, 10, 10), [11, 10, 23, 23]],
+  'another tree': [c => S.tree(c, 37, 51), [38, 51, 50, 64]],
+  harbour: [c => S.harbour(c, 50, 100, 1000, -1e9), [50, 41, 88, 100]],
+  boat: [c => S.boat(c, 30, 1000, 2), [30, 0, 59, 11]],
+  ship: [c => S.ship(c, 50, 100, 1000, 0, 0), [52, 83, 74, 112]],
+};
+for (const [name, [draw, box]] of Object.entries(FOOTPRINTS)) {
+  test(`the 2× ${name} keeps its 1× footprint`, () => {
+    const c = recorder();
+    draw(c);
+    assert.deepEqual(c.box(), box);
+    assert.ok(c.rects.some(r => r.w < 1 || r.h < 1 || r.x % 1 || r.y % 1), 'and has detail finer than a scene pixel');
+  });
+}
