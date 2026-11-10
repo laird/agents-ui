@@ -2,7 +2,8 @@
  * A name over each part of the map and under each house, from what each
  * feature registers (registerLabels). Each label is placed in canvas pixels
  * with an anchor: 'top' hangs below the point, 'bottom' sits above it,
- * 'right' ends at it. */
+ * 'right' ends at it. A label with `parts` may wrap between them, never
+ * inside one. */
 import { LABELS, registerOverlay } from './registry.js';
 import { cv, shownScenes, themeAt } from './layout.js';
 import { esc } from './panels.js';
@@ -56,7 +57,7 @@ export function placeLabels() {
       const tight = l.size && l.size * s < 8 && l.short;
       const size = l.size ? `font-size:${Math.max(6, Math.min(16, l.size * s))}px;` : '';
       html += `<div class="al${l.cls ? ' ' + esc(l.cls) : ''}" aria-hidden="true" data-anchor="${l.anchor}"${l.fixed ? ' data-fixed="1"' : ''} style="${size}left:${ox0 + (ox + l.x) * s}px;top:${oy0 + (oy + l.y) * s}px;transform:${shift[l.anchor]};${max}">` +
-        `${esc(tight ? l.short : l.text)}${l.sub ? ` <small>${esc(l.sub)}</small>` : ''}</div>`;
+        `${tight ? esc(l.short) : l.parts ? l.parts.map(p => `<span>${esc(p)}</span>`).join(' ') : esc(l.text)}${l.sub ? ` <small>${esc(l.sub)}</small>` : ''}</div>`;
     }));
   });
   // Redo it when the labels or the sprites to avoid change (a sprite's rect may

@@ -99,6 +99,9 @@
   .alabels.compact small { display: none; }
   .al.num { background: none; border: 0; padding: 0; line-height: 1; letter-spacing: -.04em; color: #f8f8f8; text-shadow: 0 0 2px #000, 0 0 1px #000, 0 0 1px #000; overflow: visible; }
   .al.house { font-size: calc(var(--lf, 11px) - 1px); color: var(--ink); border-color: var(--win-inner); padding: 0 3px; }
+  .al.house { white-space: normal; text-align: center; }
+  .al.house span { white-space: nowrap; }
+  .al.house small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .al.house.working { border-color: #38c848; }
   .al.house.blocked { border-color: #e02828; }
   .legend-btn { background: var(--win-bot); color: var(--gold); border: 2px solid var(--win-inner); border-radius: 50%; font: 700 14px var(--mono); width: 30px; height: 30px; padding: 0; cursor: pointer; }

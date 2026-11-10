@@ -14,6 +14,7 @@ import { ARRIVE_IN, SAIL_OUT, UNLOAD, pickup, tripAt } from './trips.js';
 import { workOf } from './ship.js';
 import { crateState, whereWaitedOn } from './docks.js';
 import { houseName, issueItems, issueLabel, issueOf, link, repoUrl, sessionOf } from './dialogs.js';
+import { houseLabel, managerSub } from './houselabel.js';
 
 /* Where a house's sub-agents stand: two beside the door, then a row on the
  * lane in front. Past that, a "+N" badge counts the rest, so every running
@@ -291,12 +292,14 @@ registerLabels((sc, theme) => {
   const roomy = v.backlog.length <= 24, size = roomy ? 3 : 2.2;
   (sc.hits || []).filter(h => h.o.kind === 'crate' && h.o.at === 'backlog')
     .forEach(h => out.push({ x: h.x + 2.5, y: h.y + (roomy ? 6.5 : 6), anchor: 'center', text: '#' + h.o.n, short: String(h.o.n), cls: 'num', fixed: true, size }));
-  add(lay.hallX + 16, 43, 'top', theme.labels.hall, 'manager');
+  add(lay.hallX + 16, 43, 'top', theme.labels.hall, managerSub(v.manager));
   add(lay.hallX + 51, 45, 'top', theme.labels.board, runtime ? 'failed' : `blocked · ${v.board.length}`);
-  // A house label may be no wider than its lot, so neighbours never overlap.
+  // A house label may be no wider than its lot, so neighbours never overlap:
+  // `wt-1 · #400` wraps after the name, and the title under it is cut short.
   v.houses.forEach((h, i) => {
     const lot = lay.lots[i]; if (!lot) return;
-    add(lot.x + 8, lot.y + 17, 'top', houseName(v, h), null, 'house ' + h.status, LW - 1);
+    const l = houseLabel(houseName(v, h), h, h.issue && (h.issue_title || issueOf(v, h.issue).title));
+    out.push({ x: lot.x + 8, y: lot.y + 17, anchor: 'top', text: l.parts.join(' '), parts: l.parts, sub: l.sub, cls: 'house ' + h.status, width: LW - 1 });
   });
   return out;
 }, 10);

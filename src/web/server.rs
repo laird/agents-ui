@@ -53,6 +53,7 @@ const VILLAGE_ASSETS: &[(&str, &str, &str)] = &[
     ("fitscale.js", "text/javascript; charset=utf-8", include_str!("village/fitscale.js")),
     ("dialogs.js", "text/javascript; charset=utf-8", include_str!("village/dialogs.js")),
     ("labels.js", "text/javascript; charset=utf-8", include_str!("village/labels.js")),
+    ("houselabel.js", "text/javascript; charset=utf-8", include_str!("village/houselabel.js")),
     ("key.js", "text/javascript; charset=utf-8", include_str!("village/key.js")),
     ("data.js", "text/javascript; charset=utf-8", include_str!("village/data.js")),
     ("saver.js", "text/javascript; charset=utf-8", include_str!("village/saver.js")),
@@ -1471,7 +1472,7 @@ mod tests {
         // The features and the modules they lean on, two imports or more away included.
         for module in [
             "registry.js", "layout.js", "lifecycle.js", "docks.js", "trips.js", "ship.js", "gatehouse.js", "features.js", "envrow.js", "voyages.js", "worlds.js", "panels.js", "dialogs.js",
-            "labels.js", "key.js", "data.js", "state.js", "palette.js", "sprites/houses.js", "scenery.js", "people.js",
+            "labels.js", "houselabel.js", "key.js", "data.js", "state.js", "palette.js", "sprites/houses.js", "scenery.js", "people.js",
             "themes/registry.js", "themes/medieval.js", "themes/modern.js", "themes/future.js", "saver.js", "screensaver.js",
         ] {
             assert!(seen.iter().any(|s| s == module), "main.js never loads {module}");
@@ -1764,7 +1765,10 @@ mod tests {
         assert!(body.contains(r#"id="labels-on" checked"#));
         assert!(body.contains("LABELS.forEach(({ fn }) => fn(sc, theme).forEach(l => {"));
         assert!(body.contains("registerOverlay(placeLabels, 20);"));
-        assert!(body.contains("add(lot.x + 8, lot.y + 17, 'top', houseName(v, h), null, 'house ' + h.status, LW - 1);"));
+        assert!(body.contains("const l = houseLabel(houseName(v, h), h, h.issue && (h.issue_title || issueOf(v, h.issue).title));"));
+        assert!(body.contains("parts: l.parts, sub: l.sub, cls: 'house ' + h.status, width: LW - 1"));
+        // The hall names the manager's issue when it has one.
+        assert!(body.contains("theme.labels.hall, managerSub(v.manager)"));
         // Houses are named for their worktree, less the project prefix.
         assert!(body.contains("function houseName(v, h)"));
         assert!(body.contains("base.startsWith(v.project + '-')"));
@@ -2325,7 +2329,7 @@ mod tests {
     fn village_node_tests_pass() {
         let root = env!("CARGO_MANIFEST_DIR");
         let dir = format!("{root}/tools/village-tests");
-        let files = ["fitscale.test.mjs", "featurecolours.test.mjs", "docks.test.mjs"].map(|f| format!("{dir}/{f}"));
+        let files = ["fitscale.test.mjs", "featurecolours.test.mjs", "docks.test.mjs", "houselabel.test.mjs"].map(|f| format!("{dir}/{f}"));
         match std::process::Command::new("node").arg("--test").args(&files).output() {
             Ok(out) => assert!(out.status.success(), "tools/village-tests failed:\n{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)),
             Err(e) => eprintln!("node is not installed ({e}); skipping tools/village-tests"),
