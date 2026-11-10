@@ -24,7 +24,7 @@ agents-tui --headless --web-port 7890 --web-bind 127.0.0.1,tailscale --read-only
 
 Avoid `0.0.0.0`: it also exposes the UI on the LAN, and it has no authentication.
 
-To keep it serving as a systemd user service (Linux):
+To keep it serving as a user service (systemd on Linux, a launchd agent on macOS):
 
 ```bash
 agents-tui service install --web-bind 127.0.0.1,tailscale --source swarms=herdr [--read-only] [--linger]
@@ -58,7 +58,7 @@ Tests are inline `#[cfg(test)]` modules in each source file:
 - `src/web/framework.rs` — state words, task numbers, report → village mapping, autocoder labels, outside adapters (`tools/adapters/example-report.json`)
 - `src/web/source.rs` — `--source` parsing, swarm-source precedence, any village source as a world's platform
 - `src/web/deployments.rs` — newest successful GitHub Deployment per environment, from JSON fixtures
-- `src/service/unit.rs`, `src/service/systemd.rs`, `src/service/mod.rs` — the service unit from the options; `service install|uninstall|status|restart` against a recording runner (command order, re-install diff and restart, dry run, linger, 0.0.0.0 refused, village up and down); argument parsing
+- `src/service/unit.rs`, `src/service/systemd.rs`, `src/service/launchd.rs`, `src/service/mod.rs` — the service unit and plist from the options; `service install|uninstall|status|restart` for systemd and launchd (either tested on any OS) against a recording runner (command order, re-install diff and restart, dry run, linger, 0.0.0.0 refused, village up and down); argument parsing
 - `src/web/gate.rs` — the merge gate from a merge job's `.pid`/`.log`/`.exit` files and labels: every state, slots from `/proc/locks`, test progress, trains, repo ids; bounces (#431): conflicts and failed gates from the job's comments, push retries from the re-sync commits, conflict files remembered from logs, today's tally and hotspots
 - `src/web/build.rs` — the integration branch's build health from recorded check runs (green, red, running, one OS red, none), red-since and blame from workflow runs, failing tests from a job log, the sentinel's state file, a merge job red on the branch alone
 - `src/web/feature.rs` — features from links and the village: where each subtask is, Build/stage counts, not-planned leaves the total, stuck, live, one-day retention, report tasks with a `parent`
