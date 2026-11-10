@@ -86,7 +86,11 @@ for f in "${FILES[@]}"; do [ -f "$SRC/$f" ] || { echo "install.sh: missing $SRC/
 # /etc/profile.d/omarchy.sh, Omarchy's own way of setting both, so nothing
 # here hard-codes where Omarchy lives.
 sq() {  # sq <word>: the word as the shell reads it back, single-quoted only when it must be
-  if [[ $1 =~ ^[A-Za-z0-9_./:=@%+-]+$ ]]; then printf '%s' "$1"; else printf "'%s'" "${1//\'/\'\\\'\'}"; fi
+  # Each ' becomes '\'' by sed, not ${1//...}: bash 3.2 (macOS's) reads the
+  # quotes inside that expansion differently. The x keeps trailing newlines.
+  if [[ $1 =~ ^[A-Za-z0-9_./:=@%+-]+$ ]]; then printf '%s' "$1"; return; fi
+  local q
+  q=$(printf '%sx' "$1" | sed "s/'/'\\\\''/g"); printf "'%s'" "${q%x}"
 }
 remote_cmd() {  # remote_cmd <command...>: the string ssh runs on $HOST
   local words=() a

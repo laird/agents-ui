@@ -7,7 +7,9 @@
 set -uo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
-TMP=$(mktemp -d -t release-test.XXXXXX)
+# Resolved (pwd -P): on macOS mktemp's /var/folders is a link to /private/var,
+# and install-hooks.sh writes the resolved path into the hook.
+TMP=$(cd "$(mktemp -d -t release-test.XXXXXX)" && pwd -P)
 trap 'rm -rf "$TMP"' EXIT
 FAILS=0
 
@@ -44,7 +46,7 @@ rel() {
   while [ $# -gt 0 ] && [ "$1" != -- ]; do envs+=("$1"); shift; done
   [ "${1:-}" = -- ] && shift
   export STUB_LOG="$TMP/$name.log"; : > "$STUB_LOG"
-  OUT=$(cd "$TMP/main" && env HOME="$TMP/home" PATH="$STUBS:$PATH" RELEASE_DATE=2026.11.09 "${envs[@]}" bash tools/release.sh "$@" 2>&1)
+  OUT=$(cd "$TMP/main" && env HOME="$TMP/home" PATH="$STUBS:$PATH" RELEASE_DATE=2026.11.09 ${envs[@]+"${envs[@]}"} bash tools/release.sh "$@" 2>&1)
   RC=$?
   LOG=$(cat "$STUB_LOG")
   CASE=$name
@@ -88,6 +90,13 @@ rel release-fails STUB_CREATE_RC=1 --
 check "exits 1" test "$RC" -eq 1
 check "says gh failed" has "gh release create failed" "$OUT"
 check "records no Deployment for a release that does not exist" hasnt "environment=release" "$LOG"
+
+# The newest release is found by number, not by text: .10 is after .9.
+tag_origin v2026.11.09.9 "$ONE"
+tag_origin v2026.11.09.10 "$TWO"
+rel newest-by-number --
+check "takes .10 as newer than .9" has "is already the newest release (v2026.11.09.10)" "$OUT"
+check "so releases nothing" hasnt "release create" "$LOG"
 
 # ---- the pre-push hook ---------------------------------------------------------
 # A stand-in release.sh that only logs what it was asked to release.

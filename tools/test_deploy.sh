@@ -8,7 +8,9 @@ set -uo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 SCRIPT="$HERE/deploy.sh"
-TMP=$(mktemp -d -t deploy-test.XXXXXX)
+# Resolved (pwd -P): on macOS mktemp's /var/folders is a link to /private/var,
+# and git and the scripts report the resolved path.
+TMP=$(cd "$(mktemp -d -t deploy-test.XXXXXX)" && pwd -P)
 trap 'rm -rf "$TMP"' EXIT
 FAILS=0
 
@@ -71,7 +73,7 @@ run() {
   [ "${1:-}" = -- ] && shift
   export STUB_LOG="$TMP/$name.log"; : > "$STUB_LOG"
   OUT=$(cd "$TMP/work" && env -u AGENTS_TUI_URL -u AGENTS_TUI_WAIT HOME="$TMP/home" PATH="$STUBS:$PATH" \
-    "${envs[@]}" bash tools/deploy.sh "$@" 2>&1)
+    ${envs[@]+"${envs[@]}"} bash tools/deploy.sh "$@" 2>&1)
   RC=$?
   LOG=$(cat "$STUB_LOG")
   CASE=$name
