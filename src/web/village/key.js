@@ -36,24 +36,26 @@ function swatch(paint, size = 14) {
   const g = c.getContext('2d'); prepare(g); paint(g);
   return c;
 }
-/* A crate drawn twice its size, so the priority bands tell apart at key size. */
-const bigCrate = (c, pr) => { c.save(); c.scale(2, 2); state.T.crate(c, 1, 1, 'feature', pr); c.restore(); };
 /* A gatehouse with two tables, one lit. */
 const KEY_GATE = { x0: 0, y: 0, w: 30, rx: 11, rw: 8, tables: [[2, 12], [19, 12]] };
 /* A sprite framed to fit its swatch, whatever the theme draws: drawn once
- * off-screen at the origin to find its bounds, then centred in a square
- * swatch one pixel larger all round. Returns [paint, size]. */
+ * off-screen at the origin, on the detail grid as the map draws it (so a
+ * detail pixel at a sprite's edge counts), to find its bounds in scene
+ * pixels, then centred in a square swatch one pixel larger all round.
+ * Returns [paint, size]. */
 function framed(fn) {
-  const off = document.createElement('canvas'), N = 240;
-  off.width = N; off.height = N;
+  const off = document.createElement('canvas'), N = 240, W = N * DETAIL;
+  off.width = W; off.height = W;
   const g = off.getContext('2d');
-  g.translate(N / 2, N / 2); fn(g);
-  const d = g.getImageData(0, 0, N, N).data;
-  let x0 = N, y0 = N, x1 = -1, y1 = -1;
-  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (d[(y * N + x) * 4 + 3]) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  prepare(g); g.translate(N / 2, N / 2); fn(g);
+  const d = g.getImageData(0, 0, W, W).data;
+  let x0 = W, y0 = W, x1 = -1, y1 = -1;
+  for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) if (d[(y * W + x) * 4 + 3]) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
   if (x1 < 0) return [fn, 14];
-  const w = x1 - x0 + 1, h = y1 - y0 + 1, size = Math.max(w, h) + 2;
-  const dx = 1 + ((size - 2 - w) >> 1) - (x0 - N / 2), dy = 1 + ((size - 2 - h) >> 1) - (y0 - N / 2);
+  // Canvas pixels to whole scene pixels, relative to where the sprite was drawn.
+  const sx0 = Math.floor(x0 / DETAIL) - N / 2, sy0 = Math.floor(y0 / DETAIL) - N / 2;
+  const w = Math.floor(x1 / DETAIL) - N / 2 - sx0 + 1, h = Math.floor(y1 / DETAIL) - N / 2 - sy0 + 1, size = Math.max(w, h) + 2;
+  const dx = 1 + ((size - 2 - w) >> 1) - sx0, dy = 1 + ((size - 2 - h) >> 1) - sy0;
   return [c => { c.save(); c.translate(dx, dy); fn(c); c.restore(); }, size];
 }
 /* Each place's sprite, drawn by the theme at the origin and framed to fit. */
@@ -85,8 +87,10 @@ export function renderLegend() {
     ['places', 'What each part of the map is', placeRows(L).map(r => { const [paint, size] = framed(PLACE_ART[r.id]); return [paint, r.words, size]; })],
     ['states', 'What a worker is doing, trouble loudest', stateRows(FRESH_DONE_MS / 60000).map(r => [STATE_ART[r.id][0], r.words, STATE_ART[r.id][1]])],
     ['kinds', `Crates at the ${L.docks}: the kind of work`, Object.keys(KINDCOL).map(k => [c => state.T.crate(c, 1, 1, k, null, k === 'workshop'), KIND_WORDS[k] || k, 7])],
-    ['priority', 'Priority', [...PRIO_ROWS.map(({ p, words }) => [c => bigCrate(c, p), words, 12]),
-      [c => bigCrate(c, null), 'No band: not prioritised', 12],
+    // A crate at its own size: on the detail grid its priority mark has a
+    // pattern per level (#443), which reads at key size without enlarging it.
+    ['priority', 'Priority', [...PRIO_ROWS.map(({ p, words }) => [c => state.T.crate(c, 1, 1, 'feature', p), words, 7]),
+      [c => state.T.crate(c, 1, 1, 'feature', null), 'No band: not prioritised', 7],
       ...Object.keys(PENNANT_WORDS).map(p => [c => pennant(c, 5, 7, p, 0), `Pennant over a house: ${PENNANT_WORDS[p]}`]),
       [c => state.T.B.feature(c, 3, 5, 'idle', 0), 'No pennant over a house: P3', 22]]],
     ['docks', `Ready or waiting, at the ${L.docks}`, [

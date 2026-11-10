@@ -1,42 +1,11 @@
 /* The Modern business district theme. */
-import { KINDCOL, P, PRIOCOL, R, blink, hash, shadow } from '../palette.js';
+import { KINDCOL, P, PRIOCOL, R, blink, hash } from '../palette.js';
 import { note, prioRun } from '../cvdmarks.js';
 import { puffs } from '../sprites/houses.js';
 import { detail } from '../detail.js';
 import { disc, dither, px } from '../art2x.js';
 import { CRATE_W, CRATE_H, seal, stencil } from '../crates.js';
 import { registerTheme } from './registry.js';
-
-/* Downtown props. MODERN has no `decor` slot, so these are not drawn. */
-export const modernDecor = (c, x, y, k, t) => {
-  switch (k) {
-    case 0: // planter
-      shadow(c, x + 1, y + 6, 7, 1);
-      R(c, x, y + 3, 7, 3, P.o); R(c, x + 1, y + 3, 5, 2, M.concreteL);
-      R(c, x + 1, y, 5, 3, P.o); R(c, x + 2, y, 3, 3, P.leaf); R(c, x + 2, y, 1, 1, P.leafL); break;
-    case 1: // bench
-      shadow(c, x, y + 5, 8, 1);
-      R(c, x, y + 1, 8, 2, P.o); R(c, x + 1, y + 1, 6, 1, M.box); R(c, x, y + 3, 8, 1, M.boxD);
-      R(c, x + 1, y + 4, 1, 1, P.o); R(c, x + 6, y + 4, 1, 1, P.o); break;
-    case 2: // lamp post, lit at night-blue intervals
-      shadow(c, x + 3, y + 7, 3, 1);
-      R(c, x + 2, y + 1, 1, 7, M.steelD); R(c, x + 1, y, 3, 2, P.o); R(c, x + 2, y, 1, 1, blink(t + x * 37, 1800) ? P.lamp : M.glassL); break;
-    case 3: // bike rack
-      for (let i = 0; i < 3; i++) { R(c, x + i * 3, y + 2, 1, 3, M.steel); R(c, x + i * 3, y + 2, 2, 1, M.steel); }
-      R(c, x, y + 5, 8, 1, M.concreteD); break;
-    case 4: // fountain
-      shadow(c, x + 1, y + 6, 8, 1);
-      R(c, x, y + 3, 8, 3, P.o); R(c, x + 1, y + 3, 6, 2, M.concreteL); R(c, x + 2, y + 3, 4, 1, M.glassL);
-      R(c, x + 3, y + 1, 2, 2, M.glassL); if (blink(t + y * 13, 300)) R(c, x + 3, y, 1, 1, P.white); break;
-    default: // hedge strip
-      R(c, x, y + 2, 8, 3, P.o); R(c, x + 1, y + 2, 6, 2, P.leaf); R(c, x + 1, y + 2, 3, 1, P.leafL);
-  }
-};
-/* A low fence downtown. MODERN has no `border` slot, so it is not drawn. */
-export const modernBorder = (c, W, H) => {
-  R(c, 0, H - 2, W, 2, M.concreteD); R(c, 0, 11, 2, H - 11, M.concreteD); R(c, W - 2, 11, 2, H - 11, M.concreteD);
-  for (let x = 2; x < W - 2; x += 6) R(c, x, H - 3, 1, 1, M.steel);
-};
 
 export const M = {
   lawn: '#68b050', lawnD: '#58a040', asphalt: '#505868', asphaltD: '#383c48', dash: '#f0d850',

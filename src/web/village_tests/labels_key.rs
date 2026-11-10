@@ -95,9 +95,12 @@ fn village_html_has_a_key_drawn_from_the_renderer() {
     }
     // No blank swatches: every row draws something.
     assert!(!body.contains("[() => {}, "), "a key row with a blank swatch");
-    // Priority crates drawn twice their size, the P-number first.
-    assert!(body.contains("const bigCrate = (c, pr) => { c.save(); c.scale(2, 2); state.T.crate(c, 1, 1, 'feature', pr); c.restore(); };"));
-    assert!(body.contains("...PRIO_ROWS.map(({ p, words }) => [c => bigCrate(c, p), words, 12])"));
+    // Priority crates at their own size on the detail grid (#423): no 1×
+    // enlargement, the P-number first.
+    assert!(body.contains("...PRIO_ROWS.map(({ p, words }) => [c => state.T.crate(c, 1, 1, 'feature', p), words, 7])"));
+    assert!(!body.contains("bigCrate"), "the key enlarges no sprite: every swatch is on the detail grid");
+    // A place is measured on the detail grid, as the map draws it.
+    assert!(body.contains("prepare(g); g.translate(N / 2, N / 2); fn(g);"));
     // Every kind, icon and pennant the map draws has words in the key.
     for table in ["KINDCOL", "ICONS"] {
         let words = if table == "KINDCOL" { "KIND_WORDS" } else { "ICON_WORDS" };
