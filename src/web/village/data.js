@@ -6,7 +6,7 @@ import { buildWords } from './buildweather.js';
 import { state } from './state.js';
 import { THEMES } from './themes/registry.js';
 import { placeOverlays } from './registry.js';
-import { cv, layout, shownScenes } from './layout.js';
+import { cv, layout, shownScenes, sizeCanvas } from './layout.js';
 import { esc, fit, toast } from './panels.js';
 import { kbox, kbuttons, placeKeys, repoUrl } from './dialogs.js';
 import { diff } from './trips.js';
@@ -85,7 +85,7 @@ function select(want) {
     if (sc.L.slot) sc.L = layout(sc.v); // shown alone, a world's dev village has no platform in its row
     document.getElementById('workflow').textContent = describe(sc.v);
     nameBar(sc.v.project, sc.v);
-    if (cv.width !== sc.L.W || cv.height !== sc.L.H) { cv.width = sc.L.W; cv.height = sc.L.H; }
+    sizeCanvas(sc.L.W, sc.L.H);
   }
   fit();
   if (state.reduce) draw(0);

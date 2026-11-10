@@ -1435,7 +1435,7 @@ mod tests {
         }
         // The features and the modules they lean on, two imports or more away included.
         for module in [
-            "registry.js", "layout.js", "lifecycle.js", "docks.js", "trips.js", "ship.js", "gatehouse.js", "weather.js", "buildweather.js", "bounces.js", "bouncemarks.js", "features.js", "envrow.js", "envlabels.js", "voyages.js", "worlds.js", "panels.js", "dialogs.js",
+            "registry.js", "layout.js", "detail.js", "lifecycle.js", "docks.js", "trips.js", "ship.js", "gatehouse.js", "weather.js", "buildweather.js", "bounces.js", "bouncemarks.js", "features.js", "envrow.js", "envlabels.js", "voyages.js", "worlds.js", "panels.js", "dialogs.js",
             "labels.js", "houselabel.js", "alarms.js", "key.js", "data.js", "state.js", "palette.js", "sprites/houses.js", "scenery.js", "people.js",
             "themes/registry.js", "themes/medieval.js", "themes/modern.js", "themes/future.js", "saver.js", "screensaver.js", "rest.js",
         ] {

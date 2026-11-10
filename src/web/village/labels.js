@@ -5,7 +5,7 @@
  * 'right' ends at it. A label with `parts` may wrap between them, never
  * inside one. */
 import { LABELS, registerOverlay } from './registry.js';
-import { cv, shownScenes, themeAt } from './layout.js';
+import { cv, shownScale, shownScenes, themeAt } from './layout.js';
 import { esc } from './panels.js';
 
 const abox = document.getElementById('alabels'), labelsOn = document.getElementById('labels-on');
@@ -45,7 +45,7 @@ export function placeLabels() {
   abox.hidden = !labelsOn.checked || cv.hidden;
   if (abox.hidden) return;
   const vp = document.getElementById('viewport'), r = cv.getBoundingClientRect(), vr = vp.getBoundingClientRect();
-  const s = r.width / cv.width, ox0 = r.left - vr.left + vp.scrollLeft, oy0 = r.top - vr.top + vp.scrollTop;
+  const s = shownScale(), ox0 = r.left - vr.left + vp.scrollLeft, oy0 = r.top - vr.top + vp.scrollTop;
   const shift = { top: 'translate(-50%, 0)', bottom: 'translate(-50%, -100%)', right: 'translate(-100%, -50%)', center: 'translate(-50%, -50%)' };
   // Text grows with the map; below 3x the subtitles go, so names stay readable.
   abox.style.setProperty('--lf', Math.round(Math.max(9, Math.min(14, 2 + 2.5 * s))) + 'px');

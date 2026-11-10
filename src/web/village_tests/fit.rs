@@ -8,9 +8,13 @@ use super::*;
 fn village_html_fits_the_map_to_the_window() {
     let body = &village_source();
     // The room is the viewport's width and height; a phone gets its own scale (below).
-    assert!(body.contains("return chooseScale(cv.width, cv.height, vp.clientWidth - 8, vp.clientHeight - 8);"));
+    // It is chosen on the scene's size, not the 2× canvas's (#418), so the
+    // finer canvas fills exactly the room the 1× one did.
+    assert!(body.contains("const vp = document.getElementById('viewport'), w = cv.width / DETAIL, h = cv.height / DETAIL;"));
+    assert!(body.contains("return chooseScale(w, h, vp.clientWidth - 8, vp.clientHeight - 8);"));
+    assert!(body.contains("const mapScale = () => zoomedScale() / DETAIL;"), "CSS pixels per canvas pixel");
     // A phone (#437): a readable minimum scale, scrolling sideways, not a sliver.
-    assert!(body.contains("if (!tall) return phoneScale(cv.width, cv.height, vp.clientWidth - 8);"));
+    assert!(body.contains("if (!tall) return phoneScale(w, h, vp.clientWidth - 8);"));
     assert!(body.contains("keepInside([...abox.children], cv.getBoundingClientRect());"), "labels stay inside the map");
     assert!(body.contains(".legend { position: fixed; inset: 0; max-height: none;"), "the key is a full-screen sheet on a phone");
     assert!(body.contains("document.getElementById('legend-close').addEventListener('click'"));

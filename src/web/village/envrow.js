@@ -21,7 +21,7 @@ import { badge, badgeSize, bubble } from './scenery.js';
 import { MODERN, M } from './themes/modern.js';
 import { FUTURE } from './themes/future.js';
 import { registerHit, registerLabels, registerLayer, registerOverlay, tap } from './registry.js';
-import { cv, shownScenes } from './layout.js';
+import { cv, shownScale, shownScenes } from './layout.js';
 import { issueItems, isSha, link, repoUrl } from './dialogs.js';
 import { sourceWords } from './ship.js';
 import { esc } from './panels.js';
@@ -188,7 +188,7 @@ registerLabels(sc => (sc.L.envs || []).map(e => {
  * the dev village up top or one of the row's under it. */
 const miniBox = document.getElementById('minimap'), miniVp = document.getElementById('viewport');
 export function scrollToVillage(x, y = 0) {
-  const s = cv.getBoundingClientRect().width / cv.width;
+  const s = shownScale();
   miniVp.scrollTo({ left: Math.max(0, x * s - 8), top: Math.max(0, y * s - 8), behavior: state.reduce ? 'auto' : 'smooth' });
 }
 function placeMini() {
@@ -198,7 +198,7 @@ function placeMini() {
   const wide = lay && lay.envs.length && (shown.width > miniVp.clientWidth + 2 || shown.height > miniVp.clientHeight + 2);
   miniBox.hidden = !wide;
   if (!wide) { miniBox.innerHTML = ''; return; }
-  const s = shown.width / cv.width, from = miniVp.scrollLeft / s, to = from + miniVp.clientWidth / s;
+  const s = shownScale(), from = miniVp.scrollLeft / s, to = from + miniVp.clientWidth / s;
   const fromY = miniVp.scrollTop / s, toY = fromY + miniVp.clientHeight / s;
   const sailing = (sc.v.pipeline.voyages || []).filter(vo => vo.state === 'sailing' || vo.state === 'loading');
   const boxes = [{ name: sc.v.project, x: 0, y: 0, w: lay.devW, h: lay.devH, health: 'ok' },

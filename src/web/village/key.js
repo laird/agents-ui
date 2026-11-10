@@ -4,6 +4,7 @@
  * its own tables (KINDCOL, ICONS, STATE, SPECIALTIES, NOTECOL), and the rows
  * are listed from those tables, so the key cannot drift from the map. */
 import { state } from './state.js';
+import { DETAIL, prepare } from './detail.js';
 import { FEATURE_COLS, KINDCOL, NOTECOL, P, PRIOCOL, R, SPECIALTIES } from './palette.js';
 import { cobwebs, pennant } from './sprites/houses.js';
 import { ICONS, bubble, glint, ribbon, roped, tether, zzz } from './scenery.js';
@@ -19,8 +20,9 @@ const PRIO_WORDS = { P0: 'P0: urgent', P1: 'P1: high', P2: 'P2: normal', P3: 'P3
 const PENNANT_WORDS = { P0: 'P0: urgent (waves)', P1: 'P1: high', P2: 'P2: normal' };
 function swatch(paint, size = 14) {
   const c = document.createElement('canvas');
-  c.width = size; c.height = size; c.setAttribute('aria-hidden', 'true');
-  const g = c.getContext('2d'); g.imageSmoothingEnabled = false; paint(g);
+  // The map's detail grid, so a 2× sprite keeps its detail in the key too.
+  c.width = size * DETAIL; c.height = size * DETAIL; c.setAttribute('aria-hidden', 'true');
+  const g = c.getContext('2d'); prepare(g); paint(g);
   return c;
 }
 export function renderLegend() {
