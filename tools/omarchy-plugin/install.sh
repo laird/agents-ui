@@ -111,6 +111,38 @@ run_script() {  # run_script <what it does> <script> [args...]
 # Best effort: the shell may not be running (a remote machine at its login screen).
 shell_ok() { run sh -c 'command -v omarchy-shell >/dev/null && omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true'; }
 
+# Enabling races the shell (#416): a plugin just linked or copied is "not
+# known" until the shell has rescanned and registered it, which takes a moment
+# after rescanPlugins returns. So rescan, try to enable, and try again until it
+# takes or the time is up ($AGENTS_UI_ENABLE_TRIES tries,
+# $AGENTS_UI_ENABLE_PAUSE seconds apart: 20 x 0.5 s by default). One script,
+# so over --host it is one ssh, not one per try.
+ENABLE_TRIES=${AGENTS_UI_ENABLE_TRIES:-20}
+ENABLE_PAUSE=${AGENTS_UI_ENABLE_PAUSE:-0.5}
+[[ $ENABLE_TRIES =~ ^[1-9][0-9]*$ ]] || { echo "install.sh: AGENTS_UI_ENABLE_TRIES takes a whole number" >&2; exit 1; }
+[[ $ENABLE_PAUSE =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo "install.sh: AGENTS_UI_ENABLE_PAUSE takes seconds" >&2; exit 1; }
+ENABLE_SCRIPT='id=$1; tries=$2; pause=$3; i=0
+while :; do
+  command -v omarchy-shell >/dev/null && omarchy-shell shell rescanPlugins >/dev/null 2>&1
+  if out=$(omarchy plugin enable "$id" 2>&1); then exit 0; fi
+  i=$((i + 1))
+  [ "$i" -lt "$tries" ] || { printf "%s\n" "$out" >&2; exit 1; }
+  sleep "$pause"
+done'
+enable_plugin() {  # enable_plugin: enable $ID once the shell knows it; false, saying why, if it never does
+  if [ "$DRY_RUN" = true ]; then
+    if [ -n "$HOST" ]; then echo "would run on $HOST: $(remote_cmd sh -c "omarchy plugin enable $ID"), once Omarchy knows the plugin (rescanning, up to $ENABLE_TRIES tries)"
+    else echo "would run: omarchy plugin enable $ID, once Omarchy knows the plugin (rescanning, up to $ENABLE_TRIES tries)"; fi
+    return 0
+  fi
+  local err
+  if err=$(run sh -c "$ENABLE_SCRIPT" sh "$ID" "$ENABLE_TRIES" "$ENABLE_PAUSE" 2>&1); then return 0; fi
+  echo "install.sh: could not enable $ID${HOST:+ on $HOST}${err:+: $err}" >&2
+  echo "install.sh: the plugin is in place; enable it by hand${HOST:+ on $HOST} once Omarchy has picked it up:" >&2
+  echo "  omarchy-shell shell rescanPlugins && omarchy plugin enable $ID" >&2
+  return 1
+}
+
 # The screensaver's settings, and Omarchy's idle settings around it. The
 # original shell.json is kept once, before the first change, so uninstall
 # puts back what was there however often install ran. Only `idle` is put
@@ -180,10 +212,15 @@ fi
 shell_ok
 
 if [ "$SCREENSAVER" = true ]; then
+  # Enable first, and only then turn Omarchy's own screensaver off: a failed
+  # enable must not leave the machine with no screensaver at all (#416).
+  # A service has nowhere to be placed: enabling it is what starts it.
+  if ! enable_plugin; then
+    echo "install.sh: Omarchy's own screensaver and idle settings were left as they were." >&2
+    exit 1
+  fi
   run_script "write ~/.config/agents-ui/screensaver.json (server $SERVER, cycle ${CYCLE}s${DIM:+, dim $DIM}) and set idle.screensaver to 0$([ "$NEVER_SLEEP" = true ] && echo ' and idle.lock to 0') in ~/.config/omarchy/shell.json" \
     "$CONFIGURE" sh "$SERVER" "$CYCLE" "$DIM" "$NEVER_SLEEP"
-  # A service has nowhere to be placed: enabling it is what starts it.
-  run sh -c "omarchy plugin enable $ID"
   echo "Installed $WHAT${HOST:+ on $HOST}: after the idle time Omarchy's screensaver used, the village opens full screen; any input closes it."
   echo "It shows $SERVER. Try it now, from a terminal${HOST:+ on $HOST}: ~/$DEST_REL/village-screensaver force"
   if [ "$NEVER_SLEEP" = true ]; then
@@ -196,7 +233,7 @@ if [ "$SCREENSAVER" = true ]; then
 fi
 
 if [ "$ENABLE" = true ]; then
-  run sh -c "omarchy plugin enable $ID"
+  enable_plugin || exit 1
   echo "Added $WHAT to the bar${HOST:+ on $HOST}."
 else
   echo "Installed $WHAT${HOST:+ on $HOST}. Add it to the bar with:"
