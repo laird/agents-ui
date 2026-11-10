@@ -29,6 +29,7 @@ use serde::Serialize;
 use super::temporal::{TemporalSource, TemporalVillages};
 use super::village::{Pipeline, SwarmVillages, VillageSnapshot};
 use super::world::{WorldConfig, WorldSnapshot, build_world};
+use crate::model::recognize::AgentExplanation;
 use super::{AgentSnapshot, IssueSnapshot, SwarmSnapshot};
 use crate::model::issue::FeatureLink;
 use crate::transport::ServerTransport;
@@ -57,6 +58,44 @@ pub trait SwarmSource: Send + Sync {
     fn name(&self) -> &'static str;
     /// Every swarm this host runs; none when the host isn't there.
     fn swarms<'a>(&'a self, transport: &'a ServerTransport) -> BoxFuture<'a, Vec<SwarmSnapshot>>;
+    /// Every agent this source saw and what became of it: its swarm and
+    /// role, the rule that made a manager, or why it was left out
+    /// (`GET /api/swarms?explain=1`). By default, the agents of the swarms
+    /// it shows; a source that can leave agents out says why.
+    fn explain<'a>(&'a self, transport: &'a ServerTransport) -> BoxFuture<'a, Vec<AgentExplanation>> {
+        Box::pin(async move { explain_snapshots(self.name(), &self.swarms(transport).await) })
+    }
+}
+
+/// The agents of `swarms` as a source that leaves none out explains them.
+pub fn explain_snapshots(source: &str, swarms: &[SwarmSnapshot]) -> Vec<AgentExplanation> {
+    swarms
+        .iter()
+        .flat_map(|s| {
+            let manager = (s.manager.state != "Missing").then_some(&s.manager);
+            manager.into_iter().chain(&s.workers).map(move |a| AgentExplanation {
+                source: source.to_string(),
+                pane: a.tmux_target.clone(),
+                cwd: a.worktree_path.clone(),
+                swarm: Some(s.project_name.clone()),
+                repo: (!s.repo_key.is_empty()).then(|| s.repo_key.clone()),
+                role: Some(a.role.clone()),
+                manager_rule: a.is_manager.then_some(s.manager_by.as_ref()).flatten().map(|p| p.rule),
+                manager_because: a.is_manager.then_some(s.manager_by.as_ref()).flatten().map(|p| p.rule.describe().to_string()),
+                ambiguous: a.is_manager.then_some(s.manager_by.as_ref()).flatten().map(|p| p.ambiguous),
+                ..AgentExplanation::default()
+            })
+        })
+        .collect()
+}
+
+/// Every agent every source saw, in source order.
+pub async fn explain(sources: &[Box<dyn SwarmSource>], transport: &ServerTransport) -> Vec<AgentExplanation> {
+    let mut out = Vec::new();
+    for source in sources {
+        out.extend(source.explain(transport).await);
+    }
+    out
 }
 
 /// The backlog a swarm works from.
