@@ -2,10 +2,11 @@
 //!
 //! herdr gives one entry per agent pane with its `cwd`, `pane_id`, optional
 //! `name` and `agent_status` (`working`, `idle`, `blocked`, `done`,
-//! `unknown`). As in autocoder's own `/monitor-workers`, the `cwd` decides
-//! who is who and names like `wt3-<project>` are only a hint: an agent in a
-//! `<repo>-wt-<N>` worktree is worker N of `<repo>`, and the agent in `<repo>`
-//! itself is the manager. Agents anywhere else aren't part of a swarm.
+//! `unknown`). The `cwd` decides who is who (`model::recognize`): an agent
+//! anywhere inside one of a repo's worktrees belongs to that repo's swarm,
+//! as a worker when the worktree isn't the main checkout and as the manager
+//! when it is. Names like `wt3-<project>` are only a hint. Agents outside
+//! every repo aren't part of a swarm.
 //!
 //! A manager with no workers is still a swarm (one scaled to zero between
 //! waves) when its pane is named `manager-…` or its repo holds an autocoder
@@ -17,13 +18,14 @@
 //! herdr doesn't know issues, so a worker's issue comes from its branch
 //! (`feature/issue-412`, `fix/412-crash`).
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::path::{Path, PathBuf};
+use std::collections::{BTreeSet, HashMap};
+use std::path::PathBuf;
 
 use futures::future::BoxFuture;
 use serde_json::Value;
 
 use super::source::SwarmSource;
+use crate::model::recognize::{AgentFact, RepoFacts, canonical, gather, recognize};
 use super::{AgentSnapshot, SwarmSnapshot};
 use crate::transport::ServerTransport;
 
@@ -92,19 +94,6 @@ pub fn parse_agents(json: &str) -> Vec<HerdrAgent> {
         .unwrap_or_default()
 }
 
-/// `/src/repo-wt-3` → (`/src/repo`, Some(3)); `/src/repo` → (`/src/repo`, None).
-pub fn place(cwd: &str) -> (PathBuf, Option<u32>) {
-    let path = Path::new(cwd.trim_end_matches('/'));
-    let base = path.file_name().and_then(|b| b.to_str()).unwrap_or_default();
-    if let Some((repo, n)) = base.rsplit_once("-wt-")
-        && let Ok(n) = n.parse::<u32>()
-        && !repo.is_empty()
-    {
-        return (path.with_file_name(repo), Some(n));
-    }
-    (path.to_path_buf(), None)
-}
-
 /// The issue a branch is for: `feature/issue-412`, `issue/412`, `fix/412-crash`.
 pub fn branch_issue(branch: &str) -> Option<u32> {
     let b = branch.to_ascii_lowercase();
@@ -154,39 +143,41 @@ fn snapshot(agent: &HerdrAgent, project: &str, role: &str, is_manager: bool, bra
     }
 }
 
-/// Group herdr agents into swarms. `branches` maps worktree paths to their
-/// checked-out branch; `manifests` holds the repos with an autocoder swarm
-/// manifest, whose manager makes a swarm even with zero workers.
+/// The plain facts the recognizer needs from herdr's agents.
+pub fn facts(agents: &[HerdrAgent]) -> Vec<AgentFact> {
+    agents
+        .iter()
+        .map(|a| AgentFact { source: "herdr".to_string(), pane: a.pane_id.clone(), cwd: canonical(&a.cwd) })
+        .collect()
+}
+
+/// Group herdr agents into swarms by repo identity (`recognize`). `repos` are
+/// the repos their cwds are in; `manifests` holds the main checkouts with an
+/// autocoder swarm manifest, whose manager makes a swarm even with zero
+/// workers.
 pub fn swarms_from_agents(
     agents: &[HerdrAgent],
-    branches: &HashMap<PathBuf, String>,
+    repos: &[RepoFacts],
     manifests: &BTreeSet<PathBuf>,
 ) -> Vec<SwarmSnapshot> {
-    let mut groups: BTreeMap<PathBuf, (Option<&HerdrAgent>, Vec<(u32, &HerdrAgent)>)> = BTreeMap::new();
-    for agent in agents {
-        let (repo, worker) = place(&agent.cwd);
-        let group = groups.entry(repo).or_default();
-        match worker {
-            Some(n) => group.1.push((n, agent)),
-            // Prefer the agent named as the manager when several sit in the repo.
-            None if group.0.is_none() || agent.name.as_deref().is_some_and(|n| n.starts_with("manager")) => group.0 = Some(agent),
-            None => {}
-        }
-    }
-    groups
+    let named_manager = |a: &HerdrAgent| a.name.as_deref().is_some_and(|n| n.starts_with("manager"));
+    recognize(&facts(agents), repos)
         .into_iter()
-        .filter(|(repo, (manager, workers))| {
-            !workers.is_empty()
-                || manager.is_some_and(|m| {
-                    m.name.as_deref().is_some_and(|n| n.starts_with("manager")) || manifests.contains(repo)
-                })
-        })
-        .map(|(repo, (manager, mut workers))| {
-            workers.sort_by_key(|(n, a)| (*n, a.pane_id.clone()));
-            let project = repo.file_name().and_then(|b| b.to_str()).unwrap_or("swarm").to_string();
-            let branch_of = |cwd: &str| branches.get(Path::new(cwd.trim_end_matches('/')));
+        .filter_map(|swarm| {
+            // Prefer the agent named as the manager when several sit in the main checkout.
+            let manager = swarm
+                .main_members()
+                .find(|m| named_manager(&agents[m.agent]))
+                .or_else(|| swarm.main_members().next());
+            let workers: Vec<_> = swarm.workers().collect();
+            let is_swarm = !workers.is_empty()
+                || manager.is_some_and(|m| named_manager(&agents[m.agent]) || manifests.contains(&swarm.root));
+            if !is_swarm {
+                return None;
+            }
+            let project = swarm.name();
             let manager = match manager {
-                Some(m) => snapshot(m, &project, "manager", true, branch_of(&m.cwd)),
+                Some(m) => snapshot(&agents[m.agent], &project, "manager", true, m.branch.as_ref()),
                 None => {
                     let mut missing = snapshot(
                         &HerdrAgent { pane_id: String::new(), name: None, status: "unknown".into(), cwd: String::new(), agent: None },
@@ -201,17 +192,19 @@ pub fn swarms_from_agents(
             };
             let workers: Vec<AgentSnapshot> = workers
                 .iter()
-                .map(|(n, a)| snapshot(a, &project, &format!("worker-{n}"), false, branch_of(&a.cwd)))
+                .map(|(n, m)| snapshot(&agents[m.agent], &project, &format!("worker-{n}"), false, m.branch.as_ref()))
                 .collect();
             let busy = workers.iter().filter(|w| w.state.starts_with("Working")).count();
             let attention = workers.iter().filter(|w| w.waiting_for_input).count();
-            SwarmSnapshot {
-                agent_type: agents
+            Some(SwarmSnapshot {
+                agent_type: swarm
+                    .members
                     .iter()
-                    .find_map(|a| a.agent.clone())
+                    .find_map(|m| agents[m.agent].agent.clone())
                     .unwrap_or_else(|| "Claude".to_string()),
                 project_name: project,
-                repo_path: repo.to_string_lossy().into_owned(),
+                repo_path: swarm.root.to_string_lossy().into_owned(),
+                repo_key: swarm.key.to_string_lossy().into_owned(),
                 workflow: None,
                 tmux_session: "herdr".to_string(),
                 stopped: false,
@@ -221,7 +214,7 @@ pub fn swarms_from_agents(
                 manager,
                 workers,
                 issues: Vec::new(),
-            }
+            })
         })
         .collect()
 }
@@ -253,30 +246,35 @@ async fn collect(transport: &ServerTransport) -> Vec<SwarmSnapshot> {
         // herdr exits 1 here even when it prints the list, so read stdout either way.
         name_from_workspaces(&mut agents, &parse_workspace_labels(&String::from_utf8_lossy(&out.stdout)));
     }
-    let mut branches = HashMap::new();
-    let repos: BTreeSet<PathBuf> = agents.iter().map(|a| place(&a.cwd).0).collect();
+    let cwds: Vec<PathBuf> = facts(&agents).into_iter().map(|f| f.cwd).collect();
+    let repos = gather(transport, &cwds).await;
     let mut manifests = BTreeSet::new();
-    for repo in repos {
+    for root in repos.iter().filter_map(|r| r.worktrees.first()).map(|w| &w.path) {
         // An autocoder swarm manifest makes a lone manager a swarm of zero workers.
         let probe = ["-c".to_string(), "ls .autocoder/swarm/*.json >/dev/null 2>&1".to_string()];
-        if let Ok(out) = transport.output("sh", &probe, Some(&repo)).await
+        if let Ok(out) = transport.output("sh", &probe, Some(root)).await
             && out.status.success()
         {
-            manifests.insert(repo.clone());
-        }
-        let args: Vec<String> = ["worktree", "list", "--porcelain"].iter().map(|s| s.to_string()).collect();
-        if let Ok(out) = transport.output("git", &args, Some(&repo)).await
-            && out.status.success()
-        {
-            branches.extend(crate::model::swarm::parse_worktree_porcelain(&String::from_utf8_lossy(&out.stdout)));
+            manifests.insert(root.clone());
         }
     }
-    swarms_from_agents(&agents, &branches, &manifests)
+    swarms_from_agents(&agents, &repos, &manifests)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::recognize::Worktree;
+
+    fn repo(root: &str, worktrees: &[(&str, Option<&str>)]) -> RepoFacts {
+        RepoFacts {
+            common_dir: PathBuf::from(format!("{root}/.git")),
+            worktrees: std::iter::once((root, None))
+                .chain(worktrees.iter().copied())
+                .map(|(p, b)| Worktree { path: p.into(), branch: b.map(str::to_string) })
+                .collect(),
+        }
+    }
 
     const LIST: &str = r#"{"result":{"agents":[
       {"pane_id":"w1:p1","name":"manager-shop","agent_status":"working","cwd":"/src/shop","agent":"claude"},
@@ -295,10 +293,7 @@ mod tests {
     }
 
     #[test]
-    fn places_worktrees_and_reads_branch_issues() {
-        assert_eq!(place("/src/shop-wt-3"), (PathBuf::from("/src/shop"), Some(3)));
-        assert_eq!(place("/src/shop"), (PathBuf::from("/src/shop"), None));
-        assert_eq!(place("/src/my-wt-x"), (PathBuf::from("/src/my-wt-x"), None));
+    fn reads_branch_issues() {
         assert_eq!(branch_issue("feature/issue-412"), Some(412));
         assert_eq!(branch_issue("issue/88"), Some(88));
         assert_eq!(branch_issue("fix/412-crash"), Some(412));
@@ -307,13 +302,13 @@ mod tests {
 
     #[test]
     fn groups_agents_into_swarms_by_cwd() {
-        let mut branches = HashMap::new();
-        branches.insert(PathBuf::from("/src/shop-wt-2"), "feature/issue-77".to_string());
-        let swarms = swarms_from_agents(&parse_agents(LIST), &branches, &BTreeSet::new());
+        let repos = [repo("/src/shop", &[("/src/shop-wt-1", None), ("/src/shop-wt-2", Some("feature/issue-77"))])];
+        let swarms = swarms_from_agents(&parse_agents(LIST), &repos, &BTreeSet::new());
         assert_eq!(swarms.len(), 1, "the stray agent in ~/notes is not a swarm");
         let s = &swarms[0];
         assert_eq!(s.project_name, "shop");
         assert_eq!(s.repo_path, "/src/shop");
+        assert_eq!(s.repo_key, "/src/shop/.git");
         assert_eq!(s.manager.state, "Working");
         assert_eq!(s.workers.len(), 2);
         assert_eq!(s.workers[0].role, "worker-1");
@@ -329,7 +324,7 @@ mod tests {
     #[test]
     fn workers_without_a_manager_still_make_a_swarm() {
         let json = r#"{"result":{"agents":[{"pane_id":"w2:p1","agent_status":"idle","cwd":"/src/x-wt-1"}]}}"#;
-        let swarms = swarms_from_agents(&parse_agents(json), &HashMap::new(), &BTreeSet::new());
+        let swarms = swarms_from_agents(&parse_agents(json), &[repo("/src/x", &[("/src/x-wt-1", None)])], &BTreeSet::new());
         assert_eq!(swarms.len(), 1);
         assert_eq!(swarms[0].manager.state, "Missing");
     }
@@ -340,10 +335,11 @@ mod tests {
         // autocoder left a swarm manifest there.
         let json = r#"{"result":{"agents":[{"pane_id":"w5:p1","agent_status":"working","cwd":"/src/shop"}]}}"#;
         let agents = parse_agents(json);
-        assert!(swarms_from_agents(&agents, &HashMap::new(), &BTreeSet::new()).is_empty());
+        let repos = [repo("/src/shop", &[])];
+        assert!(swarms_from_agents(&agents, &repos, &BTreeSet::new()).is_empty());
 
         let manifests = BTreeSet::from([PathBuf::from("/src/shop")]);
-        let swarms = swarms_from_agents(&agents, &HashMap::new(), &manifests);
+        let swarms = swarms_from_agents(&agents, &repos, &manifests);
         assert_eq!(swarms.len(), 1);
         assert_eq!(swarms[0].project_name, "shop");
         assert_eq!(swarms[0].manager.tmux_target, "w5:p1");
@@ -367,7 +363,7 @@ mod tests {
         assert_eq!(agents[1].name.as_deref(), Some("manager-agents-ui"));
         assert_eq!(agents[2].name.as_deref(), Some("kept"));
         // The labelled manager wins over the other session in the repo, and makes a swarm.
-        let swarms = swarms_from_agents(&agents, &HashMap::new(), &BTreeSet::new());
+        let swarms = swarms_from_agents(&agents, &[repo("/src/agents-ui", &[])], &BTreeSet::new());
         assert_eq!(swarms.len(), 1);
         assert_eq!(swarms[0].manager.tmux_target, "w5:p1");
         assert!(swarms[0].workers.is_empty());
@@ -376,7 +372,7 @@ mod tests {
     #[test]
     fn a_manager_named_manager_is_a_swarm_without_a_manifest() {
         let json = r#"{"result":{"agents":[{"pane_id":"w1:p1","name":"manager-shop","agent_status":"idle","cwd":"/src/shop"}]}}"#;
-        let swarms = swarms_from_agents(&parse_agents(json), &HashMap::new(), &BTreeSet::new());
+        let swarms = swarms_from_agents(&parse_agents(json), &[repo("/src/shop", &[])], &BTreeSet::new());
         assert_eq!(swarms.len(), 1);
         assert!(swarms[0].workers.is_empty());
     }

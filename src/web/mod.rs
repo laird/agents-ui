@@ -81,6 +81,11 @@ pub struct IssueSnapshot {
 pub struct SwarmSnapshot {
     pub project_name: String,
     pub repo_path: String,
+    /// The repo's identity: its git common directory, absolute. Empty when
+    /// the source couldn't ask git (a saved swarm, a repo it couldn't find).
+    /// Two swarms with the same key are one swarm (`source::discover`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub repo_key: String,
     pub agent_type: String,
     pub workflow: Option<String>,
     pub tmux_session: String,
@@ -141,6 +146,7 @@ impl SwarmSnapshot {
         Self {
             project_name: swarm.project_name.clone(),
             repo_path: swarm.repo_path.to_string_lossy().into_owned(),
+            repo_key: String::new(),
             agent_type: swarm.agent_type.to_string(),
             workflow: swarm.workflow.as_ref().map(|w| w.to_string()),
             tmux_session: swarm.tmux_session.clone(),

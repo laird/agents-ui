@@ -1282,6 +1282,7 @@ mod tests {
         SwarmSnapshot {
             project_name: name.to_string(),
             repo_path: format!("/repos/{name}"),
+            repo_key: String::new(),
             agent_type: "Claude".to_string(),
             workflow: None,
             tmux_session: format!("claude-{name}"),

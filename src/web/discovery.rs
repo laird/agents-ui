@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use crate::model::recognize::{AgentFact, Member, Place, canonical, gather, recognize};
 use futures::future::BoxFuture;
 use tokio::time::{Duration, sleep};
 
@@ -160,6 +161,7 @@ fn stopped_swarm_snapshot(
     SwarmSnapshot {
         project_name: project_name.to_string(),
         repo_path: state.repo_path.clone(),
+        repo_key: String::new(),
         agent_type: state.agent_type.clone(),
         workflow: state.workflow.clone(),
         tmux_session: state.tmux_session.clone(),
@@ -191,7 +193,37 @@ async fn build_swarm_snapshot(
         return Ok(None);
     }
 
-    // Resolve the repo from the manager pane's working directory.
+    // Who is where, by repo identity (`model::recognize`): each pane's cwd is
+    // placed in the worktree holding it, at any depth, and the session's repo
+    // is the one holding its manager pane (else most of its panes).
+    let facts: Vec<AgentFact> = session_info
+        .windows
+        .iter()
+        .flat_map(|w| &w.panes)
+        .filter_map(|p| {
+            Some(AgentFact { source: "tmux".to_string(), pane: p.target.clone(), cwd: canonical(p.current_path.as_deref()?) })
+        })
+        .collect();
+    let cwds: Vec<PathBuf> = facts.iter().map(|f| f.cwd.clone()).collect();
+    let repos = gather(transport, &cwds).await;
+    let manager_pane = session_info
+        .windows
+        .iter()
+        .find(|w| w.name.eq_ignore_ascii_case("review"))
+        .and_then(|w| w.panes.first())
+        .map(|p| p.target.as_str());
+    let recognized = recognize(&facts, &repos);
+    let swarm = recognized
+        .iter()
+        .find(|s| s.members.iter().any(|m| Some(facts[m.agent].pane.as_str()) == manager_pane))
+        .or_else(|| recognized.iter().max_by_key(|s| s.members.len()));
+    let placed: HashMap<&str, &Member> = swarm
+        .map(|s| s.members.iter().map(|m| (facts[m.agent].pane.as_str(), m)).collect())
+        .unwrap_or_default();
+
+    // Resolve the repo: its main checkout, from git. When git can't say (the
+    // panes report no path, or none is in a repo), fall back to the manager
+    // pane's directory with any `-wt-N` stripped.
     //
     // The previous approach asked tmux for the session's PWD, but a tmux
     // session environment does not carry PWD -- the server answers "unknown
@@ -209,24 +241,34 @@ async fn build_swarm_snapshot(
         .and_then(|w| w.panes.first())
         .and_then(|p| p.current_path.as_deref());
 
-    let repo_path = match manager_pane_path {
-        Some(path) => Some(strip_worktree_suffix(
+    let repo_path = match (swarm, manager_pane_path) {
+        (Some(s), _) => Some(s.root.clone()),
+        (None, Some(path)) => Some(strip_worktree_suffix(
             std::path::Path::new(path),
             &project_name,
         )),
         // Kept as a fallback for sessions whose manager window is missing or
         // whose panes report no path.
-        None => find_repo_path(transport, session_name, &project_name).await,
+        (None, None) => find_repo_path(transport, session_name, &project_name).await,
     };
     let repo_path_str = repo_path
         .as_ref()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_default();
+    let repo_key = swarm.map(|s| s.key.to_string_lossy().into_owned()).unwrap_or_default();
 
-    // One `git worktree list` per swarm refresh, not one `git` call per agent.
-    let branches = match repo_path.as_deref() {
-        Some(root) => worktree_branches(transport, root).await,
-        None => std::collections::HashMap::new(),
+    // The branch in each worktree: from the repo's worktree list when git
+    // placed the panes, else one `git worktree list` for the swarm.
+    let branches: HashMap<PathBuf, String> = match swarm.and_then(|s| repos.iter().find(|r| r.common_dir == s.key)) {
+        Some(repo) => repo
+            .worktrees
+            .iter()
+            .filter_map(|w| Some((w.path.clone(), w.branch.clone()?)))
+            .collect(),
+        None => match repo_path.as_deref() {
+            Some(root) => worktree_branches(transport, root).await,
+            None => HashMap::new(),
+        },
     };
 
     // Collect agent snapshots from all panes.
@@ -248,6 +290,7 @@ async fn build_swarm_snapshot(
     let mut manager: Option<AgentSnapshot> = None;
     let mut workers: Vec<AgentSnapshot> = Vec::new();
     let mut ordinal: u32 = 0;
+    let mut numbers: Vec<u32> = Vec::new();
 
     for window in &session_info.windows {
         let is_manager_window = window.name.eq_ignore_ascii_case("review");
@@ -258,15 +301,29 @@ async fn build_swarm_snapshot(
             if !is_manager {
                 ordinal += 1;
             }
+            // A pane git placed in a worker worktree is that worktree's worker
+            // number (`-wt-N`, else its order); position only when it isn't,
+            // or when another pane already took that number.
+            let member = placed.get(pane.target.as_str());
+            let number = match member.map(|m| m.place) {
+                Some(Place::Worker(n)) if !is_manager && !numbers.contains(&n) => n,
+                _ => ordinal,
+            };
+            if !is_manager {
+                numbers.push(number);
+            }
+            let pane_path = member
+                .map(|m| m.worktree.to_string_lossy().into_owned())
+                .or_else(|| pane.current_path.clone());
 
             let snap = build_agent_snapshot(
                 transport,
                 &pane.target,
                 is_manager,
-                ordinal,
+                number,
                 &project_name,
                 repo_path.as_deref(),
-                pane.current_path.as_deref(),
+                pane_path.as_deref(),
                 &branches,
                 &agent_type,
                 health,
@@ -317,6 +374,7 @@ async fn build_swarm_snapshot(
     Ok(Some(SwarmSnapshot {
         project_name,
         repo_path: repo_path_str,
+        repo_key,
         agent_type: agent_type.to_string(),
         workflow: None,
         tmux_session: session_name.to_string(),

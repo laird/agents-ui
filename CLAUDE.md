@@ -38,6 +38,7 @@ Tests are inline `#[cfg(test)]` modules in each source file:
 
 - `src/model/status.rs` — Status line parsing, state detection, issue extraction, file I/O
 - `src/model/swarm.rs` — Agent counting, lookups, state queries, type methods
+- `src/model/recognize.rs` — swarm recognition: repo identity (git common dir), worktree membership at any depth, worker numbers, same-name repos, one repo through two sources
 - `src/config/persistence.rs` — TOML save/load round-trips, listing, missing files
 - `src/app.rs` — Key-to-tmux conversion, pane status inference, tab completion helpers
 - `src/web/village.rs` — House kinds and statuses, crew grouping, backlog/board sorting, tip-ref and environment parsing, transcript actions
@@ -75,6 +76,7 @@ src/
   model/
     status.rs       # AgentState/AgentStatus types, status file parsing
     swarm.rs        # Swarm/AgentInfo types, AgentType, Workflow
+    recognize.rs    # Swarm recognition: agents → repos by git common dir and worktree (shared by every source)
   tmux/
     session.rs      # Session discovery, pane listing
     proxy.rs        # Pane capture, send-keys, background watchers

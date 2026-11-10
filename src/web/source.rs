@@ -29,7 +29,7 @@ use serde::Serialize;
 use super::temporal::{TemporalSource, TemporalVillages};
 use super::village::{Pipeline, SwarmVillages, VillageSnapshot};
 use super::world::{WorldConfig, WorldSnapshot, build_world};
-use super::{IssueSnapshot, SwarmSnapshot};
+use super::{AgentSnapshot, IssueSnapshot, SwarmSnapshot};
 use crate::model::issue::FeatureLink;
 use crate::transport::ServerTransport;
 
@@ -314,18 +314,98 @@ impl SourceConfig {
     }
 }
 
-/// Every swarm the sources show, in order; a project already shown by an
-/// earlier source is skipped (tmux before herdr before saved swarms).
+/// Every swarm the sources show, in order (tmux before herdr before saved
+/// swarms), one per repo:
+///
+/// - The same repo (`repo_key`) from two sources is one swarm: the earlier
+///   source's, plus the later one's manager when the earlier had none and its
+///   workers in worktrees the earlier didn't show.
+/// - Two different repos with the same folder name are both kept; the later
+///   one is named `<name>@<parent folder>` so pages can tell them apart.
+/// - A swarm with no `repo_key` (its source couldn't ask git) is matched by
+///   name, and an earlier source owns the name.
 pub async fn discover(sources: &[Box<dyn SwarmSource>], transport: &ServerTransport) -> Vec<SwarmSnapshot> {
     let mut swarms: Vec<SwarmSnapshot> = Vec::new();
     for source in sources {
         for snap in source.swarms(transport).await {
-            if !swarms.iter().any(|s| s.project_name == snap.project_name) {
-                swarms.push(snap);
-            }
+            add_swarm(&mut swarms, snap);
         }
     }
     swarms
+}
+
+fn add_swarm(swarms: &mut Vec<SwarmSnapshot>, mut snap: SwarmSnapshot) {
+    if !snap.repo_key.is_empty()
+        && let Some(same) = swarms.iter_mut().find(|s| s.repo_key == snap.repo_key)
+    {
+        merge_swarm(same, snap);
+        return;
+    }
+    let Some(namesake) = swarms.iter().find(|s| s.project_name == snap.project_name) else {
+        swarms.push(snap);
+        return;
+    };
+    if namesake.repo_key.is_empty() || snap.repo_key.is_empty() {
+        return;
+    }
+    // A different repo with the same folder name.
+    let parent = std::path::Path::new(&snap.repo_path)
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|p| p.to_str())
+        .unwrap_or("other")
+        .to_string();
+    let mut name = format!("{}@{parent}", snap.project_name);
+    let mut n = 2;
+    while swarms.iter().any(|s| s.project_name == name) {
+        name = format!("{}@{parent}-{n}", snap.project_name);
+        n += 1;
+    }
+    let old = format!("{}/", snap.project_name);
+    for agent in std::iter::once(&mut snap.manager).chain(snap.workers.iter_mut()) {
+        if let Some(role) = agent.id.strip_prefix(&old) {
+            agent.id = format!("{name}/{role}");
+        }
+    }
+    snap.project_name = name;
+    swarms.push(snap);
+}
+
+/// Fold `other` (the same repo, from a later source) into `swarm`.
+fn merge_swarm(swarm: &mut SwarmSnapshot, other: SwarmSnapshot) {
+    let project = swarm.project_name.clone();
+    let rename = |mut a: AgentSnapshot, role: String| {
+        a.id = format!("{project}/{role}");
+        a.role = role;
+        a
+    };
+    if swarm.manager.state == "Missing" && other.manager.state != "Missing" {
+        swarm.manager = rename(other.manager, "manager".to_string());
+    }
+    for worker in other.workers {
+        let shown = swarm.workers.iter().any(|w| {
+            (!worker.worktree_path.is_empty() && w.worktree_path == worker.worktree_path)
+                || (w.mux == worker.mux && w.tmux_target == worker.tmux_target)
+        });
+        if shown {
+            continue;
+        }
+        let mut role = worker.role.clone();
+        let mut n = swarm.workers.len() as u32 + 1;
+        while swarm.workers.iter().any(|w| w.role == role) {
+            role = format!("worker-{n}");
+            n += 1;
+        }
+        if worker.state.starts_with("Working") {
+            swarm.busy_count += 1;
+        } else {
+            swarm.idle_count += 1;
+        }
+        if worker.waiting_for_input {
+            swarm.attention_count += 1;
+        }
+        swarm.workers.push(rename(worker, role));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -449,6 +529,7 @@ mod tests {
         SwarmSnapshot {
             project_name: project.into(),
             repo_path: String::new(),
+            repo_key: String::new(),
             agent_type: "claude".into(),
             workflow: None,
             tmux_session: String::new(),
@@ -492,6 +573,71 @@ mod tests {
             .map(|s| (s.project_name, s.agent_type))
             .collect();
         assert_eq!(got, vec![("shop".into(), "tmux".into()), ("docs".into(), "herdr".into())]);
+    }
+
+    /// Swarms given whole, standing in for a source that asked git.
+    struct Given(&'static str, Vec<SwarmSnapshot>);
+
+    impl SwarmSource for Given {
+        fn name(&self) -> &'static str {
+            self.0
+        }
+        fn swarms<'a>(&'a self, _: &'a ServerTransport) -> BoxFuture<'a, Vec<SwarmSnapshot>> {
+            let snaps = self.1.clone();
+            Box::pin(async move { snaps })
+        }
+    }
+
+    fn keyed(project: &str, root: &str, workers: &[(&str, &str, crate::web::Mux)]) -> SwarmSnapshot {
+        let mut s = empty_swarm(project);
+        s.repo_path = root.to_string();
+        s.repo_key = format!("{root}/.git");
+        for (role, wt, mux) in workers {
+            let mut w = s.manager.clone();
+            w.id = format!("{project}/{role}");
+            w.role = role.to_string();
+            w.is_manager = false;
+            w.state = "Working #1".into();
+            w.worktree_path = wt.to_string();
+            w.tmux_target = format!("{wt}-pane");
+            w.mux = *mux;
+            s.workers.push(w);
+            s.busy_count += 1;
+        }
+        s
+    }
+
+    #[tokio::test]
+    async fn one_repo_seen_through_tmux_and_herdr_is_one_swarm() {
+        use crate::web::Mux;
+        let mut tmux = keyed("shop", "/src/shop", &[("worker-1", "/src/shop-wt-1", Mux::Tmux)]);
+        tmux.manager.state = "Missing".into();
+        let herdr = keyed(
+            "shop",
+            "/src/shop",
+            &[("worker-1", "/src/shop-wt-1", Mux::Herdr), ("worker-1", "/src/hotfix", Mux::Herdr)],
+        );
+        let sources: Vec<Box<dyn SwarmSource>> = vec![Box::new(Given("tmux", vec![tmux])), Box::new(Given("herdr", vec![herdr]))];
+        let got = discover(&sources, &ServerTransport::default()).await;
+        assert_eq!(got.len(), 1);
+        let s = &got[0];
+        // herdr's manager stands in for tmux's missing one.
+        assert_ne!(s.manager.state, "Missing");
+        // wt-1 is shown once (tmux's); herdr's other worktree joins under a free number.
+        let workers: Vec<(&str, &str, Mux)> = s.workers.iter().map(|w| (w.role.as_str(), w.worktree_path.as_str(), w.mux)).collect();
+        assert_eq!(workers, vec![("worker-1", "/src/shop-wt-1", Mux::Tmux), ("worker-2", "/src/hotfix", Mux::Herdr)]);
+        assert_eq!(s.workers[1].id, "shop/worker-2");
+        assert_eq!(s.busy_count, 2);
+    }
+
+    #[tokio::test]
+    async fn two_repos_with_the_same_folder_name_stay_apart() {
+        let work = keyed("shop", "/work/shop", &[]);
+        let home = keyed("shop", "/home/me/shop", &[]);
+        let sources: Vec<Box<dyn SwarmSource>> = vec![Box::new(Given("herdr", vec![work, home]))];
+        let got = discover(&sources, &ServerTransport::default()).await;
+        let names: Vec<(&str, &str)> = got.iter().map(|s| (s.project_name.as_str(), s.manager.id.as_str())).collect();
+        assert_eq!(names, vec![("shop", "shop/manager"), ("shop@me", "shop@me/manager")]);
     }
 
     /// A village source with one fixed village, standing in for a platform.
