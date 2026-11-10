@@ -141,7 +141,7 @@ registerLayer({ z: 85, draw(c, { v, lay }) {
     slots.forEach((sl, k) => {
       const x = sx + 3 + (k % BAY_COLS) * 6, y = sy + 10 + Math.floor(k / BAY_COLS) * 7;
       if (sl.banner) { R(c, x + 1, y, 1, 6, P.woodL); R(c, x + 2, y, 3, 3, sl.banner.col); return; }
-      state.T.crate(c, x, y + 1, 'workshop', null, true); tap(x, y + 1, 5, 5, { kind: 'crate', n: sl.n, at: 'env', i: e.i });
+      state.T.crate(c, x, y + 1, 'workshop', null, true, sl.n); tap(x, y + 1, 5, 5, { kind: 'crate', n: sl.n, at: 'env', i: e.i });
     });
     // Right-aligned to the shed, so even three digits stay on it (#436).
     if (more > 0) {

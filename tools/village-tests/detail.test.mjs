@@ -47,21 +47,18 @@ function drawn(paint, d) {
 }
 const doubled = rects => rects.map(([x, y, w, h, col, a]) => [x * DETAIL, y * DETAIL, w * DETAIL, h * DETAIL, col, a]);
 
-/* 1×-only sprites from every corner of the village: crates and their marks,
- * tags, pennants and cobwebs. (People are drawn at 2× since #419, and
- * buildings since #421: their tests are below, in people2x.test.mjs and in
- * upscale.test.mjs.) */
+/* 1×-only sprites from every corner of the village: tags, pennants and
+ * cobwebs. (Crates are drawn at 2× since #420, people since #419 and
+ * buildings since #421: their tests are crates.test.mjs, people2x.test.mjs
+ * and upscale.test.mjs.) */
 const SCENE = c => {
   state.T = THEMES.medieval;
-  scenery.crate(c, 3, 4, 'bug', 'P1', true);
-  scenery.roped(c, 10, 4);
   scenery.badge(c, 20, 3, 12);
   scenery.numberTag(c, 30, 3, 404);
   houses.pennant(c, 60, 20, 'P0', 0);
   houses.cobwebs(c, 70, 20);
   for (const T of Object.values(THEMES)) {
     state.T = T;
-    T.crate(c, 80, 4, 'feature', 'P2', false);
   }
 };
 

@@ -81,7 +81,7 @@ function drawBarge(c, b, t) {
     R(c, x, y + 6, 24, 5, P.o); R(c, x + 1, y + 6, 22, 3, P.wood); R(c, x + 1, y + 6, 22, 1, P.woodL); R(c, x + 3, y + 9, 18, 1, P.woodD);
     R(c, x + 22, y - 6, 1, 8, P.o); R(c, x + 23, y - 6, 5, 4, P.o); R(c, x + 23, y - 5, 4, 2, b.col);
   }
-  b.issues.slice(0, 4).forEach((n, k) => state.T.crate(c, x + 2 + k * 5, y + 1, 'workshop', null, true));
+  b.issues.slice(0, 4).forEach((n, k) => state.T.crate(c, x + 2 + k * 5, y + 1, 'workshop', null, true, n));
   tap(b.x, b.y - 6, 28, 18, { kind: 'barge', f: b.f ? b.f.number : null, issues: b.issues });
 }
 /* The fog wash per theme, shared with the key. */

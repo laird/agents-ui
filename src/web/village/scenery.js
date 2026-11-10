@@ -1,7 +1,8 @@
-/* Things and scenery: crates, speech bubbles, "zzz", "+N" badges, grass, paths, water, trees,
+/* Things and scenery: speech bubbles, "zzz", "+N" badges, grass, paths, water, trees,
  * the castle, the board, the locks, the harbour, the ship and the supply boat. */
 import { state } from './state.js';
-import { KINDCOL, NOTECOL, P, PRIOCOL, R, STATE, blink, glassOf, hash, shadow } from './palette.js';
+import { DIGITS, NOTECOL, P, R, ROPE, STATE, blink, glassOf, hash, shadow } from './palette.js';
+import { crate } from './crates.js';
 
 /* ---------- People and things ---------- */
 export const ICONS = {
@@ -30,19 +31,6 @@ export function zzz(c, x, y, t) {
     g.forEach((row, r) => [...row].forEach((ch, i) => { if (ch === '#') R(c, gx + i, gy + r, 1, 1, P.white); }));
   }
 }
-const ROPE = '#d8b070';
-/* A crate's epic: the outline in its feature's flag colour, like a ribbon
- * tied round it. Drawn over any theme's crate. */
-export function ribbon(c, x, y, col) {
-  x = Math.round(x); y = Math.round(y);
-  R(c, x, y, 5, 1, col); R(c, x, y + 4, 5, 1, col); R(c, x, y, 1, 5, col); R(c, x + 4, y, 1, 5, col);
-}
-/* Ready to pick up: a glint now and then on the crate's corner. */
-export function glint(c, x, y, t) {
-  if ((t % 2400 + 2400) % 2400 >= 180) return;
-  x = Math.round(x); y = Math.round(y);
-  R(c, x + 4, y - 1, 1, 1, P.white); R(c, x + 5, y, 1, 1, 'rgba(248,248,248,.6)'); R(c, x + 3, y, 1, 1, 'rgba(248,248,248,.6)');
-}
 /* A rope between a waiting crate and the crate it waits on, both at the
  * docks: dotted, drawn under the crates so only the gaps show it. */
 export function tether(c, a, b) {
@@ -50,23 +38,6 @@ export function tether(c, a, b) {
   const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
   for (let k = 0; k <= n; k += 2) R(c, x0 + Math.round((x1 - x0) * k / (n || 1)), y0 + Math.round((y1 - y0) * k / (n || 1)), 1, 1, ROPE);
 }
-/* A crate tied shut: it waits on another issue (a "Depends on" line), so
- * nobody picks it up yet. Drawn over any theme's crate. */
-export function roped(c, x, y) {
-  x = Math.round(x); y = Math.round(y);
-  // Tied across, knotted in the middle: the crate's kind and priority still show.
-  R(c, x - 1, y + 2, 7, 1, ROPE); R(c, x + 2, y - 1, 1, 7, ROPE);
-  R(c, x + 2, y + 2, 1, 1, P.woodD);
-}
-export function crate(c, x, y, kind, pr, sealed) {
-  x = Math.round(x); y = Math.round(y);
-  R(c, x, y, 5, 5, P.o); R(c, x + 1, y + 1, 3, 3, P.woodL);
-  R(c, x + 1, y + 1, 3, 1, KINDCOL[kind] || P.woodD);
-  // Its priority: a painted band along the foot (none when unprioritised).
-  if (PRIOCOL[pr]) R(c, x + 1, y + 3, 3, 1, PRIOCOL[pr]);
-  if (sealed) R(c, x + 2, y + 2, 1, 1, P.seal);
-}
-
 /* ---------- Scenery ---------- */
 export const FLOWERS = ['#f8f8f8', '#f8d040', '#e070d0', '#e05050', '#a8c8f8'];
 export function grass(c, x0, y0, w, h) {
@@ -196,8 +167,6 @@ export function ship(c, x, cy, t, ox, oy) {
   R(c, x + 13, cy - 17, 5, 3, P.o); R(c, x + 13, cy - 16, 4, 1, '#804098');
 }
 
-export const DIGITS = ['111101101101111', '010110010010111', '111001111100111', '111001111001111', '101101111001001',
-  '111100111001111', '111100111101111', '111001001001001', '111101111101111', '111101111001111'];
 const PLUS = '000010111010000';
 /* A tag of 3x5 glyphs whose ink starts at (x + 1, y): an outline, and inside
  * it a pixel of `bg` all round the ink (#436). Without that pixel above and
