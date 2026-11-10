@@ -38,6 +38,17 @@
         { "id": "45", "title": "Which payment provider?", "labels": ["needs-design"], "state": "blocked" },
         { "id": "38", "title": "Faster search", "labels": ["performance"], "state": "done" }
       ],
+      "build": {
+        "state": "red",
+        "sha": "9c1a2b3d4e5f",
+        "since": "2026-11-09T20:40:00Z",
+        "blame": "9c1a2b3d4e5f",
+        "url": "https://ci.example.com/larkspur/runs/812",
+        "partial": true,
+        "jobs": [{ "name": "test (macos-latest)", "os": "macOS", "state": "red", "tests": ["cart::totals", "cart::tax"] }],
+        "tests": ["cart::totals", "cart::tax"],
+        "source": "buildkite"
+      },
       "pipeline": {
         "integration": "main",
         "gate": "green",

@@ -312,6 +312,7 @@ mod tests {
                 ..Pipeline::default()
             },
             builds: vec![],
+            build: None,
             features: vec![],
         }
     }

@@ -30,6 +30,7 @@ agents-tui --headless --framework ./reports.json                 # a file (file:
 | `tasks[].parent` | features: a banner per parent, a trail to its subtasks; a subtask's crate edged in its flag's colour | features, the same way |
 | `tasks[].depends_on` | a roped crate that "waits on #N" | the same |
 | `builds[]` | none | versions the workers run; a world matches releases against these |
+| `build` | the integration branch's health: a red build is a storm over the village | the same, for the platform's own build |
 | `plane` | `development` | `runtime` |
 
 A world (`--world dev=platform`) pairs a development village with a runtime village. Any two villages can be paired, whatever framework drew them.
@@ -79,7 +80,7 @@ An adapter may print one report, a list of reports, or `{"reports": [...]}`. Onl
 - `workflow`: optional, a finer name such as `Modernize`.
 - `location`: a repository path or server URL.
 - `coordinator`: a workstream. Without one, the hall stands empty.
-- `workstreams`, `tasks`, `pipeline`, `builds`.
+- `workstreams`, `tasks`, `pipeline`, `builds`, `build`.
 
 **Workstream**
 
@@ -182,6 +183,21 @@ Matching ignores case. Anything else counts as `unknown`.
 
 `/api/village` reports the same per village: `pipeline.gates` (one `{issue, state, ...}` per task in the gate) and `pipeline.merge`.
 Each stage is a `pipeline.stops` entry with the fields above (`cargo` as issue numbers), and `pipeline.voyages` lists the voyages with `issues` and `issues_more` in place of `tasks` and `tasks_more`.
+
+**Build**
+
+`build` is the integration branch's build health. A swarm village works it out itself (`src/web/build.rs`). It reads GitHub check runs at the branch tip first, then the sentinel's state file, then a merge job that failed on the branch alone. An outside adapter sets it from its own CI.
+
+- `state`: `green`, `red`, `running` or `unknown`. Red wins over running: one failed job is a red build, whatever is still running.
+- `sha`: the commit it describes.
+- `since`: when it turned red (RFC 3339), and `blame`, the commit that turned it red.
+- `url`: the run to open.
+- `jobs`: the jobs that aren't green, each `{name, os, state, url, tests}`. `os` (`Linux`, `macOS`, `Windows`) tells "macOS only" from "everything".
+- `tests`: every failing test, once each, where they are cheap to get.
+- `partial`: red, but some jobs passed: one OS or one job, not everything.
+- `source`: who said so (`ci`, `sentinel`, `gate`, or the adapter's own word).
+
+`/api/village` reports it per village as `build`.
 
 ## Replaying history
 

@@ -517,6 +517,10 @@ pub struct Report {
     pub pipeline: ReportPipeline,
     #[serde(default)]
     pub builds: Vec<String>,
+    /// The integration branch's build health: `green`, `red`, `running` or
+    /// `unknown`, with the failing jobs and tests (`build.rs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<super::build::Build>,
 }
 
 fn schema() -> String {
@@ -785,6 +789,7 @@ pub fn to_village(report: &Report) -> Reading {
         pipeline,
         builds: report.builds.clone(),
         features: Vec::new(),
+        build: report.build.clone(),
     };
     village.features = super::feature::build(&village, &super::feature::links_from_tasks(&report.tasks));
     Reading { village, issues }
@@ -984,6 +989,7 @@ pub fn swarm_report_gated(swarm: &SwarmSnapshot, issues: &[IssueSnapshot], pipel
                 .collect(),
         },
         builds: Vec::new(),
+        build: None,
     }
 }
 
@@ -1475,7 +1481,13 @@ mod tests {
         assert_eq!(dev.pipeline.voyages.len(), 1);
         assert_eq!((dev.pipeline.voyages[0].from.as_str(), dev.pipeline.voyages[0].issues.clone()), ("staging", vec![39]));
         assert!(dev.houses.iter().any(|h| h.status == HouseStatus::Blocked));
+        // The report's build health reaches the village as it was sent.
+        let build = dev.build.as_ref().expect("the example reports a build");
+        assert_eq!((build.state, build.partial, build.source.as_str()), (super::super::build::BuildState::Red, true, "buildkite"));
+        assert_eq!(build.jobs[0].os.as_deref(), Some("macOS"));
+        assert_eq!(build.tests.len(), 2);
         let run = to_village(&reports[1]).village;
+        assert_eq!(run.build, None, "a report that says nothing about its build has none");
         assert_eq!(run.plane, Plane::Runtime);
         assert_eq!(run.builds, vec!["1f2e3d4c5b6a"]);
         assert!(!run.manager.subagents.is_empty());
