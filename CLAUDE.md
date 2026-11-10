@@ -137,6 +137,7 @@ src/
       docks.js      #   no DOM: the docks' crate order (prerequisites first, a chain as one run) and each crate's state
       trips.js      #   what each change between two polls sets off: diff(), the queued trips and where each is
       ship.js       #   the canal: quay, locks, harbour and the ship that sails on a release
+      bounces.js    #   crates the gate handed back: dressed for rework at their house, a red ↺ tag, debris (what they say: bouncemarks.js)
       features.js   #   feature banners, trails, barges, fog, the strip and the feature dialog
       envrow.js     #   the environment row under the dev village: a village per environment (sign, warehouse of cargo, health, rank), the mini-map
       voyages.js    #   ships between the row's villages: loading, sailing, docked, failed, and voyages the page plays itself
