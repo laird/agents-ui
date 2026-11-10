@@ -51,6 +51,7 @@ const VILLAGE_ASSETS: &[(&str, &str, &str)] = &[
     ("worlds.js", "text/javascript; charset=utf-8", include_str!("village/worlds.js")),
     ("panels.js", "text/javascript; charset=utf-8", include_str!("village/panels.js")),
     ("fitscale.js", "text/javascript; charset=utf-8", include_str!("village/fitscale.js")),
+    ("rest.js", "text/javascript; charset=utf-8", include_str!("village/rest.js")),
     ("dialogs.js", "text/javascript; charset=utf-8", include_str!("village/dialogs.js")),
     ("labels.js", "text/javascript; charset=utf-8", include_str!("village/labels.js")),
     ("houselabel.js", "text/javascript; charset=utf-8", include_str!("village/houselabel.js")),
@@ -1473,7 +1474,7 @@ mod tests {
         for module in [
             "registry.js", "layout.js", "lifecycle.js", "docks.js", "trips.js", "ship.js", "gatehouse.js", "features.js", "envrow.js", "voyages.js", "worlds.js", "panels.js", "dialogs.js",
             "labels.js", "houselabel.js", "key.js", "data.js", "state.js", "palette.js", "sprites/houses.js", "scenery.js", "people.js",
-            "themes/registry.js", "themes/medieval.js", "themes/modern.js", "themes/future.js", "saver.js", "screensaver.js",
+            "themes/registry.js", "themes/medieval.js", "themes/modern.js", "themes/future.js", "saver.js", "screensaver.js", "rest.js",
         ] {
             assert!(seen.iter().any(|s| s == module), "main.js never loads {module}");
         }
@@ -2323,13 +2324,33 @@ mod tests {
         assert!(body.contains("return `· ${w.dev} builds ${w.platform} · release ${short(w.release)} ${release}${builds ? ` · platform builds ${builds}` : ''}`;"));
     }
 
+    /// #411: a finished worker shows ✓ only for a while; idle (or done a
+    /// while ago) it sits on its doorstep under "zzz". The timing is tested
+    /// under node (rest.js); this is the drawing that follows it.
+    #[test]
+    fn village_idle_workers_sleep_instead_of_a_lingering_tick() {
+        let body = &village_source();
+        assert!(body.contains("const st = h.status, tt = t + i * 311, rest = restOf(h, wall);"));
+        assert!(body.contains("if (rest === 'asleep') { person(c, lot.x + 4, lot.y + 9, h.id, 'sit', { status: 'asleep' }); sleepers.push("));
+        assert!(body.contains("if (ICONS[st] && rest !== 'asleep') bubbles.push(["), "no ✓ over a sleeper");
+        assert!(body.contains("(sleepers || []).forEach(([x, y, dt]) => zzz(c, x, y, t + dt));"));
+        // Every theme: people sit, robots sit with dim eyes and no hover.
+        assert!(body.contains("if (kind === 'sit') return ['........', '........', ...r.slice(0, 9), r[11]];"));
+        assert!(body.contains("asleep: '#24606c'"));
+        assert!(body.contains("const bob = st === 'idle' && kind === 'stand'"), "only an awake idle robot hovers");
+        // The key shows the sleeper and how long the tick lasts.
+        assert!(body.contains("done: `Done: just finished (for ${FRESH_DONE_MS / 60000} minutes)`"));
+        assert!(body.contains("'Sitting on the doorstep under \"zzz\": idle, nothing claimed, waiting for work'"));
+    }
+
     /// The village's DOM-free decisions under node (tools/village-tests/):
-    /// the Fit scale (#400) and each epic's flag colour (#406).
+    /// the Fit scale (#400), each epic's flag colour (#406), the docks, and a
+    /// worker at rest (#411).
     #[test]
     fn village_node_tests_pass() {
         let root = env!("CARGO_MANIFEST_DIR");
         let dir = format!("{root}/tools/village-tests");
-        let files = ["fitscale.test.mjs", "featurecolours.test.mjs", "docks.test.mjs", "houselabel.test.mjs"].map(|f| format!("{dir}/{f}"));
+        let files = ["fitscale.test.mjs", "featurecolours.test.mjs", "docks.test.mjs", "houselabel.test.mjs", "rest.test.mjs"].map(|f| format!("{dir}/{f}"));
         match std::process::Command::new("node").arg("--test").args(&files).output() {
             Ok(out) => assert!(out.status.success(), "tools/village-tests failed:\n{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)),
             Err(e) => eprintln!("node is not installed ({e}); skipping tools/village-tests"),

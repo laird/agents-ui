@@ -1,4 +1,4 @@
-/* Things and scenery: crates, speech bubbles, "+N" badges, grass, paths, water, trees,
+/* Things and scenery: crates, speech bubbles, "zzz", "+N" badges, grass, paths, water, trees,
  * the castle, the board, the locks, the harbour, the ship and the supply boat. */
 import { state } from './state.js';
 import { KINDCOL, NOTECOL, P, PRIOCOL, R, STATE, blink, glassOf, hash, shadow } from './palette.js';
@@ -15,6 +15,20 @@ export function bubble(c, x, y, icon) {
   R(c, x + 1, y, 7, 1, o); R(c, x + 1, y + 8, 7, 1, o); R(c, x, y + 1, 1, 7, o); R(c, x + 8, y + 1, 1, 7, o);
   R(c, x + 1, y + 1, 7, 7, w); R(c, x + 4, y + 8, 1, 2, w); R(c, x + 3, y + 9, 1, 1, o); R(c, x + 5, y + 9, 1, 1, o); R(c, x + 4, y + 10, 1, 1, o);
   for (let r = 0; r < 5; r++) for (let k = 0; k < 5; k++) if (m[r][k] === '#') R(c, x + 2 + k, y + 2 + r, 1, 1, col);
+}
+/* "zzz" drifting up from a house whose worker is asleep (#411): three z's,
+ * small to large, rising and swaying, each outlined so it reads on any
+ * ground. With reduced motion they hold still, stacked. */
+const ZS = [['###', '.#.', '###'], ['####', '..#.', '.#..', '####']];
+export function zzz(c, x, y, t) {
+  for (let k = 0; k < 3; k++) {
+    const ph = state.reduce ? k / 3 : (t / 2400 + k / 3) % 1;
+    if (ph > 0.92) continue; // gone, before it starts again at the roof
+    const g = ZS[ph < 0.45 ? 0 : 1];
+    const gx = Math.round(x + ph * 6 + (state.reduce ? 0 : Math.sin(ph * 12) * 1.2)), gy = Math.round(y - ph * 12);
+    g.forEach((row, r) => [...row].forEach((ch, i) => { if (ch === '#') R(c, gx + i + 1, gy + r + 1, 1, 1, P.o); }));
+    g.forEach((row, r) => [...row].forEach((ch, i) => { if (ch === '#') R(c, gx + i, gy + r, 1, 1, P.white); }));
+  }
 }
 const ROPE = '#d8b070';
 /* A crate's epic: the outline in its feature's flag colour, like a ribbon

@@ -56,15 +56,15 @@ const DRESS = {
     mayor: { c: '#7a4ae0', C: '#4a2ca0', t: '#f8d040', p: '#40446a' } }
 };
 /* A robot's eyes and antenna say its status: cyan at work, red and
- * blinking when it needs you, dim when stalled, dark when unknown. */
-const ROBOT_EYE = { working: '#b8f8ff', idle: '#40e0f0', blocked: '#e02828', done: '#3878e0', stalled: '#585870', unknown: '#383850', stopped: '#383850' };
+ * blinking when it needs you, dim when stalled or asleep, dark when unknown. */
+const ROBOT_EYE = { working: '#b8f8ff', idle: '#40e0f0', asleep: '#24606c', blocked: '#e02828', done: '#3878e0', stalled: '#585870', unknown: '#383850', stopped: '#383850' };
 function strHash(s) {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
   return h >>> 0;
 }
 /* Poses are edits of the standing body: a raised hand, both hands up under
- * a crate, a foot lifted mid-step. */
+ * a crate, a foot lifted mid-step, sitting down. */
 const setAt = (row, i, ch) => row.slice(0, i) + ch + row.slice(i + 1);
 function pose(rows, kind) {
   const r = rows.slice();
@@ -75,6 +75,8 @@ function pose(rows, kind) {
     r[8] = setAt(setAt(r[8], 0, '.'), 7, '.');
   }
   if (kind === 'carrystep') r[11] = '.oo...o.';
+  // Sitting on the doorstep (#411): two rows lower, the legs folded away, the feet out front.
+  if (kind === 'sit') return ['........', '........', ...r.slice(0, 9), r[11]];
   return r;
 }
 /* Draw a person. `seed` names who they are; `accent` (a specialist's color)
@@ -138,7 +140,7 @@ function robot(c, x, y, seed, h, kind, opts) {
   if (slump) rows = ['......a.', '.....o..', ...rows.slice(2)];
   const shell = opts.mayor ? [dress.mayor.c, dress.mayor.C] : dress.cloth[(h >>> 7) % dress.cloth.length];
   const eye = opts.sub && st !== 'blocked' ? '#40e0f0' : ROBOT_EYE[st] || ROBOT_EYE.idle;
-  const tip = st === 'blocked' ? (blink(t, 300) ? '#e02828' : '#802828') : st === 'working' && blink(t + (h % 500), 600) ? '#b8f8ff' : slump ? '#585870' : '#f048c0';
+  const tip = st === 'blocked' ? (blink(t, 300) ? '#e02828' : '#802828') : st === 'working' && blink(t + (h % 500), 600) ? '#b8f8ff' : slump || st === 'asleep' ? '#585870' : '#f048c0';
   const map = {
     o: P.o, w: P.white, s: '#9098b8', S: '#686e90',
     h: dress.heads[(h >>> 11) % dress.heads.length], e: eye, a: tip,

@@ -6,13 +6,14 @@
 import { state } from './state.js';
 import { FEATURE_COLS, KINDCOL, NOTECOL, P, PRIOCOL, R, SPECIALTIES } from './palette.js';
 import { cobwebs, pennant } from './sprites/houses.js';
-import { ICONS, bubble, glint, ribbon, roped, tether } from './scenery.js';
+import { ICONS, bubble, glint, ribbon, roped, tether, zzz } from './scenery.js';
+import { FRESH_DONE_MS } from './rest.js';
 import { person } from './people.js';
 import { fogCol } from './features.js';
 
 const KIND_WORDS = { bug: 'Bug', feature: 'Feature', tests: 'Tests', security: 'Security', research: 'Research', perf: 'Performance',
   refactor: 'Refactor', docs: 'Docs', chores: 'Chore', workshop: 'Finished work, sealed (quay and stages)', cottage: 'Other work' };
-const ICON_WORDS = { blocked: 'Blocked: waiting on you', done: 'Done', unknown: 'Unknown: no word from it', stalled: 'Stalled: no progress' };
+const ICON_WORDS = { blocked: 'Blocked: waiting on you', done: `Done: just finished (for ${FRESH_DONE_MS / 60000} minutes)`, unknown: 'Unknown: no word from it', stalled: 'Stalled: no progress' };
 const PRIO_WORDS = { P0: 'P0: urgent', P1: 'P1: high', P2: 'P2: normal', P3: 'P3: low' };
 const PENNANT_WORDS = { P0: 'P0: urgent (waves)', P1: 'P1: high', P2: 'P2: normal' };
 function swatch(paint, size = 14) {
@@ -37,7 +38,8 @@ export function renderLegend() {
       [() => {}, 'Order: highest priority first; a crate stands after what it waits on, so a chain reads as one run'],
       [() => {}, `#N under a crate: its issue. Blocked issues are notes on the ${L.board}`]]],
     ['Bubbles over people and stops', Object.keys(ICONS).map(k => [c => bubble(c, 2, 1, k), ICON_WORDS[k] || k])],
-    ['Other marks', [[c => { state.T.crate(c, 1, 1, 'feature', null); roped(c, 1, 1); }, 'Roped crate: waits on another issue ("Depends on")', 7], [c => cobwebs(c, -1, -6), 'Cobwebs on a house: stalled'],
+    ['Other marks', [[c => { person(c, 1, 6, 'key:asleep', 'sit', { status: 'asleep' }); zzz(c, 9, 9, 0); }, 'Sitting on the doorstep under "zzz": idle, nothing claimed, waiting for work', 18],
+      [c => { state.T.crate(c, 1, 1, 'feature', null); roped(c, 1, 1); }, 'Roped crate: waits on another issue ("Depends on")', 7], [c => cobwebs(c, -1, -6), 'Cobwebs on a house: stalled'],
       [c => { R(c, 0, 0, 14, 14, fogCol(state.T)); bubble(c, 2, 1, 'unknown'); }, 'Grey fog over a stage: nothing says what runs there (no Deployment, no branch)'],
       [c => { R(c, 4, 2, 1, 10, P.woodD); R(c, 5, 2, 6, 4, P.p0); }, 'Red flag on a warehouse or a ship: the newest deployment failed, and the ship turned back']]],
     ['Sub-agent accents: their specialty', [...SPECIALTIES.map(([name, kind]) => [c => person(c, 3, 1, 'key:' + name, 'stand', { accent: KINDCOL[kind], sub: true }), name]),
