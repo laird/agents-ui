@@ -129,6 +129,7 @@ src/
       worlds.js     #   a world drawn as platform over dev village; draw(); the bar's line for a world (worldWords)
       panels.js     #   toast, zoom and Fit
       fitscale.js   #   Fit's scale for a map in the room left for it (no DOM; tools/village-tests/)
+      rest.js       #   a worker at rest: ✓ just after finishing, then asleep ("zzz") (no DOM; tools/village-tests/)
       dialogs.js    #   explain()/act() dispatch on registered hits; the hit test; keyboard targets
       labels.js     #   area labels from registerLabels, kept clear of the art and each other
       key.js        #   the Key (legend), drawn with the renderer's own functions
