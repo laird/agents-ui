@@ -10,7 +10,8 @@
 #   (no --host)  link this checkout's plugin into ~/.config/omarchy/plugins/, so
 #                edits here show up as you save them
 #   --host H     copy it to H over ssh (omarchy-1, the uConsole, ...), replacing
-#                any earlier copy
+#                any earlier copy; commands there run in a login shell, so
+#                `omarchy` has its environment (OMARCHY_PATH)
 #   --enable     also add the widget to the bar (`omarchy plugin enable`)
 #   --uninstall  disable the plugin and remove it; with --screensaver, also put
 #                Omarchy's own screensaver and idle settings back
@@ -78,11 +79,25 @@ fi
 SRC="$HERE/$NAME"
 for f in "${FILES[@]}"; do [ -f "$SRC/$f" ] || { echo "install.sh: missing $SRC/$f" >&2; exit 1; }; done
 
+# On $HOST, a command runs in a login shell. ssh alone gives a non-login,
+# non-interactive shell, which lacks the session environment `omarchy` needs
+# (OMARCHY_PATH, and Omarchy's PATH additions): `omarchy plugin enable` then
+# fails with "OMARCHY_PATH is not set". A login shell reads
+# /etc/profile.d/omarchy.sh, Omarchy's own way of setting both, so nothing
+# here hard-codes where Omarchy lives.
+sq() {  # sq <word>: the word as the shell reads it back, single-quoted only when it must be
+  if [[ $1 =~ ^[A-Za-z0-9_./:=@%+-]+$ ]]; then printf '%s' "$1"; else printf "'%s'" "${1//\'/\'\\\'\'}"; fi
+}
+remote_cmd() {  # remote_cmd <command...>: the string ssh runs on $HOST
+  local words=() a
+  for a in "$@"; do words+=("$(sq "$a")"); done
+  printf 'bash -lc %s' "$(sq "${words[*]}")"
+}
 run() {  # run <command...>: here, or on $HOST
   if [ "$DRY_RUN" = true ]; then
-    echo "would run${HOST:+ on $HOST}: $*"
+    if [ -n "$HOST" ]; then echo "would run on $HOST: $(remote_cmd "$@")"; else echo "would run: $*"; fi
   elif [ -n "$HOST" ]; then
-    ssh "$HOST" "$(printf '%q ' "$@")"
+    ssh "$HOST" "$(remote_cmd "$@")"
   else
     "$@"
   fi
@@ -122,6 +137,19 @@ fi
 rm -f "$backup" "$dir/screensaver.json"'
 
 DEST_REL=".config/omarchy/plugins/$NAME"
+
+# Before changing anything: `omarchy` has to run where the plugin goes, or the
+# install would stop half way, with Omarchy's screensaver already turned off
+# in shell.json and the village's never turned on.
+if [ "$UNINSTALL" != true ] && { [ "$SCREENSAVER" = true ] || [ "$ENABLE" = true ]; }; then
+  if [ "$DRY_RUN" = true ]; then
+    echo "would check that omarchy runs${HOST:+ on $HOST} (omarchy plugin list)"
+  elif ! err=$(run sh -c 'command -v omarchy >/dev/null || { echo "omarchy: command not found"; exit 1; }; omarchy plugin list 2>&1 >/dev/null' 2>&1); then
+    echo "install.sh: omarchy does not run${HOST:+ on $HOST}${err:+: $err}" >&2
+    echo "install.sh: nothing was changed." >&2
+    exit 1
+  fi
+fi
 
 if [ "$UNINSTALL" = true ]; then
   run sh -c "command -v omarchy >/dev/null && omarchy plugin disable $ID >/dev/null 2>&1 || true"
