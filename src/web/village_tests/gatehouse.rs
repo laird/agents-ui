@@ -86,3 +86,25 @@ fn village_html_plays_a_new_bounce_from_the_gate_back_to_the_house() {
     // Played once: only bounces `old` didn't have.
     assert!(body.contains(".filter(m => m.count > bouncesOf(old, m.n).length)"));
 }
+
+/// The inefficiency view (#435): a slate by the gatehouse with today's
+/// landed and bounced counts, and a hotspots sign whose dialog lists the
+/// files that conflict most, in order. The words and the order are tested
+/// under node (scoretally.test.mjs); this checks what is drawn and said.
+#[test]
+fn village_html_shows_the_gate_scoreboard_and_hotspots() {
+    let body = &village_source();
+    // The slate shows the totals, landed in green and bounced in red, when the gate reports a tally.
+    assert!(body.contains("const g = lay.gate, ms = v.pipeline.merge_stats;\n  if (!g || !ms) return;"));
+    assert!(body.contains("const w = slate(c, x, y, ms.landed_today || 0, ms.bounced_today || 0);"));
+    assert!(body.contains("numberTag(c, x + 2, y + 3, landed, LANDED, P.o);"));
+    assert!(body.contains("numberTag(c, x + 3 + wl, y + 3, bounced, BOUNCED, P.white);"));
+    assert!(body.contains("return `landed ${ms.landed_today || 0} · bounced ${ms.bounced_today || 0} today`;"));
+    // The sign stands only when something conflicted, and its dialog lists them in order.
+    assert!(body.contains("if ((ms.hotspots || []).length) {"));
+    assert!(body.contains("return { title: 'Conflict hotspots', line: 'The files that conflict most today: work that touches them bounces back from the gate.', meta: lines };"));
+    assert!(body.contains(".sort((a, b) => b.count - a.count || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0))"));
+    // The Key names the slate and the sign (bounces.js names the rework crate).
+    assert!(body.contains("registerKey({ group: 'other', rows: () => ["));
+    assert!(body.contains("[c => slate(c, 1, 1, 14, 6), 'Slate by the gatehouse: work landed (green) and bounced (red) today', 26],"));
+}
