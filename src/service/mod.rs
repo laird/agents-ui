@@ -2,7 +2,9 @@
 //! The service file's text is [`unit`]'s (#425). On Linux [`systemd`] writes
 //! it and drives systemd (#426); on macOS [`launchd`] writes the agent's
 //! plist and drives launchctl (#427). Which one is a [`Backend`], so either
-//! is tested on any OS.
+//! is tested on any OS. `--with-herdr` adds the herdr server's own systemd
+//! unit, [`herdr`] (#428).
+pub mod herdr;
 pub mod launchd;
 pub mod systemd;
 pub mod unit;
@@ -14,20 +16,25 @@ use unit::{Probes, ServiceOptions, defaults, suggested_bind};
 
 const USAGE: &str = "usage: agents-tui service <install|uninstall|status|restart>
   install [--web-port N] [--web-bind ADDR[,ADDR]] [--source LAYER=NAME]... [--read-only]
-          [--allow-lan] [--linger] [--dry-run]
+          [--allow-lan] [--linger] [--with-herdr] [--dry-run]
     Write the user service, enable and start it, and wait until the village answers.
     Run it again to change the options: it shows what changed and restarts.
     --linger (Linux) keeps it running after you log out. macOS has no such thing:
     a LaunchAgent runs while you are logged in.
-  uninstall   Stop, disable and remove the service.
+    --with-herdr (Linux) also installs herdr.service for the herdr server. A herdr
+    already running is never restarted (that ends every pane): the unit is enabled,
+    and takes over at the next login or once that herdr exits.
+  uninstall [--with-herdr [--stop-herdr]]
+    Stop, disable and remove the service. --with-herdr removes herdr.service too,
+    leaving a running herdr running unless --stop-herdr.
   status      The service's state, where it serves, and the binary it runs.
   restart     Restart the service and wait for the village.";
 
 /// What `service` was asked to do.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
-    Install { set: Overrides, flags: systemd::InstallFlags },
-    Uninstall,
+    Install { set: Overrides, flags: systemd::InstallFlags, with_herdr: bool },
+    Uninstall { with_herdr: bool, stop_herdr: bool },
     Status,
     Restart,
 }
@@ -64,11 +71,24 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
     let (verb, rest) = args.split_first().ok_or_else(|| USAGE.to_string())?;
     let simple = |c: Command| if rest.is_empty() { Ok(c) } else { Err(format!("`service {verb}` takes no options\n{USAGE}")) };
     match verb.as_str() {
-        "uninstall" => simple(Command::Uninstall),
+        "uninstall" => {
+            let (mut with_herdr, mut stop_herdr) = (false, false);
+            for arg in rest {
+                match arg.as_str() {
+                    "--with-herdr" => with_herdr = true,
+                    "--stop-herdr" => stop_herdr = true,
+                    other => return Err(format!("unknown option {other}\n{USAGE}")),
+                }
+            }
+            if stop_herdr && !with_herdr {
+                return Err(format!("--stop-herdr goes with --with-herdr\n{USAGE}"));
+            }
+            Ok(Command::Uninstall { with_herdr, stop_herdr })
+        }
         "status" => simple(Command::Status),
         "restart" => simple(Command::Restart),
         "install" => {
-            let (mut set, mut flags) = (Overrides::default(), systemd::InstallFlags::default());
+            let (mut set, mut flags, mut with_herdr) = (Overrides::default(), systemd::InstallFlags::default(), false);
             let mut it = rest.iter();
             while let Some(arg) = it.next() {
                 let (name, inline) = match arg.split_once('=') {
@@ -84,18 +104,23 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
                     "--allow-lan" => set.allow_lan = true,
                     "--linger" => flags.linger = true,
                     "--dry-run" => flags.dry_run = true,
+                    "--with-herdr" => with_herdr = true,
                     other => return Err(format!("unknown option {other}\n{USAGE}")),
                 }
             }
-            Ok(Command::Install { set, flags })
+            Ok(Command::Install { set, flags, with_herdr })
         }
         "-h" | "--help" | "help" => Err(USAGE.to_string()),
         other => Err(format!("unknown service command {other}\n{USAGE}")),
     }
 }
 
+fn find_on_path(program: &str) -> Option<std::path::PathBuf> {
+    std::env::split_paths(&std::env::var_os("PATH")?).map(|d| d.join(program)).find(|p| p.is_file())
+}
+
 fn on_path(program: &str) -> bool {
-    std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(program).is_file()))
+    find_on_path(program).is_some()
 }
 
 /// `agents-tui service ...`: run it, print to `out`, and return the exit code.
@@ -145,11 +170,15 @@ pub enum Backend {
     Launchd { uid: u32 },
 }
 
+const HERDR_SYSTEMD_ONLY: &str = "--with-herdr installs a systemd unit; it is for Linux only";
+
 fn dispatch(command: Command, backend: Backend, home: &Path, runner: &mut systemd::SystemRunner, out: &mut dyn Write) -> Result<(), String> {
     match (command, backend) {
-        (Command::Install { set, flags }, _) => install(home, &set, flags, backend, runner, out),
-        (Command::Uninstall, Backend::Systemd) => systemd::uninstall(home, runner, out),
-        (Command::Uninstall, Backend::Launchd { uid }) => launchd::uninstall(home, uid, runner, out),
+        (Command::Install { set, flags, with_herdr }, _) => install(home, &set, flags, with_herdr, backend, runner, out),
+        (Command::Uninstall { with_herdr, stop_herdr }, Backend::Systemd) => systemd::uninstall(home, runner, out)
+            .and_then(|()| if with_herdr { herdr::uninstall(home, stop_herdr, runner, out) } else { Ok(()) }),
+        (Command::Uninstall { with_herdr: true, .. }, Backend::Launchd { .. }) => Err(HERDR_SYSTEMD_ONLY.into()),
+        (Command::Uninstall { .. }, Backend::Launchd { uid }) => launchd::uninstall(home, uid, runner, out),
         (Command::Status, Backend::Systemd) => systemd::status(home, runner, out),
         (Command::Status, Backend::Launchd { uid }) => launchd::status(home, uid, runner, out),
         (Command::Restart, Backend::Systemd) => systemd::restart(home, runner, out),
@@ -157,7 +186,8 @@ fn dispatch(command: Command, backend: Backend, home: &Path, runner: &mut system
     }
 }
 
-fn install(home: &Path, set: &Overrides, flags: systemd::InstallFlags, backend: Backend, runner: &mut systemd::SystemRunner, out: &mut dyn Write) -> Result<(), String> {
+#[allow(clippy::too_many_arguments)]
+fn install(home: &Path, set: &Overrides, flags: systemd::InstallFlags, with_herdr: bool, backend: Backend, runner: &mut systemd::SystemRunner, out: &mut dyn Write) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| format!("can't find this binary: {e}"))?;
     let probes = Probes {
         herdr_on_path: on_path("herdr"),
@@ -171,9 +201,15 @@ fn install(home: &Path, set: &Overrides, flags: systemd::InstallFlags, backend: 
     }
     match backend {
         Backend::Systemd => {
+            // herdr first: the village's swarms=herdr source reads from it.
+            if with_herdr {
+                let herdr = find_on_path("herdr").ok_or("--with-herdr: herdr is not on PATH")?;
+                herdr::install(home, &herdr, &opts.path, flags.dry_run, runner, out)?;
+            }
             let user = std::env::var("USER").unwrap_or_else(|_| "$USER".into());
             systemd::install(&opts, flags, &user, runner, out)
         }
+        Backend::Launchd { .. } if with_herdr => Err(HERDR_SYSTEMD_ONLY.into()),
         Backend::Launchd { uid } => launchd::install(&opts, flags, uid, runner, out),
     }
 }
@@ -189,7 +225,8 @@ mod tests {
     #[test]
     fn parses_install_options() {
         let c = parse(&words("install --web-port 7999 --web-bind 127.0.0.1,tailscale --source swarms=herdr --read-only --linger --dry-run")).unwrap();
-        let Command::Install { set, flags } = c else { panic!("{c:?}") };
+        let Command::Install { set, flags, with_herdr } = c else { panic!("{c:?}") };
+        assert!(!with_herdr);
         assert_eq!(set.web_port, Some(7999));
         assert_eq!(set.web_binds, vec!["127.0.0.1", "tailscale"]);
         assert_eq!(set.sources, vec!["swarms=herdr"]);
@@ -202,13 +239,23 @@ mod tests {
     fn parses_the_other_commands_and_refuses_nonsense() {
         assert_eq!(parse(&words("status")).unwrap(), Command::Status);
         assert_eq!(parse(&words("restart")).unwrap(), Command::Restart);
-        assert_eq!(parse(&words("uninstall")).unwrap(), Command::Uninstall);
+        assert_eq!(parse(&words("uninstall")).unwrap(), Command::Uninstall { with_herdr: false, stop_herdr: false });
         assert!(parse(&words("status --now")).unwrap_err().contains("takes no options"));
         assert!(parse(&words("install --web-port")).unwrap_err().contains("needs a value"));
         assert!(parse(&words("install --web-port nine")).unwrap_err().contains("port number"));
         assert!(parse(&words("install --verbose")).unwrap_err().contains("unknown option"));
         assert!(parse(&words("frobnicate")).unwrap_err().contains("unknown service command"));
         assert!(parse(&[]).unwrap_err().starts_with("usage:"));
+    }
+
+    #[test]
+    fn with_herdr_on_install_and_uninstall() {
+        let Command::Install { with_herdr, flags, .. } = parse(&words("install --with-herdr --dry-run")).unwrap() else { panic!() };
+        assert!(with_herdr && flags.dry_run);
+        assert_eq!(parse(&words("uninstall --with-herdr")).unwrap(), Command::Uninstall { with_herdr: true, stop_herdr: false });
+        assert_eq!(parse(&words("uninstall --with-herdr --stop-herdr")).unwrap(), Command::Uninstall { with_herdr: true, stop_herdr: true });
+        assert!(parse(&words("uninstall --stop-herdr")).unwrap_err().contains("goes with --with-herdr"));
+        assert!(parse(&words("uninstall --now")).unwrap_err().contains("unknown option"));
     }
 
     #[test]
