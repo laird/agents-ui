@@ -57,6 +57,11 @@ file.
   scale, the dock order, house labels, build weather and bounce marks) run
   under node: `node --test tools/village-tests/`, every `*.test.mjs` there,
   also run by `cargo test village_node_tests`.
+  They need Node 22 or later.
+  A test that draws people or anything else animated must pin the clock
+  (`performance.now`): two drawings a few milliseconds apart can land on
+  different animation frames, which passes on a fast machine and fails on CI
+  (#450).
 
 For the village UI, `tools/mock/demo.sh` runs agents-tui against simulated herdr and Temporal swarms.
 `VOYAGES=1 tools/mock/demo.sh` scripts Deployments for this repo's own environments (`nuc-1`, then `release`): a deploy, a promotion and a failed deploy on a 120 s loop, so the environment row's voyages can be seen without real ones (`tools/mock/voyages.py`; tests: `python3 -m unittest discover -s tools/mock -p 'test_voyages.py'`).
