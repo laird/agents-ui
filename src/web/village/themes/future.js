@@ -3,6 +3,7 @@ import { state, now } from '../state.js';
 import { F, KINDCOL, NOTECOL, P, PRIOCOL, R, SHADE, blink, hash, shadow } from '../palette.js';
 import { puffs } from '../sprites/houses.js';
 import { detail } from '../detail.js';
+import { planks, px } from '../art2x.js';
 import { CRATE_W, CRATE_H, seal, stencil } from '../crates.js';
 import { registerTheme } from './registry.js';
 /* ---------- Future ----------
@@ -116,31 +117,59 @@ export const FUTURE = {
   weather: { style: 'alert', cloud: '#501828', cloudD: '#300818', rain: '#ff7090', tint: 'rgba(224,24,48,0.20)', alarm: '#ff2040' },
   labels: { docks: 'Cargo bay', board: 'Holo-board', houses: 'Pods', quay: 'Launch rail', castle: 'Spaceport', hall: 'Command dome', ship: 'Shuttle', sails: 'launches', gate: 'Scanner arch' },
   towers: [[2, -58, 9, 50], [13, -55, 18, 45]],
+  /* Deck plates at 2× (#453): each seam lit along one side, so the plates
+   * read as bevelled; rivets with a cap; now and then a vent slot. */
   ground(c, x0, y0, w, h) {
     R(c, x0, y0, w, h, F.deckD);
     for (let x = x0 + 7; x < x0 + w; x += 8) R(c, x, y0, 1, h, F.seam);
     for (let y = y0 + 7; y < y0 + h; y += 8) R(c, x0, y, w, 1, F.seam);
-    for (let y = y0 + 1; y < y0 + h; y += 16) for (let x = x0 + 1; x < x0 + w; x += 16) R(c, x, y, 1, 1, F.rivet);
+    detail(c, x0, y0, g => {
+      for (let x = 7; x < w; x += 8) if (x + 1 < w) px(g, 2 * x + 2, 0, 1, 2 * h, F.deck);
+      for (let y = 7; y < h; y += 8) if (y + 1 < h) px(g, 0, 2 * y + 2, 2 * w, 1, F.deck);
+      for (let y = 1; y < h; y += 16) for (let x = 1; x < w; x += 16) { px(g, 2 * x, 2 * y, 2, 2, F.rivet); px(g, 2 * x, 2 * y, 1, 1, F.deckL); }
+      for (let y = 3; y + 2 < h; y += 8) for (let x = 2; x + 4 < w; x += 8) if (hash(x0 + x, y0 + y) < 0.12) { px(g, 2 * x, 2 * y, 7, 1, F.seam); px(g, 2 * x, 2 * y + 2, 7, 1, F.seam); }
+    });
   },
   /* Walkways with a glowing light strip down the middle. */
+  /* At 2× the edges are a detail pixel of trim and a detail pixel of glow,
+   * and each light in the strip has a white-hot core. */
   road(c, x0, y0, w, h) {
     R(c, x0, y0, w, h, F.deckL);
-    if (w > h && h >= 4) { R(c, x0, y0, w, 1, F.cyanD); R(c, x0, y0 + h - 1, w, 1, F.cyanD); for (let x = x0 + 1; x < x0 + w - 2; x += 4) R(c, x, y0 + (h >> 1), 2, 1, F.cyan); }
-    if (h > w && w >= 4) { R(c, x0, y0, 1, h, F.cyanD); R(c, x0 + w - 1, y0, 1, h, F.cyanD); for (let y = y0 + 1; y < y0 + h - 2; y += 4) R(c, x0 + (w >> 1), y, 1, 2, F.cyan); }
+    detail(c, x0, y0, g => {
+      const W = 2 * w, H = 2 * h;
+      if (w > h && h >= 4) {
+        px(g, 0, 0, W, 1, F.cyanD); px(g, 0, 1, W, 1, F.cyan); px(g, 0, H - 1, W, 1, F.cyanD); px(g, 0, H - 2, W, 1, F.deck);
+        for (let x = 1; x < w - 2; x += 4) { px(g, 2 * x, 2 * (h >> 1), 4, 2, F.cyan); px(g, 2 * x + 1, 2 * (h >> 1), 2, 1, F.cyanL); }
+      }
+      if (h > w && w >= 4) {
+        px(g, 0, 0, 1, H, F.cyanD); px(g, 1, 0, 1, H, F.cyan); px(g, W - 1, 0, 1, H, F.cyanD); px(g, W - 2, 0, 1, H, F.deck);
+        for (let y = 1; y < h - 2; y += 4) { px(g, 2 * (w >> 1), 2 * y, 2, 4, F.cyan); px(g, 2 * (w >> 1), 2 * y + 1, 1, 2, F.cyanL); }
+      }
+    });
   },
   yard(c, x0, y0, w, h) {
     R(c, x0, y0, w, h, F.deck);
     for (let x = x0 + 3; x < x0 + w; x += 4) R(c, x, y0, 1, h, F.deckD);
     for (let y = y0 + 3; y < y0 + h; y += 4) R(c, x0, y, w, 1, F.deckD);
+    // A lit rivet where every other pair of seams cross.
+    detail(c, x0, y0, g => { for (let y = 3; y < h; y += 8) for (let x = 3; x < w; x += 8) px(g, 2 * x, 2 * y, 1, 1, F.deckL); });
   },
   /* Rivers and canals are plasma conduits; their pulses flow. */
   channel(c, x0, y0, w, h, t, flow) {
     R(c, x0, y0, w, h, F.space);
     R(c, x0, y0, w, 1, F.magentaD); R(c, x0, y0 + h - 1, w, 1, F.magentaD);
-    const off = Math.floor(t / 60 * flow) % 10;
-    for (let x = x0 - 10 + off; x < x0 + w; x += 10) if (x >= x0) {
-      R(c, x, y0 + (h >> 1), 4, 1, F.plasmaL); R(c, x + 5, y0 + (h >> 1) - 2, 2, 1, F.plasma); R(c, x + 2, y0 + (h >> 1) + 2, 2, 1, F.cyanD);
-    }
+    const off = Math.floor(t / 60 * flow) % 10, mid = h >> 1;
+    // At 2×: a glow just inside each wall, and pulses with a hot core and a trail.
+    detail(c, x0, y0, g => {
+      const W = 2 * w, H = 2 * h;
+      px(g, 0, 2, W, 1, F.magentaD); px(g, 0, H - 3, W, 1, F.magentaD);
+      for (let x = -10 + off; x < w; x += 10) if (x >= 0) {
+        const X = 2 * x, Y = 2 * mid;
+        px(g, X, Y, Math.min(8, W - X), 2, F.plasmaL); px(g, X + 5, Y, Math.min(3, W - X - 5), 1, P.white);
+        if (X + 10 < W) px(g, X + 10, Y - 4, Math.min(4, W - X - 10), 1, F.plasma);
+        if (X + 4 < W) px(g, X + 4, Y + 4, Math.min(4, W - X - 4), 1, F.cyanD);
+      }
+    });
   },
   dock(c, x, y, w) {
     R(c, x, y, w, 7, P.o); R(c, x + 1, y, w - 2, 6, F.hullD);
@@ -149,18 +178,34 @@ export const FUTURE = {
   /* Groves become station kit: an antenna mast, a solar array or a small dome. */
   tree(c, x, y) {
     const k = Math.floor(hash(x, y) * 3);
+    // At 2× (#453): rungs and lit tips on the mast, a finer cell grid and a
+    // glint on the array, a dome with a highlight curve and lit base lights.
     if (k === 0) {
       R(c, x + 4, y + 9, 5, 3, P.o); R(c, x + 5, y + 9, 3, 2, F.hullD);
       R(c, x + 6, y + 1, 1, 8, F.hull); R(c, x + 3, y + 3, 7, 1, F.hullD); R(c, x + 4, y + 6, 5, 1, F.hullD);
       R(c, x + 5, y, 3, 2, P.o); R(c, x + 6, y, 1, 1, blink(now() + x * 31, 900) ? P.p0 : F.magentaD);
+      detail(c, x, y, g => {
+        for (let yy = 4; yy < 18; yy += 3) px(g, 13, yy, 1, 1, F.hullD);
+        px(g, 6, 6, 1, 1, F.cyanL); px(g, 19, 6, 1, 1, F.cyanL); px(g, 8, 12, 1, 1, F.cyan); px(g, 17, 12, 1, 1, F.cyan);
+        px(g, 11, 19, 1, 1, F.rivet); px(g, 14, 19, 1, 1, F.rivet);
+      });
     } else if (k === 1) {
       R(c, x + 5, y + 7, 2, 5, F.hullD);
       R(c, x, y + 2, 12, 6, P.o); R(c, x + 1, y + 3, 10, 4, F.panel);
-      for (let xx = x + 3; xx < x + 11; xx += 3) R(c, xx, y + 3, 1, 4, F.panelL);
-      R(c, x + 1, y + 3, 10, 1, F.panelL);
+      detail(c, x, y, g => {
+        planks(g, 2, 6, 20, 8, 2, F.panelL);
+        for (let xx = 5; xx < 22; xx += 3) px(g, xx, 6, 1, 8, F.panelL);
+        px(g, 2, 6, 20, 1, F.panelL);
+        for (let k2 = 0; k2 < 4; k2++) px(g, 13 + k2, 7 + k2, 1, 1, P.white);
+        px(g, 11, 14, 1, 10, F.hull);
+      });
     } else {
       [3, 4, 5, 5].forEach((w, dy) => { R(c, x + 6 - w, y + 4 + dy, 2 * w, 1, P.o); if (dy) R(c, x + 7 - w, y + 4 + dy, 2 * w - 2, 1, dy === 1 ? F.cyanL : F.glass); });
       R(c, x + 1, y + 8, 10, 3, P.o); R(c, x + 2, y + 8, 8, 2, F.hullD);
+      detail(c, x, y, g => {
+        px(g, 8, 11, 3, 1, P.white); px(g, 7, 12, 1, 2, P.white); px(g, 16, 14, 1, 2, F.cyanD);
+        [6, 10, 14, 18].forEach((lx, i) => px(g, lx, 18, 1, 1, blink(now() + x * 17 + i * 200, 800) ? F.cyanL : F.cyan));
+      });
     }
   },
   /* Command dome: a glass dome on a hull ring, an antenna with a blinking
@@ -234,6 +279,14 @@ export const FUTURE = {
     for (let yy = cy - 42; yy < cy - 10; yy += 5) R(c, x + 5, yy, 2, 2, F.cyanL);
     R(c, x + 2, cy - 52, 8, 6, P.o); R(c, x + 3, cy - 51, 6, 4, F.glass);
     R(c, x + 5, cy - 56, 1, 4, F.hull); R(c, x + 4, cy - 57, 3, 1, blink(t, 700) || t - fw < 1600 ? P.p0 : F.magentaD);
+    // At 2×: the tower's panel seams and a lit edge, glazing bars in the
+    // control cab, seams along the pad's skirt, and a landing ring on the pad.
+    detail(c, x, cy, g => {
+      planks(g, 8, -90, 8, 72, 6, F.hullD); px(g, 8, -90, 1, 72, F.hullL);
+      px(g, 9, -102, 1, 8, P.o); px(g, 14, -102, 1, 8, P.o); px(g, 7, -102, 2, 1, P.white);
+      for (let k = 6; k < 72; k += 12) px(g, k, -14, 1, 12, F.hull);
+      px(g, 22, 6, 34, 1, F.cyanD); px(g, 22, 24, 34, 1, F.cyanD); px(g, 22, 6, 1, 19, F.cyanD); px(g, 55, 6, 1, 19, F.cyanD);
+    });
     const ft = t - fw;
     if (ft >= 0 && ft < 1600) {
       const p = ft / 1600;
@@ -256,6 +309,14 @@ export const FUTURE = {
     R(c, rx + 11, sy + 20, 3, 10, P.o); R(c, rx + 11, sy + 21, 2, 8, F.magentaD);
     R(c, rx + 15, sy + 14, 1, 18, F.hullD); R(c, rx + 15, sy + 31, 12, 1, F.cyanD);
     if (oy < 0) for (let k = 0; k < 4; k++) R(c, rx + 2 + k * 2, sy + 30 + (blink(t + k * 60, 80) ? 1 : 0), 2, 3 + (k % 2) * 2, k % 2 ? F.cyan : F.cyanL);
+    // At 2×: a lit edge down the hull and its panel seams, a highlight on the
+    // nose, the cockpit's glazing, and a white-hot core in each engine flame.
+    detail(c, rx, sy, g => {
+      px(g, 8, 0, 1, 58, F.hull); planks(g, 4, -2, 16, 18, 6, F.hull); planks(g, 4, 20, 16, 38, 6, F.hull);
+      px(g, 9, -10, 3, 1, P.white); px(g, 11, 6, 2, 1, P.white);
+      px(g, -2, 42, 1, 16, F.magenta); px(g, 23, 42, 1, 16, F.magenta);
+      if (oy < 0) for (let k = 0; k < 4; k++) px(g, 5 + k * 4, 61 + (blink(t + k * 60, 80) ? 2 : 0), 1, 2 + (k % 2) * 2, P.white);
+    });
   },
   hold: [[33, -14], [38, -14], [33, -19], [38, -19], [33, -24], [38, -24]], holdBadge: [31, -32], hull: [14, -58, 30, 50], flies: true,
   /* The cargo shuttle that brings new issues down the conduit, hovering. */
@@ -280,6 +341,11 @@ export const FUTURE = {
     R(c, x, y + 4, 27, 5, P.o); R(c, x + 1, y + 5, 25, 3, F.hull); R(c, x + 1, y + 5, 25, 1, F.hullL); R(c, x + 26, y + 5, 3, 3, P.o); R(c, x + 26, y + 6, 2, 1, F.cyan);
     R(c, x + 18, y + 2, 7, 3, P.o); R(c, x + 19, y + 3, 5, 1, F.glass);
     R(c, x - 2, y + 5, 2, 3, blink(t, 120) ? F.cyan : F.cyanL);
+    // At 2×: hull seams and rivets, a glint on the canopy, a hot core in the thruster.
+    detail(c, x, y, g => {
+      for (let k = 8; k < 52; k += 10) { px(g, k, 10, 1, 6, F.hullD); px(g, k + 3, 14, 1, 1, F.rivet); }
+      px(g, 40, 6, 2, 1, P.white); px(g, -3, 12, 2, 2, P.white);
+    });
     for (let k = 0; k < Math.min(load, 3); k++) this.crate(c, x + 2 + k * 5, y, 'workshop', null);
   },
   decor(c, x, y, k, t) {
@@ -292,11 +358,16 @@ export const FUTURE = {
       case 2: // small dome
         shadow(c, x + 1, y + 6, 7, 1);
         R(c, x + 2, y + 1, 4, 1, P.o); R(c, x + 1, y + 2, 6, 4, P.o); R(c, x + 2, y + 2, 4, 3, F.glass); R(c, x + 2, y + 2, 2, 1, F.cyanL); R(c, x + 1, y + 5, 6, 1, F.hullD); break;
-      case 3: { // maintenance drone, hovering
+      case 3: { // maintenance drone, hovering: at 2×, rotors blurred, a lens with a glint, a skid
         const b = blink(t + y * 29, 400) ? 1 : 0;
         shadow(c, x + 2, y + 7, 4, 1);
         R(c, x + 1, y + 1 + b, 6, 3, P.o); R(c, x + 2, y + 2 + b, 4, 1, F.hull); R(c, x + 3, y + 2 + b, 1, 1, F.cyan);
-        R(c, x, y + b, 2, 1, F.hullD); R(c, x + 6, y + b, 2, 1, F.hullD); break;
+        R(c, x, y + b, 2, 1, F.hullD); R(c, x + 6, y + b, 2, 1, F.hullD);
+        detail(c, x, y + b, g => {
+          px(g, 0, 0, 4, 1, blink(t + x * 7, 60) ? F.hull : F.hullD); px(g, 12, 0, 4, 1, blink(t + x * 7 + 30, 60) ? F.hull : F.hullD);
+          px(g, 6, 4, 1, 1, P.white); px(g, 4, 6, 8, 1, F.hullL); px(g, 4, 7, 1, 1, F.rivet); px(g, 11, 7, 1, 1, F.rivet);
+        });
+        break;
       }
       case 4: // light bollards
         [x + 1, x + 5].forEach(bx => { R(c, bx, y + 2, 2, 4, P.o); R(c, bx, y + 2, 2, 1, blink(t + bx * 13, 1400) ? F.cyanL : F.cyan); });
