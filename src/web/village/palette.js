@@ -22,8 +22,34 @@ export const STATE = { blocked: '#f07020', done: '#3878e0', unknown: '#585870', 
 export const KINDCOL = { bug: '#e03838', feature: '#40b8e8', tests: '#e070d0', security: '#3058b0', research: '#c0a8f0', perf: '#d8c8a8', refactor: '#6878a0', docs: '#2878a0', chores: '#a83028', workshop: '#c88848', cottage: '#c8a048' };
 export const NOTECOL = { 'needs-design': '#f8c800', 'needs-clarification': '#d0c0f8', 'needs-approval': '#e89890', 'too-complex': '#b02010', 'future': '#8088a8', 'proposal': '#c0a8f0', 'failed': '#e02828', 'conflict': '#f07020', 'unreachable': '#585870' };
 export const STOPCOL = ['#38c848', '#f8d040', '#f8f8f8', '#4868e8', '#e070d0'];
-/* One cloth colour per feature banner, in the order the server lists them. */
-export const FEATURE_COLS = ['#40b8e8', '#e070d0', '#60e0c8', '#f07020', '#c0a8f0', '#a8c8f8'];
+/* Feature (epic) colours (#406): bright hues, distinct from each other and
+ * from every theme's ground, water, paths, the gold of "live" and the red
+ * stuck pennant (tools/village-tests/featurecolours.test.mjs measures it). */
+export const FEATURE_COLS = ['#40b8e8', '#e070d0', '#60e0c8', '#f07020', '#c0a8f0', '#8068f0',
+  '#f04888', '#20b0a8', '#c050e0', '#ff9878', '#4058f8', '#f8b8e0'];
+/* Each visible feature's colour, by issue number: its home colour is
+ * `number mod 12`, so it is the same across polls, reloads, themes and the
+ * screensaver. No two visible features share one: the oldest issue keeps its
+ * home colour and a younger one that collides takes the next free one. With
+ * more than 12 on screen, colours must repeat; then a feature only avoids the
+ * colours of its neighbours in the order shown. Returns number → colour. */
+export function featureColours(features) {
+  const N = FEATURE_COLS.length, shown = (features || []).map(f => f.number);
+  const out = new Map(), used = new Set();
+  [...new Set(shown)].sort((a, b) => a - b).forEach(n => {
+    const k = shown.indexOf(n), home = ((n % N) + N) % N;
+    const near = new Set([shown[k - 1], shown[k + 1]].map(m => out.get(m)).filter(Boolean));
+    const free = used.size < N ? i => !used.has(i) : i => !near.has(FEATURE_COLS[i]);
+    let i = home;
+    for (let step = 0; step < N && !free(i); step++) i = (i + 1) % N;
+    used.add(i); out.set(n, FEATURE_COLS[i]);
+  });
+  return out;
+}
+/* One feature's colour among those on screen: the one source for its flag,
+ * banner, strip, trail, barge and cargo. */
+export const featureColour = (f, visible) =>
+  featureColours(visible).get(f.number) || FEATURE_COLS[((f.number % FEATURE_COLS.length) + FEATURE_COLS.length) % FEATURE_COLS.length];
 /* A sub-agent's accent (tie, apron, belt) matches the building its specialty would build. */
 export const SPECIALTIES = [['architect', 'research'], ['security', 'security'], ['test', 'tests'], ['doc', 'docs'], ['coder', 'feature']];
 export const subHat = s => {

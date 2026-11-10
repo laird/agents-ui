@@ -9,7 +9,7 @@
  * capital (production) with a keep. The ships between them are voyages.js;
  * the strip of villages over the map is the mini-map, at the end. */
 import { state } from './state.js';
-import { F, FEATURE_COLS, P, R, blink, shadow } from './palette.js';
+import { F, P, R, blink, featureColours, shadow } from './palette.js';
 import { puffs } from './sprites/houses.js';
 import { badge, bubble } from './scenery.js';
 import { MODERN, M } from './themes/modern.js';
@@ -39,7 +39,7 @@ export function agoWords(iso, now = Date.now()) {
  * the order the village lists its features), then the fixes that belong to
  * none. Each group keeps its banner colour from the feature strip. */
 export function cargoGroups(v, ns) {
-  const fs = v.features || [], groups = fs.map((f, k) => ({ f, col: FEATURE_COLS[k % FEATURE_COLS.length], ns: [] })), fixes = { f: null, col: P.stone, ns: [] };
+  const fs = v.features || [], cols = featureColours(fs), groups = fs.map(f => ({ f, col: cols.get(f.number), ns: [] })), fixes = { f: null, col: P.stone, ns: [] };
   ns.forEach(n => {
     const k = fs.findIndex(f => (f.subtasks || []).some(s => s.number === n));
     (k >= 0 ? groups[k] : fixes).ns.push(n);

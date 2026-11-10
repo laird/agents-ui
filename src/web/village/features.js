@@ -92,17 +92,20 @@ function fogStop(c, v, i, lay, t) {
   if (!state.reduce) for (let k = 0; k < w / 6 - 1; k++) puffs(c, x + 4 + k * 6, lay.canalY - 18 + (k % 2) * 22, t + k * 330, '#e0e4f0', '#b8c0d8');
   bubble(c, x + (w >> 1) - 4, lay.canalY - 6, 'unknown');
 }
-/* A flag on a pole: swallowtail cloth in the feature's colour, a red pennant
- * when a subtask is stuck, gold and sparkling once live. The spec lies at
- * its foot: a scroll in the village, a clipboard downtown. */
+/* A flag on a pole: swallowtail cloth in the feature's own colour, always
+ * (#406), a red pennant when a subtask is stuck, and once live a gold finial
+ * and sparkles, never a gold cloth. The spec lies at its foot: a scroll in
+ * the village, a clipboard downtown. */
 function drawBanner(c, g, on, t) {
-  const { x, y, f } = g, col = f.live ? P.gold : g.col, wave = !state.reduce && blink(t + f.number * 7, 320) ? 1 : 0;
+  const { x, y, f } = g, col = g.col, wave = !state.reduce && blink(t + f.number * 7, 320) ? 1 : 0;
   const stuck = (f.stuck || []).length > 0, top = stuck ? y - 7 : y - 1, modern = state.T !== MEDIEVAL;
   R(c, x - 2, y + 23, 5, 2, P.o); R(c, x - 1, y + 23, 3, 1, modern ? M.concrete : P.stoneD);
-  R(c, x, top, 1, y + 23 - top, modern ? M.steelD : P.o); R(c, x, top - 1, 1, 1, P.gold);
+  R(c, x, top, 1, y + 23 - top, modern ? M.steelD : P.o);
+  if (f.live) { R(c, x - 1, top - 3, 3, 3, P.o); R(c, x, top - 2, 1, 1, P.gold); R(c, x - 1, top - 2, 3, 1, P.gold); R(c, x, top - 3, 1, 1, P.gold); }
+  else R(c, x, top - 1, 1, 1, modern ? M.steel : P.stoneL);
   R(c, x + 1, y, 14, 10, P.o); R(c, x + 1, y + 1, 13, 8, col); R(c, x + 1, y + 1, 13, 1, P.white);
   if (!modern) R(c, x + 12, y + 4 + wave, 3, 2, P.o);
-  R(c, x + 4, y + 4, 6, 1, f.live ? P.o : P.white); R(c, x + 4, y + 6, 4, 1, f.live ? P.o : P.white);
+  R(c, x + 4, y + 4, 6, 1, P.white); R(c, x + 4, y + 6, 4, 1, P.white);
   if (stuck) { const w = !state.reduce && blink(t, 260) ? 1 : 0; R(c, x + 1, y - 7, 7 + w, 4, P.o); R(c, x + 1, y - 6, 6 + w, 2, P.p0); }
   if (modern) { R(c, x + 4, y + 18, 7, 7, P.o); R(c, x + 5, y + 19, 5, 5, P.white); R(c, x + 6, y + 18, 3, 1, M.steel); R(c, x + 6, y + 21, 3, 1, M.concreteD); R(c, x + 6, y + 23, 2, 1, M.concreteD); }
   else { R(c, x + 3, y + 19, 8, 5, P.o); R(c, x + 4, y + 20, 6, 3, P.parch); R(c, x + 5, y + 21, 4, 1, P.pathS); }
@@ -133,7 +136,7 @@ registerLayer({ z: 140, draw(c, { v, lay, barges }, t) {
   const fade = (state.scenes[v.project] || {}).fade || {};
   lay.banners.forEach(g => {
     const on = isFollowed(v, g.f), a = on ? 1 : (fade[g.f.number] ?? 1);
-    if (on) counted(g.f).forEach(s => { const w = whereIs(s.number, v, lay, barges); if (w) drawTrail(c, g.x, g.y + 25, w.x, w.y, g.f.live ? P.gold : g.col, t); });
+    if (on) counted(g.f).forEach(s => { const w = whereIs(s.number, v, lay, barges); if (w) drawTrail(c, g.x, g.y + 25, w.x, w.y, g.col, t); });
     c.globalAlpha = a; drawBanner(c, g, on, t); c.globalAlpha = 1;
     tap(g.x - 3, g.y - 9, 20, 36, { kind: 'banner', f: g.f.number });
   });
@@ -200,7 +203,7 @@ function placeBanners() {
   const s = r.width / cv.width, keep = new Set();
   let strip = null;
   if (!cv.hidden) shownScenes().forEach(([sc, ox, oy]) => sc.L.banners.forEach((g, k) => {
-    const f = g.f, key = `${sc.v.project}#${f.number}`, on = isFollowed(sc.v, f), col = f.live ? 'var(--gold)' : g.col;
+    const f = g.f, key = `${sc.v.project}#${f.number}`, on = isFollowed(sc.v, f), col = g.col;
     if (on) strip = { sc, g };
     keep.add(key);
     let b = fbuttons.get(key);
@@ -230,7 +233,7 @@ function renderStrip(on) {
   fstrip.hidden = !on;
   if (!on) return;
   const { sc, g } = on, f = g.f, b = f.build || { landed: 0, total: counted(f).length };
-  fstrip.style.setProperty('--fc', f.live ? 'var(--gold)' : g.col);
+  fstrip.style.setProperty('--fc', g.col);
   const chip = (cls, text) => `<span class="chip ${cls}">${esc(text)}</span>`;
   const build = (f.stuck || []).length ? chip('stuck', `Build ${b.landed}/${b.total}: ${stuckWords(f)}`)
     : chip(b.landed === b.total ? 'done' : b.landed ? 'part' : '', `Build ${b.landed}/${b.total}`);

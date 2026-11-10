@@ -79,7 +79,8 @@
   .fb small { display: block; font-weight: 400; color: var(--ink-dim); }
   .fb[aria-pressed="true"] { background: var(--fc); color: #0c1028; }
   .fb[aria-pressed="true"] small { color: #0c1028; }
-  .fb.live { border-color: var(--gold); }
+  /* Live keeps its own colour (#406); a gold star marks it. */
+  .fb.live::before { content: '\2605 '; color: var(--gold); }
   .fb.stuck small { color: #ff8070; }
   .fb.stuck[aria-pressed="true"] small { color: #600; }
   /* A feature's label stays hidden until its flag is clicked (followed), the
