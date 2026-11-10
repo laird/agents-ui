@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::Html,
     response::sse::{Event, KeepAlive, Sse},
@@ -76,6 +76,8 @@ pub struct WebServerState {
     pub transport: ServerTransport,
     /// The village view's sources.
     pub village: super::source::Villages,
+    /// The swarm sources, asked again live for `GET /api/swarms?explain=1`.
+    pub swarm_sources: std::sync::Arc<Vec<Box<dyn super::source::SwarmSource>>>,
 }
 
 async fn index_handler() -> Html<&'static str> {
@@ -107,7 +109,18 @@ async fn api_village_handler(State(state): State<WebServerState>) -> Json<Value>
     Json(json!(snapshot))
 }
 
-async fn api_swarms_handler(State(state): State<WebServerState>) -> Json<Value> {
+/// `GET /api/swarms?explain=1` asks for each agent's recognition too.
+#[derive(Deserialize, Default)]
+struct SwarmsQuery {
+    explain: Option<String>,
+}
+
+/// `GET /api/swarms`: the swarms the poll found. With `?explain=1`, also
+/// `agents`: every agent each source sees right now, the swarm and role it
+/// was given (and for a manager, the evidence rule that picked it), or why it
+/// was left out. `swarms` is the same either way.
+async fn api_swarms_handler(State(state): State<WebServerState>, Query(q): Query<SwarmsQuery>) -> Json<Value> {
+    let explain = q.explain.as_deref().is_some_and(|v| !matches!(v, "" | "0" | "false"));
     let swarms = state
         .swarms
         .read()
@@ -115,7 +128,11 @@ async fn api_swarms_handler(State(state): State<WebServerState>) -> Json<Value> 
         .ok()
         .map(|s| s.clone())
         .unwrap_or_default();
-    Json(json!({ "swarms": swarms }))
+    if !explain {
+        return Json(json!({ "swarms": swarms }));
+    }
+    let agents = super::source::explain(&state.swarm_sources, &state.transport).await;
+    Json(json!({ "swarms": swarms, "agents": agents }))
 }
 
 /// Returns the pane content for a specific agent, captured live from tmux.
@@ -1218,6 +1235,7 @@ mod tests {
             agents_dir: PathBuf::from("/tmp/test-agents"),
             transport: ServerTransport::default(),
             village: Default::default(),
+            swarm_sources: Default::default(),
         }
     }
 
@@ -1580,6 +1598,57 @@ mod tests {
         assert_eq!(swarms[0]["project_name"], "my-project");
         assert_eq!(swarms[0]["agent_type"], "Claude");
         assert_eq!(swarms[0]["busy_count"], 2);
+    }
+
+    /// A swarm source that shows the same swarms every time.
+    struct Showing(Vec<SwarmSnapshot>);
+    impl super::super::source::SwarmSource for Showing {
+        fn name(&self) -> &'static str {
+            "tmux"
+        }
+        fn swarms<'a>(&'a self, _: &'a ServerTransport) -> futures::future::BoxFuture<'a, Vec<SwarmSnapshot>> {
+            Box::pin(async move { self.0.clone() })
+        }
+    }
+
+    async fn get_json(app: Router, uri: &str) -> serde_json::Value {
+        let resp = app.oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        serde_json::from_slice(&axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap()).unwrap()
+    }
+
+    /// `?explain=1` (#397): every agent the sources see, with its swarm and
+    /// role; the swarms themselves are the same as without it.
+    #[tokio::test]
+    async fn api_swarms_explain_lists_every_agent_and_its_role() {
+        let shared = new_shared_state();
+        shared.write().unwrap().push(sample_swarm("my-project"));
+        let mut state = make_web_state(shared);
+        let mut live = sample_swarm("my-project");
+        live.manager_by = Some(super::super::ManagerPick {
+            rule: crate::model::recognize::ManagerRule::Label,
+            candidates: 1,
+            ambiguous: false,
+        });
+        state.swarm_sources = std::sync::Arc::new(vec![Box::new(Showing(vec![live]))]);
+
+        let plain = get_json(make_app(state.clone()), "/api/swarms").await;
+        assert!(plain.get("agents").is_none(), "plain /api/swarms is unchanged");
+        let off = get_json(make_app(state.clone()), "/api/swarms?explain=0").await;
+        assert!(off.get("agents").is_none());
+
+        let json = get_json(make_app(state), "/api/swarms?explain=1").await;
+        assert_eq!(json["swarms"], plain["swarms"], "the swarms are the same either way");
+        let agents = json["agents"].as_array().unwrap();
+        let roles: Vec<&str> = agents.iter().map(|a| a["role"].as_str().unwrap()).collect();
+        assert_eq!(roles[0], "manager");
+        assert!(roles[1..].iter().all(|r| r.starts_with("worker-")), "{roles:?}");
+        assert!(agents.iter().all(|a| a["source"] == "tmux" && a["swarm"] == "my-project"));
+        assert_eq!(agents[0]["manager_rule"], "label");
+        assert_eq!(agents[0]["manager_because"], "its manager label");
+        assert_eq!(agents[0]["ambiguous"], false);
+        assert!(agents[1].get("manager_rule").is_none(), "only the manager has a rule");
+        assert!(agents.iter().all(|a| a.get("left_out").is_none()));
     }
 
     #[tokio::test]

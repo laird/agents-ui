@@ -31,8 +31,8 @@ use serde_json::Value;
 
 use super::source::SwarmSource;
 use crate::model::recognize::{
-    AgentFact, Evidence, ManagerRule, RepoFacts, SwarmManifest, canonical, choose_manager, gather, process_marker,
-    read_manifests, recognize,
+    AgentExplanation, AgentFact, Evidence, Judged, LONE_AGENT, ManagerRule, RepoFacts, SwarmManifest, canonical,
+    choose_manager, explain, gather, process_marker, read_manifests, recognize,
 };
 use super::{AgentSnapshot, ManagerPick, SwarmSnapshot};
 use crate::transport::ServerTransport;
@@ -224,21 +224,13 @@ pub fn swarms_from_agents(
     manifests: &Manifests,
     markers: &HashMap<String, String>,
 ) -> Vec<SwarmSnapshot> {
-    let evidence = evidence(agents, markers);
-    recognize(&facts(agents), repos)
+    judge(agents, repos, manifests, markers)
         .into_iter()
-        .filter_map(|swarm| {
-            let found = manifests.get(&swarm.root).map(Vec::as_slice).unwrap_or(&[]);
-            let choice = choose_manager(&swarm, &evidence, found);
+        .filter(|j| j.left_out.is_none())
+        .map(|Judged { swarm, choice, .. }| {
             let manager = choice.as_ref().map(|c| &swarm.members[c.member]);
             // An agent picked as manager from a worker's worktree isn't also a worker.
             let workers: Vec<_> = swarm.workers().filter(|(_, m)| Some(m.agent) != manager.map(|x| x.agent)).collect();
-            let is_swarm = !workers.is_empty()
-                || !found.is_empty()
-                || choice.as_ref().is_some_and(|c| c.rule != ManagerRule::MainCheckout);
-            if !is_swarm {
-                return None;
-            }
             let project = swarm.name();
             let manager = match manager {
                 Some(m) => snapshot(&agents[m.agent], &project, "manager", true, m.branch.as_ref()),
@@ -260,7 +252,7 @@ pub fn swarms_from_agents(
                 .collect();
             let busy = workers.iter().filter(|w| w.state.starts_with("Working")).count();
             let attention = workers.iter().filter(|w| w.waiting_for_input).count();
-            Some(SwarmSnapshot {
+            SwarmSnapshot {
                 agent_type: swarm
                     .members
                     .iter()
@@ -279,9 +271,42 @@ pub fn swarms_from_agents(
                 manager,
                 workers,
                 issues: Vec::new(),
-            })
+            }
         })
         .collect()
+}
+
+/// Each repo's agents as the recognizer judged them: the manager chosen by
+/// evidence (`choose_manager`), and whether the repo is a swarm at all. A
+/// repo is a swarm when it has a worker, a manifest, or a manager picked by
+/// more than being in the main checkout. Without any of those, a lone agent
+/// in a repo is just someone's Claude session.
+pub fn judge(agents: &[HerdrAgent], repos: &[RepoFacts], manifests: &Manifests, markers: &HashMap<String, String>) -> Vec<Judged> {
+    let evidence = evidence(agents, markers);
+    recognize(&facts(agents), repos)
+        .into_iter()
+        .map(|swarm| {
+            let found = manifests.get(&swarm.root).map(Vec::as_slice).unwrap_or(&[]);
+            let choice = choose_manager(&swarm, &evidence, found);
+            let manager = choice.as_ref().map(|c| swarm.members[c.member].agent);
+            let has_worker = swarm.workers().any(|(_, m)| Some(m.agent) != manager);
+            let is_swarm = has_worker
+                || !found.is_empty()
+                || choice.as_ref().is_some_and(|c| c.rule != ManagerRule::MainCheckout);
+            Judged { swarm, choice, left_out: (!is_swarm).then(|| LONE_AGENT.to_string()) }
+        })
+        .collect()
+}
+
+/// Every herdr agent and what became of it (`GET /api/swarms?explain=1`).
+pub fn explain_agents(
+    agents: &[HerdrAgent],
+    repos: &[RepoFacts],
+    manifests: &Manifests,
+    markers: &HashMap<String, String>,
+) -> Vec<AgentExplanation> {
+    let names: Vec<Option<String>> = agents.iter().map(|a| a.name.clone()).collect();
+    explain(&facts(agents), &names, &judge(agents, repos, manifests, markers))
 }
 
 /// Swarms under a running herdr server; none when herdr isn't installed or
@@ -293,17 +318,30 @@ impl SwarmSource for HerdrSwarms {
         "herdr"
     }
     fn swarms<'a>(&'a self, transport: &'a ServerTransport) -> BoxFuture<'a, Vec<SwarmSnapshot>> {
-        Box::pin(collect(transport))
+        Box::pin(async move {
+            let (agents, repos, manifests, markers) = look(transport).await;
+            swarms_from_agents(&agents, &repos, &manifests, &markers)
+        })
+    }
+    fn explain<'a>(&'a self, transport: &'a ServerTransport) -> BoxFuture<'a, Vec<AgentExplanation>> {
+        Box::pin(async move {
+            let (agents, repos, manifests, markers) = look(transport).await;
+            explain_agents(&agents, &repos, &manifests, &markers)
+        })
     }
 }
 
-async fn collect(transport: &ServerTransport) -> Vec<SwarmSnapshot> {
+/// What the recognizer needs from herdr and git: the agents (named after
+/// their workspaces), the repos holding them, each repo's manifests, and the
+/// process markers of the panes worth probing. Nothing when herdr isn't there.
+async fn look(transport: &ServerTransport) -> (Vec<HerdrAgent>, Vec<RepoFacts>, Manifests, HashMap<String, String>) {
+    let nothing = || (Vec::new(), Vec::new(), Manifests::new(), HashMap::new());
     let args = ["agent".to_string(), "list".to_string()];
     let Ok(out) = transport.output("herdr", &args, None).await else {
-        return Vec::new();
+        return nothing();
     };
     if !out.status.success() {
-        return Vec::new();
+        return nothing();
     }
     let mut agents = parse_agents(&String::from_utf8_lossy(&out.stdout));
     let args = ["workspace".to_string(), "list".to_string()];
@@ -326,13 +364,13 @@ async fn collect(transport: &ServerTransport) -> Vec<SwarmSnapshot> {
             markers.insert(pane, marker);
         }
     }
-    swarms_from_agents(&agents, &repos, &manifests, &markers)
+    (agents, repos, manifests, markers)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::recognize::{ManagerRule, Worktree};
+    use crate::model::recognize::{ManagerRule, OUTSIDE_ANY_REPO, Worktree};
 
     fn repo(root: &str, worktrees: &[(&str, Option<&str>)]) -> RepoFacts {
         RepoFacts {
@@ -496,5 +534,76 @@ mod tests {
         let json = r#"{"result":{"process_info":{"foreground_processes":[{"pid":481923,"name":"claude"}],"pane_id":"w5:p1","shell_pid":476081}}}"#;
         assert_eq!(parse_pane_pids(json), vec![481923, 476081]);
         assert!(parse_pane_pids("nope").is_empty());
+    }
+
+    /// `/api/swarms?explain=1` for herdr: the bug of #393 (a lone manager in a
+    /// repo with no manifest or label) shows up in one request.
+    #[test]
+    fn explains_who_was_grouped_and_why_not() {
+        let shop = [repo("/src/shop", &[("/src/shop-wt-1", Some("feature/issue-77")), ("/src/shop-wt-2", None)])];
+        let out = explain_agents(&parse_agents(LIST), &shop, &Manifests::new(), &HashMap::new());
+        assert_eq!(out.len(), 4, "every agent herdr saw, kept or not");
+        let by = |pane: &str| out.iter().find(|e| e.pane == pane).unwrap();
+
+        let m = by("w1:p1");
+        assert_eq!((m.source.as_str(), m.role.as_deref(), m.swarm.as_deref()), ("herdr", Some("manager"), Some("shop")));
+        assert_eq!(m.name.as_deref(), Some("manager-shop"));
+        assert_eq!((m.manager_rule, m.ambiguous), (Some(ManagerRule::Label), Some(false)));
+        assert_eq!(m.manager_because.as_deref(), Some("its manager label"));
+        assert_eq!(m.repo.as_deref(), Some("/src/shop/.git"));
+
+        assert_eq!(by("w2:p1").role.as_deref(), Some("worker-1"));
+        assert_eq!(by("w2:p1").manager_rule, None);
+
+        let stray = by("w4:p1");
+        assert_eq!((stray.swarm.as_deref(), stray.role.as_deref()), (None, None));
+        assert_eq!(stray.left_out.as_deref(), Some(OUTSIDE_ANY_REPO));
+        assert_eq!(stray.cwd, "/home/me/notes");
+    }
+
+    #[test]
+    fn explains_a_lone_unmarked_agent_and_the_runner_up_in_the_main_checkout() {
+        // A lone unnamed agent in a repo with no manifest: not a swarm, and says so.
+        let lone = r#"{"result":{"agents":[{"pane_id":"w5:p1","agent_status":"working","cwd":"/src/agents-ui"}]}}"#;
+        let out = explain_agents(&parse_agents(lone), &agents_ui(), &Manifests::new(), &HashMap::new());
+        assert_eq!(out[0].left_out.as_deref(), Some(LONE_AGENT));
+        assert_eq!((out[0].swarm.as_deref(), out[0].role.as_deref()), (None, None));
+
+        // Two unmarked agents in the main checkout: one manager (an ambiguous
+        // pick) and one left without a role, naming who won and why.
+        let out = explain_agents(&parse_agents(TWO_IN_MAIN), &agents_ui(), &Manifests::new(), &HashMap::new());
+        let m = out.iter().find(|e| e.role.as_deref() == Some("manager")).unwrap();
+        assert_eq!((m.pane.as_str(), m.manager_rule, m.ambiguous), ("w1:p1", Some(ManagerRule::MainCheckout), Some(true)));
+        let other = out.iter().find(|e| e.pane == "w5:p1").unwrap();
+        assert_eq!(other.role, None);
+        assert_eq!(other.swarm.as_deref(), Some("agents-ui"));
+        assert_eq!(other.left_out.as_deref(), Some("in the main checkout, but w1:p1 is the manager (it is the agent in the main checkout)"));
+
+        // With the manifest naming w5:p1, it is the manager, unambiguously, by that rule.
+        let manifests = Manifests::from([(
+            PathBuf::from("/src/agents-ui"),
+            vec![SwarmManifest { session: "claude-agents-ui".into(), manager_panes: vec!["w5:p1".into()] }],
+        )]);
+        let out = explain_agents(&parse_agents(TWO_IN_MAIN), &agents_ui(), &manifests, &HashMap::new());
+        let m = out.iter().find(|e| e.pane == "w5:p1").unwrap();
+        assert_eq!((m.role.as_deref(), m.manager_rule, m.ambiguous), (Some("manager"), Some(ManagerRule::ManifestPane), Some(false)));
+        assert_eq!(m.manager_because.as_deref(), Some("the pane the swarm manifest names"));
+    }
+
+    /// The swarms and their explanation agree: the explanation is made from
+    /// the same judgement.
+    #[test]
+    fn explanation_matches_the_swarms() {
+        let shop = [repo("/src/shop", &[("/src/shop-wt-1", None), ("/src/shop-wt-2", None)])];
+        let agents = parse_agents(LIST);
+        let swarms = swarms_from_agents(&agents, &shop, &Manifests::new(), &HashMap::new());
+        let out = explain_agents(&agents, &shop, &Manifests::new(), &HashMap::new());
+        let grouped: Vec<&str> = out.iter().filter(|e| e.role.is_some()).map(|e| e.pane.as_str()).collect();
+        let shown: Vec<&str> = swarms
+            .iter()
+            .flat_map(|s| std::iter::once(&s.manager).chain(&s.workers))
+            .map(|a| a.tmux_target.as_str())
+            .collect();
+        assert_eq!(grouped, shown);
     }
 }

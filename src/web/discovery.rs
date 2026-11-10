@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use crate::model::recognize::{
-    AgentFact, Evidence, ManagerRule, Member, Place, canonical, choose_manager, gather, process_marker, read_manifests,
+    AgentExplanation, AgentFact, Evidence, ManagerRule, Member, Place, canonical, choose_manager, gather, process_marker, read_manifests,
     recognize,
 };
 use futures::future::BoxFuture;
@@ -67,6 +67,15 @@ impl SwarmSource for TmuxSwarms {
         Box::pin(async move {
             let mut health = self.health.lock().await;
             collect_swarms(transport, &mut health).await
+        })
+    }
+    /// Every pane of an agent session is in its swarm, so the swarms say it
+    /// all. Read with a health map of its own, so asking doesn't advance the
+    /// stall counts the poll keeps.
+    fn explain<'a>(&'a self, transport: &'a ServerTransport) -> BoxFuture<'a, Vec<AgentExplanation>> {
+        Box::pin(async move {
+            let swarms = collect_swarms(transport, &mut HealthMap::new()).await;
+            super::source::explain_snapshots(self.name(), &swarms)
         })
     }
 }
