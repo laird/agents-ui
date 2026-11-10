@@ -6,7 +6,8 @@
 import { state } from './state.js';
 import { P, R, blink, shadow, subHat, waveFrame } from './palette.js';
 import { cobwebs, pennant, puffs } from './sprites/houses.js';
-import { ICONS, badge, bubble, glint, ribbon, roped, tether } from './scenery.js';
+import { ICONS, badge, bubble, glint, ribbon, roped, tether, zzz } from './scenery.js';
+import { restOf } from './rest.js';
 import { QUIET_ACTIONS, actionSign, drawAction, person, wander } from './people.js';
 import { registerHit, registerLabels, registerLayer, tap } from './registry.js';
 import { LW, slotPos } from './layout.js';
@@ -86,11 +87,11 @@ registerLayer({ z: 60, draw(c, { v, lay, bound }, t) {
  * crate being worked on. Status bubbles are drawn last, over everything. */
 registerLayer({ z: 70, draw(c, scene, t) {
   const { v, lay, at, bound } = scene, { hallX, lots } = lay;
-  const bubbles = scene.bubbles = [];
+  const bubbles = scene.bubbles = [], sleepers = scene.sleepers = [], wall = Date.now();
   if (['blocked', 'done', 'unknown', 'stalled'].includes(v.manager.status)) bubbles.push([hallX + 26, 18, v.manager.status]);
   v.houses.forEach((h, i) => {
     const lot = lots[i]; if (!lot) return;
-    const st = h.status, tt = t + i * 311;
+    const st = h.status, tt = t + i * 311, rest = restOf(h, wall);
     shadow(c, lot.x + 2, lot.y + 16, 16, 2); shadow(c, lot.x + 16, lot.y + 4, 2, 12);
     tap(lot.x, lot.y - 4, 16, 25, { kind: 'house', i });
     if (st === 'building') state.T.scaffold(c, lot.x, lot.y, tt);
@@ -100,8 +101,9 @@ registerLayer({ z: 70, draw(c, scene, t) {
     if (st === 'unknown') R(c, lot.x - 1, lot.y - 6, 18, 23, 'rgba(32,34,60,.6)');
     const away = state.porters.some(p => p.seed === h.id && t >= p.t0 && at.get(p));
     if (!away) {
-      if (st === 'idle') person(c, lot.x + 4, lot.y + 9, h.id, 'stand', { status: st });
-      if (st === 'done') person(c, lot.x + 4, lot.y + 8, h.id, 'stand', { status: st });
+      // Just finished: standing at the door under a ✓. Otherwise idle: sitting on the doorstep, asleep.
+      if (rest === 'fresh') person(c, lot.x + 4, lot.y + 8, h.id, 'stand', { status: st });
+      if (rest === 'asleep') { person(c, lot.x + 4, lot.y + 9, h.id, 'sit', { status: 'asleep' }); sleepers.push([lot.x + 10, lot.y - 4, i * 700]); }
       if (st === 'blocked') person(c, lot.x + 4, lot.y + 10, h.id, waveFrame(t + i * 90), { status: st });
       // A working agent is one busy figure at its door, acting out what it is doing.
       if (st === 'working') { person(c, lot.x + 4, lot.y + 8, h.id, workFrame(tt), { status: st }); drawAction(c, lot.x + 4, lot.y + 8, h.action, tt); }
@@ -136,7 +138,7 @@ registerLayer({ z: 70, draw(c, scene, t) {
     }
     if (st === 'working' && h.action) actionSign(c, lot.x + 4, lot.y - 4, h.action);
     if (subs.length > SUB_SLOTS.length) { badge(c, lot.x + 12, lot.y + 4, subs.length - SUB_SLOTS.length); tap(lot.x + 11, lot.y + 3, 12, 7, { kind: 'house', i }); }
-    if (ICONS[st]) bubbles.push([lot.x + 4, lot.y - (st === 'blocked' ? 1 : 3) + (st === 'blocked' && blink(t, 200) ? -1 : 0), st]);
+    if (ICONS[st] && rest !== 'asleep') bubbles.push([lot.x + 4, lot.y - (st === 'blocked' ? 1 : 3) + (st === 'blocked' && blink(t, 200) ? -1 : 0), st]);
   });
 } });
 /* Trips: whoever is walking, with the crate carried overhead, or still
@@ -161,7 +163,8 @@ registerLayer({ z: 120, draw(c, { at }, t) {
     return true;
   });
 } });
-registerLayer({ z: 130, draw(c, { bubbles }) {
+registerLayer({ z: 130, draw(c, { bubbles, sleepers }, t) {
+  (sleepers || []).forEach(([x, y, dt]) => zzz(c, x, y, t + dt));
   bubbles.forEach(([x, y, s]) => bubble(c, x, y, s));
 } });
 
