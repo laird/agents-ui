@@ -51,6 +51,13 @@ pub struct AgentSnapshot {
     /// is read and typed into (`tmux_target` is a tmux target or a herdr pane id).
     #[serde(default)]
     pub mux: Mux,
+    /// How much of its context window it has used, 0 to 100, from the
+    /// `ctx NN%` status line under its input box. None without one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_pct: Option<u8>,
+    /// That window's size as the status line writes it (`1M`, `200k`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<String>,
 }
 
 /// Where an agent's terminal lives (shared with the terminal view's model).
@@ -128,6 +135,15 @@ pub fn new_shared_state() -> SharedWebState {
 }
 
 impl AgentSnapshot {
+    /// Read `context_pct` and `context_window` from the pane's status line.
+    pub fn with_context_from_pane(mut self) -> Self {
+        if let Some(ctx) = crate::model::status::parse_context(&self.pane_content) {
+            self.context_pct = Some(ctx.pct);
+            self.context_window = ctx.window;
+        }
+        self
+    }
+
     pub fn from_agent_info(info: &crate::model::swarm::AgentInfo) -> Self {
         let health = info.health.status().as_str();
         let status_timestamp = info.status.timestamp.map(|ts| {
@@ -150,7 +166,10 @@ impl AgentSnapshot {
             worktree_path: info.worktree_path.to_string_lossy().into_owned(),
             branch: info.branch.clone(),
             mux: Mux::Tmux,
+            context_pct: None,
+            context_window: None,
         }
+        .with_context_from_pane()
     }
 }
 

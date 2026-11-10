@@ -310,6 +310,7 @@ pub fn report(
                     state: if p.waiting() { AgentState::Waiting } else { AgentState::Working },
                     action: pending_action(pending.get(&p.id)),
                     detail: Some(p.id.clone()),
+                    ..Agent::default()
                 })
                 .collect();
             let state = if root.waiting() {

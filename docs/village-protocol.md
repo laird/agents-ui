@@ -103,6 +103,8 @@ An adapter may print one report, a list of reports, or `{"reports": [...]}`. Onl
 - `state`: see below.
 - `action`: see below.
 - `detail`: a few words on what it is doing, shown when you click the house.
+- `context_pct`: how much of its context window it has used, 0 to 100. The house shows its fullest agent's as a barrel beside it (a fuel gauge downtown, a battery in the future), green below 70, amber to 90, red from 90 and flashing from 95, when an agent is about to wedge. Leave it out when unknown. Built-in swarms read it from the `ctx NN%` status line under Claude Code's input box.
+- `context_window`: that window's size as text (`1M`, `200k`), for the dialog's "Context 82% of 1M".
 
 **State.** Frameworks' own words are accepted:
 
