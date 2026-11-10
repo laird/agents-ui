@@ -48,6 +48,12 @@ climbs, then passes, lands unproven, fails, conflicts or meets a red base, in
 turn. Every third hand-off waits for a partner and goes as a merge train.
 Failed work is handed back and re-queued a little later.
 
+With --conflicts (implies --gate), each issue's attempts at the gate follow
+conflicts.py instead, one story per issue in turn: a conflict fixed on the
+second attempt, a failed gate, a push rejected and re-synced twice, and a
+hotspot file that conflicts three times. Trains are off, so every bounce is
+one issue's. A conflict also leaves autocoder's issue comment.
+
 Linked to the platform (temporal_sim.py): every prod promotion of "shop"
 writes the released commit to <dir>/state/release, and every line the
 platform appends to <dir>/state/incidents.jsonl becomes an `incident` issue
@@ -61,6 +67,7 @@ in "shop" naming the workstream that failed.
     swarm_sim.py --dir DEMO --lifecycle run                     # every issue transition, on a loop
     swarm_sim.py --dir DEMO --voyages run                       # nuc-1 and release deployments, on a loop
     swarm_sim.py --dir DEMO --gate run                          # finished work goes through a merge gate
+    swarm_sim.py --dir DEMO --conflicts run                     # ... with scripted conflicts, failures and push retries
 
 With --story the demo tells one story cleanly: an incident from the platform
 becomes a P0 bug, a worker fixes it (asking once for permission on the way),
@@ -102,6 +109,7 @@ import time
 from pathlib import Path
 
 import voyages  # next to this file: scripted Deployments for the environment row
+import conflicts  # next to this file: the CONFLICTS=1 merge-gate script
 
 SWARMS = [("shop", 5, "autocoder"), ("billing", 2, "modernize")]
 STORY = False
@@ -389,7 +397,8 @@ class Swarm:
         return agents
 
     def write_issues(self):
-        out = [{"number": i["number"], "title": i["title"], "state": "OPEN", "labels": [{"name": l} for l in i["labels"]]}
+        out = [{"number": i["number"], "title": i["title"], "state": "OPEN", "labels": [{"name": l} for l in i["labels"]],
+                **({"comments": i["comments"]} if i.get("comments") else {})}
                for i in self.issues]
         path = self.state / "issues" / f"{self.name}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -591,8 +600,9 @@ class GateSim:
     OUTCOMES = ["pass", "pass", "fail", "unproven", "conflict", "pass", "red"]
     TESTS = 745
 
-    def __init__(self, swarm, tmp):
+    def __init__(self, swarm, tmp, script=None):
         self.s, self.tmp = swarm, tmp
+        self.script = script  # conflicts.Script with --conflicts: each issue's attempts, scripted
         tmp.mkdir(parents=True, exist_ok=True)
         common = os.path.realpath(swarm.repo / ".git")
         self.prefix = f"autocoder-merge-{swarm.repo.name}-{hashlib.sha1(common.encode()).hexdigest()[:8]}-"
@@ -655,6 +665,11 @@ class GateSim:
                 tip = git(self.s.repo, "commit-tree", tree, "-p", tip, "-p", side, "-m", f"Merge branch 'feature/issue-{m}' into {feature}")
             git(self.s.repo, "update-ref", f"refs/heads/{feature}", tip)
         j = {"issue": lead, "members": members, "phase": "queued", "since": t, "outcome": self.OUTCOMES[(self.count - 1) % len(self.OUTCOMES)], "slot": None, "ran": 0}
+        if self.script:
+            (kind, arg), j["attempt"] = self.script.attempt(lead)
+            j["outcome"] = kind
+            j["files"] = arg if kind == "conflict" else None
+            j["resyncs"], j["synced"] = (arg if kind == "pass" else 0), 0
         if len(members) > 1 and j["outcome"] in ("conflict", "red"):
             j["outcome"] = "pass"
         for ext in ("log", "exit"):
@@ -673,9 +688,10 @@ class GateSim:
     def tick(self, t):
         # Every third hand-off waits for a partner and rides a train with it.
         while self.pending:
-            if self.count % 3 == 2 and len(self.pending) < 2:
+            train = self.count % 3 == 2 and not self.script
+            if train and len(self.pending) < 2:
                 break
-            take = 2 if self.count % 3 == 2 else 1
+            take = 2 if train else 1
             self.start(self.pending[:take], t)
             self.pending = self.pending[take:]
         gating = [j for j in self.jobs if j["phase"] == "gating"]
@@ -686,7 +702,7 @@ class GateSim:
                 self.log(j, f"🔀 Merging {j['members']} onto master in a throwaway worktree\n")
             elif j["phase"] == "merging" and age >= 3:
                 if j["outcome"] == "conflict":
-                    self.finish(j, 1, f"Auto-merging src/web/village/lifecycle.js\nCONFLICT (content): Merge conflict in src/web/village/lifecycle.js\n❌ Merge conflict integrating 'master' into feature/issue-{j['issue']}.\n")
+                    self.finish(j, 1, conflicts.conflict(j["issue"], j.get("files") or ["src/web/village/lifecycle.js"]))
                     self.hand_back(j, t)
                     continue
                 free = [k for k in range(1, self.SLOTS + 1) if k not in {g["slot"] for g in gating}]
@@ -707,6 +723,13 @@ class GateSim:
                     if n > 0:
                         self.log(j, "".join(f"test t{j['ran'] + k} ... ok\n" for k in range(n)))
                         j["ran"] += n
+                    continue
+                if j.get("resyncs"):
+                    # The push is rejected: re-sync and gate the merged tree again.
+                    j["synced"] += 1
+                    j["resyncs"] -= 1
+                    self.log(j, conflicts.resync(j["synced"], f"{random.getrandbits(32):08x}"))
+                    j["since"], j["ran"] = t, 0
                     continue
                 self.outcome(j, t)
         # Handed back work is re-queued after a while; unproven work is proven green.
@@ -742,6 +765,9 @@ class GateSim:
     def hand_back(self, j, t):
         for m in j["members"]:
             self.label(m, drop=("merging",), add=("needs-clarification",))
+            if j["outcome"] == "conflict" and self.issue(m):
+                # As merge-to-integration.sh does: say so on the issue.
+                self.issue(m).setdefault("comments", []).append({"body": conflicts.conflict_comment(m), "createdAt": now_iso(t)})
             self.handed.append((m, t + 25))
 
 
@@ -757,12 +783,13 @@ def main():
     ap.add_argument("--lifecycle", action="store_true", help="play every transition of an issue's life on a loop (see the module docstring)")
     ap.add_argument("--voyages", action="store_true", help="script nuc-1 and release deployments (see the module docstring)")
     ap.add_argument("--gate", action="store_true", help="send finished work through a simulated merge gate (see the module docstring)")
+    ap.add_argument("--conflicts", action="store_true", help="the merge gate with scripted conflicts, failures and push retries (implies --gate)")
     ap.add_argument("command", choices=["setup", "run"])
     args = ap.parse_args()
     global STORY, FEATURE, PROMOTION, LIFECYCLE
     global VOYAGES, GATE
     STORY, FEATURE, PROMOTION, LIFECYCLE, VOYAGES = args.story, args.feature, args.promotion, args.lifecycle, args.voyages
-    GATE = args.gate
+    GATE = args.gate or args.conflicts
     quiet = STORY or FEATURE or LIFECYCLE
     if args.seed is not None:
         random.seed(args.seed)
@@ -789,7 +816,7 @@ def main():
     script = voyages.VoyageScript(lambda: git(shop.repo, "rev-parse", "refs/remotes/origin/master"), time.time() + 5,
                                   released=shop.write_release) if VOYAGES else None
     if GATE:
-        shop.gate = GateSim(shop, Path(os.environ.get("AUTOCODER_TMP") or root / "tmp"))
+        shop.gate = GateSim(shop, Path(os.environ.get("AUTOCODER_TMP") or root / "tmp"), conflicts.Script() if args.conflicts else None)
     incident_offset = 0
     print(f"simulating {', '.join(s.name for s in swarms)} in {root}", flush=True)
     next_green, next_staging, next_prod, red_until, next_red = 0, 0, 0, 0, time.time() + 150
