@@ -122,8 +122,33 @@ export function objAt(e) {
 cv.addEventListener('click', e => {
   if (!state.view) return;
   const h = objAt(e);
-  if (!(h && act(h.o, h.sc, h.theme))) groundHint(e);
+  if (h && act(h.o, h.sc, h.theme)) hovered = false;
+  else groundHint(e);
 });
+/* Hovering with a mouse over a kind registered with `hover: true` opens its
+ * dialog, as a click does, and it closes when the pointer leaves; a click
+ * keeps it open, and a dialog a click opened is never replaced by a hover.
+ * A short delay, restarted on each new object, keeps it from flickering
+ * between neighbours. Touch has no hover: a tap opens it as before. */
+let hovered = false, hoverKey = '', hoverTimer = 0;
+function hoverTo(h) {
+  const key = h ? `${h.sc.v.project}|${keyOf(h.o)}` : '';
+  if (key === hoverKey) return;
+  hoverKey = key; clearTimeout(hoverTimer);
+  hoverTimer = setTimeout(() => {
+    if (h) {
+      if (!dialog.hidden && !hovered) return;
+      const info = explain(h.o, h.sc, h.theme);
+      if (info) { openInfo(info); hovered = true; }
+    } else if (hovered) { dialog.hidden = true; hovered = false; }
+  }, h ? 120 : 250);
+}
+cv.addEventListener('pointermove', e => {
+  if (e.pointerType !== 'mouse' || !state.view) return;
+  const h = objAt(e);
+  hoverTo(h && (HITS[h.o.kind] || {}).hover ? h : null);
+});
+cv.addEventListener('pointerleave', () => hoverTo(null));
 /* Open ground does nothing, so say what does, where the click was. */
 const hintEl = document.getElementById('hint');
 let hintTimer = 0;

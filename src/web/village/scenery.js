@@ -1,7 +1,7 @@
 /* Things and scenery: crates, speech bubbles, "+N" badges, grass, paths, water, trees,
  * the castle, the board, the locks, the harbour, the ship and the supply boat. */
 import { state } from './state.js';
-import { KINDCOL, NOTECOL, P, R, STATE, blink, glassOf, hash, shadow } from './palette.js';
+import { KINDCOL, NOTECOL, P, PRIOCOL, R, STATE, blink, glassOf, hash, shadow } from './palette.js';
 
 /* ---------- People and things ---------- */
 export const ICONS = {
@@ -16,19 +16,40 @@ export function bubble(c, x, y, icon) {
   R(c, x + 1, y + 1, 7, 7, w); R(c, x + 4, y + 8, 1, 2, w); R(c, x + 3, y + 9, 1, 1, o); R(c, x + 5, y + 9, 1, 1, o); R(c, x + 4, y + 10, 1, 1, o);
   for (let r = 0; r < 5; r++) for (let k = 0; k < 5; k++) if (m[r][k] === '#') R(c, x + 2 + k, y + 2 + r, 1, 1, col);
 }
+const ROPE = '#d8b070';
+/* A crate's epic: the outline in its feature's flag colour, like a ribbon
+ * tied round it. Drawn over any theme's crate. */
+export function ribbon(c, x, y, col) {
+  x = Math.round(x); y = Math.round(y);
+  R(c, x, y, 5, 1, col); R(c, x, y + 4, 5, 1, col); R(c, x, y, 1, 5, col); R(c, x + 4, y, 1, 5, col);
+}
+/* Ready to pick up: a glint now and then on the crate's corner. */
+export function glint(c, x, y, t) {
+  if ((t % 2400 + 2400) % 2400 >= 180) return;
+  x = Math.round(x); y = Math.round(y);
+  R(c, x + 4, y - 1, 1, 1, P.white); R(c, x + 5, y, 1, 1, 'rgba(248,248,248,.6)'); R(c, x + 3, y, 1, 1, 'rgba(248,248,248,.6)');
+}
+/* A rope between a waiting crate and the crate it waits on, both at the
+ * docks: dotted, drawn under the crates so only the gaps show it. */
+export function tether(c, a, b) {
+  const x0 = Math.round(a.x) + 2, y0 = Math.round(a.y) + 2, x1 = Math.round(b.x) + 2, y1 = Math.round(b.y) + 2;
+  const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
+  for (let k = 0; k <= n; k += 2) R(c, x0 + Math.round((x1 - x0) * k / (n || 1)), y0 + Math.round((y1 - y0) * k / (n || 1)), 1, 1, ROPE);
+}
 /* A crate tied shut: it waits on another issue (a "Depends on" line), so
  * nobody picks it up yet. Drawn over any theme's crate. */
-const ROPE = '#d8b070';
 export function roped(c, x, y) {
   x = Math.round(x); y = Math.round(y);
+  // Tied across, knotted in the middle: the crate's kind and priority still show.
   R(c, x - 1, y + 2, 7, 1, ROPE); R(c, x + 2, y - 1, 1, 7, ROPE);
-  R(c, x + 1, y + 1, 3, 3, P.o); R(c, x + 2, y + 2, 1, 1, ROPE);
+  R(c, x + 2, y + 2, 1, 1, P.woodD);
 }
 export function crate(c, x, y, kind, pr, sealed) {
   x = Math.round(x); y = Math.round(y);
   R(c, x, y, 5, 5, P.o); R(c, x + 1, y + 1, 3, 3, P.woodL);
   R(c, x + 1, y + 1, 3, 1, KINDCOL[kind] || P.woodD);
-  if (pr === 'P0') R(c, x + 2, y + 3, 1, 1, P.p0);
+  // Its priority: a painted band along the foot (none when unprioritised).
+  if (PRIOCOL[pr]) R(c, x + 1, y + 3, 3, 1, PRIOCOL[pr]);
   if (sealed) R(c, x + 2, y + 2, 1, 1, P.seal);
 }
 

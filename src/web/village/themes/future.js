@@ -1,6 +1,6 @@
 /* The Future theme. */
 import { state, now } from '../state.js';
-import { F, KINDCOL, NOTECOL, P, R, SHADE, blink, hash, shadow } from '../palette.js';
+import { F, KINDCOL, NOTECOL, P, PRIOCOL, R, SHADE, blink, hash, shadow } from '../palette.js';
 import { puffs } from '../sprites/houses.js';
 import { registerTheme } from './registry.js';
 /* ---------- Future ----------
@@ -192,7 +192,8 @@ export const FUTURE = {
     R(c, x, y, 5, 5, P.o); R(c, x + 1, y + 1, 3, 3, F.hull);
     R(c, x + 1, y + 2, 3, 1, KINDCOL[kind] || F.hullD);
     R(c, x + 1, y + 4, 3, 1, F.cyan);
-    if (pr === 'P0') R(c, x + 1, y + 1, 1, 1, P.p0);
+    // Its priority: a status light along the top (none when unprioritised).
+    if (PRIOCOL[pr]) R(c, x + 1, y + 1, 2, 1, PRIOCOL[pr]);
     if (sealed) R(c, x + 3, y + 1, 1, 1, P.seal);
   },
   B: FB,

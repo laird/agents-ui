@@ -196,6 +196,10 @@ pub struct Crate {
     /// body). autocoder won't pick it up until they close.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub waits_on: Vec<u32>,
+    /// The feature (epic) this issue is a subtask of, from the feature links
+    /// or a report task's `parent`. Its crate carries that feature's colour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1191,6 +1195,7 @@ impl SwarmVillages {
         }
         village.pipeline.titles = pipeline_titles(&village.pipeline, &issues, &closed);
         self.since.stamp(&swarm.repo_path, &mut village.houses, chrono::Utc::now());
+        super::feature::attach_parents(&mut village.backlog, &links);
         village.features = super::feature::build(&village, &links);
         self.activity.attach(transport, &mut village);
         Reading { village, issues }

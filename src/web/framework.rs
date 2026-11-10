@@ -751,7 +751,7 @@ pub fn to_village(report: &Report) -> Reading {
         }
         match t.state {
             TaskState::Blocked | TaskState::Failed => board.push(Note { number: n, title: t.title.clone(), label: note_label(t), url: t.url.clone() }),
-            TaskState::Open => backlog.push(Crate { number: n, title: t.title.clone(), kind: house_kind(&t.labels), priority: priority(&t.priority), url: t.url.clone(), waits_on: waits_on(t) }),
+            TaskState::Open => backlog.push(Crate { number: n, title: t.title.clone(), kind: house_kind(&t.labels), priority: priority(&t.priority), url: t.url.clone(), waits_on: waits_on(t), parent: t.parent.as_deref().filter(|p| !p.trim().is_empty()).map(task_number) }),
             TaskState::Claimed | TaskState::Done => {}
         }
     }
@@ -1186,6 +1186,30 @@ mod tests {
         assert_eq!(report.tasks[0].depends_on, vec!["4".to_string()]);
         let v = to_village(&report).village;
         assert_eq!(v.backlog.iter().find(|c| c.number == 5).unwrap().waits_on, vec![4]);
+    }
+
+    #[test]
+    fn a_subtask_crate_names_its_parent() {
+        let report = Report {
+            project: "shop".into(),
+            tasks: vec![
+                Task { id: "395".into(), title: "Epic".into(), state: TaskState::Claimed, ..Task::default() },
+                Task { id: "396".into(), title: "Part".into(), parent: Some("395".into()), ..Task::default() },
+                Task { id: "397".into(), title: "Loose".into(), parent: Some(" ".into()), ..Task::default() },
+                Task { id: "PROJ-2".into(), title: "Jira part".into(), parent: Some("PROJ-1".into()), ..Task::default() },
+            ],
+            ..Report::default()
+        };
+        let v = to_village(&report).village;
+        let crate_of = |n: u32| v.backlog.iter().find(|c| c.number == n).unwrap().clone();
+        assert_eq!(crate_of(396).parent, Some(395));
+        assert_eq!(crate_of(397).parent, None, "a blank parent is none");
+        assert_eq!(crate_of(task_number("PROJ-2")).parent, Some(task_number("PROJ-1")));
+        // Serialized only when there is one.
+        let json = serde_json::to_value(&v.backlog).unwrap();
+        let by = |n: u32| json.as_array().unwrap().iter().find(|c| c["number"] == n).unwrap().clone();
+        assert_eq!(by(396)["parent"], 395);
+        assert!(by(397).get("parent").is_none());
     }
 
     #[test]
