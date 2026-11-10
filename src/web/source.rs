@@ -530,6 +530,7 @@ mod tests {
             project_name: project.into(),
             repo_path: String::new(),
             repo_key: String::new(),
+            manager_by: None,
             agent_type: "claude".into(),
             workflow: None,
             tmux_session: String::new(),

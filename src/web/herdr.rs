@@ -2,31 +2,39 @@
 //!
 //! herdr gives one entry per agent pane with its `cwd`, `pane_id`, optional
 //! `name` and `agent_status` (`working`, `idle`, `blocked`, `done`,
-//! `unknown`). The `cwd` decides who is who (`model::recognize`): an agent
-//! anywhere inside one of a repo's worktrees belongs to that repo's swarm,
-//! as a worker when the worktree isn't the main checkout and as the manager
-//! when it is. Names like `wt3-<project>` are only a hint. Agents outside
-//! every repo aren't part of a swarm.
+//! `unknown`). The `cwd` decides who is where (`model::recognize`): an agent
+//! anywhere inside one of a repo's worktrees belongs to that repo's swarm, as
+//! a worker when the worktree isn't the main checkout. Names like
+//! `wt3-<project>` are only a hint. Agents outside every repo aren't part of a
+//! swarm.
+//!
+//! The manager is chosen by evidence (`choose_manager`): the pane the repo's
+//! swarm manifest names, then an agent whose processes carry
+//! `AUTOCODER_MANAGER` (`herdr pane process-info`, then `/proc`), then a pane
+//! or workspace labelled `manager-…`, then any agent in the main checkout.
+//! An agent with no name of its own takes its workspace's label (`herdr
+//! workspace list`), which is where swarm launchers put `manager-<project>`.
 //!
 //! A manager with no workers is still a swarm (one scaled to zero between
-//! waves) when its pane is named `manager-…` or its repo holds an autocoder
-//! swarm manifest (`.autocoder/swarm/*.json`). Without either, a lone agent
-//! in a repo is just someone's Claude session, not a swarm. An agent with no
-//! name of its own takes its workspace's label (`herdr workspace list`), which
-//! is where swarm launchers put `manager-<project>`.
+//! waves) when its repo holds a manifest or anything but its place in the main
+//! checkout picked it. Otherwise a lone agent in a repo is just someone's
+//! Claude session, not a swarm.
 //!
 //! herdr doesn't know issues, so a worker's issue comes from its branch
 //! (`feature/issue-412`, `fix/412-crash`).
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use futures::future::BoxFuture;
 use serde_json::Value;
 
 use super::source::SwarmSource;
-use crate::model::recognize::{AgentFact, RepoFacts, canonical, gather, recognize};
-use super::{AgentSnapshot, SwarmSnapshot};
+use crate::model::recognize::{
+    AgentFact, Evidence, ManagerRule, RepoFacts, SwarmManifest, canonical, choose_manager, gather, process_marker,
+    read_manifests, recognize,
+};
+use super::{AgentSnapshot, ManagerPick, SwarmSnapshot};
 use crate::transport::ServerTransport;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -151,27 +159,83 @@ pub fn facts(agents: &[HerdrAgent]) -> Vec<AgentFact> {
         .collect()
 }
 
-/// Group herdr agents into swarms by repo identity (`recognize`). `repos` are
-/// the repos their cwds are in; `manifests` holds the main checkouts with an
-/// autocoder swarm manifest, whose manager makes a swarm even with zero
-/// workers.
+/// The swarm manifests in each repo, by main checkout.
+pub type Manifests = HashMap<PathBuf, Vec<SwarmManifest>>;
+
+/// What each agent shows that could make it the manager: its pane, the
+/// `AUTOCODER_MANAGER` marker probed from its processes (`markers`, by pane),
+/// and its name or workspace label.
+pub fn evidence(agents: &[HerdrAgent], markers: &HashMap<String, String>) -> Vec<Evidence> {
+    agents
+        .iter()
+        .map(|a| Evidence {
+            panes: vec![a.pane_id.clone()],
+            marker: markers.get(&a.pane_id).cloned(),
+            label: a.name.clone(),
+        })
+        .collect()
+}
+
+/// The panes worth probing for a process marker: agents in a main checkout
+/// whose swarm a live manifest pane hasn't already settled.
+pub fn marker_candidates(agents: &[HerdrAgent], repos: &[RepoFacts], manifests: &Manifests) -> Vec<String> {
+    let evidence = evidence(agents, &HashMap::new());
+    recognize(&facts(agents), repos)
+        .iter()
+        .filter(|swarm| {
+            let found = manifests.get(&swarm.root).map(Vec::as_slice).unwrap_or(&[]);
+            choose_manager(swarm, &evidence, found).is_none_or(|c| c.rule != ManagerRule::ManifestPane)
+        })
+        .flat_map(|swarm| swarm.main_members().map(|m| agents[m.agent].pane_id.clone()).collect::<Vec<_>>())
+        .collect()
+}
+
+/// `herdr pane process-info` output → the pane's shell and foreground pids.
+pub fn parse_pane_pids(json: &str) -> Vec<u32> {
+    let Ok(v) = serde_json::from_str::<Value>(json) else {
+        return Vec::new();
+    };
+    let Some(info) = v.pointer("/result/process_info") else {
+        return Vec::new();
+    };
+    let pid = |v: &Value| v.as_u64().and_then(|n| u32::try_from(n).ok());
+    let mut pids: Vec<u32> = info
+        .get("foreground_processes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|p| p.get("pid").and_then(pid))
+        .collect();
+    pids.extend(info.get("shell_pid").and_then(pid));
+    pids
+}
+
+/// Group herdr agents into swarms by repo identity (`recognize`), each with
+/// its manager chosen by evidence (`choose_manager`). `repos` are the repos
+/// their cwds are in; `manifests` the swarm manifests in each; `markers` the
+/// `AUTOCODER_MANAGER` marker found in each probed pane's processes.
+///
+/// A repo is a swarm when it has a worker, a manifest, or a manager picked
+/// by more than being in the main checkout. Without any of those, a lone
+/// agent in a repo is just someone's Claude session.
 pub fn swarms_from_agents(
     agents: &[HerdrAgent],
     repos: &[RepoFacts],
-    manifests: &BTreeSet<PathBuf>,
+    manifests: &Manifests,
+    markers: &HashMap<String, String>,
 ) -> Vec<SwarmSnapshot> {
-    let named_manager = |a: &HerdrAgent| a.name.as_deref().is_some_and(|n| n.starts_with("manager"));
+    let evidence = evidence(agents, markers);
     recognize(&facts(agents), repos)
         .into_iter()
         .filter_map(|swarm| {
-            // Prefer the agent named as the manager when several sit in the main checkout.
-            let manager = swarm
-                .main_members()
-                .find(|m| named_manager(&agents[m.agent]))
-                .or_else(|| swarm.main_members().next());
-            let workers: Vec<_> = swarm.workers().collect();
+            let found = manifests.get(&swarm.root).map(Vec::as_slice).unwrap_or(&[]);
+            let choice = choose_manager(&swarm, &evidence, found);
+            let manager = choice.as_ref().map(|c| &swarm.members[c.member]);
+            // An agent picked as manager from a worker's worktree isn't also a worker.
+            let workers: Vec<_> = swarm.workers().filter(|(_, m)| Some(m.agent) != manager.map(|x| x.agent)).collect();
             let is_swarm = !workers.is_empty()
-                || manager.is_some_and(|m| named_manager(&agents[m.agent]) || manifests.contains(&swarm.root));
+                || !found.is_empty()
+                || choice.as_ref().is_some_and(|c| c.rule != ManagerRule::MainCheckout);
             if !is_swarm {
                 return None;
             }
@@ -205,6 +269,7 @@ pub fn swarms_from_agents(
                 project_name: project,
                 repo_path: swarm.root.to_string_lossy().into_owned(),
                 repo_key: swarm.key.to_string_lossy().into_owned(),
+                manager_by: choice.map(ManagerPick::from),
                 workflow: None,
                 tmux_session: "herdr".to_string(),
                 stopped: false,
@@ -248,23 +313,26 @@ async fn collect(transport: &ServerTransport) -> Vec<SwarmSnapshot> {
     }
     let cwds: Vec<PathBuf> = facts(&agents).into_iter().map(|f| f.cwd).collect();
     let repos = gather(transport, &cwds).await;
-    let mut manifests = BTreeSet::new();
+    let mut manifests = Manifests::new();
     for root in repos.iter().filter_map(|r| r.worktrees.first()).map(|w| &w.path) {
-        // An autocoder swarm manifest makes a lone manager a swarm of zero workers.
-        let probe = ["-c".to_string(), "ls .autocoder/swarm/*.json >/dev/null 2>&1".to_string()];
-        if let Ok(out) = transport.output("sh", &probe, Some(root)).await
-            && out.status.success()
-        {
-            manifests.insert(root.clone());
+        manifests.insert(root.clone(), read_manifests(transport, root).await);
+    }
+    let mut markers = HashMap::new();
+    for pane in marker_candidates(&agents, &repos, &manifests) {
+        let args: Vec<String> = ["pane", "process-info", "--pane", &pane].iter().map(|s| s.to_string()).collect();
+        let Ok(out) = transport.output("herdr", &args, None).await else { continue };
+        let pids = parse_pane_pids(&String::from_utf8_lossy(&out.stdout));
+        if let Some(marker) = process_marker(transport, &pids).await {
+            markers.insert(pane, marker);
         }
     }
-    swarms_from_agents(&agents, &repos, &manifests)
+    swarms_from_agents(&agents, &repos, &manifests, &markers)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::recognize::Worktree;
+    use crate::model::recognize::{ManagerRule, Worktree};
 
     fn repo(root: &str, worktrees: &[(&str, Option<&str>)]) -> RepoFacts {
         RepoFacts {
@@ -303,7 +371,7 @@ mod tests {
     #[test]
     fn groups_agents_into_swarms_by_cwd() {
         let repos = [repo("/src/shop", &[("/src/shop-wt-1", None), ("/src/shop-wt-2", Some("feature/issue-77"))])];
-        let swarms = swarms_from_agents(&parse_agents(LIST), &repos, &BTreeSet::new());
+        let swarms = swarms_from_agents(&parse_agents(LIST), &repos, &Manifests::new(), &HashMap::new());
         assert_eq!(swarms.len(), 1, "the stray agent in ~/notes is not a swarm");
         let s = &swarms[0];
         assert_eq!(s.project_name, "shop");
@@ -324,7 +392,7 @@ mod tests {
     #[test]
     fn workers_without_a_manager_still_make_a_swarm() {
         let json = r#"{"result":{"agents":[{"pane_id":"w2:p1","agent_status":"idle","cwd":"/src/x-wt-1"}]}}"#;
-        let swarms = swarms_from_agents(&parse_agents(json), &[repo("/src/x", &[("/src/x-wt-1", None)])], &BTreeSet::new());
+        let swarms = swarms_from_agents(&parse_agents(json), &[repo("/src/x", &[("/src/x-wt-1", None)])], &Manifests::new(), &HashMap::new());
         assert_eq!(swarms.len(), 1);
         assert_eq!(swarms[0].manager.state, "Missing");
     }
@@ -336,10 +404,10 @@ mod tests {
         let json = r#"{"result":{"agents":[{"pane_id":"w5:p1","agent_status":"working","cwd":"/src/shop"}]}}"#;
         let agents = parse_agents(json);
         let repos = [repo("/src/shop", &[])];
-        assert!(swarms_from_agents(&agents, &repos, &BTreeSet::new()).is_empty());
+        assert!(swarms_from_agents(&agents, &repos, &Manifests::new(), &HashMap::new()).is_empty());
 
-        let manifests = BTreeSet::from([PathBuf::from("/src/shop")]);
-        let swarms = swarms_from_agents(&agents, &repos, &manifests);
+        let manifests = Manifests::from([(PathBuf::from("/src/shop"), vec![SwarmManifest::default()])]);
+        let swarms = swarms_from_agents(&agents, &repos, &manifests, &HashMap::new());
         assert_eq!(swarms.len(), 1);
         assert_eq!(swarms[0].project_name, "shop");
         assert_eq!(swarms[0].manager.tmux_target, "w5:p1");
@@ -363,7 +431,7 @@ mod tests {
         assert_eq!(agents[1].name.as_deref(), Some("manager-agents-ui"));
         assert_eq!(agents[2].name.as_deref(), Some("kept"));
         // The labelled manager wins over the other session in the repo, and makes a swarm.
-        let swarms = swarms_from_agents(&agents, &[repo("/src/agents-ui", &[])], &BTreeSet::new());
+        let swarms = swarms_from_agents(&agents, &[repo("/src/agents-ui", &[])], &Manifests::new(), &HashMap::new());
         assert_eq!(swarms.len(), 1);
         assert_eq!(swarms[0].manager.tmux_target, "w5:p1");
         assert!(swarms[0].workers.is_empty());
@@ -372,8 +440,61 @@ mod tests {
     #[test]
     fn a_manager_named_manager_is_a_swarm_without_a_manifest() {
         let json = r#"{"result":{"agents":[{"pane_id":"w1:p1","name":"manager-shop","agent_status":"idle","cwd":"/src/shop"}]}}"#;
-        let swarms = swarms_from_agents(&parse_agents(json), &[repo("/src/shop", &[])], &BTreeSet::new());
+        let swarms = swarms_from_agents(&parse_agents(json), &[repo("/src/shop", &[])], &Manifests::new(), &HashMap::new());
         assert_eq!(swarms.len(), 1);
         assert!(swarms[0].workers.is_empty());
+    }
+
+    /// Two agents in the main checkout of /src/agents-ui: w1:p1 (an earlier
+    /// session) and w5:p1 (the manager), plus a worker.
+    const TWO_IN_MAIN: &str = r#"{"result":{"agents":[
+        {"pane_id":"w1:p1","agent_status":"done","cwd":"/src/agents-ui"},
+        {"pane_id":"w5:p1","agent_status":"working","cwd":"/src/agents-ui"},
+        {"pane_id":"w2:p1","agent_status":"working","cwd":"/src/agents-ui-wt-1"}]}}"#;
+
+    fn agents_ui() -> [RepoFacts; 1] {
+        [repo("/src/agents-ui", &[("/src/agents-ui-wt-1", None)])]
+    }
+
+    #[test]
+    fn the_manifest_pane_is_the_manager() {
+        let manifests = Manifests::from([(
+            PathBuf::from("/src/agents-ui"),
+            vec![SwarmManifest { session: "claude-agents-ui".into(), manager_panes: vec!["w5:p1".into()] }],
+        )]);
+        let agents = parse_agents(TWO_IN_MAIN);
+        // Settled by the manifest: no process needs probing.
+        assert!(marker_candidates(&agents, &agents_ui(), &manifests).is_empty());
+        let s = &swarms_from_agents(&agents, &agents_ui(), &manifests, &HashMap::new())[0];
+        assert_eq!(s.manager.tmux_target, "w5:p1");
+        let by = s.manager_by.unwrap();
+        assert_eq!((by.rule, by.ambiguous), (ManagerRule::ManifestPane, false));
+    }
+
+    #[test]
+    fn the_process_marker_picks_the_manager_among_agents_in_the_main_checkout() {
+        let agents = parse_agents(TWO_IN_MAIN);
+        // No manifest: both main-checkout agents get probed.
+        assert_eq!(marker_candidates(&agents, &agents_ui(), &Manifests::new()), vec!["w1:p1", "w5:p1"]);
+        let markers = HashMap::from([("w5:p1".to_string(), "claude-agents-ui".to_string())]);
+        let s = &swarms_from_agents(&agents, &agents_ui(), &Manifests::new(), &markers)[0];
+        assert_eq!(s.manager.tmux_target, "w5:p1");
+        assert_eq!(s.manager_by.unwrap().rule, ManagerRule::ProcessMarker);
+    }
+
+    #[test]
+    fn two_unmarked_agents_in_the_main_checkout_make_an_ambiguous_manager() {
+        let s = &swarms_from_agents(&parse_agents(TWO_IN_MAIN), &agents_ui(), &Manifests::new(), &HashMap::new())[0];
+        assert_eq!(s.manager.tmux_target, "w1:p1", "picked deterministically: the lowest pane");
+        let by = s.manager_by.unwrap();
+        assert_eq!((by.rule, by.candidates, by.ambiguous), (ManagerRule::MainCheckout, 2, true));
+        assert_eq!(s.workers.len(), 1);
+    }
+
+    #[test]
+    fn parses_pane_pids() {
+        let json = r#"{"result":{"process_info":{"foreground_processes":[{"pid":481923,"name":"claude"}],"pane_id":"w5:p1","shell_pid":476081}}}"#;
+        assert_eq!(parse_pane_pids(json), vec![481923, 476081]);
+        assert!(parse_pane_pids("nope").is_empty());
     }
 }
