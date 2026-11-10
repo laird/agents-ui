@@ -103,7 +103,7 @@ pub fn exec_args(opts: &ServiceOptions) -> Vec<String> {
 }
 
 /// A path as systemd reads it in a user unit: under the home directory, `%h/...`.
-fn systemd_path(home: &Path, p: &Path) -> String {
+pub(crate) fn systemd_path(home: &Path, p: &Path) -> String {
     match p.strip_prefix(home) {
         Ok(rest) if !home.as_os_str().is_empty() => format!("%h/{}", rest.display()),
         _ => p.display().to_string(),
@@ -111,7 +111,7 @@ fn systemd_path(home: &Path, p: &Path) -> String {
 }
 
 /// One ExecStart word: quoted when it has a space or a quote; `%` doubled, as systemd expands it.
-fn systemd_word(w: &str) -> String {
+pub(crate) fn systemd_word(w: &str) -> String {
     let w = w.replace('%', "%%");
     if w.chars().any(|c| c.is_whitespace() || c == '"' || c == '\'' || c == '\\') {
         format!("\"{}\"", w.replace('\\', "\\\\").replace('"', "\\\""))
