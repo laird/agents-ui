@@ -76,17 +76,19 @@ function select(want) {
   else return;
   const view = state.view;
   if (view.world) {
+    shownScenes(); // lays the dev row out with the platform in its slot
     document.getElementById('workflow').textContent = worldWords(w);
     nameBar(`${w.dev} \u21c4 ${w.platform}`, villages.find(x => x.project === w.dev));
   } else {
     const sc = state.scenes[view.village];
+    if (sc.L.slot) sc.L = layout(sc.v); // shown alone, a world's dev village has no platform in its row
     document.getElementById('workflow').textContent = describe(sc.v);
     nameBar(sc.v.project, sc.v);
     if (cv.width !== sc.L.W || cv.height !== sc.L.H) { cv.width = sc.L.W; cv.height = sc.L.H; }
   }
   fit();
   if (state.reduce) draw(0);
-  const sc = !view.world && state.scenes[view.village], e = env && sc && sc.L.envs.find(x => x.s.name === env);
+  const sc = state.scenes[view.world ? w.dev : view.village], e = env && sc && sc.L && sc.L.envs.find(x => x.s.name === env);
   if (e && state.scrolledTo !== want) { state.scrolledTo = want; scrollToVillage(e.x); }
   placeOverlays();
 }

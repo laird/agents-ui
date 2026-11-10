@@ -7,7 +7,7 @@
  * real issue URL shows which GitHub repo this is, never a guess. */
 import { state } from './state.js';
 import { HITS, hitAt, registerOverlay } from './registry.js';
-import { SIDE, cv, otherTheme, shownScenes, themeAt, worldGeom } from './layout.js';
+import { cv, shownScenes, themeAt } from './layout.js';
 import { esc } from './panels.js';
 
 export const dialog = document.getElementById('dialog');
@@ -107,17 +107,16 @@ export function act(o, sc, theme) {
 }
 /* What is under a pointer event: the object, its scene and theme; or null. */
 export function objAt(e) {
-  const { view, scenes, worlds } = state;
+  const { view, scenes } = state;
   if (!view) return null;
   const r = cv.getBoundingClientRect();
   const x = (e.clientX - r.left) / r.width * cv.width, y = (e.clientY - r.top) / r.height * cv.height;
   if (!view.world) { const sc = scenes[view.village], o = sc && sc.v && hitAt(sc, x, y); return o ? { o, sc, theme: state.T } : null; }
-  const w = worlds.find(x => x.name === view.world), Ps = w && scenes[w.platform], Ds = w && scenes[w.dev];
-  if (!Ps || !Ds || !Ps.v || !Ds.v) return null;
-  const g = worldGeom(Ps, Ds);
-  const [sc, theme, top] = y < Ps.L.H ? [Ps, otherTheme(), 0] : y >= g.devTop ? [Ds, state.T, g.devTop] : [];
-  const o = sc && hitAt(sc, x - SIDE, y - top);
-  return o ? { o, sc, theme } : null;
+  // A world: the scene on top at that point (the platform over its slot) answers.
+  const at = shownScenes().reverse().find(([sc, ox, oy]) => x >= ox && y >= oy && x < ox + sc.L.W && y < oy + sc.L.H);
+  if (!at) return null;
+  const [sc, ox, oy] = at, o = hitAt(sc, x - ox, y - oy);
+  return o ? { o, sc, theme: themeAt(sc) } : null;
 }
 cv.addEventListener('click', e => {
   if (!state.view) return;
@@ -174,7 +173,7 @@ export function placeKeys() {
   const vp = document.getElementById('viewport'), r = cv.getBoundingClientRect(), vr = vp.getBoundingClientRect();
   const s = r.width / cv.width, ox0 = r.left - vr.left + vp.scrollLeft, oy0 = r.top - vr.top + vp.scrollTop, keep = new Set();
   if (!cv.hidden) shownScenes().forEach(([sc, ox, oy]) => {
-    const theme = themeAt(oy);
+    const theme = themeAt(sc);
     (sc.hits || []).forEach(h => {
       if ((HITS[h.o.kind] || {}).key === false || h.o.at === 'transit') return;
       const key = `${sc.v.project}|${keyOf(h.o)}`;
