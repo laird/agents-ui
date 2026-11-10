@@ -28,6 +28,12 @@ pub struct TmuxPaneInfo {
     /// This is the authoritative source for which worktree an agent is in:
     /// the session environment does not carry PWD, so it cannot be asked.
     pub current_path: Option<String>,
+    /// tmux's own pane id (`%12`), which is how an autocoder swarm manifest
+    /// records the manager's pane (`tmuxTarget`).
+    pub id: Option<String>,
+    /// The pid of the pane's first process (its shell), whose descendants
+    /// include the agent.
+    pub pid: Option<u32>,
 }
 
 /// Check if tmux is available.
@@ -200,7 +206,7 @@ pub async fn list_panes(transport: &ServerTransport, session: &str) -> Result<Tm
                 "-t".to_string(),
                 session.to_string(),
                 "-F".to_string(),
-                format!("#{{window_index}}{SEP}#{{window_name}}{SEP}#{{pane_index}}{SEP}#{{pane_current_path}}"),
+                format!("#{{window_index}}{SEP}#{{window_name}}{SEP}#{{pane_index}}{SEP}#{{pane_id}}{SEP}#{{pane_pid}}{SEP}#{{pane_current_path}}"),
             ],
             None,
         )
@@ -232,10 +238,18 @@ fn parse_list_panes_output(session: &str, stdout: &str) -> TmuxSessionInfo {
     for line in stdout.lines() {
         // The path field is optional so that output captured from an older
         // format string (and the existing tab-separated fixtures) still parses.
-        let parts: Vec<&str> = if line.contains(SEP) {
-            line.splitn(4, SEP).collect()
+        // Current format: index, name, pane, id, pid, path (six fields). Lines
+        // with fewer are an older format: index, name, pane, then the path.
+        let (parts, id, pid): (Vec<&str>, Option<String>, Option<u32>) = if line.contains(SEP) {
+            let six: Vec<&str> = line.splitn(6, SEP).collect();
+            if six.len() == 6 {
+                let id = Some(six[3].trim().to_string()).filter(|s| !s.is_empty());
+                (vec![six[0], six[1], six[2], six[5]], id, six[4].trim().parse().ok())
+            } else {
+                (line.splitn(4, SEP).collect(), None, None)
+            }
         } else {
-            line.splitn(4, '\t').collect()
+            (line.splitn(4, '\t').collect(), None, None)
         };
         if parts.len() < 3 {
             continue;
@@ -254,6 +268,8 @@ fn parse_list_panes_output(session: &str, stdout: &str) -> TmuxSessionInfo {
             index: pane_idx,
             target,
             current_path,
+            id,
+            pid,
         };
 
         if let Some(window) = windows.iter_mut().find(|w| w.index == win_idx) {
@@ -336,5 +352,20 @@ mod tests {
         assert_eq!(parsed.windows.len(), 1);
         assert_eq!(parsed.windows[0].index, 2);
         assert_eq!(parsed.windows[0].panes[0].target, "codex-demo:2.0");
+    }
+
+    #[test]
+    fn reads_pane_id_and_pid_from_the_current_format() {
+        let parsed = parse_list_panes_output(
+            "claude-shop",
+            "1|#|review|#|1|#|%12|#|4242|#|/src/shop\n2|#|agents|#|1|#|%13|#||#|/src/a|#|b\n",
+        );
+        let review = &parsed.windows[0].panes[0];
+        assert_eq!(review.id.as_deref(), Some("%12"));
+        assert_eq!(review.pid, Some(4242));
+        assert_eq!(review.current_path.as_deref(), Some("/src/shop"));
+        let worker = &parsed.windows[1].panes[0];
+        assert_eq!(worker.pid, None);
+        assert_eq!(worker.current_path.as_deref(), Some("/src/a|#|b"));
     }
 }

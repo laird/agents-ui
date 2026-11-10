@@ -12,11 +12,28 @@
 //! worktree named otherwise takes the lowest number no `-wt-<N>` worktree
 //! uses, in worktree order.
 //!
-//! [`recognize`] takes only plain facts, so every source (and the terminal
-//! view) can share it; [`gather`] collects those facts from git.
+//! Who the manager is comes from evidence, strongest first ([`choose_manager`]):
+//!
+//! 1. the pane an autocoder swarm manifest (`.autocoder/swarm/*.json`) names
+//!    as the manager's, if that pane is live;
+//! 2. an agent process carrying `AUTOCODER_MANAGER=<session>` in its
+//!    environment (the marker the launcher exports);
+//! 3. a label: a pane or workspace named `manager-…` (tmux: the `review`
+//!    window);
+//! 4. any agent in the main checkout.
+//!
+//! The rule that matched is recorded, and a tie at that rule picks one
+//! deterministically and marks the choice ambiguous.
+//!
+//! [`recognize`] and [`choose_manager`] take only plain facts, so every source
+//! (and the terminal view) can share them; [`gather`], [`read_manifests`] and
+//! [`process_marker`] collect those facts.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::transport::ServerTransport;
 
@@ -234,6 +251,154 @@ pub fn canonical(cwd: &str) -> PathBuf {
     std::fs::canonicalize(&p).unwrap_or(p)
 }
 
+/// What an autocoder swarm manifest says about its manager.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SwarmManifest {
+    /// The swarm's session (`claude-shop`): the value of its manager's
+    /// `AUTOCODER_MANAGER` marker.
+    pub session: String,
+    /// The manager's pane in every multiplexer the manifest names
+    /// (`herdrPane`, `tmuxTarget`, `cmuxWorkspace`).
+    pub manager_panes: Vec<String>,
+}
+
+/// Every manifest in `text`: the `.autocoder/swarm/*.json` files one after
+/// another, as `cat` prints them. A file that doesn't parse is skipped.
+pub fn parse_manifests(text: &str) -> Vec<SwarmManifest> {
+    serde_json::Deserializer::from_str(text)
+        .into_iter::<Value>()
+        .map_while(Result::ok)
+        .filter_map(|v| {
+            let session = v.get("session")?.as_str()?.to_string();
+            let manager = v.get("manager");
+            let manager_panes = ["herdrPane", "tmuxTarget", "cmuxWorkspace"]
+                .iter()
+                .filter_map(|k| manager?.get(*k)?.as_str())
+                .filter(|p| !p.is_empty())
+                .map(str::to_string)
+                .collect();
+            Some(SwarmManifest { session, manager_panes })
+        })
+        .collect()
+}
+
+/// The swarm manifests in a repo's main checkout. None when it has none (or
+/// they can't be read).
+pub async fn read_manifests(transport: &ServerTransport, root: &Path) -> Vec<SwarmManifest> {
+    let cat = ["-c".to_string(), "cat .autocoder/swarm/*.json 2>/dev/null".to_string()];
+    match transport.output("sh", &cat, Some(root)).await {
+        Ok(out) => parse_manifests(&String::from_utf8_lossy(&out.stdout)),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// The `AUTOCODER_MANAGER` marker in the environment of any of `pids` or
+/// their descendants (`/proc/<pid>/environ`), the first one found.
+pub async fn process_marker(transport: &ServerTransport, pids: &[u32]) -> Option<String> {
+    if pids.is_empty() {
+        return None;
+    }
+    const WALK: &str = r#"walk() { for p in "$@"; do
+  v=$(tr '\0' '\n' < /proc/$p/environ 2>/dev/null | sed -n 's/^AUTOCODER_MANAGER=//p' | head -n 1)
+  if [ -n "$v" ]; then echo "$v"; exit 0; fi
+  walk $(cat /proc/$p/task/*/children 2>/dev/null)
+done; }; walk "$@""#;
+    let mut args = vec!["-c".to_string(), WALK.to_string(), "sh".to_string()];
+    args.extend(pids.iter().map(u32::to_string));
+    let out = transport.output("sh", &args, None).await.ok()?;
+    let marker = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!marker.is_empty()).then_some(marker)
+}
+
+/// What a source knows about one agent that could make it the manager.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Evidence {
+    /// Every name its pane goes by (herdr `w5:p1`; tmux `claude-shop:1.0` and
+    /// `%12`), to match a manifest's manager pane.
+    pub panes: Vec<String>,
+    /// The `AUTOCODER_MANAGER` value in its process environment.
+    pub marker: Option<String>,
+    /// The pane's or workspace's name (tmux: the window's name).
+    pub label: Option<String>,
+}
+
+/// Which rule picked the manager, strongest first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ManagerRule {
+    ManifestPane,
+    ProcessMarker,
+    Label,
+    MainCheckout,
+}
+
+impl ManagerRule {
+    pub fn describe(self) -> &'static str {
+        match self {
+            Self::ManifestPane => "the pane the swarm manifest names",
+            Self::ProcessMarker => "its AUTOCODER_MANAGER process marker",
+            Self::Label => "its manager label",
+            Self::MainCheckout => "it is the agent in the main checkout",
+        }
+    }
+}
+
+/// The manager [`choose_manager`] picked.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ManagerChoice {
+    /// Index into the swarm's `members`.
+    pub member: usize,
+    pub rule: ManagerRule,
+    /// How many agents the winning rule matched; more than one is a tie.
+    pub candidates: usize,
+}
+
+impl ManagerChoice {
+    /// Several agents matched the winning rule equally, and one was picked.
+    pub fn ambiguous(&self) -> bool {
+        self.candidates > 1
+    }
+}
+
+/// A pane or workspace label that names the manager: `manager-<project>`, or
+/// tmux's `review` window.
+pub fn is_manager_label(label: &str) -> bool {
+    label.starts_with("manager") || label.eq_ignore_ascii_case("review")
+}
+
+/// Pick a swarm's manager by evidence (see the module docs). `evidence` is
+/// indexed like the agents passed to [`recognize`]; `manifests` are the
+/// repo's. A marker counts when it names one of the manifests' sessions, or
+/// is any marker when the repo has no manifest. Ties go to an agent in the
+/// main checkout, then the lowest pane name. None when no rule matches.
+pub fn choose_manager(swarm: &RepoSwarm, evidence: &[Evidence], manifests: &[SwarmManifest]) -> Option<ManagerChoice> {
+    let ev = |m: &Member| evidence.get(m.agent);
+    let rules: [(ManagerRule, &dyn Fn(&Member) -> bool); 4] = [
+        (ManagerRule::ManifestPane, &|m| {
+            ev(m).is_some_and(|e| {
+                manifests.iter().any(|f| f.manager_panes.iter().any(|p| e.panes.contains(p)))
+            })
+        }),
+        (ManagerRule::ProcessMarker, &|m| {
+            ev(m).and_then(|e| e.marker.as_deref()).is_some_and(|marker| {
+                manifests.is_empty() || manifests.iter().any(|f| f.session == marker)
+            })
+        }),
+        (ManagerRule::Label, &|m| ev(m).and_then(|e| e.label.as_deref()).is_some_and(is_manager_label)),
+        (ManagerRule::MainCheckout, &|m| m.place == Place::Main),
+    ];
+    for (rule, matches) in rules {
+        let mut found: Vec<usize> = (0..swarm.members.len()).filter(|&i| matches(&swarm.members[i])).collect();
+        if found.is_empty() {
+            continue;
+        }
+        let first_pane = |i: usize| ev(&swarm.members[i]).and_then(|e| e.panes.first().cloned()).unwrap_or_default();
+        found.sort_by_key(|&i| (swarm.members[i].place != Place::Main, first_pane(i), swarm.members[i].agent));
+        return Some(ManagerChoice { member: found[0], rule, candidates: found.len() });
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -339,4 +504,121 @@ worktree /nonexistent/shop-wt-1\nHEAD 123\nbranch refs/heads/feature/issue-7\n";
         assert_eq!(wt_number(Path::new("/src/my-wt-x")), None);
         assert_eq!(wt_number(Path::new("/src/-wt-2")), None);
     }
+
+    fn ev(pane: &str, marker: Option<&str>, label: Option<&str>) -> Evidence {
+        Evidence { panes: vec![pane.into()], marker: marker.map(Into::into), label: label.map(Into::into) }
+    }
+
+    fn manifest(session: &str, pane: &str) -> SwarmManifest {
+        SwarmManifest { session: session.into(), manager_panes: vec![pane.into()] }
+    }
+
+    /// Three agents in the main checkout and one worker, each with `evidence`.
+    fn manager_of(evidence: &[Evidence], manifests: &[SwarmManifest]) -> Option<(String, ManagerRule, bool)> {
+        let agents: Vec<AgentFact> = evidence
+            .iter()
+            .enumerate()
+            .map(|(i, e)| agent("herdr", &e.panes[0], if i < 3 { "/src/shop" } else { "/src/shop-wt-1" }))
+            .collect();
+        let swarm = recognize(&agents, &[shop()]).remove(0);
+        let c = choose_manager(&swarm, evidence, manifests)?;
+        Some((evidence[swarm.members[c.member].agent].panes[0].clone(), c.rule, c.ambiguous()))
+    }
+
+    #[test]
+    fn the_manifest_pane_wins_over_a_labelled_pane() {
+        let e = [ev("w1:p1", None, Some("manager-shop")), ev("w2:p1", None, None), ev("w3:p1", None, None), ev("w4:p1", None, None)];
+        let got = manager_of(&e, &[manifest("claude-shop", "w2:p1")]);
+        assert_eq!(got, Some(("w2:p1".into(), ManagerRule::ManifestPane, false)));
+    }
+
+    #[test]
+    fn the_process_marker_wins_over_a_label() {
+        let e = [
+            ev("w1:p1", None, Some("manager-shop")),
+            ev("w2:p1", Some("claude-shop"), None),
+            ev("w3:p1", None, None),
+            ev("w4:p1", None, None),
+        ];
+        assert_eq!(manager_of(&e, &[]), Some(("w2:p1".into(), ManagerRule::ProcessMarker, false)));
+        // With a manifest, the marker must name its session.
+        assert_eq!(
+            manager_of(&e, &[manifest("claude-other", "w9:p9")]),
+            Some(("w1:p1".into(), ManagerRule::Label, false))
+        );
+    }
+
+    #[test]
+    fn two_unlabelled_agents_in_the_main_checkout_are_ambiguous() {
+        let e = [ev("w3:p1", None, None), ev("w1:p1", None, None), ev("w2:p1", None, None), ev("w4:p1", None, None)];
+        // Deterministic: the lowest pane, whatever order they were seen in.
+        assert_eq!(manager_of(&e, &[]), Some(("w1:p1".into(), ManagerRule::MainCheckout, true)));
+    }
+
+    #[test]
+    fn a_dead_manifest_pane_falls_through_to_the_next_rule() {
+        let e = [ev("w1:p1", None, None), ev("w2:p1", None, Some("manager-shop")), ev("w3:p1", None, None), ev("w4:p1", None, None)];
+        // The manifest names w8:p1, which no live agent has.
+        let got = manager_of(&e, &[manifest("claude-shop", "w8:p1")]);
+        assert_eq!(got, Some(("w2:p1".into(), ManagerRule::Label, false)));
+    }
+
+    #[test]
+    fn a_tmux_pane_matches_the_manifest_by_its_pane_id() {
+        let mut e = [ev("claude-shop:1.0", None, Some("review")), ev("claude-shop:2.0", None, None), ev("x", None, None), ev("y", None, None)];
+        e[1].panes.push("%12".into());
+        let got = manager_of(&e, &[manifest("claude-shop", "%12")]);
+        assert_eq!(got, Some(("claude-shop:2.0".into(), ManagerRule::ManifestPane, false)));
+    }
+
+    #[test]
+    fn workers_alone_have_no_manager() {
+        let agents = [agent("herdr", "w4:p1", "/src/shop-wt-1")];
+        let swarm = recognize(&agents, &[shop()]).remove(0);
+        assert_eq!(choose_manager(&swarm, &[Evidence::default()], &[]), None);
+    }
+
+    #[test]
+    fn parses_manifests_one_after_another() {
+        let text = r#"{"version":1,"session":"claude-shop","manager":{"tmuxTarget":null,"cmuxWorkspace":null,"herdrPane":"w5:p1"}}
+{"session":"codex-shop","manager":{"tmuxTarget":"%3"}}
+{"no":"session"}"#;
+        let m = parse_manifests(text);
+        assert_eq!(m, vec![manifest("claude-shop", "w5:p1"), manifest("codex-shop", "%3")]);
+        assert!(parse_manifests("").is_empty());
+    }
+
+    #[test]
+    fn manager_labels() {
+        assert!(is_manager_label("manager-shop"));
+        assert!(is_manager_label("review"));
+        assert!(!is_manager_label("wt1-shop"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn the_process_marker_is_found_in_a_descendant() {
+        // A shell (no marker) whose child carries the marker, as a pane's shell
+        // runs the agent.
+        let mut shell = std::process::Command::new("sh")
+            .args(["-c", "AUTOCODER_MANAGER=claude-test sleep 30 & wait"])
+            .env_remove("AUTOCODER_MANAGER")
+            .spawn()
+            .unwrap();
+        let transport = ServerTransport::new(None);
+        let mut found = None;
+        for _ in 0..50 {
+            found = process_marker(&transport, &[shell.id()]).await;
+            if found.is_some() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(found.as_deref(), Some("claude-test"));
+        assert_eq!(process_marker(&transport, &[]).await, None);
+        let _ = std::process::Command::new("pkill").args(["-P", &shell.id().to_string()]).status();
+        let _ = shell.kill();
+        let _ = shell.wait();
+    }
 }
+

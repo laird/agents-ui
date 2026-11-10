@@ -86,6 +86,11 @@ pub struct SwarmSnapshot {
     /// Two swarms with the same key are one swarm (`source::discover`).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub repo_key: String,
+    /// How the manager was chosen (`model::recognize::choose_manager`): the
+    /// rule that matched and how many agents it matched. None when the source
+    /// didn't choose by evidence (a saved swarm) or found no manager.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manager_by: Option<ManagerPick>,
     pub agent_type: String,
     pub workflow: Option<String>,
     pub tmux_session: String,
@@ -97,6 +102,23 @@ pub struct SwarmSnapshot {
     pub workers: Vec<AgentSnapshot>,
     /// Open GitHub issues for this swarm's repository.
     pub issues: Vec<IssueSnapshot>,
+}
+
+/// Which evidence picked a swarm's manager.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct ManagerPick {
+    pub rule: crate::model::recognize::ManagerRule,
+    /// How many agents the rule matched; more than one means the choice was a
+    /// deterministic pick among equals.
+    pub candidates: usize,
+    /// Several agents matched the winning rule equally and one was picked.
+    pub ambiguous: bool,
+}
+
+impl From<crate::model::recognize::ManagerChoice> for ManagerPick {
+    fn from(c: crate::model::recognize::ManagerChoice) -> Self {
+        Self { rule: c.rule, candidates: c.candidates, ambiguous: c.ambiguous() }
+    }
 }
 
 /// Thread-safe shared state between the TUI app and the web server.
@@ -147,6 +169,7 @@ impl SwarmSnapshot {
             project_name: swarm.project_name.clone(),
             repo_path: swarm.repo_path.to_string_lossy().into_owned(),
             repo_key: String::new(),
+            manager_by: None,
             agent_type: swarm.agent_type.to_string(),
             workflow: swarm.workflow.as_ref().map(|w| w.to_string()),
             tmux_session: swarm.tmux_session.clone(),

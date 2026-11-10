@@ -8,7 +8,10 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use crate::model::recognize::{AgentFact, Member, Place, canonical, gather, recognize};
+use crate::model::recognize::{
+    AgentFact, Evidence, ManagerRule, Member, Place, canonical, choose_manager, gather, process_marker, read_manifests,
+    recognize,
+};
 use futures::future::BoxFuture;
 use tokio::time::{Duration, sleep};
 
@@ -19,7 +22,7 @@ use crate::model::status::{AgentState, read_status_file};
 use crate::model::swarm::{AgentType, WorkerHealth};
 
 use super::source::SwarmSource;
-use super::{AgentSnapshot, SharedWebState, SwarmSnapshot};
+use super::{AgentSnapshot, ManagerPick, SharedWebState, SwarmSnapshot};
 
 /// How often to refresh the web state (seconds).
 const POLL_INTERVAL_SECS: u64 = 3;
@@ -162,6 +165,7 @@ fn stopped_swarm_snapshot(
         project_name: project_name.to_string(),
         repo_path: state.repo_path.clone(),
         repo_key: String::new(),
+        manager_by: None,
         agent_type: state.agent_type.clone(),
         workflow: state.workflow.clone(),
         tmux_session: state.tmux_session.clone(),
@@ -220,6 +224,47 @@ async fn build_swarm_snapshot(
     let placed: HashMap<&str, &Member> = swarm
         .map(|s| s.members.iter().map(|m| (facts[m.agent].pane.as_str(), m)).collect())
         .unwrap_or_default();
+
+    // The manager, by evidence (`choose_manager`): the pane the swarm manifest
+    // names, then a pane whose processes carry `AUTOCODER_MANAGER`, then the
+    // `review` window, then any pane in the main checkout. The `review`
+    // window alone decides only when git placed no pane in a repo.
+    let panes: HashMap<&str, (&tmux_session::TmuxPaneInfo, &str)> = session_info
+        .windows
+        .iter()
+        .flat_map(|w| w.panes.iter().map(move |p| (p.target.as_str(), (p, w.name.as_str()))))
+        .collect();
+    let manifests = match swarm {
+        Some(s) => read_manifests(transport, &s.root).await,
+        None => Vec::new(),
+    };
+    let mut evidence: Vec<Evidence> = facts
+        .iter()
+        .map(|f| {
+            let (pane, window) = panes[f.pane.as_str()];
+            Evidence {
+                panes: std::iter::once(pane.target.clone()).chain(pane.id.clone()).collect(),
+                marker: None,
+                label: Some(window.to_string()),
+            }
+        })
+        .collect();
+    let mut choice = swarm.and_then(|s| choose_manager(s, &evidence, &manifests));
+    if let Some(s) = swarm
+        && choice.as_ref().is_none_or(|c| c.rule != ManagerRule::ManifestPane)
+    {
+        // Only probe processes when a live manifest pane hasn't settled it.
+        for m in s.main_members() {
+            if let Some(pid) = panes[facts[m.agent].pane.as_str()].0.pid {
+                evidence[m.agent].marker = process_marker(transport, &[pid]).await;
+            }
+        }
+        choice = choose_manager(s, &evidence, &manifests);
+    }
+    let manager_target: Option<String> = swarm
+        .zip(choice.as_ref())
+        .map(|(s, c)| facts[s.members[c.member].agent].pane.clone());
+    let manager_by = choice.map(ManagerPick::from);
 
     // Resolve the repo: its main checkout, from git. When git can't say (the
     // panes report no path, or none is in a repo), fall back to the manager
@@ -295,9 +340,13 @@ async fn build_swarm_snapshot(
     for window in &session_info.windows {
         let is_manager_window = window.name.eq_ignore_ascii_case("review");
         for pane in &window.panes {
-            // Only the first pane of the review window is the manager; if it
-            // were ever split, the rest are still workers.
-            let is_manager = is_manager_window && manager.is_none();
+            // The pane chosen by evidence above. Without one (no pane in a
+            // repo), only the first pane of the review window is the manager;
+            // if it were ever split, the rest are still workers.
+            let is_manager = match &manager_target {
+                Some(target) => &pane.target == target,
+                None => is_manager_window && manager.is_none(),
+            };
             if !is_manager {
                 ordinal += 1;
             }
@@ -375,6 +424,7 @@ async fn build_swarm_snapshot(
         project_name,
         repo_path: repo_path_str,
         repo_key,
+        manager_by,
         agent_type: agent_type.to_string(),
         workflow: None,
         tmux_session: session_name.to_string(),

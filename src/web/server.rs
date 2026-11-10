@@ -1284,6 +1284,7 @@ mod tests {
             project_name: name.to_string(),
             repo_path: format!("/repos/{name}"),
             repo_key: String::new(),
+            manager_by: None,
             agent_type: "Claude".to_string(),
             workflow: None,
             tmux_session: format!("claude-{name}"),
