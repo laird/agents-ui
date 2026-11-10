@@ -113,6 +113,11 @@ pub trait IssueTracker: Send + Sync {
     fn closed<'a>(&'a self, _transport: &'a ServerTransport, _repo: &'a Path) -> BoxFuture<'a, Vec<IssueSnapshot>> {
         Box::pin(async { Vec::new() })
     }
+    /// The merge job's recent comments, `(issue, at, body)`, for where the
+    /// gate handed work back (`gate::bounce_history`); none when the tracker can't say.
+    fn merge_comments<'a>(&'a self, _transport: &'a ServerTransport, _repo: &'a Path) -> BoxFuture<'a, Vec<(u32, String, String)>> {
+        Box::pin(async { Vec::new() })
+    }
 }
 
 /// Where pushed work has got to on its way to production.
@@ -194,6 +199,9 @@ impl IssueTracker for GitHubIssues {
             let parents = crate::github::fetch_feature_parents(transport, repo).await;
             self.links.get(transport, repo, &parents).await
         })
+    }
+    fn merge_comments<'a>(&'a self, transport: &'a ServerTransport, repo: &'a Path) -> BoxFuture<'a, Vec<(u32, String, String)>> {
+        Box::pin(async move { crate::github::fetch_merge_comments(transport, repo).await.unwrap_or_default() })
     }
     fn closed<'a>(&'a self, transport: &'a ServerTransport, repo: &'a Path) -> BoxFuture<'a, Vec<IssueSnapshot>> {
         Box::pin(async move {

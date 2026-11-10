@@ -450,6 +450,12 @@ pub struct Pipeline {
     /// Deployments as ships between the villages of the environment row.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub voyages: Vec<Voyage>,
+    /// Where the gate handed each issue's work back, oldest first (#431).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub bounces: std::collections::BTreeMap<u32, Vec<super::gate::Bounce>>,
+    /// Today at the gate: landed, bounced, and the files that conflict most.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge_stats: Option<super::gate::MergeStats>,
 }
 
 /// A task's trip through the merge gate, by issue number.
@@ -1149,21 +1155,23 @@ pub struct SwarmVillages {
     issues: Box<dyn IssueTracker>,
     pipeline: Box<dyn PipelineSource>,
     activity: Box<dyn ActivitySource>,
-    extras: TtlCache<PathBuf, (Vec<IssueSnapshot>, Pipeline, Vec<FeatureLink>, Vec<IssueSnapshot>)>,
+    extras: TtlCache<PathBuf, (Vec<IssueSnapshot>, Pipeline, Vec<FeatureLink>, Vec<IssueSnapshot>, Vec<(u32, String, String)>)>,
     since: SinceMemory,
+    /// Each repo's conflicted files by issue, kept after the job's log is overwritten.
+    conflicts: std::sync::Mutex<HashMap<String, HashMap<u32, Vec<String>>>>,
     /// CI answers per repo, re-asked when the tip moves (`build.rs`).
     ci: super::build::CiCache,
 }
 
 impl SwarmVillages {
     pub fn new(issues: Box<dyn IssueTracker>, pipeline: Box<dyn PipelineSource>, activity: Box<dyn ActivitySource>) -> Self {
-        Self { issues, pipeline, activity, extras: TtlCache::new(extras_ttl()), since: Default::default(), ci: Default::default() }
+        Self { issues, pipeline, activity, extras: TtlCache::new(extras_ttl()), since: Default::default(), conflicts: Default::default(), ci: Default::default() }
     }
 
     async fn village(&self, transport: &ServerTransport, swarm: &SwarmSnapshot) -> Reading {
         let repo = PathBuf::from(&swarm.repo_path);
-        let (fetched, pipeline, links, closed) = if swarm.repo_path.is_empty() {
-            (Vec::new(), Pipeline::default(), Vec::new(), Vec::new())
+        let (fetched, pipeline, links, closed, merge_comments) = if swarm.repo_path.is_empty() {
+            (Vec::new(), Pipeline::default(), Vec::new(), Vec::new(), Vec::new())
         } else {
             self.extras
                 .get_or(repo.clone(), || async {
@@ -1174,7 +1182,8 @@ impl SwarmVillages {
                     };
                     let pipeline = self.pipeline.pipeline(transport, &repo).await;
                     let features = self.issues.features(transport, &repo).await;
-                    (issues, pipeline, features, self.issues.closed(transport, &repo).await)
+                    let comments = self.issues.merge_comments(transport, &repo).await;
+                    (issues, pipeline, features, self.issues.closed(transport, &repo).await, comments)
                 })
                 .await
         };
@@ -1182,18 +1191,31 @@ impl SwarmVillages {
         // The merge gate's files are on the host that runs the merges: read
         // them only for a local village, and fresh each time (they change by
         // the second while a gate runs).
-        let gate = if transport.server().is_none() && !swarm.repo_path.is_empty() {
-            let repo = repo.clone();
-            tokio::task::spawn_blocking(move || super::gate::read_local(&repo)).await.unwrap_or_default()
+        let (gate, retries) = if transport.server().is_none() && !swarm.repo_path.is_empty() {
+            let (repo, integration) = (repo.clone(), pipeline.integration.clone());
+            tokio::task::spawn_blocking(move || (super::gate::read_local(&repo), super::gate::read_push_retries(&repo, &integration)))
+                .await
+                .unwrap_or_default()
         } else {
-            super::gate::GateReading::default()
+            (super::gate::GateReading::default(), String::new())
         };
+        // Bounces (#431): the job's comments and the push retries outlive its files.
+        let bounces = {
+            let mut memory = self.conflicts.lock().unwrap_or_else(|e| e.into_inner());
+            let remembered = memory.entry(swarm.repo_path.clone()).or_default();
+            super::gate::remember_conflicts(&gate.jobs, remembered);
+            super::gate::bounce_history(&merge_comments, &retries, &gate.jobs, remembered)
+        };
+        let merge_stats = (gate.local || !bounces.is_empty())
+            .then(|| super::gate::merge_stats(&bounces, &gate.jobs, &chrono::Utc::now().format("%Y-%m-%d").to_string()));
         let integration = pipeline.integration.clone();
         let mut village = build_gated(swarm, &issues, pipeline, &gate);
         if !swarm.repo_path.is_empty() {
             village.build = Some(super::build::read(&self.ci, transport, &repo, &integration, &gate).await);
         }
         village.pipeline.titles = pipeline_titles(&village.pipeline, &issues, &closed);
+        village.pipeline.bounces = bounces;
+        village.pipeline.merge_stats = merge_stats;
         self.since.stamp(&swarm.repo_path, &mut village.houses, chrono::Utc::now());
         super::feature::attach_parents(&mut village.backlog, &links);
         village.features = super::feature::build(&village, &links);
@@ -1262,6 +1284,25 @@ mod tests {
             url: String::new(),
             depends_on: Vec::new(),
         }
+    }
+
+    /// #431: the gate's bounces and today's tally ride on the pipeline, and
+    /// are left out of the JSON when there are none.
+    #[test]
+    fn bounces_and_merge_stats_reach_the_village_json() {
+        use super::super::gate::{Bounce, BounceKind, Hotspot, MergeStats};
+        let mut v = build(&swarm(vec![]), &[], Pipeline::default());
+        let quiet = serde_json::to_value(&v).unwrap();
+        assert!(quiet["pipeline"].get("bounces").is_none() && quiet["pipeline"].get("merge_stats").is_none());
+        v.pipeline.bounces.insert(9, vec![Bounce { at: Some("2026-11-10T01:00:00Z".into()), kind: BounceKind::Conflict, files: vec!["src/web/server.rs".into()] }]);
+        v.pipeline.merge_stats = Some(MergeStats { landed_today: 3, bounced_today: 1, hotspots: vec![Hotspot { file: "src/web/server.rs".into(), count: 1 }] });
+        let j = serde_json::to_value(&v).unwrap();
+        assert_eq!(j["pipeline"]["bounces"]["9"][0]["kind"], "conflict");
+        assert_eq!(j["pipeline"]["bounces"]["9"][0]["files"][0], "src/web/server.rs");
+        assert_eq!(j["pipeline"]["merge_stats"]["bounced_today"], 1);
+        assert_eq!(j["pipeline"]["merge_stats"]["hotspots"][0]["count"], 1);
+        let back: VillageSnapshot = serde_json::from_value(j).unwrap();
+        assert_eq!(back.pipeline.bounces[&9][0].kind, BounceKind::Conflict);
     }
 
     #[test]
