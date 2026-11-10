@@ -1477,10 +1477,10 @@ mod tests {
     #[test]
     fn village_core_functions_know_no_feature() {
         let body = &village_source();
-        // paint() walks the layers, renderFlow() the counters, placeLabels()
-        // the label lists, explain()/act() the hits, and the hit test only the
-        // rectangles paint() recorded: none of them names a feature.
-        for name in ["paint", "hitAt", "objAt", "explain", "act", "renderFlow", "placeLabels", "placeOverlays"] {
+        // paint() walks the layers, placeLabels() the label lists,
+        // explain()/act() the hits, and the hit test only the rectangles
+        // paint() recorded: none of them names a feature.
+        for name in ["paint", "hitAt", "objAt", "explain", "act", "placeLabels", "placeOverlays"] {
             let f = js_fn(body, name);
             for word in [
                 "house", "crate", "porter", "ship", "harbour", "quay", "stop", "banner", "barge", "feature", "docks", "board", "hall",
@@ -1490,17 +1490,15 @@ mod tests {
             }
         }
         assert!(js_fn(body, "paint").contains("for (const layer of LAYERS) layer.draw(c, scene, t);"));
-        assert!(js_fn(body, "renderFlow").contains("COUNTERS.filter(k => k.plane === plane)"));
-        // Each feature registers itself: its layers, hits, labels and counters.
+        // Each feature registers itself: its layers, hits and labels.
         for (file, registers) in [
             ("layout.js", &["registerLayer("][..]),
-            ("lifecycle.js", &["registerLayer(", "registerHit(", "registerLabels(", "registerCounter("][..]),
-            ("ship.js", &["registerLayer(", "registerHit(", "registerLabels(", "registerCounter("][..]),
-            ("gatehouse.js", &["registerLayer(", "registerHit(", "registerLabels(", "registerCounter("][..]),
+            ("lifecycle.js", &["registerLayer(", "registerHit(", "registerLabels("][..]),
+            ("ship.js", &["registerLayer(", "registerHit(", "registerLabels("][..]),
+            ("gatehouse.js", &["registerLayer(", "registerHit(", "registerLabels("][..]),
             ("features.js", &["registerLayer(", "registerHit(", "registerOverlay("][..]),
-            ("envrow.js", &["registerLayer(", "registerHit(", "registerLabels(", "registerCounter(", "registerOverlay("][..]),
+            ("envrow.js", &["registerLayer(", "registerHit(", "registerLabels(", "registerOverlay("][..]),
             ("voyages.js", &["registerLayer(", "registerHit("][..]),
-            ("worlds.js", &["registerCounter("][..]),
             ("dialogs.js", &["registerOverlay("][..]),
             ("labels.js", &["registerOverlay("][..]),
         ] {
@@ -2155,15 +2153,13 @@ mod tests {
         assert!(trips.contains("[{ pts: [from, [lay.roadX + 3, from[1]], [lay.roadX + 3, ROAD], ...boardFromRoad(lay)], carry: true }], { dented: true }));"));
         assert!(trips.contains("if (oldQuay.has(n) || gated.has(n) || oldGs.spots.has(n)) return;"));
         assert!(body.contains("if (p.dented) {"));
-        // Dialogs, the area label and the counter (between the houses and the quay).
+        // Dialogs and the area label, which also counts today's failures (#405: no counter row).
         assert!(gate.contains("return { title: `${theme.labels.gate} · merge gate`, line: `${gs.queued} queued · ${gs.gating} gating`,"));
-        assert!(gate.contains("return ['Gate', `${count('queued')} queued · ${count('gating')} gating · ${failed} failed today`,"));
         assert!(gate.contains("link('What went wrong', e.failure_url)"));
-        assert!(gate.contains("registerCounter({ order: 45, render(v) {"));
         for kind in ["gatehouse", "train", "redbase", "gatecrate"] {
             assert!(gate.contains(&format!("registerHit({{ kind: '{kind}',")), "no dialog for {kind}");
         }
-        assert!(gate.contains("text: `${theme.labels.gate} · merge gate`, sub: `${gs.queued} queued · ${gs.gating} gating`"));
+        assert!(gate.contains("text: `${theme.labels.gate} · merge gate`, sub: `${gs.queued} queued · ${gs.gating} gating${failed ? ` · ${failed} failed today` : ''}`"));
     }
 
     #[test]
@@ -2195,8 +2191,6 @@ mod tests {
         assert!(body.contains("if (subs.length > SUB_SLOTS.length) { badge(c, lot.x + 12, lot.y + 4, subs.length - SUB_SLOTS.length);"));
         assert!(body.contains("function badge(c, x, y, n)"));
         assert!(!body.contains("subs.length > 2"), "the old two-figure cap is gone");
-        // The flow counter counts every sub-agent, as the figures plus badge do.
-        assert!(body.contains("['Sub-agents', 'running in sessions', [v.manager, ...v.houses].reduce((n, h) => n + (h.subagents || []).length, 0)]"));
         // The manager is drawn busy at the hall while working.
         assert!(body.contains("if (v.manager.status !== 'stopped') {"));
         assert!(body.contains("busy ? workFrame(t) : 'stand', { mayor: true, status: v.manager.status });"));
@@ -2225,6 +2219,19 @@ mod tests {
         assert!(body.contains("justify-content: safe center;"));
     }
 
+    /// #405: no row of counters under the map; the map shows the counts.
+    /// A world keeps what only the row said (its release, the platform's
+    /// build IDs) in the bar's line.
+    #[test]
+    fn village_has_no_counter_row() {
+        let body = &village_source();
+        for gone in ["id=\"flow\"", ".flow {", "renderFlow", "registerCounter", "COUNTERS"] {
+            assert!(!body.contains(gone), "the counter row is back: `{gone}`");
+        }
+        assert!(body.contains("document.getElementById('workflow').textContent = worldWords(w);"));
+        assert!(body.contains("return `· ${w.dev} builds ${w.platform} · release ${short(w.release)} ${release}${builds ? ` · platform builds ${builds}` : ''}`;"));
+    }
+
     /// The village's DOM-free decisions under node (tools/village-tests/):
     /// the Fit scale (#400) and each epic's flag colour (#406).
     #[test]
@@ -2247,7 +2254,7 @@ mod tests {
         assert!(body.contains("const tall = state.screensaver || !matchMedia(NARROW).matches;"));
         assert!(body.contains("if (state.screensaver) return f;"));
         // No bar, picker or buttons; no cursor; the labels stay on.
-        assert!(body.contains("html.screensaver .bar, html.screensaver .fstrip, html.screensaver .flow"));
+        assert!(body.contains("html.screensaver .bar, html.screensaver .fstrip, html.screensaver .legend"));
         assert!(body.contains("cursor: none;"));
         assert!(body.contains("document.getElementById('labels-on').checked = true;"));
         // The page says after each poll whether the server answered; the strip and the "can't reach" read it.

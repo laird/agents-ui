@@ -1,5 +1,5 @@
 /* The village page. Each module registers what it draws, what its objects
- * are, its labels and its counters (registry.js); this only loads them, in
+ * are and its labels (registry.js); this only loads them, in
  * order, and starts the page. */
 import './themes/medieval.js';
 import './themes/modern.js';

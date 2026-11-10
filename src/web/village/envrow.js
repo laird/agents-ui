@@ -14,7 +14,7 @@ import { puffs } from './sprites/houses.js';
 import { badge, bubble } from './scenery.js';
 import { MODERN, M } from './themes/modern.js';
 import { FUTURE } from './themes/future.js';
-import { registerCounter, registerHit, registerLabels, registerLayer, registerOverlay, tap } from './registry.js';
+import { registerHit, registerLabels, registerLayer, registerOverlay, tap } from './registry.js';
 import { cv, shownScenes } from './layout.js';
 import { issueItems, isSha, link, repoUrl } from './dialogs.js';
 import { sourceWords } from './ship.js';
@@ -162,9 +162,6 @@ registerLabels(sc => (sc.L.envs || []).map(e => {
   const ver = versionOf(e.s), when = agoWords(e.s.deployed_at);
   return { x: e.x + e.w / 2, y: sc.L.canalY + 15, anchor: 'top', text: e.s.name, sub: ver ? `${ver}${when ? ' · ' + when : ''}` : 'unknown', width: e.w - 8 };
 }), 25);
-
-registerCounter({ order: 65, render: v => (v.plane === 'runtime' ? [] : v.pipeline.stops.filter(s => s.kind !== 'gate')
-  .map(s => [s.name, 'runs', versionOf(s) || '?'])) });
 
 /* ---------- The mini-map ----------
  * A strip over the map with a box per village, coloured by health, and a dot

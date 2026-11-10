@@ -47,10 +47,6 @@
   .viewport { overflow: auto; display: flex; justify-content: safe center; background: var(--frame-shadow); border-radius: 2px; min-height: 120px; align-items: safe center; }
   .stage > .viewport { flex: 1; }
   canvas { image-rendering: pixelated; image-rendering: crisp-edges; display: block; cursor: pointer; }
-  .flow { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-  .step { flex: 1 1 90px; padding: 6px 8px; background: rgba(6,8,20,.45); border: 2px solid var(--rule); border-radius: 4px; }
-  .step b { display: block; font: 700 18px/1.1 var(--mono); font-variant-numeric: tabular-nums; }
-  .step span { font: 12px var(--mono); color: var(--ink-dim); }
   .empty { padding: 48px 16px; text-align: center; color: var(--ink-dim); font: 14px var(--mono); }
   .toast { position: fixed; left: 50%; top: 16px; transform: translateX(-50%); max-width: calc(100vw - 32px); padding: 8px 14px; z-index: 11; font: 700 13px/1.3 var(--mono); color: var(--gold); }
   .toast[hidden] { display: none; }
@@ -72,7 +68,7 @@
   .dialog button { position: absolute; top: 8px; right: 10px; background: none; border: 0; color: var(--ink); font: 700 16px var(--mono); cursor: pointer; }
   :focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
   /* Features: a label under each banner (a real button, so Tab reaches it),
-   * and the strip above the counters for the feature being followed. */
+   * and the strip under the map for the feature being followed. */
   .viewport { position: relative; }
   .fbanners { position: absolute; inset: 0; pointer-events: none; }
   .fb { position: absolute; transform: translateX(-50%); pointer-events: auto; max-width: 118px; font: 700 11px/1.25 var(--mono); color: var(--ink); background: rgba(6,8,20,.82); border: 2px solid var(--fc); border-radius: 4px; padding: 2px 6px; cursor: pointer; text-align: center; }
@@ -148,7 +144,7 @@
   /* The screensaver (screensaver.js): the map fitted to the whole display, a
    * status strip readable across the room, no controls, no cursor. */
   html.screensaver body { padding: 0; overflow: hidden; cursor: none; transition: translate 20s linear, filter 3s; }
-  html.screensaver .bar, html.screensaver .fstrip, html.screensaver .flow, html.screensaver .legend, html.screensaver .minimap,
+  html.screensaver .bar, html.screensaver .fstrip, html.screensaver .legend, html.screensaver .minimap,
   html.screensaver .dialog, html.screensaver .toast, html.screensaver .hint, html.screensaver .hitkeys { display: none !important; }
   html.screensaver .stage { flex: 1; min-height: 0; max-width: none; width: 100%; margin: 0; padding: 12px; display: flex; border: 0; border-radius: 0; box-shadow: none; background: var(--night); }
   html.screensaver .viewport { flex: 1; min-height: 0; overflow: hidden; background: var(--night); }
