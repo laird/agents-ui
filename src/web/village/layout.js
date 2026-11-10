@@ -3,7 +3,7 @@
  * where each village shown sits on the canvas (alone, or both halves of a
  * world). */
 import { state } from './state.js';
-import { FEATURE_COLS, hash, shadow } from './palette.js';
+import { featureColours, hash, shadow } from './palette.js';
 import { THEMES } from './themes/registry.js';
 import { registerLayer } from './registry.js';
 
@@ -51,7 +51,8 @@ export function layout(v) {
   const forestX = Math.max(cx0 + vw + 6, hallX + 64);
   // Feature banners stand in a strip cleared out of the forest, east of the
   // houses; the map widens if they need the room. No features, no strip.
-  const banners = (v.features || []).map((f, k) => ({ f, x: forestX + 12 + k * 30, y: 14, col: FEATURE_COLS[k % FEATURE_COLS.length] }));
+  const fcols = featureColours(v.features);
+  const banners = (v.features || []).map((f, k) => ({ f, x: forestX + 12 + k * 30, y: 14, col: fcols.get(f.number) }));
   const devW = Math.max(cx0 + vw + 40, roadX + 70, castleX + 46, gate ? gate.x0 + gate.w + 4 : 0, banners.length ? forestX + 12 + banners.length * 30 : 0);
   // The environment row: a village per environment east of the dev village,
   // a stretch of river before each, production right-most (docs/environment-row.md).

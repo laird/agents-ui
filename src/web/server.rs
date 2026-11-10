@@ -2225,12 +2225,16 @@ mod tests {
         assert!(body.contains("justify-content: safe center;"));
     }
 
+    /// The village's DOM-free decisions under node (tools/village-tests/):
+    /// the Fit scale (#400) and each epic's flag colour (#406).
     #[test]
-    fn village_fit_scale_tests_pass() {
+    fn village_node_tests_pass() {
         let root = env!("CARGO_MANIFEST_DIR");
-        match std::process::Command::new("node").args(["--test", &format!("{root}/tools/village-tests/fitscale.test.mjs")]).output() {
-            Ok(out) => assert!(out.status.success(), "fitscale.test.mjs failed:\n{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)),
-            Err(e) => eprintln!("node is not installed ({e}); skipping fitscale.test.mjs"),
+        let dir = format!("{root}/tools/village-tests");
+        let files = ["fitscale.test.mjs", "featurecolours.test.mjs"].map(|f| format!("{dir}/{f}"));
+        match std::process::Command::new("node").arg("--test").args(&files).output() {
+            Ok(out) => assert!(out.status.success(), "tools/village-tests failed:\n{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)),
+            Err(e) => eprintln!("node is not installed ({e}); skipping tools/village-tests"),
         }
     }
 
