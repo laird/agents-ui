@@ -672,6 +672,9 @@ impl ClaudeAdapter {
     }
 
     async fn ensure_swarm_agents_running(&self, swarm: &Swarm) -> Result<()> {
+        if !swarm.in_tmux() {
+            return Ok(()); // a herdr swarm runs its own agents
+        }
         if swarm.stopped || crate::config::persistence::is_swarm_stopped(&swarm.project_name) {
             tracing::info!(
                 "Skipping ensure_swarm_agents_running for stopped swarm {}",
@@ -1018,6 +1021,7 @@ impl ClaudeAdapter {
             resurrection_attempts: 0,
             completed_issue_count: 0,
             health: crate::model::swarm::WorkerHealth::default(),
+            mux: Default::default(),
         };
 
         let mut workers = Vec::new();
@@ -1068,6 +1072,7 @@ impl ClaudeAdapter {
             resurrection_attempts: 0,
             completed_issue_count: 0,
                     health: crate::model::swarm::WorkerHealth::default(),
+                    mux: Default::default(),
                 });
                 worker_num += 1;
             }
@@ -1405,20 +1410,33 @@ impl AgentRuntime for ClaudeAdapter {
         Ok((swarm, notes))
     }
 
+    /// The swarms `/api/swarms` recognizes (`web::source::discover` over the
+    /// tmux and herdr sources, which share `model::recognize`), as the
+    /// terminal view runs them: a tmux swarm is built from its session as
+    /// before (its agents' targets are what healing and passthrough use), and
+    /// a herdr swarm is taken as the recognizer saw it, its panes read and
+    /// typed into through herdr.
     async fn discover(&self, _agents_dir: &Path) -> Result<Vec<Swarm>> {
-        let sessions = session::discover_agent_sessions(&self.transport).await?;
+        let sources: Vec<Box<dyn crate::web::source::SwarmSource>> =
+            vec![Box::new(crate::web::discovery::TmuxSwarms::default()), Box::new(crate::web::herdr::HerdrSwarms)];
+        let snapshots = crate::web::source::discover(&sources, &self.transport).await;
         let mut swarms = Vec::new();
 
-        for session_name in sessions {
-            let Some((agent_type, project_name)) = parse_agent_session_name(&session_name) else {
-                continue;
+        for found in recognized(&snapshots, &self.runtime) {
+            let (session_name, repo_path, agent_type, extra) = match found {
+                Recognized::Herdr(swarm) => {
+                    swarms.push(swarm);
+                    continue;
+                }
+                Recognized::Tmux { session, repo, agent_type, extra } => (session, repo, agent_type, extra),
             };
-
-            if agent_type != self.runtime {
-                continue;
-            }
-
-            let repo_path = find_repo_path(&self.transport, &session_name, &project_name).await;
+            let repo_path = match repo_path {
+                Some(p) => Some(p),
+                None => {
+                    let project = parse_agent_session_name(&session_name).map(|(_, p)| p).unwrap_or_default();
+                    find_repo_path(&self.transport, &session_name, &project).await
+                }
+            };
 
             if let Some(repo_path) = repo_path {
                 // Ensure gh is authenticated as the correct user for this repo
@@ -1433,16 +1451,18 @@ impl AgentRuntime for ClaudeAdapter {
                     .build_swarm_from_session(&session_name, repo_path, agent_type)
                     .await
                 {
-                    Ok(swarm) => {
+                    Ok(mut swarm) => {
                         if let Err(e) = self.ensure_swarm_agents_running(&swarm).await {
                             tracing::warn!("Failed to start agents for {session_name}: {e}");
                         }
+                        // Workers of the same repo found under herdr join it.
+                        swarm.workers.extend(extra);
                         swarms.push(swarm)
                     }
                     Err(e) => tracing::warn!("Failed to build swarm from {session_name}: {e}"),
                 }
             } else {
-                tracing::warn!("Could not determine repo path for project {project_name}");
+                tracing::warn!("Could not determine repo path for session {session_name}");
             }
         }
 
@@ -1577,6 +1597,7 @@ impl AgentRuntime for ClaudeAdapter {
             resurrection_attempts: 0,
             completed_issue_count: 0,
             health: crate::model::swarm::WorkerHealth::default(),
+            mux: Default::default(),
         })
     }
 
@@ -1669,6 +1690,9 @@ impl AgentRuntime for ClaudeAdapter {
     }
 
     async fn heal_workers(&self, swarm: &mut Swarm) -> Result<Vec<String>> {
+        if !swarm.in_tmux() {
+            return Ok(vec![]); // a herdr swarm heals itself; never rebuild it in tmux
+        }
         if swarm.stopped || crate::config::persistence::is_swarm_stopped(&swarm.project_name) {
             tracing::info!(
                 "Skipping heal_workers for stopped swarm {}",
@@ -2026,6 +2050,9 @@ impl AgentRuntime for ClaudeAdapter {
     }
 
     async fn revive_agents(&self, swarm: &Swarm) -> Result<()> {
+        if !swarm.in_tmux() {
+            return Ok(());
+        }
         if swarm.stopped || crate::config::persistence::is_swarm_stopped(&swarm.project_name) {
             return Ok(());
         }
@@ -2367,6 +2394,81 @@ fn extract_issue_number_from_branch(branch: &str) -> Option<u32> {
     }
 
     None
+}
+
+/// A swarm the shared recognizer found, as the terminal view takes it.
+#[derive(Debug, Clone)]
+pub(crate) enum Recognized {
+    /// A tmux swarm: built from its session (`build_swarm_from_session`), with
+    /// any workers of the same repo found under herdr (`extra`) added.
+    Tmux { session: String, repo: Option<PathBuf>, agent_type: AgentType, extra: Vec<AgentInfo> },
+    /// A swarm under herdr, as the recognizer saw it.
+    Herdr(Swarm),
+}
+
+/// The terminal view's swarms from the ones `/api/swarms` recognizes, in the
+/// same order, keeping those of `runtime`. Which agents make a swarm and who
+/// its manager is are the recognizer's (`model::recognize`), never re-decided
+/// here: a herdr swarm is taken whole, manager-only ones included.
+pub(crate) fn recognized(snapshots: &[crate::web::SwarmSnapshot], runtime: &AgentType) -> Vec<Recognized> {
+    use crate::web::Mux;
+    let mut out = Vec::new();
+    for snap in snapshots {
+        if snap.stopped {
+            continue; // a saved swarm, not a running one
+        }
+        let repo = (!snap.repo_path.is_empty()).then(|| PathBuf::from(&snap.repo_path));
+        if let Some((agent_type, _)) = parse_agent_session_name(&snap.tmux_session) {
+            if &agent_type != runtime {
+                continue;
+            }
+            let extra = snap.workers.iter().filter(|w| w.mux == Mux::Herdr).map(agent_info).collect();
+            out.push(Recognized::Tmux { session: snap.tmux_session.clone(), repo, agent_type, extra });
+            continue;
+        }
+        // A herdr swarm: its agent type as herdr reports it; an unknown one runs as `runtime`.
+        let agent_type = snap.agent_type.parse::<AgentType>().unwrap_or_else(|_| runtime.clone());
+        if &agent_type != runtime {
+            continue;
+        }
+        let mut manager = agent_info(&snap.manager);
+        manager.mux = Mux::Herdr; // a missing manager still marks the swarm as herdr's
+        out.push(Recognized::Herdr(Swarm {
+            repo_path: repo.unwrap_or_default(),
+            project_name: snap.project_name.clone(),
+            agent_type,
+            workflow: None,
+            tmux_session: snap.tmux_session.clone(),
+            manager,
+            workers: snap.workers.iter().map(agent_info).collect(),
+            issue_cache: Default::default(),
+            stopped: false,
+        }));
+    }
+    out
+}
+
+/// An agent of a recognized swarm, as the terminal view tracks it. Its state
+/// comes from the view's own watchers and status files from here on.
+fn agent_info(a: &crate::web::AgentSnapshot) -> AgentInfo {
+    AgentInfo {
+        id: a.id.clone(),
+        role: a.role.clone(),
+        worktree_path: PathBuf::from(&a.worktree_path),
+        branch: a.branch.clone(),
+        tmux_target: a.tmux_target.clone(),
+        status: AgentStatus::default(),
+        is_manager: a.is_manager,
+        pane_content: String::new(),
+        dispatched_issue: None,
+        current_issue: a.current_issue,
+        current_issue_title: a.current_issue_title.clone(),
+        waiting_for_input: a.waiting_for_input,
+        resurrection_attempts: 0,
+        completed_issue_count: 0,
+        health: crate::model::swarm::WorkerHealth::default(),
+        mux: a.mux,
+    }
 }
 
 fn parse_agent_session_name(session_name: &str) -> Option<(AgentType, String)> {
@@ -3894,6 +3996,7 @@ exit 0
                 resurrection_attempts: 0,
                 completed_issue_count: 0,
                 health: crate::model::swarm::WorkerHealth::default(),
+                mux: Default::default(),
             },
             workers: vec![
                 AgentInfo {
@@ -3912,6 +4015,7 @@ exit 0
                     resurrection_attempts: 0,
                     completed_issue_count: 0,
                     health: crate::model::swarm::WorkerHealth::default(),
+                    mux: Default::default(),
                 },
                 AgentInfo {
                     id: "demo/worker-2".to_string(),
@@ -3929,6 +4033,7 @@ exit 0
                     resurrection_attempts: 0,
                     completed_issue_count: 0,
                     health: crate::model::swarm::WorkerHealth::default(),
+                    mux: Default::default(),
                 },
             ],
             issue_cache: IssueCache::default(),
@@ -4153,4 +4258,102 @@ pub(crate) fn is_feedback_prompt(content: &str) -> bool {
     let lower = content.to_lowercase();
     lower.contains("how is claude doing this session")
         || (lower.contains("1: bad") && lower.contains("0: dismiss"))
+}
+
+/// The terminal view's swarm list comes from the shared recognizer (#399):
+/// the same herdr fixtures the web's tests use, through
+/// `web::herdr::swarms_from_agents`, give the same swarms here.
+#[cfg(test)]
+mod recognized_tests {
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    use super::{Recognized, recognized};
+    use crate::model::recognize::{RepoFacts, Worktree};
+    use crate::model::swarm::{AgentType, Mux};
+    use crate::web::SwarmSnapshot;
+    use crate::web::herdr::{Manifests, parse_agents, swarms_from_agents};
+
+    fn repo(root: &str, worktrees: &[&str]) -> RepoFacts {
+        RepoFacts {
+            common_dir: PathBuf::from(format!("{root}/.git")),
+            worktrees: std::iter::once(root).chain(worktrees.iter().copied()).map(|p| Worktree { path: p.into(), branch: None }).collect(),
+        }
+    }
+
+    const LIST: &str = r#"{"result":{"agents":[
+      {"pane_id":"w1:p1","name":"manager-shop","agent_status":"working","cwd":"/src/shop","agent":"claude"},
+      {"pane_id":"w2:p1","name":"wt1-shop","agent_status":"blocked","cwd":"/src/shop-wt-1"},
+      {"pane_id":"w3:p1","name":"wt2-shop","agent_status":"working","cwd":"/src/shop-wt-2/"},
+      {"pane_id":"w4:p1","agent_status":"idle","cwd":"/home/me/notes"}
+    ]}}"#;
+
+    fn shop() -> Vec<SwarmSnapshot> {
+        swarms_from_agents(&parse_agents(LIST), &[repo("/src/shop", &["/src/shop-wt-1", "/src/shop-wt-2"])], &Manifests::new(), &HashMap::new())
+    }
+
+    #[test]
+    fn a_herdr_swarm_is_the_recognizers_swarm() {
+        let snaps = shop();
+        let found = recognized(&snaps, &AgentType::Claude);
+        assert_eq!(found.len(), 1, "the stray agent in ~/notes is no swarm here either");
+        let Recognized::Herdr(s) = &found[0] else { panic!("a herdr swarm") };
+        assert_eq!(s.project_name, snaps[0].project_name);
+        assert_eq!(s.repo_path, PathBuf::from("/src/shop"));
+        assert_eq!(s.manager.tmux_target, snaps[0].manager.tmux_target);
+        assert_eq!(s.manager.tmux_target, "w1:p1");
+        let workers: Vec<_> = s.workers.iter().map(|w| (w.id.as_str(), w.role.as_str(), w.tmux_target.as_str())).collect();
+        let theirs: Vec<_> = snaps[0].workers.iter().map(|w| (w.id.as_str(), w.role.as_str(), w.tmux_target.as_str())).collect();
+        assert_eq!(workers, theirs);
+        assert_eq!(workers[0], ("shop/worker-1", "worker-1", "w2:p1"));
+        // Read and typed into through herdr, and never healed or revived in tmux.
+        assert!(std::iter::once(&s.manager).chain(&s.workers).all(|a| a.mux == Mux::Herdr));
+        assert!(!s.in_tmux());
+        assert_eq!(s.workers[0].worktree_path, PathBuf::from("/src/shop-wt-1"));
+    }
+
+    #[test]
+    fn a_manager_only_herdr_swarm_is_listed() {
+        let json = r#"{"result":{"agents":[{"pane_id":"w1:p1","name":"manager-shop","agent_status":"idle","cwd":"/src/shop"}]}}"#;
+        let snaps = swarms_from_agents(&parse_agents(json), &[repo("/src/shop", &[])], &Manifests::new(), &HashMap::new());
+        let found = recognized(&snaps, &AgentType::Claude);
+        let Recognized::Herdr(s) = &found[0] else { panic!("a herdr swarm") };
+        assert_eq!(s.manager.tmux_target, "w1:p1");
+        assert!(s.workers.is_empty());
+    }
+
+    #[test]
+    fn workers_without_a_manager_keep_the_swarm_herdrs() {
+        let json = r#"{"result":{"agents":[{"pane_id":"w2:p1","agent_status":"idle","cwd":"/src/x-wt-1"}]}}"#;
+        let snaps = swarms_from_agents(&parse_agents(json), &[repo("/src/x", &["/src/x-wt-1"])], &Manifests::new(), &HashMap::new());
+        let Recognized::Herdr(s) = &recognized(&snaps, &AgentType::Claude)[0] else { panic!("a herdr swarm") };
+        assert!(s.manager.tmux_target.is_empty());
+        assert!(!s.in_tmux(), "no tmux manager pane to heal or dispatch to");
+    }
+
+    #[test]
+    fn a_tmux_swarm_is_built_from_its_session_with_herdr_workers_added() {
+        let mut snap = shop().remove(0);
+        snap.tmux_session = "claude-shop".into();
+        snap.manager.mux = Mux::Tmux;
+        snap.workers[0].mux = Mux::Tmux;
+        let found = recognized(&[snap.clone()], &AgentType::Claude);
+        let Recognized::Tmux { session, repo, agent_type, extra } = &found[0] else { panic!("a tmux swarm") };
+        assert_eq!(session, "claude-shop");
+        assert_eq!(repo.as_deref(), Some(std::path::Path::new("/src/shop")));
+        assert_eq!(*agent_type, AgentType::Claude);
+        assert_eq!(extra.iter().map(|a| a.tmux_target.as_str()).collect::<Vec<_>>(), ["w3:p1"], "only the herdr worker is added");
+        // Another runtime's session, and a saved (stopped) swarm, are not this view's.
+        assert!(recognized(&[snap.clone()], &AgentType::Codex).is_empty());
+        snap.stopped = true;
+        assert!(recognized(&[snap], &AgentType::Claude).is_empty());
+    }
+
+    #[test]
+    fn a_herdr_swarm_of_another_agent_is_left_to_that_runtime() {
+        let mut snaps = shop();
+        snaps[0].agent_type = "codex".into();
+        assert!(recognized(&snaps, &AgentType::Claude).is_empty());
+        assert_eq!(recognized(&snaps, &AgentType::Codex).len(), 1);
+    }
 }

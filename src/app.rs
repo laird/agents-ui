@@ -1768,6 +1768,7 @@ impl App {
             resurrection_attempts: 0,
             completed_issue_count: 0,
                 health: crate::model::swarm::WorkerHealth::default(),
+                mux: Default::default(),
             },
             workers: Vec::new(),
             issue_cache: crate::model::issue::IssueCache::default(),
@@ -2284,6 +2285,13 @@ impl App {
         // Handle stop-all confirmation from Repo View
         if let Some(idx) = self.confirm_stop {
             match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') if self.swarms.get(idx).is_some_and(|s| !s.in_tmux()) => {
+                    // A herdr swarm isn't this view's to stop: there's no tmux
+                    // session to kill, and saving it would resume it in tmux.
+                    self.confirm_stop = None;
+                    self.status_message = Some(format!("{} runs under herdr; stop it in herdr", self.swarms[idx].project_name));
+                    return Ok(());
+                }
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
                     if idx < self.swarms.len() {
                         let swarm = self.swarms[idx].clone();
@@ -2421,7 +2429,7 @@ impl App {
                             let cmd = ProjectManagementClient::from_env()
                                 .manager_create_issue_prompt(&labels, &title);
                             tracing::info!("Sending '{cmd}' to manager at {target}");
-                            proxy::send_keys(&self.transport, &target, &cmd).await?;
+                            self.send_line_to(&target, &cmd).await?;
                             self.status_message = Some(format!("Created issue: {title}"));
                         }
                     }
@@ -2549,7 +2557,7 @@ impl App {
                 if key.modifiers.contains(KeyModifiers::ALT) && key.code == KeyCode::Char('d') {
                     let cmd = "deploy";
                     tracing::info!("Sending '{cmd}' to manager at {target}");
-                    proxy::send_keys(&self.transport, &target, cmd).await?;
+                    self.send_line_to(&target, cmd).await?;
                     self.swarm_view.scroll_manager_to_bottom();
                     self.set_status("Sent deploy to manager".to_string());
                     return Ok(());
@@ -2576,7 +2584,7 @@ impl App {
                 }
                 let tmux_key = key_event_to_tmux(key);
                 if let Some(tmux_key) = tmux_key {
-                    send_raw_key(&self.transport, &target, &tmux_key).await?;
+                    self.send_key_to(&target, &tmux_key).await?;
                     self.swarm_view.scroll_manager_to_bottom();
                 }
             }
@@ -3000,7 +3008,7 @@ impl App {
                                 self.set_status("Manager is busy — wait until idle".to_string());
                             } else if let Some(cmd) = self.review_blocked_cmd(&agent_type) {
                                 tracing::info!("Sending '{cmd}' to manager at {target}");
-                                proxy::send_keys(&self.transport, &target, &cmd).await?;
+                                self.send_line_to(&target, &cmd).await?;
                                 self.set_status(format!("Sent: {cmd}"));
                             } else {
                                 self.set_status(format!(
@@ -3334,7 +3342,7 @@ impl App {
         if let Some(num) = issue_num {
             let full_cmd = format!("{cmd} {num}");
             tracing::info!("Sending '{full_cmd}' to manager at {target}");
-            proxy::send_keys(&self.transport, &target, &full_cmd).await?;
+            self.send_line_to(&target, &full_cmd).await?;
             self.set_status(format!("Sent: {full_cmd}"));
         }
         Ok(())
@@ -3882,7 +3890,7 @@ impl App {
 
         // Esc is forwarded to the pane (use Alt+Left to go back)
         if key.code == KeyCode::Esc {
-            send_raw_key(&self.transport, &target, "Escape").await?;
+            self.send_key_to(&target, "Escape").await?;
             return Ok(());
         }
 
@@ -4082,7 +4090,7 @@ impl App {
                     if !self.run_report_log_errors_command(&input).await?
                         && !self.run_direct_gh_command(swarm_idx, &input).await?
                     {
-                        proxy::send_keys(&self.transport, &target, &input).await?;
+                        self.send_line_to(&target, &input).await?;
                         self.agent_view.scroll_to_bottom();
                     }
                 }
@@ -4117,7 +4125,7 @@ impl App {
         // Everything else is forwarded directly to the tmux pane.
         let tmux_key = key_event_to_tmux(key);
         if let Some(tmux_key) = tmux_key {
-            send_raw_key(&self.transport, &target, &tmux_key).await?;
+            self.send_key_to(&target, &tmux_key).await?;
             self.agent_view.scroll_to_bottom();
         }
 
@@ -4797,25 +4805,64 @@ impl App {
         let tx = self.events.tx();
 
         for swarm in &self.swarms {
-            // Agent IDs are globally unique (e.g., "nextgen-CDD/manager")
-            let handle = proxy::spawn_pane_watcher(
-                self.transport.clone(),
-                swarm.manager.tmux_target.clone(),
-                swarm.manager.id.clone(),
-                tx.clone(),
-                Duration::from_millis(500),
-            );
-            self.pane_watchers.push(handle);
-
-            for worker in &swarm.workers {
-                let handle = proxy::spawn_pane_watcher(
+            // Agent IDs are globally unique (e.g., "nextgen-CDD/manager").
+            // Each pane is watched through its own multiplexer (tmux or herdr).
+            for agent in std::iter::once(&swarm.manager).chain(swarm.workers.iter()) {
+                if agent.tmux_target.is_empty() {
+                    continue; // a herdr swarm with no manager pane
+                }
+                let pane = crate::web::pane::Pane { target: agent.tmux_target.clone(), mux: agent.mux };
+                let handle = crate::web::pane::spawn_watcher(
                     self.transport.clone(),
-                    worker.tmux_target.clone(),
-                    worker.id.clone(),
+                    pane,
+                    agent.id.clone(),
                     tx.clone(),
                     Duration::from_millis(500),
                 );
                 self.pane_watchers.push(handle);
+            }
+        }
+    }
+
+    /// The multiplexer of the agent whose pane is `target` (tmux when none is).
+    fn mux_of(&self, target: &str) -> crate::model::swarm::Mux {
+        self.swarms
+            .iter()
+            .flat_map(|s| std::iter::once(&s.manager).chain(s.workers.iter()))
+            .find(|a| a.tmux_target == target)
+            .map(|a| a.mux)
+            .unwrap_or_default()
+    }
+
+    /// Type a line and press Enter in an agent's pane, through its own
+    /// multiplexer. A herdr pane that doesn't take it is logged, not fatal.
+    async fn send_line_to(&self, target: &str, line: &str) -> Result<()> {
+        match self.mux_of(target) {
+            crate::model::swarm::Mux::Tmux => proxy::send_keys(&self.transport, target, line).await,
+            mux @ crate::model::swarm::Mux::Herdr => {
+                let pane = crate::web::pane::Pane { target: target.to_string(), mux };
+                if let Err(e) = crate::web::pane::send_line(&self.transport, &pane, line).await {
+                    tracing::warn!("herdr line to {target} failed: {e}");
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// Press a key (named as tmux names it) in an agent's pane, through the
+    /// agent's own multiplexer: tmux `send-keys`, or `herdr pane` for a herdr pane.
+    async fn send_key_to(&self, target: &str, tmux_key: &str) -> Result<()> {
+        let mux = self.mux_of(target);
+        match mux {
+            crate::model::swarm::Mux::Tmux => send_raw_key(&self.transport, target, tmux_key).await,
+            crate::model::swarm::Mux::Herdr => {
+                // As with tmux, a key that doesn't arrive (the pane closed) is
+                // logged, not fatal: the view stays up.
+                let pane = crate::web::pane::Pane { target: target.to_string(), mux };
+                if let Err(e) = crate::web::pane::send_key(&self.transport, &pane, tmux_key).await {
+                    tracing::warn!("herdr key {tmux_key} to {target} failed: {e}");
+                }
+                Ok(())
             }
         }
     }
@@ -4952,7 +4999,7 @@ impl App {
     /// Check for idle workers and dispatch the next available issue to them.
     async fn dispatch_idle_workers(&mut self) {
         for si in 0..self.swarms.len() {
-            if self.swarms[si].stopped {
+            if self.swarms[si].stopped || !self.swarms[si].in_tmux() {
                 continue;
             }
             let project_name = self.swarms[si].project_name.clone();
@@ -5071,7 +5118,7 @@ impl App {
         let mut all_repairs = Vec::new();
 
         for i in 0..self.swarms.len() {
-            if self.swarms[i].stopped {
+            if self.swarms[i].stopped || !self.swarms[i].in_tmux() {
                 continue;
             }
             if self
@@ -5164,7 +5211,7 @@ impl App {
         // Identify workers that look dropped before attempting revival.
         let mut dropped: Vec<(usize, usize)> = Vec::new(); // (swarm_idx, worker_idx)
         for (si, swarm) in self.swarms.iter().enumerate() {
-            if swarm.stopped || swarm.manager.tmux_target.is_empty() || intentionally_stopped.contains(&swarm.project_name) {
+            if swarm.stopped || !swarm.in_tmux() || swarm.manager.tmux_target.is_empty() || intentionally_stopped.contains(&swarm.project_name) {
                 continue;
             }
             for (wi, worker) in swarm.workers.iter().enumerate() {
@@ -5185,6 +5232,7 @@ impl App {
             .iter()
             .filter(|s| {
                 !s.stopped
+                    && s.in_tmux()
                     && !s.manager.tmux_target.is_empty()
                     && !intentionally_stopped.contains(&s.project_name)
             })
@@ -5203,7 +5251,7 @@ impl App {
 
         for si in 0..self.swarms.len() {
             let swarm = &self.swarms[si];
-            if swarm.stopped {
+            if swarm.stopped || !swarm.in_tmux() {
                 continue;
             }
             if matches!(swarm.agent_type, AgentType::Codex) {
@@ -5381,7 +5429,7 @@ impl App {
             }
         }
 
-        for swarm in &self.swarms {
+        for swarm in self.swarms.iter().filter(|s| s.in_tmux()) {
             // Check if any worker is idle
             let has_idle_worker = swarm
                 .workers

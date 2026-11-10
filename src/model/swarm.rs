@@ -281,6 +281,20 @@ pub struct AgentInfo {
     pub completed_issue_count: u32,
     /// Health tracking for auto-recovery
     pub health: WorkerHealth,
+    /// The multiplexer the agent's pane is in, which decides how it is read
+    /// and typed into: tmux (`tmux_target` is a tmux target) or herdr
+    /// (`tmux_target` is a herdr pane id, read and typed into via
+    /// `web::pane`).
+    pub mux: Mux,
+}
+
+/// Where an agent's terminal lives.
+#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Mux {
+    #[default]
+    Tmux,
+    Herdr,
 }
 
 /// Detect if pane content indicates the session is waiting for user input.
@@ -449,6 +463,16 @@ pub struct Swarm {
     pub stopped: bool,
 }
 
+impl Swarm {
+    /// Whether the terminal view runs this swarm in tmux, and so may start,
+    /// heal, revive and dispatch to its agents. A swarm it found under herdr
+    /// is watched and typed into, but its agents are left to the swarm's own
+    /// loops.
+    pub fn in_tmux(&self) -> bool {
+        self.manager.mux == Mux::Tmux
+    }
+}
+
 #[allow(dead_code)] // Utility methods for future UI enhancements
 impl Swarm {
     /// Count of busy workers
@@ -573,6 +597,7 @@ mod tests {
             resurrection_attempts: 0,
             completed_issue_count: 0,
             health: WorkerHealth::default(),
+            mux: Default::default(),
         }
     }
 
@@ -607,6 +632,7 @@ mod tests {
             resurrection_attempts: 0,
             completed_issue_count: 0,
             health: WorkerHealth::default(),
+            mux: Default::default(),
         };
         let mut cache = IssueCache::default();
         cache.issues = issues;
@@ -995,6 +1021,7 @@ mod tests {
             resurrection_attempts: 0,
             completed_issue_count: 0,
             health: WorkerHealth::default(),
+            mux: Default::default(),
         }
     }
 

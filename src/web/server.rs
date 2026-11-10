@@ -768,6 +768,7 @@ async fn api_stop_swarm_handler(
         resurrection_attempts: a.resurrection_attempts,
         completed_issue_count: a.completed_issue_count,
         health: WorkerHealth::default(),
+        mux: Default::default(),
     };
 
     let swarm = Swarm {
@@ -889,6 +890,7 @@ async fn api_add_worker_handler(
         resurrection_attempts: 0,
         completed_issue_count: 0,
         health: WorkerHealth::default(),
+        mux: Default::default(),
     };
     let workers: Vec<AgentInfo> = snapshot
         .workers
@@ -909,6 +911,7 @@ async fn api_add_worker_handler(
             resurrection_attempts: 0,
             completed_issue_count: 0,
             health: WorkerHealth::default(),
+            mux: Default::default(),
         })
         .collect();
 
@@ -1001,6 +1004,7 @@ async fn api_switch_agent_handler(
         resurrection_attempts: 0,
         completed_issue_count: 0,
         health: WorkerHealth::default(),
+        mux: Default::default(),
     };
     let workers: Vec<AgentInfo> = snapshot
         .workers
@@ -1021,6 +1025,7 @@ async fn api_switch_agent_handler(
             resurrection_attempts: 0,
             completed_issue_count: 0,
             health: WorkerHealth::default(),
+            mux: Default::default(),
         })
         .collect();
 

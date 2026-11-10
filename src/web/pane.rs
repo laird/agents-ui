@@ -63,6 +63,50 @@ pub async fn send_line(transport: &ServerTransport, pane: &Pane, text: &str) -> 
     }
 }
 
+/// Watch an agent's pane for the terminal view: each change of its content
+/// is sent as `PaneOutput`. tmux panes use tmux's own watcher; a herdr pane
+/// is read through `herdr pane read`, and after `HERDR_GONE_AFTER` failed
+/// reads in a row it is reported `PaneDead` and the watch ends.
+pub fn spawn_watcher(
+    transport: ServerTransport,
+    pane: Pane,
+    agent_id: String,
+    tx: tokio::sync::mpsc::UnboundedSender<crate::event::Event>,
+    poll_interval: std::time::Duration,
+) -> tokio::task::JoinHandle<()> {
+    if pane.mux == Mux::Tmux {
+        return proxy::spawn_pane_watcher(transport, pane.target, agent_id, tx, poll_interval);
+    }
+    tokio::spawn(async move {
+        let mut last = String::new();
+        let mut interval = tokio::time::interval(poll_interval);
+        let mut failures: u32 = 0;
+        loop {
+            interval.tick().await;
+            match capture(&transport, &pane, 500).await {
+                Ok(c) => {
+                    failures = 0;
+                    if c.content != last {
+                        last = c.content.clone();
+                        if tx.send(crate::event::Event::PaneOutput { agent_id: agent_id.clone(), content: c.content }).is_err() {
+                            break;
+                        }
+                    }
+                }
+                Err(e) => {
+                    failures += 1;
+                    tracing::warn!("herdr pane {} read failed ({failures}): {e}", pane.target);
+                    if failures >= HERDR_GONE_AFTER {
+                        let _ = tx.send(crate::event::Event::PaneDead { agent_id: agent_id.clone() });
+                        break;
+                    }
+                }
+            }
+        }
+    })
+}
+const HERDR_GONE_AFTER: u32 = 10;
+
 /// What a tmux key becomes for herdr: a logical key, or text to type.
 #[derive(Debug, PartialEq, Eq)]
 pub enum HerdrInput {
