@@ -572,6 +572,8 @@ mod tests {
             worktree_path: String::new(),
             branch: None,
             mux: Default::default(),
+            context_pct: None,
+            context_window: None,
         };
         SwarmSnapshot {
             project_name: project.into(),
@@ -712,6 +714,8 @@ mod tests {
                 answer_url: None,
                 branch: None,
                 since: None,
+                context_pct: None,
+                context_window: None,
             };
             let village = VillageSnapshot {
                 project: "ops".into(),

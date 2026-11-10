@@ -163,6 +163,8 @@ fn stopped_placeholder_agent(project_name: &str, role: &str, is_manager: bool) -
         worktree_path: String::new(),
         branch: None,
         mux: Default::default(),
+        context_pct: None,
+        context_window: None,
     }
 }
 
@@ -482,6 +484,8 @@ this swarm is running without a manager."
         worktree_path: String::new(),
         branch: None,
         mux: Default::default(),
+        context_pct: None,
+        context_window: None,
     }
 }
 
@@ -590,7 +594,10 @@ async fn build_agent_snapshot(
             .unwrap_or_default(),
         branch,
         mux: Default::default(),
+        context_pct: None,
+        context_window: None,
     }
+    .with_context_from_pane()
 }
 
 /// Map each of a repo's worktrees to the branch checked out in it.

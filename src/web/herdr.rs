@@ -44,6 +44,9 @@ pub struct HerdrAgent {
     pub status: String,
     pub cwd: String,
     pub agent: Option<String>,
+    /// Its context use, from the status line at the bottom of its pane
+    /// (`herdr pane read`); not in `herdr agent list`.
+    pub context: Option<crate::model::status::ContextUse>,
 }
 
 /// `herdr workspace list` output → workspace id (`w5`) to its label
@@ -95,6 +98,7 @@ pub fn parse_agents(json: &str) -> Vec<HerdrAgent> {
                         status: s("agent_status").unwrap_or_else(|| "unknown".to_string()),
                         cwd: s("cwd").or_else(|| s("foreground_cwd"))?,
                         agent: s("agent"),
+                        context: None,
                     })
                 })
                 .collect()
@@ -148,6 +152,8 @@ fn snapshot(agent: &HerdrAgent, project: &str, role: &str, is_manager: bool, bra
         worktree_path: agent.cwd.trim_end_matches('/').to_string(),
         branch: branch.cloned(),
         mux: super::Mux::Herdr,
+        context_pct: agent.context.as_ref().map(|c| c.pct),
+        context_window: agent.context.as_ref().and_then(|c| c.window.clone()),
     }
 }
 
@@ -236,7 +242,7 @@ pub fn swarms_from_agents(
                 Some(m) => snapshot(&agents[m.agent], &project, "manager", true, m.branch.as_ref()),
                 None => {
                     let mut missing = snapshot(
-                        &HerdrAgent { pane_id: String::new(), name: None, status: "unknown".into(), cwd: String::new(), agent: None },
+                        &HerdrAgent { pane_id: String::new(), name: None, status: "unknown".into(), cwd: String::new(), agent: None, context: None },
                         &project,
                         "manager",
                         true,
@@ -331,6 +337,24 @@ impl SwarmSource for HerdrSwarms {
     }
 }
 
+/// Each agent's context use, from the last few lines of its pane, where
+/// Claude Code's status line is. All panes at once: one short read each.
+async fn read_context(transport: &ServerTransport, agents: &mut [HerdrAgent]) {
+    let reads: Vec<_> = agents
+        .iter()
+        .map(|a| {
+            let args = super::pane::herdr_read_args(&a.pane_id, 6, "text");
+            async move { transport.output("herdr", &args, None).await.ok() }
+        })
+        .collect();
+    let outs = futures::future::join_all(reads).await;
+    for (agent, out) in agents.iter_mut().zip(outs) {
+        agent.context = out
+            .filter(|o| o.status.success())
+            .and_then(|o| crate::model::status::parse_context(&String::from_utf8_lossy(&o.stdout)));
+    }
+}
+
 /// What the recognizer needs from herdr and git: the agents (named after
 /// their workspaces), the repos holding them, each repo's manifests, and the
 /// process markers of the panes worth probing. Nothing when herdr isn't there.
@@ -344,6 +368,7 @@ async fn look(transport: &ServerTransport) -> (Vec<HerdrAgent>, Vec<RepoFacts>, 
         return nothing();
     }
     let mut agents = parse_agents(&String::from_utf8_lossy(&out.stdout));
+    read_context(transport, &mut agents).await;
     let args = ["workspace".to_string(), "list".to_string()];
     if let Ok(out) = transport.output("herdr", &args, None).await {
         // herdr exits 1 here even when it prints the list, so read stdout either way.
@@ -425,6 +450,20 @@ mod tests {
         assert_eq!(s.attention_count, 1);
         // Their panes are herdr's, so the session view reads them through herdr, not tmux.
         assert!([&s.manager].into_iter().chain(&s.workers).all(|a| a.mux == crate::web::Mux::Herdr));
+    }
+
+    #[test]
+    fn a_panes_context_use_reaches_its_agent() {
+        let repos = [repo("/src/shop", &[("/src/shop-wt-1", None), ("/src/shop-wt-2", Some("feature/issue-77"))])];
+        let mut agents = parse_agents(LIST);
+        assert!(agents.iter().all(|a| a.context.is_none()), "herdr agent list doesn't say");
+        // What read_context finds at the bottom of worker-1's pane.
+        let w1 = agents.iter_mut().find(|a| a.cwd == "/src/shop-wt-1").unwrap();
+        w1.context = crate::model::status::parse_context("> \n  ctx 91% of 1M | Opus 5\n");
+        let swarms = swarms_from_agents(&agents, &repos, &Manifests::new(), &HashMap::new());
+        let w = &swarms[0].workers;
+        assert_eq!((w[0].context_pct, w[0].context_window.as_deref()), (Some(91), Some("1M")));
+        assert_eq!(w[1].context_pct, None, "no status line read: unknown");
     }
 
     #[test]

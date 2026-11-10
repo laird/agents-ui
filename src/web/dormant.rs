@@ -52,6 +52,8 @@ pub fn dormant_swarm(root: &Path, manifests: &[SwarmManifest]) -> Option<SwarmSn
         worktree_path: root.to_string_lossy().into_owned(),
         branch: None,
         mux: Default::default(),
+        context_pct: None,
+        context_window: None,
     };
     Some(SwarmSnapshot {
         project_name: project,

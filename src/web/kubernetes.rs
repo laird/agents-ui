@@ -214,6 +214,7 @@ pub fn report(source: &KubeSource, workloads: &Value, nodes: &Value) -> Report {
                             (None, Some(v)) => format!("{} · {v}", name(p)),
                             (None, None) => name(p),
                         }),
+                        ..Agent::default()
                     }
                 })
                 .collect();

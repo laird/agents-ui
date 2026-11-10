@@ -118,6 +118,7 @@ session is a house, and agents sharing a worktree are one house.
 | People out front | Running Claude Code sub-agents (`~/.claude/projects/<worktree>/<session>/subagents/`) |
 | A ✓ over the door | The worker just finished its issue: it shows for 5 minutes after the house turned `done` |
 | Sitting on the doorstep, "zzz" rising | The worker is idle: nothing claimed, waiting for the next tick (or it finished more than 5 minutes ago). A robot sits with its lights dimmed |
+| A barrel beside a house or the castle | How much of its context window the agent has used, from the `ctx NN% of 1M` status line under its input box: green below 70%, amber to 90%, red from 90%, flashing from 95% (about to wedge). A fuel gauge downtown, a battery in the future. No barrel without a status line. Also in `/api/swarms` as each agent's `context_pct` |
 | Crates at the docks | Open, unclaimed, unblocked issues, highest priority first. A crate that waits on another stands after it, and crates waiting on the same issue stand together, so a chain (#395 → #396 → #397) reads as one run (`docks.js`; a dependency cycle keeps backlog order). Each crate's number is under it |
 | A crate's mark | Its priority: P0 red, P1 orange, P2 yellow, P3 grey, none when unprioritised. A band along the foot (medieval), a tag (modern), a light (future) |
 | A crate edged in colour | A subtask of a feature (its epic): the colour of that feature's flag |

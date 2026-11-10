@@ -168,6 +168,13 @@ pub struct House {
     /// When the server first saw it in its current status (RFC 3339).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub since: Option<String>,
+    /// How much of its context window its crew has used (the fullest
+    /// session's), 0 to 100: the barrel beside the house. None when unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_pct: Option<u8>,
+    /// That window's size (`1M`, `200k`), when the status line says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1262,6 +1269,8 @@ mod tests {
             worktree_path: worktree.to_string(),
             branch: None,
             mux: Default::default(),
+            context_pct: None,
+            context_window: None,
         }
     }
 
