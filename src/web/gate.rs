@@ -280,6 +280,196 @@ pub fn assess(reading: &GateReading, issues: &[IssueSnapshot], now: SystemTime) 
 }
 
 // ---------------------------------------------------------------------------
+// Bounces: work the gate handed back (#430, #431)
+// ---------------------------------------------------------------------------
+//
+// A merge job's files are per issue and a relaunch overwrites them, so they
+// only tell about the current attempt. The history comes from what outlives
+// them: the job's own comment on the issue for a conflict or a failed gate,
+// and the "Re-sync … (push retry N)" commits it leaves on the integration
+// branch. A conflict's files are only in a live log; the village remembers
+// them across polls ([`remember_conflicts`]).
+
+/// Why the gate handed work back.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "kebab-case")]
+pub enum BounceKind {
+    /// The branch would not merge onto the integration branch.
+    Conflict,
+    /// The tests failed on the integrated tree.
+    GateFailed,
+    /// The push was rejected (a sibling landed first) and the job re-synced.
+    PushRetry,
+}
+
+/// One time the gate handed an issue's work back.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Bounce {
+    /// When (RFC 3339, UTC).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<String>,
+    pub kind: BounceKind,
+    /// For a conflict, the files that conflicted, when known.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<String>,
+}
+
+/// A file that conflicts again and again.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct Hotspot {
+    pub file: String,
+    pub count: u32,
+}
+
+/// The day at the gate: how much landed, how much bounced, and where.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct MergeStats {
+    pub landed_today: u32,
+    pub bounced_today: u32,
+    /// The files that conflicted most in the bounces kept, most first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hotspots: Vec<Hotspot>,
+}
+
+/// Hotspots listed at most.
+const HOTSPOTS: usize = 5;
+
+/// The files git named in `CONFLICT (…): Merge conflict in <file>` lines, once each.
+pub fn conflict_files(log: &str) -> Vec<String> {
+    let mut files: Vec<String> = Vec::new();
+    for line in log.lines().filter(|l| l.contains("CONFLICT")) {
+        if let Some(f) = line.split("Merge conflict in ").nth(1).map(str::trim).filter(|f| !f.is_empty()) {
+            if !files.iter().any(|x| x == f) {
+                files.push(f.to_string());
+            }
+        }
+    }
+    files
+}
+
+/// RFC 3339 in UTC, from any offset; `None` when it isn't a time.
+fn utc(at: &str) -> Option<String> {
+    chrono::DateTime::parse_from_rfc3339(at.trim())
+        .ok()
+        .map(|t| t.with_timezone(&chrono::Utc).to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+}
+
+/// The bounce a merge job's comment on its issue reports, if it reports one.
+pub fn comment_bounce(body: &str, at: &str) -> Option<Bounce> {
+    let first = body.lines().next().unwrap_or("");
+    let kind = if first.starts_with("⚠️ **Auto-merge to ") && first.contains("hit a conflict**") {
+        BounceKind::Conflict
+    } else if first.starts_with("❌ **Auto-merge to ") && first.contains("failed**") {
+        BounceKind::GateFailed
+    } else {
+        return None;
+    };
+    Some(Bounce { at: utc(at), kind, files: Vec::new() })
+}
+
+/// Push retries from `git log --format='%cI%x09%s'` of the integration
+/// branch: each "Re-sync origin/<branch> into <…>/issue-<N>… (push retry K)".
+pub fn push_retry_bounces(log: &str) -> Vec<(u32, Bounce)> {
+    log.lines()
+        .filter_map(|line| {
+            let (at, subject) = line.split_once('\t')?;
+            if !(subject.starts_with("Re-sync origin/") && subject.contains("(push retry ")) {
+                return None;
+            }
+            let rest = subject.split("/issue-").nth(1)?;
+            let n: u32 = rest.chars().take_while(char::is_ascii_digit).collect::<String>().parse().ok()?;
+            Some((n, Bounce { at: utc(at), kind: BounceKind::PushRetry, files: Vec::new() }))
+        })
+        .collect()
+}
+
+fn rfc3339(t: SystemTime) -> String {
+    chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
+
+/// A finished job that handed its work back, and how.
+fn job_bounce(job: &Job) -> Option<BounceKind> {
+    match (job.alive, job.exit) {
+        (false, Some(1)) if job.log.contains("❌ Merge conflict") => Some(BounceKind::Conflict),
+        (false, Some(code)) if code != 0 && !red_base(&job.log) => Some(BounceKind::GateFailed),
+        _ => None,
+    }
+}
+
+/// Keep the files of each conflicted job's log, by issue: the log is gone
+/// once the job is relaunched, the bounce it reported is not.
+pub fn remember_conflicts(jobs: &[Job], memory: &mut HashMap<u32, Vec<String>>) {
+    for job in jobs.iter().filter(|j| job_bounce(j) == Some(BounceKind::Conflict)) {
+        let files = conflict_files(&job.log);
+        if !files.is_empty() {
+            memory.insert(job.issue, files);
+        }
+    }
+}
+
+/// Each issue's bounces, oldest first: the jobs' comments (`(issue, at, body)`),
+/// the push retries on the integration branch, and a finished job whose
+/// comment hasn't been read yet. An issue's latest conflict gets the files
+/// last seen in its conflicted log.
+pub fn bounce_history(
+    comments: &[(u32, String, String)],
+    retries_log: &str,
+    jobs: &[Job],
+    remembered: &HashMap<u32, Vec<String>>,
+) -> std::collections::BTreeMap<u32, Vec<Bounce>> {
+    let mut out: std::collections::BTreeMap<u32, Vec<Bounce>> = Default::default();
+    for (n, at, body) in comments {
+        if let Some(b) = comment_bounce(body, at) {
+            out.entry(*n).or_default().push(b);
+        }
+    }
+    for (n, b) in push_retry_bounces(retries_log) {
+        out.entry(n).or_default().push(b);
+    }
+    for job in jobs {
+        let Some(kind) = job_bounce(job) else { continue };
+        let started = job.started.map(rfc3339);
+        // Its comment is posted after it starts: one at or after the start is this bounce.
+        let reported = out.get(&job.issue).is_some_and(|bs| {
+            bs.iter().any(|b| b.kind == kind && match (&b.at, &started) {
+                (Some(a), Some(s)) => a >= s,
+                _ => true,
+            })
+        });
+        if !reported {
+            out.entry(job.issue).or_default().push(Bounce { at: started, kind, files: Vec::new() });
+        }
+    }
+    for (n, bs) in out.iter_mut() {
+        bs.sort_by(|a, b| a.at.cmp(&b.at));
+        if let (Some(files), Some(last)) = (remembered.get(n), bs.iter_mut().rev().find(|b| b.kind == BounceKind::Conflict)) {
+            if last.files.is_empty() {
+                last.files = files.clone();
+            }
+        }
+    }
+    out
+}
+
+/// Today's tally (`today` is `YYYY-MM-DD`, UTC, as the bounce times are):
+/// jobs that landed today, bounces today, and the files that conflict most.
+pub fn merge_stats(bounces: &std::collections::BTreeMap<u32, Vec<Bounce>>, jobs: &[Job], today: &str) -> MergeStats {
+    let landed_today = jobs
+        .iter()
+        .filter(|j| !j.alive && j.exit == Some(0) && j.started.is_some_and(|t| rfc3339(t).starts_with(today)))
+        .count() as u32;
+    let bounced_today = bounces.values().flatten().filter(|b| b.at.as_deref().is_some_and(|a| a.starts_with(today))).count() as u32;
+    let mut counts: HashMap<&str, u32> = HashMap::new();
+    for f in bounces.values().flatten().flat_map(|b| &b.files) {
+        *counts.entry(f).or_default() += 1;
+    }
+    let mut hotspots: Vec<Hotspot> = counts.into_iter().map(|(file, count)| Hotspot { file: file.to_string(), count }).collect();
+    hotspots.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.file.cmp(&b.file)));
+    hotspots.truncate(HOTSPOTS);
+    MergeStats { landed_today, bounced_today, hotspots }
+}
+
+// ---------------------------------------------------------------------------
 // Gate slots: who holds which lock
 // ---------------------------------------------------------------------------
 
@@ -438,6 +628,13 @@ pub fn local_repo_id(repo: &Path) -> Option<String> {
 
 /// Read the merge jobs for `repo` on this host. Blocking: it reads a few
 /// small files and runs `git` twice.
+/// The integration branch's push-retry commits of the last two days, as
+/// `%cI<TAB>%s` lines for [`push_retry_bounces`]; empty when git can't say.
+pub fn read_push_retries(repo: &Path, integration: &str) -> String {
+    let branch = format!("origin/{}", if integration.is_empty() { "HEAD" } else { integration });
+    command("git", &["log", &branch, "--since=2.days", "--fixed-strings", "--grep=(push retry ", "--format=%cI%x09%s"], repo, None).unwrap_or_default()
+}
+
 pub fn read_local(repo: &Path) -> GateReading {
     let tmp = PathBuf::from(std::env::var("AUTOCODER_TMP").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/tmp".to_string()));
     let slots = max_gates(std::env::var("AUTOCODER_MAX_GATES").ok().as_deref(), std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4));
@@ -739,5 +936,99 @@ mod tests {
         assert_eq!(words, vec!["\"queued\"", "\"landed-unproven\"", "\"red-base\""]);
         let g: TaskGate = serde_json::from_str(r#"{"state": "gating", "slot": 2, "attempt": 1}"#).unwrap();
         assert_eq!((g.state, g.slot, g.attempt), (GateState::Gating, Some(2), 1));
+    }
+
+    // ---- bounces (#431) ----
+
+    const TWO_FILES: &str = "Auto-merging src/web/server.rs\nCONFLICT (content): Merge conflict in src/web/server.rs\nCONFLICT (content): Merge conflict in src/web/village/main.js\nCONFLICT (content): Merge conflict in src/web/server.rs\n❌ Merge conflict integrating 'master' into feature/issue-9.\n";
+    const C_CONFLICT: &str = "⚠️ **Auto-merge to `master` hit a conflict** on branch `feature/issue-9` and needs manual resolution.";
+    const C_FAILED: &str = "❌ **Auto-merge to `master` failed** (exit 1): tests fail on the integrated tree";
+
+    #[test]
+    fn conflict_files_are_the_files_git_named_once_each() {
+        assert_eq!(conflict_files(TWO_FILES), ["src/web/server.rs", "src/web/village/main.js"]);
+        assert_eq!(conflict_files(CONFLICT), ["src/web/server.rs"]);
+        assert!(conflict_files(FAILED).is_empty());
+    }
+
+    #[test]
+    fn the_jobs_comments_say_conflict_or_failed_gate_and_nothing_else_does() {
+        let c = comment_bounce(C_CONFLICT, "2026-11-10T01:46:14Z").unwrap();
+        assert_eq!((c.kind, c.at.as_deref()), (BounceKind::Conflict, Some("2026-11-10T01:46:14Z")));
+        assert_eq!(comment_bounce(C_FAILED, "2026-11-10T02:00:00Z").unwrap().kind, BounceKind::GateFailed);
+        for other in ["🔁 **Conflict resolved, re-launching the merge**", "✅ **Issue Resolved**", "⚠️ **Auto-merge to `master` pushed, then hit an internal error** (exit 4)", "a comment quoting \"hit a conflict**\""] {
+            assert_eq!(comment_bounce(other, "2026-11-10T02:00:00Z"), None, "{other}");
+        }
+    }
+
+    #[test]
+    fn push_retries_come_from_the_resync_commits_in_utc() {
+        let log = "2026-11-09T21:10:00-05:00\tRe-sync origin/master into feature/issue-415 (push retry 2)\n\
+                   2026-11-09T21:09:00-05:00\tRe-sync origin/master into feature/issue-415 (push retry 1)\n\
+                   2026-11-09T21:08:00-05:00\tImplement #415: something\n\
+                   2026-11-09T21:07:00-05:00\tRe-sync origin/master into enhancement/issue-77-auto (push retry 1)\n";
+        let r = push_retry_bounces(log);
+        assert_eq!(r.iter().map(|(n, _)| *n).collect::<Vec<_>>(), [415, 415, 77]);
+        assert!(r.iter().all(|(_, b)| b.kind == BounceKind::PushRetry));
+        assert_eq!(r[0].1.at.as_deref(), Some("2026-11-10T02:10:00Z"));
+    }
+
+    #[test]
+    fn an_issue_bounced_twice_then_landed_has_its_history_in_order_with_the_files() {
+        let comments = vec![
+            (9, "2026-11-10T01:00:00Z".to_string(), C_CONFLICT.to_string()),
+            (9, "2026-11-10T01:30:00Z".to_string(), C_CONFLICT.to_string()),
+            (9, "2026-11-10T01:31:00Z".to_string(), "🔁 re-launching".to_string()),
+            (12, "2026-11-10T01:40:00Z".to_string(), C_FAILED.to_string()),
+        ];
+        let retries = "2026-11-10T01:50:00Z\tRe-sync origin/master into feature/issue-9 (push retry 1)\n";
+        // The landed job's own log no longer shows the conflicts; memory does.
+        let mut memory = HashMap::new();
+        remember_conflicts(&[job(9, false, Some(1), TWO_FILES)], &mut memory);
+        let h = bounce_history(&comments, retries, &[job(9, false, Some(0), PASSED)], &memory);
+        let nine: Vec<_> = h[&9].iter().map(|b| (b.kind, b.at.clone().unwrap(), b.files.len())).collect();
+        assert_eq!(nine, [
+            (BounceKind::Conflict, "2026-11-10T01:00:00Z".to_string(), 0),
+            (BounceKind::Conflict, "2026-11-10T01:30:00Z".to_string(), 2),
+            (BounceKind::PushRetry, "2026-11-10T01:50:00Z".to_string(), 0),
+        ]);
+        assert_eq!(h[&12].len(), 1);
+        assert_eq!(h[&12][0].kind, BounceKind::GateFailed);
+    }
+
+    #[test]
+    fn a_finished_job_counts_before_its_comment_is_read_and_only_once_after() {
+        // T0 is the job's start; no comment yet: the job itself is the bounce.
+        let h = bounce_history(&[], "", &[job(9, false, Some(1), CONFLICT)], &HashMap::new());
+        assert_eq!(h[&9].len(), 1);
+        assert_eq!(h[&9][0].at, Some(rfc3339(at(T0))));
+        // Its comment, posted after the start, is the same bounce.
+        let after = (9, rfc3339(at(T0 + 30)), C_CONFLICT.to_string());
+        assert_eq!(bounce_history(&[after], "", &[job(9, false, Some(1), CONFLICT)], &HashMap::new())[&9].len(), 1);
+        // An older comment is an earlier bounce: two in all.
+        let before = (9, rfc3339(at(T0 - 3600)), C_CONFLICT.to_string());
+        assert_eq!(bounce_history(&[before], "", &[job(9, false, Some(1), CONFLICT)], &HashMap::new())[&9].len(), 2);
+        // Running, passed and red-base jobs are not bounces.
+        for j in [job(9, true, None, RESYNC), job(9, false, Some(0), PASSED), job(9, false, Some(1), RED_REFUSED)] {
+            assert!(bounce_history(&[], "", &[j], &HashMap::new()).is_empty());
+        }
+        assert_eq!(bounce_history(&[], "", &[job(9, false, Some(1), FAILED)], &HashMap::new())[&9][0].kind, BounceKind::GateFailed);
+    }
+
+    #[test]
+    fn todays_tally_counts_landings_bounces_and_hotspots() {
+        let today = &rfc3339(at(T0))[..10];
+        let b = |at: &str, files: &[&str]| Bounce { at: Some(at.to_string()), kind: BounceKind::Conflict, files: files.iter().map(|f| f.to_string()).collect() };
+        let t = |h: u32| format!("{today}T{h:02}:00:00Z");
+        let mut bounces = std::collections::BTreeMap::new();
+        bounces.insert(1, vec![b(&t(1), &["server.rs", "main.js"]), b("2000-01-01T00:00:00Z", &["server.rs"])]);
+        bounces.insert(2, vec![b(&t(2), &["server.rs"]), Bounce { at: Some(t(3)), kind: BounceKind::PushRetry, files: vec![] }]);
+        let jobs = [job(1, false, Some(0), PASSED), job(2, false, Some(0), PASSED), job(3, true, None, RESYNC), job(4, false, Some(1), CONFLICT)];
+        let s = merge_stats(&bounces, &jobs, today);
+        assert_eq!((s.landed_today, s.bounced_today), (2, 3));
+        assert_eq!(s.hotspots, vec![Hotspot { file: "server.rs".into(), count: 3 }, Hotspot { file: "main.js".into(), count: 1 }]);
+        let json = serde_json::to_string(&bounces[&2]).unwrap();
+        // Kinds are kebab-case, and a bounce with no files has no `files` key.
+        assert!(json.contains(r#""kind":"conflict""#) && json.contains(r#""kind":"push-retry"}"#), "{json}");
     }
 }
