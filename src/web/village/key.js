@@ -16,8 +16,8 @@ import { glint, ribbon, roped } from './crates.js';
 import { alarm, boardFrame, failed, lamp, ring } from './alarms.js';
 import { FRESH_DONE_MS } from './rest.js';
 import { person } from './people.js';
-import { drawBanner } from './features.js';
-import { envShed, envSign } from './envrow.js';
+import { drawBanner } from './bannerart.js';
+import { envShed, envSign } from './envart.js';
 import { PRIO_ROWS, placeRows, stateRows } from './keyrows.js';
 import { GLYPH_WORDS, note } from './cvdmarks.js';
 

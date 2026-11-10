@@ -22,6 +22,7 @@ import { issueItems, isSha, link, repoUrl } from './dialogs.js';
 import { toast } from './panels.js';
 import { SHED } from './envrow.js';
 import { agoWords, versionOf } from './envlabels.js';
+import { poleFlag } from './envart.js';
 
 export const VOYAGE_SAIL = 9000, VOYAGE_UNLOAD = 6000, PLAYED_SAIL = 5000, PLAYED_DOCK = 5000, LOAD_TRIP = 1400, VOYAGE_CAP = 6;
 export const voyageKey = vo => `${vo.to}|${vo.sha}|${vo.state}`;
@@ -108,7 +109,7 @@ function drawVoyage(c, v, lay, vo, seen, t) {
   if (pose.state === 'failed') {
     // Sail torn, a red flag up.
     R(c, left + (hw >> 1) - 1, top + 9, 2, 3, P.o); R(c, left + (hw >> 1) + 2, top + 13, 1, 2, P.o);
-    R(c, left + 2, top - 4, 1, 7, P.woodD); R(c, left + 3, top - 4 + (blink(t, 500) ? 1 : 0), 5, 3, P.p0);
+    poleFlag(c, left + 2, top - 4, P.p0, blink(t, 500) ? 1 : 0, 7, 5);
   }
   const id = `${vo.to}:${vo.sha}`;
   tap(left, top, hw, hh, { kind: 'voyage', id, at: pose.state, vo });

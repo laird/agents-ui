@@ -135,3 +135,23 @@ fn village_html_says_which_source_placed_each_stop() {
         assert!(body.contains(line), "sourceWords is missing: {line}");
     }
 }
+
+/// #454: the environment row, the feature flags and a failed voyage's flag
+/// at 2×: each keeps its 1× drawing (so its footprint, taps and labels stay)
+/// and gains detail on the detail grid, from DOM-free modules node tests
+/// (tools/village-tests/envart.test.mjs).
+#[test]
+fn village_env_row_and_flags_are_drawn_at_2x() {
+    let body = &village_source();
+    assert!(body.contains("import { envKeep, envShed, envSign, failFlag, flame, poleFlag } from './envart.js';"));
+    assert!(body.contains("export function envShed(c, x, y, w, h) {"));
+    assert!(body.contains("for (let xx = 7; xx < W - 4; xx += 6) px(g, xx, 3, 1, 11, k.roofD);"), "the warehouse's roof ribs at detail pixels");
+    assert!(body.contains("failFlag(c, sx + SHED.w - 8, sy - 9);"));
+    assert!(body.contains("flame(c, sx + 8, sy - 3, f); flame(c, sx + 40, sy - 2, 1 - f);"));
+    assert!(body.contains("poleFlag(c, hx + 2, cy - 38, h.col, blink(t + k * 250, 900) ? 1 : 0);"));
+    assert!(body.contains("poleFlag(c, left + 2, top - 4, P.p0, blink(t, 500) ? 1 : 0, 7, 5);"), "a failed voyage's flag");
+    // The flag: its own module, its number still the 1× stencil on the cloth.
+    assert!(body.contains("import { drawBanner } from './bannerart.js';"));
+    assert!(body.contains("if (String(f.number).length <= 3 && f.number >= 0) digits(c, x + 2, y + 2, f.number, P.white);"));
+    assert!(body.contains("px(d, 15, 4, 1, 12, 'rgba(12,20,36,.22)');"), "the cloth's fold at 2×");
+}

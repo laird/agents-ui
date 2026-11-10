@@ -15,11 +15,9 @@
  * ships between them are voyages.js; the strip of villages over the map is
  * the mini-map, at the end. */
 import { state } from './state.js';
-import { F, P, R, blink, featureColours, shadow } from './palette.js';
+import { P, R, blink, featureColours } from './palette.js';
 import { puffs } from './sprites/houses.js';
 import { badge, badgeSize, bubble } from './scenery.js';
-import { MODERN, M } from './themes/modern.js';
-import { FUTURE } from './themes/future.js';
 import { registerHit, registerLabels, registerLayer, registerOverlay, tap } from './registry.js';
 import { cv, shownScale, shownScenes } from './layout.js';
 import { issueItems, isSha, link, repoUrl } from './dialogs.js';
@@ -27,6 +25,7 @@ import { sourceWords } from './ship.js';
 import { esc } from './panels.js';
 import { agoWords, envHouses, envLabel, versionOf } from './envlabels.js';
 import { showFeature } from './features.js';
+import { envKeep, envShed, envSign, failFlag, flame, poleFlag } from './envart.js';
 
 /* Where things stand in an environment village, from its left edge and the canal. */
 export const SHED = { dx: 30, w: 60, h: 32, up: 44 }, ENV_DOCK = 20, BAY_COLS = 9, BAY_ROWS = 3;
@@ -55,36 +54,6 @@ export function baySlots(groups, more = 0) {
 }
 
 /* ---------- Drawing ---------- */
-const envLook = () => {
-  const mod = state.T === MODERN, fut = state.T === FUTURE;
-  return { roof: fut ? F.purple : mod ? M.steel : P.barn, roofD: fut ? F.purpleD : mod ? M.steelD : P.barnD,
-    wall: fut ? F.hullD : mod ? M.concrete : P.wood, bay: fut ? F.navy : mod ? M.asphaltD : P.woodD,
-    keep: fut ? F.hull : mod ? M.glass : P.stone, keepD: fut ? F.hullD : mod ? M.glassD : P.stoneD };
-};
-export function envShed(c, x, y, w, h) {
-  const k = envLook();
-  shadow(c, x + 2, y + h, w, 2);
-  R(c, x, y, w, h, P.o);
-  R(c, x + 1, y + 1, w - 2, 7, k.roof); R(c, x + 1, y + 7, w - 2, 1, k.roofD);
-  for (let xx = x + 4; xx < x + w - 2; xx += 6) R(c, xx, y + 2, 1, 4, k.roofD);
-  R(c, x + 1, y + 8, w - 2, h - 9, k.wall);
-  R(c, x + 2, y + 9, w - 4, h - 10, k.bay);
-}
-/* The capital's keep (a tower downtown, a spire in the future), its flag in the health colour. */
-function envKeep(c, x, y, h, flag, t) {
-  const k = envLook();
-  shadow(c, x + 2, y + h, 12, 2);
-  R(c, x, y, 12, h, P.o); R(c, x + 1, y + 1, 10, h - 2, k.keep); R(c, x + 1, y + 1, 2, h - 2, k.keepD);
-  for (let xx = x; xx < x + 12; xx += 4) R(c, xx, y - 2, 2, 2, P.o);
-  for (let yy = y + 5; yy < y + h - 6; yy += 7) R(c, x + 5, yy, 2, 3, P.dark);
-  R(c, x + 5, y - 10, 1, 8, P.woodD); R(c, x + 6, y - 10 + (blink(t, 700) ? 1 : 0), 5, 3, flag);
-}
-export function envSign(c, x, y, face) {
-  const [frame, board, ink] = state.T.sign || [P.woodD, P.parch, P.woodD];
-  R(c, x + 6, y + 8, 2, 12, frame);
-  R(c, x, y, 15, 9, P.o); R(c, x + 1, y + 1, 13, 7, face || board);
-  R(c, x + 3, y + 3, 9, 1, ink); R(c, x + 3, y + 5, 6, 1, ink);
-}
 const healthOf = s => (s.health && s.health.state) || (s.source === 'unknown' ? 'unknown' : 'ok');
 const HEALTH_COL = { ok: '#38c848', failed: '#e02828', incident: '#f07020', unknown: '#8088a8' };
 
@@ -111,7 +80,7 @@ registerLayer({ z: 60, draw(c, { v, lay }, t) {
       houses.forEach((h, k) => {
         const hx = x + SHED.dx + SHED.w + 4 + k * 18;
         state.T.B.cottage(c, hx, cy - 30, 'idle', t);
-        R(c, hx + 2, cy - 38, 1, 9, P.woodD); R(c, hx + 3, cy - 38 + (blink(t + k * 250, 900) ? 1 : 0), 4, 3, h.col);
+        poleFlag(c, hx + 2, cy - 38, h.col, blink(t + k * 250, 900) ? 1 : 0);
         tap(hx, cy - 38, 16, 24, { kind: 'envhouse', f: h.f.number });
       });
       if (more > 0) badge(c, x + SHED.dx + SHED.w + 4 + houses.length * 18, cy - 34, more);
@@ -125,11 +94,10 @@ registerLayer({ z: 60, draw(c, { v, lay }, t) {
     tap(sx, sy, SHED.w, 9, { kind: 'env', i: e.i });
     if (health === 'failed') {
       puffs(c, sx + 10, sy - 2, t, '#484858', '#282830'); puffs(c, sx + 16, sy - 4, t + 500, '#585870', '#383848');
-      R(c, sx + SHED.w - 8, sy - 9, 1, 9, P.woodD); R(c, sx + SHED.w - 7, sy - 9, 5, 3, P.p0);
+      failFlag(c, sx + SHED.w - 8, sy - 9);
     } else if (health === 'incident') {
       const f = blink(t, 140) ? 1 : 0;
-      R(c, sx + 8, sy - 3 - f, 3, 3 + f, P.p0); R(c, sx + 9, sy - 4 - f, 1, 2, P.gold);
-      R(c, sx + 40, sy - 2 + f, 3, 3 - f, P.p0); R(c, sx + 41, sy - 3 + f, 1, 2, P.gold);
+      flame(c, sx + 8, sy - 3, f); flame(c, sx + 40, sy - 2, 1 - f);
       puffs(c, sx + 9, sy - 8, t, '#484858', '#282830');
     }
   });
