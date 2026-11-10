@@ -1,6 +1,17 @@
-/* People, robots and drones, and what they act out. */
+/* People, robots and drones, and what they act out. Bodies are drawn at 2×
+ * (#419): people2x.js lifts each 8×12 template onto the detail grid (#418)
+ * with faces, hair, buttons, shoes and role clothing; tools and props are
+ * drawn over them in scene pixels, as before. */
 import { state, now } from './state.js';
 import { F, P, R, blink, shadow } from './palette.js';
+import { detail } from './detail.js';
+import { lift, runs } from './people2x.js';
+
+/* A posed body at 2×, its top-left at scene (x, y). */
+function body2x(c, x, y, rows, map, opts) {
+  const parts = runs(lift(rows, map, opts));
+  detail(c, x, y, g => parts.forEach(([px, py, w, col]) => R(g, px, py, w, 1, col)));
+}
 
 /* ---------- People ----------
  * Four body templates per theme, two women and two men, alternating so a
@@ -97,7 +108,8 @@ export function person(c, x, y, seed, kind = 'stand', opts = {}) {
   };
   x = Math.round(x); y = Math.round(y);
   shadow(c, x + 1, y + 11, 7, 1);
-  for (let r = 0; r < rows.length; r++) for (let k = 0; k < 8; k++) { const ch = rows[r][k]; if (ch !== '.') R(c, x + k, y + r, 1, 1, map[ch]); }
+  // The manager's sash is medieval dress; downtown its gold tie says it already.
+  body2x(c, x, y, rows, map, { mayor: opts.mayor && style === 'medieval', sash: dress.mayor.t, sub: opts.sub, accent: opts.accent });
   if (kind === 'work' || kind === 'work2') {
     // Busy: a hammer swinging between raised and struck, so a working
     // agent reads as working even with no action sign.
@@ -154,7 +166,7 @@ function robot(c, x, y, seed, h, kind, opts) {
   shadow(c, x + 1, y + 11, 7, 1);
   const yy = y + bob + (slump ? 1 : 0);
   if (opts.mayor) { R(c, x - 1, yy + 7, 1, 4, map.C); R(c, x + 8, yy + 7, 1, 4, map.C); }
-  for (let r = 0; r < rows.length; r++) for (let k = 0; k < 8; k++) { const ch = rows[r][k]; if (ch !== '.') R(c, x + k, yy + r, 1, 1, map[ch]); }
+  body2x(c, x, yy, rows, map, { robot: true });
   if (opts.mayor) { R(c, x + 2, yy - 2, 5, 2, P.o); R(c, x + 2, yy - 1, 5, 1, P.gold); R(c, x + 2, yy - 2, 1, 1, P.gold); R(c, x + 4, yy - 3, 1, 1, P.gold); R(c, x + 6, yy - 2, 1, 1, P.gold); }
   if (kind === 'wave' || kind === 'wave2') {
     R(c, x + 7, yy + 6, 2, 2, P.o); R(c, x + 7, yy + 6, 1, 1, map.C);

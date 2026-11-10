@@ -12,6 +12,7 @@ const { DETAIL, prepare, detail, sceneScale, toScene } = await import(V + 'detai
 const { state } = await import(V + 'state.js');
 const scenery = await import(V + 'scenery.js');
 const { person } = await import(V + 'people.js');
+const { SHADE } = await import(V + 'palette.js');
 const houses = await import(V + 'sprites/houses.js');
 const { THEMES } = await import(V + 'themes/registry.js');
 await import(V + 'themes/medieval.js');
@@ -47,20 +48,18 @@ function drawn(paint, d) {
 const doubled = rects => rects.map(([x, y, w, h, col, a]) => [x * DETAIL, y * DETAIL, w * DETAIL, h * DETAIL, col, a]);
 
 /* 1×-only sprites from every corner of the village: crates and their marks,
- * tags, people, houses and each theme's buildings. */
+ * tags, houses and each theme's buildings. (People are drawn at 2× since
+ * #419: their test is below and in people2x.test.mjs.) */
 const SCENE = c => {
   state.T = THEMES.medieval;
   scenery.crate(c, 3, 4, 'bug', 'P1', true);
   scenery.roped(c, 10, 4);
   scenery.badge(c, 20, 3, 12);
   scenery.numberTag(c, 30, 3, 404);
-  person(c, 40, 10, 'worker-1', 'stand', { status: 'working' });
-  person(c, 50, 10, 'manager:shop', 'carry', { mayor: true, status: 'idle' });
   houses.pennant(c, 60, 20, 'P0', 0);
   houses.cobwebs(c, 70, 20);
   for (const T of Object.values(THEMES)) {
     state.T = T;
-    person(c, 100, 40, 'robot-1', 'work', { status: 'working' });
     T.crate(c, 80, 4, 'feature', 'P2', false);
     for (const kind of Object.keys(T.B)) T.B[kind](c, 90, 20, 'working', 0);
     T.hall(c, 120, 18, 'working');
@@ -98,3 +97,21 @@ test('the screen maps to scene pixels through the finer canvas', () => {
   assert.equal(toScene(400), 200);
   assert.equal(sceneScale(800, 200, 1), 4, 'and at 1×, as before');
 });
+
+test('people are drawn at 2× (#419): in half scene pixels, inside their 8×12 footprint', () => {
+  for (const T of Object.values(THEMES)) {
+    state.T = T;
+    for (const [seed, kind, opts] of [['worker-1', 'stand', { status: 'idle' }], ['manager:shop', 'stand', { mayor: true, status: 'idle' }]]) {
+      const rects = drawn(c => person(c, 40, 10, seed, kind, opts), DETAIL);
+      // Some detail pixels are single canvas pixels: finer than a doubled 1× sprite can draw.
+      assert.ok(rects.some(([x, y, w, h]) => h === 1 && (x % 2 === 1 || y % 2 === 1)), `${T.name}: ${seed} has 2× detail`);
+      // The body stays where the 1× one stood: scene (40, 10) to (48, 22), less the shadow under it.
+      const body = rects.filter(([, , , , col]) => col !== SHADE);
+      const xs = body.map(([x, , w]) => [x, x + w]).flat(), ys = body.map(([, y, , h]) => [y, y + h]).flat();
+      assert.ok(Math.min(...xs) >= 40 * DETAIL - 2 && Math.max(...xs) <= 48 * DETAIL + 2, `${T.name}: ${seed} keeps its width`);
+      // (A robot manager's crown stands up to 4 scene pixels over it, as at 1×.)
+      assert.ok(Math.min(...ys) >= (10 - 4) * DETAIL && Math.max(...ys) <= 22 * DETAIL + 2, `${T.name}: ${seed} keeps its height`);
+    }
+  }
+});
+
