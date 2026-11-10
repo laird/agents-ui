@@ -616,6 +616,45 @@ mod tests {
         assert_eq!(state(Some(&job(9, false, None, GATING)), &["merging"]), None, "the job died without an exit code");
     }
 
+    /// `CONFLICTS=1 tools/mock/demo.sh` (#432): every scripted attempt's files
+    /// read as the state it plays: conflicts and a failed gate hand the work
+    /// back, push retries re-gate and land, the hotspot conflicts on one file.
+    #[test]
+    fn the_conflicts_demo_files_read_as_their_states() {
+        let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tools/mock/conflicts.py");
+        let out = match std::process::Command::new("python3").args([script, "--fixtures"]).output() {
+            Ok(out) if out.status.success() => out,
+            Ok(out) => panic!("conflicts.py --fixtures failed: {}", String::from_utf8_lossy(&out.stderr)),
+            Err(e) => return eprintln!("python3 is not installed ({e}); skipping the conflicts demo fixtures"),
+        };
+        let stories: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        let read = |story: &str| -> Vec<(GateState, u32, String)> {
+            let s = stories.as_array().unwrap().iter().find(|s| s["story"] == story).unwrap();
+            let n = s["issue"].as_u64().unwrap() as u32;
+            s["attempts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|a| {
+                    let (log, exit) = (a["log"].as_str().unwrap(), a["exit"].as_i64().unwrap() as i32);
+                    let l = if exit == 0 { labels(&[]) } else { labels(&["needs-clarification"]) };
+                    let g = job_gate(Some(&job(n, false, Some(exit), log)), &l, None, at(T0)).unwrap();
+                    let files = log.lines().filter_map(|l| l.strip_prefix("CONFLICT (content): Merge conflict in ")).collect::<Vec<_>>().join(",");
+                    (g.state, g.attempt, files)
+                })
+                .collect()
+        };
+        use GateState::*;
+        let conflict = read("conflict");
+        assert_eq!(conflict[0], (Conflict, 0, "src/web/server.rs,src/web/village/lifecycle.js".to_string()));
+        assert_eq!((conflict[1].0, conflict[1].1), (Passed, 1));
+        assert_eq!(read("gate-fail").iter().map(|a| a.0).collect::<Vec<_>>(), [Failed, Passed]);
+        assert_eq!(read("push-retry").iter().map(|a| (a.0, a.1)).collect::<Vec<_>>(), [(Passed, 3)], "gated, then twice more after each re-sync");
+        let hot = read("hotspot");
+        assert_eq!(hot.iter().map(|a| a.0).collect::<Vec<_>>(), [Conflict, Conflict, Conflict, Passed]);
+        assert!(hot[..3].iter().all(|a| a.2 == "src/web/village/main.js"), "three bounces on the same file");
+    }
+
     #[test]
     fn a_running_gate_carries_slot_timing_attempt_and_progress() {
         let mut j = job(9, true, None, RESYNC);
