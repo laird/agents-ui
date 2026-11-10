@@ -1,14 +1,14 @@
 /* ---------- Each issue's life ----------
  * The docks, the town hall and its board, the houses, and the people walking
- * between them: what each draws, what a click on it says, its labels and its
- * counters. The walks themselves, what each change between two polls sets
+ * between them: what each draws, what a click on it says, and its labels.
+ * The walks themselves, what each change between two polls sets
  * off, are the trips (trips.js). */
 import { state } from './state.js';
 import { P, R, blink, shadow, subHat, waveFrame } from './palette.js';
 import { cobwebs, pennant, puffs } from './sprites/houses.js';
 import { ICONS, badge, bubble, roped } from './scenery.js';
 import { QUIET_ACTIONS, actionSign, drawAction, person, wander } from './people.js';
-import { registerCounter, registerHit, registerLabels, registerLayer, tap } from './registry.js';
+import { registerHit, registerLabels, registerLayer, tap } from './registry.js';
 import { LW, slotPos } from './layout.js';
 import { ARRIVE_IN, SAIL_OUT, UNLOAD, pickup, tripAt } from './trips.js';
 import { workOf } from './ship.js';
@@ -276,17 +276,3 @@ registerLabels((sc, theme) => {
   return out;
 }, 10);
 
-/* ---------- Counters ---------- */
-registerCounter({ order: 10, render: v => [state.T.labels.docks, 'backlog', v.backlog.length] });
-registerCounter({ order: 20, render: v => [state.T.labels.board, 'blocked · proposals', v.board.length] });
-registerCounter({ order: 30, render: v => [state.T.labels.houses, `${v.houses.filter(h => h.status === 'working').length} of ${v.houses.length} working`, v.houses.filter(h => h.issue).length] });
-registerCounter({ order: 40, render: v => ['Sub-agents', 'running in sessions', [v.manager, ...v.houses].reduce((n, h) => n + (h.subagents || []).length, 0)] });
-/* Runtime villages (Temporal, AgentEx, ...) count workstreams and agents, not issues and pushes. */
-const count = (v, st) => v.houses.filter(h => h.status === st).length;
-registerCounter({ plane: 'runtime', order: 10, render: v => [state.T.labels.houses, 'top-level workstreams', v.houses.length] });
-registerCounter({ plane: 'runtime', order: 20, render: v => ['Working', 'workstreams busy', count(v, 'working')] });
-registerCounter({ plane: 'runtime', order: 30, render: v => ['Waiting on you', 'an agent asked a person', count(v, 'blocked')] });
-registerCounter({ plane: 'runtime', order: 40, render: v => ['Retrying', 'activity failing', count(v, 'stalled')] });
-registerCounter({ plane: 'runtime', order: 50, render: v => ['Agents', 'working for workstreams', v.houses.reduce((n, h) => n + (h.subagents || []).length, 0)] });
-registerCounter({ plane: 'runtime', order: 60, render: v => ['Workers', v.manager.status === 'stalled' ? 'a task queue has none' : 'polling task queues', (v.manager.subagents || []).length] });
-registerCounter({ plane: 'runtime', order: 70, render: v => [state.T.labels.board, 'failed in 24h', v.board.filter(n => n.label === 'failed').length] });

@@ -112,17 +112,17 @@ src/
       index.html    #   the page's markup
       village.css   #   its styles
       main.js       #   only imports the modules (each registers itself) and starts the page
-      registry.js   #   registerLayer/Hit/Labels/Counter/Overlay, and the feature-free core: paint(), tap(), hitAt()
+      registry.js   #   registerLayer/Hit/Labels/Overlay, and the feature-free core: paint(), tap(), hitAt()
       state.js      #   what the drawing reads and the page sets: `state.T` (theme), the scene being drawn, scenes, view
       layout.js     #   where things stand (layout(), world geometry, shownScenes) and the ground layers
-      lifecycle.js  #   each issue's life: docks, hall, board, houses, walkers (layers, hits, labels, counters)
+      lifecycle.js  #   each issue's life: docks, hall, board, houses, walkers (layers, hits, labels)
       trips.js      #   what each change between two polls sets off: diff(), the queued trips and where each is
       ship.js       #   the canal: quay, locks, harbour and the ship that sails on a release
       features.js   #   feature banners, trails, barges, fog, the strip and the feature dialog
       envrow.js     #   the environment row: a village per environment (sign, warehouse of cargo, health, rank), the mini-map
       voyages.js    #   ships between the row's villages: loading, sailing, docked, failed, and voyages the page plays itself
-      worlds.js     #   a world drawn as platform over dev village; draw(); the world counters
-      panels.js     #   the flow strip (renderFlow walks the counters), toast, zoom
+      worlds.js     #   a world drawn as platform over dev village; draw(); the bar's line for a world (worldWords)
+      panels.js     #   toast, zoom and Fit
       fitscale.js   #   Fit's scale for a map in the room left for it (no DOM; tools/village-tests/)
       dialogs.js    #   explain()/act() dispatch on registered hits; the hit test; keyboard targets
       labels.js     #   area labels from registerLabels, kept clear of the art and each other
@@ -143,7 +143,7 @@ tools/adapters/     # Outside framework adapters: example report, adapter templa
 ### Adding to the village
 
 The village page's core (`paint()`, the hit test, `explain()`/`act()`,
-`renderFlow()`, `placeLabels()`) names no feature: it walks what the feature
+`placeLabels()`) names no feature: it walks what the feature
 modules register (`registry.js`). To add something to the village:
 
 1. **A new module** in `src/web/village/`, importing what it draws with from
@@ -159,8 +159,8 @@ modules register (`registry.js`). To add something to the village:
      gives it no keyboard target.
    - `registerLabels(fn, order)` for its names on the map, and
      `{ avoid: rect }` items for sprites labels must keep clear of.
-   - `registerCounter({ plane, order, render(v) })` for a step of the flow
-     strip ('development', 'runtime' or 'world').
+   - There is no row of counters under the map (#405): a count worth
+     showing goes in the area's label (`sub`) or its dialog.
    - A theme registers with `registerTheme` (`themes/registry.js`).
 3. **Import it in `main.js`.** That is all `main.js` does: import the
    modules, then `start()`.

@@ -6,14 +6,14 @@ import { state } from './state.js';
 import { THEMES } from './themes/registry.js';
 import { placeOverlays } from './registry.js';
 import { cv, layout, shownScenes } from './layout.js';
-import { esc, fit, renderFlow, toast } from './panels.js';
+import { esc, fit, toast } from './panels.js';
 import { kbox, kbuttons, placeKeys, repoUrl } from './dialogs.js';
 import { diff } from './trips.js';
 import { releaseOf, sail } from './ship.js';
 import { noteVoyages } from './voyages.js';
 import { scrollToVillage } from './envrow.js';
 import { fadeLive } from './features.js';
-import { draw, updateWorld } from './worlds.js';
+import { draw, updateWorld, worldWords } from './worlds.js';
 import { legend, renderLegend } from './key.js';
 import { hashName } from './saver.js';
 
@@ -72,15 +72,13 @@ function select(want) {
   else return;
   const view = state.view;
   if (view.world) {
-    document.getElementById('workflow').textContent = `· ${w.dev} builds ${w.platform}`;
+    document.getElementById('workflow').textContent = worldWords(w);
     nameBar(`${w.dev} \u21c4 ${w.platform}`, villages.find(x => x.project === w.dev));
-    renderFlow(w, 'world');
   } else {
     const sc = state.scenes[view.village];
     document.getElementById('workflow').textContent = describe(sc.v);
     nameBar(sc.v.project, sc.v);
     if (cv.width !== sc.L.W || cv.height !== sc.L.H) { cv.width = sc.L.W; cv.height = sc.L.H; }
-    renderFlow(sc.v);
   }
   fit();
   if (state.reduce) draw(0);

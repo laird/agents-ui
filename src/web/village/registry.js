@@ -11,9 +11,6 @@
  *   registerLabels(fn, order)   fn(scene, theme) lists the names over one
  *       village: { x, y, anchor, text, sub, cls, width } in scene pixels, or
  *       { avoid: { x, y, w, h } }, a sprite no label may cover.
- *   registerCounter({ plane, order, render(v) })   one step of the flow strip
- *       for villages of that plane ('development', 'runtime') or for worlds
- *       ('world'): [label, words, count], or a list of them.
  *   registerOverlay(fn, order)   fn() places something over the map (feature
  *       banners, area labels, keyboard targets) after it moves or changes.
  *
@@ -37,12 +34,6 @@ export const LABELS = [];
 export function registerLabels(fn, order = 0) {
   LABELS.push({ fn, order });
   byOrder(LABELS);
-}
-
-export const COUNTERS = [];
-export function registerCounter(counter) {
-  COUNTERS.push({ plane: 'development', ...counter });
-  byOrder(COUNTERS);
 }
 
 export const OVERLAYS = [];

@@ -13,7 +13,7 @@ import { state } from './state.js';
 import { P, R, STOPCOL, blink } from './palette.js';
 import { puffs } from './sprites/houses.js';
 import { badge } from './scenery.js';
-import { registerCounter, registerHit, registerLabels, registerLayer, tap } from './registry.js';
+import { registerHit, registerLabels, registerLayer, tap } from './registry.js';
 import { porterPos, shownScenes } from './layout.js';
 import { toast } from './panels.js';
 import { isSha, issueItems, link, repoUrl } from './dialogs.js';
@@ -248,10 +248,3 @@ registerLabels((sc, theme) => {
   return out;
 }, 20);
 
-/* ---------- Counters ---------- */
-registerCounter({ order: 50, render: v => [state.T.labels.quay, `pushed to ${v.pipeline.integration || 'integration'}`, v.pipeline.quay.length] });
-registerCounter({ order: 60, render(v) {
-  const stops = v.pipeline.stops;
-  return stops.map((s, i) => [i === stops.length - 1 ? `${state.T.labels.castle} · ${s.name}` : s.name, i === 0 && v.pipeline.sentinel !== 'absent' ? `sentinel: ${v.pipeline.sentinel}` : 'environment', s.issues.length]);
-} });
-registerCounter({ plane: 'runtime', order: 80, render: v => [state.T.labels.castle, 'completed in 24h', v.pipeline.stops.reduce((n, s) => n + s.issues.length, 0)] });

@@ -190,8 +190,8 @@ for autocoder, read from the merge jobs' files on this host):
 
 A merge train rides one cart, its crates chained. Busy tables are lit and
 idle ones dark. Click the gatehouse for the queue, each table and recent
-outcomes; click a crate for its state, attempt and the failure comment. The
-counters add "Gate: N queued · M gating · K failed today". There is no
+outcomes; click a crate for its state, attempt and the failure comment. Its
+label reads "N queued · M gating", plus "· K failed today" once any have. There is no
 gatehouse for runtime villages, or when nothing says what the gate is doing.
 `GATE=1 tools/mock/demo.sh` runs a simulated gate that passes, fails,
 conflicts and trains in turn.
@@ -314,7 +314,7 @@ got:
 **Following.** Select a banner or its label (Tab to it, then Enter or Space).
 A marching trail runs from the banner to each counted subtask, wherever it
 is: a crate at the docks, a note on the board, a house, the quay, a lock, the
-harbour, or a barge. A strip appears above the counters:
+harbour, or a barge. A strip appears under the map:
 
 `Spec ✓ › Build 4/4 › Master-green 4/4 › Dev 4/4 › UAT 2/4 › Prod 0/4`
 
@@ -464,7 +464,9 @@ a worker on one of the platform's task queues reports a build ID (Temporal
 worker versioning: `deploymentOptions.buildId`, or the older
 `workerVersionCapabilities.buildId`) that is a prefix of it, or it of the
 build ID, at least 7 characters long, so build workers with the git sha.
-Without build IDs the village can't tell, and says so in the counters.
+Without build IDs the village can't tell, and says so in the bar, next to the
+world's name: `· release abc1234 running on the platform` (or `rolling out`,
+or `platform reports no build IDs`), then the build IDs its workers report.
 
 ## Sources
 

@@ -11,7 +11,7 @@ import { puffs } from './sprites/houses.js';
 import { MEDIEVAL } from './themes/medieval.js';
 import { M, MODERN } from './themes/modern.js';
 import { FUTURE } from './themes/future.js';
-import { drawVillage, registerCounter } from './registry.js';
+import { drawVillage } from './registry.js';
 import { SIDE, ctx, cv, otherTheme, porterPos, worldGeom } from './layout.js';
 import { SAIL } from './ship.js';
 import { fit } from './panels.js';
@@ -135,13 +135,12 @@ export function draw(t) {
   if (sc && sc.v) drawVillage(ctx, sc, t);
 }
 
-/* World counters follow the loop: raised, being fixed, released, running. */
+/* The bar's line for a world. The map draws the incidents, the fixes, the
+ * houses and what is shipping; what it can't draw is which release the
+ * platform runs and the build IDs its workers report, so the line says so. */
 const short = s => (s ? s.slice(0, 7) : '—');
-const busy = sc => (sc && sc.v ? sc.v.houses.filter(h => h.status === 'working').length : 0);
-registerCounter({ plane: 'world', order: 10, render: w => ['Incidents', 'raised by the platform', w.incidents.filter(i => !i.in_progress).length] });
-registerCounter({ plane: 'world', order: 20, render: w => ['Being fixed', `claimed in ${w.dev}`, w.incidents.filter(i => i.in_progress).length] });
-registerCounter({ plane: 'world', order: 30, render: w => ['Dev village', 'houses working', busy(state.scenes[w.dev])] });
-registerCounter({ plane: 'world', order: 40, render: w => ['Shipping', 'released, not yet running', w.shipping.length] });
-registerCounter({ plane: 'world', order: 50, render: w => ['Release', w.landed === null ? 'platform reports no build IDs' : w.landed ? 'running on the platform' : 'rolling out', short(w.release)] });
-registerCounter({ plane: 'world', order: 60, render: w => ['Platform', 'workstreams busy', busy(state.scenes[w.platform])] });
-registerCounter({ plane: 'world', order: 70, render: w => ['Platform builds', 'reported by workers', w.platform_builds.map(short).join(' ') || '—'] });
+export function worldWords(w) {
+  const release = w.landed === null ? 'platform reports no build IDs' : w.landed ? 'running on the platform' : 'rolling out';
+  const builds = (w.platform_builds || []).map(short).join(' ');
+  return `· ${w.dev} builds ${w.platform} · release ${short(w.release)} ${release}${builds ? ` · platform builds ${builds}` : ''}`;
+}

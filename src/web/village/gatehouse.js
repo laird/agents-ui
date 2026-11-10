@@ -21,7 +21,7 @@ import { state } from './state.js';
 import { NOTECOL, P, R, blink } from './palette.js';
 import { badge, numberTag } from './scenery.js';
 import { drawAction, person } from './people.js';
-import { registerCounter, registerHit, registerLabels, registerLayer, tap } from './registry.js';
+import { registerHit, registerLabels, registerLayer, tap } from './registry.js';
 import { quaySpot } from './ship.js';
 import { issueLabel, issueOf, link } from './dialogs.js';
 
@@ -215,20 +215,15 @@ registerHit({ kind: 'gatecrate', dialog(o, sc, theme) {
     links: [link(issueLabel(o.n), it.url), e && e.failure_url && e.failure_url !== it.url ? link('What went wrong', e.failure_url) : null] };
 } });
 
-/* ---------- Label and counter ---------- */
+/* ---------- Label ---------- */
+/* Merge jobs that failed or hit a conflict today. */
+function failedToday(v) {
+  const today = new Date().toISOString().slice(0, 10);
+  return gateEntries(v).filter(e => (e.state === 'failed' || e.state === 'conflict') && (!e.started_at || e.started_at.slice(0, 10) === today)).length;
+}
 registerLabels((sc, theme) => {
   const g = sc.L.gate; if (!g) return [];
-  const gs = gateSpots(sc.v, sc.L);
+  const gs = gateSpots(sc.v, sc.L), failed = failedToday(sc.v);
   // West of the master crate, over the line: the ground under the gatehouse is the quay's, and east of it stand the locks.
-  return [{ x: g.rx - 15, y: g.y + 6, anchor: 'right', text: `${theme.labels.gate} · merge gate`, sub: `${gs.queued} queued · ${gs.gating} gating` }];
+  return [{ x: g.rx - 15, y: g.y + 6, anchor: 'right', text: `${theme.labels.gate} · merge gate`, sub: `${gs.queued} queued · ${gs.gating} gating${failed ? ` · ${failed} failed today` : ''}` }];
 }, 15);
-/* "Gate: N queued · M gating · K failed today", between the houses and the
- * quay. A train counts once, as it does at the gatehouse. */
-registerCounter({ order: 45, render(v) {
-  const es = gateEntries(v);
-  if (!v.pipeline.merge && !es.length) return null;
-  const count = st => new Set(es.filter(e => e.state === st).map(e => e.train || '#' + e.issue)).size;
-  const today = new Date().toISOString().slice(0, 10);
-  const failed = es.filter(e => (e.state === 'failed' || e.state === 'conflict') && (!e.started_at || e.started_at.slice(0, 10) === today)).length;
-  return ['Gate', `${count('queued')} queued · ${count('gating')} gating · ${failed} failed today`, es.filter(e => IN_GATE.has(e.state)).length];
-} });
