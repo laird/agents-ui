@@ -26,5 +26,20 @@ export function houseLabel(name, house, title) {
   return { parts: [name, `· #${n}`], sub: shortTitle(title) || null };
 }
 
+/* A feature flag's label (#441): its number, a name of a word or two, and
+ * its subtasks landed of all: `#417 Hi-res · 1/6`. The name is what comes
+ * before a colon ("Harden swarm recognition: …"), unless that is a one-word
+ * area tag ("Village: …", "Proposal: …"); a "(#…)" is left out. The full
+ * title is in the dialog. */
+export function flagLabel(n, title, build) {
+  let t = String(title || '').trim();
+  const colon = t.match(/^([^:]{1,40}):\s*(.*)$/);
+  if (colon) t = /\s/.test(colon[1].trim()) ? colon[1] : colon[2];
+  t = t.replace(/\s*[([].*$/, '');
+  const name = shortTitle(t, 2, 12);
+  const b = build || { landed: 0, total: 0 };
+  return `#${n}${name ? ' ' + name : ''} · ${b.landed}/${b.total}`;
+}
+
 /* The hall's subtitle: the manager, and its issue when it has one. */
 export const managerSub = m => (m && m.issue ? `manager · #${m.issue}` : 'manager');

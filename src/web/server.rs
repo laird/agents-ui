@@ -1633,6 +1633,16 @@ mod tests {
 
     /// `?explain=1` (#397): every agent the sources see, with its swarm and
     /// role; the swarms themselves are the same as without it.
+    #[test]
+    fn village_html_names_each_feature_flag() {
+        let body = &village_source();
+        // The number on the cloth (#441), and a label under each flag edged in its colour.
+        assert!(body.contains("if (String(f.number).length <= 3 && f.number >= 0) digits(c, x + 2, y + 2, f.number, P.white);"));
+        assert!(body.contains("text: flagLabel(f.number, f.title, b), cls: 'flag', edge: g.col, width: 29 };"));
+        assert!(body.contains("return `#${n}${name ? ' ' + name : ''} · ${b.landed}/${b.total}`;"));
+        assert!(body.contains("const edge = l.edge && /^#[0-9a-f]{3,8}$/i.test(l.edge) ? `border-color:${l.edge};` : '';"));
+    }
+
     #[tokio::test]
     async fn api_swarms_explain_lists_every_agent_and_its_role() {
         let shared = new_shared_state();

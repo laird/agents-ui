@@ -65,7 +65,9 @@ export function placeLabels() {
       if (l.size && l.size * s < 3.5) return;
       const tight = l.size && l.size * s < 8 && l.short;
       const size = l.size ? `font-size:${Math.max(6, Math.min(16, l.size * s))}px;` : '';
-      html += `<div class="al${l.cls ? ' ' + esc(l.cls) : ''}" aria-hidden="true" data-anchor="${l.anchor}"${l.fixed ? ' data-fixed="1"' : ''} style="${size}left:${ox0 + (ox + l.x) * s}px;top:${oy0 + (oy + l.y) * s}px;transform:${shift[l.anchor]};${max}">` +
+      // A label given an edge colour is bordered in it (#441).
+      const edge = l.edge && /^#[0-9a-f]{3,8}$/i.test(l.edge) ? `border-color:${l.edge};` : '';
+      html += `<div class="al${l.cls ? ' ' + esc(l.cls) : ''}" aria-hidden="true" data-anchor="${l.anchor}"${l.fixed ? ' data-fixed="1"' : ''} style="${size}${edge}left:${ox0 + (ox + l.x) * s}px;top:${oy0 + (oy + l.y) * s}px;transform:${shift[l.anchor]};${max}">` +
         `${tight ? esc(l.short) : l.parts ? l.parts.map(p => `<span>${esc(p)}</span>`).join(' ') : esc(l.text)}${l.sub ? ` <small>${esc(l.sub)}</small>` : ''}</div>`;
     }));
   });
