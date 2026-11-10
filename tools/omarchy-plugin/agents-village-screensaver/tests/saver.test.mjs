@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  staleWords, cycleOrder, dimmedAt, dismisses, driftAt, gateWords, hashName, nextName, saverOptions, saverSummary,
+  buildEntry, staleWords, cycleOrder, dimmedAt, dismisses, driftAt, gateWords, hashName, nextName, saverOptions, saverSummary,
 } from '../../../../src/web/village/saver.js';
 
 const fixture = JSON.parse(readFileSync(new URL('../../agents-village/tests/fixtures/village.json', import.meta.url)));
@@ -63,6 +63,7 @@ test('the strip counts houses, the gate, the quay, each stop and what waits on y
     gate: { queued: 1, gating: 2, failed: 2 },
     quay: 3,
     stops: [{ name: 'nuc-1', count: 1 }, { name: 'release', count: 0 }],
+    build: null,
   });
 });
 
@@ -125,4 +126,25 @@ test('how long ago, in a word', () => {
   assert.equal(staleWords(150000), '3m ago');
   assert.equal(staleWords(7200000), '2h ago');
   assert.equal(staleWords(-5), '0s ago');
+});
+
+// The build (#413's `build`, #415): a red one is BUILD BROKEN on the strip.
+const running = JSON.parse(readFileSync(new URL('../../agents-village/tests/fixtures/village-build-running.json', import.meta.url)));
+const at = iso => iso.slice(11, 16);
+
+test('a red build is BUILD BROKEN, with what and since when', () => {
+  const red = { state: 'red', since: '2026-11-09T20:40:00Z', tests: ['a', 'b', 'c'], jobs: [{ name: 'test (macos-latest)', os: 'macOS', state: 'red' }] };
+  assert.deepEqual(buildEntry(red, at), { red: true, text: 'BUILD BROKEN', detail: '3 tests failing · since 20:40' });
+  assert.deepEqual(buildEntry({ ...red, partial: true, tests: ['a'] }, at), { red: true, text: 'BUILD BROKEN', detail: 'on macOS · 1 test failing · since 20:40' });
+  assert.deepEqual(buildEntry({ state: 'red' }, at), { red: true, text: 'BUILD BROKEN', detail: '' });
+});
+
+test('a running build says so; green and unknown add nothing', () => {
+  const v = running.villages[0];
+  assert.equal(v.build.state, 'running', 'recorded while CI ran on master');
+  assert.deepEqual(buildEntry(saverSummary(v).build), { red: false, text: 'Build running', detail: '' });
+  assert.equal(buildEntry({ state: 'green' }), null);
+  assert.equal(buildEntry({ state: 'unknown' }), null);
+  assert.equal(buildEntry(null), null);
+  assert.equal(saverSummary(fixture.villages[0]).build, null, 'a village from before #413 has none');
 });

@@ -1,0 +1,714 @@
+{
+  "villages": [
+    {
+      "backlog": [
+        {
+          "kind": "feature",
+          "number": 424,
+          "priority": "P1",
+          "title": "agents-tui service install: set up the server as a systemd user service (launchd on macOS) for anyone who installs it",
+          "url": "https://github.com/laird/agents-ui/issues/424"
+        },
+        {
+          "kind": "feature",
+          "number": 418,
+          "parent": 417,
+          "priority": "P2",
+          "title": "Hi-res village (#417) 1/6: renderer supports a 2× detail grid, with 1× and 2× sprites side by side",
+          "url": "https://github.com/laird/agents-ui/issues/418",
+          "waits_on": [
+            402
+          ]
+        },
+        {
+          "kind": "feature",
+          "number": 419,
+          "parent": 417,
+          "priority": "P2",
+          "title": "Hi-res village (#417) 2/6: detailed people at 2× (faces, role clothing, tools, actions) in all themes",
+          "url": "https://github.com/laird/agents-ui/issues/419",
+          "waits_on": [
+            418
+          ]
+        },
+        {
+          "kind": "feature",
+          "number": 420,
+          "parent": 417,
+          "priority": "P2",
+          "title": "Hi-res village (#417) 3/6: crates and cargo at 2×, with the issue number stencilled on",
+          "url": "https://github.com/laird/agents-ui/issues/420",
+          "waits_on": [
+            418
+          ]
+        },
+        {
+          "kind": "feature",
+          "number": 421,
+          "parent": 417,
+          "priority": "P2",
+          "title": "Hi-res village (#417) 4/6: houses, castle, gatehouse, board, docks and quay at 2×",
+          "url": "https://github.com/laird/agents-ui/issues/421",
+          "waits_on": [
+            418
+          ]
+        },
+        {
+          "kind": "feature",
+          "number": 422,
+          "parent": 417,
+          "priority": "P2",
+          "title": "Hi-res village (#417) 5/6: scenery, water, boats and ships, the environment row and the screensaver at 2×",
+          "url": "https://github.com/laird/agents-ui/issues/422",
+          "waits_on": [
+            418
+          ]
+        },
+        {
+          "kind": "feature",
+          "number": 423,
+          "parent": 417,
+          "priority": "P2",
+          "title": "Hi-res village (#417) 6/6: redraw the key and remove the 1× code paths",
+          "url": "https://github.com/laird/agents-ui/issues/423",
+          "waits_on": [
+            419,
+            420,
+            421,
+            422
+          ]
+        }
+      ],
+      "board": [],
+      "build": {
+        "jobs": [
+          {
+            "name": "test (macos-latest)",
+            "os": "macOS",
+            "state": "running",
+            "url": "https://github.com/laird/agents-ui/actions/runs/42741259583/job/129582588972"
+          },
+          {
+            "name": "test (ubuntu-latest)",
+            "os": "Linux",
+            "state": "running",
+            "url": "https://github.com/laird/agents-ui/actions/runs/42741259583/job/129582588488"
+          }
+        ],
+        "sha": "b7eae594f9788538b69cf892c7dbb4fce35358e5",
+        "source": "ci",
+        "state": "running",
+        "url": "https://github.com/laird/agents-ui/actions/runs/42741259583"
+      },
+      "builds": [],
+      "features": [
+        {
+          "build": {
+            "landed": 4,
+            "total": 5
+          },
+          "linked_by": "body",
+          "live": false,
+          "number": 394,
+          "promotion": "subtask",
+          "stages": [
+            {
+              "name": "nuc-1",
+              "reached": 3,
+              "total": 5,
+              "unknown": false
+            },
+            {
+              "name": "release",
+              "reached": 3,
+              "total": 5,
+              "unknown": false
+            }
+          ],
+          "stuck": [],
+          "subtasks": [
+            {
+              "blocked": null,
+              "dropped": false,
+              "number": 395,
+              "stop": "release",
+              "title": "Swarm recognition: key swarms by git repo identity and group agents by worktree membership",
+              "where": "stop"
+            },
+            {
+              "blocked": null,
+              "dropped": false,
+              "number": 396,
+              "stop": "release",
+              "title": "Swarm recognition: choose the manager by evidence (manifest pane, AUTOCODER_MANAGER marker, label, main checkout)",
+              "where": "stop"
+            },
+            {
+              "blocked": null,
+              "dropped": false,
+              "number": 397,
+              "stop": "release",
+              "title": "Swarm recognition: /api/swarms?explain=1 says why each agent was or wasn't grouped",
+              "where": "stop"
+            },
+            {
+              "blocked": null,
+              "dropped": false,
+              "number": 398,
+              "title": "Swarm recognition: a swarm with a manifest but nothing running shows as dormant, not gone",
+              "where": "quay"
+            },
+            {
+              "blocked": null,
+              "dropped": false,
+              "number": 399,
+              "title": "Swarm recognition: the agents-tui terminal view uses the same recognizer as the web village",
+              "where": "house"
+            }
+          ],
+          "title": "Harden swarm recognition: identify swarms from repo identity, manifests and process markers, not naming conventions",
+          "url": "https://github.com/laird/agents-ui/issues/394"
+        },
+        {
+          "build": {
+            "landed": 1,
+            "total": 3
+          },
+          "linked_by": "body",
+          "live": false,
+          "number": 410,
+          "promotion": "subtask",
+          "stages": [
+            {
+              "name": "nuc-1",
+              "reached": 1,
+              "total": 3,
+              "unknown": false
+            },
+            {
+              "name": "release",
+              "reached": 1,
+              "total": 3,
+              "unknown": false
+            }
+          ],
+          "stuck": [],
+          "subtasks": [
+            {
+              "blocked": null,
+              "dropped": false,
+              "number": 413,
+              "stop": "release",
+              "title": "Build health: a build field in /api/village from CI check runs, the sentinel and the merge gate",
+              "where": "stop"
+            },
+            {
+              "blocked": null,
+              "dropped": false,
+              "number": 414,
+              "title": "Village: a storm, a BUILD BROKEN sign and a blame crate when the build is red (weather.js)",
+              "where": "backlog"
+            },
+            {
+              "blocked": null,
+              "dropped": false,
+              "number": 415,
+              "title": "Bar widget and screensaver strip show a red build",
+              "where": "house"
+            }
+          ],
+          "title": "Village: a broken build is unmissable: storm over the village, BUILD BROKEN sign, red status (from CI check runs, sentinel, gate)",
+          "url": "https://github.com/laird/agents-ui/issues/410"
+        },
+        {
+          "build": {
+            "landed": 0,
+            "total": 6
+          },
+          "linked_by": "body",
+          "live": false,
+          "number": 417,
+          "promotion": "subtask",
+          "stages": [
+            {
+              "name": "nuc-1",
+              "reached": 0,
+              "total": 6,
+              "unknown": false
+            },
+            {
+              "name": "release",
+              "reached": 0,
+              "total": 6,
+              "unknown": false
+            }
+          ],
+          "stuck": [],
+          "subtasks": [
+            {
+              "blocked": null,
+              "dropped": false,
+              "number": 418,
+              "title": "Hi-res village (#417) 1/6: renderer supports a 2× detail grid, with 1× and 2× sprites side by side",
+              "where": "backlog"
+            },
+            {
+              "blocked": null,
+              "dropped": false,
+              "number": 419,
+              "title": "Hi-res village (#417) 2/6: detailed people at 2× (faces, role clothing, tools, actions) in all themes",
+              "where": "backlog"
+            },
+            {
+              "blocked": null,
+              "dropped": false,
+              "number": 420,
+              "title": "Hi-res village (#417) 3/6: crates and cargo at 2×, with the issue number stencilled on",
+              "where": "backlog"
+            },
+            {
+              "blocked": null,
+              "dropped": false,
+              "number": 421,
+              "title": "Hi-res village (#417) 4/6: houses, castle, gatehouse, board, docks and quay at 2×",
+              "where": "backlog"
+            },
+            {
+              "blocked": null,
+              "dropped": false,
+              "number": 422,
+              "title": "Hi-res village (#417) 5/6: scenery, water, boats and ships, the environment row and the screensaver at 2×",
+              "where": "backlog"
+            },
+            {
+              "blocked": null,
+              "dropped": false,
+              "number": 423,
+              "title": "Hi-res village (#417) 6/6: redraw the key and remove the 1× code paths",
+              "where": "backlog"
+            }
+          ],
+          "title": "Proposal: finer-resolution village art (2× detail grid): detailed workers, numbered crates, clearer buildings",
+          "url": "https://github.com/laird/agents-ui/issues/417"
+        }
+      ],
+      "framework": "autocoder",
+      "houses": [
+        {
+          "action": "thinking",
+          "branch": "feature/issue-415",
+          "crew": [
+            "worker-1"
+          ],
+          "id": "/home/laird/src/agents-ui-wt-1",
+          "issue": 415,
+          "issue_title": "Bar widget and screensaver strip show a red build",
+          "kind": "feature",
+          "links": [
+            {
+              "label": "Agent session",
+              "url": "/#/swarm/agents-ui/agent/worker-1"
+            },
+            {
+              "label": "GitHub issue #415",
+              "url": "https://github.com/laird/agents-ui/issues/415"
+            }
+          ],
+          "priority": "P2",
+          "role": "worker-1",
+          "since": "2026-11-10T02:14:42Z",
+          "status": "working",
+          "subagents": []
+        },
+        {
+          "action": null,
+          "branch": "feature/issue-402",
+          "crew": [
+            "worker-2"
+          ],
+          "id": "/home/laird/src/agents-ui-wt-2",
+          "issue": 402,
+          "issue_title": "Village: label each worker house with the issue it's working on (wt-1 · #400)",
+          "kind": "feature",
+          "links": [
+            {
+              "label": "Agent session",
+              "url": "/#/swarm/agents-ui/agent/worker-2"
+            },
+            {
+              "label": "GitHub issue #402",
+              "url": "https://github.com/laird/agents-ui/issues/402"
+            }
+          ],
+          "priority": "P2",
+          "role": "worker-2",
+          "since": "2026-11-10T02:14:42Z",
+          "status": "working",
+          "subagents": []
+        },
+        {
+          "action": "running",
+          "branch": "feature/issue-399",
+          "crew": [
+            "worker-3"
+          ],
+          "id": "/home/laird/src/agents-ui-wt-3",
+          "issue": 399,
+          "issue_title": "Swarm recognition: the agents-tui terminal view uses the same recognizer as the web village",
+          "kind": "feature",
+          "links": [
+            {
+              "label": "Agent session",
+              "url": "/#/swarm/agents-ui/agent/worker-3"
+            },
+            {
+              "label": "GitHub issue #399",
+              "url": "https://github.com/laird/agents-ui/issues/399"
+            }
+          ],
+          "priority": "P2",
+          "role": "worker-3",
+          "since": "2026-11-10T02:14:42Z",
+          "status": "working",
+          "subagents": []
+        },
+        {
+          "action": "thinking",
+          "branch": "feature/issue-411",
+          "crew": [
+            "worker-4"
+          ],
+          "id": "/home/laird/src/agents-ui-wt-4",
+          "issue": 411,
+          "issue_title": "Proposal: idle workers show 'zzz' instead of a lingering ✓",
+          "kind": "feature",
+          "links": [
+            {
+              "label": "Agent session",
+              "url": "/#/swarm/agents-ui/agent/worker-4"
+            },
+            {
+              "label": "GitHub issue #411",
+              "url": "https://github.com/laird/agents-ui/issues/411"
+            }
+          ],
+          "priority": "P3",
+          "role": "worker-4",
+          "since": "2026-11-10T02:14:48Z",
+          "status": "working",
+          "subagents": []
+        },
+        {
+          "action": "thinking",
+          "branch": "feature/issue-412",
+          "crew": [
+            "worker-5"
+          ],
+          "id": "/home/laird/src/agents-ui-wt-5",
+          "issue": 412,
+          "issue_title": "Proposal: a context-use barrel per agent (fills toward the wedge point), plus retry and failure markers",
+          "kind": "feature",
+          "links": [
+            {
+              "label": "Agent session",
+              "url": "/#/swarm/agents-ui/agent/worker-5"
+            },
+            {
+              "label": "GitHub issue #412",
+              "url": "https://github.com/laird/agents-ui/issues/412"
+            }
+          ],
+          "priority": "P3",
+          "role": "worker-5",
+          "since": "2026-11-10T02:14:42Z",
+          "status": "working",
+          "subagents": []
+        }
+      ],
+      "manager": {
+        "action": null,
+        "branch": "master",
+        "crew": [
+          "manager"
+        ],
+        "id": "manager",
+        "issue": null,
+        "issue_title": null,
+        "kind": "cottage",
+        "links": [
+          {
+            "label": "Agent session",
+            "url": "/#/swarm/agents-ui/agent/manager"
+          }
+        ],
+        "priority": null,
+        "role": "manager",
+        "status": "done",
+        "subagents": []
+      },
+      "pipeline": {
+        "gates": [
+          {
+            "failure_url": "https://github.com/laird/agents-ui/issues/402",
+            "issue": 402,
+            "landed": false,
+            "started_at": "2026-11-10T01:33:59Z",
+            "state": "conflict"
+          }
+        ],
+        "integration": "master",
+        "merge": {
+          "busy": [],
+          "slots": 8
+        },
+        "promotion": "subtask",
+        "quay": [
+          398,
+          416
+        ],
+        "release": "cab359ac750a8d66a01e1f82ddf9a197e620cd0f",
+        "sentinel": "absent",
+        "stops": [
+          {
+            "cargo": [
+              413,
+              409,
+              407,
+              397,
+              404,
+              408,
+              405,
+              396,
+              406,
+              395,
+              403,
+              400,
+              401,
+              393,
+              375,
+              382,
+              385,
+              391,
+              392,
+              390,
+              386,
+              389,
+              384,
+              380,
+              372,
+              383,
+              388,
+              381,
+              371,
+              379,
+              378,
+              368,
+              370,
+              362,
+              377,
+              369,
+              374,
+              373,
+              364,
+              366
+            ],
+            "cargo_more": 15,
+            "deployed_at": "2026-11-10T02:11:43Z",
+            "deployed_by": "laird",
+            "health": {
+              "state": "ok"
+            },
+            "issues": [],
+            "kind": "environment",
+            "name": "nuc-1",
+            "sha": "cab359ac750a8d66a01e1f82ddf9a197e620cd0f",
+            "source": "deployment"
+          },
+          {
+            "cargo": [
+              413,
+              409,
+              407,
+              397,
+              404,
+              408,
+              405,
+              396,
+              406,
+              395,
+              403,
+              400,
+              401,
+              393,
+              375,
+              382,
+              385,
+              391,
+              392,
+              390,
+              386,
+              389,
+              384,
+              380,
+              372,
+              383,
+              388,
+              381,
+              371,
+              379,
+              378,
+              368,
+              370,
+              362,
+              377,
+              369,
+              374,
+              373,
+              364,
+              366
+            ],
+            "cargo_more": 15,
+            "deployed_at": "2026-11-10T02:11:45Z",
+            "deployed_by": "laird",
+            "health": {
+              "state": "ok"
+            },
+            "issues": [
+              413,
+              409,
+              407,
+              397,
+              404,
+              408,
+              405,
+              396,
+              406,
+              395,
+              403,
+              400
+            ],
+            "kind": "environment",
+            "name": "release",
+            "sha": "cab359ac750a8d66a01e1f82ddf9a197e620cd0f",
+            "source": "deployment",
+            "tag": "v2026.11.09.5",
+            "url": "https://github.com/laird/agents-ui/releases/tag/v2026.11.09.5"
+          }
+        ],
+        "titles": {
+          "395": "Swarm recognition: key swarms by git repo identity and group agents by worktree membership",
+          "396": "Swarm recognition: choose the manager by evidence (manifest pane, AUTOCODER_MANAGER marker, label, main checkout)",
+          "397": "Swarm recognition: /api/swarms?explain=1 says why each agent was or wasn't grouped",
+          "398": "Swarm recognition: a swarm with a manifest but nothing running shows as dormant, not gone",
+          "400": "Village: Fit scales the map to fill the window, width and height, with no scrolling",
+          "403": "omarchy-plugin install.sh --host: remote 'omarchy plugin enable' fails (OMARCHY_PATH is not set), leaving no screensaver",
+          "404": "Village: crates show priority, epic, and ready/waiting/blocked (with reason); docks arrange crates by dependency",
+          "405": "Village: remove the counter row under the map; the village already shows it",
+          "406": "Village: every epic gets its own stable, unique flag colour (not by position, and not all gold when live)",
+          "407": "Village environment row: a world's platform is the production village (last #376 acceptance item)",
+          "408": "CI red on master: screensaver install test assumes Omarchy is installed on the test machine",
+          "409": "CI on macOS: deploy and release script tests fail (scripts and tests assume Linux)",
+          "413": "Build health: a build field in /api/village from CI check runs, the sentinel and the merge gate",
+          "416": "omarchy-plugin install.sh: enables the plugin before Omarchy has registered it, leaving no screensaver"
+        },
+        "voyages": [
+          {
+            "finished_at": "2026-11-10T02:11:43Z",
+            "from": "dev",
+            "issues": [
+              413,
+              409,
+              407,
+              397,
+              404,
+              408,
+              405,
+              396,
+              406,
+              395,
+              403,
+              400
+            ],
+            "issues_more": true,
+            "sha": "cab359ac750a8d66a01e1f82ddf9a197e620cd0f",
+            "started_at": "2026-11-10T02:11:17Z",
+            "state": "docked",
+            "to": "nuc-1"
+          },
+          {
+            "finished_at": "2026-11-10T02:11:45Z",
+            "from": "nuc-1",
+            "issues": [
+              413,
+              409,
+              407,
+              397,
+              404,
+              408,
+              405,
+              396,
+              406,
+              395,
+              403,
+              400,
+              401,
+              393,
+              375,
+              382,
+              385,
+              391,
+              392,
+              390,
+              386,
+              389,
+              384,
+              380,
+              372,
+              383,
+              388,
+              381,
+              371,
+              379,
+              378,
+              368,
+              370,
+              362,
+              377,
+              369,
+              374,
+              373,
+              364,
+              366,
+              363,
+              361,
+              360,
+              359,
+              356,
+              355,
+              358,
+              357,
+              354,
+              351,
+              352,
+              350,
+              349,
+              348,
+              347
+            ],
+            "issues_more": true,
+            "sha": "cab359ac750a8d66a01e1f82ddf9a197e620cd0f",
+            "started_at": "2026-11-10T02:11:45Z",
+            "state": "docked",
+            "tag": "v2026.11.09.5",
+            "to": "release",
+            "url": "https://github.com/laird/agents-ui/releases/tag/v2026.11.09.5"
+          }
+        ]
+      },
+      "plane": "development",
+      "project": "agents-ui",
+      "repo_path": "/home/laird/src/agents-ui",
+      "workflow": null
+    }
+  ]
+}

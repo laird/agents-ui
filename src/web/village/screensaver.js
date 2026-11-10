@@ -9,7 +9,7 @@
  * What it shows and when is decided in saver.js; this only puts it on screen.
  * data.js says after each poll whether the server answered ('village:polled'). */
 import { state } from './state.js';
-import { staleWords, cycleOrder, dimmedAt, dismisses, driftAt, gateWords, nextName, saverOptions, saverSummary } from './saver.js';
+import { buildEntry, staleWords, cycleOrder, dimmedAt, dismisses, driftAt, gateWords, nextName, saverOptions, saverSummary } from './saver.js';
 import { esc, fit } from './panels.js';
 import { placeOverlays } from './registry.js';
 
@@ -30,8 +30,11 @@ function renderSaverStrip(box, lastOk) {
   const s = saverSummary(v), view = state.view;
   const title = view.world ? view.world : s.project;
   const stops = s.stops.map(st => `<span class="ss-item"><b>${st.count}</b> ${esc(st.name)}</span>`).join('');
+  const b = buildEntry(s.build);
+  const build = b ? `<span class="ss-item ss-build${b.red ? ' ss-red' : ''}"><b>${esc(b.text)}</b>${b.detail ? ' ' + esc(b.detail) : ''}</span>` : '';
   box.innerHTML = `<div class="ss-row">
       <span class="ss-name">${esc(title)}</span>
+      ${build}
       <span class="ss-item ss-working"><b>${s.working}</b> working</span>
       <span class="ss-item"><b>${s.idle}</b> idle</span>
       <span class="ss-item${s.blocked ? ' ss-red' : ''}"><b>${s.blocked}</b> blocked</span>

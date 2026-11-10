@@ -211,6 +211,37 @@ function releases(villagesDoc, seen) {
   return { seen: next, sailed: sailed }
 }
 
+// The integration branch's build (#413's `build`): "red", "running", "green",
+// or "unknown" when the village doesn't say.
+var BUILD_RANK = { unknown: 0, green: 1, running: 2, red: 3 }
+function buildState(v) {
+  var s = v && v.build && v.build.state
+  return BUILD_RANK[s] !== undefined ? s : "unknown"
+}
+
+// "20:40": when, on this machine's clock. "" for no time.
+function clock(iso) {
+  var t = Date.parse(iso || "")
+  if (isNaN(t)) return ""
+  var d = new Date(t), pad = function(n) { return (n < 10 ? "0" : "") + n }
+  return pad(d.getHours()) + ":" + pad(d.getMinutes())
+}
+
+// The build in a few words: "build red · 3 tests failing since 20:40",
+// "build red on macOS since 20:40", "build running", "build green"; "" when
+// the village doesn't say.
+function buildWords(v) {
+  var b = (v && v.build) || {}, state = buildState(v)
+  if (state === "unknown") return ""
+  if (state !== "red") return "build " + state
+  var oses = []
+  ;(b.jobs || []).forEach(function(j) { if (j.state === "red" && j.os && oses.indexOf(j.os) < 0) oses.push(j.os) })
+  var head = "build red" + (b.partial && oses.length ? " on " + oses.join(", ") : "")
+  var n = (b.tests || []).length, since = clock(b.since)
+  var tail = (n ? n + (n === 1 ? " test" : " tests") + " failing" : "") + (since ? (n ? " " : "") + "since " + since : "")
+  return tail ? head + (n ? " · " : " ") + tail : head
+}
+
 // The bar icon: houses working, a red dot when anything waits on you, a ship
 // while a deployment sails (`sailing`: the projects whose ship is out), dimmed
 // when the server can't be reached. One village when one is picked, all of
@@ -219,11 +250,15 @@ function badge(villagesDoc, project, reachable, sailingProjects) {
   var vs = villagesOf(villagesDoc).filter(function(v) { return project === "" || v.project === project })
   var out = sailingProjects || []
   var sailing = vs.some(function(v) { return out.indexOf(v.project) >= 0 || !!(v.pipeline && v.pipeline.sailing) })
+  var worst = vs.reduce(function(w, v) { return !w || BUILD_RANK[buildState(v)] > BUILD_RANK[buildState(w)] ? v : w }, null)
   return {
     reachable: !!reachable,
     working: vs.reduce(function(n, v) { return n + working(v) }, 0),
     alert: vs.some(function(v) { return needsYou(v) > 0 }),
-    sailing: sailing
+    sailing: sailing,
+    // The worst build among them, and its words: the icon turns red for a red one.
+    build: worst ? buildState(worst) : "unknown",
+    buildWords: worst ? buildWords(worst) : ""
   }
 }
 
@@ -255,6 +290,6 @@ if (typeof module !== "undefined") {
     villageFor: villageFor, swarmFor: swarmFor, needsYou: needsYou, swarmRows: swarmRows,
     chooseProject: chooseProject, canGoBack: canGoBack, houseName: houseName, houseRows: houseRows,
     flow: flow, attention: attention, features: features, badge: badge, ago: ago, repoUrl: repoUrl,
-    releaseKey: releaseKey, releases: releases
+    releaseKey: releaseKey, releases: releases, buildState: buildState, buildWords: buildWords, clock: clock
   }
 }
