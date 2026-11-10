@@ -110,11 +110,11 @@ test("features carry their build progress", () => {
 })
 
 test("the bar badge: working, needs you, sailing, unreachable", () => {
-  assert.deepStrictEqual(M.badge(villages, "", true), { reachable: true, working: 3, alert: true, sailing: false })
+  assert.deepStrictEqual(M.badge(villages, "", true), { reachable: true, working: 3, alert: true, sailing: false, build: "unknown", buildWords: "" })
   const [, v2] = twoSwarms()
-  assert.deepStrictEqual(M.badge(v2, "shop", true), { reachable: true, working: 0, alert: true, sailing: false }, "one village when one is open")
+  assert.deepStrictEqual(M.badge(v2, "shop", true), { reachable: true, working: 0, alert: true, sailing: false, build: "unknown", buildWords: "" }, "one village when one is open")
   assert.strictEqual(M.badge(v2, "", true).working, 3, "all of them otherwise")
-  assert.deepStrictEqual(M.badge(null, "", false), { reachable: false, working: 0, alert: false, sailing: false })
+  assert.deepStrictEqual(M.badge(null, "", false), { reachable: false, working: 0, alert: false, sailing: false, build: "unknown", buildWords: "" })
   const sailing = { villages: [{ project: "x", houses: [], board: [], pipeline: { sailing: true } }] }
   assert.strictEqual(M.badge(sailing, "", true).sailing, true)
 })
@@ -152,4 +152,52 @@ test("a swarm of only its manager (zero workers) is still listed", () => {
   assert.deepStrictEqual(M.houseRows(BASE, v.villages[0], s.swarms[0]), [])
   assert.strictEqual(M.chooseProject(M.swarmRows(s, v), "", ""), "solo")
   assert.strictEqual(M.badge(v, "", true).working, 0)
+})
+
+// The build (#413's `build`, #415): the icon turns red for a red build, and
+// the tooltip and panel say what is failing and since when.
+const buildRunning = fixture("village-build-running.json")
+const withBuild = (build) => ({ villages: [Object.assign({}, buildRunning.villages[0], { build: build })] })
+const RED = { state: "red", since: "2026-11-09T20:40:00Z", tests: ["a", "b", "c"], url: "https://ci/run/1",
+  jobs: [{ name: "test (macos-latest)", os: "macOS", state: "red" }, { name: "test (ubuntu-latest)", os: "Linux", state: "red" }] }
+
+test("a running build, as recorded while CI ran on master", () => {
+  const v = M.villageFor(buildRunning, "agents-ui")
+  assert.strictEqual(M.buildState(v), "running")
+  assert.strictEqual(M.buildWords(v), "build running")
+  const b = M.badge(buildRunning, "", true)
+  assert.strictEqual(b.build, "running")
+  assert.strictEqual(b.buildWords, "build running")
+})
+
+test("a red build: how many tests fail, on which OS, since when", () => {
+  const at = M.clock(RED.since)
+  assert.match(at, /^\d\d:\d\d$/)
+  const v = withBuild(RED).villages[0]
+  assert.strictEqual(M.buildState(v), "red")
+  assert.strictEqual(M.buildWords(v), "build red · 3 tests failing since " + at)
+  assert.strictEqual(M.buildWords({ build: Object.assign({}, RED, { partial: true, tests: ["a"], jobs: [RED.jobs[0]] }) }),
+    "build red on macOS · 1 test failing since " + at)
+  assert.strictEqual(M.buildWords({ build: { state: "red" } }), "build red")
+  assert.strictEqual(M.buildWords({ build: { state: "red", since: RED.since } }), "build red since " + at)
+  const b = M.badge(withBuild(RED), "", true)
+  assert.strictEqual(b.build, "red")
+  assert.strictEqual(b.buildWords, "build red · 3 tests failing since " + at)
+})
+
+test("green, and villages that don't say", () => {
+  assert.strictEqual(M.buildWords(withBuild({ state: "green", sha: "abc" }).villages[0]), "build green")
+  assert.strictEqual(M.badge(withBuild({ state: "green" }), "", true).build, "green")
+  // A village recorded before #413 has no build at all.
+  assert.strictEqual(M.buildState(M.villageFor(villages, "agents-ui")), "unknown")
+  assert.strictEqual(M.buildWords(M.villageFor(villages, "agents-ui")), "")
+  assert.strictEqual(M.badge(villages, "", true).build, "unknown")
+  assert.strictEqual(M.buildState({ build: { state: "weird" } }), "unknown")
+})
+
+test("the worst build of all the villages decides the icon", () => {
+  const two = { villages: [Object.assign({}, buildRunning.villages[0], { project: "a", build: { state: "green" } }),
+                           Object.assign({}, buildRunning.villages[0], { project: "b", build: RED })] }
+  assert.strictEqual(M.badge(two, "", true).build, "red")
+  assert.strictEqual(M.badge(two, "a", true).build, "green", "one picked: only that one")
 })

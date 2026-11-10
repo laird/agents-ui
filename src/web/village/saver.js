@@ -59,7 +59,21 @@ export function saverSummary(v) {
     },
     quay: (p.quay || []).length,
     stops: (p.stops || []).map(s => ({ name: s.name, count: (s.issues || []).length })),
+    build: (v && v.build) || null,
   };
+}
+
+/* The strip's build entry (#413's `build`, #415): a red build is "BUILD
+ * BROKEN", readable across the room, with what and since when; a running one
+ * says so; green or unknown add nothing. `clock` formats an ISO time. */
+export function buildEntry(build, clock = iso => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })) {
+  if (!build || build.state === 'green' || !['red', 'running'].includes(build.state)) return null;
+  if (build.state === 'running') return { red: false, text: 'Build running', detail: '' };
+  const oses = [...new Set((build.jobs || []).filter(j => j.state === 'red' && j.os).map(j => j.os))];
+  const n = (build.tests || []).length, since = build.since && !Number.isNaN(Date.parse(build.since)) ? clock(build.since) : '';
+  const detail = [build.partial && oses.length ? `on ${oses.join(', ')}` : '', n ? `${n} ${n === 1 ? 'test' : 'tests'} failing` : '', since ? `since ${since}` : '']
+    .filter(Boolean).join(' · ');
+  return { red: true, text: 'BUILD BROKEN', detail };
 }
 
 /* The gate in a few words. */

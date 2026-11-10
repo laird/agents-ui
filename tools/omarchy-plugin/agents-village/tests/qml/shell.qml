@@ -69,6 +69,17 @@ ShellRoot {
       one.apply(Fixtures.swarms, shipped("bbb2222"))
       check("the ship sails on a new release", one.badge.sailing, true)
 
+      console.log("the build")
+      one.apply(Fixtures.swarms, Fixtures.villages)
+      check("no build: the icon is not red", one.buildRed, false)
+      one.apply(Fixtures.swarms, Fixtures.buildRunning)
+      check("a running build", one.badge.build, "running")
+      check("running is not red", one.buildRed, false)
+      check("the panel says it runs", one.buildWords, "build running")
+      one.apply(Fixtures.swarms, Fixtures.buildRed)
+      check("a red build turns the icon red", one.buildRed, true)
+      check("the panel says what fails", one.buildWords.indexOf("build red · 3 tests failing since ") === 0, true)
+
       console.log("server down")
       one.apply("", "")
       check("unreachable", one.reachable, false)

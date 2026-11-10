@@ -52,6 +52,10 @@ Panel {
   readonly property var attentionItems: Model.attention(base, village)
   readonly property var featureItems: Model.features(village)
   readonly property var badge: Model.badge(villagesDoc, project, reachable, sailing)
+  readonly property string buildState: Model.buildState(village)
+  // The icon turns red for a red build (#415).
+  readonly property bool buildRed: reachable && badge.build === "red"
+  readonly property string buildWords: Model.buildWords(village)
   readonly property string repo: Model.repoUrl(village)
   readonly property string host: base.replace(/^[a-z]+:\/\//i, "").replace(/:\d+$/, "")
 
@@ -141,8 +145,11 @@ Panel {
     labelText: root.showWorking && root.badge.working > 0 ? String(root.badge.working) : ""
     // Dimmed, like Omarchy's Tailscale icon when it is off, while the server can't be reached.
     dimmed: !root.reachable
+    // A red build turns the icon red (#415), Omarchy's own urgent colour.
+    active: root.buildRed
     tooltipText: !root.reachable ? "Can't reach " + root.host
       : root.badge.working + " working" + (root.badge.alert ? " · something needs you" : "")
+        + (root.badge.build === "red" || root.badge.build === "running" ? " · " + root.badge.buildWords : "")
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.RightButton) root.openVillage()
       else root.toggle()
@@ -158,6 +165,17 @@ Panel {
       anchors.right: parent.right
       anchors.topMargin: Math.round(button.height / 6)
       anchors.rightMargin: Math.round(button.width / 8)
+    }
+    Text {
+      // A build running on the integration branch: a small clock at the foot.
+      visible: root.reachable && root.badge.build === "running"
+      // nf-md-progress_clock
+      text: "󰦖"
+      color: root.barForeground
+      font.family: root.fontFamily
+      font.pixelSize: Math.round(button.height / 3)
+      anchors.bottom: parent.bottom
+      anchors.left: parent.left
     }
     Text {
       visible: root.reachable && root.showSailing && root.badge.sailing
@@ -297,6 +315,16 @@ Panel {
                   }
                 }
               }
+            }
+
+            // The integration branch's build: red, running or green, with where to look.
+            Row2 {
+              visible: root.buildWords !== ""
+              width: parent.width
+              name: "Build"
+              sub: root.buildWords
+              alert: root.buildState === "red"
+              onClicked: root.openUrl(root.village && root.village.build ? root.village.build.url || "" : "")
             }
 
             Column {

@@ -23,6 +23,11 @@ if not SHELL.is_dir():
 
 fixture = lambda name: json.loads((ROOT / "tests/fixtures" / name).read_text())
 swarms, villages = fixture("swarms.json"), fixture("village.json")
+# Recorded while CI ran on master (#413's `build`), and the same village red.
+build_running = fixture("village-build-running.json")
+build_red = json.loads(json.dumps(build_running))
+build_red["villages"][0]["build"] = {"state": "red", "since": "2026-11-09T20:40:00Z", "tests": ["a", "b", "c"],
+                                     "url": "https://ci/run/1", "jobs": [{"name": "test (macos-latest)", "os": "macOS", "state": "red"}]}
 two_swarms = json.loads(json.dumps(swarms))
 two_swarms["swarms"].append({"project_name": "shop", "workflow": "Modernize", "agent_type": "claude", "stopped": False,
                              "busy_count": 0, "attention_count": 1, "workers": [{"role": "worker-1"}]})
@@ -44,7 +49,8 @@ with tempfile.TemporaryDirectory(prefix="agents-village-qml-") as directory:
     shutil.copy(ROOT / "Panel.qml", harness / "BarPanel.qml")
     (harness / "Fixtures.js").write_text("".join(
         f"var {name} = {json.dumps(json.dumps(doc))}\n"
-        for name, doc in (("swarms", swarms), ("villages", villages), ("twoSwarms", two_swarms), ("twoVillages", two_villages))))
+        for name, doc in (("swarms", swarms), ("villages", villages), ("twoSwarms", two_swarms), ("twoVillages", two_villages),
+                          ("buildRunning", build_running), ("buildRed", build_red))))
     (harness / "Commons").symlink_to(SHELL / "Commons")
     shutil.copytree(SHELL / "Ui", harness / "Ui", symlinks=True)
     shutil.copy(ROOT / "tests/qml/KeyboardPanel.qml", harness / "Ui/KeyboardPanel.qml")
