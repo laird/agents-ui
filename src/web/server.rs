@@ -2201,7 +2201,7 @@ mod tests {
         assert!(body.contains("unknown ? unknownWords(v, o.i) : null"));
         assert!(body.contains("last.source === 'unknown' ? unknownWords(v, stops.length - 1) : null"));
         // The quay: six crates, a "+N" for the rest, and every issue listed with its title.
-        assert!(body.contains("if (atQuay.length > QUAY_CAP) { badge(c, roadX + 25, quayY - 9, atQuay.length - QUAY_CAP);"));
+        assert!(body.contains("if (atQuay.length > QUAY_CAP) { const more = atQuay.length - QUAY_CAP, { w, h } = badgeSize(more); badge(c, roadX + 25, quayY - 9, more);"));
         assert!(body.contains("items: issueItems(v, v.pipeline.quay)"));
         assert!(!body.contains("info.items.slice(0, 40)"), "the dialog lists every issue");
         assert!(body.contains("(v.pipeline.titles || {})[n]"), "landed issues' titles come from the pipeline");
@@ -2287,7 +2287,7 @@ mod tests {
         // One figure per sub-agent in the slots, then a "+N" badge: none dropped.
         assert!(body.contains("const SUB_SLOTS = [[-1, 12], [9, 12], [-4, 16], [4, 16], [12, 16]];"));
         assert!(body.contains(".slice(0, SUB_SLOTS.length).forEach((sa, k) => {"));
-        assert!(body.contains("if (subs.length > SUB_SLOTS.length) { badge(c, lot.x + 12, lot.y + 4, subs.length - SUB_SLOTS.length);"));
+        assert!(body.contains("if (subs.length > SUB_SLOTS.length) { const more = subs.length - SUB_SLOTS.length, { w, h } = badgeSize(more); badge(c, lot.x + 12, lot.y + 4, more);"));
         assert!(body.contains("function badge(c, x, y, n)"));
         assert!(!body.contains("subs.length > 2"), "the old two-figure cap is gone");
         // The manager is drawn busy at the hall while working.
@@ -2352,12 +2352,19 @@ mod tests {
 
     /// The village's DOM-free decisions under node (tools/village-tests/):
     /// the Fit scale (#400), each epic's flag colour (#406), the docks, and a
-    /// worker at rest (#411).
+    /// worker at rest (#411), and the "+N" badge and number tags (#436).
     #[test]
     fn village_node_tests_pass() {
         let root = env!("CARGO_MANIFEST_DIR");
         let dir = format!("{root}/tools/village-tests");
-        let files = ["fitscale.test.mjs", "featurecolours.test.mjs", "docks.test.mjs", "houselabel.test.mjs", "rest.test.mjs", "buildweather.test.mjs"].map(|f| format!("{dir}/{f}"));
+        // Every test file there, so a new one can't be left out of this list.
+        let mut files: Vec<String> = std::fs::read_dir(&dir)
+            .expect("tools/village-tests")
+            .filter_map(|e| e.ok().map(|e| e.path().to_string_lossy().into_owned()))
+            .filter(|p| p.ends_with(".test.mjs"))
+            .collect();
+        files.sort();
+        assert!(files.len() >= 7, "village tests found: {files:?}");
         match std::process::Command::new("node").arg("--test").args(&files).output() {
             Ok(out) => assert!(out.status.success(), "tools/village-tests failed:\n{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)),
             Err(e) => eprintln!("node is not installed ({e}); skipping tools/village-tests"),
