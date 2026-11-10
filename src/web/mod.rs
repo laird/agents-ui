@@ -12,6 +12,8 @@ pub mod server;
 pub mod source;
 pub mod temporal;
 pub mod village;
+#[cfg(test)]
+mod village_tests;
 pub mod world;
 
 use serde::{Deserialize, Serialize};
