@@ -480,6 +480,10 @@ pub struct VillageSnapshot {
     /// Parent issues split into subtasks, followed from spec to production.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub features: Vec<super::feature::Feature>,
+    /// The integration branch's build health (`build.rs`): CI, the sentinel,
+    /// the merge gate, or what an outside report says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<super::build::Build>,
 }
 
 /// Labels checked in order; the first that matches decides the house.
@@ -1143,11 +1147,13 @@ pub struct SwarmVillages {
     activity: Box<dyn ActivitySource>,
     extras: TtlCache<PathBuf, (Vec<IssueSnapshot>, Pipeline, Vec<FeatureLink>, Vec<IssueSnapshot>)>,
     since: SinceMemory,
+    /// CI answers per repo, re-asked when the tip moves (`build.rs`).
+    ci: super::build::CiCache,
 }
 
 impl SwarmVillages {
     pub fn new(issues: Box<dyn IssueTracker>, pipeline: Box<dyn PipelineSource>, activity: Box<dyn ActivitySource>) -> Self {
-        Self { issues, pipeline, activity, extras: TtlCache::new(extras_ttl()), since: Default::default() }
+        Self { issues, pipeline, activity, extras: TtlCache::new(extras_ttl()), since: Default::default(), ci: Default::default() }
     }
 
     async fn village(&self, transport: &ServerTransport, swarm: &SwarmSnapshot) -> Reading {
@@ -1178,7 +1184,11 @@ impl SwarmVillages {
         } else {
             super::gate::GateReading::default()
         };
+        let integration = pipeline.integration.clone();
         let mut village = build_gated(swarm, &issues, pipeline, &gate);
+        if !swarm.repo_path.is_empty() {
+            village.build = Some(super::build::read(&self.ci, transport, &repo, &integration, &gate).await);
+        }
         village.pipeline.titles = pipeline_titles(&village.pipeline, &issues, &closed);
         self.since.stamp(&swarm.repo_path, &mut village.houses, chrono::Utc::now());
         village.features = super::feature::build(&village, &links);

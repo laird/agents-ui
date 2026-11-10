@@ -678,6 +678,7 @@ mod tests {
                 board: Vec::new(),
                 pipeline: Pipeline::default(),
                 builds: vec!["abcdef1".into()],
+                build: None,
                 features: Vec::new(),
             };
             Box::pin(async move { vec![Reading { village, issues: Vec::new() }] })

@@ -197,6 +197,7 @@ mod tests {
             board: Vec::new(),
             pipeline: Pipeline::default(),
             builds: Vec::new(),
+            build: None,
             features: Vec::new(),
         }
     }

@@ -200,7 +200,7 @@ pub fn gate_progress(log: &str) -> Option<(u64, u32)> {
 }
 
 /// The log says the integration branch fails without this change.
-fn red_base(log: &str) -> bool {
+pub(crate) fn red_base(log: &str) -> bool {
     log.contains("fails alone too")
 }
 
@@ -427,18 +427,23 @@ fn tail(path: &Path, max: u64) -> String {
 /// phase lines and the latest summaries are near the end.
 const LOG_TAIL: u64 = 512 * 1024;
 
+/// autocoder's repo id for a local checkout ([`repo_id`]), from git and
+/// `sha1sum`. Blocking.
+pub fn local_repo_id(repo: &Path) -> Option<String> {
+    let common = command("git", &["rev-parse", "--git-common-dir"], repo, None)?;
+    let common = std::fs::canonicalize(repo.join(&common)).unwrap_or_else(|_| repo.join(&common));
+    let sha = command("sha1sum", &[], repo, Some(&common.to_string_lossy())).and_then(|s| s.split_whitespace().next().map(str::to_string))?;
+    Some(repo_id(&common, &sha))
+}
+
 /// Read the merge jobs for `repo` on this host. Blocking: it reads a few
 /// small files and runs `git` twice.
 pub fn read_local(repo: &Path) -> GateReading {
     let tmp = PathBuf::from(std::env::var("AUTOCODER_TMP").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/tmp".to_string()));
     let slots = max_gates(std::env::var("AUTOCODER_MAX_GATES").ok().as_deref(), std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4));
     let mut reading = GateReading { local: true, slots, ..GateReading::default() };
-    let Some(common) = command("git", &["rev-parse", "--git-common-dir"], repo, None) else { return reading };
-    let common = std::fs::canonicalize(repo.join(&common)).unwrap_or_else(|_| repo.join(&common));
-    let Some(sha) = command("sha1sum", &[], repo, Some(&common.to_string_lossy())).and_then(|s| s.split_whitespace().next().map(str::to_string)) else {
-        return reading;
-    };
-    let prefix = format!("autocoder-merge-{}-", repo_id(&common, &sha));
+    let Some(id) = local_repo_id(repo) else { return reading };
+    let prefix = format!("autocoder-merge-{id}-");
 
     let mut jobs = Vec::new();
     for entry in std::fs::read_dir(&tmp).into_iter().flatten().flatten() {

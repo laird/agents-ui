@@ -1,3 +1,4 @@
+pub mod build;
 pub mod deployments;
 pub mod discovery;
 pub mod feature;
