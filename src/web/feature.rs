@@ -4,17 +4,12 @@
 //! is in the village: a house, the backlog, the board, the quay or a stop.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
 use super::framework::{Task, TaskState, task_number};
 use super::village::{HouseStatus, Pipeline, Promotion, StopSource, VillageSnapshot};
 use crate::model::issue::{Child, FeatureLink, LinkedBy};
-
-/// How long a live feature stays after its parent closes.
-pub const LIVE_KEEP: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Where a subtask is in the village.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -84,6 +79,22 @@ pub struct Feature {
     pub stuck: Vec<u32>,
 }
 
+impl Feature {
+    /// Whether the feature still has work in flight, and so a flag (#401):
+    /// at least one counted subtask is specified (backlog, board), being
+    /// worked on (a house), or landed short of the last stop. A subtask at
+    /// the last stop is deployed, unless that stop is unknown; one closed
+    /// with no landed tip has nothing left to deploy.
+    pub fn in_flight(&self) -> bool {
+        let last = self.stages.last();
+        self.subtasks.iter().filter(|s| !s.dropped).any(|s| match s.place {
+            Where::Backlog | Where::Board | Where::House | Where::Quay => true,
+            Where::Stop => last.is_none_or(|l| l.unknown || s.stop.as_deref() != Some(l.name.as_str())),
+            Where::Closed => false,
+        })
+    }
+}
+
 /// Stops reached per issue (0: the quay). The pipeline's untruncated map
 /// wins; a report's pipeline has none, so its quay and stops fill in.
 fn reached(p: &Pipeline) -> HashMap<u32, usize> {
@@ -95,8 +106,14 @@ fn reached(p: &Pipeline) -> HashMap<u32, usize> {
     m
 }
 
-/// Features for a village, one per feature link.
+/// The features a village flags: those still in flight
+/// ([`Feature::in_flight`]). One whose every subtask is deployed goes at once.
 pub fn build(village: &VillageSnapshot, links: &[FeatureLink]) -> Vec<Feature> {
+    follow(village, links).into_iter().filter(Feature::in_flight).collect()
+}
+
+/// Every feature link followed through the village, in flight or not.
+fn follow(village: &VillageSnapshot, links: &[FeatureLink]) -> Vec<Feature> {
     let reached = reached(&village.pipeline);
     let houses: HashMap<u32, HouseStatus> = village
         .houses
@@ -210,43 +227,6 @@ pub fn links_from_tasks(tasks: &[Task]) -> Vec<FeatureLink> {
     links
 }
 
-/// Live features outlive their parent by [`LIVE_KEEP`]: a feature that was
-/// live when its parent stopped being listed (closed) is kept, as last seen,
-/// for one more day. Keyed by village.
-#[derive(Default)]
-pub struct LiveMemory {
-    seen: Mutex<HashMap<String, HashMap<u32, (Feature, Option<Instant>)>>>,
-}
-
-impl LiveMemory {
-    pub fn keep(&self, village: &str, mut current: Vec<Feature>, now: Instant) -> Vec<Feature> {
-        let Ok(mut seen) = self.seen.lock() else {
-            return current;
-        };
-        let remembered = seen.entry(village.to_string()).or_default();
-        for f in &current {
-            if f.live {
-                remembered.insert(f.number, (f.clone(), None));
-            } else {
-                remembered.remove(&f.number);
-            }
-        }
-        remembered.retain(|number, (feature, gone)| {
-            if current.iter().any(|f| f.number == *number) {
-                return true;
-            }
-            let since = *gone.get_or_insert(now);
-            let keep = now.duration_since(since) < LIVE_KEEP;
-            if keep {
-                current.push(feature.clone());
-            }
-            keep
-        });
-        current.sort_by_key(|f| f.number);
-        current
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -321,14 +301,14 @@ mod tests {
     #[test]
     fn build_goes_from_none_landed_to_all_landed() {
         let v = village(&[], [&[], &[], &[], &[]], vec![house(Some(461), HouseStatus::Working)], vec![]);
-        let f = &build(&v, &[four()])[0];
+        let f = &follow(&v, &[four()])[0];
         assert_eq!(f.build, Build { landed: 0, total: 4 });
         assert_eq!(f.subtasks[0].place, Where::House);
         assert_eq!(f.subtasks[1].place, Where::Backlog);
         assert!(!f.live);
 
         let v = village(&[461, 462], [&[463], &[464], &[], &[]], vec![], vec![]);
-        let f = &build(&v, &[four()])[0];
+        let f = &follow(&v, &[four()])[0];
         assert_eq!(f.build, Build { landed: 4, total: 4 });
         assert_eq!(f.subtasks[0].place, Where::Quay);
         assert_eq!((f.subtasks[3].place, f.subtasks[3].stop.as_deref()), (Where::Stop, Some("dev")));
@@ -339,7 +319,7 @@ mod tests {
     #[test]
     fn partly_promoted_reads_uat_two_of_four() {
         let v = village(&[], [&[], &[461, 462], &[463, 464], &[]], vec![], vec![]);
-        let f = &build(&v, &[four()])[0];
+        let f = &follow(&v, &[four()])[0];
         let by_stage: Vec<_> = f.stages.iter().map(|s| (s.name.as_str(), s.reached, s.total)).collect();
         assert_eq!(by_stage, vec![("master-green", 4, 4), ("dev", 4, 4), ("uat", 2, 4), ("prod", 0, 4)]);
         assert!(!f.live);
@@ -348,7 +328,7 @@ mod tests {
     #[test]
     fn all_in_prod_is_live() {
         let v = village(&[], [&[], &[], &[], &[461, 462, 463, 464]], vec![], vec![]);
-        let f = &build(&v, &[four()])[0];
+        let f = &follow(&v, &[four()])[0];
         assert!(f.live);
         assert_eq!(f.stages.last().map(|s| s.reached), Some(4));
     }
@@ -360,7 +340,7 @@ mod tests {
         dropped.not_planned = true;
         let l = link(vec![child(461), child(462), child(463), dropped]);
         let v = village(&[], [&[], &[], &[], &[461, 462, 463]], vec![], vec![]);
-        let f = &build(&v, &[l])[0];
+        let f = &follow(&v, &[l])[0];
         assert_eq!(f.build.total, 3);
         assert!(f.live, "the dropped subtask doesn't hold the feature back");
         let d = &f.subtasks[3];
@@ -372,7 +352,7 @@ mod tests {
     fn blocked_subtasks_make_the_feature_stuck() {
         let board = vec![Note { number: 463, title: "Sub 463".into(), label: "needs-design".into(), url: None }];
         let v = village(&[461], [&[], &[], &[], &[]], vec![house(Some(462), HouseStatus::Blocked)], board);
-        let f = &build(&v, &[four()])[0];
+        let f = &follow(&v, &[four()])[0];
         assert_eq!(f.stuck, vec![462, 463]);
         assert_eq!(f.subtasks[2].place, Where::Board);
         assert_eq!(f.subtasks[2].blocked.as_deref(), Some("needs-design"));
@@ -385,7 +365,7 @@ mod tests {
         let mut v = village(&[], [&[], &[461, 462, 463, 464], &[], &[]], vec![], vec![]);
         v.pipeline.stops[2].source = StopSource::Unknown;
         v.pipeline.stops[3].source = StopSource::Unknown;
-        let f = &build(&v, &[four()])[0];
+        let f = &follow(&v, &[four()])[0];
         assert!(f.stages[2].unknown);
         assert!(!f.stages[1].unknown);
         assert!(!f.live);
@@ -397,7 +377,7 @@ mod tests {
         // still has every subtask in prod.
         let mut v = village(&[], [&[], &[], &[], &[1, 2, 3]], vec![], vec![]);
         v.pipeline.reached = (461..=464).map(|n| (n, 4)).collect();
-        let f = &build(&v, &[four()])[0];
+        let f = &follow(&v, &[four()])[0];
         assert!(f.live);
         assert_eq!(f.subtasks[0].stop.as_deref(), Some("prod"));
     }
@@ -407,7 +387,7 @@ mod tests {
         let mut done = child(461);
         done.closed = true;
         let v = village(&[], [&[], &[], &[], &[]], vec![house(Some(461), HouseStatus::Idle)], vec![]);
-        let f = &build(&v, &[link(vec![done])])[0];
+        let f = &follow(&v, &[link(vec![done])])[0];
         assert_eq!(f.subtasks[0].place, Where::Closed);
     }
 
@@ -439,35 +419,72 @@ mod tests {
         assert!(links.iter().any(|l| l.title == "PROJ-5"));
     }
 
-    #[test]
-    fn live_features_stay_a_day_after_their_parent_closes() {
-        let memory = LiveMemory::default();
-        let t0 = Instant::now();
-        let v = village(&[], [&[], &[], &[], &[461, 462, 463, 464]], vec![], vec![]);
-        let live = build(&v, &[four()]);
-        assert_eq!(memory.keep("app", live, t0).len(), 1);
-
-        // The parent closes: it's no longer listed, but stays for a day.
-        assert_eq!(memory.keep("app", vec![], t0 + Duration::from_secs(60)).len(), 1);
-        assert_eq!(memory.keep("app", vec![], t0 + LIVE_KEEP).len(), 1);
-        assert!(memory.keep("app", vec![], t0 + LIVE_KEEP + Duration::from_secs(61)).is_empty());
-        // Other villages are separate.
-        assert!(memory.keep("other", vec![], t0).is_empty());
+    fn flagged(v: &VillageSnapshot, l: FeatureLink) -> bool {
+        !build(v, &[l]).is_empty()
     }
 
     #[test]
-    fn features_that_were_never_live_just_go() {
-        let memory = LiveMemory::default();
-        let t0 = Instant::now();
+    fn specified_or_worked_on_subtasks_keep_the_flag() {
+        let none = village(&[], [&[], &[], &[], &[]], vec![], vec![]);
+        assert!(flagged(&none, four()), "backlog");
+        let board = vec![Note { number: 461, title: "Sub 461".into(), label: "needs-design".into(), url: None }];
+        let pinned = village(&[], [&[], &[], &[], &[462, 463, 464]], vec![], board);
+        assert!(flagged(&pinned, four()), "board");
+        let worked = village(&[], [&[], &[], &[], &[462, 463, 464]], vec![house(Some(461), HouseStatus::Working)], vec![]);
+        assert!(flagged(&worked, four()), "house");
+    }
+
+    #[test]
+    fn landed_but_not_deployed_keeps_the_flag() {
+        let closed = |n| Child { closed: true, ..child(n) };
+        let all_closed = || link((461..=464).map(closed).collect());
+        let quay = village(&[461], [&[], &[], &[], &[462, 463, 464]], vec![], vec![]);
+        assert!(flagged(&quay, all_closed()), "one at the quay");
+        let uat = village(&[], [&[], &[], &[461], &[462, 463, 464]], vec![], vec![]);
+        assert!(flagged(&uat, all_closed()), "one at an earlier stop");
+    }
+
+    #[test]
+    fn deployed_features_go_at_once() {
+        let v = village(&[], [&[], &[], &[], &[461, 462, 463, 464]], vec![], vec![]);
+        assert!(follow(&v, &[four()])[0].live);
+        assert!(build(&v, &[four()]).is_empty(), "no afterglow once every subtask is in prod");
+        // The untruncated map says so too.
+        let mut v = village(&[], [&[], &[], &[], &[]], vec![], vec![]);
+        v.pipeline.reached = (461..=464).map(|n| (n, 4)).collect();
+        assert!(build(&v, &[four()]).is_empty());
+    }
+
+    #[test]
+    fn nothing_specified_has_no_flag() {
         let v = village(&[], [&[], &[], &[], &[]], vec![], vec![]);
-        memory.keep("app", build(&v, &[four()]), t0);
-        assert!(memory.keep("app", vec![], t0).is_empty());
+        assert!(!flagged(&v, link(vec![])));
+        let dropped = Child { closed: true, not_planned: true, ..child(461) };
+        assert!(!flagged(&v, link(vec![dropped])), "only a not-planned subtask");
+    }
+
+    #[test]
+    fn closed_without_landing_has_no_flag() {
+        let closed = |n| Child { closed: true, ..child(n) };
+        let v = village(&[], [&[], &[], &[], &[]], vec![], vec![]);
+        assert!(!flagged(&v, link(vec![closed(461), closed(462)])));
+        // A not-planned subtask left in the backlog doesn't hold it up either.
+        let v = village(&[], [&[], &[], &[], &[461]], vec![], vec![]);
+        let dropped = Child { not_planned: true, ..child(462) };
+        assert!(!flagged(&v, link(vec![closed(461), dropped])));
+    }
+
+    #[test]
+    fn an_unknown_last_stop_keeps_the_flag() {
+        let mut v = village(&[], [&[], &[], &[], &[461, 462, 463, 464]], vec![], vec![]);
+        v.pipeline.stops[3].source = StopSource::Unknown;
+        assert!(flagged(&v, four()));
     }
 
     #[test]
     fn serializes_per_the_contract() {
         let v = village(&[], [&[], &[], &[461], &[]], vec![], vec![]);
-        let json = serde_json::to_value(&build(&v, &[link(vec![child(461)])])[0]).unwrap();
+        let json = serde_json::to_value(&follow(&v, &[link(vec![child(461)])])[0]).unwrap();
         assert_eq!(json["linked_by"], "sub-issues");
         assert_eq!(json["promotion"], "subtask");
         assert_eq!(json["subtasks"][0]["where"], "stop");

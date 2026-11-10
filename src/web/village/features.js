@@ -146,7 +146,7 @@ registerHit({ kind: 'barge', act(o, sc) { const v = sc.v, f = (v.features || [])
 
 /* A live banner has done its job: it fades over the first hour after this
  * page saw it go live and is gone after LIVE_GONE, unless it is being
- * followed. (The server also stops listing a feature a day after it went live.) */
+ * followed. (The server stops listing a feature once every subtask is live, #401.) */
 const LIVE_FADE = 10 * 60e3, LIVE_DIM = 60 * 60e3, LIVE_GONE = 2 * 60 * 60e3;
 export function fadeLive(sc, v) {
   const now = Date.now(), seen = {};

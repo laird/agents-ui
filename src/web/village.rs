@@ -1143,12 +1143,11 @@ pub struct SwarmVillages {
     activity: Box<dyn ActivitySource>,
     extras: TtlCache<PathBuf, (Vec<IssueSnapshot>, Pipeline, Vec<FeatureLink>, Vec<IssueSnapshot>)>,
     since: SinceMemory,
-    live: super::feature::LiveMemory,
 }
 
 impl SwarmVillages {
     pub fn new(issues: Box<dyn IssueTracker>, pipeline: Box<dyn PipelineSource>, activity: Box<dyn ActivitySource>) -> Self {
-        Self { issues, pipeline, activity, extras: TtlCache::new(extras_ttl()), live: Default::default(), since: Default::default() }
+        Self { issues, pipeline, activity, extras: TtlCache::new(extras_ttl()), since: Default::default() }
     }
 
     async fn village(&self, transport: &ServerTransport, swarm: &SwarmSnapshot) -> Reading {
@@ -1182,8 +1181,7 @@ impl SwarmVillages {
         let mut village = build_gated(swarm, &issues, pipeline, &gate);
         village.pipeline.titles = pipeline_titles(&village.pipeline, &issues, &closed);
         self.since.stamp(&swarm.repo_path, &mut village.houses, chrono::Utc::now());
-        let features = super::feature::build(&village, &links);
-        village.features = self.live.keep(&swarm.repo_path, features, std::time::Instant::now());
+        village.features = super::feature::build(&village, &links);
         self.activity.attach(transport, &mut village);
         Reading { village, issues }
     }

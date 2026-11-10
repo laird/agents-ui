@@ -353,11 +353,15 @@ live.
 **Live.** A feature is live when every counted subtask's landed commit is in
 what the last stop runs. The banner turns gold and sparkles, and the strip
 adds `★ Live in prod`. This means the code runs in production. Feature flags
-are out of scope, so it doesn't mean users can see it. Two timers clear live
-banners away. The server keeps listing a live feature for a day after its
-parent issue closes. Independently, an open page fades a banner over the
-first hour after that page saw it go live, and hides it after two hours
-unless you're following it.
+are out of scope, so it doesn't mean users can see it.
+
+**When a banner flies.** A feature has a banner only while it has work in
+flight: at least one counted subtask is in the backlog or on the board, in a
+house, at the quay, or at a stop short of the last one (a last stop that is
+unknown counts as short of it). Once every counted subtask has reached the
+last stop, the banner goes on the next poll, with no afterglow. A feature
+with no counted subtasks has no banner, and nor does one whose subtasks were
+all closed without landing: there is nothing left to deploy.
 
 **Details.** The dialog lists each subtask and where it is: being built by a
 worker, waiting at the docks, on the board, landed and waiting at the quay,
