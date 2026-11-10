@@ -16,7 +16,7 @@ use super::unit::{ServiceOptions, systemd_unit, validate};
 pub const UNIT: &str = "agents-tui.service";
 
 /// How long `install` and `restart` wait for the village to answer.
-const WAIT: Duration = Duration::from_secs(30);
+pub(crate) const WAIT: Duration = Duration::from_secs(30);
 const WAIT_STEP: Duration = Duration::from_secs(1);
 
 /// What a command printed, and whether it succeeded.
@@ -119,12 +119,12 @@ pub fn reach_host(opts: &ServiceOptions, runner: &mut dyn Runner) -> String {
     ip.stdout.lines().next().map(str::trim).filter(|s| !s.is_empty()).unwrap_or("127.0.0.1").to_string()
 }
 
-fn url(host: &str, port: u16) -> String {
+pub(crate) fn url(host: &str, port: u16) -> String {
     if host.contains(':') { format!("http://[{host}]:{port}") } else { format!("http://{host}:{port}") }
 }
 
 /// Wait until the village answers, up to [`WAIT`].
-fn wait_for_village(runner: &mut dyn Runner, host: &str, port: u16) -> bool {
+pub(crate) fn wait_for_village(runner: &mut dyn Runner, host: &str, port: u16) -> bool {
     let mut waited = Duration::ZERO;
     loop {
         if runner.village_answers(host, port) {
@@ -248,10 +248,16 @@ pub fn installed(text: &str, home: &Path) -> Option<(PathBuf, u16, Vec<String>)>
         Some(rest) => home.join(rest),
         None => PathBuf::from(exe),
     };
+    let (port, binds) = served(&words);
+    Some((exe, port, binds))
+}
+
+/// The port and binds in the server's argument words (`--web-port`, `--web-bind`).
+pub(crate) fn served(words: &[String]) -> (u16, Vec<String>) {
     let after = |flag: &str| words.iter().position(|w| w == flag).and_then(|i| words.get(i + 1)).cloned();
     let port = after("--web-port").and_then(|p| p.parse().ok()).unwrap_or(super::unit::DEFAULT_PORT);
     let binds = after("--web-bind").map(|b| b.split(',').map(str::to_string).collect()).unwrap_or_else(|| vec!["127.0.0.1".into()]);
-    Some((exe, port, binds))
+    (port, binds)
 }
 
 /// Split an ExecStart line into words: double quotes group, `%%` is `%`.

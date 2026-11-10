@@ -8,7 +8,8 @@ mod model;
 mod project_management;
 mod runtime;
 mod scripts;
-// `agents-tui service` (#426). The launchd plist is only tested until #427 uses it.
+// `agents-tui service` (#426, #427). Each OS builds only its own backend's
+// path; the other is still compiled and tested, so it would read as dead code.
 #[allow(dead_code)]
 mod service;
 #[cfg(test)]
