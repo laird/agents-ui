@@ -1,5 +1,5 @@
 /* The Modern business district theme. */
-import { KINDCOL, NOTECOL, P, R, blink, hash, shadow } from '../palette.js';
+import { KINDCOL, NOTECOL, P, PRIOCOL, R, blink, hash, shadow } from '../palette.js';
 import { puffs } from '../sprites/houses.js';
 import { registerTheme } from './registry.js';
 
@@ -208,7 +208,8 @@ export const MODERN = {
     x = Math.round(x); y = Math.round(y);
     R(c, x, y, 5, 5, P.o); R(c, x + 1, y + 1, 3, 3, M.box);
     R(c, x + 2, y + 1, 1, 3, KINDCOL[kind] || M.boxD);
-    if (pr === 'P0') R(c, x + 1, y + 3, 1, 1, P.p0);
+    // Its priority: a shipping tag on the lower left (none when unprioritised).
+    if (PRIOCOL[pr]) R(c, x + 1, y + 2, 1, 2, PRIOCOL[pr]);
     if (sealed) R(c, x + 3, y + 1, 1, 1, P.seal);
   },
   B: MB,

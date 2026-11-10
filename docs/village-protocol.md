@@ -27,7 +27,7 @@ agents-tui --headless --framework ./reports.json                 # a file (file:
 | `workstreams[].helpers[]` | sub-agents (the Task tool, modernize specialists) | child workflows: the agents working for it |
 | `tasks[]` | issues: crates at the docks, notes on the board | failed runs pinned to the board |
 | `pipeline` | the canal: landed, then each stage to production | completed runs at the castle |
-| `tasks[].parent` | features: a banner per parent, a trail to its subtasks | features, the same way |
+| `tasks[].parent` | features: a banner per parent, a trail to its subtasks; a subtask's crate edged in its flag's colour | features, the same way |
 | `tasks[].depends_on` | a roped crate that "waits on #N" | the same |
 | `builds[]` | none | versions the workers run; a world matches releases against these |
 | `plane` | `development` | `runtime` |
@@ -124,7 +124,7 @@ Matching ignores case. Anything else counts as `unknown`.
 - `id` (required): `412`, `#412`, `PROJ-12`, or a workflow id. Numeric ids keep their number; other ids are hashed to a stable one.
 - `title`, `labels`, `priority` (`P0` to `P3`), `url`: the task in its tracker. Its house, crate or note links to it.
 - `parent`: the id of the task this one is a subtask of. Tasks that share a parent make a **feature**: a banner the village follows from spec to production (see [Following a feature](village.md#following-a-feature)). Setting `parent` is all an adapter does; the village works out where each subtask is and how far the feature has got. The parent's title and url come from its own task when the report lists it. A subtask in state `done` counts as closed; a report has no "not planned", so every subtask counts. A feature is shown only while one of its subtasks is not yet at the last stop (see [When a banner flies](village.md#following-a-feature)); once all are, it is left out of `/api/village`.
-- `depends_on`: ids of tasks this one waits on. While any of them is in the report and not `done`, the task's crate is drawn roped at the docks and says "waits on #N". A dependency the report doesn't list counts as met. Swarms fill it from "Depends on" / "Blocked by" lines in the issue body, the rule autocoder uses before claiming.
+- `depends_on`: ids of tasks this one waits on. While any of them is in the report and not `done`, the task's crate is drawn roped at the docks, stands after the crates it waits on, and says "waits on #N". A dependency the report doesn't list counts as met. Swarms fill it from "Depends on" / "Blocked by" lines in the issue body, the rule autocoder uses before claiming.
 - `state`:
   - `open` (the default): a crate at the docks;
   - `claimed`: taken, so not in the backlog;

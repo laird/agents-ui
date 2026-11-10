@@ -18,8 +18,10 @@ labelsOn.addEventListener('change', () => {
  * screen, so it holds at any scale. */
 function unclutter(els, blocked) {
   const hits = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
-  const placed = [...blocked];
-  els.forEach(el => {
+  // A fixed label stays on its point; the others keep clear of it.
+  const fixed = els.filter(el => el.dataset.fixed);
+  const placed = [...blocked, ...fixed.map(el => el.getBoundingClientRect())];
+  els.filter(el => !el.dataset.fixed).forEach(el => {
     const up = el.dataset.anchor !== 'top';
     for (let k = 0; k < 8; k++) {
       const r = el.getBoundingClientRect(), o = placed.find(p => hits(r, p));
@@ -34,7 +36,7 @@ export function placeLabels() {
   if (abox.hidden) return;
   const vp = document.getElementById('viewport'), r = cv.getBoundingClientRect(), vr = vp.getBoundingClientRect();
   const s = r.width / cv.width, ox0 = r.left - vr.left + vp.scrollLeft, oy0 = r.top - vr.top + vp.scrollTop;
-  const shift = { top: 'translate(-50%, 0)', bottom: 'translate(-50%, -100%)', right: 'translate(-100%, -50%)' };
+  const shift = { top: 'translate(-50%, 0)', bottom: 'translate(-50%, -100%)', right: 'translate(-100%, -50%)', center: 'translate(-50%, -50%)' };
   // Text grows with the map; below 3x the subtitles go, so names stay readable.
   abox.style.setProperty('--lf', Math.round(Math.max(9, Math.min(14, 2 + 2.5 * s))) + 'px');
   abox.classList.toggle('compact', s < 3);
@@ -47,8 +49,14 @@ export function placeLabels() {
       if (a) { blocked.push({ left: r.left + (ox + a.x) * s, top: r.top + (oy + a.y) * s, right: r.left + (ox + a.x + a.w) * s, bottom: r.top + (oy + a.y + a.h) * s }); return; }
       // A label given a width (scene pixels) is no wider than that.
       const max = l.width ? `max-width:${Math.max(28, l.width * s)}px;` : '';
-      html += `<div class="al${l.cls ? ' ' + esc(l.cls) : ''}" aria-hidden="true" data-anchor="${l.anchor}" style="left:${ox0 + (ox + l.x) * s}px;top:${oy0 + (oy + l.y) * s}px;transform:${shift[l.anchor]};${max}">` +
-        `${esc(l.text)}${l.sub ? ` <small>${esc(l.sub)}</small>` : ''}</div>`;
+      // A label given a size (scene pixels) scales with the map, no smaller
+      // than 6px: when that is tight it gives its `short` text, and zoomed out
+      // too far to fit at all it is left out.
+      if (l.size && l.size * s < 3.5) return;
+      const tight = l.size && l.size * s < 8 && l.short;
+      const size = l.size ? `font-size:${Math.max(6, Math.min(16, l.size * s))}px;` : '';
+      html += `<div class="al${l.cls ? ' ' + esc(l.cls) : ''}" aria-hidden="true" data-anchor="${l.anchor}"${l.fixed ? ' data-fixed="1"' : ''} style="${size}left:${ox0 + (ox + l.x) * s}px;top:${oy0 + (oy + l.y) * s}px;transform:${shift[l.anchor]};${max}">` +
+        `${esc(tight ? l.short : l.text)}${l.sub ? ` <small>${esc(l.sub)}</small>` : ''}</div>`;
     }));
   });
   // Redo it when the labels or the sprites to avoid change (a sprite's rect may

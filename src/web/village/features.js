@@ -43,7 +43,7 @@ function whereIs(n, v, lay, barges) {
   const hi = v.houses.findIndex(h => h.issue === n);
   if (hi >= 0) { const lot = lay.lots[hi]; if (lot) return { x: lot.x + 8, y: lot.y + 18 }; }
   const bi = v.backlog.findIndex(c => c.number === n);
-  if (bi >= 0) { const s = slotPos(Math.min(bi, 39)); return { x: s.x + 2, y: s.y + 2 }; }
+  if (bi >= 0) { const s = slotPos(Math.min(bi, 39), v.backlog.length); return { x: s.x + 2, y: s.y + 2 }; }
   const ni = v.board.findIndex(b => b.number === n);
   if (ni >= 0) { const k = Math.min(ni, 7); return { x: lay.hallX + 45 + (k % 4) * 4, y: 31 + Math.floor(k / 4) * 4 }; }
   const b = barges.find(b => b.issues.includes(n));

@@ -41,6 +41,7 @@ const VILLAGE_ASSETS: &[(&str, &str, &str)] = &[
     ("registry.js", "text/javascript; charset=utf-8", include_str!("village/registry.js")),
     ("layout.js", "text/javascript; charset=utf-8", include_str!("village/layout.js")),
     ("lifecycle.js", "text/javascript; charset=utf-8", include_str!("village/lifecycle.js")),
+    ("docks.js", "text/javascript; charset=utf-8", include_str!("village/docks.js")),
     ("trips.js", "text/javascript; charset=utf-8", include_str!("village/trips.js")),
     ("ship.js", "text/javascript; charset=utf-8", include_str!("village/ship.js")),
     ("gatehouse.js", "text/javascript; charset=utf-8", include_str!("village/gatehouse.js")),
@@ -1469,7 +1470,7 @@ mod tests {
         }
         // The features and the modules they lean on, two imports or more away included.
         for module in [
-            "registry.js", "layout.js", "lifecycle.js", "trips.js", "ship.js", "gatehouse.js", "features.js", "envrow.js", "voyages.js", "worlds.js", "panels.js", "dialogs.js",
+            "registry.js", "layout.js", "lifecycle.js", "docks.js", "trips.js", "ship.js", "gatehouse.js", "features.js", "envrow.js", "voyages.js", "worlds.js", "panels.js", "dialogs.js",
             "labels.js", "key.js", "data.js", "state.js", "palette.js", "sprites/houses.js", "scenery.js", "people.js",
             "themes/registry.js", "themes/medieval.js", "themes/modern.js", "themes/future.js", "saver.js", "screensaver.js",
         ] {
@@ -1855,7 +1856,8 @@ mod tests {
         let body = &village_source();
         assert!(body.contains(r#"<div class="hint" id="hint" role="status" hidden>Click a building, crate or person for details</div>"#));
         // act() says whether a click did anything; when it did not, the hint shows.
-        assert!(body.contains("if (!(h && act(h.o, h.sc, h.theme))) groundHint(e);"));
+        // (A click that did something also keeps a dialog a hover opened.)
+        assert!(body.contains("if (h && act(h.o, h.sc, h.theme)) hovered = false;\n  else groundHint(e);"));
         assert!(body.contains("return !!info;"));
         assert!(body.contains("hintTimer = setTimeout(() => { hintEl.hidden = true; }, 2500);"));
     }
@@ -2307,7 +2309,7 @@ mod tests {
     fn village_node_tests_pass() {
         let root = env!("CARGO_MANIFEST_DIR");
         let dir = format!("{root}/tools/village-tests");
-        let files = ["fitscale.test.mjs", "featurecolours.test.mjs"].map(|f| format!("{dir}/{f}"));
+        let files = ["fitscale.test.mjs", "featurecolours.test.mjs", "docks.test.mjs"].map(|f| format!("{dir}/{f}"));
         match std::process::Command::new("node").arg("--test").args(&files).output() {
             Ok(out) => assert!(out.status.success(), "tools/village-tests failed:\n{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)),
             Err(e) => eprintln!("node is not installed ({e}); skipping tools/village-tests"),
@@ -2410,11 +2412,35 @@ mod tests {
         assert!(body.contains("if ((cr.waits_on || []).length) roped(c, s.x, s.y);"));
         assert!(body.contains("function roped(c, x, y)"));
         // The crate dialog and the docks list say what it waits on.
-        assert!(body.contains("return w.length ? ` · waits on ${w.map(d => '#' + d).join(', ')}` : '';"));
-        assert!(body.contains("waiting at the ${theme.labels.docks.toLowerCase()}${waitsWords(v, o.n)}"));
+        assert!(body.contains("return 'Waits on ' + cr.waits_on.map(d => { const w = whereWaitedOn(v, d, houseName); return `#${d}${w ? ` (${w})` : ''}`; }).join(', ');"));
         assert!(body.contains("(i.waits_on || []).length ? ' · waits on ' + i.waits_on.map(d => '#' + d).join(', ') : ''"));
         // And the key explains the rope.
         assert!(body.contains("'Roped crate: waits on another issue (\"Depends on\")'"));
+    }
+
+    #[test]
+    fn village_html_shows_each_crates_priority_epic_state_and_number() {
+        let body = &village_source();
+        // Every theme marks all four priorities, each its own way.
+        assert!(body.contains("export const PRIOCOL = { P0: '#e02828', P1: '#f07020', P2: '#f8d040', P3: '#9898a8' };"));
+        assert_eq!(body.matches("if (PRIOCOL[pr]) R(c, x + 1, y + ").count(), 3, "medieval, modern and future");
+        // The docks stand in dock order; a crate carries its epic's flag colour and glints when ready.
+        assert!(body.contains("v.backlog = arrangeDocks(v.backlog);"));
+        assert!(body.contains("if (cols.has(cr.parent)) ribbon(c, s.x, s.y, cols.get(cr.parent));"));
+        assert!(body.contains("roped(c, s.x, s.y); else if (!state.reduce) glint(c, s.x, s.y, t + cr.number * 263);"));
+        assert!(body.contains("if (spot.has(d)) tether(c, s, spot.get(d));"));
+        // The dialog names the priority, the epic and the state; hovering opens it.
+        assert!(body.contains("registerHit({ kind: 'crate', hover: true, dialog(o, sc, theme) {"));
+        assert!(body.contains("meta: [`Priority: ${it.priority || 'none'}`, epic ? `Epic: ${epic.words}` : null, cr ? stateWords(v, cr) : null],"));
+        assert!(body.contains("if (crateState(cr) === 'ready') return 'Ready to pick up';"));
+        assert!(body.contains("hoverTo(h && (HITS[h.o.kind] || {}).hover ? h : null);"));
+        assert!(body.contains("cv.addEventListener('pointerleave', () => hoverTo(null));"));
+        // Each crate's number under it, fixed in place.
+        assert!(body.contains("text: '#' + h.o.n, short: String(h.o.n), cls: 'num', fixed: true, size }"));
+        assert!(body.contains("export const slotPos = (i, n = 40) => (n <= 24"));
+        // And the key explains it all.
+        assert!(body.contains("'Glinting crate: ready to pick up'"));
+        assert!(body.contains("\"Crate edged in a flag's colour: part of that feature (its epic)\""));
     }
 
     #[test]
