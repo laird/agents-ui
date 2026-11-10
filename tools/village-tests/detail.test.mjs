@@ -65,10 +65,32 @@ const SCENE = c => {
   }
 };
 
+/* The scene at a fixed moment. People animate from the clock (performance.now:
+ * a robot's sparks blink every 120 ms), so two drawings a few milliseconds
+ * apart can differ by a frame. That made this test fail on CI's slower
+ * runner and pass on a fast machine (#450); pinning the clock makes it exact. */
+function at(ms, paint) {
+  const real = performance.now;
+  performance.now = () => ms;
+  try { return paint(); } finally { performance.now = real; }
+}
+
 test('a 1×-only scene drawn on the 2× grid is the same scene, doubled', () => {
-  const one = drawn(SCENE, 1), two = drawn(SCENE, DETAIL);
-  assert.ok(one.length > 60, `the scene draws plenty (${one.length} rectangles)`);
-  assert.deepEqual(two, doubled(one));
+  // Two moments, so a frame of anything animated is compared too.
+  for (const ms of [1000, 1130]) {
+    const one = at(ms, () => drawn(SCENE, 1)), two = at(ms, () => drawn(SCENE, DETAIL));
+    assert.ok(one.length > 60, `the scene draws plenty (${one.length} rectangles)`);
+    assert.deepEqual(two, doubled(one), `at ${ms} ms`);
+  }
+});
+
+test('a drawing at a pinned clock repeats exactly', () => {
+  // People (#419) and buildings (#421) animate from the clock; pin it in any
+  // test that draws them twice and compares (#450).
+  assert.deepEqual(at(1000, () => drawn(SCENE, 1)), at(1000, () => drawn(SCENE, 1)));
+  const robot = () => drawn(c => { state.T = THEMES.future; person(c, 40, 10, 'robot-1', 'work', { status: 'working' }); }, DETAIL);
+  assert.deepEqual(at(1000, robot), at(1000, robot));
+  assert.notDeepEqual(at(1000, robot), at(1130, robot), 'a working robot does animate: the pin is what makes it repeat');
 });
 
 test('a 2× sprite draws in half scene pixels, and leaves the grid as it was', () => {
