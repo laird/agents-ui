@@ -51,9 +51,9 @@ for (const [name, T] of Object.entries(THEMES)) {
   });
 }
 
-test("a flag's issue number is still drawn on its cloth, as the 1× stencil", () => {
+test("a flag's issue number is drawn on its cloth, in the 2× font (#456)", () => {
   state.T = THEMES.medieval;
   const c = canvas(); drawBanner(c, { x: 20, y: 20, col: '#40b8e8', f: { number: 417, stuck: [] } }, false, 0);
-  const ink = c.rects.filter(r => !r.fine && r.col === '#f8f8f8' && r.w === 2 && r.h === 2);
+  const ink = c.rects.filter(r => r.fine && r.col === '#f8f8f8');
   assert.ok(ink.length > 10, 'the digits of 417 are on the cloth');
 });

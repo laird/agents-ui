@@ -11,9 +11,19 @@ const { state } = await import('../../src/web/village/state.js');
 const { ALARM, BUBBLE, RED, RED_D, alarm, boardAlert, boardFrame, failed, lamp, ring } = await import('../../src/web/village/alarms.js');
 const { bubble } = await import('../../src/web/village/scenery.js');
 
-/* A canvas that records the box every drawing covers, and its colours. */
+/* A canvas that records the box every drawing covers, in scene pixels, and
+ * its colours. It follows save/translate/scale, as the 2× marks draw inside
+ * detail() (#456). */
 function recorder() {
-  const c = { rects: [], fillStyle: null, fillRect(x, y, w, h) { this.rects.push({ x, y, w, h, col: this.fillStyle }); } };
+  let m = [1, 1, 0, 0];
+  const stack = [];
+  const c = {
+    rects: [], fillStyle: null,
+    save() { stack.push([...m]); }, restore() { m = stack.pop(); },
+    translate(x, y) { m = [m[0], m[1], m[2] + m[0] * x, m[3] + m[1] * y]; },
+    scale(sx, sy) { m = [m[0] * sx, m[1] * sy, m[2], m[3]]; },
+    fillRect(x, y, w, h) { this.rects.push({ x: m[0] * x + m[2], y: m[1] * y + m[3], w: m[0] * w, h: m[1] * h, col: this.fillStyle }); },
+  };
   c.box = () => {
     const xs = c.rects.flatMap(r => [r.x, r.x + r.w]), ys = c.rects.flatMap(r => [r.y, r.y + r.h]);
     return { w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
@@ -63,4 +73,13 @@ test("the board's alert follows its note count", () => {
 
 test('the gatehouse lamp is red', () => {
   assert.ok(draw(lamp, 0).red() && draw(lamp, 300).red());
+});
+
+test('every mark is drawn on the 2× grid, in half pixels', () => {
+  const marks = [draw(bubble, 'done'), draw(alarm, 0), draw(failed), draw(boardFrame, 3, 0), draw(lamp, 0)];
+  const r = recorder(); ring(r, 50, 50, 0); marks.push(r);
+  for (const c of marks) {
+    assert.ok(c.rects.length > 0);
+    assert.ok(c.rects.some(q => [q.x, q.y, q.w, q.h].some(v => v % 1 !== 0)), 'something is finer than a scene pixel');
+  }
 });

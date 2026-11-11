@@ -5,28 +5,37 @@ import assert from 'node:assert/strict';
 
 globalThis.window = {};  // state.js reads window.matchMedia
 const { badge, badgeSize, numberTag, numberTagSize } = await import('../../src/web/village/scenery.js');
-const { DIGITS } = await import('../../src/web/village/palette.js');
 const { P } = await import('../../src/web/village/palette.js');
+const { FONT2X } = await import('../../src/web/village/glyphs2x.js');
 
-const PLUS = '000010111010000';
-
-/* Draw with a recording context: every pixel's last colour. */
+/* Draw with a recording context: every detail pixel's last colour (the tags
+ * are drawn at 2× since #456, inside detail()). at(x, y) reads the scene
+ * pixel at (x, y), by its top-left detail pixel; at2(i, j) a detail pixel. */
 function draw(fn) {
   const px = new Map();
+  let m = [1, 1, 0, 0];
+  const stack = [];
   const c = {
     fillStyle: '',
-    fillRect(x, y, w, h) { for (let i = 0; i < w; i++) for (let j = 0; j < h; j++) px.set(`${x + i},${y + j}`, this.fillStyle); },
+    save() { stack.push([...m]); }, restore() { m = stack.pop(); },
+    translate(x, y) { m = [m[0], m[1], m[2] + m[0] * x, m[3] + m[1] * y]; },
+    scale(sx, sy) { m = [m[0] * sx, m[1] * sy, m[2], m[3]]; },
+    fillRect(x, y, w, h) {
+      // Into detail pixels: twice the scene's.
+      const x0 = 2 * (m[0] * x + m[2]), y0 = 2 * (m[1] * y + m[3]), w2 = 2 * m[0] * w, h2 = 2 * m[1] * h;
+      for (let i = 0; i < w2; i++) for (let j = 0; j < h2; j++) px.set(`${x0 + i},${y0 + j}`, this.fillStyle);
+    },
   };
   fn(c);
-  return (x, y) => px.get(`${x},${y}`);
+  const at2 = (i, j) => px.get(`${i},${j}`);
+  return Object.assign((x, y) => at2(2 * x, 2 * y), { at2 });
 }
 
 /* Read a tag drawn at (x, y): its glyphs, from the ink inside the outline. */
 function read(at, x, y, glyphs) {
   return Array.from({ length: glyphs }, (_, j) => {
-    let g = '';
-    for (let k = 0; k < 15; k++) g += at(x + 1 + j * 4 + (k % 3), y + Math.floor(k / 3)) === P.o ? '1' : '0';
-    return g === PLUS ? '+' : String(DIGITS.indexOf(g));
+    const rows = Array.from({ length: 10 }, (_, r) => Array.from({ length: 6 }, (_, i) => (at.at2(2 * x + 2 + 8 * j + i, 2 * y + r) === P.o ? '#' : '.')).join(''));
+    return Object.keys(FONT2X).find(k => FONT2X[k].join() === rows.join()) ?? '?';
   }).join('');
 }
 
@@ -36,10 +45,15 @@ for (const n of [3, 12, 123]) {
     assert.equal(read(at, x, y, String(n).length + 1), `+${n}`);
     assert.equal(w, (String(n).length + 1) * 4 + 3);
     assert.equal(h, 9);
-    // The outline is exactly the size badgeSize gives, from (x - 1, y - 2).
-    assert.equal(at(x - 1, y - 2), P.o);
-    assert.equal(at(x - 1 + w - 1, y - 2 + h - 1), P.o);
-    assert.equal(at(x - 1 + w, y), undefined, 'nothing past the right edge');
+    // The outline is exactly the size badgeSize gives, from (x - 1, y - 2):
+    // its edges, in detail pixels, with the corners rounded off.
+    const X = 2 * (x - 1), Y = 2 * (y - 2);
+    assert.equal(at.at2(X, Y + h), P.o, 'left edge');
+    assert.equal(at.at2(X + 2 * w - 1, Y + h), P.o, 'right edge');
+    assert.equal(at.at2(X + w, Y), P.o, 'top edge');
+    assert.equal(at.at2(X + w, Y + 2 * h - 1), P.o, 'bottom edge');
+    assert.equal(at.at2(X, Y), undefined, 'a rounded corner');
+    assert.equal(at.at2(X + 2 * w, Y + h), undefined, 'nothing past the right edge');
     // The row above and below the ink, and the column left and right of it, are gold:
     // no stroke touches the outline, so "+31" never reads "+=fl".
     for (let i = 0; i < w - 2; i++) {

@@ -1,45 +1,76 @@
 /* Things and scenery: speech bubbles, "zzz", "+N" badges, grass, paths, water, trees,
  * the castle, the board, the locks, the harbour, the ship and the supply boat. */
 import { state } from './state.js';
-import { DIGITS, NOTECOL, P, R, ROPE, STATE, blink, glassOf, hash, shadow } from './palette.js';
+import { NOTECOL, P, R, ROPE, STATE, blink, glassOf, hash, shadow } from './palette.js';
 import { crate } from './crates.js';
 import { detail } from './detail.js';
 import { bricks, disc, planks, px } from './art2x.js';
 import { note } from './cvdmarks.js';
+import { bitmap, rounded, tail, write } from './glyphs2x.js';
 
 /* ---------- People and things ---------- */
+/* The quiet bubbles' icons (#456): 10 by 10 detail pixels, drawn in the
+ * bubble's state colour. */
 export const ICONS = {
-  blocked: ['..#..', '..#..', '..#..', '.....', '..#..'],
-  done: ['.....', '....#', '...#.', '#.#..', '.#...'],
-  unknown: ['.###.', '#...#', '..##.', '.....', '..#..'],
-  stalled: ['.....', '.....', '#.#.#', '.....', '.....']
+  blocked: ['...####...', '...####...', '...####...', '....##....', '....##....', '....##....', '..........', '..........', '....##....', '....##....'],
+  done: ['..........', '........##', '.......###', '......###.', '##...###..', '###.###...', '.#####....', '..###.....', '...#......', '..........'],
+  unknown: ['...####...', '..##..##..', '......##..', '.....##...', '....##....', '....##....', '..........', '..........', '....##....', '....##....'],
+  stalled: ['..........', '..........', '..........', '..........', '##..##..##', '##..##..##', '..........', '..........', '..........', '..........']
 };
+/* A speech bubble, 9 by 11 scene pixels from (x, y): a rounded box, its
+ * tail pointing down at whoever it is over. Drawn at 2× (#456). */
+export const SPEECH = { w: 18, h: 18, tail: [6, 12] };
+export function speech(g, cols) {
+  rounded(g, 0, 0, SPEECH.w, SPEECH.h, cols, SPEECH.tail);
+  tail(g, SPEECH.tail[0], SPEECH.h, SPEECH.tail[1] - SPEECH.tail[0], 4, cols);
+}
 export function bubble(c, x, y, icon) {
-  const o = P.o, w = P.white, m = ICONS[icon], col = STATE[icon];
-  R(c, x + 1, y, 7, 1, o); R(c, x + 1, y + 8, 7, 1, o); R(c, x, y + 1, 1, 7, o); R(c, x + 8, y + 1, 1, 7, o);
-  R(c, x + 1, y + 1, 7, 7, w); R(c, x + 4, y + 8, 1, 2, w); R(c, x + 3, y + 9, 1, 1, o); R(c, x + 5, y + 9, 1, 1, o); R(c, x + 4, y + 10, 1, 1, o);
-  for (let r = 0; r < 5; r++) for (let k = 0; k < 5; k++) if (m[r][k] === '#') R(c, x + 2 + k, y + 2 + r, 1, 1, col);
+  detail(c, x, y, g => {
+    speech(g, { outline: P.o, fill: P.white, dark: '#d0d4e0' });
+    bitmap(g, 4, 4, ICONS[icon], STATE[icon]);
+  });
 }
 /* "zzz" drifting up from a house whose worker is asleep (#411): three z's,
  * small to large, rising and swaying, each outlined so it reads on any
- * ground. With reduced motion they hold still, stacked. */
-const ZS = [['###', '.#.', '###'], ['####', '..#.', '.#..', '####']];
+ * ground. With reduced motion they hold still, stacked. Drawn at 2× (#456),
+ * so they drift half a pixel at a time. */
+const ZS = [['######', '....##', '...##.', '.##...', '##....', '######'],
+  ['########', '......##', '.....##.', '....##..', '..##....', '.##.....', '##......', '########']];
+/* A glyph's outline: every pixel next to its ink (diagonals too) that is not ink. */
+export const halo = rows => rows.map((row, j) => [...row].map((ch, i) => {
+  if (ch === '#') return '.';
+  for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) if ((rows[j + dj] || '')[i + di] === '#') return '#';
+  return '.';
+}).join(''));
+const pad = rows => ['', ...rows, ''].map(r => `.${r.padEnd(rows[0].length, '.')}.`);
+const ZHALO = ZS.map(z => halo(pad(z)));
 export function zzz(c, x, y, t) {
-  for (let k = 0; k < 3; k++) {
-    const ph = state.reduce ? k / 3 : (t / 2400 + k / 3) % 1;
-    if (ph > 0.92) continue; // gone, before it starts again at the roof
-    const g = ZS[ph < 0.45 ? 0 : 1];
-    const gx = Math.round(x + ph * 6 + (state.reduce ? 0 : Math.sin(ph * 12) * 1.2)), gy = Math.round(y - ph * 12);
-    g.forEach((row, r) => [...row].forEach((ch, i) => { if (ch === '#') R(c, gx + i + 1, gy + r + 1, 1, 1, P.o); }));
-    g.forEach((row, r) => [...row].forEach((ch, i) => { if (ch === '#') R(c, gx + i, gy + r, 1, 1, P.white); }));
-  }
+  const x0 = Math.round(x), y0 = Math.round(y);
+  detail(c, x0, y0, g => {
+    for (let k = 0; k < 3; k++) {
+      const ph = state.reduce ? k / 3 : (t / 2400 + k / 3) % 1;
+      if (ph > 0.92) continue; // gone, before it starts again at the roof
+      const k2 = ph < 0.45 ? 0 : 1;
+      const gx = Math.round((x - x0 + ph * 6 + (state.reduce ? 0 : Math.sin(ph * 12) * 1.2)) * 2), gy = Math.round((y - y0 - ph * 12) * 2);
+      bitmap(g, gx - 1, gy - 1, ZHALO[k2], P.o);
+      bitmap(g, gx, gy, ZS[k2], P.white);
+    }
+  });
 }
 /* A rope between a waiting crate and the crate it waits on, both at the
- * docks: dotted, drawn under the crates so only the gaps show it. */
+ * docks: dashed, drawn under the crates so only the gaps show it. At 2×
+ * (#456) it is a twist of light rope over a darker strand. */
+export const ROPE_D = '#a07c48';
 export function tether(c, a, b) {
-  const x0 = Math.round(a.x) + 2, y0 = Math.round(a.y) + 2, x1 = Math.round(b.x) + 2, y1 = Math.round(b.y) + 2;
+  const x0 = 2 * (Math.round(a.x) + 2), y0 = 2 * (Math.round(a.y) + 2), x1 = 2 * (Math.round(b.x) + 2), y1 = 2 * (Math.round(b.y) + 2);
   const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
-  for (let k = 0; k <= n; k += 2) R(c, x0 + Math.round((x1 - x0) * k / (n || 1)), y0 + Math.round((y1 - y0) * k / (n || 1)), 1, 1, ROPE);
+  detail(c, 0, 0, g => {
+    for (let k = 0; k <= n; k++) {
+      if (k % 4 > 1) continue;
+      const x = x0 + Math.round((x1 - x0) * k / (n || 1)), y = y0 + Math.round((y1 - y0) * k / (n || 1));
+      px(g, x, y + 1, 2, 1, ROPE_D); px(g, x, y, 2, 1, ROPE);
+    }
+  });
 }
 /* ---------- Scenery ---------- */
 export const FLOWERS = ['#f8f8f8', '#f8d040', '#e070d0', '#e05050', '#a8c8f8'];
@@ -232,32 +263,33 @@ export function ship(c, x, cy, t, ox, oy) {
   });
 }
 
-const PLUS = '000010111010000';
-/* A tag of 3x5 glyphs whose ink starts at (x + 1, y): an outline, and inside
- * it a pixel of `bg` all round the ink (#436). Without that pixel above and
- * below, a digit's top and bottom strokes merged into the outline and only the
- * gaps were left to read: "+31" came out as "+=fl". */
-function glyphTag(c, x, y, glyphs, bg, ink = P.o) {
-  const { w, h } = tagSize(glyphs.length);
-  R(c, x - 1, y - 2, w, h, P.o); R(c, x, y - 1, w - 2, h - 2, bg);
-  glyphs.forEach((g, j) => { for (let k = 0; k < 15; k++) if (g[k] === '1') R(c, x + 1 + j * 4 + (k % 3), y + Math.floor(k / 3), 1, 1, ink); });
+/* A tag whose ink starts at (x + 1, y): a rounded outline, and inside it
+ * `bg` with a margin all round the ink (#436). Without the margin a digit's
+ * top and bottom strokes merged into the outline and only the gaps were
+ * left to read: "+31" came out as "+=fl". Written at 2× (#456) in the 6x10
+ * font (glyphs2x.js), in the same cells as the 3x5 one, so it is the size
+ * it was. */
+function glyphTag(c, x, y, text, bg, ink = P.o) {
+  const { w, h } = tagSize(text.length);
+  detail(c, x - 1, y - 2, g => {
+    rounded(g, 0, 0, 2 * w, 2 * h, { outline: P.o, fill: bg });
+    write(g, 4, 4, text, ink);
+  });
 }
-/* A tag's outer size for `glyphs` glyphs: 3-wide glyphs a pixel apart, a
- * pixel of padding and a pixel of outline on every side. */
 const tagSize = glyphs => ({ w: glyphs * 4 + 3, h: 9 });
 /* The outer size of badge(n), and of numberTag(n), from (x - 1, y - 2). */
 export const badgeSize = n => tagSize(String(n).length + 1);
 export const numberTagSize = n => tagSize(String(n).length);
 /* A gold tag reading "+N" in a 3x5 pixel font. */
 export function badge(c, x, y, n) {
-  glyphTag(c, x, y, [PLUS, ...String(n).split('').map(d => DIGITS[+d])], P.gold);
+  glyphTag(c, x, y, `+${n}`, P.gold);
 }
 /* A number in the 3x5 font, straight onto whatever is under it (a flag's cloth). */
 export function digits(c, x, y, n, col) {
-  String(n).split('').forEach((d, j) => { const g = DIGITS[+d]; for (let k = 0; k < 15; k++) if (g[k] === '1') R(c, x + j * 4 + (k % 3), y + Math.floor(k / 3), 1, 1, col); });
+  detail(c, x, y, g => write(g, 0, 0, n, col));
 }
 /* A number on a parchment tag (a crate's issue in a line), in the same font;
  * `bg` and `ink` recolour it (the board's red count). */
 export function numberTag(c, x, y, n, bg = P.parch, ink = P.o) {
-  glyphTag(c, x, y, String(n).split('').map(d => DIGITS[+d]), bg, ink);
+  glyphTag(c, x, y, String(n), bg, ink);
 }

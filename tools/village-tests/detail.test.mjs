@@ -47,14 +47,12 @@ function drawn(paint, d) {
 }
 const doubled = rects => rects.map(([x, y, w, h, col, a]) => [x * DETAIL, y * DETAIL, w * DETAIL, h * DETAIL, col, a]);
 
-/* 1×-only sprites from every corner of the village: tags, pennants and
- * cobwebs. (Crates are drawn at 2× since #420, people since #419 and
- * buildings since #421: their tests are crates.test.mjs, people2x.test.mjs
- * and upscale.test.mjs.) */
+/* 1×-only sprites from every corner of the village: pennants and cobwebs.
+ * (Crates are drawn at 2× since #420, people since #419, buildings since
+ * #421 and tags since #456: their tests are crates.test.mjs,
+ * people2x.test.mjs, upscale.test.mjs and badge.test.mjs.) */
 const SCENE = c => {
   state.T = THEMES.medieval;
-  scenery.badge(c, 20, 3, 12);
-  scenery.numberTag(c, 30, 3, 404);
   houses.pennant(c, 60, 20, 'P0', 0);
   houses.cobwebs(c, 70, 20);
   for (const T of Object.values(THEMES)) {
@@ -76,7 +74,7 @@ test('a 1×-only scene drawn on the 2× grid is the same scene, doubled', () => 
   // Two moments, so a frame of anything animated is compared too.
   for (const ms of [1000, 1130]) {
     const one = at(ms, () => drawn(SCENE, 1)), two = at(ms, () => drawn(SCENE, DETAIL));
-    assert.ok(one.length > 60, `the scene draws plenty (${one.length} rectangles)`);
+    assert.ok(one.length > 5, `the scene draws something (${one.length} rectangles)`);
     assert.deepEqual(two, doubled(one), `at ${ms} ms`);
   }
 });
