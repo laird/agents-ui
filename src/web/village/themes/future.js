@@ -7,6 +7,7 @@ import { dither, lobes, planks, px } from '../art2x.js';
 import { CRATE_W, CRATE_H, seal, stencil } from '../crates.js';
 import { registerTheme } from './registry.js';
 import { FB, futureBoard, futureDock, futureHall, futureScaffold } from './futurebuildings.js';
+import { futureCargo, futureGate, futurePort, futureShuttle } from './futureport.js';
 /* ---------- Future ----------
  * A space station worked by little robots: deck plates for ground, light-
  * strip walkways for roads, a plasma canal, habitat pods with portholes. It
@@ -177,68 +178,10 @@ export const FUTURE = {
   },
   B: FB,
   hall: futureHall, board: futureBoard, dock: futureDock, scaffold: futureScaffold,
-  /* An airlock: two pylons with a force field between them and a status light on the control tower. */
-  gate(c, x, cy, open, flag) {
-    R(c, x - 4, cy - 15, 12, 10, P.o); R(c, x - 3, cy - 14, 10, 8, F.hull); R(c, x - 2, cy - 12, 8, 3, F.glass);
-    R(c, x - 5, cy - 16, 14, 2, F.hullD);
-    R(c, x + 1, cy - 20, 4, 4, P.o); R(c, x + 2, cy - 19, 2, 2, flag);
-    [x - 1, x + 5].forEach(px => { R(c, px, cy - 4, 2, 22, P.o); R(c, px, cy - 3, 1, 20, F.hullD); R(c, px, cy - 3, 2, 1, F.cyan); R(c, px, cy + 16, 2, 1, F.cyan); });
-    if (!open) {
-      R(c, x + 1, cy, 4, 14, 'rgba(240,72,192,.35)');
-      const t = now();
-      for (let k = 0; k < 14; k += 3) R(c, x + 1 + ((k + Math.floor(t / 150)) % 4), cy + k, 1, 1, F.magenta);
-    }
-  },
-  /* The spaceport: released work leaves on a shuttle. The sky lights up
-   * when it does. The shuttle is drawn by vessel() below, so it can load and launch. */
-  destination(c, x, cy, t, fw) {
-    R(c, x, cy - 8, 38, 8, P.o); R(c, x + 1, cy - 7, 36, 6, F.hullD);
-    for (let k = 2; k < 36; k += 6) R(c, x + k, cy - 4, 3, 1, F.cyan);
-    R(c, x + 3, cy - 46, 6, 38, P.o); R(c, x + 4, cy - 45, 4, 36, F.hull);
-    for (let yy = cy - 42; yy < cy - 10; yy += 5) R(c, x + 5, yy, 2, 2, F.cyanL);
-    R(c, x + 2, cy - 52, 8, 6, P.o); R(c, x + 3, cy - 51, 6, 4, F.glass);
-    R(c, x + 5, cy - 56, 1, 4, F.hull); R(c, x + 4, cy - 57, 3, 1, blink(t, 700) || t - fw < 1600 ? P.p0 : F.magentaD);
-    // At 2×: the tower's panel seams and a lit edge, glazing bars in the
-    // control cab, seams along the pad's skirt, and a landing ring on the pad.
-    detail(c, x, cy, g => {
-      planks(g, 8, -90, 8, 72, 6, F.hullD); px(g, 8, -90, 1, 72, F.hullL);
-      px(g, 9, -102, 1, 8, P.o); px(g, 14, -102, 1, 8, P.o); px(g, 7, -102, 2, 1, P.white);
-      for (let k = 6; k < 72; k += 12) px(g, k, -14, 1, 12, F.hull);
-      px(g, 22, 6, 34, 1, F.cyanD); px(g, 22, 24, 34, 1, F.cyanD); px(g, 22, 6, 1, 19, F.cyanD); px(g, 55, 6, 1, 19, F.cyanD);
-    });
-    const ft = t - fw;
-    if (ft >= 0 && ft < 1600) {
-      const p = ft / 1600;
-      [[x + 6, P.gold], [x + 21, F.magenta], [x + 34, F.cyan]].forEach(([fx, col], i) => {
-        const fy = cy - 58 - p * 18 - i * 3;
-        for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; R(c, fx + Math.cos(a) * p * 9, fy + Math.sin(a) * p * 9, 1, 1, col); }
-      });
-    }
-    R(c, x + 8, cy - 2, 22, 18, P.o); R(c, x + 9, cy, 20, 15, F.space);
-    for (let k = 0; k < 4; k++) R(c, x + 11 + k * 5, cy + 7, 2, 1, F.cyanD);
-  },
-  /* The shuttle for the next release, with its cargo rack, moved by (ox, oy).
-   * Its engines fire while it climbs. */
-  vessel(c, x, cy, t, ox, oy) {
-    const rx = Math.round(x + 17 + ox), sy = Math.round(cy - 40 + oy);
-    R(c, rx + 3, sy - 6, 6, 4, P.o); R(c, rx + 4, sy - 5, 4, 3, F.hullL);
-    R(c, rx + 1, sy - 2, 10, 32, P.o); R(c, rx + 2, sy - 1, 8, 30, F.hullL); R(c, rx + 2, sy - 1, 2, 30, F.hull);
-    R(c, rx + 2, sy + 8, 8, 2, F.magenta); R(c, rx + 4, sy + 2, 4, 3, P.o); R(c, rx + 5, sy + 3, 2, 1, F.cyan);
-    R(c, rx - 2, sy + 20, 3, 10, P.o); R(c, rx - 1, sy + 21, 2, 8, F.magentaD);
-    R(c, rx + 11, sy + 20, 3, 10, P.o); R(c, rx + 11, sy + 21, 2, 8, F.magentaD);
-    R(c, rx + 15, sy + 14, 1, 18, F.hullD); R(c, rx + 15, sy + 31, 12, 1, F.cyanD);
-    if (oy < 0) for (let k = 0; k < 4; k++) R(c, rx + 2 + k * 2, sy + 30 + (blink(t + k * 60, 80) ? 1 : 0), 2, 3 + (k % 2) * 2, k % 2 ? F.cyan : F.cyanL);
-    // At 2×: a lit edge down the hull and its panel seams, a highlight on the
-    // nose, the cockpit's glazing, and a white-hot core in each engine flame.
-    detail(c, rx, sy, g => {
-      px(g, 8, 0, 1, 58, F.hull); planks(g, 4, -2, 16, 18, 6, F.hull); planks(g, 4, 20, 16, 38, 6, F.hull);
-      px(g, 9, -10, 3, 1, P.white); px(g, 11, 6, 2, 1, P.white);
-      px(g, -2, 42, 1, 16, F.magenta); px(g, 23, 42, 1, 16, F.magenta);
-      if (oy < 0) for (let k = 0; k < 4; k++) px(g, 5 + k * 4, 61 + (blink(t + k * 60, 80) ? 2 : 0), 1, 2 + (k % 2) * 2, P.white);
-    });
-  },
+  /* The airlock, spaceport and shuttle at 2× (futureport.js, #472). */
+  gate: futureGate, destination: futurePort,
+  vessel(c, x, cy, t, ox, oy) { futureShuttle(c, x, cy, t, ox, oy); },
   hold: [[33, -14], [38, -14], [33, -19], [38, -19], [33, -24], [38, -24]], holdBadge: [31, -32], hull: [14, -58, 30, 50], flies: true,
-  /* The cargo shuttle that brings new issues down the conduit, hovering. */
   /* The scanner arch at 2×: laser grids across the walkway while anything
    * is gating, and one scanner pad per gate slot, its screen glowing while
    * busy. Drawn in the order it always was, so what overlaps still does. */
@@ -268,18 +211,11 @@ export const FUTURE = {
       });
     });
   },
+  /* The cargo shuttle that brings new issues down the conduit (futureport.js). */
   supply(c, x, t, load) {
-    x = Math.round(x);
     const y = !state.reduce && blink(t, 500) ? 1 : 0;
-    R(c, x, y + 4, 27, 5, P.o); R(c, x + 1, y + 5, 25, 3, F.hull); R(c, x + 1, y + 5, 25, 1, F.hullL); R(c, x + 26, y + 5, 3, 3, P.o); R(c, x + 26, y + 6, 2, 1, F.cyan);
-    R(c, x + 18, y + 2, 7, 3, P.o); R(c, x + 19, y + 3, 5, 1, F.glass);
-    R(c, x - 2, y + 5, 2, 3, blink(t, 120) ? F.cyan : F.cyanL);
-    // At 2×: hull seams and rivets, a glint on the canopy, a hot core in the thruster.
-    detail(c, x, y, g => {
-      for (let k = 8; k < 52; k += 10) { px(g, k, 10, 1, 6, F.hullD); px(g, k + 3, 14, 1, 1, F.rivet); }
-      px(g, 40, 6, 2, 1, P.white); px(g, -3, 12, 2, 2, P.white);
-    });
-    for (let k = 0; k < Math.min(load, 3); k++) this.crate(c, x + 2 + k * 5, y, 'workshop', null);
+    futureCargo(c, x, t, y);
+    for (let k = 0; k < Math.min(load, 3); k++) this.crate(c, Math.round(x) + 2 + k * 5, y, 'workshop', null);
   },
   /* Station kit at 2× (#465): an antenna with rungs, a solar panel with
    * cells, a glass dome, a maintenance drone, light bollards, a vent grille. */

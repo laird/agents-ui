@@ -1,10 +1,10 @@
 /* Things and scenery: speech bubbles, "zzz", "+N" badges, grass, paths, cobbles, water, trees,
- * the castle, the board, the locks, the harbour, the ship and the supply boat. */
+ * the castle and the board. The waterfront (lock, harbour, ship, boat) is
+ * waterfront.js. */
 import { state } from './state.js';
-import { NOTECOL, P, R, ROPE, STATE, SHADE, blink, hash } from './palette.js';
-import { crate } from './crates.js';
+import { NOTECOL, P, ROPE, STATE, SHADE, hash } from './palette.js';
 import { detail } from './detail.js';
-import { bricks, disc, planks, px } from './art2x.js';
+import { disc, px } from './art2x.js';
 import { bitmap, rounded, tail, write } from './glyphs2x.js';
 
 /* ---------- People and things ---------- */
@@ -216,87 +216,6 @@ export function tree(c, x, y) {
     if (hash(x, y) < 0.3) [[8, 12], [17, 8]].forEach(([fx, fy]) => { px(g, fx, fy, 2, 2, '#e05050'); px(g, fx, fy, 1, 1, '#f8a0a0'); });
   });
 }
-export function lock(c, x, cy, open, flag) {
-  R(c, x - 1, cy - 4, 8, 4, P.o); R(c, x, cy - 3, 6, 2, P.stone);
-  R(c, x - 1, cy + 14, 8, 4, P.o); R(c, x, cy + 15, 6, 2, P.stone);
-  if (!open) { R(c, x + 1, cy, 1, 14, P.woodD); R(c, x + 4, cy, 1, 14, P.woodD); R(c, x + 2, cy, 2, 14, P.wood); }
-  R(c, x - 4, cy - 15, 12, 10, P.o); R(c, x - 3, cy - 13, 10, 7, P.stone);
-  R(c, x - 5, cy - 18, 14, 5, P.o); R(c, x - 4, cy - 17, 12, 3, P.red);
-  R(c, x, cy - 10, 3, 4, P.woodD);
-  R(c, x + 8, cy - 25, 1, 10, P.stoneD); R(c, x + 9, cy - 25, 5, 4, P.o); R(c, x + 9, cy - 24, 4, 2, flag);
-}
-/* Where finished work ships out: a harbour with a lighthouse at the end of
- * the canal. Its lamp flares when a release goes out. The ship moored in it
- * is drawn by ship() below, so it can load cargo and sail. */
-export function harbour(c, x, cy, t, fw) {
-  R(c, x, cy - 20, 38, 20, P.o); R(c, x + 1, cy - 19, 36, 18, P.stone);
-  [x + 3, x + 12, x + 21].forEach(bx => R(c, bx, cy - 4, 3, 3, P.o));
-  const lx = x + 27;
-  R(c, lx, cy - 50, 9, 32, P.o);
-  R(c, lx - 1, cy - 56, 11, 7, P.o); R(c, lx, cy - 55, 9, 4, blink(t, 700) || t - fw < 1600 ? P.lamp : P.glass);
-  R(c, lx + 1, cy - 59, 7, 3, P.o); R(c, lx + 2, cy - 58, 5, 1, P.red);
-  detail(c, x, cy, g => {
-    // The quay wall in brick, a light course along its top; bollards with a cap.
-    bricks(g, 2, -38, 72, 34, 8, 4, P.stoneD); px(g, 2, -38, 72, 1, P.stoneL);
-    [6, 24, 42].forEach(bx => { px(g, bx + 2, -6, 2, 2, P.stoneD); px(g, bx + 1, -7, 4, 1, P.stoneL); });
-    // The lighthouse: red and white bands, a highlight down the lit side, a shade down the other.
-    const X = 2 * (lx - x);
-    for (let yy = -98; yy < -38; yy += 2) {
-      const white = Math.floor((yy / 2) / 5) % 2 !== 0;
-      px(g, X + 2, yy, 14, 2, white ? P.white : P.red);
-      px(g, X + 3, yy, 1, 2, white ? '#ffffff' : '#f07070');
-      px(g, X + 14, yy, 2, 2, white ? P.stoneL : '#a01818');
-    }
-    px(g, X + 6, -88, 3, 4, P.o); px(g, X + 6, -66, 3, 4, P.o); // windows
-    // The lamp room's glazing bars.
-    px(g, X + 4, -110, 1, 8, P.o); px(g, X + 13, -110, 1, 8, P.o);
-  });
-  const ft = t - fw;
-  if (ft >= 0 && ft < 1600) {
-    const p = ft / 1600;
-    [[x + 8, P.gold], [x + 20, P.fizzA], [lx + 4, P.fizzB]].forEach(([fx, col], i) => {
-      const fy = cy - 62 - p * 18 - i * 3;
-      for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; R(c, fx + Math.cos(a) * p * 9, fy + Math.sin(a) * p * 9, 1, 1, col); }
-    });
-  }
-}
-/* The ship that carries the next release, moored at harbour x, moved by
- * (ox, oy) while it sails. Its cargo is drawn on deck at SHIP_HOLD. */
-/* The supply boat that brings new issues down the river to the docks,
- * with `load` crates still on deck. The river is the map's top 11 rows. */
-export function boat(c, x, t, load) {
-  x = Math.round(x);
-  const y = !state.reduce && blink(t, 600) ? 1 : 0;
-  R(c, x, y + 5, 28, 5, P.o); R(c, x + 1, y + 5, 26, 3, P.wood); R(c, x + 26, y + 4, 3, 3, P.o);
-  R(c, x + 17, 1, 5, 4, P.o); R(c, x + 18, 1, 4, 3, P.sail);
-  detail(c, x, y, g => {
-    // Planked hull: a light gunwale, seams, and nails.
-    px(g, 2, 10, 52, 1, P.woodL); planks(g, 2, 10, 52, 6, 2, P.woodD);
-    for (let k = 6; k < 52; k += 10) px(g, k, 12, 1, 1, P.o);
-    // The mast, its stay to the bow, and the sail's seam.
-    px(g, 44, -2 * y, 1, 10 + 2 * y, P.woodD);
-    for (let k = 0; k < 6; k++) px(g, 45 + k, 2 + k, 1, 1, P.woodD);
-    px(g, 36, 4 - 2 * y, 8, 1, P.millD);
-  });
-  for (let k = 0; k < Math.min(load, 3); k++) crate(c, x + 2 + k * 5, y, 'workshop', null);
-}
-export function ship(c, x, cy, t, ox, oy) {
-  x = Math.round(x + ox); cy = Math.round(cy + oy);
-  R(c, x + 2, cy + 3, 22, 9, P.o); R(c, x + 3, cy + 4, 20, 6, P.wood);
-  R(c, x + 6, cy - 12, 13, 12, P.o); R(c, x + 7, cy - 11, 11, 10, P.sail);
-  R(c, x + 13, cy - 17, 5, 3, P.o); R(c, x + 13, cy - 16, 4, 1, '#804098');
-  detail(c, x, cy, g => {
-    // Planked hull: a light rail, seams, a dark keel line and portholes.
-    px(g, 6, 8, 40, 2, P.woodL); planks(g, 6, 9, 40, 10, 3, P.woodD); px(g, 10, 20, 32, 2, P.woodD);
-    [12, 22, 32].forEach(k => { px(g, k, 13, 3, 2, P.o); px(g, k + 1, 13, 1, 1, P.glass); });
-    // Rigging: stays from the masthead to bow and stern.
-    for (let k = 0; k < 14; k++) { px(g, 24 - k, -26 + 2 * k, 1, 1, P.woodD); px(g, 26 + k, -26 + 2 * k, 1, 1, P.woodD); }
-    // The mast, then the sail's seams over it: a vertical seam and two across.
-    px(g, 24, -28, 2, 36, P.woodD);
-    px(g, 25, -22, 1, 20, P.millD); px(g, 14, -16, 22, 1, P.millD); px(g, 14, -9, 22, 1, P.millD);
-  });
-}
-
 /* A tag whose ink starts at (x + 1, y): a rounded outline, and inside it
  * `bg` with a margin all round the ink (#436). Without the margin a digit's
  * top and bottom strokes merged into the outline and only the gaps were

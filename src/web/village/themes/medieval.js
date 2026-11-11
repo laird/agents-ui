@@ -2,7 +2,8 @@
 import { P, SHADE, SHINE, hash } from '../palette.js';
 import { B, scaffold } from '../sprites/houses.js';
 import { crate } from '../crates.js';
-import { FLOWERS, boat, cobbles, grass, harbour, lock, path, ship, tree, water } from '../scenery.js';
+import { FLOWERS, cobbles, grass, path, tree, water } from '../scenery.js';
+import { boat, harbour, lock, ship } from '../waterfront.js';
 import { board, dock, hall } from './medievalbuildings.js';
 import { detail } from '../detail.js';
 import { bricks, lobes, px } from '../art2x.js';

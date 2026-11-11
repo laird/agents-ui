@@ -6,8 +6,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 globalThis.window = { matchMedia: () => ({ matches: false }) };
-const { bricks, disc, discRow, dither, lobes, planks, px } = await import('../../src/web/village/art2x.js');
+const { bricks, disc, discRow, dither, lobes, pixmap, planks, px } = await import('../../src/web/village/art2x.js');
 const S = await import('../../src/web/village/scenery.js');
+const W = await import('../../src/web/village/waterfront.js');
 
 /* A canvas that follows translate/scale, and records each rect in scene pixels. */
 function recorder() {
@@ -60,6 +61,12 @@ test('dither, planks and bricks stay in their boxes', () => {
   assert.ok(c.rects.filter(r => r.col === 'M').every(r => inside(r, [40, 0, 72, 16])));
 });
 
+test('pixmap draws each run of a colour once, and nothing for a dot', () => {
+  const c = recorder();
+  pixmap(c, 10, 20, ['.aab', 'a..a'], { a: 'A', b: 'B' });
+  assert.deepEqual(c.rects.map(r => [r.x, r.y, r.w, r.h, r.col]), [[11, 20, 2, 1, 'A'], [13, 20, 1, 1, 'B'], [10, 21, 1, 1, 'A'], [13, 21, 1, 1, 'A']]);
+});
+
 /* Each sprite's box at 1×, in scene pixels: [x0, y0, x1, y1]. The 2× art must not move it. */
 const FOOTPRINTS = {
   grass: [c => S.grass(c, 0, 0, 120, 80), [0, -1, 120, 80]],
@@ -70,9 +77,11 @@ const FOOTPRINTS = {
   'the docks\' cobbled yard': [c => S.cobbles(c, 6, 18, 56, 34), [6, 18, 62, 52]],
   tree: [c => S.tree(c, 10, 10), [11, 10, 23, 23]],
   'another tree': [c => S.tree(c, 37, 51), [38, 51, 50, 64]],
-  harbour: [c => S.harbour(c, 50, 100, 1000, -1e9), [50, 41, 88, 100]],
-  boat: [c => S.boat(c, 30, 1000, 2), [30, 0, 59, 11]],
-  ship: [c => S.ship(c, 50, 100, 1000, 0, 0), [52, 83, 74, 112]],
+  harbour: [c => W.harbour(c, 50, 100, 1000, -1e9), [50, 41, 88, 100]],
+  boat: [c => W.boat(c, 30, 1000, 2), [30, 0, 59, 11]],
+  ship: [c => W.ship(c, 50, 100, 1000, 0, 0), [52, 83, 74, 112]],
+  'lock, shut': [c => W.lock(c, 40, 60, false, '#38c848'), [35, 35, 54, 78]],
+  'lock, open': [c => W.lock(c, 40, 60, true, '#38c848'), [35, 35, 54, 78]],
 };
 for (const [name, [draw, box]] of Object.entries(FOOTPRINTS)) {
   test(`the 2× ${name} keeps its 1× footprint`, () => {

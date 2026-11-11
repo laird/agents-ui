@@ -7,6 +7,7 @@ import { disc, dither, px } from '../art2x.js';
 import { CRATE_W, CRATE_H, seal, stencil } from '../crates.js';
 import { registerTheme } from './registry.js';
 import { BLIND, CRANE_D, MB, MC, MLIT, MSHADE, mWin } from './modernhouses.js';
+import { modernGate, modernPad, modernRocket, modernTruck } from './modernport.js';
 
 /* A manhole cover, 5 detail pixels square: a dark rim, a lit edge on top
  * and a cross-hatch in the iron. */
@@ -214,61 +215,10 @@ export const MODERN = {
       }
     });
   },
-  /* Toll booth with a boom barrier across the road. */
-  gate(c, x, cy, open, flag) {
-    R(c, x - 4, cy - 15, 12, 10, P.o); R(c, x - 3, cy - 14, 10, 8, M.concreteL);
-    R(c, x - 2, cy - 12, 8, 3, M.glassL); R(c, x - 5, cy - 16, 14, 2, M.steelD);
-    R(c, x + 1, cy - 20, 4, 4, P.o); R(c, x + 2, cy - 19, 2, 2, flag);
-    R(c, x + 2, cy - 4, 2, 4, P.o);
-    if (!open) for (let k = 0; k < 14; k += 2) R(c, x + 2, cy + k, 2, 2, (k / 2) % 2 ? P.white : P.p0);
-  },
-  /* Launch pad: released work lifts off. The sky lights up when it does.
-   * The rocket on it is drawn by vessel() below, so it can load and fly. */
-  destination(c, x, cy, t, fw) {
-    R(c, x, cy - 8, 38, 8, P.o); R(c, x + 1, cy - 7, 36, 6, M.concrete);
-    for (let k = 2; k < 36; k += 6) R(c, x + k, cy - 4, 3, 1, M.dash);
-    R(c, x + 4, cy - 50, 4, 42, P.o); R(c, x + 5, cy - 49, 2, 40, P.red);
-    for (let yy = cy - 46; yy < cy - 8; yy += 6) R(c, x + 8, yy, 6, 1, M.steelD);
-    const ft = t - fw;
-    if (ft >= 0 && ft < 1600) {
-      const p = ft / 1600;
-      [[x + 6, P.gold], [x + 21, P.fizzA], [x + 34, P.fizzB]].forEach(([fx, col], i) => {
-        const fy = cy - 58 - p * 18 - i * 3;
-        for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; R(c, fx + Math.cos(a) * p * 9, fy + Math.sin(a) * p * 9, 1, 1, col); }
-      });
-    }
-    R(c, x + 8, cy - 2, 20, 18, P.o); R(c, x + 9, cy, 18, 15, P.dark);
-    // 2× (#452): the tower's cross-bracing, hazard stripes along the pad, and
-    // rivets down the gantry.
-    detail(c, x, cy, g => {
-      for (let yy = -92; yy < -18; yy += 12) for (let k = 0; k < 6; k++) { px(g, 10 + k, yy + k * 2, 1, 1, P.redD); px(g, 15 - k, yy + k * 2, 1, 1, P.redD); }
-      for (let k = 4; k < 72; k += 6) { px(g, k, -14, 3, 1, P.gold); px(g, k + 1, -13, 3, 1, P.o); }
-      for (let yy = -92; yy < -16; yy += 6) px(g, 11, yy, 1, 1, '#f8a0a0');
-    });
-  },
-  /* The rocket for the next release, with its cargo rack, moved by (ox, oy).
-   * Its engines fire while it climbs. */
-  vessel(c, x, cy, t, ox, oy) {
-    const rx = Math.round(x + 16 + ox); cy = Math.round(cy + oy);
-    R(c, rx, cy - 44, 10, 36, P.o); R(c, rx + 1, cy - 42, 8, 33, P.white); R(c, rx + 1, cy - 42, 2, 33, M.concreteL);
-    R(c, rx + 2, cy - 48, 6, 4, P.o); R(c, rx + 3, cy - 47, 4, 4, P.red); R(c, rx + 4, cy - 50, 2, 2, P.red);
-    R(c, rx + 3, cy - 34, 4, 3, P.o); R(c, rx + 4, cy - 33, 2, 1, M.glassL);
-    R(c, rx - 3, cy - 16, 3, 8, P.o); R(c, rx - 2, cy - 15, 2, 6, P.red);
-    R(c, rx + 10, cy - 16, 3, 8, P.o); R(c, rx + 10, cy - 15, 2, 6, P.red);
-    R(c, rx + 2, cy - 18, 6, 1, M.steelD);
-    R(c, rx + 13, cy - 26, 1, 18, M.steelD); R(c, rx + 13, cy - 9, 11, 1, M.steelD);
-    if (oy < 0) for (let k = 0; k < 4; k++) R(c, rx + 2 + k * 2, cy - 8 + (blink(t + k * 60, 80) ? 1 : 0), 2, 3 + (k % 2) * 2, k % 2 ? P.gold : '#f8f8f8');
-    // 2× (#452): panel seams and rivets on the body, a glint on the porthole,
-    // a lit edge on each fin and on the nose.
-    detail(c, rx, cy, g => {
-      [-76, -56, -40].forEach(yy => { px(g, 2, yy, 16, 1, M.concreteL); for (let k = 4; k < 18; k += 4) px(g, k, yy + 1, 1, 1, M.steelD); });
-      px(g, 8, -66, 1, 1, P.white);
-      px(g, -4, -30, 1, 12, '#f8a0a0'); px(g, 20, -30, 1, 12, '#f8a0a0');
-      px(g, 6, -94, 1, 6, '#f8a0a0');
-    });
-  },
+  /* The toll booth, launch pad and rocket at 2× (modernport.js, #472). */
+  gate: modernGate, destination: modernPad,
+  vessel(c, x, cy, t, ox, oy) { modernRocket(c, x, cy, t, ox, oy); },
   hold: [[30, -14], [35, -14], [30, -19], [35, -19], [30, -24], [35, -24]], holdBadge: [29, -32], hull: [12, -52, 28, 46], flies: true,
-  /* The delivery truck that brings new issues along the top road. */
   /* The QA checkpoint at 2× (#464): a security gate over the road, its LED
    * sign green while it checks work, and a lab with one conveyor scanner per
    * gate slot; a busy one runs its belt, scans and shows green. */
@@ -297,19 +247,10 @@ export const MODERN = {
       });
     });
   },
+  /* The delivery truck that brings new issues along the top road (modernport.js). */
   supply(c, x, t, load) {
-    x = Math.round(x);
-    R(c, x, 5, 20, 4, P.o); R(c, x + 1, 5, 18, 2, M.steel); R(c, x + 1, 5, 18, 1, M.concreteL);
-    R(c, x + 19, 1, 7, 8, P.o); R(c, x + 20, 2, 5, 5, P.white); R(c, x + 22, 3, 3, 2, M.glassL);
-    [x + 3, x + 14, x + 21].forEach(wx => { R(c, wx, 8, 3, 3, P.o); R(c, wx + 1, 9, 1, 1, M.steel); });
-    // 2× (#452): a glint on the windscreen, a headlight, the cab door's seam,
-    // hubs on the wheels and a stripe along the box.
-    detail(c, x, 0, g => {
-      px(g, 46, 6, 1, 2, P.white); px(g, 50, 13, 2, 1, P.gold); px(g, 42, 6, 1, 8, P.o);
-      [6, 28, 42].forEach(wx => px(g, wx + 2, 18, 2, 2, M.concreteL));
-      px(g, 2, 13, 36, 1, P.red);
-    });
-    for (let k = 0; k < Math.min(load, 3); k++) this.crate(c, x + 2 + k * 5, 0, 'workshop', null);
+    modernTruck(c, x);
+    for (let k = 0; k < Math.min(load, 3); k++) this.crate(c, Math.round(x) + 2 + k * 5, 0, 'workshop', null);
   },
   people: 'modern',
   steam: [P.white, M.concreteL], sign: [P.o, P.dark, M.led]

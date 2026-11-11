@@ -10,8 +10,10 @@
  * (or the released commit), never its issues, so a release of the same
  * issues still sails; a page loaded after a release just shows the new ship. */
 import { state } from './state.js';
-import { P, R, STOPCOL, blink } from './palette.js';
+import { P, STOPCOL, blink } from './palette.js';
 import { puffs } from './sprites/houses.js';
+import { detail } from './detail.js';
+import { px } from './art2x.js';
 import { badge, badgeSize } from './scenery.js';
 import { registerHit, registerLabels, registerLayer, tap } from './registry.js';
 import { porterPos, shownScenes } from './layout.js';
@@ -131,7 +133,13 @@ registerLayer({ z: 110, draw(c, scene, t) {
     const at = shipAt(state.S, t, lay), bob = state.T.flies || state.reduce || !blink(t, 900) ? 0 : 1, oy = at.oy + bob;
     if (at.leaving && state.T.flies) puffs(c, lay.castleX + 18, canalY - 12, t, ...state.T.steam);
     else if (at.leaving) {
-      for (let x = lay.castleX + 4; x < lay.castleX + at.ox; x += 5) R(c, x, canalY + 12 + ((x >> 2) % 2), 3, 1, P.white);
+      // The wake, at 2×: foam that thins out behind the ship.
+      detail(c, 0, canalY, g => {
+        for (let x = lay.castleX + 4; x < lay.castleX + at.ox; x += 5) {
+          const y = 24 + 2 * ((x >> 2) % 2);
+          px(g, 2 * x, y, 6, 1, P.white); px(g, 2 * x + 1, y + 1, 4, 1, 'rgba(248,248,248,.5)');
+        }
+      });
       tap(lay.castleX + 4, canalY + 8, Math.max(0, at.ox - 4), 8, { kind: 'harbour' });
     }
     const load = at.leaving ? state.S.voyage.cargo : cargo.filter(n => !carried.has(n) && !hid.has(n));

@@ -43,6 +43,8 @@ const FOOTPRINTS = {
   shuttle: [c => T.vessel(c, 50, 100, 1000, 0, 0), [65, 54, 94, 92]],
   'shuttle, launching': [c => T.vessel(c, 50, 100, 1000, 0, -20), [65, 34, 94, 76]],
   'cargo shuttle': [c => T.supply(c, 30, 1000, 2), [28, 0, 59, 9]],
+  'airlock, shut': [c => T.gate(c, 10, 80, false, '#38c848'), [5, 60, 19, 98]],
+  'airlock, open': [c => T.gate(c, 10, 80, true, '#38c848'), [5, 60, 19, 98]],
   drone: [c => T.decor(c, 40, 40, 3, 1000), [40, 41, 48, 48]],
 };
 for (const [name, [draw, box]] of Object.entries(FOOTPRINTS)) {

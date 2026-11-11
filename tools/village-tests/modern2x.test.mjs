@@ -35,6 +35,8 @@ const SPRITES = {
   'vessel (rocket)': [c => T.vessel(c, 10, 80, 0, 0, 0), [23, 30, 50, 72]],
   'vessel, climbing': [c => T.vessel(c, 10, 80, 0, 0, -10), [23, 20, 50, 67]],
   'supply (delivery truck)': [c => T.supply(c, 10, 0, 2), [10, 0, 36, 11]],
+  'gate (toll booth), shut': [c => T.gate(c, 10, 80, false, '#38c848'), [5, 60, 19, 94]],
+  'gate, open': [c => T.gate(c, 10, 80, true, '#38c848'), [5, 60, 19, 80]],
 };
 
 for (const [name, [paint, was]] of Object.entries(SPRITES)) {

@@ -75,3 +75,16 @@ export function lobes(c, discs, cols) {
   for (const [x, y, s] of discs) disc(c, x, y, s, solid);
   for (const [x, y, s] of discs) disc(c, x + 1, y + 1, s - 2, { ...cols, outline: cols.fill });
 }
+
+/* Pixel art from rows of characters: each character is a colour from
+ * `cols` ('.' or a character `cols` lacks draws nothing), drawn in runs. */
+export function pixmap(c, x, y, rows, cols) {
+  rows.forEach((row, j) => {
+    for (let i = 0; i < row.length;) {
+      let k = i;
+      while (k < row.length && row[k] === row[i]) k++;
+      if (cols[row[i]]) px(c, x + i, y + j, k - i, 1, cols[row[i]]);
+      i = k;
+    }
+  });
+}
