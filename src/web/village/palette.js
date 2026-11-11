@@ -1,5 +1,8 @@
 /* The village's colours and the drawing primitives every sprite uses. */
 
+import { detail } from './detail.js';
+import { px } from './art2x.js';
+
 /* ---------- Palette (15-bit, outline #202030) ---------- */
 export const P = {
   o: '#202030', skin: '#f8c898', skinS: '#d09068',
@@ -76,7 +79,22 @@ export const blink = (t, ms) => Math.floor(t / ms) % 2 === 1;
 export const waveFrame = t => blink(t, 220) ? 'wave2' : 'wave';
 /* Light comes from the upper left: shadows fall right and down. */
 export const SHADE = 'rgba(12,20,36,.28)', SHINE = 'rgba(255,255,240,.22)';
-export const shadow = (c, x, y, w, h) => R(c, x, y, w, h, SHADE);
+/* A soft shade under a sprite, at 2× (#476): the w×h scene box it always
+ * covered, drawn in detail pixels. SHADE in the middle; its ends, and on a
+ * shadow two or more scene pixels tall its top and bottom rows, are paler,
+ * and those rows stop short of the corners, so it reads as a soft oval. */
+export const SHADE_SOFT = 'rgba(12,20,36,.14)';
+export function shadow(c, x, y, w, h) {
+  const W = 2 * w, H = 2 * h;
+  detail(c, 0, 0, g => {
+    const X = Math.round(2 * x), Y = Math.round(2 * y);
+    for (let j = 0; j < H; j++) {
+      if (H > 2 && (j === 0 || j === H - 1)) { px(g, X + 1, Y + j, W - 2, 1, SHADE_SOFT); continue; }
+      px(g, X, Y + j, 1, 1, SHADE_SOFT); px(g, X + W - 1, Y + j, 1, 1, SHADE_SOFT);
+      if (W > 2) px(g, X + 1, Y + j, W - 2, 1, SHADE);
+    }
+  });
+}
 export const lit = st => st === 'working';
 export const glassOf = st => st === 'working' ? P.lamp : (st === 'unknown' || st === 'stopped') ? P.dark : P.glass;
 

@@ -12,7 +12,7 @@ const { DETAIL, prepare, detail, sceneScale, toScene } = await import(V + 'detai
 const { state } = await import(V + 'state.js');
 const scenery = await import(V + 'scenery.js');
 const { person } = await import(V + 'people.js');
-const { R, SHADE, shadow } = await import(V + 'palette.js');
+const { R, SHADE } = await import(V + 'palette.js');
 const houses = await import(V + 'sprites/houses.js');
 const { THEMES } = await import(V + 'themes/registry.js');
 await import(V + 'themes/medieval.js');
@@ -49,11 +49,11 @@ const doubled = rects => rects.map(([x, y, w, h, col, a]) => [x * DETAIL, y * DE
 
 /* A 1× drawing: palette primitives in scene pixels, as scenery still draws.
  * (Every sprite is drawn at 2×: crates since #420, people #419, tags #456,
- * pennants, cobwebs and smoke #461, buildings #463-#465. scenepixels.test.mjs
+ * pennants, cobwebs and smoke #461, buildings #463-#465, shadows #476. scenepixels.test.mjs
  * paints the whole village and holds every sprite to it.) */
 const SCENE = c => {
   state.T = THEMES.medieval;
-  R(c, 3, 4, 5, 2, '#406080'); shadow(c, 10, 12, 6, 2); R(c, 20, 1, 1, 9, '#e02828');
+  R(c, 3, 4, 5, 2, '#406080'); R(c, 10, 12, 6, 2, SHADE); R(c, 20, 1, 1, 9, '#e02828');
   R(c, 30, 7, 7, 7, '#202030'); R(c, 31, 8, 5, 5, '#f8f8f8');
   for (let k = 0; k < 4; k++) R(c, 40 + k * 2, 3 + k, 1, 1, '#f8d040');
 };

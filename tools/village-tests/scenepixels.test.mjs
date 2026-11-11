@@ -10,8 +10,9 @@
 // redrew at 2× inside detail(), and now the trees and decoration (#473), the
 // ground, roads, yards and water (#471), the banners, barges and fog (#475),
 // each theme's lock, harbour, ship and supply boat (#472), and the
-// environment row (#474). Only shadows still paint in scene pixels; they are
-// listed in SCENERY, so a new caller has to be named there or drawn at 2×.
+// environment row (#474), and the shadows under everything (#476). SCENERY is
+// empty: anything new that paints in scene pixels has to be named there, or
+// drawn at 2×.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -56,9 +57,7 @@ const SPRITE_FILES = new Set([
 const SPRITE_FNS = /^(?:Object\.)?(?:hall|board|dock|scaffold|gatehouse|crate|bubble)\b|\[as (?:hall|board|dock|scaffold|gatehouse|crate)\]/;
 /* What may still paint in scene pixels: scenery, not sprites (#455 left them
  * out). Each entry is the drawing function and its file. */
-const SCENERY = [
-  ['shadow', 'palette.js'],
-];
+const SCENERY = [];
 const SCENERY_SLOTS = [];
 
 /* One stack frame: [function name, file under src/web/village/]. */
