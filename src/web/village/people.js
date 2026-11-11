@@ -1,16 +1,35 @@
 /* People, robots and drones, and what they act out. Bodies are drawn at 2×
  * (#419): people2x.js lifts each 8×12 template onto the detail grid (#418)
- * with faces, hair, buttons, shoes and role clothing; tools and props are
- * drawn over them in scene pixels, as before. */
+ * with faces, hair, buttons, shoes and role clothing. The tools and props
+ * drawn over them, the drones, the action props and the action signs are
+ * drawn at 2× too (#460), in detail pixels on the scene pixels they always
+ * covered (tools/village-tests/people.test.mjs). */
 import { state, now } from './state.js';
 import { F, P, R, blink, shadow } from './palette.js';
 import { detail } from './detail.js';
 import { lift, runs } from './people2x.js';
+import { disc } from './art2x.js';
 
 /* A posed body at 2×, its top-left at scene (x, y). */
 function body2x(c, x, y, rows, map, opts) {
   const parts = runs(lift(rows, map, opts));
   detail(c, x, y, g => parts.forEach(([px, py, w, col]) => R(g, px, py, w, 1, col)));
+}
+
+/* A raised arm and its hand, in detail pixels from the body's top left:
+ * upright ('wave') or tilted out ('wave2'), with motion ticks on the
+ * outswing when `ticks`. The hand that left the side is tucked at the hip. */
+function waveArm(g, kind, sleeve, shade, hand, ticks) {
+  R(g, 14, 12, 4, 4, P.o); R(g, 15, 13, 2, 2, shade);
+  const palm = (hx, hy) => { R(g, hx + 1, hy, 6, 8, P.o); R(g, hx, hy + 1, 8, 6, P.o); R(g, hx + 2, hy + 1, 4, 6, hand); R(g, hx + 1, hy + 2, 6, 4, hand); R(g, hx + 2, hy + 1, 1, 1, P.white); };
+  if (kind === 'wave') {
+    R(g, 16, 2, 4, 12, P.o); R(g, 17, 4, 2, 10, sleeve); R(g, 18, 4, 1, 10, shade);
+    palm(14, -4);
+  } else {
+    R(g, 18, 8, 4, 6, P.o); R(g, 20, 4, 4, 6, P.o); R(g, 19, 9, 2, 4, sleeve); R(g, 21, 5, 2, 4, sleeve);
+    palm(20, -2);
+    if (ticks) [[29, -2], [31, 2], [29, 6]].forEach(([tx, ty]) => R(g, tx, ty, 1, 2, P.white));
+  }
 }
 
 /* ---------- People ----------
@@ -113,33 +132,40 @@ export function person(c, x, y, seed, kind = 'stand', opts = {}) {
   if (kind === 'work' || kind === 'work2') {
     // Busy: a hammer swinging between raised and struck, so a working
     // agent reads as working even with no action sign.
-    R(c, x + 7, y + 5, 2, 2, P.o); R(c, x + 7, y + 5, 1, 1, map.s);
-    if (kind === 'work') { R(c, x + 8, y + 1, 1, 5, P.woodD); R(c, x + 7, y, 3, 2, P.o); R(c, x + 7, y, 3, 1, P.stoneD); }
-    else { R(c, x + 8, y + 6, 4, 1, P.woodD); R(c, x + 11, y + 4, 2, 4, P.o); R(c, x + 11, y + 5, 1, 2, P.stoneD); R(c, x + 13, y + 7, 1, 1, P.gold); }
+    detail(c, x, y, g => {
+      R(g, 14, 10, 4, 4, P.o); R(g, 15, 11, 2, 2, map.s);
+      if (kind === 'work') {
+        R(g, 16, 2, 2, 9, P.woodD); R(g, 16, 2, 1, 9, P.wood);
+        R(g, 14, 0, 6, 4, P.o); R(g, 15, 1, 4, 2, P.stone); R(g, 15, 1, 4, 1, P.stoneL);
+      } else {
+        R(g, 16, 12, 8, 2, P.woodD); R(g, 16, 12, 8, 1, P.wood);
+        R(g, 22, 8, 4, 8, P.o); R(g, 23, 9, 2, 6, P.stone); R(g, 23, 9, 1, 6, P.stoneL);
+        R(g, 26, 14, 2, 2, P.gold); R(g, 28, 12, 1, 1, P.gold); R(g, 27, 16, 1, 1, P.white);
+      }
+    });
   }
   if (kind === 'wave' || kind === 'wave2') {
     // An arm raised above the head, swinging between upright and tilted out,
     // with motion ticks on the outswing: readable at a glance.
-    R(c, x + 7, y + 6, 2, 2, P.o); R(c, x + 7, y + 6, 1, 1, map.C);
-    if (kind === 'wave') {
-      R(c, x + 8, y + 1, 2, 6, P.o); R(c, x + 8, y + 2, 1, 5, map.c);
-      R(c, x + 7, y - 2, 4, 4, P.o); R(c, x + 8, y - 1, 2, 2, map.s);
-    } else {
-      R(c, x + 9, y + 4, 2, 3, P.o); R(c, x + 10, y + 2, 2, 3, P.o); R(c, x + 9, y + 5, 1, 1, map.c); R(c, x + 10, y + 3, 1, 2, map.c);
-      R(c, x + 10, y - 1, 4, 4, P.o); R(c, x + 11, y, 2, 2, map.s);
-      R(c, x + 14, y - 1, 1, 1, P.white); R(c, x + 15, y + 1, 1, 1, P.white); R(c, x + 14, y + 3, 1, 1, P.white);
-    }
+    detail(c, x, y, g => waveArm(g, kind, map.c, map.C, map.s, true));
   }
 }
 
-/* A sub-agent in Future is a mini drone in its specialty's colour. */
+/* A sub-agent in Future is a mini drone in its specialty's colour: a
+ * rounded shell with two eyes, twin rotors and a light under it. */
 function drone(c, x, y, col, t) {
   const b = !state.reduce && blink(t, 300) ? 1 : 0;
   x = Math.round(x) + 1; y = Math.round(y) + 3 + b;
   shadow(c, x + 1, y + 8 - b, 5, 1);
-  R(c, x, y + 1, 7, 4, P.o); R(c, x + 1, y + 2, 5, 2, col); R(c, x + 2, y + 2, 1, 1, P.white); R(c, x + 4, y + 2, 1, 1, P.white);
-  R(c, x - 1, y, 3, 1, P.o); R(c, x + 5, y, 3, 1, P.o);
-  R(c, x + 3, y + 5, 1, 1, '#40e0f0');
+  detail(c, x, y, g => {
+    R(g, 1, 2, 12, 8, P.o); R(g, 0, 3, 14, 6, P.o);
+    R(g, 2, 4, 10, 4, col); R(g, 2, 4, 10, 1, 'rgba(255,255,255,.35)'); R(g, 2, 7, 10, 1, 'rgba(0,0,0,.2)');
+    [4, 8].forEach(ex => { R(g, ex, 5, 2, 2, P.white); R(g, ex + 1, 6, 1, 1, P.o); });
+    // Rotors: a shaft each, the blades blurring longer and shorter as they spin.
+    R(g, 3, 1, 1, 2, P.o); R(g, 10, 1, 1, 2, P.o);
+    R(g, b ? -1 : -2, 0, b ? 8 : 10, 1, P.o); R(g, b ? 7 : 6, 0, b ? 8 : 10, 1, P.o);
+    R(g, 6, 10, 2, 2, '#40e0f0');
+  });
 }
 /* Draw a robot: the person() of the Future theme. `opts.status` picks its
  * look; `opts.sub` makes it a drone; `mayor` gives it a crown and a cape. */
@@ -165,28 +191,40 @@ function robot(c, x, y, seed, h, kind, opts) {
   const bob = st === 'idle' && kind === 'stand' && !state.reduce && blink(t + (h % 900), 700) ? -1 : 0;
   shadow(c, x + 1, y + 11, 7, 1);
   const yy = y + bob + (slump ? 1 : 0);
-  if (opts.mayor) { R(c, x - 1, yy + 7, 1, 4, map.C); R(c, x + 8, yy + 7, 1, 4, map.C); }
+  if (opts.mayor) detail(c, x, yy, g => [-2, 16].forEach(cx => { R(g, cx, 14, 2, 8, map.C); R(g, cx + (cx < 0 ? 1 : 0), 15, 1, 6, map.c); }));
   body2x(c, x, yy, rows, map, { robot: true });
-  if (opts.mayor) { R(c, x + 2, yy - 2, 5, 2, P.o); R(c, x + 2, yy - 1, 5, 1, P.gold); R(c, x + 2, yy - 2, 1, 1, P.gold); R(c, x + 4, yy - 3, 1, 1, P.gold); R(c, x + 6, yy - 2, 1, 1, P.gold); }
-  if (kind === 'wave' || kind === 'wave2') {
-    R(c, x + 7, yy + 6, 2, 2, P.o); R(c, x + 7, yy + 6, 1, 1, map.C);
-    if (kind === 'wave') { R(c, x + 8, yy + 1, 2, 6, P.o); R(c, x + 8, yy + 2, 1, 5, map.s); R(c, x + 7, yy - 2, 4, 4, P.o); R(c, x + 8, yy - 1, 2, 2, map.s); }
-    else {
-      R(c, x + 9, yy + 4, 2, 3, P.o); R(c, x + 10, yy + 2, 2, 3, P.o); R(c, x + 9, yy + 5, 1, 1, map.s); R(c, x + 10, yy + 3, 1, 2, map.s);
-      R(c, x + 10, yy - 1, 4, 4, P.o); R(c, x + 11, yy, 2, 2, map.s);
+  detail(c, x, yy, g => {
+    // The mayor's crown: a gold band on three points, a red jewel at its front.
+    if (opts.mayor) {
+      R(g, 4, -4, 10, 4, P.o); R(g, 4, -2, 10, 2, P.gold);
+      [[4, -4], [8, -6], [12, -4]].forEach(([cx, cy]) => { R(g, cx, cy, 2, 2, P.gold); R(g, cx, cy, 1, 1, P.white); });
+      R(g, 8, -2, 2, 2, P.p0);
     }
-    // A red "!" light beside a robot that needs you.
-    if (st === 'blocked') { R(c, x - 3, yy, 2, 4, P.o); R(c, x - 3, yy, 1, 3, '#e02828'); R(c, x - 3, yy + 5, 1, 1, '#e02828'); }
-  }
-  if (st === 'working') {
-    // Arms at work with a tiny wrench, sparks at the tip (none with reduced motion).
-    const up = !state.reduce && blink(t + (h % 400), 260);
-    R(c, x + 8, yy + (up ? 6 : 7), 3, 1, P.o); R(c, x + 10, yy + (up ? 5 : 6), 1, 3, '#9098b8');
-    if (!state.reduce && blink(t + (h % 300), 120)) { R(c, x + 11, yy + 4, 1, 1, P.white); R(c, x + 12, yy + 6, 1, 1, P.gold); R(c, x + 12, yy + 3, 1, 1, '#40e0f0'); }
-  }
-  if (st === 'done') { R(c, x + 3, yy + 7, 1, 1, '#3878e0'); R(c, x + 4, yy + 7, 1, 1, '#3878e0'); }
-  // Porters carry their crate on a hover-tray.
-  if (kind === 'carry' || kind === 'carrystep') { R(c, x - 1, yy - 1, 10, 2, P.o); R(c, x, yy - 1, 8, 1, F.hull); if (!state.reduce && blink(t, 160)) R(c, x + 1, yy + 1, 6, 1, F.cyan); }
+    if (kind === 'wave' || kind === 'wave2') {
+      waveArm(g, kind, map.s, map.C, map.s, false);
+      // A red "!" light beside a robot that needs you.
+      if (st === 'blocked') {
+        R(g, -6, 0, 4, 7, P.o); R(g, -5, 1, 2, 5, '#e02828'); R(g, -5, 1, 1, 1, P.white);
+        R(g, -6, 9, 4, 4, P.o); R(g, -5, 10, 2, 2, '#e02828');
+      }
+    }
+    if (st === 'working') {
+      // Arms at work with a tiny wrench, sparks at the tip (none with reduced motion).
+      const up = !state.reduce && blink(t + (h % 400), 260), a = up ? 12 : 14, w = up ? 10 : 12;
+      R(g, 16, a, 6, 2, P.o); R(g, 17, a, 4, 1, '#686e90');
+      R(g, 20, w, 2, 6, '#9098b8'); R(g, 20, w, 1, 6, '#c8d0e8'); R(g, 19, w, 1, 2, '#9098b8'); R(g, 22, w, 1, 2, '#9098b8');
+      if (!state.reduce && blink(t + (h % 300), 120)) {
+        R(g, 22, 8, 1, 1, P.white); R(g, 23, 9, 1, 1, P.white);
+        R(g, 24, 12, 2, 1, P.gold); R(g, 25, 13, 1, 1, P.gold); R(g, 24, 6, 1, 2, '#40e0f0');
+      }
+    }
+    if (st === 'done') { R(g, 6, 14, 4, 2, '#3878e0'); R(g, 6, 14, 1, 1, '#a8c8f8'); }
+    // Porters carry their crate on a hover-tray, its underside glowing.
+    if (kind === 'carry' || kind === 'carrystep') {
+      R(g, -2, -2, 20, 4, P.o); R(g, 0, -2, 16, 2, F.hull); R(g, 0, -2, 16, 1, 'rgba(255,255,255,.35)');
+      if (!state.reduce && blink(t, 160)) { R(g, 2, 2, 12, 1, F.cyan); R(g, 4, 3, 8, 1, 'rgba(64,224,240,.4)'); }
+    }
+  });
 }
 
 /* ---------- Actions ----------
@@ -197,44 +235,69 @@ export const wander = (action, t, seed) =>
   action === 'searching' || action === 'messaging' ? Math.round(Math.sin(t / 520 + (strHash(seed) % 7)) * 3) : 0;
 export function drawAction(c, x, y, action, t) {
   const up = blink(t, 240);
-  switch (action) {
-    case 'thinking':
-      [[8, -2, 1], [10, -4, 1], [12, -7, 2]].forEach(([dx, dy, sz], k) => {
-        if (blink(t + k * 160, 480) || state.reduce) { R(c, x + dx - 1, y + dy - 1, sz + 2, sz + 2, P.o); R(c, x + dx, y + dy, sz, sz, P.white); }
-      });
-      break;
-    case 'reading':
-      R(c, x + 1, y + 7, 6, 3, P.o); R(c, x + 2, y + 7, 2, 2, P.white); R(c, x + 4, y + 7, 2, 2, P.parch);
-      break;
-    case 'writing':
-      if (up) { R(c, x + 8, y + 4, 1, 4, P.woodD); R(c, x + 7, y + 3, 3, 2, P.stoneD); }
-      else { R(c, x + 8, y + 7, 3, 1, P.woodD); R(c, x + 10, y + 6, 2, 3, P.stoneD); R(c, x + 12, y + 10, 1, 1, P.gold); }
-      break;
-    case 'running':
-      R(c, x + 8, y + 8, 5, 4, P.o); R(c, x + 9, y + 9, 3, 2, up ? '#58e878' : P.dark);
-      break;
-    case 'searching':
-      R(c, x + 7, y + 1, 4, 4, P.o); R(c, x + 8, y + 2, 2, 2, P.glass); R(c, x + 10, y + 5, 1, 1, P.o); R(c, x + 11, y + 6, 1, 1, P.o);
-      break;
-    case 'messaging':
-      R(c, x + 6, y + 7, 4, 3, P.o); R(c, x + 7, y + 8, 2, 1, P.white); R(c, x + 8, y + 8, 1, 1, P.p0);
-      break;
-  }
+  detail(c, x, y, g => {
+    switch (action) {
+      case 'thinking':
+        // Thought bubbles, rising and growing, each a shaded disc.
+        [[8, -2, 1], [10, -4, 1], [12, -7, 2]].forEach(([dx, dy, sz], k) => {
+          if (blink(t + k * 160, 480) || state.reduce) disc(g, 2 * dx - 2, 2 * dy - 2, 2 * sz + 4, { outline: P.o, fill: P.white, light: P.white, dark: '#c8c8d8' });
+        });
+        break;
+      case 'reading':
+        // An open book: two pages ruled with lines, a dark spine between.
+        R(g, 2, 14, 12, 6, P.o); R(g, 3, 14, 4, 4, P.white); R(g, 9, 14, 4, 4, P.parch); R(g, 7, 14, 2, 5, P.woodD);
+        [15, 17].forEach(ly => { R(g, 4, ly, 2, 1, P.stoneL); R(g, 10, ly, 2, 1, 'rgba(32,32,48,.25)'); });
+        break;
+      case 'writing':
+        if (up) { R(g, 16, 8, 2, 8, P.woodD); R(g, 16, 8, 1, 8, P.wood); R(g, 14, 6, 6, 4, P.o); R(g, 15, 7, 4, 2, P.stone); R(g, 15, 7, 4, 1, P.stoneL); }
+        else {
+          R(g, 16, 14, 6, 2, P.woodD); R(g, 16, 14, 6, 1, P.wood);
+          R(g, 20, 12, 4, 6, P.o); R(g, 21, 13, 2, 4, P.stone); R(g, 21, 13, 1, 4, P.stoneL);
+          R(g, 24, 20, 2, 2, P.gold); R(g, 26, 19, 1, 1, P.white);
+        }
+        break;
+      case 'running':
+        // A terminal, its screen scrolling green lines as the command runs.
+        R(g, 16, 16, 10, 8, P.o); R(g, 17, 17, 8, 1, P.dark); R(g, 18, 18, 6, 4, up ? '#58e878' : P.dark);
+        if (up) { R(g, 19, 19, 3, 1, '#c8ffd8'); R(g, 19, 21, 2, 1, '#c8ffd8'); }
+        else R(g, 19, 19, 1, 2, '#58e878');
+        break;
+      case 'searching':
+        // A magnifying glass: a lens with a glint, on a wooden handle.
+        disc(g, 14, 2, 8, { outline: P.o, fill: P.glass, light: '#e0f0ff', dark: '#80a8d0' });
+        R(g, 20, 10, 2, 2, P.woodD); R(g, 21, 11, 2, 2, P.woodD); R(g, 22, 12, 2, 2, P.o);
+        break;
+      case 'messaging':
+        // A letter: its flap folded down to a red wax seal.
+        R(g, 12, 14, 8, 6, P.o); R(g, 13, 15, 6, 4, P.white);
+        [[13, 15], [14, 16], [17, 16], [18, 15]].forEach(([fx, fy]) => R(g, fx, fy, 1, 1, P.stoneL));
+        R(g, 15, 17, 2, 2, P.p0);
+        break;
+    }
+  });
 }
 /* Actions with nothing to hammer: no sparks fly off the crate. */
 export const QUIET_ACTIONS = new Set(['thinking', 'reading', 'searching', 'messaging']);
-const ACTION_ICONS = {
-  thinking: ['.###.', '#####', '.###.', '.....', '#....'],
-  reading: ['##.##', '#.#.#', '#.#.#', '##.##', '.....'],
-  writing: ['###..', '###..', '.#...', '.#...', '.#...'],
-  running: ['#.#.#', '.###.', '##.##', '.###.', '#.#.#'],
-  searching: ['.##..', '#..#.', '.##..', '...#.', '....#'],
-  messaging: ['#####', '##.##', '#.#.#', '#...#', '#####']
+/* Each action's icon on its sign, drawn for the 2× grid (#460): 10 by 10
+ * detail pixels, '#' in the sign's ink, '+' in a softer tone of it. */
+export const ACTION_ICONS = {
+  thinking: ['..####....', '.######...', '##++######', '#+########', '.########.', '..######..', '..........', '..##......', '..........', '#.........'],
+  reading: ['.###..###.', '#+++##+++#', '#.#.##.#.#', '#+++##+++#', '#.#.##.#.#', '#+++##+++#', '#.#.##.#.#', '#...##...#', '.###..###.', '..........'],
+  writing: ['.#####....', '#++++##...', '#######...', '.#####....', '...##.....', '...#+.....', '...##.....', '...#+.....', '...##.....', '...##.....'],
+  running: ['....##....', '.#.####.#.', '..######..', '.###..###.', '####..####', '####..####', '.###..###.', '..######..', '.#.####.#.', '....##....'],
+  searching: ['..####....', '.#++..#...', '#+.....#..', '#......#..', '#......#..', '.#....#...', '..#####...', '......##..', '.......##.', '........##'],
+  messaging: ['##########', '##......##', '#.#....#.#', '#..#..#..#', '#...##...#', '#........#', '#........#', '##########', '..........', '..........']
 };
-/* A small sign over a busy house naming what its own agent is doing. */
+/* A small sign over a busy house naming what its own agent is doing: a
+ * framed board 7 by 7, its icon redrawn at 2×. */
 export function actionSign(c, x, y, action) {
   const icon = ACTION_ICONS[action]; if (!icon) return;
   const [frame, face, ink] = state.T.sign;
-  R(c, x, y, 7, 7, frame); R(c, x + 1, y + 1, 5, 5, face);
-  for (let r = 0; r < 5; r++) for (let k = 0; k < 5; k++) if (icon[r][k] === '#') R(c, x + 1 + k, y + 1 + r, 1, 1, ink);
+  detail(c, x, y, g => {
+    R(g, 0, 0, 14, 14, frame); R(g, 2, 2, 10, 10, face); R(g, 2, 2, 10, 1, 'rgba(255,255,255,.25)');
+    icon.forEach((row, r) => [...row].forEach((ch, k) => {
+      if (ch === '#') R(g, 2 + k, 2 + r, 1, 1, ink);
+      else if (ch === '+') { R(g, 2 + k, 2 + r, 1, 1, ink); R(g, 2 + k, 2 + r, 1, 1, 'rgba(255,255,255,.45)'); }
+    }));
+  });
 }
