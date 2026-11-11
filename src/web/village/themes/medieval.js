@@ -21,7 +21,7 @@ const DECOR2X = [
     px(g, 4, 4, 1, 1, GLINT); px(g, 9, 5, 2, 2, BERRY); px(g, 9, 5, 1, 1, GLINT);
   },
   (g, x, y) => { // flowerbed: a lit edge, clods of soil, a heart in each flower, a leaf on each stem
-    px(g, 0, 6, 16, 1, P.wood); px(g, 3, 8, 1, 1, SOIL); px(g, 8, 9, 1, 1, SOIL); px(g, 12, 8, 1, 1, SOIL);
+    px(g, 0, 6, 16, 1, P.wood); px(g, 4, 5, 1, 1, P.woodD); px(g, 8, 4, 1, 1, P.woodD); px(g, 11, 5, 1, 1, P.woodD);
     for (let i = 0; i < 4; i++) {
       const col = FLOWERS[(i + Math.floor(hash(x, y) * 5)) % FLOWERS.length];
       px(g, 3 + i * 4, 1, 1, 1, col === FLOWERS[1] ? '#c07020' : FLOWERS[1]);
@@ -84,7 +84,7 @@ const medievalBorder = (c, W, H) => {
   leaf(0, H - 3, W, 3); leaf(0, 11, 3, H - 11); leaf(W - 3, 11, 3, H - 11);
   R(c, 3, H - 3, W - 6, 1, P.o); R(c, 3, 11, 1, H - 14, P.o); R(c, W - 4, 11, 1, H - 14, P.o);
   detail(c, 0, 0, g => {
-    const strip = (x, y, w, h) => dither(g, x, y, w, h, 3, (dx, dy) => HEDGE(x + dx, y + dy));
+    const strip = (x, y, w, h) => dither(g, x, y, w, h, 4, (dx, dy) => HEDGE(x + dx, y + dy));
     strip(0, 2 * (H - 3) + 2, 2 * W, 4); strip(0, 22, 5, 2 * (H - 14)); strip(2 * W - 5, 22, 5, 2 * (H - 14));
   });
 };

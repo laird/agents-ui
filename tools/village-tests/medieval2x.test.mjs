@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 
 globalThis.window ??= { matchMedia: () => ({ matches: false }) };
 const { MEDIEVAL: T } = await import('../../src/web/village/themes/medieval.js');
+const { SHADE } = await import('../../src/web/village/palette.js');
 
 /* A canvas that follows translate/scale and records each rect in scene pixels. */
 function recorder() {
@@ -36,7 +37,7 @@ for (const [name, [k, was]] of Object.entries(DECOR)) {
 test('every 2× detail pixel of a decoration lands on its 1× drawing', () => {
   for (const [name, [k]] of Object.entries(DECOR)) {
     const rects = drawn(c => T.decor(c, 40, 30, k, 0));
-    const solid = rects.filter(r => !fine(r)), inside = (x, y) => solid.some(r => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
+    const solid = rects.filter(r => !fine(r) && r.col !== SHADE), inside = (x, y) => solid.some(r => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
     for (const r of rects.filter(fine)) assert.ok(inside(r.x, r.y) && inside(r.x + r.w - 0.01, r.y + r.h - 0.01), `${name}: ${JSON.stringify(r)} is over the sprite`);
   }
 });
