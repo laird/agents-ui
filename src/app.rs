@@ -2505,12 +2505,12 @@ impl App {
         // Tab cycles focus forward: Manager → Workers → Issues → Manager
         // Shift+Tab cycles backwards: Manager → Issues → Workers → Manager
         if key.code == KeyCode::Tab {
-            self.swarm_view.search_query = None;
+            self.swarm_view.issue_search = None;
             self.swarm_focus = self.swarm_focus.next();
             return Ok(());
         }
         if key.code == KeyCode::BackTab {
-            self.swarm_view.search_query = None;
+            self.swarm_view.issue_search = None;
             self.swarm_focus = self.swarm_focus.prev();
             return Ok(());
         }
@@ -2855,51 +2855,13 @@ impl App {
                 }
             }
             SwarmPanel::Issues => {
-                // Search mode intercepts all input
-                if self.swarm_view.search_query.is_some() {
-                    match key.code {
-                        KeyCode::Esc => {
-                            self.swarm_view.search_query = None;
-                            self.swarm_view.issues_table.select(Some(0));
-                        }
-                        KeyCode::Enter => {
-                            self.swarm_view.search_query = None;
-                        }
-                        KeyCode::Backspace => {
-                            if let Some(q) = self.swarm_view.search_query.as_mut() {
-                                q.pop();
-                            }
-                            self.swarm_view.issues_table.select(Some(0));
-                        }
-                        KeyCode::Char(c) => {
-                            if let Some(q) = self.swarm_view.search_query.as_mut() {
-                                q.push(c);
-                            }
-                            self.swarm_view.issues_table.select(Some(0));
-                        }
-                        _ => {}
-                    }
-                    return Ok(());
-                }
                 // Search mode: route keys to the TextInput
                 if self.swarm_view.issue_search.is_some() {
-                    let search_filtered_count = if let Some(swarm) = self.swarms.get(swarm_idx) {
-                        if let Some(cache) = self.issue_caches.get(&swarm.project_name) {
-                            let q = self.swarm_view.issue_search.as_ref().unwrap().text().to_lowercase();
-                            cache.issues.iter()
-                                .filter(|i| i.matches_filter(self.swarm_view.issue_filter))
-                                .filter(|i| {
-                                    if q.is_empty() { return true; }
-                                    if let Some(num_str) = q.strip_prefix('#') {
-                                        if let Ok(num) = num_str.parse::<u32>() {
-                                            return i.number == num;
-                                        }
-                                    }
-                                    i.title.to_lowercase().contains(&q)
-                                })
-                                .count()
-                        } else { 0 }
-                    } else { 0 };
+                    // The rows the panel shows: apply_filters includes the search.
+                    let search_filtered_count = self.swarms.get(swarm_idx)
+                        .and_then(|s| self.issue_caches.get(&s.project_name))
+                        .map(|c| self.swarm_view.apply_filters(&c.issues).len())
+                        .unwrap_or(0);
 
                     match key.code {
                         KeyCode::Esc => {
@@ -2907,7 +2869,12 @@ impl App {
                             self.swarm_view.issues_table.select(Some(0));
                         }
                         KeyCode::Enter => {
-                            self.swarm_view.issue_search = None;
+                            // Keep the issue that was picked selected once every row is back.
+                            let issues = self.swarms.get(swarm_idx)
+                                .and_then(|s| self.issue_caches.get(&s.project_name))
+                                .map(|c| c.issues.as_slice())
+                                .unwrap_or(&[]);
+                            self.swarm_view.close_search_keeping_selection(issues);
                         }
                         KeyCode::Down | KeyCode::Char('j') => {
                             self.swarm_view.next_issue(search_filtered_count);
@@ -3233,15 +3200,11 @@ impl App {
                             }
                         }
                     }
-                    KeyCode::Char('/') => {
-                        self.swarm_view.search_query = Some(String::new());
-                        self.swarm_view.issues_table.select(Some(0));
-                    }
                     KeyCode::Char('c') => {
                         self.swarm_view.issue_filter = IssueFilter::All;
                         self.swarm_view.issue_type_filter = None;
                         self.swarm_view.priority_filter = None;
-                        self.swarm_view.search_query = None;
+                        self.swarm_view.issue_search = None;
                         self.swarm_view.issues_table.select(Some(0));
                         self.set_status("Filters cleared".to_string());
                     }
@@ -3734,18 +3697,10 @@ impl App {
         if self.swarm_view.issue_search.is_some() {
             let search_filtered_count = if let Some(swarm) = self.swarms.get(swarm_idx) {
                 if let Some(cache) = self.issue_caches.get(&swarm.project_name) {
-                    let q = self.swarm_view.issue_search.as_ref().unwrap().text().to_lowercase();
+                    let q = self.swarm_view.issue_search.as_ref().unwrap().text();
                     cache.issues.iter()
                         .filter(|i| i.matches_filter(self.swarm_view.issue_filter))
-                        .filter(|i| {
-                            if q.is_empty() { return true; }
-                            if let Some(num_str) = q.strip_prefix('#') {
-                                if let Ok(num) = num_str.parse::<u32>() {
-                                    return i.number == num;
-                                }
-                            }
-                            i.title.to_lowercase().contains(&q)
-                        })
+                        .filter(|i| crate::ui::swarm_view::matches_search(i, q))
                         .count()
                 } else { 0 }
             } else { 0 };
@@ -7331,6 +7286,47 @@ mod tests {
             matches!(app.screen, Screen::SwitchAgent { .. }),
             "S key must open switch-agent dialog when workers panel has focus"
         );
+    }
+
+    /// #468: `/` in the swarm view's Issues panel opens the search box, and what
+    /// is typed there filters the panel's rows (it used to open a search box
+    /// that `apply_filters`, which the panel draws from, never read).
+    #[tokio::test]
+    async fn slash_then_text_filters_the_issues_panel() {
+        use crate::model::issue::GitHubIssue;
+        use crate::ui::swarm_view::SwarmPanel;
+        let mut app = App::new(None, false, None, None, None, None, ALL_AGENT_TYPES.to_vec())
+            .await
+            .expect("App::new failed");
+        app.screen = Screen::RepoView { swarm_idx: 0 };
+        app.swarm_focus = SwarmPanel::Issues;
+        for c in "/login".chars() {
+            let _ = app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)).await;
+        }
+        assert_eq!(app.swarm_view.issue_search.as_ref().map(|s| s.text()), Some("login"));
+
+        use crate::model::issue::{IssuePriority, IssueState, IssueType};
+        let issue = |number: u32, title: &str| GitHubIssue {
+            number,
+            title: title.to_string(),
+            state: IssueState::Open,
+            priority: IssuePriority::None,
+            issue_type: IssueType::Other,
+            labels: Vec::new(),
+            is_working: false,
+            assigned_worker: None,
+            updated_at: None,
+            url: None,
+            depends_on: Vec::new(),
+        };
+        let issues = vec![issue(1, "Fix login bug"), issue(2, "Add dark mode")];
+        let shown: Vec<u32> = app.swarm_view.apply_filters(&issues).iter().map(|i| i.number).collect();
+        assert_eq!(shown, vec![1], "the panel shows only the matching issue");
+
+        // Tab leaves the panel and closes the search, so every issue is back.
+        let _ = app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)).await;
+        assert!(app.swarm_view.issue_search.is_none());
+        assert_eq!(app.swarm_view.apply_filters(&issues).len(), 2);
     }
 
     /// Regression test for #307: entering agent view must clear overlays so

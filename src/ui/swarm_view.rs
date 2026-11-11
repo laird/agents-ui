@@ -50,10 +50,22 @@ pub struct SwarmView {
     pub issue_type_filter: Option<IssueType>,
     /// Active priority filter: None = all priorities, Some(p) = only issues of that priority.
     pub priority_filter: Option<IssuePriority>,
-    /// Active search query (None = not searching, Some("") = searching with empty query).
-    pub search_query: Option<String>,
-    /// Active issue search query (`/` activates search mode)
+    /// Active issue search query (`/` activates search mode; see `matches_search`)
     pub issue_search: Option<TextInput>,
+}
+
+/// Whether `issue` matches the `/` search `query`: everything for an empty
+/// query, exactly that number for `#42`, otherwise a case-insensitive title
+/// match or a number containing the query (`42` finds #42 and #142).
+pub fn matches_search(issue: &GitHubIssue, query: &str) -> bool {
+    if query.is_empty() {
+        return true;
+    }
+    if let Some(n) = query.strip_prefix('#').and_then(|n| n.parse::<u32>().ok()) {
+        return issue.number == n;
+    }
+    issue.title.to_lowercase().contains(&query.to_lowercase())
+        || issue.number.to_string().contains(query)
 }
 
 impl SwarmView {
@@ -69,7 +81,6 @@ impl SwarmView {
             issue_filter: IssueFilter::All,
             issue_type_filter: None,
             priority_filter: None,
-            search_query: None,
             issue_search: None,
         }
     }
@@ -358,30 +369,7 @@ impl SwarmView {
             _ => "",
         };
 
-        // Split issues area: optional 1-line search bar + table
-        let is_searching = self.search_query.is_some();
-        let issues_col = body_chunks[2];
-        let (search_area, table_area) = if is_searching {
-            let parts =
-                Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(issues_col);
-            (Some(parts[0]), parts[1])
-        } else {
-            (None, issues_col)
-        };
-
-        // Render search bar
-        if let (Some(area), Some(query)) = (search_area, &self.search_query) {
-            let bar = Paragraph::new(Line::from(vec![
-                Span::styled(" / ", theme::title_style()),
-                Span::styled(
-                    query.as_str(),
-                    Style::default().fg(ratatui::style::Color::White),
-                ),
-                Span::styled("█", Style::default().fg(ratatui::style::Color::White)),
-                Span::styled("  Esc clear  Enter confirm", theme::help_style()),
-            ]));
-            f.render_widget(bar, area);
-        }
+        let table_area = body_chunks[2];
 
         let issue_header = Row::new(vec![
             Cell::from("T"),
@@ -651,25 +639,28 @@ impl SwarmView {
                     .map_or(true, |pf| &i.priority == pf)
             })
             .filter(|i| {
-                if let Some(q) = &self.search_query {
-                    if q.is_empty() {
-                        return true;
-                    }
-                    let q_lower = q.to_lowercase();
-                    if q.starts_with('#') {
-                        if let Ok(n) = q[1..].parse::<u32>() {
-                            return i.number == n;
-                        }
-                    }
-                    i.title.to_lowercase().contains(&q_lower)
-                        || i.number.to_string().contains(q.as_str())
-                } else {
-                    true
-                }
+                self.issue_search
+                    .as_ref()
+                    .map_or(true, |s| matches_search(i, s.text()))
             })
             .collect();
         result.sort_by_key(|i| (i.is_blocked(), &i.priority, i.number));
         result
+    }
+
+    /// Close the `/` search (Enter) and keep the issue that was selected in the
+    /// search's rows selected among all of them, rather than whichever issue
+    /// now sits at the same row.
+    pub fn close_search_keeping_selection(&mut self, issues: &[GitHubIssue]) {
+        let picked = self
+            .issues_table
+            .selected()
+            .and_then(|i| self.apply_filters(issues).get(i).map(|issue| issue.number));
+        self.issue_search = None;
+        if let Some(n) = picked {
+            let row = self.apply_filters(issues).iter().position(|i| i.number == n);
+            self.issues_table.select(Some(row.unwrap_or(0)));
+        }
     }
 
     /// Render a full-screen issue list for the given project.
@@ -680,22 +671,13 @@ impl SwarmView {
         project_name: &str,
         issues: &[GitHubIssue],
     ) {
-        let search_query = self.issue_search.as_ref().map(|s| s.text().to_lowercase());
         let filtered: Vec<&GitHubIssue> = issues
             .iter()
             .filter(|i| i.matches_filter(self.issue_filter))
             .filter(|i| {
-                if let Some(ref q) = search_query {
-                    if q.is_empty() { return true; }
-                    if let Some(num_str) = q.strip_prefix('#') {
-                        if let Ok(num) = num_str.parse::<u32>() {
-                            return i.number == num;
-                        }
-                    }
-                    i.title.to_lowercase().contains(q.as_str())
-                } else {
-                    true
-                }
+                self.issue_search
+                    .as_ref()
+                    .map_or(true, |s| matches_search(i, s.text()))
             })
             .collect();
 
@@ -1699,7 +1681,7 @@ mod tests {
             make_issue(2, "Add dark mode", &[]),
             make_issue(3, "Fix logout flow", &[]),
         ];
-        view.search_query = Some("login".to_string());
+        view.issue_search = Some(TextInput::with_text("login".to_string()));
         let results = view.apply_filters(&issues);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].number, 1);
@@ -1712,7 +1694,7 @@ mod tests {
             make_issue(42, "Some issue", &[]),
             make_issue(123, "Another issue", &[]),
         ];
-        view.search_query = Some("42".to_string());
+        view.issue_search = Some(TextInput::with_text("42".to_string()));
         let results = view.apply_filters(&issues);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].number, 42);
@@ -1725,10 +1707,26 @@ mod tests {
             make_issue(42, "Some issue", &[]),
             make_issue(123, "Another issue", &[]),
         ];
-        view.search_query = Some("#42".to_string());
+        view.issue_search = Some(TextInput::with_text("#42".to_string()));
         let results = view.apply_filters(&issues);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].number, 42);
+    }
+
+    #[test]
+    fn closing_search_keeps_the_picked_issue_selected() {
+        let mut view = SwarmView::new();
+        let issues = vec![
+            make_issue(1, "Add dark mode", &[]),
+            make_issue(2, "Fix login bug", &[]),
+            make_issue(3, "Fix logout flow", &[]),
+        ];
+        view.issue_search = Some(TextInput::with_text("fix".to_string()));
+        view.issues_table.select(Some(1)); // #3, the second match
+        view.close_search_keeping_selection(&issues);
+        assert!(view.issue_search.is_none());
+        let selected = view.issues_table.selected().unwrap();
+        assert_eq!(view.apply_filters(&issues)[selected].number, 3);
     }
 
     #[test]
