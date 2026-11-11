@@ -1,116 +1,17 @@
 /* The Future theme. */
 import { state, now } from '../state.js';
 import { F, KINDCOL, P, PRIOCOL, R, SHADE, blink, hash, shadow } from '../palette.js';
-import { note, prioRun } from '../cvdmarks.js';
-import { puffs } from '../sprites/houses.js';
+import { prioRun } from '../cvdmarks.js';
 import { detail } from '../detail.js';
 import { planks, px } from '../art2x.js';
 import { CRATE_W, CRATE_H, seal, stencil } from '../crates.js';
 import { registerTheme } from './registry.js';
+import { FB, at2x, futureBoard, futureDock, futureHall, futureScaffold } from './futurebuildings.js';
 /* ---------- Future ----------
  * A space station worked by little robots: deck plates for ground, light-
  * strip walkways for roads, a plasma canal, habitat pods with portholes. It
  * keeps the shared status language: lit portholes while working, an open
  * hatch for blocked, dark glass for unknown. */
-/* Portholes: lit cyan-white while working, dark when nobody can say. */
-const fWin = st => st === 'working' ? F.cyanL : (st === 'unknown' || st === 'stopped') ? P.dark : F.glassD;
-function porthole(c, x, y, st) {
-  R(c, x + 1, y, 2, 4, P.o); R(c, x, y + 1, 4, 2, P.o); R(c, x + 1, y + 1, 2, 2, fWin(st));
-  if (st === 'working') R(c, x + 1, y + 1, 1, 1, P.white);
-}
-/* A habitat pod: a rounded module with a domed roof, two portholes and a
- * hatch. The hatch stands open (dark) while its robot waits on you. */
-function pod(c, x, y, st, o = {}) {
-  const shell = o.shell || F.hull, shellD = o.shellD || F.hullD, roof = o.roof || F.hullL;
-  [4, 5, 6, 7, 7].forEach((w, dy) => {
-    R(c, x + 8 - w, y + 1 + dy, 2 * w, 1, P.o);
-    if (dy) R(c, x + 9 - w, y + 1 + dy, 2 * w - 2, 1, dy === 1 ? roof : shell);
-  });
-  R(c, x, y + 5, 16, 11, P.o); R(c, x + 1, y + 5, 14, 10, shell);
-  R(c, x + 1, y + 14, 14, 1, shellD); R(c, x + 12, y + 5, 2, 9, SHADE);
-  R(c, x + 1, y + 7, 14, 1, o.band || F.cyanD);
-  if (o.portholes !== false) { porthole(c, x + 2, y + 9, st); porthole(c, x + 10, y + 9, st); }
-  R(c, x + 6, y + 10, 4, 6, P.o);
-  R(c, x + 7, y + 11, 2, 5, st === 'blocked' ? P.o : shellD);
-  R(c, x + 6, y + 9, 4, 1, st === 'working' ? F.cyan : F.cyanD);
-}
-const FB = {
-  cottage(c, x, y, st, t) {
-    pod(c, x, y, st);
-    R(c, x + 12, y - 3, 1, 5, F.hullD); R(c, x + 11, y - 4, 3, 1, st === 'working' && blink(t, 500) ? F.cyan : F.cyanD);
-    if (st === 'working') puffs(c, x + 4, y - 1, t, F.cyanL, F.hullD);
-  },
-  workshop(c, x, y, st, t) {
-    pod(c, x, y, st, { shell: '#b8b0d0', shellD: '#8078a0' });
-    const a = st === 'working' ? Math.floor(t / 300) % 2 : 0;
-    R(c, x + 4, y - 3, 2, 5, F.hullD); R(c, x + 5, y - 4, 5, 2, F.hullD); R(c, x + 9, y - 3 + a, 2, 3, P.o);
-    if (st === 'working' && blink(t, 120)) { R(c, x + 10, y + 1 + a, 1, 1, P.white); R(c, x + 11, y + a, 1, 1, P.gold); R(c, x + 12, y + 2 + a, 1, 1, F.cyan); }
-  },
-  feature(c, x, y, st, t) {
-    pod(c, x, y, st, { band: F.magentaD });
-    R(c, x + 13, y - 4, 2, 20, F.magenta); R(c, x + 13, y - 4, 1, 20, P.o);
-    R(c, x + 3, y - 4, 13, 2, F.magenta); R(c, x + 3, y - 3, 13, 1, P.o);
-    const hook = st === 'working' ? 4 + Math.floor((Math.sin(t / 400) + 1) * 2) : 5;
-    const hx = x + 5 + (st === 'working' ? Math.floor(t / 700) % 3 : 0);
-    R(c, hx, y - 2, 1, hook, F.cyan); R(c, hx - 1, y - 2 + hook, 3, 1, F.cyanL);
-  },
-  bug(c, x, y, st, t) {
-    pod(c, x, y, st);
-    R(c, x + 4, y - 4, 8, 5, 'rgba(64,224,240,.35)');
-    R(c, x + 6, y - 3, 4, 3, P.bug); R(c, x + 7, y - 3, 1, 1, P.o); R(c, x + 8, y - 2, 1, 1, P.o);
-    R(c, x + 5, y - 2, 1, 1, P.bug); R(c, x + 10, y - 2, 1, 1, P.bug);
-    R(c, x + 7, y + 1, 2, 1, F.cyan);
-    if (st === 'working') R(c, x + 4, y - 4 + Math.floor(t / 160) % 5, 8, 1, F.cyanL);
-  },
-  security(c, x, y, st, t) {
-    pod(c, x, y, st, { shell: F.panel, shellD: P.shield, roof: F.panelL });
-    R(c, x + 6, y + 2, 4, 3, P.gold); R(c, x + 7, y + 3, 2, 1, P.shield);
-    R(c, x + 3, y - 2, 1, 5, F.hullD);
-    const a = st === 'working' ? t / 300 : 0.6;
-    for (let d = 1; d < 5; d++) R(c, x + 3 + Math.round(Math.cos(a) * d), y - 2 + Math.round(Math.sin(a) * d * 0.5), 1, 1, F.hull);
-    R(c, x + 12, y - 1, 3, 2, P.o); R(c, x + 13, y - 1, 1, 1, st === 'working' && blink(t, 400) ? P.p0 : F.hullD);
-  },
-  tests(c, x, y, st, t) {
-    pod(c, x, y, st, { shell: F.glass, shellD: F.glassD, roof: F.cyanL });
-    [x + 3, x + 11].forEach((tx, k) => {
-      R(c, tx, y - 3, 3, 5, P.o); R(c, tx + 1, y - 2, 1, 4, k ? P.fizzB : P.fizzA);
-      if (st === 'working') puffs(c, tx + 1, y - 4, t + k * 500, P.fizzA, P.fizzB);
-    });
-  },
-  research(c, x, y, st, t) {
-    pod(c, x, y, st, { roof: F.cyanL });
-    const a = -2.2 + (st === 'working' ? Math.sin(t / 900) * 0.5 : 0);
-    for (let d = 0; d < 6; d++) R(c, x + 8 + Math.round(Math.cos(a) * d), y + 2 + Math.round(Math.sin(a) * d), 1, 1, d < 5 ? F.hullD : P.o);
-    R(c, x + 8 + Math.round(Math.cos(a) * 6), y + 2 + Math.round(Math.sin(a) * 6), 1, 1, st === 'working' ? P.gold : F.cyanD);
-  },
-  docs(c, x, y, st, t) {
-    pod(c, x, y, st);
-    [F.magenta, F.cyan, P.gold, F.plasmaL].forEach((col, k) => { R(c, x + 4 + k * 2, y - 3 + (k % 2), 2, 4, P.o); R(c, x + 4 + k * 2, y - 2 + (k % 2), 1, 2, col); });
-    if (st === 'working') R(c, x + 4 + Math.floor(t / 250) % 4 * 2, y - 4, 1, 1, P.white);
-  },
-  refactor(c, x, y, st, t) {
-    pod(c, x, y, st);
-    R(c, x + 8, y + 1, 8, 15, 'rgba(240,72,192,.35)');
-    for (let yy = y + 2; yy < y + 16; yy += 3) R(c, x + 8, yy, 8, 1, F.magentaD);
-    if (st === 'working') R(c, x + 8, y + 2 + Math.floor(t / 140) % 13, 8, 1, F.magenta);
-  },
-  perf(c, x, y, st, t) {
-    pod(c, x, y, st, { shell: F.hullD, shellD: F.deckL });
-    [x + 4, x + 11].forEach((fx, k) => {
-      R(c, fx - 3, y - 2, 7, 6, P.o); R(c, fx - 2, y - 1, 5, 4, F.deck);
-      const a = st === 'working' ? t / 90 + k : 0.3;
-      for (let d = -2; d <= 2; d++) R(c, fx + Math.round(Math.cos(a) * d), y + 1 + Math.round(Math.sin(a) * d * 0.7), 1, 1, F.cyan);
-    });
-  },
-  chores(c, x, y, st, t) {
-    R(c, x, y + 3, 16, 13, P.o); R(c, x + 1, y + 4, 14, 11, F.hullD);
-    R(c, x + 1, y + 4, 14, 2, F.deckL); R(c, x + 1, y + 6, 14, 1, P.gold);
-    R(c, x + 4, y + 8, 8, 8, P.o); R(c, x + 5, y + 9, 6, 7, st === 'blocked' ? P.o : F.deck);
-    if (st !== 'blocked') for (let yy = y + 10; yy < y + 16; yy += 2) R(c, x + 5, yy, 6, 1, F.deckD);
-    if (st === 'working') R(c, x + 5, y + 9, 6, 1, F.cyan);
-    R(c, x + 12, y + 12, 4, 4, P.o); R(c, x + 13, y + 13, 2, 2, F.magenta);
-  }
-};
 export const FUTURE = {
   name: 'Future',
   pair: 'modern',
@@ -172,10 +73,6 @@ export const FUTURE = {
       }
     });
   },
-  dock(c, x, y, w) {
-    R(c, x, y, w, 7, P.o); R(c, x + 1, y, w - 2, 6, F.hullD);
-    for (let k = 0; k < w - 2; k += 4) R(c, x + 1 + k, y + 5, 2, 1, F.cyan);
-  },
   /* Groves become station kit: an antenna mast, a solar array or a small dome. */
   tree(c, x, y) {
     const k = Math.floor(hash(x, y) * 3);
@@ -209,33 +106,6 @@ export const FUTURE = {
       });
     }
   },
-  /* Command dome: a glass dome on a hull ring, an antenna with a blinking
-   * beacon on top. The hatch goes dark when the manager waits on you. */
-  hall(c, x, y, st) {
-    const x0 = x - 4, gy = y + 22, cx = x0 + 20, base = y + 10, t = now();
-    R(c, cx, y - 16, 1, 12, F.hull); R(c, cx - 3, y - 12, 7, 1, F.hullD);
-    R(c, cx - 1, y - 19, 3, 3, P.o); R(c, cx, y - 18, 1, 1, blink(t, 700) ? P.p0 : F.magentaD);
-    for (let dy = -13; dy <= 0; dy++) {
-      const w = Math.floor(Math.sqrt(14 * 14 - dy * dy));
-      R(c, cx - w, base + dy, 2 * w + 1, 1, P.o);
-      if (dy > -13) R(c, cx - w + 1, base + dy, 2 * w - 1, 1, (dy + 13) % 4 === 0 ? F.cyanD : F.glass);
-    }
-    for (let wy = y; wy < base; wy += 4) for (let wx = cx - 8; wx <= cx + 8; wx += 4) R(c, wx, wy, 2, 2, fWin(st));
-    R(c, cx - 9, base - 11, 3, 2, 'rgba(255,255,255,.55)');
-    R(c, x0, gy - 12, 40, 12, P.o); R(c, x0 + 1, gy - 11, 38, 10, F.hull);
-    R(c, x0 + 1, gy - 11, 38, 1, F.hullL); R(c, x0 + 1, gy - 8, 38, 1, F.cyanD);
-    for (let k = 3; k < 38; k += 6) R(c, x0 + k, gy - 6, 2, 2, F.cyan);
-    R(c, x0 + 16, gy - 9, 8, 9, P.o);
-    R(c, x0 + 17, gy - 8, 6, 8, st === 'blocked' ? P.o : F.hullD);
-    if (st !== 'blocked') R(c, x0 + 20, gy - 8, 1, 8, P.o);
-  },
-  /* Notes float on a hologram between two emitters. */
-  board(c, x, y, notes) {
-    R(c, x + 1, y + 11, 3, 4, P.o); R(c, x + 2, y + 11, 1, 3, F.cyan); R(c, x + 14, y + 11, 3, 4, P.o); R(c, x + 15, y + 11, 1, 3, F.cyan);
-    R(c, x, y, 18, 11, 'rgba(64,224,240,.28)');
-    R(c, x, y, 18, 1, F.cyan); R(c, x, y + 10, 18, 1, F.cyanD); R(c, x, y, 1, 11, F.cyanD); R(c, x + 17, y, 1, 11, F.cyanD);
-    notes.slice(0, 8).forEach((n, i) => note(c, x + 2 + (i % 4) * 4, y + 2 + Math.floor(i / 4) * 4, n.label, F.cyanL));
-  },
   /* A cargo crate riding a little hover-pad. */
   crate(c, x, y, kind, pr, sealed, n) {
     detail(c, x, y, d => {
@@ -250,15 +120,7 @@ export const FUTURE = {
     });
   },
   B: FB,
-  /* A pod frame going up, a drone welding at it. */
-  scaffold(c, x, y, t) {
-    for (let yy = y + 2; yy < y + 16; yy += 4) R(c, x + 1, yy, 14, 1, F.hullD);
-    R(c, x + 1, y + 2, 1, 14, F.hull); R(c, x + 14, y + 2, 1, 14, F.hull);
-    const dx = x + 3 + Math.floor((Math.sin(t / 600) + 1) * 4), dy = y - 2 + (blink(t, 300) ? 1 : 0);
-    R(c, dx, dy, 5, 3, P.o); R(c, dx + 1, dy + 1, 3, 1, F.hull); R(c, dx - 1, dy, 1, 1, F.hullD); R(c, dx + 5, dy, 1, 1, F.hullD);
-    R(c, dx + 2, dy + 1, 1, 1, F.cyan);
-    if (blink(t, 90)) { R(c, dx + 2, dy + 4, 1, 1, P.white); R(c, dx + 1 + Math.floor(hash(Math.floor(t / 90), 5) * 3), dy + 5, 1, 1, P.gold); }
-  },
+  hall: futureHall, board: futureBoard, dock: futureDock, scaffold: futureScaffold,
   /* An airlock: two pylons with a force field between them and a status light on the control tower. */
   gate(c, x, cy, open, flag) {
     R(c, x - 4, cy - 15, 12, 10, P.o); R(c, x - 3, cy - 14, 10, 8, F.hull); R(c, x - 2, cy - 12, 8, 3, F.glass);
@@ -321,19 +183,33 @@ export const FUTURE = {
   },
   hold: [[33, -14], [38, -14], [33, -19], [38, -19], [33, -24], [38, -24]], holdBadge: [31, -32], hull: [14, -58, 30, 50], flies: true,
   /* The cargo shuttle that brings new issues down the conduit, hovering. */
-  /* The scanner arch: laser grids across the walkway while anything is
-   * gating, and one scanner pad per gate slot, glowing while busy. */
+  /* The scanner arch at 2×: laser grids across the walkway while anything
+   * is gating, and one scanner pad per gate slot, its screen glowing while
+   * busy. Drawn in the order it always was, so what overlaps still does. */
   gatehouse(c, g, t, busy) {
-    const { x0, y, w, rx, rw } = g;
-    [rx - 3, rx + rw + 1].forEach(px => { R(c, px, y + 2, 2, 20, P.o); R(c, px, y + 3, 1, 18, F.hullD); R(c, px, y + 3, 2, 1, F.cyan); });
-    R(c, rx - 4, y, rw + 8, 3, P.o); R(c, rx - 3, y + 1, rw + 6, 1, F.magenta);
-    if (busy.size && !state.reduce) for (let k = 0; k < 4; k++) if (blink(t + k * 90, 180)) R(c, rx - 1, y + 5 + k * 4, rw + 2, 1, F.magenta);
-    R(c, x0, y + 3, w, 20, P.o); R(c, x0 + 1, y + 4, w - 2, 18, F.hullD); R(c, x0 + 1, y + 4, w - 2, 1, F.hull);
-    g.tables.forEach(([tx, ty], k) => {
-      const on = busy.has(k + 1);
-      R(c, tx + 4, ty - 9, 6, 6, P.o); R(c, tx + 5, ty - 8, 4, 4, on ? F.cyanL : F.navy);
-      R(c, tx, ty + 5, 10, 3, P.o); R(c, tx + 1, ty + 5, 8, 2, on ? F.cyan : F.deckD);
-      if (on && !state.reduce && blink(t + k * 70, 140)) R(c, tx + 2 + (Math.floor(t / 140) % 6), ty + 4, 1, 1, F.cyanL);
+    const { x0, y, w, rx, rw } = g, gh = g;
+    detail(c, 0, 0, g => {
+      const X = v => 2 * v, Y = v => 2 * v;
+      [rx - 3, rx + rw + 1].forEach(p => {
+        px(g, X(p), Y(y + 2), 4, 40, P.o); px(g, X(p), Y(y + 3), 2, 36, F.hullD); px(g, X(p) + 1, Y(y + 3), 1, 36, F.hull);
+        px(g, X(p), Y(y + 3), 4, 2, F.cyan); px(g, X(p) + 1, Y(y + 3), 2, 1, F.cyanL);
+        for (let k = 14; k < 40; k += 8) px(g, X(p) + 1, Y(y + 2) + k, 2, 1, F.cyanD);
+      });
+      px(g, X(rx - 4), Y(y), X(rw + 8), 6, P.o); px(g, X(rx - 3), Y(y + 1), X(rw + 6), 2, F.magenta); px(g, X(rx - 3), Y(y + 1), X(rw + 6), 1, 'rgba(255,255,255,.35)');
+      if (busy.size && !state.reduce) for (let k = 0; k < 4; k++) if (blink(t + k * 90, 180)) {
+        px(g, X(rx - 1), Y(y + 5 + k * 4), X(rw + 2), 1, F.magenta); px(g, X(rx - 1), Y(y + 5 + k * 4) + 1, X(rw + 2), 1, 'rgba(240,72,192,.35)');
+      }
+      px(g, X(x0), Y(y + 3), X(w), 40, P.o); px(g, X(x0 + 1), Y(y + 4), X(w - 2), 36, F.hullD); px(g, X(x0 + 1), Y(y + 4), X(w - 2), 2, F.hull);
+      for (let k = X(x0) + 10; k < X(x0 + w) - 2; k += 10) px(g, k, Y(y + 5), 1, 32, 'rgba(0,0,0,.2)');
+      gh.tables.forEach(([tx, ty], k) => {
+        const on = busy.has(k + 1);
+        px(g, X(tx + 4), Y(ty - 9), 12, 12, P.o); px(g, X(tx + 5), Y(ty - 8), 8, 8, on ? F.cyanL : F.navy);
+        if (on) { px(g, X(tx + 5) + 1, Y(ty - 8) + 2, 6, 1, F.cyan); px(g, X(tx + 5) + 1, Y(ty - 8) + 5, 4, 1, F.cyan); }
+        else px(g, X(tx + 5), Y(ty - 8), 2, 1, 'rgba(255,255,255,.2)');
+        px(g, X(tx), Y(ty + 5), 20, 6, P.o); px(g, X(tx + 1), Y(ty + 5), 16, 4, on ? F.cyan : F.deckD);
+        px(g, X(tx + 1), Y(ty + 5), 16, 1, on ? F.cyanL : F.deck);
+        if (on && !state.reduce && blink(t + k * 70, 140)) px(g, X(tx + 2 + (Math.floor(t / 140) % 6)), Y(ty + 4), 2, 2, F.cyanL);
+      });
     });
   },
   supply(c, x, t, load) {
@@ -349,43 +225,67 @@ export const FUTURE = {
     });
     for (let k = 0; k < Math.min(load, 3); k++) this.crate(c, x + 2 + k * 5, y, 'workshop', null);
   },
+  /* Station kit at 2× (#465): an antenna with rungs, a solar panel with
+   * cells, a glass dome, a maintenance drone, light bollards, a vent grille. */
   decor(c, x, y, k, t) {
     switch (k) {
       case 0: // antenna
         shadow(c, x + 3, y + 7, 3, 1);
-        R(c, x + 3, y + 1, 1, 7, F.hull); R(c, x + 1, y + 3, 5, 1, F.hullD); R(c, x + 2, y, 3, 2, P.o); R(c, x + 3, y, 1, 1, blink(t + x * 37, 900) ? P.p0 : F.magentaD); break;
+        detail(c, x, y, g => {
+          px(g, 6, 2, 2, 14, F.hull); px(g, 6, 2, 1, 14, F.hullL); px(g, 2, 6, 10, 2, F.hullD); px(g, 4, 11, 6, 1, F.hullD);
+          px(g, 4, 0, 6, 4, P.o); const on = blink(t + x * 37, 900); px(g, 6, 0, 2, 2, on ? P.p0 : F.magentaD); if (on) px(g, 6, 0, 1, 1, P.white);
+        }); break;
       case 1: // solar panel
-        R(c, x + 3, y + 4, 1, 3, F.hullD); R(c, x, y, 8, 4, P.o); R(c, x + 1, y + 1, 6, 2, F.panel); R(c, x + 1, y + 1, 6, 1, F.panelL); R(c, x + 4, y + 1, 1, 2, F.panelL); break;
+        detail(c, x, y, g => {
+          px(g, 6, 8, 2, 6, F.hullD); px(g, 0, 0, 16, 8, P.o); px(g, 2, 2, 12, 4, F.panel);
+          for (let cx = 5; cx < 14; cx += 3) px(g, cx, 2, 1, 4, F.panelL); px(g, 2, 2, 12, 1, F.panelL); px(g, 2, 4, 12, 1, 'rgba(0,0,0,.2)');
+          px(g, 10, 3, 2, 1, P.white);
+        }); break;
       case 2: // small dome
         shadow(c, x + 1, y + 6, 7, 1);
-        R(c, x + 2, y + 1, 4, 1, P.o); R(c, x + 1, y + 2, 6, 4, P.o); R(c, x + 2, y + 2, 4, 3, F.glass); R(c, x + 2, y + 2, 2, 1, F.cyanL); R(c, x + 1, y + 5, 6, 1, F.hullD); break;
-      case 3: { // maintenance drone, hovering: at 2×, rotors blurred, a lens with a glint, a skid
+        detail(c, x, y, g => {
+          [[5, 2, 6], [3, 3, 10], [2, 4, 12]].forEach(([dx, dy, w]) => px(g, dx, dy, w, 1, P.o));
+          px(g, 2, 5, 12, 7, P.o); px(g, 4, 4, 8, 1, F.glass); px(g, 3, 5, 10, 5, F.glass);
+          px(g, 4, 5, 3, 1, F.cyanL); px(g, 4, 6, 1, 2, P.white); px(g, 2, 10, 12, 2, F.hullD); px(g, 4, 10, 1, 1, F.cyanL); px(g, 11, 10, 1, 1, F.cyanL);
+        }); break;
+      case 3: { // maintenance drone, hovering: rotors blurred, a lens with a glint, a skid
         const b = blink(t + y * 29, 400) ? 1 : 0;
         shadow(c, x + 2, y + 7, 4, 1);
-        R(c, x + 1, y + 1 + b, 6, 3, P.o); R(c, x + 2, y + 2 + b, 4, 1, F.hull); R(c, x + 3, y + 2 + b, 1, 1, F.cyan);
-        R(c, x, y + b, 2, 1, F.hullD); R(c, x + 6, y + b, 2, 1, F.hullD);
         detail(c, x, y + b, g => {
+          px(g, 3, 2, 10, 6, P.o); px(g, 2, 3, 12, 4, P.o); px(g, 4, 4, 8, 2, F.hull); px(g, 6, 4, 2, 2, F.cyan);
           px(g, 0, 0, 4, 1, blink(t + x * 7, 60) ? F.hull : F.hullD); px(g, 12, 0, 4, 1, blink(t + x * 7 + 30, 60) ? F.hull : F.hullD);
-          px(g, 6, 4, 1, 1, P.white); px(g, 4, 6, 8, 1, F.hullL); px(g, 4, 7, 1, 1, F.rivet); px(g, 11, 7, 1, 1, F.rivet);
+          px(g, 3, 1, 1, 2, P.o); px(g, 12, 1, 1, 2, P.o);
+          px(g, 6, 4, 1, 1, P.white); px(g, 4, 8, 8, 1, F.hullL); px(g, 4, 9, 1, 1, F.rivet); px(g, 11, 9, 1, 1, F.rivet);
         });
         break;
       }
       case 4: // light bollards
-        [x + 1, x + 5].forEach(bx => { R(c, bx, y + 2, 2, 4, P.o); R(c, bx, y + 2, 2, 1, blink(t + bx * 13, 1400) ? F.cyanL : F.cyan); });
-        R(c, x, y + 6, 8, 1, F.deckL); break;
+        detail(c, x, y, g => {
+          [2, 10].forEach(bx => { px(g, bx, 4, 4, 8, P.o); px(g, bx + 1, 6, 2, 5, F.hullD); const on = blink(t + (x + bx / 2) * 13, 1400); px(g, bx, 4, 4, 2, on ? F.cyanL : F.cyan); if (on) px(g, bx + 1, 4, 2, 1, P.white); });
+          px(g, 0, 12, 16, 2, F.deckL); px(g, 0, 12, 16, 1, F.deck);
+        }); break;
       default: // vent grille
-        R(c, x, y + 1, 8, 5, P.o); for (let k = 0; k < 4; k++) R(c, x + 1, y + 2 + k, 6, 1, k % 2 ? F.deck : F.deckL);
+        detail(c, x, y, g => {
+          px(g, 0, 2, 16, 10, P.o);
+          for (let k = 0; k < 8; k++) px(g, 2, 3 + k, 12, 1, k % 2 ? F.deck : F.deckL);
+          px(g, 1, 3, 1, 1, F.rivet); px(g, 14, 3, 1, 1, F.rivet); px(g, 1, 10, 1, 1, F.rivet); px(g, 14, 10, 1, 1, F.rivet);
+        });
     }
   },
-  /* Hull trim with a starfield outside it. */
+  /* Hull trim with a starfield outside it, at 2×: stars of two sizes and
+   * colours, the trim lit along its inner edge. */
   border(c, W, H) {
-    R(c, 0, H - 3, W, 3, F.space); R(c, 0, 11, 3, H - 11, F.space); R(c, W - 3, 11, 3, H - 11, F.space);
-    for (let x = 1; x < W; x += 7) R(c, x, H - 2 - (x % 2), 1, 1, hash(x, H) < 0.5 ? P.white : F.cyanL);
-    for (let y = 13; y < H - 3; y += 9) { R(c, 1 + (y % 2), y, 1, 1, P.white); R(c, W - 2 - (y % 2), y + 4, 1, 1, F.cyanL); }
-    R(c, 3, H - 3, W - 6, 1, F.magentaD); R(c, 3, 11, 1, H - 14, F.magentaD); R(c, W - 4, 11, 1, H - 14, F.magentaD);
+    detail(c, 0, 0, g => {
+      px(g, 0, 2 * H - 6, 2 * W, 6, F.space); px(g, 0, 22, 6, 2 * H - 22, F.space); px(g, 2 * W - 6, 22, 6, 2 * H - 22, F.space);
+      for (let x = 1; x < 2 * W; x += 7) { const star = hash(x, H); px(g, x, 2 * H - 3 - (x % 3), star < 0.15 ? 2 : 1, star < 0.15 ? 2 : 1, star < 0.5 ? P.white : F.cyanL); }
+      for (let y = 26; y < 2 * H - 6; y += 9) { px(g, 1 + (y % 3), y, 1, 1, hash(1, y) < 0.3 ? F.cyanL : P.white); px(g, 2 * W - 3 + (y % 2), y + 4, 1, 1, hash(2, y) < 0.3 ? P.white : F.cyanL); }
+      px(g, 6, 2 * H - 6, 2 * W - 12, 2, F.magentaD); px(g, 6, 22, 2, 2 * H - 28, F.magentaD); px(g, 2 * W - 8, 22, 2, 2 * H - 28, F.magentaD);
+      px(g, 6, 2 * H - 7, 2 * W - 12, 1, F.magenta); px(g, 8, 22, 1, 2 * H - 29, F.magenta); px(g, 2 * W - 9, 22, 1, 2 * H - 29, F.magenta);
+    });
   },
   people: 'future', robots: true,
   steam: [F.cyanL, F.hullD], sign: [P.o, F.navy, F.cyan]
 };
 
+at2x(FUTURE.gatehouse);
 registerTheme('future', FUTURE);
