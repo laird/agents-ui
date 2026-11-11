@@ -18,11 +18,13 @@
  * place. Busy tables are lit and idle ones dark. The walks between these
  * places are trips (trips.js); the stamps they leave are drawn here. */
 import { state } from './state.js';
-import { NOTECOL, P, R, blink } from './palette.js';
+import { NOTECOL, P, blink } from './palette.js';
 import { badge, numberTag } from './scenery.js';
 import { drawAction, person } from './people.js';
 import { registerHit, registerLabels, registerLayer, tap } from './registry.js';
 import { lamp } from './alarms.js';
+import { detail } from './detail.js';
+import { disc, px } from './art2x.js';
 import { quaySpot } from './ship.js';
 import { issueLabel, issueOf, link } from './dialogs.js';
 
@@ -80,23 +82,37 @@ export function gateEntryWords(e, v) {
 }
 
 /* ---------- Drawing ---------- */
-/* A stamp the inspector brings down on a crate: green for passed, red for rejected, a knot for a conflict. */
+/* Ink a small bitmap ('#' for ink) in detail pixels. */
+const stampInk = (g, x, y, rows, col) => rows.forEach((row, j) => { for (let i = 0; i < row.length; i++) if (row[i] === '#') px(g, x + i, y + j, 1, 1, col); });
+const STAMP_CHECK = ['........##', '.......##.', '##....##..', '.##..##...', '..####....', '...##.....'];
+const STAMP_CROSS = ['##....##', '.##..##.', '..####..', '..####..', '.##..##.', '##....##'];
+const STAMP_KNOT = ['....####......', '...##..##.....', '..##....##....', '..##...######.', '...##.##...##.', '....###....##.', '...##.##..##..', '..##...####...', '.##...........', '##............'];
+/* A stamp the inspector brings down on a crate: green for passed, red for
+ * rejected, a knot for a conflict. A card 9 by 7 from (x - 1, y - 1), drawn
+ * at 2× (#459): a rounded card, a stamped border and its mark. */
 function stampMark(c, x, y, kind) {
-  if (kind === 'knot') {
-    R(c, x - 1, y - 1, 9, 7, P.o); R(c, x, y, 7, 5, NOTECOL.conflict);
-    [[1, 1], [3, 2], [5, 1], [2, 3], [4, 3], [3, 0], [3, 4]].forEach(([dx, dy]) => R(c, x + dx, y + dy, 1, 1, P.woodD));
-    return;
-  }
-  const col = kind === 'ok' ? P.leaf : P.p0;
-  R(c, x - 1, y - 1, 9, 7, P.o); R(c, x, y, 7, 5, P.white); R(c, x, y, 7, 1, col); R(c, x, y + 4, 7, 1, col); R(c, x, y, 1, 5, col); R(c, x + 6, y, 1, 5, col);
-  if (kind === 'ok') { R(c, x + 2, y + 2, 1, 1, col); R(c, x + 3, y + 3, 1, 1, col); R(c, x + 4, y + 1, 1, 2, col); }
-  else for (let k = 1; k < 4; k++) { R(c, x + 1 + k, y + k, 1, 1, col); R(c, x + 5 - k, y + k, 1, 1, col); }
+  detail(c, x - 1, y - 1, g => {
+    px(g, 1, 0, 16, 1, P.o); px(g, 1, 13, 16, 1, P.o); px(g, 0, 1, 1, 12, P.o); px(g, 17, 1, 1, 12, P.o);
+    px(g, 1, 1, 16, 12, kind === 'knot' ? NOTECOL.conflict : P.white);
+    if (kind === 'knot') { stampInk(g, 2, 2, STAMP_KNOT, P.woodD); return; }
+    const col = kind === 'ok' ? P.leaf : P.p0;
+    px(g, 2, 2, 14, 1, col); px(g, 2, 11, 14, 1, col); px(g, 2, 2, 1, 10, col); px(g, 15, 2, 1, 10, col);
+    if (kind === 'ok') stampInk(g, 4, 4, STAMP_CHECK, col); else stampInk(g, 5, 4, STAMP_CROSS, col);
+  });
 }
-/* A 1px rope from (x0, y0) to (x1, y1); tangled, it knots up halfway. */
+/* A rope from (x0, y0) to (x1, y1), sagging between them, its twist picked
+ * out every few pixels; tangled, it knots up halfway. Drawn at 2× (#459). */
+const ROPE_TANGLE = ['.##..#..', '#..##.#.', '.#.##..#', '#..#.##.', '.##..#..'];
 function rope(c, x0, y0, x1, y1, tangled) {
-  const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
-  for (let k = 0; k <= n; k += 1) R(c, x0 + (x1 - x0) * k / n, y0 + (y1 - y0) * k / n + (k % 4 === 2 ? 1 : 0), 1, 1, P.woodD);
-  if (tangled) { const mx = (x0 + x1) >> 1, my = (y0 + y1) >> 1; [[-1, -1], [1, -1], [0, 0], [-1, 1], [1, 1], [2, 0], [-2, 0]].forEach(([dx, dy]) => R(c, mx + dx, my + dy, 1, 1, P.p0)); }
+  detail(c, 0, 0, g => {
+    const ax = 2 * x0, ay = 2 * y0, bx = 2 * x1, by = 2 * y1, n = Math.max(1, Math.abs(bx - ax), Math.abs(by - ay));
+    for (let k = 0; k <= n; k++) {
+      const x = Math.round(ax + (bx - ax) * k / n), y = Math.round(ay + (by - ay) * k / n + 3 * Math.sin(Math.PI * k / n));
+      px(g, x, y, 1, 2, P.woodD);
+      if (k % 3 === 1) px(g, x, y, 1, 1, P.woodL);
+    }
+    if (tangled) stampInk(g, ((ax + bx) >> 1) - 4, ((ay + by) >> 1) - 1, ROPE_TANGLE, P.p0);
+  });
 }
 const inspectFrame = t => (!state.reduce && blink(t, 180) ? 'work2' : 'work');
 /* Before anything is drawn: where each entry in the gate is. Its crate rests
@@ -113,7 +129,8 @@ registerLayer({ z: 72, draw(c, { v, lay }) {
     const lot = lay.lots[i], e = lot && h.issue && gateOf(v, h.issue);
     if (!e || (e.state !== 'failed' && e.state !== 'conflict')) return;
     const n = Math.min(4, Math.max(1, e.attempt || 1));
-    for (let k = 0; k < n; k++) R(c, lot.x + 1 + k * 2, lot.y + 1, 1, 3, P.p0);
+    // Tally strokes, each with a darker foot (2×, #459).
+    detail(c, lot.x, lot.y, g => { for (let k = 0; k < n; k++) { px(g, 2 + k * 4, 2, 2, 6, P.p0); px(g, 2 + k * 4, 7, 2, 1, '#901818'); } });
     tap(lot.x, lot.y, n * 2 + 2, 5, { kind: 'gatecrate', n: h.issue, at: 'house' });
   });
 } });
@@ -130,7 +147,12 @@ registerLayer({ z: 75, draw(c, { v, lay, gate: gs }, t) {
   if (gateEntries(v).some(e => e.state === 'failed' || e.state === 'conflict')) lamp(c, g.x0 + g.w - 2, g.y - 4, t);
   // The master crate: the integration branch.
   const mx = g.rx - 12, my = g.y + 3;
-  R(c, mx - 1, my - 1, 9, 9, P.o); R(c, mx, my, 7, 7, P.gold); R(c, mx, my, 7, 1, P.woodD); R(c, mx + 3, my, 1, 7, P.woodD);
+  detail(c, mx - 1, my - 1, d => {
+    px(d, 1, 0, 16, 1, P.o); px(d, 1, 17, 16, 1, P.o); px(d, 0, 1, 1, 16, P.o); px(d, 17, 1, 1, 16, P.o);
+    px(d, 1, 1, 16, 16, P.gold); px(d, 1, 3, 16, 1, '#f8e070'); px(d, 1, 16, 16, 1, '#b08820');
+    px(d, 1, 1, 16, 2, P.woodD); px(d, 8, 1, 2, 16, P.woodD);
+    px(d, 3, 6, 1, 1, P.o); px(d, 14, 6, 1, 1, P.o); px(d, 3, 13, 1, 1, P.o); px(d, 14, 13, 1, 1, P.o);
+  });
   tap(mx - 1, my - 1, 9, 9, { kind: 'gatehouse' });
   gs.units.forEach(u => {
     const e = u.lead, n = e.issue;
@@ -144,9 +166,15 @@ registerLayer({ z: 75, draw(c, { v, lay, gate: gs }, t) {
     if (train) {
       // A cart under the train's crates, chained together.
       const shown = u.members.slice(0, 3), cw = shown.length * 6;
-      R(c, x - 1, y + 5, cw + 1, 2, P.o); R(c, x, y + 5, cw - 1, 1, P.woodL);
-      R(c, x, y + 7, 2, 2, P.o); R(c, x + cw - 3, y + 7, 2, 2, P.o);
-      shown.forEach((mm, i) => { T.crate(c, x + i * 6, y, 'workshop', null, false, mm.issue); if (i) R(c, x + i * 6 - 1, y + 2, 1, 1, P.stoneD); });
+      detail(c, x, y, d => {
+        px(d, -2, 10, 2 * cw + 2, 4, P.o); px(d, 0, 10, 2 * cw - 2, 2, P.woodL); px(d, 0, 12, 2 * cw - 2, 1, P.wood);
+        for (const wx of [0, 2 * cw - 6]) { px(d, wx + 1, 14, 2, 1, P.o); px(d, wx, 15, 4, 2, P.o); px(d, wx + 1, 17, 2, 1, P.o); px(d, wx + 1, 15, 2, 2, P.stoneL); }
+      });
+      shown.forEach((mm, i) => {
+        T.crate(c, x + i * 6, y, 'workshop', null, false, mm.issue);
+        // A chain link to the crate in front.
+        if (i) detail(c, x + i * 6 - 1, y + 2, d => { px(d, 0, 0, 2, 1, P.stoneD); px(d, 0, 1, 2, 1, P.stoneL); px(d, 0, 2, 2, 1, P.stoneD); });
+      });
       if (u.members.length > 3) badge(c, x + cw + 1, y - 1, u.members.length - 3);
       tap(x - 1, y - 1, cw + 2, 10, { kind: 'train', id: e.train });
     } else {
@@ -157,9 +185,13 @@ registerLayer({ z: 75, draw(c, { v, lay, gate: gs }, t) {
     if (u.state === 'gating' && u.table !== undefined) {
       // The meter under the table: tests run against the last full run's count.
       const total = S.testTotal || 0, ran = e.tests_run || 0, mw = 9;
-      R(c, x - 3, y + 10, mw + 2, 3, P.o);
-      if (total > 0) R(c, x - 2, y + 11, Math.max(1, Math.round(mw * Math.min(1, ran / total))), 1, P.leaf);
-      else if (!state.reduce) R(c, x - 2 + Math.floor(t / 150) % (mw - 2), y + 11, 3, 1, P.leaf);
+      // At 2× (#459): a slate track, filled a detail pixel at a time.
+      detail(c, x - 3, y + 10, d => {
+        px(d, 1, 0, 2 * mw + 2, 1, P.o); px(d, 1, 5, 2 * mw + 2, 1, P.o); px(d, 0, 1, 1, 4, P.o); px(d, 2 * mw + 3, 1, 1, 4, P.o);
+        px(d, 1, 1, 2 * mw + 2, 4, '#283040');
+        if (total > 0) { const w = Math.max(1, Math.round(2 * mw * Math.min(1, ran / total))); px(d, 2, 2, w, 2, P.leaf); px(d, 2, 2, w, 1, '#78d878'); }
+        else if (!state.reduce) px(d, 2 + Math.floor(t / 75) % (2 * mw - 4), 2, 6, 2, P.leaf);
+      });
     }
   });
   if (gs.waiting) badge(c, Math.max(4, g.rx - 16 - g.queueMax * 16 + 8), g.y + 14, gs.waiting);
@@ -177,15 +209,21 @@ registerLayer({ z: 85, draw(c, { v, lay, atQuay }, t) {
     const e = gateOf(v, n);
     if (!e || (e.state !== 'landed-unproven' && e.state !== 'passed')) return;
     const [x, y] = quaySpot(lay, k);
-    R(c, x + 4, y - 2, 2, 3, P.o); R(c, x + 4, y - 2, 1, 2, e.state === 'passed' ? P.leaf : P.gold);
+    // A pennant on a pole (2×, #459).
+    const ok = e.state === 'passed';
+    detail(c, x + 4, y - 2, d => { px(d, 0, 0, 1, 6, P.o); px(d, 1, 0, 3, 4, P.o); px(d, 1, 0, 2, 3, ok ? P.leaf : P.gold); px(d, 1, 0, 2, 1, ok ? '#78d878' : '#f8e070'); });
     tap(x, y - 2, 6, 7, { kind: 'gatecrate', n, at: 'quay' });
   });
   if (!gateEntries(v).some(e => e.state === 'red-base')) return;
   // Over the quay's landing, just below the gatehouse.
   const sx = lay.roadX - 4, sy = lay.quayY - 8;
-  for (let k = 0; k < 4; k++) { R(c, sx + k * 5, sy + (k % 2), 7, 5, P.o); R(c, sx + 1 + k * 5, sy + 1 + (k % 2), 5, 3, P.stoneD); }
-  if (!state.reduce) for (let k = 0; k < 5; k++) if (blink(t + k * 80, 160)) R(c, sx + 2 + k * 4, sy + 7 + (Math.floor(t / 90) + k) % 6, 1, 2, P.glass);
-  if (!state.reduce && blink(t, 1300) && Math.floor(t / 1300) % 3 === 0) { R(c, sx + 9, sy + 6, 1, 3, P.gold); R(c, sx + 8, sy + 9, 1, 2, P.gold); }
+  // At 2× (#459): billowing lumps over a flat base, rain and a forked bolt.
+  detail(c, sx, sy, d => {
+    for (let k = 0; k < 4; k++) disc(d, k * 10 + 1, 2 * (k % 2), 12, { outline: P.o, fill: P.stoneD, light: P.stone, dark: '#383848' });
+    px(d, 2, 7, 40, 3, P.stoneD); px(d, 2, 10, 40, 1, P.o); px(d, 1, 7, 1, 3, P.o); px(d, 42, 7, 1, 3, P.o);
+    if (!state.reduce) for (let k = 0; k < 5; k++) if (blink(t + k * 80, 160)) px(d, 4 + k * 8, 13 + (Math.floor(t / 45) + k) % 9, 1, 3, P.glass);
+    if (!state.reduce && blink(t, 1300) && Math.floor(t / 1300) % 3 === 0) stampInk(d, 15, 11, ['..##', '.##.', '####', '..#.', '.#..', '#...'], P.gold);
+  });
   tap(sx, sy, 22, 12, { kind: 'redbase' });
 } });
 

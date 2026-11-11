@@ -109,3 +109,23 @@ fn village_html_shows_the_gate_scoreboard_and_hotspots() {
     assert!(body.contains("registerKey({ group: 'other', rows: () => ["));
     assert!(body.contains("[c => slate(c, 1, 1, 14, 6), 'Slate by the gatehouse: work landed (green) and bounced (red) today', 26],"));
 }
+
+#[test]
+fn the_gatehouse_marks_and_the_world_frame_draw_at_2x() {
+    // #459: everything gatehouse.js and worlds.js draw themselves is on the
+    // 2× detail grid (the crates, people and tags they place are drawn by
+    // their own modules). A scene-pixel fillRect is `R(c, …)` / `R(ctx, …)`.
+    for file in ["gatehouse.js", "worlds.js"] {
+        let src = village_asset(file).unwrap().1;
+        assert!(!src.contains("R(c,") && !src.contains("R(ctx,"), "{file} still draws in scene pixels");
+        assert!(src.contains("detail("), "{file} draws nothing on the detail grid");
+    }
+    let gate = village_asset("gatehouse.js").unwrap().1;
+    for f in ["function stampMark(c, x, y, kind) {\n  detail(c, x - 1, y - 1, g => {", "function rope(c, x0, y0, x1, y1, tangled) {\n  detail(c, 0, 0, g => {"] {
+        assert!(gate.contains(f), "missing: {f}");
+    }
+    let worlds = village_asset("worlds.js").unwrap().1;
+    for f in ["function downstream(c, x, y, w, h, t) {", "detail(c, x, y, g => {", "detail(ctx, x - 3, y0 - 8, g => {", "function fireFlame(g, x, y, k) {"] {
+        assert!(worlds.contains(f), "missing: {f}");
+    }
+}
