@@ -45,6 +45,12 @@ EOF
 cat > "$STUBS/curl" <<'EOF'
 #!/usr/bin/env bash
 echo "curl ${*: -1}" >> "$STUB_LOG"
+# STUB_TAKES=N: the village needs N seconds to answer, so an attempt whose
+# --max-time is shorter times out (curl's exit 28). Simulated: nothing sleeps.
+max=""; prev=""
+for a in "$@"; do [ "$prev" = --max-time ] && max=$a; prev=$a; done
+echo "curl --max-time $max" >> "$STUB_LOG"
+if [ -n "${STUB_TAKES:-}" ] && [ -n "$max" ] && [ "$max" -lt "$STUB_TAKES" ]; then exit 28; fi
 [ "${STUB_ANSWER:-yes}" = yes ]
 EOF
 cat > "$STUBS/tailscale" <<'EOF'
@@ -120,6 +126,12 @@ check "exits 2" test "$RC" -eq 2
 check "says it did not answer" has "did not answer within 1s" "$OUT"
 check "records failure" has "state=failure" "$LOG"
 check "does not record success" hasnt "state=success" "$LOG"
+
+run slow-answer STUB_TAKES=9 AGENTS_TUI_WAIT=12 --
+check "waits for an answer slower than 5s but within the wait" test "$RC" -eq 0
+check "gives the attempt the time left, not 5s" hasnt "curl --max-time 5" "$LOG"
+check "answers on the first attempt" test "$(grep -c '^curl --max-time' <<< "$LOG")" -eq 1
+check "records success" has "state=success" "$LOG"
 
 run restart-fails STUB_RESTART_RC=1 --
 check "exits 2" test "$RC" -eq 2
