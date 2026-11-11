@@ -187,7 +187,14 @@ if [ "$RESTART" = true ]; then
   systemctl --user restart "$UNIT" || fail "systemctl --user restart $UNIT failed"
   # It is deployed when the village answers, not when the unit was started.
   deadline=$((SECONDS + WAIT))
-  until curl -fsS -o /dev/null --max-time 5 "$CHECK" 2>/dev/null; do
+  # Each attempt may take all the time left, not a fixed few seconds: the first
+  # /api/village after a restart waits on cold `gh` queries, ~9s under load (#467).
+  answers() {
+    local left=$((deadline - SECONDS))
+    [ "$left" -gt 0 ] || left=1
+    curl -fsS -o /dev/null --max-time "$left" "$CHECK" 2>/dev/null
+  }
+  until answers; do
     [ "$SECONDS" -lt "$deadline" ] || fail "$UNIT restarted, but $CHECK did not answer within ${WAIT}s (journalctl --user -u $UNIT)"
     sleep 1
   done
