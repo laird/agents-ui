@@ -37,6 +37,8 @@ function measure(fn) {
   for (const t of [0, 90, 120, 150, 240, 300, 400, 500, 700, 1300, 2600]) fn(c, t);
   return { box: [Math.floor(x0), Math.floor(y0), Math.ceil(x1), Math.ceil(y1)], fine, coarse };
 }
+/* The houses that smoke while working (their puffs() is sprites/houses.js's). */
+const SMOKY = new Set(['B.cottage.working', 'B.tests.working']);
 const G = { y: 20, x0: 40, w: 32, rx: 24, rw: 12, tables: [[44, 30], [56, 30]] };
 const SPRITES = {
   ...Object.fromEntries(Object.keys(FUTURE.B).flatMap(k => ['working', 'idle', 'blocked', 'unknown'].map(st => [`B.${k}.${st}`, (c, t) => FUTURE.B[k](c, 20, 20, st, t)]))),
@@ -59,7 +61,11 @@ for (const [name, paint] of Object.entries(SPRITES)) {
     const { box, fine } = measure(paint);
     assert.ok(fine > 0, 'draws detail pixels');
     const [a, b, c, d] = FOOTPRINT[name];
-    assert.ok(box[0] >= a && box[1] >= b && box[2] <= c && box[3] <= d, `${JSON.stringify(box)} inside ${JSON.stringify(FOOTPRINT[name])}`);
+    // A working house's chimney smoke or fizz is drawn by sprites/houses.js
+    // (#461), and rises above the roof however that draws it (as the Modern
+    // test allows, #464); the building's sides and foot stay inside its box.
+    const top = SMOKY.has(name) ? -Infinity : b;
+    assert.ok(box[0] >= a && box[1] >= top && box[2] <= c && box[3] <= d, `${JSON.stringify(box)} inside ${JSON.stringify(FOOTPRINT[name])}`);
   });
 }
 
