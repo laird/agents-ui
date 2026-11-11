@@ -10,14 +10,15 @@
  * two read apart at a glance. A dev village with no environments stacks the
  * platform over it, with a road up for releases on the right. */
 import { state } from './state.js';
-import { F, P, R, blink } from './palette.js';
+import { F, P, blink } from './palette.js';
 import { puffs } from './sprites/houses.js';
 import { MEDIEVAL } from './themes/medieval.js';
 import { M, MODERN } from './themes/modern.js';
 import { FUTURE } from './themes/future.js';
 import { drawVillage } from './registry.js';
 import { ctx, otherTheme, porterPos, sizeCanvas, worldGeom, worldScenes } from './layout.js';
-import { DETAIL, prepare } from './detail.js';
+import { DETAIL, detail, prepare } from './detail.js';
+import { bricks, planks, px } from './art2x.js';
 import { SAIL } from './ship.js';
 import { fit } from './panels.js';
 
@@ -27,25 +28,48 @@ function offscreen(sc) {
   prepare(sc.cx);
   return sc.cx;
 }
-/* A channel that flows down: water in the village, a conveyor road in the district. */
+/* A channel that flows down: water in the village, a conveyor road in the
+ * district. Drawn at 2× (#459): its banks shaded, its flow moving half a
+ * pixel at a time. */
 function downstream(c, x, y, w, h, t) {
   const modern = state.T !== MEDIEVAL, fut = state.T === FUTURE;
-  R(c, x, y, w, h, fut ? F.space : modern ? M.asphaltD : P.water);
-  const edge = fut ? F.magentaD : modern ? M.concreteD : P.waterD;
-  R(c, x, y, 1, h, edge); R(c, x + w - 1, y, 1, h, edge);
-  const off = Math.floor(t / 70) % 8;
-  for (let yy = y - 8 + off; yy < y + h; yy += 8) if (yy >= y) {
-    if (modern) R(c, x + (w >> 1), yy, 1, 4, fut ? F.plasmaL : P.white);
-    else { R(c, x + 3, yy, 1, 2, P.waterL); R(c, x + w - 5, yy + 4, 1, 2, P.waterL); }
-  }
+  const edge = fut ? F.magentaD : modern ? M.concreteD : P.waterD, W = 2 * w, H = 2 * h;
+  detail(c, x, y, g => {
+    px(g, 0, 0, W, H, fut ? F.space : modern ? M.asphaltD : P.water);
+    px(g, 0, 0, 1, H, P.o); px(g, 1, 0, 1, H, edge); px(g, W - 2, 0, 1, H, edge); px(g, W - 1, 0, 1, H, P.o);
+    const off = Math.floor(t / 35) % 16, mark = (yy, len, put) => { const a = Math.max(0, yy), b = Math.min(H, yy + len); if (b > a) put(a, b - a); };
+    for (let yy = off - 16; yy < H; yy += 16) {
+      if (modern) mark(yy, 8, (a, n) => px(g, 2 * (w >> 1), a, 2, n, fut ? F.plasmaL : P.white));
+      else {
+        mark(yy, 4, (a, n) => px(g, 6, a, 2, n, P.waterL));
+        mark(yy + 8, 4, (a, n) => px(g, W - 10, a, 2, n, P.waterL));
+        mark(yy + 4, 2, (a, n) => px(g, W - 13, a, 1, n, P.waterD));
+      }
+    }
+  });
+}
+/* A cart carrying released work up the road: planked in the village, a van
+ * with a cab in the district. Drawn at 2× (#459). */
+function cartWheel(g, x, y) {
+  px(g, x + 1, y, 4, 1, P.o); px(g, x, y + 1, 6, 4, P.o); px(g, x + 1, y + 5, 4, 1, P.o);
+  px(g, x + 2, y + 2, 2, 2, P.stoneL);
 }
 function cart(c, x, y, loads) {
   const modern = state.T !== MEDIEVAL;
   x = Math.round(x); y = Math.round(y);
-  R(c, x, y, 14, 8, P.o); R(c, x + 1, y + 1, 12, 5, modern ? P.white : P.wood);
-  if (modern) { R(c, x + 10, y - 3, 4, 4, P.o); R(c, x + 11, y - 2, 2, 2, M.glassL); }
-  R(c, x + 2, y + 7, 3, 3, P.o); R(c, x + 9, y + 7, 3, 3, P.o);
+  detail(c, x, y, g => {
+    px(g, 0, 0, 28, 16, P.o); px(g, 2, 2, 24, 10, modern ? P.white : P.wood);
+    if (modern) { px(g, 2, 8, 24, 2, M.glassL); px(g, 20, -6, 8, 8, P.o); px(g, 22, -4, 4, 4, M.glassL); px(g, 22, -4, 2, 1, P.white); }
+    else { px(g, 2, 2, 24, 1, P.woodL); planks(g, 2, 2, 24, 10, 4, P.woodD); }
+    cartWheel(g, 4, 14); cartWheel(g, 18, 14);
+  });
   for (let k = 0; k < Math.min(loads, modern ? 1 : 2); k++) state.T.crate(c, x + 2 + k * 5, y - 4, 'workshop', null, true);
+}
+/* A flame 6 by 9 detail pixels: red with a gold heart, in two shapes. */
+const FIRE_FLAMES = [['...#..', '..##..', '..###.', '.####.', '.#oo#.', '#oooo#', '#oooo#', '##oo##', '.####.'],
+  ['..#...', '..##..', '.###..', '.####.', '.#oo##', '#oooo#', '#oooo#', '##oo##', '.####.']];
+function fireFlame(g, x, y, k) {
+  FIRE_FLAMES[k].forEach((row, j) => { for (let i = 0; i < 6; i++) if (row[i] !== '.') px(g, x + i, y + j, 1, 1, row[i] === 'o' ? P.gold : P.p0); });
 }
 /* Fold a new world into its state: new incidents set off downriver, and the
  * platform lights up when the release lands. */
@@ -69,7 +93,13 @@ function originPoint(Ps, id, g) {
 /* The channel down from the platform's gate at x, and its sluice. */
 function sluice(x, y0, y1, t) {
   if (y1 - y0 > 4) downstream(ctx, x, y0, 14, y1 - y0, t);
-  R(ctx, x - 3, y0 - 8, 20, 8, P.o); R(ctx, x - 2, y0 - 7, 18, 6, state.T === MODERN ? M.concrete : state.T === FUTURE ? F.hullD : P.stone); R(ctx, x + 4, y0 - 6, 6, 5, P.dark);
+  // The sluice gate, at 2× (#459): coursed stone round a barred opening.
+  detail(ctx, x - 3, y0 - 8, g => {
+    px(g, 0, 0, 40, 16, P.o); px(g, 2, 2, 36, 12, state.T === MODERN ? M.concrete : state.T === FUTURE ? F.hullD : P.stone);
+    bricks(g, 2, 2, 36, 12, 8, 4, 'rgba(20,20,30,.3)');
+    px(g, 14, 4, 12, 10, P.dark); for (let i = 0; i < 3; i++) px(g, 16 + i * 4, 4, 1, 10, P.o);
+    px(g, 14, 4, 12, 1, P.o);
+  });
 }
 function drawWorld(t, w) {
   const both = worldScenes(w);
@@ -91,17 +121,18 @@ function drawWorld(t, w) {
     const i = Ps.v.houses.findIndex(h => h.id === id), lot = Ps.L.lots[i];
     if (!lot) return;
     const x = g.px + lot.x, y = g.py + lot.y;
-    R(ctx, x, y - 1, 16, 17, 'rgba(40,24,24,.35)');
+    detail(ctx, x, y - 1, d => px(d, 0, 0, 32, 34, 'rgba(40,24,24,.35)'));
     for (let k = 0; k < 3; k++) {
       puffs(ctx, x + 4 + k * 4, y - 6, t + k * 450, '#484858', '#282830');
       puffs(ctx, x + 5 + k * 4, y - 12, t + k * 450 + 900, '#585870', '#383848');
     }
+    // Two flames, flickering between two shapes (2×, #459).
     const f = blink(t, 140) ? 1 : 0;
-    R(ctx, x + 4, y + 2 - f, 3, 3 + f, P.p0); R(ctx, x + 5, y + 1 - f, 1, 2, P.gold);
-    R(ctx, x + 10, y + 3 + f, 3, 3 - f, P.p0); R(ctx, x + 11, y + 2 + f, 1, 2, P.gold);
+    detail(ctx, x, y, d => { fireFlame(d, 7, -2 - 2 * f, f); fireFlame(d, 19, 1 + 2 * f, 1 - f); });
   });
   if (t - st.upgradedAt < 2400) Ps.v.houses.forEach((h, i) => {
-    const lot = Ps.L.lots[i]; if (lot && blink(t + i * 90, 160)) R(ctx, g.px + lot.x + 2 + (i * 5) % 12, g.py + lot.y - 2, 1, 1, P.gold);
+    const lot = Ps.L.lots[i];
+    if (lot && blink(t + i * 90, 160)) detail(ctx, g.px + lot.x + 2 + (i * 5) % 12, g.py + lot.y - 2, d => { px(d, 0, -1, 2, 4, P.gold); px(d, -1, 0, 4, 2, P.gold); px(d, 0, 0, 2, 2, '#fff8d0'); });
   });
   state.T = devTheme;
 
