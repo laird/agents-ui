@@ -1,122 +1,14 @@
 /* The Modern business district theme. */
-import { KINDCOL, P, PRIOCOL, R, blink, hash } from '../palette.js';
+import { KINDCOL, NOTECOL, P, PRIOCOL, R, blink, hash } from '../palette.js';
 import { note, prioRun } from '../cvdmarks.js';
-import { puffs } from '../sprites/houses.js';
 import { detail } from '../detail.js';
 import { disc, dither, px } from '../art2x.js';
 import { CRATE_W, CRATE_H, seal, stencil } from '../crates.js';
 import { registerTheme } from './registry.js';
+import { MB, MC, MLIT, MSHADE, mWin } from './modernhouses.js';
 
-export const M = {
-  lawn: '#68b050', lawnD: '#58a040', asphalt: '#505868', asphaltD: '#383c48', dash: '#f0d850',
-  concrete: '#c0c0c8', concreteD: '#9898a8', concreteL: '#e0e0e8',
-  glass: '#5890c8', glassD: '#386898', glassL: '#a8d0f0', brick: '#a85840', brickD: '#783828',
-  steel: '#8890a0', steelD: '#586070', crane: '#f0c020', box: '#c89858', boxD: '#987040',
-  tarp: '#48a068', tarpD: '#307848', awnA: '#f8f8f8', awnB: '#2890a0', led: '#58e878'
-};
-const mWin = st => st === 'working' ? P.lamp : (st === 'unknown' || st === 'stopped') ? P.dark : M.glassL;
-/* Flat-roofed block: parapet roof, facade, a row of windows, glass door. */
-function block(c, x, y, st, o) {
-  const top = o.top ?? 1;
-  R(c, x, y + top, 16, 16 - top, P.o);
-  R(c, x + 1, y + top + 1, 14, 3, o.roof || M.concreteD); R(c, x + 1, y + top + 1, 14, 1, o.roofL || M.concrete);
-  R(c, x + 1, y + top + 4, 14, 11 - top, o.wall);
-  if (o.rows !== 0) for (let wy = y + top + 6; wy < y + 10; wy += 3) [x + 2, x + 6, x + 10].forEach(wx => R(c, wx, wy, 3, 2, mWin(st)));
-  if (o.door !== false) {
-    R(c, x + 6, y + 11, 4, 5, st === 'blocked' ? P.o : M.glassD);
-    if (st !== 'blocked') R(c, x + 8, y + 11, 1, 5, P.o);
-  }
-}
-const MB = {
-  cottage(c, x, y, st, t) {
-    block(c, x, y, st, { wall: M.concreteL, rows: 0, top: 3 });
-    R(c, x + 1, y + 9, 14, 3, P.o);
-    for (let k = 0; k < 7; k++) R(c, x + 2 + k * 2, y + 10, 2, 1, k % 2 ? M.awnA : M.awnB);
-    R(c, x + 2, y + 13, 3, 2, mWin(st)); R(c, x + 11, y + 13, 3, 2, mWin(st));
-    if (st === 'working') puffs(c, x + 12, y - 1, t, P.white, M.concreteL);
-  },
-  workshop(c, x, y, st, t) {
-    block(c, x, y, st, { wall: M.brick });
-    for (let yy = y + 6; yy < y + 16; yy += 3) R(c, x + 1, yy, 14, 1, M.brickD);
-    [x + 2, x + 10].forEach(wx => { R(c, wx, y + 6, 4, 2, mWin(st)); R(c, wx, y + 9, 4, 1, mWin(st)); });
-  },
-  feature(c, x, y, st, t) {
-    block(c, x, y, st, { wall: M.concrete, top: 4, rows: 0 });
-    R(c, x + 2, y + 10, 3, 2, mWin(st));
-    for (let yy = y + 5; yy < y + 16; yy += 4) R(c, x + 9, yy, 7, 1, M.steel);
-    R(c, x + 9, y + 5, 1, 11, M.steelD); R(c, x + 15, y + 5, 1, 11, M.steelD);
-    R(c, x + 13, y - 4, 2, 20, M.crane); R(c, x + 13, y - 4, 1, 20, P.o);
-    R(c, x + 3, y - 4, 13, 2, M.crane); R(c, x + 3, y - 3, 13, 1, P.o);
-    const hook = st === 'working' ? 5 + Math.floor((Math.sin(t / 400) + 1) * 2) : 6;
-    R(c, x + 5 + (st === 'working' ? Math.floor(t / 700) % 3 : 0), y - 2, 1, hook, P.o);
-  },
-  bug(c, x, y, st, t) {
-    block(c, x, y, st, { wall: M.concreteL, rows: 0 });
-    R(c, x + 2, y + 6, 12, 4, P.o); R(c, x + 3, y + 7, 10, 2, mWin(st));
-    R(c, x + 4, y - 3, 8, 5, P.o); R(c, x + 5, y - 2, 6, 3, P.white);
-    R(c, x + 6, y - 2, 4, 3, P.bug); R(c, x + 7, y - 2, 1, 1, P.o); R(c, x + 8, y - 1, 1, 1, P.o); R(c, x + 8, y - 2, 1, 3, P.o);
-    R(c, x + 6, y + 2, 1, 2, P.o); R(c, x + 9, y + 2, 1, 2, P.o);
-    if (st === 'working') R(c, x + 3 + Math.floor(t / 160) % 9, y + 7, 1, 1, P.o);
-  },
-  security(c, x, y, st, t) {
-    block(c, x, y, st, { wall: M.concreteD, rows: 0, top: 2, roof: M.steelD, roofL: M.steel });
-    [x + 3, x + 11].forEach(wx => R(c, wx, y + 8, 2, 1, mWin(st)));
-    R(c, x + 6, y + 6, 4, 4, P.gold); R(c, x + 7, y + 7, 2, 2, P.shield);
-    R(c, x + 3, y - 2, 1, 5, P.o);
-    const a = st === 'working' ? t / 300 : 0.6;
-    for (let d = 1; d < 5; d++) R(c, x + 3 + Math.round(Math.cos(a) * d), y - 2 + Math.round(Math.sin(a) * d * 0.5), 1, 1, M.steelD);
-    R(c, x + 12, y - 1, 3, 2, P.o); R(c, x + 13, y - 1, 1, 1, st === 'working' && blink(t, 400) ? P.p0 : M.steel);
-  },
-  tests(c, x, y, st, t) {
-    block(c, x, y, st, { wall: M.glass, rows: 0 });
-    for (let wy = y + 5; wy < y + 11; wy += 2) R(c, x + 1, wy, 14, 1, st === 'working' ? P.fizzB : M.glassL);
-    R(c, x + 2, y + 6, 1, 4, M.glassD); R(c, x + 13, y + 6, 1, 4, M.glassD);
-    R(c, x + 3, y - 2, 3, 3, P.o); R(c, x + 4, y - 1, 1, 2, P.copper);
-    R(c, x + 10, y - 2, 3, 3, P.o); R(c, x + 11, y - 1, 1, 2, P.copper);
-    if (st === 'working') { puffs(c, x + 4, y - 3, t, P.fizzA, P.fizzB); puffs(c, x + 11, y - 3, t + 500, P.fizzB, P.fizzA); }
-  },
-  research(c, x, y, st, t) {
-    block(c, x, y, st, { wall: P.white, top: 2 });
-    const a = -2.2 + (st === 'working' ? Math.sin(t / 900) * 0.5 : 0);
-    for (let dy = -4; dy <= 0; dy++) for (let dx = -4; dx <= 4; dx++) {
-      if (dx * dx + dy * dy > 16) continue;
-      R(c, x + 8 + dx, y + 2 + dy, 1, 1, dx * dx + dy * dy > 9 ? P.o : M.concreteL);
-    }
-    R(c, x + 8 + Math.round(Math.cos(a) * 4), y + 1 + Math.round(Math.sin(a) * 4), 1, 1, P.gold);
-    R(c, x + 8, y + 2, 1, 2, P.o);
-  },
-  docs(c, x, y, st, t) {
-    block(c, x, y, st, { wall: P.parch, rows: 0 });
-    R(c, x + 2, y + 6, 4, 4, mWin(st)); R(c, x + 10, y + 6, 4, 4, mWin(st));
-    ['#c04838', '#3870c0', '#58a048', '#f8d040'].forEach((col, k) => R(c, x + 4 + k * 2, y - 2, 2, 4, col));
-    R(c, x + 3, y + 2, 10, 1, P.o);
-  },
-  refactor(c, x, y, st, t) {
-    block(c, x, y, st, { wall: M.brick });
-    R(c, x + 8, y + 1, 8, 15, P.o); R(c, x + 9, y + 2, 6, 13, M.tarp);
-    for (let yy = y + 4; yy < y + 15; yy += 4) R(c, x + 9, yy, 6, 1, M.tarpD);
-    for (let yy = y + 2; yy < y + 16; yy += 5) R(c, x + 7, yy, 9, 1, M.steel);
-    if (st === 'working' && blink(t, 140)) R(c, x + 11, y + 6 + Math.floor(t / 280) % 6, 1, 1, P.white);
-  },
-  perf(c, x, y, st, t) {
-    block(c, x, y, st, { wall: M.steelD, rows: 0, top: 2, roof: M.steel, roofL: M.concrete });
-    [x + 4, x + 11].forEach((fx, k) => {
-      R(c, fx - 3, y - 1, 7, 6, P.o); R(c, fx - 2, y, 5, 4, M.steelD);
-      const a = st === 'working' ? t / 90 + k : 0.3;
-      for (let d = -2; d <= 2; d++) R(c, fx + Math.round(Math.cos(a) * d), y + 2 + Math.round(Math.sin(a) * d * 0.7), 1, 1, M.concreteL);
-    });
-    for (let k = 0; k < 6; k++) R(c, x + 2 + k * 2, y + 9, 1, 1, st === 'working' && hash(k, Math.floor(t / 200)) < 0.6 ? M.led : P.dark);
-  },
-  chores(c, x, y, st, t) {
-    R(c, x, y + 3, 16, 13, P.o); R(c, x + 1, y + 4, 14, 11, M.steel);
-    for (let xx = x + 2; xx < x + 15; xx += 2) R(c, xx, y + 4, 1, 11, M.steelD);
-    R(c, x + 1, y + 4, 14, 2, M.concreteD);
-    R(c, x + 4, y + 8, 8, 8, P.o); R(c, x + 5, y + 9, 6, 7, st === 'blocked' ? P.o : M.concreteL);
-    if (st !== 'blocked') for (let yy = y + 10; yy < y + 16; yy += 2) R(c, x + 5, yy, 6, 1, M.concreteD);
-    if (st === 'working') R(c, x + 5, y + 9, 6, 1, P.lamp);
-    R(c, x + 12, y + 12, 4, 4, P.o); R(c, x + 13, y + 13, 2, 2, M.box);
-  }
-};
+/* The theme's colours, kept with its offices (modernhouses.js). */
+export const M = MC;
 export const MODERN = {
   name: 'Modern business district',
   pair: 'medieval',
@@ -178,9 +70,16 @@ export const MODERN = {
       dither(g, 0, 6, 2 * w, Math.max(0, 2 * h - 12), 3, (x, y) => (hash(x0 * 2 + x, y0 * 2 + y + 5) < 0.1 ? M.asphalt : null));
     });
   },
+  /* The loading dock at 2× (#464): a concrete lip lit along its top, the
+   * slab's expansion joints, rubber bumpers, and a hazard edge. */
   dock(c, x, y, w) {
-    R(c, x, y, w, 7, P.o); R(c, x + 1, y, w - 2, 6, M.concrete);
-    for (let k = 0; k < w - 2; k += 4) R(c, x + 1 + k, y + 5, 2, 1, M.dash);
+    detail(c, x, y, g => {
+      px(g, 0, 0, 2 * w, 14, P.o); px(g, 2, 0, 2 * w - 4, 12, M.concrete);
+      px(g, 2, 0, 2 * w - 4, 1, M.concreteL); px(g, 2, 9, 2 * w - 4, 1, M.concreteD);
+      for (let k = 14; k < 2 * w - 4; k += 16) { px(g, k, 1, 1, 8, M.concreteD); px(g, k - 8, 3, 3, 5, P.dark); }
+      px(g, 2, 10, 2 * w - 4, 2, P.o);
+      for (let k = 0; k < w - 2; k += 4) px(g, 2 + 2 * k, 10, 4, 2, M.dash);
+    });
   },
   /* A street tree in a concrete planter, at 2× (#452): a round canopy lit
    * from the top left with leaf clusters, over a planter with a lit rim. */
@@ -192,27 +91,59 @@ export const MODERN = {
       [[8, 6], [13, 9], [10, 12]].forEach(([dx, dy]) => { px(g, dx, dy, 2, 1, P.leafL); px(g, dx + 1, dy + 1, 2, 1, P.leafD); });
     });
   },
-  /* Headquarters: a glass tower with a gold crown over a colonnaded
-   * podium, flags out front. The lobby doors go dark when the manager
-   * waits on you. */
+  /* Headquarters at 2× (#464): a glass tower with a gold crown over a
+   * colonnaded podium, flags out front. The lobby doors go dark when the
+   * manager waits on you. */
   hall(c, x, y, st) {
-    const x0 = x - 4, gy = y + 22;
-    R(c, x0 + 9, y - 8, 22, 22, P.o); R(c, x0 + 10, y - 7, 20, 20, M.glassD);
-    for (let wy = y - 6; wy < y + 12; wy += 3) for (let wx = x0 + 11; wx < x0 + 29; wx += 3) R(c, wx, wy, 2, 2, mWin(st));
-    for (let wx = x0 + 13; wx < x0 + 29; wx += 6) R(c, wx, y - 7, 1, 20, M.glassL);
-    R(c, x0 + 9, y - 11, 22, 4, P.o); R(c, x0 + 10, y - 10, 20, 2, P.gold);
-    R(c, x0 + 14, y - 13, 12, 2, P.o); R(c, x0 + 15, y - 13, 10, 1, P.gold);
-    R(c, x0 + 19, y - 17, 2, 4, P.gold);
-    R(c, x0, gy - 9, 40, 9, P.o); R(c, x0 + 1, gy - 8, 38, 7, M.concreteL);
-    R(c, x0 + 1, gy - 8, 38, 1, P.gold);
-    for (let k = 3; k < 38; k += 5) R(c, x0 + k, gy - 7, 2, 6, M.concrete);
-    R(c, x0 + 15, gy - 7, 10, 7, P.o); R(c, x0 + 16, gy - 6, 8, 6, st === 'blocked' ? P.o : M.glassL);
-    if (st !== 'blocked') R(c, x0 + 20, gy - 6, 1, 6, P.o);
-    [[x0 - 2, P.gold], [x0 + 40, '#3878e0']].forEach(([fx, col]) => { R(c, fx, gy - 22, 1, 22, M.steelD); R(c, fx + 1, gy - 22, 4, 3, P.o); R(c, fx + 1, gy - 21, 3, 1, col); });
+    const x0 = x - 4;
+    detail(c, x0, y, g => {
+      // The tower: its curtain wall, each office lit or clear, mullions and a sheen.
+      px(g, 18, -16, 44, 44, P.o); px(g, 20, -14, 40, 40, M.glassD);
+      const lit = mWin(st);
+      for (let wy = -12; wy < 24; wy += 6) for (let wx = 22; wx < 58; wx += 6) {
+        px(g, wx, wy, 4, 4, lit); px(g, wx, wy + 3, 4, 1, MSHADE);
+        if (st === 'working') px(g, wx, wy, 4, 1, '#e8c060'); else if (lit === M.glassL) px(g, wx, wy, 1, 1, P.white);
+      }
+      [26, 38, 50].forEach(mx => { px(g, mx, -14, 1, 40, M.glassL); px(g, mx + 1, -14, 1, 40, M.glass); });
+      for (let k = 0; k < 12; k++) px(g, 30 + k, -14 + 3 * k, 1, 2, MLIT);
+      // The crown, in two gold tiers, and the spire with its beacon.
+      px(g, 18, -22, 44, 8, P.o); px(g, 20, -20, 40, 4, P.gold); px(g, 20, -20, 40, 1, '#fff0a0'); px(g, 20, -17, 40, 1, '#c8a020');
+      px(g, 28, -26, 24, 4, P.o); px(g, 30, -26, 20, 2, P.gold); px(g, 30, -26, 20, 1, '#fff0a0');
+      px(g, 38, -34, 4, 8, P.gold); px(g, 38, -32, 1, 6, '#fff0a0'); px(g, 41, -32, 1, 6, '#c8a020'); px(g, 39, -34, 2, 2, P.p0);
+      // The podium: a gold band, columns with capitals and bases, the lobby doors.
+      px(g, 0, 26, 80, 18, P.o); px(g, 2, 28, 76, 14, M.concreteL); px(g, 2, 28, 76, 2, P.gold); px(g, 2, 29, 76, 1, '#c8a020');
+      for (let k = 3; k < 38; k += 5) {
+        px(g, 2 * k, 30, 4, 12, M.concrete); px(g, 2 * k + 3, 30, 1, 12, M.concreteD);
+        px(g, 2 * k - 1, 30, 6, 1, M.concreteD); px(g, 2 * k - 1, 41, 6, 1, M.concreteD);
+      }
+      px(g, 30, 30, 20, 14, P.o);
+      if (st !== 'blocked') {
+        px(g, 32, 32, 16, 12, M.glassL); px(g, 40, 32, 2, 12, P.o);
+        px(g, 33, 33, 1, 8, P.white); px(g, 43, 33, 1, 8, P.white);
+        px(g, 38, 37, 1, 3, M.steelD); px(g, 43, 37, 1, 3, M.steelD);
+      } else px(g, 46, 32, 1, 12, M.glassD);
+      // The flags: a pole with a lit side, and the cloth with a fold in it.
+      [[-4, P.gold], [80, '#3878e0']].forEach(([fx, col]) => {
+        px(g, fx, 0, 1, 44, M.steel); px(g, fx + 1, 0, 1, 44, M.steelD);
+        px(g, fx + 2, 0, 8, 6, P.o); px(g, fx + 2, 1, 7, 4, col); px(g, fx + 2, 1, 7, 1, MLIT); px(g, fx + 5, 1, 1, 4, MSHADE);
+      });
+    });
   },
+  /* The whiteboard at 2× (#464): an aluminium frame on two legs, the last
+   * meeting's marker scribbles under the notes, and a tray of markers. */
   board(c, x, y, notes) {
-    R(c, x + 2, y + 9, 1, 6, M.steelD); R(c, x + 15, y + 9, 1, 6, M.steelD);
-    R(c, x, y, 18, 11, P.o); R(c, x + 1, y + 1, 16, 9, P.white);
+    detail(c, x, y, g => {
+      px(g, 4, 18, 2, 12, M.steelD); px(g, 30, 18, 2, 12, M.steelD);
+      px(g, 2, 29, 6, 1, P.o); px(g, 28, 29, 6, 1, P.o);
+      px(g, 0, 0, 36, 22, P.o); px(g, 1, 1, 34, 20, M.steel); px(g, 1, 1, 34, 1, M.concreteL);
+      px(g, 2, 2, 32, 18, P.white);
+      [[5, 6, 6], [14, 7, 8], [6, 13, 10], [20, 14, 7], [24, 4, 6]].forEach(([sx, sy, len]) => px(g, sx, sy, len, 1, '#c8d0e0'));
+      px(g, 6, 20, 24, 2, M.steelD);
+      [[10, P.red], [15, '#3870c0'], [20, '#58a048']].forEach(([mx, col]) => px(g, mx, 20, 3, 1, col));
+      // Each note's square, on this grid so the board does not cover it;
+      // note() below adds its glyph over it.
+      notes.slice(0, 8).forEach((n, i) => px(g, 4 + (i % 4) * 8, 4 + Math.floor(i / 4) * 8, 6, 6, NOTECOL[n.label] || P.gold));
+    });
     notes.slice(0, 8).forEach((n, i) => note(c, x + 2 + (i % 4) * 4, y + 2 + Math.floor(i / 4) * 4, n.label, P.gold));
   },
   /* A parcel at 2× (crates.js): taped shut along the top in the kind's
@@ -228,11 +159,26 @@ export const MODERN = {
     });
   },
   B: MB,
+  /* A house going up, at 2× (#464): scaffold rails lit along the top, with
+   * boards laid on them and braced bays, under a lattice crane; a welder's
+   * spark flickers along the second rail. */
   scaffold(c, x, y, t) {
-    for (let yy = y + 2; yy < y + 16; yy += 4) R(c, x + 1, yy, 14, 1, M.steel);
-    R(c, x + 1, y + 2, 1, 14, M.steelD); R(c, x + 14, y + 2, 1, 14, M.steelD);
-    R(c, x + 7, y - 4, 2, 20, M.crane); R(c, x + 2, y - 4, 13, 2, M.crane);
-    if (blink(t, 90)) R(c, x + 4 + Math.floor(hash(Math.floor(t / 90), 5) * 8), y + 6, 1, 1, P.white);
+    detail(c, x, y, g => {
+      for (let yy = 4; yy < 32; yy += 8) {
+        px(g, 4, yy - 1, 24, 1, P.wood);
+        px(g, 2, yy, 28, 2, M.steel); px(g, 2, yy, 28, 1, M.concreteL);
+        if (yy + 8 < 32) for (let k = 0; k < 6; k++) px(g, 5 + Math.round(k * 4), yy + 2 + k, 1, 1, M.steelD);
+      }
+      px(g, 2, 4, 2, 28, M.steelD); px(g, 28, 4, 2, 28, M.steelD);
+      px(g, 14, -8, 4, 40, M.crane); px(g, 14, -8, 1, 40, P.o);
+      for (let yy = -4; yy < 32; yy += 4) px(g, 15, yy, 3, 1, '#b88810');
+      px(g, 4, -8, 26, 4, M.crane); px(g, 4, -8, 26, 1, '#f8e070');
+      for (let xx = 6; xx < 28; xx += 4) px(g, xx, -6, 2, 1, '#b88810');
+      if (blink(t, 90)) {
+        const sx = 2 * (4 + Math.floor(hash(Math.floor(t / 90), 5) * 8));
+        px(g, sx, 12, 2, 2, P.white); px(g, sx - 1, 12, 1, 1, P.gold); px(g, sx + 2, 13, 1, 1, P.gold);
+      }
+    });
   },
   /* Toll booth with a boom barrier across the road. */
   gate(c, x, cy, open, flag) {
@@ -289,19 +235,32 @@ export const MODERN = {
   },
   hold: [[30, -14], [35, -14], [30, -19], [35, -19], [30, -24], [35, -24]], holdBadge: [29, -32], hull: [12, -52, 28, 46], flies: true,
   /* The delivery truck that brings new issues along the top road. */
-  /* The QA checkpoint: a security gate over the road, and a lab with one
-   * conveyor scanner per gate slot; a busy one runs and shows green. */
+  /* The QA checkpoint at 2× (#464): a security gate over the road, its LED
+   * sign green while it checks work, and a lab with one conveyor scanner per
+   * gate slot; a busy one runs its belt, scans and shows green. */
   gatehouse(c, g, t, busy) {
     const { x0, y, w, rx, rw } = g;
-    [rx - 3, rx + rw + 1].forEach(px => { R(c, px, y + 2, 2, 20, P.o); R(c, px, y + 3, 1, 18, M.steel); });
-    R(c, rx - 4, y, rw + 8, 3, P.o); R(c, rx - 3, y + 1, rw + 6, 1, busy.size ? M.led : P.p0);
-    R(c, x0, y + 3, w, 20, P.o); R(c, x0 + 1, y + 4, w - 2, 18, M.concreteL); R(c, x0 + 1, y + 4, w - 2, 2, M.concrete);
-    g.tables.forEach(([tx, ty], k) => {
-      const on = busy.has(k + 1), off = on ? Math.floor(t / 120) % 3 : 0;
-      R(c, tx + 4, ty - 9, 6, 6, P.o); R(c, tx + 5, ty - 8, 4, 4, on ? M.led : M.glassD);
-      R(c, tx, ty + 5, 10, 3, P.o); R(c, tx + 1, ty + 5, 8, 1, M.steelD);
-      for (let k2 = off; k2 < 8; k2 += 3) R(c, tx + 1 + k2, ty + 6, 1, 1, M.steel);
-      R(c, tx + 8, ty + 1, 1, 1, on ? M.led : P.dark);
+    detail(c, 0, 0, d => {
+      [rx - 3, rx + rw + 1].forEach(p => {
+        px(d, 2 * p, 2 * y + 4, 4, 40, P.o); px(d, 2 * p, 2 * y + 6, 2, 36, M.steel); px(d, 2 * p, 2 * y + 6, 1, 36, M.concreteL);
+        for (let k = 0; k < 2; k++) px(d, 2 * p, 2 * y + 34 + 4 * k, 2, 2, M.dash);
+      });
+      px(d, 2 * rx - 8, 2 * y, 2 * rw + 16, 6, P.o); px(d, 2 * rx - 6, 2 * y + 2, 2 * rw + 12, 2, busy.size ? M.led : P.p0);
+      for (let k = 2; k < 2 * rw + 12; k += 3) px(d, 2 * rx - 6 + k, 2 * y + 2, 1, 2, MSHADE);
+      const X = 2 * x0, Y = 2 * y + 6;
+      px(d, X, Y, 2 * w, 40, P.o); px(d, X + 2, Y + 2, 2 * w - 4, 36, M.concreteL);
+      px(d, X + 2, Y + 2, 2 * w - 4, 4, M.concrete); px(d, X + 2, Y + 2, 2 * w - 4, 1, M.concreteL); px(d, X + 2, Y + 6, 2 * w - 4, 1, MSHADE);
+      for (let k = X + 10; k < X + 2 * w - 2; k += 12) px(d, k, Y + 30, 1, 8, M.concrete);
+      g.tables.forEach(([tx, ty], k) => {
+        const on = busy.has(k + 1), off = on ? Math.floor(t / 60) % 6 : 0, TX = 2 * tx, TY = 2 * ty;
+        px(d, TX + 8, TY - 18, 12, 12, P.o); px(d, TX + 10, TY - 16, 8, 8, on ? M.led : M.glassD);
+        if (on) px(d, TX + 10, TY - 16 + Math.floor(t / 100) % 8, 8, 1, '#b8f8c8'); else px(d, TX + 10, TY - 16, 2, 1, M.glass);
+        px(d, TX + 13, TY - 6, 2, 2, M.steelD);
+        px(d, TX, TY + 10, 20, 6, P.o); px(d, TX + 2, TY + 10, 16, 2, M.steelD);
+        for (let k2 = off; k2 < 16; k2 += 6) { px(d, TX + 2 + k2, TY + 12, 2, 2, M.steel); px(d, TX + 2 + k2, TY + 12, 1, 1, M.concreteL); px(d, TX + 2 + k2, TY + 10, 1, 1, M.steel); }
+        if (on) px(d, TX + 15, TY + 1, 4, 4, 'rgba(88,232,120,0.35)');
+        px(d, TX + 16, TY + 2, 2, 2, on ? M.led : P.dark);
+      });
     });
   },
   supply(c, x, t, load) {

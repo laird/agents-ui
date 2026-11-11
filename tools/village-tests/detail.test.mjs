@@ -134,7 +134,8 @@ test('buildings are drawn at 2× (#421): in half scene pixels, where the 1× bui
       ['the board', c => T.board(c, 160, 28, [{ label: 'needs-design' }])]]) {
       const rects = drawn(paint, DETAIL);
       assert.ok(rects.length > 10, `${T.name}: ${what} draws`);
-      assert.ok(rects.every(([, , , h]) => h === 1), `${T.name}: ${what} is painted in detail pixels, row by row`);
+      // Scale2x'd (#421) or redrawn on the detail grid (#464), it lands on whole canvas pixels.
+      assert.ok(rects.every(r => r.slice(0, 4).every(Number.isInteger)), `${T.name}: ${what} is painted in detail pixels`);
     }
   }
 });

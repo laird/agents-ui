@@ -86,13 +86,17 @@ export function hd(fn) {
     recording = true;
     let rec;
     try { rec = record(r => fn(r, ...args)); } finally { recording = false; }
-    if (!rec.grid.length) return;
-    const parts = runs(scale2x(rec.grid));
-    // Two detail pixels per scene pixel: x and y in detail pixels from (x0, y0).
-    detail(c, rec.x0, rec.y0, g => parts.forEach(([x, y, w, col]) => col.split('|').forEach(layer => { g.fillStyle = layer; g.fillRect(x, y, w, 1); })));
+    // A slot redrawn at 2× (#464) draws only on the detail grid: nothing to scale, all of it in `over`.
+    if (rec.grid.length) {
+      const parts = runs(scale2x(rec.grid));
+      // Two detail pixels per scene pixel: x and y in detail pixels from (x0, y0).
+      detail(c, rec.x0, rec.y0, g => parts.forEach(([x, y, w, col]) => col.split('|').forEach(layer => { g.fillStyle = layer; g.fillRect(x, y, w, 1); })));
+    }
     // What the building drew at 2× itself, on top, where it drew it.
     if (rec.over.length) detail(c, 0, 0, g => rec.over.forEach(([x, y, w, h, col]) => { g.fillStyle = col; g.fillRect(x * 2, y * 2, w * 2, h * 2); }));
   };
   wrapped.hd = true;
+  // What it draws before it is scaled: a test checks a redrawn slot draws nothing in scene pixels.
+  wrapped.raw = fn;
   return wrapped;
 }
