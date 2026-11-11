@@ -4,9 +4,11 @@
  * beside the hall for the manager, filling as the context does. Green below
  * 70%, amber to 90%, red from 90%, flashing from 95%: an agent there is about
  * to wedge (Claude Code stops at about 97%). Downtown it is a fuel gauge, in
- * the future a battery. No barrel when the context is unknown. */
+ * the future a battery. No barrel when the context is unknown. Drawn at 2×
+ * (#457): tools/village-tests/barrels.test.mjs paints it under node. */
 import { state } from './state.js';
 import { P, R, blink } from './palette.js';
+import { detail } from './detail.js';
 import { registerKey, registerLayer, tap } from './registry.js';
 import { MODERN, M } from './themes/modern.js';
 import { FUTURE } from './themes/future.js';
@@ -23,30 +25,47 @@ export function contextWords(h) {
   const note = h.context_pct >= CTX_WEDGE ? ': about to run out and wedge' : h.context_pct >= CTX_FULL ? ': nearly full' : '';
   return `Context ${h.context_pct}%${of}${note}`;
 }
-/* A barrel 4 wide and 8 tall at (x, y), filled to `pct` from the bottom. */
+/* A barrel's footprint, in detail pixels (detail.js): 4×8 scene pixels, as
+ * it has always stood, redrawn at 2× (#457). Its level fills a window of
+ * BARREL_ROWS detail rows, from the bottom. */
+export const BARREL_W = 8, BARREL_H = 16, BARREL_ROWS = 12;
+/* How many of the window's rows are filled at `pct`. */
+export const barrelFill = pct => Math.round(BARREL_ROWS * Math.max(0, Math.min(100, pct)) / 100);
+/* The level, in the window x 2–5 and rows 2–13, with a lighter surface on top. */
+function barrelLevel(d, fill, col) {
+  if (!fill) return;
+  R(d, 2, 14 - fill, 4, fill, col);
+  R(d, 2, 14 - fill, 4, 1, 'rgba(255,255,255,.35)');
+}
+/* A barrel 4 wide and 8 tall at scene (x, y), filled to `pct` from the bottom. */
 export function barrel(c, x, y, pct, t, theme = state.T) {
-  x = Math.round(x); y = Math.round(y);
-  const fill = Math.round(6 * Math.max(0, Math.min(100, pct)) / 100);
+  const fill = barrelFill(pct);
   const flash = pct >= CTX_WEDGE && !state.reduce && blink(t, 300);
   const col = flash ? P.white : contextColour(pct);
-  if (theme === FUTURE) {
-    // A battery: a cap on top, cells lit from the bottom.
-    R(c, x + 1, y - 1, 2, 1, P.o); R(c, x, y, 4, 8, P.o); R(c, x + 1, y + 1, 2, 6, '#262b4c');
-    if (fill) R(c, x + 1, y + 7 - fill, 2, fill, col);
-    // A dim line between cells, as on a battery's charge meter.
-    for (let k = y + 3; k < y + 7; k += 2) R(c, x + 1, k, 2, 1, 'rgba(18,14,42,.35)');
-  } else if (theme === MODERN) {
-    // A fuel gauge on a post: a steel frame, the level inside.
-    R(c, x, y, 4, 8, P.o); R(c, x + 1, y + 1, 2, 6, M.steelD);
-    if (fill) R(c, x + 1, y + 7 - fill, 2, fill, col);
-    R(c, x + 3, y + 2, 1, 1, P.white);
-  } else {
-    // A wooden barrel, the level showing through its staves; two hoops on its sides.
-    R(c, x, y, 4, 8, P.o); R(c, x + 1, y + 1, 2, 6, P.wood);
-    if (fill) R(c, x + 1, y + 7 - fill, 2, fill, col);
-    [y + 2, y + 5].forEach(hy => { R(c, x, hy, 1, 1, P.stone); R(c, x + 3, hy, 1, 1, P.stone); });
-    R(c, x + 1, y, 2, 1, P.woodL);
-  }
+  detail(c, x, y, d => {
+    if (theme === FUTURE) {
+      // A battery: a cap on top, cells lit from the bottom, a glint down its side.
+      R(d, 2, -2, 4, 2, P.o); R(d, 3, -1, 2, 1, '#40e0f0');
+      R(d, 0, 0, BARREL_W, BARREL_H, P.o); R(d, 1, 1, 6, 14, '#262b4c'); R(d, 1, 1, 1, 14, '#3a4070');
+      barrelLevel(d, fill, col);
+      // A dim line between cells, as on a battery's charge meter.
+      for (let k = 5; k < 14; k += 3) R(d, 2, k, 4, 1, 'rgba(18,14,42,.35)');
+    } else if (theme === MODERN) {
+      // A fuel gauge on a post: a steel frame, the level in its window, ticks up the side.
+      R(d, 0, 0, BARREL_W, BARREL_H, P.o); R(d, 1, 1, 6, 14, M.steel); R(d, 2, 2, 4, 12, M.steelD);
+      R(d, 1, 1, 6, 1, P.stoneL);
+      barrelLevel(d, fill, col);
+      [5, 8, 11].forEach(k => R(d, 6, k, 1, 1, P.white));
+    } else {
+      // A wooden barrel, bellied: the level showing through its staves, two iron hoops.
+      R(d, 1, 0, 6, BARREL_H, P.o); R(d, 0, 2, BARREL_W, 12, P.o);
+      R(d, 2, 1, 4, 14, P.wood); R(d, 1, 2, 6, 12, P.wood);
+      R(d, 1, 2, 1, 12, P.woodD); R(d, 6, 2, 1, 12, P.woodD); R(d, 4, 2, 1, 12, P.woodD);
+      barrelLevel(d, fill, col);
+      [3, 11].forEach(hy => { R(d, 0, hy, 2, 2, P.stoneD); R(d, 6, hy, 2, 2, P.stoneD); R(d, 0, hy, 2, 1, P.stone); R(d, 6, hy, 2, 1, P.stone); });
+      R(d, 2, 1, 4, 1, P.woodL);
+    }
+  });
 }
 
 registerLayer({ z: 74, draw(c, { v, lay }, t) {
