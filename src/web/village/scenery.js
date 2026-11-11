@@ -125,14 +125,14 @@ export function path(c, x0, y0, w, h) {
       for (let x = 0; x < W; x += 5) {
         const v = hash(x0 * 2 + x, y0);
         if (v < 0.5) px(g, x, 1, 2, 1, P.pathL);
-        if (v > 0.86) { px(g, x, 0, 1, 2, P.grass); px(g, x + 2, 0, 1, 1, P.grass); }
+        if (v > 0.86 && x + 3 <= W) { px(g, x, 0, 1, 2, P.grass); px(g, x + 2, 0, 1, 1, P.grass); }
       }
     } else {
       px(g, 0, 0, 1, H, P.pathL); px(g, W - 1, 0, 1, H, P.pathS);
       for (let y = 0; y < H; y += 5) {
         const v = hash(x0, y0 * 2 + y);
         if (v < 0.5) px(g, 1, y, 1, 2, P.pathL);
-        if (v > 0.86) { px(g, 0, y, 2, 1, P.grass); px(g, 0, y + 2, 1, 1, P.grass); }
+        if (v > 0.86 && y + 3 <= H) { px(g, 0, y, 2, 1, P.grass); px(g, 0, y + 2, 1, 1, P.grass); }
       }
     }
   });
@@ -154,7 +154,7 @@ export function cobbles(c, x0, y0, w, h) {
         // Round the corners: the top and bottom rows a pixel in at each end.
         for (let j = 0; j < rows; j++) {
           const edge = j === 0 || j === rows - 1, l = a + (edge ? 1 : 0), r = b - (edge ? 1 : 0);
-          px(g, l, y + j, r - l, 1, j === 0 ? COBBLE.lit : j === rows - 1 && rows > 2 ? COBBLE.foot : body);
+          if (r > l) px(g, l, y + j, r - l, 1, j === 0 ? COBBLE.lit : j === rows - 1 && rows > 2 ? COBBLE.foot : body);
         }
       }
     }

@@ -98,7 +98,7 @@ export const MODERN = {
         px(g, 0, 4, W, 1, M.dash); px(g, 0, H - 5, W, 1, M.dash);
         for (let x = 4; x < W; x += 24) {
           const lit = Math.floor(t / 400 + x / 24) % 6 === 0;
-          px(g, x, 4, 1, 1, lit ? P.white : '#c8b030'); px(g, x + 12, H - 5, 1, 1, lit ? P.white : '#c8b030');
+          px(g, x, 4, 1, 1, lit ? P.white : '#c8b030'); if (x + 12 < W) px(g, x + 12, H - 5, 1, 1, lit ? P.white : '#c8b030');
         }
       }
       for (let x = -8 + off; x < w; x += 8) if (x >= 0) { px(g, 2 * x, mid, Math.min(8, W - 2 * x), 2, P.white); px(g, 2 * x, mid + 1, Math.min(8, W - 2 * x), 1, M.concreteL); }

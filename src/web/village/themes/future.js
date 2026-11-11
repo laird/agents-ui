@@ -73,7 +73,7 @@ export const FUTURE = {
     detail(c, x0, y0, g => {
       const W = 2 * w, H = 2 * h;
       px(g, 0, 0, W, H, F.deckL);
-      dither(g, 2, 2, W - 4, H - 4, 3, (x, y) => (hash(x0 * 2 + x, y0 * 2 + y + 3) < 0.5 ? F.deck : null));
+      dither(g, 2, 2, W - 4, H - 4, 4, (x, y) => (hash(x0 * 2 + x, y0 * 2 + y + 3) < 0.4 ? F.deck : null));
       if (w > h && h >= 4) {
         px(g, 0, 0, W, 1, F.cyanD); px(g, 0, 1, W, 1, F.cyan); px(g, 0, H - 1, W, 1, F.cyanD); px(g, 0, H - 2, W, 1, F.deck);
         for (let x = 1; x < w - 2; x += 4) {
