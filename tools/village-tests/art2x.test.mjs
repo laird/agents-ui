@@ -66,6 +66,8 @@ const FOOTPRINTS = {
   path: [c => S.path(c, 0, 0, 120, 6), [0, 0, 120, 6]],
   'path, upright': [c => S.path(c, 0, 0, 6, 80), [0, 0, 6, 80]],
   water: [c => S.water(c, 0, 0, 200, 11, 1234, 1), [0, 0, 200, 11]],
+  'cobbled yard': [c => S.cobbles(c, 0, 0, 48, 9), [0, 0, 48, 9]],
+  'the docks\' cobbled yard': [c => S.cobbles(c, 6, 18, 56, 34), [6, 18, 62, 52]],
   tree: [c => S.tree(c, 10, 10), [11, 10, 23, 23]],
   'another tree': [c => S.tree(c, 37, 51), [38, 51, 50, 64]],
   harbour: [c => S.harbour(c, 50, 100, 1000, -1e9), [50, 41, 88, 100]],
@@ -92,4 +94,35 @@ test('lobes share one outline: no outline pixel inside where two discs overlap',
   assert.equal(at.get('0,5'), 'O', 'the left edge is outlined');
   assert.equal(at.get('15,5'), 'O', 'the right edge is outlined');
   assert.equal(Math.max(...[...at.keys()].map(k => +k.split(',')[0])), 15, 'it spans both discs');
+});
+
+/* The ground, paths, yards and water are wholly at 2× (#471): every rect is
+ * drawn inside detail(), in half scene pixels. */
+test('the ground, paths, yards and water draw nothing in scene pixels', () => {
+  for (const draw of [c => S.grass(c, 0, 0, 60, 40), c => S.path(c, 0, 0, 60, 6), c => S.cobbles(c, 0, 0, 48, 9), c => S.water(c, 0, 0, 100, 11, 900, 1)]) {
+    const c = recorder(), scales = [];
+    let k = 1; const { scale, save, restore } = c, ks = [];
+    c.scale = function (sx, sy) { k *= sx; return scale.call(this, sx, sy); };
+    c.save = function () { ks.push(k); return save.call(this); };
+    c.restore = function () { k = ks.pop(); return restore.call(this); };
+    const fill = c.fillRect; c.fillRect = function (...a) { scales.push(k); return fill.apply(this, a); };
+    draw(c);
+    assert.ok(scales.length && scales.every(s => s === 0.5), 'every rect inside detail()');
+  }
+});
+test('the cobbles are stones in mortar, lit along their tops', () => {
+  const c = recorder();
+  S.cobbles(c, 0, 0, 48, 9);
+  const cols = new Set(c.rects.map(r => r.col));
+  for (const col of [S.COBBLE.mortar, S.COBBLE.stone[0], S.COBBLE.lit, S.COBBLE.foot]) assert.ok(cols.has(col), col);
+  assert.ok(c.rects.length > 100, 'one stone at a time, not one fill');
+});
+test('the stream ripples with the clock, and holds still with reduced motion', async () => {
+  const { state } = await import('../../src/web/village/state.js');
+  const at = t => { const c = recorder(); S.water(c, 0, 0, 200, 11, t, 1); return JSON.stringify(c.rects); };
+  state.reduce = false;
+  assert.notEqual(at(0), at(2500));
+  state.reduce = true;
+  assert.equal(at(0), at(2500));
+  state.reduce = false;
 });

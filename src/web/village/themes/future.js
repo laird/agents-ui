@@ -3,7 +3,7 @@ import { state, now } from '../state.js';
 import { F, KINDCOL, P, PRIOCOL, R, SHADE, blink, hash, shadow } from '../palette.js';
 import { prioRun } from '../cvdmarks.js';
 import { detail } from '../detail.js';
-import { lobes, planks, px } from '../art2x.js';
+import { dither, lobes, planks, px } from '../art2x.js';
 import { CRATE_W, CRATE_H, seal, stencil } from '../crates.js';
 import { registerTheme } from './registry.js';
 import { FB, futureBoard, futureDock, futureHall, futureScaffold } from './futurebuildings.js';
@@ -47,55 +47,86 @@ export const FUTURE = {
   weather: { style: 'alert', cloud: '#501828', cloudD: '#300818', rain: '#ff7090', tint: 'rgba(224,24,48,0.20)', alarm: '#ff2040' },
   labels: { docks: 'Cargo bay', board: 'Holo-board', houses: 'Pods', quay: 'Launch rail', castle: 'Spaceport', hall: 'Command dome', ship: 'Shuttle', sails: 'launches', gate: 'Scanner arch' },
   towers: [[2, -58, 9, 50], [13, -55, 18, 45]],
-  /* Deck plates at 2× (#453): each seam lit along one side, so the plates
-   * read as bevelled; rivets with a cap; now and then a vent slot. */
+  /* The deck, walkways, tiles and the plasma canal, wholly at 2× (#453, #471). */
+  /* Deck plates: each plate bevelled, lit along its top and left, shaded
+   * along its foot; rivets with a cap at the corners; now and then a vent
+   * slot or a little status lamp. */
   ground(c, x0, y0, w, h) {
-    R(c, x0, y0, w, h, F.deckD);
-    for (let x = x0 + 7; x < x0 + w; x += 8) R(c, x, y0, 1, h, F.seam);
-    for (let y = y0 + 7; y < y0 + h; y += 8) R(c, x0, y, w, 1, F.seam);
-    detail(c, x0, y0, g => {
-      for (let x = 7; x < w; x += 8) if (x + 1 < w) px(g, 2 * x + 2, 0, 1, 2 * h, F.deck);
-      for (let y = 7; y < h; y += 8) if (y + 1 < h) px(g, 0, 2 * y + 2, 2 * w, 1, F.deck);
-      for (let y = 1; y < h; y += 16) for (let x = 1; x < w; x += 16) { px(g, 2 * x, 2 * y, 2, 2, F.rivet); px(g, 2 * x, 2 * y, 1, 1, F.deckL); }
-      for (let y = 3; y + 2 < h; y += 8) for (let x = 2; x + 4 < w; x += 8) if (hash(x0 + x, y0 + y) < 0.12) { px(g, 2 * x, 2 * y, 7, 1, F.seam); px(g, 2 * x, 2 * y + 2, 7, 1, F.seam); }
-    });
-  },
-  /* Walkways with a glowing light strip down the middle. */
-  /* At 2× the edges are a detail pixel of trim and a detail pixel of glow,
-   * and each light in the strip has a white-hot core. */
-  road(c, x0, y0, w, h) {
-    R(c, x0, y0, w, h, F.deckL);
     detail(c, x0, y0, g => {
       const W = 2 * w, H = 2 * h;
+      px(g, 0, 0, W, H, F.deckD);
+      for (let x = 7; x < w; x += 8) { px(g, 2 * x, 0, 2, H, F.seam); if (x + 1 < w) px(g, 2 * x + 2, 0, 1, H, F.deck); }
+      for (let y = 7; y < h; y += 8) { px(g, 0, 2 * y, W, 2, F.seam); if (y + 1 < h) px(g, 0, 2 * y + 2, W, 1, F.deck); }
+      for (let y = 7; y < h; y += 8) px(g, 0, 2 * y - 1, W, 1, '#20243f');
+      for (let y = 1; y < h; y += 16) for (let x = 1; x < w; x += 16) { px(g, 2 * x, 2 * y, 2, 2, F.rivet); px(g, 2 * x, 2 * y, 1, 1, F.deckL); }
+      for (let y = 3; y + 2 < h; y += 8) for (let x = 2; x + 4 < w; x += 8) {
+        const v = hash(x0 + x, y0 + y);
+        if (v < 0.12) { px(g, 2 * x, 2 * y, 7, 1, F.seam); px(g, 2 * x, 2 * y + 2, 7, 1, F.seam); px(g, 2 * x, 2 * y + 1, 7, 1, F.deck); }
+        else if (v > 0.95) { px(g, 2 * x + 2, 2 * y, 3, 3, F.seam); px(g, 2 * x + 3, 2 * y + 1, 1, 1, v > 0.975 ? F.cyan : F.magenta); }
+      }
+    });
+  },
+  /* Walkways with a glowing light strip down the middle: the edges a detail
+   * pixel of trim and a detail pixel of glow, grip dots in the deck, and
+   * each light in the strip with a white-hot core in a soft halo. */
+  road(c, x0, y0, w, h) {
+    detail(c, x0, y0, g => {
+      const W = 2 * w, H = 2 * h;
+      px(g, 0, 0, W, H, F.deckL);
+      dither(g, 2, 2, W - 4, H - 4, 3, (x, y) => (hash(x0 * 2 + x, y0 * 2 + y + 3) < 0.5 ? F.deck : null));
       if (w > h && h >= 4) {
         px(g, 0, 0, W, 1, F.cyanD); px(g, 0, 1, W, 1, F.cyan); px(g, 0, H - 1, W, 1, F.cyanD); px(g, 0, H - 2, W, 1, F.deck);
-        for (let x = 1; x < w - 2; x += 4) { px(g, 2 * x, 2 * (h >> 1), 4, 2, F.cyan); px(g, 2 * x + 1, 2 * (h >> 1), 2, 1, F.cyanL); }
+        for (let x = 1; x < w - 2; x += 4) {
+          const X = 2 * x, Y = 2 * (h >> 1);
+          if (h >= 6) { px(g, X - 1, Y - 1, 6, 1, F.panel); px(g, X - 1, Y + 2, 6, 1, F.panel); }
+          px(g, X, Y, 4, 2, F.cyan); px(g, X + 1, Y, 2, 1, F.cyanL);
+        }
       }
       if (h > w && w >= 4) {
         px(g, 0, 0, 1, H, F.cyanD); px(g, 1, 0, 1, H, F.cyan); px(g, W - 1, 0, 1, H, F.cyanD); px(g, W - 2, 0, 1, H, F.deck);
-        for (let y = 1; y < h - 2; y += 4) { px(g, 2 * (w >> 1), 2 * y, 2, 4, F.cyan); px(g, 2 * (w >> 1), 2 * y + 1, 1, 2, F.cyanL); }
+        for (let y = 1; y < h - 2; y += 4) {
+          const X = 2 * (w >> 1), Y = 2 * y;
+          if (w >= 6) { px(g, X - 1, Y - 1, 1, 6, F.panel); px(g, X + 2, Y - 1, 1, 6, F.panel); }
+          px(g, X, Y, 2, 4, F.cyan); px(g, X, Y + 1, 1, 2, F.cyanL);
+        }
       }
     });
   },
+  /* Deck tiles: bevelled squares, lit along the top and left of each, a lit
+   * rivet where every other pair of seams cross, and a cyan trim at the edge. */
   yard(c, x0, y0, w, h) {
-    R(c, x0, y0, w, h, F.deck);
-    for (let x = x0 + 3; x < x0 + w; x += 4) R(c, x, y0, 1, h, F.deckD);
-    for (let y = y0 + 3; y < y0 + h; y += 4) R(c, x0, y, w, 1, F.deckD);
-    // A lit rivet where every other pair of seams cross.
-    detail(c, x0, y0, g => { for (let y = 3; y < h; y += 8) for (let x = 3; x < w; x += 8) px(g, 2 * x, 2 * y, 1, 1, F.deckL); });
-  },
-  /* Rivers and canals are plasma conduits; their pulses flow. */
-  channel(c, x0, y0, w, h, t, flow) {
-    R(c, x0, y0, w, h, F.space);
-    R(c, x0, y0, w, 1, F.magentaD); R(c, x0, y0 + h - 1, w, 1, F.magentaD);
-    const off = Math.floor(t / 60 * flow) % 10, mid = h >> 1;
-    // At 2×: a glow just inside each wall, and pulses with a hot core and a trail.
     detail(c, x0, y0, g => {
       const W = 2 * w, H = 2 * h;
-      px(g, 0, 2, W, 1, F.magentaD); px(g, 0, H - 3, W, 1, F.magentaD);
+      px(g, 0, 0, W, H, F.deck);
+      for (let y = 0; y < h; y += 4) px(g, 0, 2 * y, W, 1, F.deckL);
+      for (let x = 0; x < w; x += 4) px(g, 2 * x, 0, 1, H, F.deckL);
+      for (let x = 3; x < w; x += 4) px(g, 2 * x, 0, 2, H, F.deckD);
+      for (let y = 3; y < h; y += 4) px(g, 0, 2 * y, W, 2, F.deckD);
+      for (let y = 3; y < h; y += 8) for (let x = 3; x < w; x += 8) { px(g, 2 * x, 2 * y, 2, 2, F.rivet); px(g, 2 * x, 2 * y, 1, 1, F.cyanL); }
+      px(g, 0, H - 1, W, 1, F.cyanD);
+    });
+  },
+  /* Rivers and canals are plasma conduits: walls with a glow just inside,
+   * the plasma brightening towards the middle, pulses with a hot core and a
+   * trail flowing along, and sparks that twinkle (still, with reduced motion). */
+  channel(c, x0, y0, w, h, t, flow) {
+    t = state.reduce ? 0 : t;
+    const off = Math.floor(t / 60 * flow) % 10, mid = h >> 1;
+    detail(c, x0, y0, g => {
+      const W = 2 * w, H = 2 * h, Y = 2 * mid;
+      px(g, 0, 0, W, H, F.space);
+      if (H >= 12) px(g, 0, Y - 3, W, 8, '#1c1440');
+      if (H >= 16) px(g, 0, Y - 1, W, 4, '#281c58');
+      px(g, 0, 0, W, 2, F.magentaD); px(g, 0, H - 2, W, 2, F.magentaD);
+      px(g, 0, 0, W, 1, F.magenta); px(g, 0, 2, W, 1, F.magentaD); px(g, 0, H - 3, W, 1, F.magentaD);
+      for (let x = 3; x < w - 1; x += 7) {
+        const v = hash(x0 + x, y0 + 13);
+        if (v < 0.4 && Math.floor(t / 300 + v * 20) % 4 === 0) { const sy = 4 + Math.floor(v * 10) % Math.max(1, H - 8); px(g, 2 * x, sy, 1, 1, F.cyanL); }
+      }
       for (let x = -10 + off; x < w; x += 10) if (x >= 0) {
-        const X = 2 * x, Y = 2 * mid;
+        const X = 2 * x;
         px(g, X, Y, Math.min(8, W - X), 2, F.plasmaL); px(g, X + 5, Y, Math.min(3, W - X - 5), 1, P.white);
+        if (X > 3) px(g, X - 4, Y, 4, 1, F.plasma);
         if (X + 10 < W) px(g, X + 10, Y - 4, Math.min(4, W - X - 10), 1, F.plasma);
         if (X + 4 < W) px(g, X + 4, Y + 4, Math.min(4, W - X - 4), 1, F.cyanD);
       }

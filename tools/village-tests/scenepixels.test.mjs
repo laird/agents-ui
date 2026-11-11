@@ -7,8 +7,8 @@
 // the bare ×DETAIL transform (prepare(), detail.js) is drawn in scene pixels.
 // Each is traced to the function that drew it, and none may come from a
 // sprite: the buildings, crates, people and their props, and every mark #455
-// redrew at 2× inside detail(). Scenery that still paints in scene pixels (the
-// ground, water and roads, trees, the lock, harbour and ship, the environment
+// redrew at 2× inside detail(), and the ground, roads, yards and water (#471).
+// Scenery that still paints in scene pixels (trees, the lock, harbour and ship, the environment
 // row, banners, barges, Medieval's decoration and hedge, shadows) is listed in
 // SCENERY,
 // so a new caller has to be named there or drawn at 2×.
@@ -59,11 +59,10 @@ const SPRITE_FNS = /^(?:Object\.)?(?:hall|board|dock|scaffold|gatehouse|crate|bu
 const SCENERY = [
   ['shadow', 'palette.js'], ['fogStop', 'features.js'], ['drawBanner', 'bannerart.js'],
   ['envKeep', 'envart.js'], ['envShed', 'envart.js'], ['envSign', 'envart.js'],
-  ['grass', 'scenery.js'], ['path', 'scenery.js'], ['water', 'scenery.js'],
   ['lock', 'scenery.js'], ['harbour', 'scenery.js'], ['ship', 'scenery.js'], ['boat', 'scenery.js'],
   ['drawBarge', 'features.js'], ['poleFlag', 'envart.js'], ['draw', 'envrow.js'],
 ];
-const SCENERY_SLOTS = ['ground', 'road', 'yard', 'channel', 'gate', 'destination', 'vessel', 'supply'];
+const SCENERY_SLOTS = ['gate', 'destination', 'vessel', 'supply'];
 
 /* One stack frame: [function name, file under src/web/village/]. */
 function frames(stack) {

@@ -3,7 +3,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { FEATURE_COLS, P, F, featureColour, featureColours } from '../../src/web/village/palette.js';
-import { M } from '../../src/web/village/themes/modern.js';
+// modern.js reads state.js, which asks the window about reduced motion.
+globalThis.window ??= { matchMedia: () => ({ matches: false }) };
+const { M } = await import('../../src/web/village/themes/modern.js');
 
 const fs = (...ns) => ns.map(number => ({ number }));
 const N = FEATURE_COLS.length;

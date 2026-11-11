@@ -1,5 +1,6 @@
 /* The Modern business district theme. */
 import { KINDCOL, NOTECOL, P, PRIOCOL, R, blink, hash } from '../palette.js';
+import { state } from '../state.js';
 import { note, prioRun } from '../cvdmarks.js';
 import { detail } from '../detail.js';
 import { disc, dither, px } from '../art2x.js';
@@ -7,6 +8,13 @@ import { CRATE_W, CRATE_H, seal, stencil } from '../crates.js';
 import { registerTheme } from './registry.js';
 import { BLIND, CRANE_D, MB, MC, MLIT, MSHADE, mWin } from './modernhouses.js';
 
+/* A manhole cover, 5 detail pixels square: a dark rim, a lit edge on top
+ * and a cross-hatch in the iron. */
+function manhole(g, x, y) {
+  px(g, x + 1, y, 3, 1, MC.asphaltD); px(g, x, y + 1, 5, 3, MC.asphaltD); px(g, x + 1, y + 4, 3, 1, MC.asphaltD);
+  px(g, x + 1, y + 1, 3, 3, MC.concreteD); px(g, x + 2, y + 1, 1, 3, MC.asphalt); px(g, x + 1, y + 2, 3, 1, MC.asphalt);
+  px(g, x + 1, y + 1, 1, 1, MC.concreteL);
+}
 /* The theme's colours, kept with its offices (modernhouses.js). */
 export const M = MC;
 export const MODERN = {
@@ -16,58 +24,84 @@ export const MODERN = {
   weather: { style: 'smog', cloud: '#8a7a5c', cloudD: '#5c5240', rain: '#b8b0a0', tint: 'rgba(96,74,40,0.30)', alarm: '#ff3030' },
   labels: { docks: 'Mailroom', board: 'Whiteboard', houses: 'Offices', quay: 'Loading bay', castle: 'Launch pad', hall: 'Headquarters', ship: 'Rocket', sails: 'lifts off', gate: 'QA checkpoint' },
   towers: [[3, -51, 6, 43], [12, -51, 18, 43]],
+  /* The lawn, roads, paving and the traffic road, wholly at 2× (#452, #471). */
+  /* A mown lawn: stripes, each lit along its top; the odd clover, and daisies
+   * with a yellow heart. */
   ground(c, x0, y0, w, h) {
-    for (let y = y0; y < y0 + h; y += 4) R(c, x0, y, w, Math.min(4, y0 + h - y), (y >> 2) % 2 ? M.lawn : M.lawnD);
-    // 2× (#452): the mower's stripes catch the light on one edge, and the
-    // lawn has the odd clover and daisy.
     detail(c, x0, y0, g => {
-      for (let y = 0; y < h; y += 4) px(g, 0, 2 * y, 2 * w, 1, (((y0 + y) >> 2) % 2 ? M.lawnD : M.lawn));
-      dither(g, 0, 0, 2 * w, 2 * h, 3, (x, y) => {
+      const W = 2 * w;
+      for (let y = 0; y < h; y += 4) {
+        const n = Math.min(4, h - y), dark = ((y0 + y) >> 2) % 2;
+        px(g, 0, 2 * y, W, 2 * n, dark ? M.lawnD : M.lawn);
+        px(g, 0, 2 * y, W, 1, dark ? M.lawn : '#78c060');
+      }
+      dither(g, 0, 0, W, 2 * h, 3, (x, y) => {
         const v = hash((x0 * 2 + x) >> 1, (y0 * 2 + y) >> 1);
-        return v < 0.03 ? P.leafD : v > 0.992 ? P.white : null;
+        return v < 0.03 ? P.leafD : null;
       });
-    });
-  },
-  road(c, x0, y0, w, h) {
-    R(c, x0, y0, w, h, M.asphalt);
-    if (w > h && h >= 6) for (let x = x0 + 1; x < x0 + w - 2; x += 6) R(c, x, y0 + (h >> 1), 3, 1, M.dash);
-    if (h > w && w >= 6) for (let y = y0 + 1; y < y0 + h - 2; y += 6) R(c, x0 + (w >> 1), y, 1, 3, M.dash);
-    // 2× (#452): aggregate in the asphalt, and worn dashes.
-    detail(c, x0, y0, g => {
-      dither(g, 0, 0, 2 * w, 2 * h, 3, (x, y) => {
-        const v = hash((x0 * 2 + x), (y0 * 2 + y) + 11);
-        return v < 0.12 ? M.asphaltD : v > 0.94 ? M.concreteD : null;
-      });
-      if (w > h && h >= 6) for (let x = 1; x < w - 2; x += 6) px(g, 2 * x + 1, 2 * (h >> 1) + 1, 4, 1, M.concreteL);
-      if (h > w && w >= 6) for (let y = 1; y < h - 2; y += 6) px(g, 2 * (w >> 1) + 1, 2 * y + 1, 1, 4, M.concreteL);
-    });
-  },
-  yard(c, x0, y0, w, h) {
-    R(c, x0, y0, w, h, M.concrete);
-    for (let x = x0 + 3; x < x0 + w; x += 4) R(c, x, y0, 1, h, M.concreteD);
-    for (let y = y0 + 3; y < y0 + h; y += 4) R(c, x0, y, w, 1, M.concreteD);
-    // 2× (#452): each paving slab's joint is a fine groove with a lit lip, and
-    // some slabs are stained.
-    detail(c, x0, y0, g => {
-      for (let x = 3; x < w; x += 4) { px(g, 2 * x, 0, 1, 2 * h, M.concreteD); px(g, 2 * x + 1, 0, 1, 2 * h, M.concreteL); }
-      for (let y = 3; y < h; y += 4) { px(g, 0, 2 * y, 2 * w, 1, M.concreteD); px(g, 0, 2 * y + 1, 2 * w, 1, M.concreteL); }
-      for (let y = 0; y < h - 3; y += 4) for (let x = 0; x < w - 3; x += 4) {
-        if (hash(x0 + x, y0 + y) < 0.15) { px(g, 2 * x + 2, 2 * y + 2, 3, 2, M.concreteD); px(g, 2 * x + 3, 2 * y + 4, 1, 1, M.concreteD); }
+      for (let y = 1; y + 3 < h; y += 5) for (let x = 1; x + 2 < w; x += 5) {
+        const v = hash(x0 + x + 3, y0 + y + 17), X = 2 * x, Y = 2 * y;
+        if (v < 0.04) { px(g, X + 1, Y, 1, 1, P.white); px(g, X, Y + 1, 3, 1, P.white); px(g, X + 1, Y + 2, 1, 1, P.white); px(g, X + 1, Y + 1, 1, 1, P.gold); }
+        else if (v < 0.08) { px(g, X, Y, 2, 1, '#489838'); px(g, X + 1, Y + 1, 2, 1, '#489838'); px(g, X, Y, 1, 1, '#88d070'); }
       }
     });
   },
-  /* Rivers and canals become roads with moving traffic markings. */
-  channel(c, x0, y0, w, h, t, flow) {
-    R(c, x0, y0, w, h, M.asphaltD);
-    R(c, x0, y0, w, 1, M.concreteD); R(c, x0, y0 + h - 1, w, 1, M.concreteD);
-    const off = Math.floor(t / 60 * flow) % 8;
-    for (let x = x0 - 8 + off; x < x0 + w; x += 8) if (x >= x0) R(c, x, y0 + (h >> 1), 4, 1, P.white);
-    // 2× (#452): a kerb with a lit edge each side, solid edge lines inside
-    // them, and aggregate in the asphalt.
+  /* Asphalt: a kerb lit along its top and shaded at its foot, aggregate,
+   * worn dashes down the middle, and now and then a manhole cover. */
+  road(c, x0, y0, w, h) {
     detail(c, x0, y0, g => {
-      px(g, 0, 1, 2 * w, 1, M.concreteL); px(g, 0, 2 * h - 2, 2 * w, 1, M.concreteL);
-      if (h >= 6) { px(g, 0, 4, 2 * w, 1, M.dash); px(g, 0, 2 * h - 5, 2 * w, 1, M.dash); }
-      dither(g, 0, 6, 2 * w, Math.max(0, 2 * h - 12), 3, (x, y) => (hash(x0 * 2 + x, y0 * 2 + y + 5) < 0.1 ? M.asphalt : null));
+      const W = 2 * w, H = 2 * h;
+      px(g, 0, 0, W, H, M.asphalt);
+      dither(g, 0, 0, W, H, 3, (x, y) => {
+        const v = hash((x0 * 2 + x), (y0 * 2 + y) + 11);
+        return v < 0.12 ? M.asphaltD : v > 0.94 ? M.concreteD : null;
+      });
+      if (w > h) {
+        px(g, 0, 0, W, 1, M.concreteL); px(g, 0, H - 1, W, 1, M.asphaltD);
+        if (h >= 6) for (let x = 1; x < w - 2; x += 6) { px(g, 2 * x, 2 * (h >> 1), 6, 2, M.dash); px(g, 2 * x + 1, 2 * (h >> 1), 4, 1, '#f8e888'); }
+        if (h >= 5) for (let x = 6; x + 6 < w; x += 23) if (hash(x0 + x, y0 + 31) < 0.3) manhole(g, 2 * x, h >= 6 ? 1 : (H - 5) >> 1);
+      } else {
+        px(g, 0, 0, 1, H, M.concreteL); px(g, W - 1, 0, 1, H, M.asphaltD);
+        if (w >= 6) for (let y = 1; y < h - 2; y += 6) { px(g, 2 * (w >> 1), 2 * y, 2, 6, M.dash); px(g, 2 * (w >> 1), 2 * y + 1, 1, 4, '#f8e888'); }
+      }
+    });
+  },
+  /* Paving slabs: each joint a fine groove with a lit lip; some slabs a
+   * shade lighter, some stained, and the odd drain grate. */
+  yard(c, x0, y0, w, h) {
+    detail(c, x0, y0, g => {
+      const W = 2 * w, H = 2 * h;
+      px(g, 0, 0, W, H, M.concrete);
+      for (let y = 0; y < h; y += 4) for (let x = 0; x < w; x += 4) {
+        const v = hash(x0 + x, y0 + y), X = 2 * x, Y = 2 * y, sw = Math.min(6, W - X), sh = Math.min(6, H - Y);
+        if (v > 0.8) px(g, X, Y, sw, sh, '#cacad2');
+        if (v < 0.15 && sw >= 5 && sh >= 5) { px(g, X + 2, Y + 2, 3, 2, M.concreteD); px(g, X + 3, Y + 4, 1, 1, M.concreteD); }
+        else if (v > 0.97 && sw >= 6 && sh >= 6) { px(g, X + 1, Y + 1, 5, 5, P.dark); for (let k = 0; k < 5; k += 2) px(g, X + 1, Y + 1 + k, 5, 1, M.concreteD); }
+      }
+      for (let x = 3; x < w; x += 4) { px(g, 2 * x, 0, 1, H, M.concreteD); px(g, 2 * x + 1, 0, 1, H, M.concreteL); }
+      for (let y = 3; y < h; y += 4) { px(g, 0, 2 * y, W, 1, M.concreteD); px(g, 0, 2 * y + 1, W, 1, M.concreteL); }
+    });
+  },
+  /* Rivers and canals become roads with moving traffic markings: a kerb with
+   * a lit edge each side, solid edge lines with cat's eyes that glint in
+   * turn, aggregate, and the centre dashes rolling with the flow. */
+  channel(c, x0, y0, w, h, t, flow) {
+    t = state.reduce ? 0 : t;
+    const off = Math.floor(t / 60 * flow) % 8;
+    detail(c, x0, y0, g => {
+      const W = 2 * w, H = 2 * h, mid = 2 * (h >> 1);
+      px(g, 0, 0, W, H, M.asphaltD);
+      px(g, 0, 0, W, 2, M.concreteD); px(g, 0, H - 2, W, 2, M.concreteD);
+      px(g, 0, 1, W, 1, M.concreteL); px(g, 0, H - 2, W, 1, M.concreteL);
+      dither(g, 0, 6, W, Math.max(0, H - 12), 3, (x, y) => (hash(x0 * 2 + x, y0 * 2 + y + 5) < 0.1 ? M.asphalt : null));
+      if (h >= 6) {
+        px(g, 0, 4, W, 1, M.dash); px(g, 0, H - 5, W, 1, M.dash);
+        for (let x = 4; x < W; x += 24) {
+          const lit = Math.floor(t / 400 + x / 24) % 6 === 0;
+          px(g, x, 4, 1, 1, lit ? P.white : '#c8b030'); px(g, x + 12, H - 5, 1, 1, lit ? P.white : '#c8b030');
+        }
+      }
+      for (let x = -8 + off; x < w; x += 8) if (x >= 0) { px(g, 2 * x, mid, Math.min(8, W - 2 * x), 2, P.white); px(g, 2 * x, mid + 1, Math.min(8, W - 2 * x), 1, M.concreteL); }
     });
   },
   /* The loading dock at 2× (#464): a concrete lip lit along its top, the

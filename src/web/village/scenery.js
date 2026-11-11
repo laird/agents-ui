@@ -1,4 +1,4 @@
-/* Things and scenery: speech bubbles, "zzz", "+N" badges, grass, paths, water, trees,
+/* Things and scenery: speech bubbles, "zzz", "+N" badges, grass, paths, cobbles, water, trees,
  * the castle, the board, the locks, the harbour, the ship and the supply boat. */
 import { state } from './state.js';
 import { NOTECOL, P, R, ROPE, STATE, SHADE, blink, hash } from './palette.js';
@@ -73,57 +73,106 @@ export function tether(c, a, b) {
 }
 /* ---------- Scenery ---------- */
 export const FLOWERS = ['#f8f8f8', '#f8d040', '#e070d0', '#e05050', '#a8c8f8'];
-/* The ground, the paths, the water and the trees are drawn at 2× (#451):
- * their colour at scene scale, then their detail in detail pixels inside
- * detail(). Each samples where it did at 1× and keeps its footprint, so the
- * map lays out and costs as before. */
+/* The ground, the paths, the yards and the water are drawn wholly at 2×
+ * (#451, #471): their fill and their detail in detail pixels inside detail(),
+ * nothing in scene pixels. Each samples where it did at 1× and keeps its
+ * footprint, so the map lays out and costs as before. */
 export function grass(c, x0, y0, w, h) {
-  R(c, x0, y0, w, h, P.grass);
   detail(c, x0, y0, g => {
+    const W = 2 * w, H = 2 * h;
+    px(g, 0, 0, W, H, P.grass);
     // Soft, dithered variation: one detail pixel per sample, set off the scene grid.
     for (let y = 0; y < h; y += 2) for (let x = (y >> 1) % 2; x < w; x += 2) {
       const sx = x0 + x, sy = y0 + y, v = hash(sx >> 3, sy >> 3) * 0.6 + hash(sx >> 2, sy >> 2) * 0.4;
       if (v < 0.2 || v > 0.82) px(g, 2 * x + ((sx + sy) & 1), 2 * y + ((sx >> 1) & 1), 1, 1, v < 0.2 ? '#62a850' : '#4c9040');
     }
-    // Tufts of three blades (the middle one tallest), dark specks, and the odd flower with a centre.
+    // Tufts of three blades (the middle one tallest, its tip lit), dark specks,
+    // clover, and the odd flower: four round petals about a centre, on a stem with a leaf.
     for (let y = 0; y < h; y += 3) for (let x = 0; x < w; x += 3) {
       const sx = x0 + x, sy = y0 + y, v = hash(sx, sy), X = 2 * x, Y = 2 * y;
-      if (v < 0.05) { px(g, X, Y, 1, 2, P.grassL); px(g, X + 2, Y - 2, 1, 4, P.grassL); px(g, X + 4, Y, 1, 2, P.grassL); px(g, X + 3, Y + 1, 1, 1, P.grassD); }
-      else if (v < 0.1) px(g, X + 1, Y + 1, 1, 1, P.grassD);
-      else if (v > 0.985) {
+      if (v < 0.05) {
+        px(g, X, Y, 1, 2, P.grassL); px(g, X + 2, Y - 2, 1, 4, P.grassL); px(g, X + 4, Y, 1, 2, P.grassL);
+        px(g, X + 2, Y - 2, 1, 1, '#b0e070'); px(g, X + 3, Y + 1, 1, 1, P.grassD);
+      } else if (v < 0.1) px(g, X + 1, Y + 1, 1, 1, P.grassD);
+      else if (v < 0.115 && X + 4 <= W && Y + 3 <= H) {
+        px(g, X + 1, Y, 1, 1, '#3e8a36'); px(g, X, Y + 1, 3, 1, '#3e8a36'); px(g, X + 1, Y + 1, 1, 1, P.grassL); px(g, X + 3, Y + 2, 1, 1, '#3e8a36');
+      } else if (v > 0.985 && X + 4 <= W && Y + 5 <= H) {
         const petal = FLOWERS[Math.floor(hash(sy, sx) * FLOWERS.length)];
-        px(g, X, Y, 2, 1, petal); px(g, X, Y + 1, 1, 1, petal); px(g, X + 1, Y + 1, 1, 1, petal === '#f8d040' ? '#c06020' : '#f8d040');
-        px(g, X + 1, Y + 2, 1, 2, P.leafD);
+        px(g, X + 1, Y + 3, 1, 2, P.leafD); px(g, X + 2, Y + 4, 1, 1, P.leaf);
+        px(g, X + 1, Y, 1, 1, petal); px(g, X, Y + 1, 3, 1, petal); px(g, X + 1, Y + 2, 1, 1, petal);
+        px(g, X + 1, Y + 1, 1, 1, petal === '#f8d040' ? '#c06020' : '#f8d040');
       }
     }
   });
 }
 export function path(c, x0, y0, w, h) {
-  R(c, x0, y0, w, h, P.path);
   detail(c, x0, y0, g => {
-    // Pebbles with a shaded underside, and light grit.
+    const W = 2 * w, H = 2 * h;
+    px(g, 0, 0, W, H, P.path);
+    // Wheel ruts worn along a lane wide enough for a cart, a little darker than the earth.
+    if (w > h && h >= 5) { px(g, 0, Math.round(H * 0.3), W, 1, '#c8a868'); px(g, 0, Math.round(H * 0.7), W, 1, '#c8a868'); }
+    if (h > w && w >= 5) { px(g, Math.round(W * 0.3), 0, 1, H, '#c8a868'); px(g, Math.round(W * 0.7), 0, 1, H, '#c8a868'); }
+    // Pebbles: round, lit on top and shaded under; and light grit.
     for (let y = 0; y < h; y += 2) for (let x = 0; x < w; x += 2) {
       const v = hash(x0 + x + 7, y0 + y + 3), X = 2 * x + 1, Y = 2 * y + 1;
-      if (v < 0.07) { px(g, X, Y, 2, 1, P.pathS); px(g, X + 1, Y + 1, 1, 1, P.stoneD); }
+      if (v < 0.07) { px(g, X, Y, 2, 1, P.pathS); px(g, X, Y - 1, 1, 1, P.pathL); px(g, X + 1, Y + 1, 1, 1, P.stoneD); }
       else if (v < 0.11) px(g, X, Y, 1, 1, P.pathL);
     }
-    // Worn edges one detail pixel wide where the path meets the grass, broken here and there.
-    const W = 2 * w, H = 2 * h;
+    // Worn edges one detail pixel wide where the path meets the grass, broken
+    // here and there, and blades of grass creeping in over them.
     if (w > h) {
       px(g, 0, 0, W, 1, P.pathL); px(g, 0, H - 1, W, 1, P.pathS);
-      for (let x = 0; x < W; x += 5) if (hash(x0 * 2 + x, y0) < 0.5) px(g, x, 1, 2, 1, P.pathL);
+      for (let x = 0; x < W; x += 5) {
+        const v = hash(x0 * 2 + x, y0);
+        if (v < 0.5) px(g, x, 1, 2, 1, P.pathL);
+        if (v > 0.86) { px(g, x, 0, 1, 2, P.grass); px(g, x + 2, 0, 1, 1, P.grass); }
+      }
     } else {
       px(g, 0, 0, 1, H, P.pathL); px(g, W - 1, 0, 1, H, P.pathS);
-      for (let y = 0; y < H; y += 5) if (hash(x0, y0 * 2 + y) < 0.5) px(g, 1, y, 1, 2, P.pathL);
+      for (let y = 0; y < H; y += 5) {
+        const v = hash(x0, y0 * 2 + y);
+        if (v < 0.5) px(g, 1, y, 1, 2, P.pathL);
+        if (v > 0.86) { px(g, 0, y, 2, 1, P.grass); px(g, 0, y + 2, 1, 1, P.grass); }
+      }
     }
   });
 }
+/* A cobbled yard (#471): staggered courses of rounded sandstone setts, each
+ * lit along its top and shaded along its foot, in mortar the colour of the
+ * paths; some warmer, some paler, and a kerb lit along the top. */
+export const COBBLE = { w: 6, h: 4, mortar: P.pathS, stone: ['#d0b888', '#c4aa7c', '#dcc8a0'], lit: '#ecdcb8', foot: '#a88a60' };
+export function cobbles(c, x0, y0, w, h) {
+  detail(c, x0, y0, g => {
+    const W = 2 * w, H = 2 * h, { w: cw, h: ch } = COBBLE;
+    px(g, 0, 0, W, H, COBBLE.mortar);
+    for (let k = 0, y = 1; y < H - 1; k++, y += ch) {
+      const rows = Math.min(ch - 1, H - 1 - y);
+      for (let x = (k % 2 ? -(cw >> 1) : 0) + 1; x < W - 1; x += cw) {
+        const a = Math.max(1, x), b = Math.min(W - 1, x + cw - 1);
+        if (b - a < 2) continue;
+        const v = hash(x0 * 2 + x, y0 * 2 + y), body = COBBLE.stone[v < 0.2 ? 1 : v > 0.85 ? 2 : 0];
+        // Round the corners: the top and bottom rows a pixel in at each end.
+        for (let j = 0; j < rows; j++) {
+          const edge = j === 0 || j === rows - 1, l = a + (edge ? 1 : 0), r = b - (edge ? 1 : 0);
+          px(g, l, y + j, r - l, 1, j === 0 ? COBBLE.lit : j === rows - 1 && rows > 2 ? COBBLE.foot : body);
+        }
+      }
+    }
+    px(g, 0, 0, W, 1, P.pathL); px(g, 0, H - 1, W, 1, P.woodD);
+  });
+}
+/* Water: a stream with a dark lip under the far bank and a sandy near one.
+ * Its ripples drift with the flow; soft highlights swell and fade slowly
+ * (still, with reduced motion). */
 export function water(c, x0, y0, w, h, t, flow) {
-  R(c, x0, y0, w, h, P.water);
-  R(c, x0, y0 + 1, w, 2, P.waterD);
+  t = state.reduce ? 0 : t;
   const off = Math.floor(t / 120 * flow);
   detail(c, x0, y0, g => {
     const W = 2 * w, H = 2 * h;
+    px(g, 0, 0, W, H, P.water);
+    px(g, 0, 2, W, 4, P.waterD);
+    // The shallows by the near bank, a soft dither of light.
+    for (let x = (y0 & 1); x < W; x += 2) if (hash(x0 * 2 + x, y0) < 0.5) px(g, x, H - 4 - (x & 2 ? 1 : 0), 1, 1, '#5890d8');
     // Banks: a dark lip on the far side, a sandy edge on the near one, each a detail pixel finer.
     px(g, 0, 0, W, 1, P.pathS); px(g, 0, 1, W, 1, P.stoneD);
     px(g, 0, H - 2, W, 1, P.path); px(g, 0, H - 1, W, 1, P.pathL);
@@ -134,11 +183,22 @@ export function water(c, x0, y0, w, h, t, flow) {
       px(g, X, 2 * y, Math.min(3, W - X), 1, P.waterL);
       if (X + 1 < W) px(g, X + 1, 2 * y, 1, 1, P.white);
     }
+    // Soft highlights that stay put: a pale curve that swells and fades, each in its own time.
+    for (let y = 4; y < h - 2; y += 3) for (let x = 3; x < w - 3; x += 11) {
+      const v = hash(x0 + x + 5, y0 + y + 9);
+      if (v >= 0.3) continue;
+      const s = Math.sin(t / 1400 + v * 40), n = s > 0.6 ? 3 : s > -0.2 ? 2 : 0, X = 2 * x, Y = 2 * y + 1;
+      if (n) { px(g, X - n, Y + 1, 1, 1, P.waterL); px(g, X - n + 1, Y, 2 * n - 1, 1, '#a0ccf4'); px(g, X + n, Y + 1, 1, 1, P.waterL); }
+    }
     // Thin reeds on the near bank, and the odd lily pad with a notch and a flower.
     for (let x = 2; x < w - 2; x += 5) {
       const v = hash(x0 + x, y0 + h), X = 2 * x;
       if (v < 0.22) { px(g, X, H - 6, 1, 4, P.leafD); px(g, X + 2, H - 8, 1, 6, P.leaf); px(g, X + 3, H - 5, 1, 3, P.leafD); px(g, X + 2, H - 9, 1, 1, P.woodD); }
-      else if (v > 0.93 && h > 9) { const Y = 2 * (h >> 1); px(g, X, Y, 6, 2, P.leaf); px(g, X + 3, Y, 1, 1, P.water); px(g, X + 2, Y, 1, 1, '#e070d0'); }
+      else if (v > 0.93 && h > 9) {
+        const Y = 2 * (h >> 1);
+        px(g, X + 1, Y - 1, 4, 1, P.leafL); px(g, X, Y, 6, 2, P.leaf); px(g, X + 1, Y + 2, 4, 1, P.leafD);
+        px(g, X + 3, Y, 1, 1, P.water); px(g, X + 2, Y - 1, 1, 1, '#e070d0'); px(g, X + 2, Y - 2, 1, 1, '#f8b0e8');
+      }
     }
   });
 }

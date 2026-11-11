@@ -53,3 +53,11 @@ for (const [name, [draw, box]] of Object.entries(FOOTPRINTS)) {
     assert.ok(c.rects.some(r => r.w % 1 || r.h % 1 || r.x % 1 || r.y % 1), 'and has detail finer than a scene pixel');
   });
 }
+
+test('the plasma canal flows with the clock, and holds still with reduced motion (#471)', async () => {
+  const { state } = await import('../../src/web/village/state.js');
+  const at = t => { const c = recorder(); T.channel(c, 0, 0, 200, 11, t, 1); return JSON.stringify(c.rects); };
+  assert.notEqual(at(0), at(2500));
+  state.reduce = true;
+  try { assert.equal(at(0), at(2500)); } finally { state.reduce = false; }
+});

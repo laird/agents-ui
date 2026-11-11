@@ -2,7 +2,7 @@
 import { P, SHADE, SHINE, hash } from '../palette.js';
 import { B, scaffold } from '../sprites/houses.js';
 import { crate } from '../crates.js';
-import { FLOWERS, boat, grass, harbour, lock, path, ship, tree, water } from '../scenery.js';
+import { FLOWERS, boat, cobbles, grass, harbour, lock, path, ship, tree, water } from '../scenery.js';
 import { board, dock, hall } from './medievalbuildings.js';
 import { detail } from '../detail.js';
 import { bricks, lobes, px } from '../art2x.js';
@@ -147,7 +147,7 @@ export const MEDIEVAL = {
   pair: 'modern',
   weather: { style: 'storm', cloud: '#50506a', cloudD: '#30303f', rain: '#a8d0f0', tint: 'rgba(16,20,44,0.32)', flash: 'rgba(255,255,236,0.38)', alarm: '#f03030' },
   labels: { docks: 'Docks', board: 'Notice board', houses: 'Houses', quay: 'Quay', castle: 'Harbour', hall: 'Castle', ship: 'Ship', sails: 'sails', gate: 'Gatehouse' },
-  ground: grass, road: path, yard: path, channel: water,
+  ground: grass, road: path, yard: cobbles, channel: water,
   dock,
   tree, hall, board, crate, B, scaffold, gate: lock, destination: harbour, vessel: ship, supply: boat, gatehouse, decor: medievalDecor, border: medievalBorder,
   // Deck slots for cargo (from the harbour's x and the canal's y), the "+N"

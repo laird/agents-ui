@@ -49,3 +49,10 @@ test('the traffic markings still move with the clock', () => {
   const at = t => drawn(c => T.channel(c, 0, 0, 60, 12, t, 1)).filter(r => r.col === '#f8f8f8').map(r => r.x).join();
   assert.notEqual(at(0), at(120));
 });
+
+test('the traffic road holds still with reduced motion (#471)', () => {
+  const at = t => JSON.stringify(drawn(c => T.channel(c, 0, 0, 60, 12, t, 1)));
+  state.reduce = true;
+  try { assert.equal(at(0), at(2500)); } finally { state.reduce = false; }
+  assert.notEqual(at(0), at(2500));
+});
