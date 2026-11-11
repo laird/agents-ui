@@ -8,10 +8,6 @@
 import { P, SHADE, SHINE, glassOf } from '../palette.js';
 import { px } from '../art2x.js';
 
-/* Marks a slot as drawn at 2× already, so registerTheme's hd() (the Scale2x
- * wrap, upscale.js) passes it through untouched. */
-export const drawn2x = fn => { fn.hd = true; return fn; };
-
 /* A pitched roof filling W by H at (X, Y), seen from the front: a sunlit
  * ridge, courses of staggered shingles (or straw, for thatch), the far
  * slope in shade and the eaves' shadow along its foot. */

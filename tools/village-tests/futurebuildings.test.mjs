@@ -3,7 +3,7 @@
 //   node --test tools/village-tests/
 // Each is painted onto a fake context that follows the detail transform, at
 // many moments of its animation and in every status: it draws its own detail
-// pixels (hd()'s Scale2x passes it through), and it stays inside the scene
+// pixels, and it stays inside the scene
 // box its 1× art covered (FOOTPRINT, recorded from the 1× art before #465).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -12,6 +12,7 @@ globalThis.window ??= {}; // state.js reads window.matchMedia, when there is one
 const V = '../../src/web/village/';
 const { state } = await import(V + 'state.js');
 const { FUTURE } = await import(V + 'themes/future.js');
+const { FB, futureBoard, futureDock, futureHall, futureScaffold } = await import(V + 'themes/futurebuildings.js');
 
 /* The 1× art's scene box for each sprite, [x0, y0, x1, y1] (x1, y1 exclusive). */
 const FOOTPRINT = {"B.cottage.working":[20,7,36,36],"B.cottage.idle":[20,16,36,36],"B.cottage.blocked":[20,16,36,36],"B.cottage.unknown":[20,16,36,36],"B.workshop.working":[20,16,36,36],"B.workshop.idle":[20,16,36,36],"B.workshop.blocked":[20,16,36,36],"B.workshop.unknown":[20,16,36,36],"B.feature.working":[20,16,36,36],"B.feature.idle":[20,16,36,36],"B.feature.blocked":[20,16,36,36],"B.feature.unknown":[20,16,36,36],"B.bug.working":[20,16,36,36],"B.bug.idle":[20,16,36,36],"B.bug.blocked":[20,16,36,36],"B.bug.unknown":[20,16,36,36],"B.security.working":[20,16,36,36],"B.security.idle":[20,18,36,36],"B.security.blocked":[20,18,36,36],"B.security.unknown":[20,18,36,36],"B.tests.working":[20,4,36,36],"B.tests.idle":[20,17,36,36],"B.tests.blocked":[20,17,36,36],"B.tests.unknown":[20,17,36,36],"B.research.working":[20,16,36,36],"B.research.idle":[20,17,36,36],"B.research.blocked":[20,17,36,36],"B.research.unknown":[20,17,36,36],"B.docs.working":[20,16,36,36],"B.docs.idle":[20,17,36,36],"B.docs.blocked":[20,17,36,36],"B.docs.unknown":[20,17,36,36],"B.refactor.working":[20,21,36,36],"B.refactor.idle":[20,21,36,36],"B.refactor.blocked":[20,21,36,36],"B.refactor.unknown":[20,21,36,36],"B.perf.working":[20,18,36,36],"B.perf.idle":[20,18,36,36],"B.perf.blocked":[20,18,36,36],"B.perf.unknown":[20,18,36,36],"B.chores.working":[20,23,36,36],"B.chores.idle":[20,23,36,36],"B.chores.blocked":[20,23,36,36],"B.chores.unknown":[20,23,36,36],"hall.working":[16,21,56,62],"hall.idle":[16,21,56,62],"hall.blocked":[16,21,56,62],"board":[20,20,38,35],"dock":[20,20,46,27],"scaffold":[21,18,36,36],"gatehouse":[20,20,72,43],"decor.0":[21,20,26,28],"decor.1":[20,20,28,27],"decor.2":[21,21,28,27],"decor.3":[20,20,28,28],"decor.4":[20,22,28,27],"decor.5":[20,21,28,26],"border":[0,11,120,81]};
@@ -69,15 +70,16 @@ for (const [name, paint] of Object.entries(SPRITES)) {
   });
 }
 
-test("the redrawn slots pass through registerTheme's Scale2x wrap", () => {
-  for (const slot of ['hall', 'board', 'dock', 'scaffold', 'gatehouse']) assert.equal(FUTURE[slot].hd, true, slot);
-  for (const [kind, fn] of Object.entries(FUTURE.B)) assert.equal(fn.hd, true, kind);
+test("registerTheme keeps the theme's own slots: nothing wraps them", () => {
+  for (const [kind, fn] of Object.entries(FB)) assert.equal(FUTURE.B[kind], fn, kind);
+  assert.equal(FUTURE.hall, futureHall); assert.equal(FUTURE.board, futureBoard);
+  assert.equal(FUTURE.dock, futureDock); assert.equal(FUTURE.scaffold, futureScaffold);
 });
 
 test('the buildings draw nothing in scene pixels but the shadows and steam under them', () => {
   state.T = FUTURE; state.reduce = true;
   for (const [name, paint] of Object.entries(SPRITES)) {
-    if (/^decor\.[023]$/.test(name) || name === 'B.cottage.working' || name === 'B.tests.working' || name === 'board') continue;
+    if (/^decor\.[023]$/.test(name) || name === 'B.cottage.working' || name === 'B.tests.working') continue;
     assert.equal(measure(paint).coarse, 0, name);
   }
 });

@@ -7,7 +7,6 @@ import { P, SHADE, SHINE, glassOf } from '../palette.js';
 import { note } from '../cvdmarks.js';
 import { detail } from '../detail.js';
 import { bricks, px } from '../art2x.js';
-import { drawn2x } from '../sprites/houseparts.js';
 
 const PURPLE = '#804098', PURPLE_D = '#603078';
 /* A conical tower roof with a gold finial, its widest row 16 across at
@@ -22,7 +21,7 @@ function cone(g, X, Y) {
 /* The manager's castle: a keep with banners between two round-roofed
  * towers, behind a crenellated curtain wall. 40 wide, centred on the
  * 32-wide hall slot; the gate opens when the manager waits on you. */
-export const hall = drawn2x((c, x, y, st) => detail(c, x - 4, y, g => {
+export const hall = ((c, x, y, st) => detail(c, x - 4, y, g => {
   const glass = glassOf(st);
   // The keep: dressed stone, crenels, two arched windows, the banners and the flag.
   px(g, 24, -4, 32, 40, P.o); px(g, 25, -3, 30, 39, P.stoneL);
@@ -64,7 +63,7 @@ export const hall = drawn2x((c, x, y, st) => detail(c, x - 4, y, g => {
 
 /* The notice board: a framed plank board on two posts, a note pinned on it
  * for each issue that waits on a person (eight at most). */
-export const board = drawn2x((c, x, y, notes) => {
+export const board = ((c, x, y, notes) => {
   detail(c, x, y, g => {
     [2, 32].forEach(X => { px(g, X, 18, 2, 12, P.woodD); px(g, X, 18, 1, 12, P.wood); });
     px(g, 0, 0, 36, 22, P.o); px(g, 1, 1, 34, 20, P.woodD); px(g, 1, 1, 34, 1, P.woodL);
@@ -79,7 +78,7 @@ export const board = drawn2x((c, x, y, notes) => {
 });
 
 /* A dock: boards laid along it, their butt joints staggered and nailed. */
-export const dock = drawn2x((c, x, y, w) => detail(c, x, y, g => {
+export const dock = ((c, x, y, w) => detail(c, x, y, g => {
   const W = 2 * w;
   px(g, 0, 0, W, 14, P.o); px(g, 1, 0, W - 2, 13, P.plank);
   [4, 8].forEach(j => px(g, 1, j, W - 2, 1, P.wood));

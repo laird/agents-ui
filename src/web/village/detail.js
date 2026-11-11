@@ -3,10 +3,11 @@
  *
  * The map's canvas has DETAIL canvas pixels per scene pixel (#418): a crate
  * of 5×5 scene pixels covers 10×10 canvas pixels. Layout stays in scene
- * pixels, and every scene is painted under a ×DETAIL transform (prepare), so
- * a sprite drawn in scene pixels (a "1×" sprite) comes out doubled and looks
- * as it always did. A redrawn "2×" sprite draws inside detail(), in canvas
- * pixels, with twice the detail in the same space.
+ * pixels, and every scene is painted under a ×DETAIL transform (prepare).
+ * Sprites draw inside detail(), in canvas pixels, with twice the detail in
+ * the same space (#455); what is still drawn in scene pixels under the bare
+ * transform (the ground, water and other scenery, shadows) comes out doubled.
+ * tools/village-tests/scenepixels.test.mjs keeps sprites off it.
  *
  * Whatever maps between the screen and the scene divides the canvas's size
  * by DETAIL (sceneScale, toScene); Fit scales the canvas, which is DETAIL

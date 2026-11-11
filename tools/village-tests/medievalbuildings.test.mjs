@@ -4,7 +4,7 @@
 //   node --test tools/village-tests/
 // Each is painted onto a fake context that follows the detail transform, at
 // many moments of its animation and in every status: it draws its own detail
-// pixels (hd()'s Scale2x passes it through), and it stays inside the scene
+// pixels, and it stays inside the scene
 // box its 1× art covered (FOOTPRINT, recorded from the 1× art before #463).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -63,16 +63,14 @@ for (const [name, paint] of Object.entries(SPRITES)) {
   });
 }
 
-test("the redrawn slots pass through registerTheme's Scale2x wrap", () => {
-  for (const slot of ['hall', 'board', 'dock', 'scaffold', 'gatehouse']) assert.equal(MEDIEVAL[slot].hd, true, slot);
-  for (const [kind, fn] of Object.entries(MEDIEVAL.B)) assert.equal(fn.hd, true, kind);
+test("registerTheme keeps the theme's own slots: nothing wraps them", () => {
   // The theme's houses are houses.js's own, unwrapped: the workshop still builds on the cottage.
   for (const kind of Object.keys(B)) assert.equal(MEDIEVAL.B[kind], B[kind], kind);
 });
 
-test('the buildings draw nothing in scene pixels but the notes on the board', () => {
+test('the buildings draw nothing in scene pixels, the notes on the board included', () => {
   state.T = MEDIEVAL; state.reduce = true;
-  for (const [name, paint] of Object.entries(SPRITES)) if (name !== 'board') assert.equal(measure(paint).coarse, 0, name);
+  for (const [name, paint] of Object.entries(SPRITES)) assert.equal(measure(paint).coarse, 0, name);
 });
 
 test('a house shows its status: lit glass while working, a dark door when blocked', () => {

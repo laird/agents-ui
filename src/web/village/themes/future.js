@@ -6,7 +6,7 @@ import { detail } from '../detail.js';
 import { planks, px } from '../art2x.js';
 import { CRATE_W, CRATE_H, seal, stencil } from '../crates.js';
 import { registerTheme } from './registry.js';
-import { FB, at2x, futureBoard, futureDock, futureHall, futureScaffold } from './futurebuildings.js';
+import { FB, futureBoard, futureDock, futureHall, futureScaffold } from './futurebuildings.js';
 /* ---------- Future ----------
  * A space station worked by little robots: deck plates for ground, light-
  * strip walkways for roads, a plasma canal, habitat pods with portholes. It
@@ -287,5 +287,4 @@ export const FUTURE = {
   steam: [F.cyanL, F.hullD], sign: [P.o, F.navy, F.cyan]
 };
 
-at2x(FUTURE.gatehouse);
 registerTheme('future', FUTURE);

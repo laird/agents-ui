@@ -8,17 +8,11 @@
  * Each theme module registers itself. The Style picker lists the themes in
  * the order they register, by their `name`; `pair` names the theme a world
  * draws its other half in. */
-import { hd } from '../upscale.js';
-
 export const THEMES = {};
 
-/* The buildings each theme draws at 2× (#421, upscale.js): houses of every
- * kind, the hall, the notice board, the gatehouse, docks and quay, and the
- * scaffolding a house goes up in. Ground, water and scenery stay 1×. */
-export const HD_SLOTS = ['hall', 'board', 'gatehouse', 'dock', 'scaffold'];
-
+/* Every theme draws its own sprites at 2×, in detail() (detail.js): its
+ * buildings since #463-#465, which retired the Scale2x upscaling (#466).
+ * tools/village-tests/scenepixels.test.mjs holds every theme to it. */
 export function registerTheme(name, theme) {
-  HD_SLOTS.forEach(slot => { theme[slot] = hd(theme[slot]); });
-  if (theme.B) theme.B = Object.fromEntries(Object.entries(theme.B).map(([kind, fn]) => [kind, hd(fn)]));
   THEMES[name] = theme;
 }

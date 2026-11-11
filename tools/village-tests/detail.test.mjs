@@ -47,10 +47,10 @@ function drawn(paint, d) {
 }
 const doubled = rects => rects.map(([x, y, w, h, col, a]) => [x * DETAIL, y * DETAIL, w * DETAIL, h * DETAIL, col, a]);
 
-/* A 1× drawing: palette primitives in scene pixels. (Every sprite is now
- * drawn at 2×: crates since #420, people #419, buildings #421, tags #456,
- * pennants, cobwebs and smoke #461. Their tests are crates.test.mjs,
- * people2x.test.mjs, upscale.test.mjs, badge.test.mjs and the one below.) */
+/* A 1× drawing: palette primitives in scene pixels, as scenery still draws.
+ * (Every sprite is drawn at 2×: crates since #420, people #419, tags #456,
+ * pennants, cobwebs and smoke #461, buildings #463-#465. scenepixels.test.mjs
+ * paints the whole village and holds every sprite to it.) */
 const SCENE = c => {
   state.T = THEMES.medieval;
   R(c, 3, 4, 5, 2, '#406080'); shadow(c, 10, 12, 6, 2); R(c, 20, 1, 1, 9, '#e02828');

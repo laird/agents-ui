@@ -4,7 +4,6 @@ import { B, scaffold } from '../sprites/houses.js';
 import { crate } from '../crates.js';
 import { FLOWERS, boat, grass, harbour, lock, path, ship, tree, water } from '../scenery.js';
 import { board, dock, hall } from './medievalbuildings.js';
-import { drawn2x } from '../sprites/houseparts.js';
 import { detail } from '../detail.js';
 import { bricks, dither, px } from '../art2x.js';
 import { registerTheme } from './registry.js';
@@ -128,7 +127,6 @@ function gatehouse(c, g, t, busy) {
     });
   });
 }
-drawn2x(gatehouse);
 
 export const MEDIEVAL = {
   name: 'Medieval village',

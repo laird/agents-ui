@@ -10,7 +10,6 @@ import assert from 'node:assert/strict';
 globalThis.window ??= { matchMedia: () => ({ matches: false }) };
 const { MODERN } = await import('../../src/web/village/themes/modern.js');
 const { state } = await import('../../src/web/village/state.js');
-const { record } = await import('../../src/web/village/upscale.js');
 const { NOTECOL } = await import('../../src/web/village/palette.js');
 
 /* A canvas that follows translate/scale and records each rect in scene pixels. */
@@ -21,8 +20,10 @@ function recorder() {
     setTransform(a, b, c, d, e, f) { m = [a, b, c, d, e, f]; },
     translate(x, y) { m = [m[0], m[1], m[2], m[3], m[4] + m[0] * x, m[5] + m[3] * y]; },
     scale(sx, sy) { m = [m[0] * sx, m[1], m[2], m[3] * sy, m[4], m[5]]; },
-    fillRect(x, y, w, h) { this.rects.push({ x: m[4] + m[0] * x, y: m[5] + m[3] * y, w: m[0] * w, h: m[3] * h, col: this.fillStyle }); } };
+    fillRect(x, y, w, h) { this.rects.push({ x: m[4] + m[0] * x, y: m[5] + m[3] * y, w: m[0] * w, h: m[3] * h, col: this.fillStyle, s: m[0] }); } };
 }
+/* What `paint` draws in scene pixels (`grid`) and on the detail grid (`over`). */
+const record = paint => { const c = recorder(); state.T = MODERN; paint(c); return { grid: c.rects.filter(r => r.s === 1), over: c.rects.filter(r => r.s !== 1) }; };
 const drawn = paint => { const c = recorder(); state.T = MODERN; paint(c); return c.rects; };
 const box = rects => [Math.min(...rects.map(r => r.x)), Math.min(...rects.map(r => r.y)), Math.max(...rects.map(r => r.x + r.w)), Math.max(...rects.map(r => r.y + r.h))];
 const T = MODERN;
@@ -62,7 +63,7 @@ for (const [kind, was] of Object.entries(OFFICES)) {
       assert.ok(got[1] < was.other[1], `${st} at t=${t}: the smoke rises over the roof`);
     }));
     STATES.forEach(st => {
-      const rec = record(r => T.B[kind].raw(r, 10, 20, st, 0));
+      const rec = record(r => T.B[kind](r, 10, 20, st, 0));
       assert.deepEqual(rec.grid, [], `${st}: nothing drawn in scene pixels`);
       assert.ok(rec.over.length, `${st}: drawn at 2×`);
     });
@@ -71,13 +72,13 @@ for (const [kind, was] of Object.entries(OFFICES)) {
 
 const GATE = { x0: 30, y: 40, w: 32, rx: 20, rw: 6, tables: [[34, 50], [46, 50]] };
 const SITES = {
-  'headquarters, working': [c => T.hall(c, 10, 30, 'working'), r => T.hall.raw(r, 10, 30, 'working'), [4, 13, 51, 52]],
-  'headquarters, blocked': [c => T.hall(c, 10, 30, 'blocked'), r => T.hall.raw(r, 10, 30, 'blocked'), [4, 13, 51, 52]],
-  whiteboard: [c => T.board(c, 10, 20, []), r => T.board.raw(r, 10, 20, []), [10, 20, 28, 35]],
-  'loading dock': [c => T.dock(c, 10, 20, 40), r => T.dock.raw(r, 10, 20, 40), [10, 20, 50, 27]],
-  scaffold: [c => T.scaffold(c, 10, 20, 90), r => T.scaffold.raw(r, 10, 20, 90), [11, 16, 25, 36]],
-  'QA checkpoint, idle': [c => T.gatehouse(c, GATE, 0, new Set()), r => T.gatehouse.raw(r, GATE, 0, new Set()), [16, 40, 62, 63]],
-  'QA checkpoint, busy': [c => T.gatehouse(c, GATE, 300, new Set([1, 2])), r => T.gatehouse.raw(r, GATE, 300, new Set([1, 2])), [16, 40, 62, 63]],
+  'headquarters, working': [c => T.hall(c, 10, 30, 'working'), r => T.hall(r, 10, 30, 'working'), [4, 13, 51, 52]],
+  'headquarters, blocked': [c => T.hall(c, 10, 30, 'blocked'), r => T.hall(r, 10, 30, 'blocked'), [4, 13, 51, 52]],
+  whiteboard: [c => T.board(c, 10, 20, []), r => T.board(r, 10, 20, []), [10, 20, 28, 35]],
+  'loading dock': [c => T.dock(c, 10, 20, 40), r => T.dock(r, 10, 20, 40), [10, 20, 50, 27]],
+  scaffold: [c => T.scaffold(c, 10, 20, 90), r => T.scaffold(r, 10, 20, 90), [11, 16, 25, 36]],
+  'QA checkpoint, idle': [c => T.gatehouse(c, GATE, 0, new Set()), r => T.gatehouse(r, GATE, 0, new Set()), [16, 40, 62, 63]],
+  'QA checkpoint, busy': [c => T.gatehouse(c, GATE, 300, new Set([1, 2])), r => T.gatehouse(r, GATE, 300, new Set([1, 2])), [16, 40, 62, 63]],
 };
 for (const [name, [paint, raw, was]] of Object.entries(SITES)) {
   test(`modern ${name}: the 1× footprint, drawn on the detail grid`, () => {

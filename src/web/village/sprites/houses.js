@@ -1,11 +1,10 @@
 /* Houses, one sprite per kind, and what is drawn on them. Every house is
  * drawn at 2× (#463), in detail pixels (detail.js) from its origin, out of
- * the parts in houseparts.js; drawn2x() tells registerTheme's hd() to leave
- * it be. */
+ * the parts in houseparts.js. */
 import { P, SHADE, SHINE, blink, glassOf, hash, lit } from '../palette.js';
 import { detail } from '../detail.js';
 import { bricks, px } from '../art2x.js';
-import { chimney, door2, drawn2x, line2, roof2, wall2, win2 } from './houseparts.js';
+import { chimney, door2, line2, roof2, wall2, win2 } from './houseparts.js';
 /* Smoke from a chimney at (x, y): three puffs rising and drifting, `a`
  * while fresh and `b` as they thin. Drawn at 2× (#461): round puffs with a
  * lit top that shrink as they rise, moving half a pixel at a time. */
@@ -24,7 +23,7 @@ export function puffs(c, x, y, t, a, b) {
 
 /* ---------- Houses: each draws in x..x+15, y-4..y+16 ----------
  * In detail pixels that is 0..32 across and -8..32 down. */
-const house2x = draw => drawn2x((c, x, y, st, t) => detail(c, x, y, g => draw(g, st, t)));
+const house2x = draw => (c, x, y, st, t) => detail(c, x, y, g => draw(g, st, t));
 /* The plain cottage under a roof of `roof`: a chimney, two windows, a door. */
 function cottage2x(g, st, roof, roofD) {
   chimney(g, 22, -4, 8, 10);
@@ -34,12 +33,12 @@ function cottage2x(g, st, roof, roofD) {
 }
 const BOOKS = ['#c04838', '#3870c0', '#58a048', '#f8d040'];
 export const B = {
-  cottage: drawn2x((c, x, y, st, t, roof = P.thatch, roofD = P.thatchD) => {
+  cottage: ((c, x, y, st, t, roof = P.thatch, roofD = P.thatchD) => {
     detail(c, x, y, g => cottage2x(g, st, roof, roofD));
     if (lit(st)) puffs(c, x + 12, y - 4, t, P.white, P.stoneL);
   }),
   // A smithy: the cottage under a red roof, an anvil on the sign in its gable.
-  workshop: drawn2x((c, x, y, st, t) => {
+  workshop: ((c, x, y, st, t) => {
     detail(c, x, y, g => {
       cottage2x(g, st, P.red, P.redD);
       px(g, 8, 8, 12, 6, P.o); px(g, 9, 9, 10, 4, P.woodD);
@@ -95,7 +94,7 @@ export const B = {
     if (lit(st)) { px(g, 14, -10, 4, 2, blink(t, 160) ? P.gold : P.lamp); if (blink(t, 160)) px(g, 15, -10, 2, 1, P.white); }
   }),
   // The test lab: a purple roof with a copper flue, a flask in the gable that fizzes while working.
-  tests: drawn2x((c, x, y, st, t) => {
+  tests: ((c, x, y, st, t) => {
     detail(c, x, y, g => {
       roof2(g, 0, 2, 32, 18, P.purple, P.purpleD);
       px(g, 4, -4, 10, 2, P.o); px(g, 5, -4, 8, 1, P.copper);
@@ -202,7 +201,7 @@ export const B = {
   })
 };
 /* A house going up: two posts, three rails, a brace, and the odd spark. */
-export const scaffold = drawn2x((c, x, y, t) => detail(c, x, y, g => {
+export const scaffold = ((c, x, y, t) => detail(c, x, y, g => {
   [2, 28].forEach(k => { px(g, k, 4, 2, 28, P.woodD); px(g, k, 4, 1, 28, P.woodL); });
   for (let j = 6; j < 32; j += 10) { px(g, 2, j, 28, 2, P.wood); px(g, 2, j, 28, 1, P.woodL); }
   line2(g, 4, 30, 27, 7, P.woodD); line2(g, 5, 30, 28, 7, P.wood);

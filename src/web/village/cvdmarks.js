@@ -33,14 +33,16 @@ export function inkOn(hex) {
 }
 
 /* A note on a board: its colour, 3×3 scene pixels at (x, y), with its glyph
- * on it in detail pixels. An unknown label is a plain note in `fallback`. */
+ * on it, all in detail pixels (#466). An unknown label is a plain note in
+ * `fallback`. */
 export function note(c, x, y, label, fallback) {
   const col = NOTECOL[label] || fallback;
-  R(c, x, y, 3, 3, col);
   const g = NOTE_GLYPHS[label];
-  if (!g) return;
   const ink = inkOn(col);
-  detail(c, x, y, d => g.forEach((row, j) => { for (let i = 0; i < 4; i++) if (row[i] === '1') R(d, 1 + i, 1 + j, 1, 1, ink); }));
+  detail(c, x, y, d => {
+    R(d, 0, 0, 6, 6, col);
+    if (g) g.forEach((row, j) => { for (let i = 0; i < 4; i++) if (row[i] === '1') R(d, 1 + i, 1 + j, 1, 1, ink); });
+  });
 }
 
 /* Which cells of a priority band of `len` detail pixels are painted: P0

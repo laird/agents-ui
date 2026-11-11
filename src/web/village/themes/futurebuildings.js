@@ -11,10 +11,7 @@ import { disc, px } from '../art2x.js';
 /* Each draws in detail pixels (detail.js) on the scene pixels it always
  * covered: pods with a smooth dome, round portholes and panel seams, the
  * command dome with its ribs and meridians, the holo-board, the cargo bay,
- * the scaffold. (The scanner arch is in future.js, redrawn the same way.)
- * at2x() marks a slot as already drawn at 2×, so registerTheme's hd() (the
- * Scale2x wrap, upscale.js) passes it through untouched. */
-export const at2x = fn => { fn.hd = true; return fn; };
+ * the scaffold. (The scanner arch is in future.js, redrawn the same way.) */
 /* Portholes: lit cyan-white while working, dark when nobody can say. */
 const fWin = st => st === 'working' ? F.cyanL : (st === 'unknown' || st === 'stopped') ? P.dark : F.glassD;
 /* A porthole 4 scene pixels across at detail (X, Y): a round frame, its
@@ -49,9 +46,9 @@ function pod(g, st, o = {}) {
   px(g, 12, 18, 8, 2, st === 'working' ? F.cyan : F.cyanD); px(g, 13, 18, 6, 1, st === 'working' ? F.cyanL : F.cyanD);
 }
 /* Draw a pod-based house: the pod, then `extra` over it, both in detail pixels. */
-const podHouse = (o, extra) => at2x((c, x, y, st, t) => detail(c, x, y, g => { pod(g, st, typeof o === 'function' ? o(st) : o); if (extra) extra(g, st, t); }));
+const podHouse = (o, extra) => (c, x, y, st, t) => detail(c, x, y, g => { pod(g, st, typeof o === 'function' ? o(st) : o); if (extra) extra(g, st, t); });
 export const FB = {
-  cottage: at2x((c, x, y, st, t) => {
+  cottage: ((c, x, y, st, t) => {
     detail(c, x, y, g => {
       pod(g, st);
       // A comms mast with a lit tip.
@@ -104,7 +101,7 @@ export const FB = {
     const on = st === 'working' && blink(t, 400);
     px(g, 26, -2, 2, 2, on ? P.p0 : F.hullD); if (on) px(g, 26, -2, 1, 1, P.white);
   }),
-  tests: at2x((c, x, y, st, t) => {
+  tests: ((c, x, y, st, t) => {
     detail(c, x, y, g => {
       pod(g, st, { shell: F.glass, shellD: F.glassD, roof: F.cyanL });
       // Two test tubes, glass lit along one side, a bubble rising in each.
@@ -147,7 +144,7 @@ export const FB = {
       px(g, fx - 1, 1, 2, 2, F.cyanL);
     });
   }),
-  chores: at2x((c, x, y, st, t) => detail(c, x, y, g => {
+  chores: ((c, x, y, st, t) => detail(c, x, y, g => {
     // A depot: a flat-roofed block with hazard striping, a roll-up door, a crate.
     px(g, 0, 6, 32, 26, P.o); px(g, 2, 8, 28, 22, F.hullD);
     px(g, 2, 8, 28, 4, F.deckL); px(g, 2, 8, 28, 1, F.hull);
@@ -161,7 +158,7 @@ export const FB = {
 };
 /* The cargo bay's deck edge at 2×: a lit lip, plate seams and rivets,
  * landing lights with a white-hot core. */
-export const futureDock = at2x((c, x, y, w) => detail(c, x, y, g => {
+export const futureDock = ((c, x, y, w) => detail(c, x, y, g => {
   px(g, 0, 0, 2 * w, 14, P.o); px(g, 2, 0, 2 * w - 4, 12, F.hullD); px(g, 2, 0, 2 * w - 4, 1, F.hull);
   for (let k = 8; k < 2 * w - 2; k += 8) { px(g, k, 1, 1, 8, 'rgba(0,0,0,.25)'); px(g, k + 2, 2, 1, 1, F.rivet); }
   for (let k = 0; k < w - 2; k += 4) { px(g, 2 + 2 * k, 10, 4, 2, F.cyan); px(g, 3 + 2 * k, 10, 2, 1, F.cyanL); }
@@ -169,7 +166,7 @@ export const futureDock = at2x((c, x, y, w) => detail(c, x, y, g => {
 /* Command dome at 2× (#465): a glass dome with curved ribs and meridians
  * on a hull ring, an antenna with a blinking beacon on top. The hatch goes
  * dark when the manager waits on you. */
-export const futureHall = at2x((c, x, y, st) => {
+export const futureHall = ((c, x, y, st) => {
   const t = now(), lit = st === 'working';
   detail(c, x - 4, y, g => {
     px(g, 40, -32, 2, 24, F.hull); px(g, 40, -32, 1, 24, F.hullL);
@@ -204,7 +201,7 @@ export const futureHall = at2x((c, x, y, st) => {
 });
 /* Notes float on a hologram between two emitters, at 2×: rounded
  * emitters with a hot core, a scanlined field, bright corner brackets. */
-export const futureBoard = at2x((c, x, y, notes) => {
+export const futureBoard = ((c, x, y, notes) => {
   detail(c, x, y, g => {
     [2, 28].forEach(ex => { px(g, ex + 1, 22, 4, 8, P.o); px(g, ex, 23, 6, 7, P.o); px(g, ex + 2, 22, 2, 6, F.cyan); px(g, ex + 2, 22, 1, 2, F.cyanL); });
     px(g, 0, 0, 36, 22, 'rgba(64,224,240,.28)');
@@ -215,7 +212,7 @@ export const futureBoard = at2x((c, x, y, notes) => {
   notes.slice(0, 8).forEach((n, i) => note(c, x + 2 + (i % 4) * 4, y + 2 + Math.floor(i / 4) * 4, n.label, F.cyanL));
 });
 /* A pod frame going up at 2×, cross-braced, a drone welding at it. */
-export const futureScaffold = at2x((c, x, y, t) => detail(c, x, y, g => {
+export const futureScaffold = ((c, x, y, t) => detail(c, x, y, g => {
   for (let r = 0; r < 4; r++) {
     const by = 4 + 8 * r;
     px(g, 2, by, 28, 2, F.hullD); px(g, 2, by, 28, 1, F.hull);
