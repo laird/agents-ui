@@ -29,8 +29,9 @@ const T = MODERN;
 const STATES = ['working', 'idle', 'blocked', 'stalled', 'unknown'];
 
 // Each office's box at (10, 20), as drawn at 1× before #464: working (at
-// t = 0 and t = 777, with its smoke, fizz or swung telescope), and in any
-// other state.
+// t = 0 and t = 777, with its crane's hook or swung telescope), and in any
+// other state. Working, the café and the lab also smoke and fizz (SMOKY).
+const SMOKY = new Set(['cottage', 'tests']);
 const OFFICES = {
   cottage: { working: [[10, 11, 26, 36], [10, 11, 26, 36]], other: [10, 23, 26, 36] },
   workshop: { working: [[10, 21, 26, 36], [10, 21, 26, 36]], other: [10, 21, 26, 36] },
@@ -52,12 +53,15 @@ test('every kind of house the theme draws has its office here', () => {
 for (const [kind, was] of Object.entries(OFFICES)) {
   test(`modern ${kind} office: the 1× footprint in every state, drawn on the detail grid`, () => {
     STATES.forEach(st => [0, 777].forEach((t, k) => {
-      const want = st === 'working' ? was.working[k] : was.other;
-      assert.deepEqual(box(drawn(c => T.B[kind](c, 10, 20, st, t))), want, `${st} at t=${t}`);
+      const got = box(drawn(c => T.B[kind](c, 10, 20, st, t)));
+      if (st !== 'working' || !SMOKY.has(kind)) return assert.deepEqual(got, st === 'working' ? was.working[k] : was.other, `${st} at t=${t}`);
+      // Its smoke or fizz is drawn by sprites/houses.js (#461), and rises
+      // above the roof however that draws it; the office's sides and ground
+      // stay where they were.
+      assert.deepEqual([got[0], got[2], got[3]], [was.other[0], was.other[2], was.other[3]], `${st} at t=${t}`);
+      assert.ok(got[1] < was.other[1], `${st} at t=${t}: the smoke rises over the roof`);
     }));
-    // Smoke and fizz are scenery drawn over it (sprites/houses.js); the
-    // office itself puts nothing in scene pixels.
-    STATES.filter(st => st !== 'working').forEach(st => {
+    STATES.forEach(st => {
       const rec = record(r => T.B[kind].raw(r, 10, 20, st, 0));
       assert.deepEqual(rec.grid, [], `${st}: nothing drawn in scene pixels`);
       assert.ok(rec.over.length, `${st}: drawn at 2×`);
