@@ -33,10 +33,9 @@ const SPRITES = {
   failFlag: c => failFlag(c, 50, 30),
   flame: c => flame(c, 20, 20, 1),
   houseFlag: c => poleFlag(c, 30, 20, '#40b8e8', 0),
-  shipFlag: c => poleFlag(c, 30, 20, '#e02828', 1, 7, 5),
-  banner: c => drawBanner(c, { x: 20, y: 20, col: '#40b8e8', f: { number: 417, stuck: [] } }, false, 0),
-  liveStuckBanner: c => drawBanner(c, { x: 20, y: 20, col: '#40b8e8', f: { number: 9, stuck: [1], live: true } }, false, 0)
+  shipFlag: c => poleFlag(c, 30, 20, '#e02828', 1, 7, 5)
 };
+// The flag itself is all on the detail grid now (#475): featureart.test.mjs.
 
 for (const [name, T] of Object.entries(THEMES)) {
   test(`${name}: each sprite gains detail at 2× and keeps its 1× footprint`, () => {

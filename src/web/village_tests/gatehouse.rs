@@ -66,7 +66,7 @@ fn village_html_marks_bounced_crates_at_their_house() {
     // The tag over the house, red; each theme its own art; a click lists every attempt.
     assert!(body.contains("text: m.tag, cls: 'bounce', fixed: true"));
     assert!(body.contains(".al.bounce { color: #fff; background: #b02020;"));
-    assert!(body.contains("if (state.T === FUTURE) {") && body.contains("} else if (state.T === MODERN) {"));
+    assert!(body.contains("if (theme === FUTURE) {") && body.contains("} else if (theme === MODERN) {"));
     assert!(body.contains("registerHit({ kind: 'bounce', dialog(o, sc) {"));
     assert!(body.contains("meta: bounceLines(bs),"));
 }

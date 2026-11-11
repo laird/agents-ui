@@ -7,11 +7,11 @@
 // the bare ×DETAIL transform (prepare(), detail.js) is drawn in scene pixels.
 // Each is traced to the function that drew it, and none may come from a
 // sprite: the buildings, crates, people and their props, and every mark #455
-// redrew at 2× inside detail(), and now the trees and decoration (#473) and
-// the ground, roads, yards and water (#471). Scenery that still paints in
-// scene pixels (the lock, harbour and ship, the supply boat, the environment
-// row, banners, barges, shadows) is listed in SCENERY, so a new caller has to
-// be named there or drawn at 2×.
+// redrew at 2× inside detail(), and now the trees and decoration (#473), the
+// ground, roads, yards and water (#471), and the banners, barges and fog
+// (#475). Scenery that still paints in scene pixels (the lock, harbour and
+// ship, the supply boat, the environment row, shadows) is listed in SCENERY,
+// so a new caller has to be named there or drawn at 2×.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -57,10 +57,10 @@ const SPRITE_FNS = /^(?:Object\.)?(?:hall|board|dock|scaffold|gatehouse|crate|bu
 /* What may still paint in scene pixels: scenery, not sprites (#455 left them
  * out). Each entry is the drawing function and its file. */
 const SCENERY = [
-  ['shadow', 'palette.js'], ['fogStop', 'features.js'], ['drawBanner', 'bannerart.js'],
+  ['shadow', 'palette.js'],
   ['envKeep', 'envart.js'], ['envShed', 'envart.js'], ['envSign', 'envart.js'],
   ['lock', 'scenery.js'], ['harbour', 'scenery.js'], ['ship', 'scenery.js'], ['boat', 'scenery.js'],
-  ['drawBarge', 'features.js'], ['poleFlag', 'envart.js'], ['draw', 'envrow.js'],
+  ['poleFlag', 'envart.js'], ['draw', 'envrow.js'],
 ];
 const SCENERY_SLOTS = ['gate', 'destination', 'vessel', 'supply'];
 

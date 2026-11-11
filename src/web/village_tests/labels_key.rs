@@ -75,8 +75,8 @@ fn village_html_has_a_key_drawn_from_the_renderer() {
     assert!(body.contains("KEYS.forEach(k => {"));
     assert!(body.contains("registerKey({ group: 'Weather: the build', rows: theme => {"));
     assert!(body.contains("registerKey({ group: 'other', rows: theme => [\n  [c => { theme.crate(c, 3, 4, 'feature', null); reworked(c, 3, 4, 0); },"));
-    assert!(body.contains("R(c, 0, 0, 14, 14, fogCol(theme));"));
-    assert!(body.contains("lay.devH - lay.canalY + 28, fogCol(state.T));"));
+    assert!(body.contains("fogArt(c, 0, 0, 14, 14, 0, theme);"));
+    assert!(body.contains("fogArt(c, x, lay.canalY - 28, w, lay.devH - lay.canalY + 28, t);"));
     // Redrawn in the theme being shown.
     assert!(body.contains("if (!legend.hidden) renderLegend();\n    if (view) select("));
     assert!(body.contains("`Key · ${state.T.name}`"));

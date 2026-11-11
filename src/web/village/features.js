@@ -8,13 +8,11 @@
  * Each banner has a label (a button, so it can be followed by keyboard), and
  * the one followed has the strip under the map. */
 import { state } from './state.js';
-import { F, P, R, blink } from './palette.js';
-import { puffs } from './sprites/houses.js';
+import { P, R, blink } from './palette.js';
 import { bubble } from './scenery.js';
 import { flagLabel } from './houselabel.js';
 import { drawBanner } from './bannerart.js';
-import { M, MODERN } from './themes/modern.js';
-import { FUTURE } from './themes/future.js';
+import { bargeArt, fogArt } from './featureart.js';
 import { placeOverlays, registerHit, registerKey, registerLabels, registerLayer, registerOverlay, tap } from './registry.js';
 import { cv, shownScale, shownScenes, slotPos } from './layout.js';
 import { SHIP_CAP, cargoOf, holdPos, placeOf, sourceWords } from './ship.js';
@@ -65,34 +63,20 @@ function whereIs(n, v, lay, barges) {
   }
   return null;
 }
-/* A barge on the canal, or a flatbed truck on the district's road. */
+/* A barge on the canal, a flatbed truck on the district's road or a
+ * hover-barge (featureart.js), with its subtasks' crates riding on it. */
 function drawBarge(c, b, t) {
   const x = b.x, y = b.y + (!state.reduce && blink(t, 700) ? 1 : 0);
-  if (state.T === FUTURE) {
-    // A hover-barge: hull, cockpit, a glow under it.
-    R(c, x, y + 6, 24, 4, P.o); R(c, x + 1, y + 6, 22, 2, F.hull); R(c, x + 1, y + 6, 22, 1, b.col);
-    R(c, x + 18, y + 1, 6, 6, P.o); R(c, x + 19, y + 2, 4, 3, F.glass);
-    R(c, x + 2, y + 10, 20, 1, !state.reduce && blink(t, 200) ? F.cyanL : F.cyan);
-  } else if (state.T === MODERN) {
-    R(c, x, y + 6, 20, 4, P.o); R(c, x + 1, y + 6, 18, 2, M.steel); R(c, x + 1, y + 6, 18, 1, b.col);
-    R(c, x + 19, y + 1, 6, 9, P.o); R(c, x + 20, y + 2, 4, 6, P.white); R(c, x + 21, y + 3, 3, 2, M.glassL);
-    [x + 3, x + 14, x + 21].forEach(wx => { R(c, wx, y + 9, 3, 3, P.o); R(c, wx + 1, y + 10, 1, 1, M.steel); });
-  } else {
-    R(c, x, y + 6, 24, 5, P.o); R(c, x + 1, y + 6, 22, 3, P.wood); R(c, x + 1, y + 6, 22, 1, P.woodL); R(c, x + 3, y + 9, 18, 1, P.woodD);
-    R(c, x + 22, y - 6, 1, 8, P.o); R(c, x + 23, y - 6, 5, 4, P.o); R(c, x + 23, y - 5, 4, 2, b.col);
-  }
+  bargeArt(c, x, y, b.col, t);
   b.issues.slice(0, 4).forEach((n, k) => state.T.crate(c, x + 2 + k * 5, y + 1, 'workshop', null, true, n));
   tap(b.x, b.y - 6, 28, 18, { kind: 'barge', f: b.f ? b.f.number : null, issues: b.issues });
 }
-/* The fog wash per theme, shared with the key. */
-export const fogCol = th => th === MODERN ? 'rgba(170,176,196,.75)' : th === FUTURE ? 'rgba(60,52,110,.78)' : 'rgba(206,210,230,.72)';
 registerKey({ group: 'other', rows: theme => [
-  [c => { R(c, 0, 0, 14, 14, fogCol(theme)); bubble(c, 2, 1, 'unknown'); }, 'Grey fog over a stage: nothing says what runs there (no Deployment, no branch)']] });
+  [c => { fogArt(c, 0, 0, 14, 14, 0, theme); bubble(c, 2, 1, 'unknown'); }, 'Grey fog over a stage: nothing says what runs there (no Deployment, no branch)']] });
 /* Fog over a stop with neither a Deployment nor a branch: "?", never "not live". */
 function fogStop(c, v, i, lay, t) {
   const last = v.pipeline.stops.length - 1, x = i === last ? lay.castleX - 4 : lay.lockStart + i * 34 - 7, w = i === last ? 46 : 32;
-  R(c, x, lay.canalY - 28, w, lay.devH - lay.canalY + 28, fogCol(state.T));
-  if (!state.reduce) for (let k = 0; k < w / 6 - 1; k++) puffs(c, x + 4 + k * 6, lay.canalY - 18 + (k % 2) * 22, t + k * 330, '#e0e4f0', '#b8c0d8');
+  fogArt(c, x, lay.canalY - 28, w, lay.devH - lay.canalY + 28, t);
   bubble(c, x + (w >> 1) - 4, lay.canalY - 6, 'unknown');
 }
 /* Under each flag, with LABELS on: "#417 Hi-res · 1/6", edged in its colour (#441). */

@@ -150,8 +150,11 @@ fn village_env_row_and_flags_are_drawn_at_2x() {
     assert!(body.contains("flame(c, sx + 8, sy - 3, f); flame(c, sx + 40, sy - 2, 1 - f);"));
     assert!(body.contains("poleFlag(c, hx + 2, cy - 38, h.col, blink(t + k * 250, 900) ? 1 : 0);"));
     assert!(body.contains("poleFlag(c, left + 2, top - 4, P.p0, blink(t, 500) ? 1 : 0, 7, 5);"), "a failed voyage's flag");
-    // The flag: its own module, its number still the 1× stencil on the cloth.
+    // The flag: its own module, all of it at 2× (#475), its number in the 2× font on the cloth.
     assert!(body.contains("import { drawBanner } from './bannerart.js';"));
     assert!(body.contains("if (String(f.number).length <= 3 && f.number >= 0) digits(c, x + 2, y + 2, f.number, P.white);"));
-    assert!(body.contains("px(d, 15, 4, 1, 12, 'rgba(12,20,36,.22)');"), "the cloth's fold at 2×");
+    assert!(body.contains("if (s) px(d, cx, a + 2, 1, b - a - 5, 'rgba(12,20,36,.16)');"), "the cloth's folds in shadow at 2×");
+    // The barge and the fog, at 2× in featureart.js.
+    assert!(body.contains("import { bargeArt, fogArt } from './featureart.js';"));
+    assert!(body.contains("bargeArt(c, x, y, b.col, t);"));
 }
