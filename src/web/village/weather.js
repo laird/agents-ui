@@ -10,9 +10,11 @@
  *   clear    green or unknown, as before.
  * Each theme has its own (`weather` in themes/*.js): a storm in the
  * village, smog and alarm lights downtown, a red alert in the future. With
- * motion reduced the rain stands still and nothing flashes. */
+ * motion reduced the rain stands still and nothing flashes. The art is
+ * drawn at 2× (#458), in weatherart.js. */
 import { state } from './state.js';
 import { P, R, blink, shadow } from './palette.js';
+import { alarmLamp, alarms, blameCrate, bolt, brokenSign, clouds, puff, rain, SIGN_W, SIGN_H } from './weatherart.js';
 import { registerHit, registerKey, registerLabels, registerLayer, tap } from './registry.js';
 import { link, repoUrl } from './dialogs.js';
 import { buildSign, buildWords, failingJobs, shortSha, weatherOf } from './buildweather.js';
@@ -20,40 +22,6 @@ import { buildSign, buildWords, failingJobs, shortSha, weatherOf } from './build
 /* A theme without its own weather gets the village's. */
 const STORM = { style: 'storm', cloud: '#50506a', cloudD: '#30303f', rain: P.glass, tint: 'rgba(16,20,44,0.32)', flash: 'rgba(255,255,236,0.38)', alarm: '#f03030' };
 const weatherStyle = () => (state.T && state.T.weather) || STORM;
-
-/* Precipitation over a box: deterministic streaks falling with `t`. */
-function rain(c, x0, y0, w, h, n, col, t, len = 3) {
-  for (let i = 0; i < n; i++) {
-    const x = x0 + ((i * 37 + (i >> 3) * 11) % w);
-    const y = y0 + Math.floor((i * 53 + t / (9 + (i % 5))) % h);
-    R(c, x, y, 1, len, col);
-  }
-}
-
-/* A row of cloud puffs from x0 over w, at y. */
-function clouds(c, x0, y, w, wx, t) {
-  const drift = state.reduce ? 0 : Math.floor(t / 400) % 6;
-  for (let x = x0 - 6 + drift; x < x0 + w; x += 11) {
-    const k = Math.floor(x / 11) % 3;
-    R(c, x, y + (k === 1 ? 1 : 0), 14, 6, wx.cloudD);
-    R(c, x + 2, y - 1 + (k === 1 ? 1 : 0), 9, 5, wx.cloud);
-    R(c, x + 4, y - 2, 5, 2, wx.cloud);
-  }
-}
-
-/* A lightning bolt from (x, y) down. */
-function bolt(c, x, y) {
-  [[0, 0, 1, 4], [-1, 4, 2, 1], [-2, 5, 1, 4], [-3, 9, 2, 1], [-3, 10, 1, 4]].forEach(([dx, dy, w, h]) => R(c, x + dx, y + dy, w, h, P.gold));
-}
-
-/* Blinking red lights: one on each house's roof, and at the hall. */
-function alarms(c, lay, wx, t) {
-  // Neighbours alternate; with motion reduced every lamp stays lit.
-  const lit = k => state.reduce || blink(t, 420) === (k % 2 === 0);
-  const lamp = (x, y, k) => { R(c, x, y, 3, 2, P.o); R(c, x + 1, y, 1, 1, lit(k) ? wx.alarm : P.redD); };
-  (lay.lots || []).forEach((l, k) => lamp(l.x + 7, l.y - 13, k));
-  lamp(lay.hallX + 15, 5, 0);
-}
 
 /* Weather over the dev village, under the labels and over everything else. */
 registerLayer({ z: 150, draw(c, { v, lay }, t) {
@@ -66,7 +34,7 @@ registerLayer({ z: 150, draw(c, { v, lay }, t) {
     const g = lay.gate, x0 = g ? g.x0 - 4 : lay.roadX - 20, y0 = g ? g.y - 12 : lay.quayY - 26, w = g ? g.w + 8 : 46;
     clouds(c, x0, y0, w, wx, t);
     if (wx.style === 'storm') rain(c, x0, y0 + 5, w, 20, Math.floor(w / 2), wx.rain, t);
-    else { const on = state.reduce || blink(t, 420); R(c, x0 + (w >> 1), y0 + 6, 3, 2, P.o); R(c, x0 + (w >> 1) + 1, y0 + 6, 1, 1, on ? wx.alarm : P.redD); }
+    else alarmLamp(c, x0 + (w >> 1), y0 + 6, state.reduce || blink(t, 420), wx.alarm);
     tap(x0, y0 - 2, w, 12, { kind: 'build' });
     return;
   }
@@ -98,18 +66,15 @@ const signAt = lay => ({ x: lay.roadX - 46, y: lay.quayY - 13 });
 registerLayer({ z: 86, draw(c, { v, lay }) {
   if (!buildSign(v.build) || !lay) return;
   const { x, y } = signAt(lay);
-  shadow(c, x + 1, y + 13, 26, 1);
-  R(c, x + 3, y + 8, 2, 5, P.woodD); R(c, x + 21, y + 8, 2, 5, P.woodD);
-  R(c, x, y, 26, 9, P.o); R(c, x + 1, y + 1, 24, 7, '#d02828'); R(c, x + 1, y + 1, 24, 1, '#f05050');
-  for (let k = 0; k < 5; k++) R(c, x + 3 + k * 4, y + 4, 2, 1, P.white);
-  tap(x, y, 26, 13, { kind: 'build' });
+  shadow(c, x + 1, y + SIGN_H, SIGN_W, 1);
+  brokenSign(c, x, y);
+  tap(x, y, SIGN_W, SIGN_H, { kind: 'build' });
   const b = v.build;
   if (b.blame) {
     // The commit that turned it red: a crate under a red flag.
     const cx = x - 10, cy = y + 6;
     shadow(c, cx, cy + 7, 7, 1);
-    R(c, cx, cy, 7, 7, P.o); R(c, cx + 1, cy + 1, 5, 5, P.wood); R(c, cx + 1, cy + 3, 5, 1, P.woodD);
-    R(c, cx + 5, cy - 7, 1, 8, P.woodD); R(c, cx + 1, cy - 7, 4, 3, '#e02828');
+    blameCrate(c, cx, cy);
     tap(cx, cy - 7, 7, 14, { kind: 'blame' });
   }
 } });
@@ -146,14 +111,13 @@ registerHit({ kind: 'blame', dialog(o, sc) {
 const STORM_WORDS = { storm: 'Storm over the village', smog: 'Smog and alarm lights over the town', alert: 'Red alert over the base' };
 registerKey({ group: 'Weather: the build', rows: theme => {
   const wx = (theme && theme.weather) || STORM;
-  const cloud = (c, x, y) => { R(c, x, y + 1, 9, 4, wx.cloudD); R(c, x + 2, y, 5, 3, wx.cloud); };
   return [
-    [c => { R(c, 0, 0, 14, 14, wx.tint); cloud(c, 2, 1); [3, 7, 11].forEach((x, k) => R(c, x, 7 + (k % 2) * 2, 1, 3, wx.rain)); },
+    [c => { R(c, 0, 0, 14, 14, wx.tint); puff(c, 0, 2, wx); rain(c, 2, 8, 10, 4, 3, wx.rain, 0, 2); },
       `${STORM_WORDS[wx.style] || STORM_WORDS.storm}: the build is red on every OS (lightning now and then)`],
-    [c => { cloud(c, 2, 2); R(c, 5, 8, 1, 2, wx.rain); R(c, 8, 9, 1, 2, wx.rain); }, 'A cloud over the gatehouse only: red on one OS or one job'],
-    [c => [[3, 3], [9, 5], [5, 9], [11, 11]].forEach(([x, y]) => R(c, x, y, 1, 2, wx.rain)), 'Drizzle: the build is running'],
-    [c => { R(c, 3, 9, 1, 4, P.woodD); R(c, 10, 9, 1, 4, P.woodD); R(c, 0, 3, 14, 7, P.o); R(c, 1, 4, 12, 5, '#d02828'); }, 'BUILD BROKEN sign on the quay: the failing jobs; click for the tests and the run'],
-    [c => { R(c, 3, 6, 7, 7, P.o); R(c, 4, 7, 5, 5, P.wood); R(c, 8, 0, 1, 7, P.woodD); R(c, 4, 0, 4, 3, '#e02828'); }, 'A crate under a red flag on the quay: the commit that turned the build red'],
+    [c => { puff(c, 0, 3, wx); rain(c, 4, 9, 7, 3, 2, wx.rain, 0, 2); }, 'A cloud over the gatehouse only: red on one OS or one job'],
+    [c => rain(c, 2, 2, 10, 10, 4, wx.rain, 0, 2), 'Drizzle: the build is running'],
+    [c => brokenSign(c, 0, 0), 'BUILD BROKEN sign on the quay: the failing jobs; click for the tests and the run', SIGN_W],
+    [c => blameCrate(c, 3, 7), 'A crate under a red flag on the quay: the commit that turned the build red'],
   ];
 } });
 

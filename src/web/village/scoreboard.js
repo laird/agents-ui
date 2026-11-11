@@ -4,9 +4,11 @@
  * for the files that conflict most. A click on either says it in words
  * (scoretally.js). Drawn only when the gate reports a tally
  * (`pipeline.merge_stats`, #431); the sign only when something conflicted. */
-import { P, R, blink } from './palette.js';
+import { DIGITS, P, blink } from './palette.js';
+import { detail } from './detail.js';
+import { dither, px } from './art2x.js';
 import { state } from './state.js';
-import { numberTag, numberTagSize } from './scenery.js';
+import { numberTagSize } from './scenery.js';
 import { registerHit, registerKey, registerLabels, registerLayer, tap } from './registry.js';
 import { hotspotLines, scoreLine } from './scoretally.js';
 
@@ -14,22 +16,46 @@ const LANDED = '#38c848', BOUNCED = '#e02828', SLATE = '#283040';
 /* Where the slate stands: east of the gatehouse, clear of its lamp and above the locks' towers. */
 export const tallyAt = g => ({ x: g.x0 + g.w + 4, y: g.y });
 
-/* The slate with its two counts; how wide it is. */
+/* A count chalked on a coloured chit, drawn in detail pixels from (x, y),
+ * the chit's outer corner: the same 3×5 digits as numberTag, each stroke a
+ * 2×2 block over a drop shadow, so the figures read embossed. */
+function chit(d, x, y, n, bg, ink) {
+  const glyphs = String(n).split('').map(k => DIGITS[+k]), w = 2 * numberTagSize(n).w;
+  px(d, x, y, w, 18, P.o); px(d, x + 2, y + 2, w - 4, 14, bg); px(d, x + 2, y + 2, w - 4, 1, 'rgba(255,255,255,.3)');
+  // A drop shadow under every stroke first, then the strokes over it.
+  [['rgba(0,0,0,.3)', 1], [ink, 0]].forEach(([col, o]) => glyphs.forEach((g, j) => {
+    for (let k = 0; k < 15; k++) if (g[k] === '1') px(d, x + 4 + j * 8 + 2 * (k % 3) + o, y + 4 + 2 * Math.floor(k / 3) + o, 2, 2, col);
+  }));
+}
+/* The slate with its two counts; how wide it is (scene pixels, as before:
+ * the chits' widths and five pixels of frame). Drawn at 2× (#458): a slate
+ * in a wooden frame on two legs, chalk dust on it, the counts on chits. */
 export function slate(c, x, y, landed, bounced) {
   const wl = numberTagSize(landed).w, wb = numberTagSize(bounced).w, w = wl + wb + 5;
-  R(c, x + 1, y + 11, 1, 4, P.woodD); R(c, x + w - 2, y + 11, 1, 4, P.woodD);
-  R(c, x, y, w, 12, P.o); R(c, x + 1, y + 1, w - 2, 10, SLATE);
-  numberTag(c, x + 2, y + 3, landed, LANDED, P.o);
-  numberTag(c, x + 3 + wl, y + 3, bounced, BOUNCED, P.white);
+  detail(c, x, y, d => {
+    [2, 2 * w - 4].forEach(lx => { px(d, lx, 22, 2, 8, P.woodD); px(d, lx, 22, 1, 8, P.wood); });
+    px(d, 0, 0, 2 * w, 24, P.o); px(d, 1, 1, 2 * w - 2, 22, P.wood); px(d, 1, 1, 2 * w - 2, 1, P.woodL);
+    px(d, 2, 2, 2 * w - 4, 20, SLATE);
+    // Chalk dust where the old counts were wiped.
+    dither(d, 3, 3, 2 * w - 6, 18, 5, (dx, dy) => (dx * 7 + dy * 3) % 11 < 3 ? 'rgba(232,232,240,.16)' : null);
+    chit(d, 2, 2, landed, LANDED, P.o);
+    chit(d, 4 + 2 * wl, 2, bounced, BOUNCED, P.white);
+  });
   return w;
 }
-/* The hotspots sign: a post, a board, and a red flame on it. */
+/* The hotspots sign at 2× (#458): a post, a parchment board with a nail at
+ * each corner, and a red flame on it, flickering, a gold heart in it. */
 export function hotspotSign(c, x, y, t) {
-  R(c, x + 3, y + 7, 1, 8, P.woodD);
-  R(c, x, y, 8, 8, P.o); R(c, x + 1, y + 1, 6, 6, P.parch);
   const f = !state.reduce && blink(t, 220) ? 1 : 0;
-  R(c, x + 3, y + 2 + f, 2, 4 - f, BOUNCED); R(c, x + 2, y + 4, 1, 2, BOUNCED); R(c, x + 5, y + 3, 1, 3, BOUNCED);
-  R(c, x + 3, y + 4, 2, 2, P.gold);
+  detail(c, x, y, d => {
+    px(d, 6, 14, 2, 16, P.woodD); px(d, 6, 14, 1, 16, P.wood);
+    px(d, 0, 0, 16, 16, P.o); px(d, 2, 2, 12, 12, P.parch); px(d, 2, 13, 12, 1, P.mill);
+    [[2, 2], [12, 2], [2, 12], [12, 12]].forEach(([nx, ny]) => px(d, nx, ny, 1, 1, P.stoneD));
+    // The flame, a row at a time from its tip; it licks a pixel higher on the flicker.
+    [[7, 3 - f, 2], [6, 5 - f, 3], [5, 7, 6], [4, 9, 8], [4, 11, 8], [5, 12, 6]].forEach(([fx, fy, fw]) => px(d, fx, fy, fw, 2, BOUNCED));
+    px(d, 4, 7, 1, 2, BOUNCED); px(d, 11, 6, 1, 3, BOUNCED);
+    px(d, 6, 8, 4, 4, '#f07020'); px(d, 7, 9, 2, 3, P.gold); px(d, 7, 9, 1, 1, P.white);
+  });
 }
 
 registerLayer({ z: 76, draw(c, { v, lay }, t) {

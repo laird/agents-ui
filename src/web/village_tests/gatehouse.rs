@@ -97,8 +97,9 @@ fn village_html_shows_the_gate_scoreboard_and_hotspots() {
     // The slate shows the totals, landed in green and bounced in red, when the gate reports a tally.
     assert!(body.contains("const g = lay.gate, ms = v.pipeline.merge_stats;\n  if (!g || !ms) return;"));
     assert!(body.contains("const w = slate(c, x, y, ms.landed_today || 0, ms.bounced_today || 0);"));
-    assert!(body.contains("numberTag(c, x + 2, y + 3, landed, LANDED, P.o);"));
-    assert!(body.contains("numberTag(c, x + 3 + wl, y + 3, bounced, BOUNCED, P.white);"));
+    // At 2× (#458) the counts are chits drawn in detail pixels where numberTag put them.
+    assert!(body.contains("chit(d, 2, 2, landed, LANDED, P.o);"));
+    assert!(body.contains("chit(d, 4 + 2 * wl, 2, bounced, BOUNCED, P.white);"));
     assert!(body.contains("return `landed ${ms.landed_today || 0} · bounced ${ms.bounced_today || 0} today`;"));
     // The sign stands only when something conflicted, and its dialog lists them in order.
     assert!(body.contains("if ((ms.hotspots || []).length) {"));
