@@ -136,16 +136,20 @@ fn village_html_says_which_source_placed_each_stop() {
     }
 }
 
-/// #454: the environment row, the feature flags and a failed voyage's flag
-/// at 2×: each keeps its 1× drawing (so its footprint, taps and labels stay)
-/// and gains detail on the detail grid, from DOM-free modules node tests
-/// (tools/village-tests/envart.test.mjs).
+/// #454, #474: the environment row, the feature flags and a failed voyage's
+/// flag at 2×. The row (keeps, sheds, signs, flags and the bay's banners)
+/// draws inside detail() over the scene pixels it always covered, so its
+/// footprint, taps and labels stay; the feature flag keeps its 1× drawing
+/// and gains detail. DOM-free modules node tests
+/// (tools/village-tests/envart.test.mjs, scenepixels.test.mjs).
 #[test]
 fn village_env_row_and_flags_are_drawn_at_2x() {
     let body = &village_source();
-    assert!(body.contains("import { envKeep, envShed, envSign, failFlag, flame, poleFlag } from './envart.js';"));
+    assert!(body.contains("import { bayBanner, envKeep, envShed, envSign, failFlag, flame, poleFlag } from './envart.js';"));
     assert!(body.contains("export function envShed(c, x, y, w, h) {"));
-    assert!(body.contains("for (let xx = 7; xx < W - 4; xx += 6) px(g, xx, 3, 1, 11, k.roofD);"), "the warehouse's roof ribs at detail pixels");
+    assert!(body.contains("function envCloth(g, X, Y, w, h, col, wave) {"), "flags flutter on the detail grid");
+    assert!(body.contains("envSign(c, x + 4, signY, health === 'unknown' ? P.stoneL : null, s.name);"), "the sign letters its environment's name");
+    assert!(body.contains("if (sl.banner) { bayBanner(c, x, y, sl.banner.col, t + k * 130); return; }"), "the bay's banners at 2×");
     assert!(body.contains("failFlag(c, sx + SHED.w - 8, sy - 9);"));
     assert!(body.contains("flame(c, sx + 8, sy - 3, f); flame(c, sx + 40, sy - 2, 1 - f);"));
     assert!(body.contains("poleFlag(c, hx + 2, cy - 38, h.col, blink(t + k * 250, 900) ? 1 : 0);"));

@@ -15,7 +15,7 @@
  * ships between them are voyages.js; the strip of villages over the map is
  * the mini-map, at the end. */
 import { state } from './state.js';
-import { P, R, blink, featureColours } from './palette.js';
+import { P, blink, featureColours } from './palette.js';
 import { puffs } from './sprites/houses.js';
 import { badge, badgeSize, bubble } from './scenery.js';
 import { registerHit, registerLabels, registerLayer, registerOverlay, tap } from './registry.js';
@@ -25,7 +25,7 @@ import { sourceWords } from './ship.js';
 import { esc } from './panels.js';
 import { agoWords, envHouses, envLabel, versionOf } from './envlabels.js';
 import { showFeature } from './features.js';
-import { envKeep, envShed, envSign, failFlag, flame, poleFlag } from './envart.js';
+import { bayBanner, envKeep, envShed, envSign, failFlag, flame, poleFlag } from './envart.js';
 
 /* Where things stand in an environment village, from its left edge and the canal. */
 export const SHED = { dx: 30, w: 60, h: 32, up: 44 }, ENV_DOCK = 20, BAY_COLS = 9, BAY_ROWS = 3;
@@ -86,7 +86,7 @@ registerLayer({ z: 60, draw(c, { v, lay }, t) {
       if (more > 0) badge(c, x + SHED.dx + SHED.w + 4 + houses.length * 18, cy - 34, more);
     }
     if (e.rank === 'capital' && !e.platform) envKeep(c, x + w - 18, cy - 42, 32, HEALTH_COL[health], t);
-    envSign(c, x + 4, signY, health === 'unknown' ? P.stoneL : null);
+    envSign(c, x + 4, signY, health === 'unknown' ? P.stoneL : null, s.name);
     tap(x + 2, signY - 2, 19, 22, { kind: 'env', i: e.i });
     if (health === 'unknown') bubble(c, x + 20, signY - 3, 'unknown');
     const sx = x + SHED.dx, sy = cy - SHED.up;
@@ -103,12 +103,12 @@ registerLayer({ z: 60, draw(c, { v, lay }, t) {
   });
 } });
 /* What each environment runs: crates in the warehouse bay, under their banners. */
-registerLayer({ z: 85, draw(c, { v, lay }) {
+registerLayer({ z: 85, draw(c, { v, lay }, t) {
   lay.envs.forEach(e => {
     const sx = e.x + SHED.dx, sy = e.cy - SHED.up, { slots, more } = baySlots(cargoGroups(v, e.s.cargo || []), e.s.cargo_more || 0);
     slots.forEach((sl, k) => {
       const x = sx + 3 + (k % BAY_COLS) * 6, y = sy + 10 + Math.floor(k / BAY_COLS) * 7;
-      if (sl.banner) { R(c, x + 1, y, 1, 6, P.woodL); R(c, x + 2, y, 3, 3, sl.banner.col); return; }
+      if (sl.banner) { bayBanner(c, x, y, sl.banner.col, t + k * 130); return; }
       state.T.crate(c, x, y + 1, 'workshop', null, true, sl.n); tap(x, y + 1, 5, 5, { kind: 'crate', n: sl.n, at: 'env', i: e.i });
     });
     // Right-aligned to the shed, so even three digits stay on it (#436).

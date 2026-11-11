@@ -9,9 +9,9 @@
 // sprite: the buildings, crates, people and their props, and every mark #455
 // redrew at 2× inside detail(), and now the trees and decoration (#473), the
 // ground, roads, yards and water (#471), the banners, barges and fog (#475),
-// and each theme's lock, harbour, ship and supply boat (#472). Scenery that
-// still paints in scene pixels (the environment row, shadows) is listed in
-// SCENERY, so a new caller has to be named there or drawn at 2×.
+// each theme's lock, harbour, ship and supply boat (#472), and the
+// environment row (#474). Only shadows still paint in scene pixels; they are
+// listed in SCENERY, so a new caller has to be named there or drawn at 2×.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -58,8 +58,6 @@ const SPRITE_FNS = /^(?:Object\.)?(?:hall|board|dock|scaffold|gatehouse|crate|bu
  * out). Each entry is the drawing function and its file. */
 const SCENERY = [
   ['shadow', 'palette.js'],
-  ['envKeep', 'envart.js'], ['envShed', 'envart.js'], ['envSign', 'envart.js'],
-  ['poleFlag', 'envart.js'], ['draw', 'envrow.js'],
 ];
 const SCENERY_SLOTS = [];
 
