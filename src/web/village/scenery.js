@@ -1,7 +1,7 @@
 /* Things and scenery: speech bubbles, "zzz", "+N" badges, grass, paths, water, trees,
  * the castle, the board, the locks, the harbour, the ship and the supply boat. */
 import { state } from './state.js';
-import { NOTECOL, P, R, ROPE, STATE, blink, hash, shadow } from './palette.js';
+import { NOTECOL, P, R, ROPE, STATE, SHADE, blink, hash } from './palette.js';
 import { crate } from './crates.js';
 import { detail } from './detail.js';
 import { bricks, disc, planks, px } from './art2x.js';
@@ -143,9 +143,11 @@ export function water(c, x0, y0, w, h, t, flow) {
   });
 }
 export function tree(c, x, y) {
-  shadow(c, x + 4, y + 11, 9, 2);
   detail(c, x, y, g => {
-    // The trunk, with bark.
+    // A soft oval shadow, falling right and down (#473), where it fell at 1×.
+    px(g, 10, 22, 14, 1, SHADE); px(g, 8, 23, 18, 2, SHADE); px(g, 10, 25, 14, 1, SHADE);
+    // The trunk, with bark and a root either side.
+    px(g, 9, 23, 2, 1, P.woodD); px(g, 14, 23, 2, 1, P.woodD);
     px(g, 10, 16, 4, 8, P.woodD); px(g, 11, 16, 1, 8, P.wood); px(g, 12, 19, 1, 2, P.o); px(g, 11, 22, 1, 1, P.o);
     // A round canopy: outlined, lit from the top left.
     disc(g, 2, 0, 22, { outline: P.o, fill: P.leaf, light: P.leafL, dark: P.leafD });

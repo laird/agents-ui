@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 globalThis.window = { matchMedia: () => ({ matches: false }) };
+performance.now = () => 1000; // the groves glow in turn: pin the clock (#450)
 const { hash } = await import('../../src/web/village/palette.js');
 const { FUTURE: T } = await import('../../src/web/village/themes/future.js');
 
@@ -24,7 +25,7 @@ function recorder() {
   };
   return c;
 }
-/* Where a tree of each kind of station kit stands (hash picks the kit). */
+/* Where a tree of each kind stands (hash picks the kind). */
 const kit = k => { for (let x = 10; x < 400; x++) if (Math.floor(hash(x, 20) * 3) === k) return x; };
 
 /* Each sprite's box at 1×, in scene pixels: [x0, y0, x1, y1]. */
@@ -34,9 +35,10 @@ const FOOTPRINTS = {
   'upright walkway': [c => T.road(c, 0, 0, 6, 80), [0, 0, 6, 80]],
   yard: [c => T.yard(c, 0, 0, 48, 9), [0, 0, 48, 9]],
   'plasma canal': [c => T.channel(c, 0, 0, 200, 11, 1234, 1), [0, 0, 200, 11]],
-  'antenna mast': [c => T.tree(c, kit(0), 20), [kit(0) + 3, 20, kit(0) + 10, 32]],
-  'solar array': [c => T.tree(c, kit(1), 20), [kit(1), 22, kit(1) + 12, 32]],
-  dome: [c => T.tree(c, kit(2), 20), [kit(2) + 1, 24, kit(2) + 11, 31]],
+  // The groves (#473) stand where the station kit they replaced stood.
+  'crystal spire': [c => T.tree(c, kit(0), 20), [kit(0) + 3, 20, kit(0) + 10, 32]],
+  'glow tree': [c => T.tree(c, kit(1), 20), [kit(1), 22, kit(1) + 12, 32]],
+  'glowing mushrooms': [c => T.tree(c, kit(2), 20), [kit(2) + 1, 24, kit(2) + 11, 31]],
   spaceport: [c => T.destination(c, 50, 100, 1000, -1e9), [50, 43, 88, 116]],
   shuttle: [c => T.vessel(c, 50, 100, 1000, 0, 0), [65, 54, 94, 92]],
   'shuttle, launching': [c => T.vessel(c, 50, 100, 1000, 0, -20), [65, 34, 94, 76]],

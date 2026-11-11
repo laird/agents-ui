@@ -59,12 +59,11 @@ const SPRITE_FNS = /^(?:Object\.)?(?:hall|board|dock|scaffold|gatehouse|crate|bu
 const SCENERY = [
   ['shadow', 'palette.js'], ['fogStop', 'features.js'], ['drawBanner', 'bannerart.js'],
   ['envKeep', 'envart.js'], ['envShed', 'envart.js'], ['envSign', 'envart.js'],
-  ['grass', 'scenery.js'], ['path', 'scenery.js'], ['water', 'scenery.js'], ['tree', 'scenery.js'],
+  ['grass', 'scenery.js'], ['path', 'scenery.js'], ['water', 'scenery.js'],
   ['lock', 'scenery.js'], ['harbour', 'scenery.js'], ['ship', 'scenery.js'], ['boat', 'scenery.js'],
-  ['medievalDecor', 'themes/medieval.js'], ['medievalBorder', 'themes/medieval.js'], ['leaf', 'themes/medieval.js'],
   ['drawBarge', 'features.js'], ['poleFlag', 'envart.js'], ['draw', 'envrow.js'],
 ];
-const SCENERY_SLOTS = ['ground', 'road', 'yard', 'channel', 'tree', 'gate', 'destination', 'vessel', 'supply', 'decor', 'border'];
+const SCENERY_SLOTS = ['ground', 'road', 'yard', 'channel', 'gate', 'destination', 'vessel', 'supply'];
 
 /* One stack frame: [function name, file under src/web/village/]. */
 function frames(stack) {

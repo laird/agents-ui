@@ -3,7 +3,7 @@ import { state, now } from '../state.js';
 import { F, KINDCOL, P, PRIOCOL, R, SHADE, blink, hash, shadow } from '../palette.js';
 import { prioRun } from '../cvdmarks.js';
 import { detail } from '../detail.js';
-import { planks, px } from '../art2x.js';
+import { lobes, planks, px } from '../art2x.js';
 import { CRATE_W, CRATE_H, seal, stencil } from '../crates.js';
 import { registerTheme } from './registry.js';
 import { FB, futureBoard, futureDock, futureHall, futureScaffold } from './futurebuildings.js';
@@ -12,6 +12,34 @@ import { FB, futureBoard, futureDock, futureHall, futureScaffold } from './futur
  * strip walkways for roads, a plasma canal, habitat pods with portholes. It
  * keeps the shared status language: lit portholes while working, an open
  * hatch for blocked, dark glass for unknown. */
+/* A crystal in detail pixels: `w` wide and `h` tall from its tip at (cx, top),
+ * pointed, outlined, lit down its left face and shaded down its right. */
+const CYAN = { light: F.cyanL, fill: F.cyan, dark: F.cyanD };
+function crystal(g, cx, top, w, h, cols) {
+  const half = w >> 1;
+  for (let j = 0; j < h; j++) {
+    const hw = Math.min(half, j + 1), x0 = cx - hw;
+    px(g, x0, top + j, 2 * hw, 1, P.o);
+    if (j === 0 || j === h - 1 || hw < 2) continue;
+    px(g, x0 + 1, top + j, hw - 1, 1, cols.light);
+    px(g, cx, top + j, hw - 1, 1, cols.dark);
+    px(g, cx - 1, top + j, 1, 1, cols.fill);
+  }
+}
+/* A glowing mushroom: a dome cap `w` wide at (x, y) on a pale stem `stem`
+ * tall, lit on top, its gills shaded underneath, spots on the cap. */
+const GLOW_M = { light: '#ff9ce0', fill: F.magenta, dark: F.magentaD }, GLOW_C = { light: F.cyanL, fill: F.cyan, dark: F.cyanD };
+function mushroom(g, x, y, w, stem, cols) {
+  const sx = x + (w >> 1) - 1, ch = Math.max(3, w >> 1);
+  px(g, sx - 1, y + ch - 1, 4, stem + 1, P.o); px(g, sx, y + ch - 1, 2, stem, F.hullL); px(g, sx + 1, y + ch, 1, stem - 1, F.hull);
+  for (let j = 0; j < ch; j++) {
+    const inset = Math.max(0, 2 - j), cw = w - 2 * inset;
+    px(g, x + inset, y + j, cw, 1, P.o);
+    if (j && cw > 2) px(g, x + inset + 1, y + j, cw - 2, 1, j === ch - 1 ? cols.dark : j === 1 ? cols.light : cols.fill);
+  }
+  px(g, x + 2, y + 1, 1, 1, P.white);
+  if (w >= 8) { px(g, x + w - 3, y + 2, 1, 1, cols.light); px(g, x + (w >> 1), y + 1, 1, 1, cols.light); }
+}
 export const FUTURE = {
   name: 'Future',
   pair: 'modern',
@@ -73,38 +101,35 @@ export const FUTURE = {
       }
     });
   },
-  /* Groves become station kit: an antenna mast, a solar array or a small dome. */
+  /* The station's groves (#473): a crystal spire on a hull plinth, a glow
+   * tree whose light pods pulse in turn, and a clump of glowing mushrooms.
+   * Drawn at 2× in the box each kind of station kit filled before. With
+   * reduced motion the glow holds still. */
   tree(c, x, y) {
-    const k = Math.floor(hash(x, y) * 3);
-    // At 2× (#453): rungs and lit tips on the mast, a finer cell grid and a
-    // glint on the array, a dome with a highlight curve and lit base lights.
-    if (k === 0) {
-      R(c, x + 4, y + 9, 5, 3, P.o); R(c, x + 5, y + 9, 3, 2, F.hullD);
-      R(c, x + 6, y + 1, 1, 8, F.hull); R(c, x + 3, y + 3, 7, 1, F.hullD); R(c, x + 4, y + 6, 5, 1, F.hullD);
-      R(c, x + 5, y, 3, 2, P.o); R(c, x + 6, y, 1, 1, blink(now() + x * 31, 900) ? P.p0 : F.magentaD);
-      detail(c, x, y, g => {
-        for (let yy = 4; yy < 18; yy += 3) px(g, 13, yy, 1, 1, F.hullD);
-        px(g, 6, 6, 1, 1, F.cyanL); px(g, 19, 6, 1, 1, F.cyanL); px(g, 8, 12, 1, 1, F.cyan); px(g, 17, 12, 1, 1, F.cyan);
-        px(g, 11, 19, 1, 1, F.rivet); px(g, 14, 19, 1, 1, F.rivet);
-      });
-    } else if (k === 1) {
-      R(c, x + 5, y + 7, 2, 5, F.hullD);
-      R(c, x, y + 2, 12, 6, P.o); R(c, x + 1, y + 3, 10, 4, F.panel);
-      detail(c, x, y, g => {
-        planks(g, 2, 6, 20, 8, 2, F.panelL);
-        for (let xx = 5; xx < 22; xx += 3) px(g, xx, 6, 1, 8, F.panelL);
-        px(g, 2, 6, 20, 1, F.panelL);
-        for (let k2 = 0; k2 < 4; k2++) px(g, 13 + k2, 7 + k2, 1, 1, P.white);
-        px(g, 11, 14, 1, 10, F.hull);
-      });
-    } else {
-      [3, 4, 5, 5].forEach((w, dy) => { R(c, x + 6 - w, y + 4 + dy, 2 * w, 1, P.o); if (dy) R(c, x + 7 - w, y + 4 + dy, 2 * w - 2, 1, dy === 1 ? F.cyanL : F.glass); });
-      R(c, x + 1, y + 8, 10, 3, P.o); R(c, x + 2, y + 8, 8, 2, F.hullD);
-      detail(c, x, y, g => {
-        px(g, 8, 11, 3, 1, P.white); px(g, 7, 12, 1, 2, P.white); px(g, 16, 14, 1, 2, F.cyanD);
-        [6, 10, 14, 18].forEach((lx, i) => px(g, lx, 18, 1, 1, blink(now() + x * 17 + i * 200, 800) ? F.cyanL : F.cyan));
-      });
-    }
+    const k = Math.floor(hash(x, y) * 3), t = now();
+    detail(c, x, y, g => {
+      if (k === 0) {
+        px(g, 9, 22, 11, 1, SHADE); px(g, 8, 23, 12, 1, SHADE);
+        px(g, 6, 19, 14, 4, P.o); px(g, 7, 19, 12, 2, F.hullD); px(g, 7, 19, 12, 1, F.hullL); px(g, 15, 20, 2, 1, F.hull);
+        crystal(g, 9, 8, 4, 12, CYAN); crystal(g, 17, 6, 4, 14, CYAN); crystal(g, 13, 0, 6, 20, CYAN);
+        const on = blink(t + x * 31, 1100);
+        px(g, 13, 2, 1, on ? 3 : 1, P.white); if (on) px(g, 12, 3, 3, 1, F.cyanL);
+        px(g, 10, 20, 2, 1, F.cyanL); px(g, 14, 20, 1, 1, F.cyan);
+      } else if (k === 1) {
+        px(g, 4, 22, 20, 2, SHADE);
+        px(g, 10, 16, 4, 8, P.o); px(g, 11, 16, 2, 7, F.hullD); px(g, 11, 16, 1, 7, F.hull); px(g, 8, 23, 8, 1, F.hullD);
+        lobes(g, [[0, 6, 14], [8, 4, 14]], { outline: P.o, fill: F.plasma, light: F.plasmaL, dark: F.purple });
+        [[5, 10], [12, 8], [16, 13], [7, 15]].forEach(([dx, dy], i) => {
+          const on = blink(t + x * 17 + i * 350, 1400);
+          px(g, dx, dy, 2, 2, on ? F.cyanL : F.cyan); if (on) px(g, dx, dy, 1, 1, P.white);
+        });
+        px(g, 11, 20, 1, 2, F.cyanL);
+      } else {
+        px(g, 4, 20, 18, 2, SHADE);
+        mushroom(g, 2, 15, 6, 4, GLOW_M); mushroom(g, 14, 13, 8, 5, GLOW_C); mushroom(g, 4, 8, 12, 7, GLOW_M);
+        if (blink(t + x * 23, 1300)) { px(g, 7, 9, 1, 1, P.white); px(g, 17, 14, 1, 1, P.white); }
+      }
+    });
   },
   /* A cargo crate riding a little hover-pad. */
   crate(c, x, y, kind, pr, sealed, n) {

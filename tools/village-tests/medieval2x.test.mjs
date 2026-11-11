@@ -1,12 +1,12 @@
-// The medieval decoration and hedge at 2× (themes/medieval.js, #462): each
-// keeps its 1× footprint and gains detail finer than a scene pixel.
+// The medieval decoration and hedge at 2× (themes/medieval.js, #462, #473):
+// each keeps its 1× footprint and is drawn wholly in detail pixels.
 //   node --test tools/village-tests/
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 globalThis.window ??= { matchMedia: () => ({ matches: false }) };
 const { MEDIEVAL: T } = await import('../../src/web/village/themes/medieval.js');
-const { SHADE } = await import('../../src/web/village/palette.js');
+const { P, SHADE } = await import('../../src/web/village/palette.js');
 
 /* A canvas that follows translate/scale and records each rect in scene pixels. */
 function recorder() {
@@ -16,7 +16,7 @@ function recorder() {
     setTransform(a, b, c, d, e, f) { m = [a, b, c, d, e, f]; },
     translate(x, y) { m = [m[0], m[1], m[2], m[3], m[4] + m[0] * x, m[5] + m[3] * y]; },
     scale(sx, sy) { m = [m[0] * sx, m[1], m[2], m[3] * sy, m[4], m[5]]; },
-    fillRect(x, y, w, h) { this.rects.push({ x: m[4] + m[0] * x, y: m[5] + m[3] * y, w: m[0] * w, h: m[3] * h, col: this.fillStyle }); } };
+    fillRect(x, y, w, h) { this.rects.push({ x: m[4] + m[0] * x, y: m[5] + m[3] * y, w: m[0] * w, h: m[3] * h, col: this.fillStyle, s: m[0] }); } };
 }
 const drawn = paint => { const c = recorder(); paint(c); return c.rects; };
 const box = rects => [Math.min(...rects.map(r => r.x)), Math.min(...rects.map(r => r.y)), Math.max(...rects.map(r => r.x + r.w)), Math.max(...rects.map(r => r.y + r.h))];
@@ -34,12 +34,21 @@ for (const [name, [k, was]] of Object.entries(DECOR)) {
   });
 }
 
-test('every 2× detail pixel of a decoration lands on its 1× drawing', () => {
+test('every decoration and the hedge is drawn on the detail grid, none of it in scene pixels (#473)', () => {
   for (const [name, [k]] of Object.entries(DECOR)) {
-    const rects = drawn(c => T.decor(c, 40, 30, k, 0));
-    const solid = rects.filter(r => !fine(r) && r.col !== SHADE), inside = (x, y) => solid.some(r => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
-    for (const r of rects.filter(fine)) assert.ok(inside(r.x, r.y) && inside(r.x + r.w - 0.01, r.y + r.h - 0.01), `${name}: ${JSON.stringify(r)} is over the sprite`);
+    const coarse = drawn(c => T.decor(c, 40, 30, k, 0)).filter(r => r.s !== 0.5);
+    assert.deepEqual(coarse, [], `${name}: drawn in scene pixels`);
   }
+  assert.deepEqual(drawn(c => T.border(c, 120, 80)).filter(r => r.s !== 0.5), [], 'the hedge: drawn in scene pixels');
+});
+
+test('a decoration has its outline and its shadow', () => {
+  for (const [name, [k]] of Object.entries(DECOR)) {
+    assert.ok(drawn(c => T.decor(c, 40, 30, k, 0)).some(r => r.col === P.o), `${name} is outlined`);
+  }
+  // Everything but the flowerbed (its box sits flat on the ground) casts a soft shadow.
+  for (const name of ['bush', 'rocks', 'haystack', 'fence'])
+    assert.ok(drawn(c => T.decor(c, 40, 30, DECOR[name][0], 0)).some(r => r.col === SHADE), `${name} casts a shadow`);
 });
 
 test('the hedge keeps to its strips, with single leaves at 2×', () => {

@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 globalThis.window = { matchMedia: () => ({ matches: false }) };
-const { bricks, disc, discRow, dither, planks, px } = await import('../../src/web/village/art2x.js');
+const { bricks, disc, discRow, dither, lobes, planks, px } = await import('../../src/web/village/art2x.js');
 const S = await import('../../src/web/village/scenery.js');
 
 /* A canvas that follows translate/scale, and records each rect in scene pixels. */
@@ -80,3 +80,16 @@ for (const [name, [draw, box]] of Object.entries(FOOTPRINTS)) {
     assert.ok(c.rects.some(r => r.w < 1 || r.h < 1 || r.x % 1 || r.y % 1), 'and has detail finer than a scene pixel');
   });
 }
+
+test('lobes share one outline: no outline pixel inside where two discs overlap', () => {
+  const c = recorder(), cols = { outline: 'O', fill: 'F', light: 'L', dark: 'D' };
+  c.scale(1, 1);
+  lobes(c, [[0, 0, 10], [6, 0, 10]], cols);
+  // The last colour painted at each pixel.
+  const at = new Map();
+  for (const r of c.rects) for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) at.set(`${x},${y}`, r.col);
+  assert.notEqual(at.get('8,5'), 'O', 'the overlap is filled');
+  assert.equal(at.get('0,5'), 'O', 'the left edge is outlined');
+  assert.equal(at.get('15,5'), 'O', 'the right edge is outlined');
+  assert.ok(Math.max(...[...at.keys()].map(k => +k.split(',')[0])) === 15, 'it spans both discs');
+});

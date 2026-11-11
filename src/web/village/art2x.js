@@ -66,3 +66,12 @@ export function bricks(c, x, y, w, h, bw, bh, mortar) {
     for (let xx = x + (k % 2 ? bw >> 1 : 0) + bw - 1; xx < x + w - 1; xx += bw) px(c, xx, yy, 1, Math.min(bh - 1, y + h - yy), mortar);
   }
 }
+
+/* Overlapping shaded discs as one lumpy shape (a bush, a cluster of leaves):
+ * every disc's outline first, then every disc's inside over them, so the
+ * lobes share one outline. discs: [[x0, y0, size], ...]; cols as disc(). */
+export function lobes(c, discs, cols) {
+  const solid = { outline: cols.outline, fill: cols.outline, light: cols.outline, dark: cols.outline };
+  for (const [x, y, s] of discs) disc(c, x, y, s, solid);
+  for (const [x, y, s] of discs) disc(c, x + 1, y + 1, s - 2, { ...cols, outline: cols.fill });
+}
