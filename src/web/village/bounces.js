@@ -8,39 +8,14 @@
  * "↺2 gate failed"); from the second bounce a little pile of broken-crate
  * debris lies beside it, gone once the issue lands. A click lists every
  * attempt: when, why, and which files conflicted. What the marks say is in
- * bouncemarks.js. */
-import { state } from './state.js';
-import { P, R, blink } from './palette.js';
+ * bouncemarks.js; the art, at 2× (#457), is in bounceart.js. */
 import { registerHit, registerKey, registerLabels, registerLayer, tap } from './registry.js';
 import { issueLabel, issueOf, link } from './dialogs.js';
-import { MODERN } from './themes/modern.js';
-import { FUTURE } from './themes/future.js';
 import { bounceLines, bounceMarks, bouncesOf, tagLevels } from './bouncemarks.js';
+import { debris, reworked } from './bounceart.js';
 
 /* Where the house's crate sits (lifecycle.js draws it there). */
 const crateAt = lot => [lot.x + 11, lot.y + 16];
-
-function reworked(c, x, y, t) {
-  if (state.T === FUTURE) {
-    const a = state.reduce || blink(t, 400) ? 'rgba(255,60,60,.85)' : 'rgba(255,60,60,.45)';
-    R(c, x - 1, y - 1, 7, 1, a); R(c, x - 1, y + 5, 7, 1, a); R(c, x - 1, y, 1, 5, a); R(c, x + 5, y, 1, 5, a);
-  } else if (state.T === MODERN) {
-    // A red REJECTED stamp: a box and its diagonal across the parcel.
-    R(c, x, y + 1, 5, 1, P.p0); R(c, x, y + 3, 5, 1, P.p0); R(c, x + 1, y + 2, 1, 1, P.p0); R(c, x + 3, y + 2, 1, 1, P.p0);
-  } else {
-    // Back on its cart: two wheels and an axle, and a red rag on the corner.
-    R(c, x - 1, y + 5, 7, 1, P.woodD); R(c, x, y + 5, 2, 2, P.o); R(c, x + 3, y + 5, 2, 2, P.o);
-    R(c, x + 4, y - 2, 1, 2, P.woodD); R(c, x + 5, y - 2, 2, 2, P.p0);
-  }
-}
-
-/* Broken boards beside the house: one more for each bounce past the first, up to four. */
-function debris(c, lot, count) {
-  const x = lot.x + 16, y = lot.y + 18, col = state.T === FUTURE ? P.stoneD : P.woodL;
-  [[0, 0, 3], [1, 2, 2], [0, 3, 3], [2, 1, 2]].slice(0, Math.min(4, count - 1)).forEach(([dx, dy, w]) => {
-    R(c, x + dx, y + dy, w, 1, col); R(c, x + dx + w - 1, y + dy + 1, 1, 1, P.woodD);
-  });
-}
 
 registerLayer({ z: 75, draw(c, { v, lay }, t) {
   bounceMarks(v).forEach(m => {
