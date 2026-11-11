@@ -1,5 +1,7 @@
 /* Houses, one sprite per kind, and what is drawn on them. */
 import { P, R, SHADE, SHINE, blink, glassOf, hash, lit } from '../palette.js';
+import { detail } from '../detail.js';
+import { px } from '../art2x.js';
 function win(c, x, y, st) {
   R(c, x, y, 4, 4, P.woodD); R(c, x + 1, y + 1, 2, 2, glassOf(st));
   if (st === 'working') R(c, x + 1, y + 1, 1, 1, P.white);
@@ -25,12 +27,19 @@ function wall(c, x, y, w, h, col) {
   R(c, x + 1, y + h - 2, w - 2, 1, P.stoneD);
   R(c, x + w - 3, y, 2, h - 2, SHADE);
 }
+/* Smoke from a chimney at (x, y): three puffs rising and drifting, `a`
+ * while fresh and `b` as they thin. Drawn at 2× (#461): round puffs with a
+ * lit top that shrink as they rise, moving half a pixel at a time. */
 export function puffs(c, x, y, t, a, b) {
-  for (let k = 0; k < 3; k++) {
-    const p = ((t / 110) + k * 7) % 21;
-    const s = p < 9 ? 2 : 1;
-    R(c, x + Math.round(Math.sin((p + k * 2) / 3)), y - Math.floor(p * 0.6), s, s, p < 12 ? a : b);
-  }
+  detail(c, x, y, g => {
+    for (let k = 0; k < 3; k++) {
+      const p = ((t / 110) + k * 7) % 21, fresh = p < 12, s = p < 5 ? 4 : p < 9 ? 3 : 2;
+      const px0 = Math.round(2 * Math.sin((p + k * 2) / 3)), py0 = -Math.round(p * 1.2);
+      px(g, px0 + 1, py0, s - 1 > 0 ? s - 1 : 1, 1, fresh ? a : b);
+      px(g, px0, py0 + 1, s, s - 1 || 1, fresh ? a : b);
+      if (s > 2) px(g, px0 + 1, py0 + 1, 1, 1, P.white);
+    }
+  });
 }
 
 /* ---------- Houses: each draws in x..x+15, y-4..y+16 ---------- */
@@ -161,14 +170,34 @@ export function scaffold(c, x, y, t) {
   for (let k = 0; k < 12; k++) R(c, x + 2 + k, y + 15 - k, 1, 1, P.woodD);
   if (blink(t, 90)) R(c, x + 4 + Math.floor(hash(Math.floor(t / 90), 3) * 8), y + 4, 1, 1, P.gold);
 }
+/* Cobwebs in a stalled house's two upper corners, each 3 by 3 scene
+ * pixels from (x + 1, y + 9) and (x + 12, y + 9). Drawn at 2× (#461): fine
+ * strands from the corner and two threads across them; the right-hand web
+ * is the left one mirrored. */
+const WEB = ['######', '##..#.', '#.#.#.', '#..##.', '####..', '#.....'];
 export function cobwebs(c, x, y) {
-  [[x + 1, y + 9], [x + 12, y + 9]].forEach(([wx, wy]) => {
-    R(c, wx, wy, 3, 1, P.web); R(c, wx, wy, 1, 3, P.web); R(c, wx + 1, wy + 1, 1, 1, P.web);
-  });
+  [[x + 1, false], [x + 12, true]].forEach(([wx, flip]) => detail(c, wx, y + 9, g => WEB.forEach((row, j) => {
+    for (let i = 0; i < 6; i++) if (row[i] === '#') px(g, flip ? 5 - i : i, j, 1, 1, P.web);
+  })));
 }
+/* A priority pennant on a pole by the house at (x, y): P0 a red flag that
+ * waves, P1 gold, P2 white, P3 none. Drawn at 2× (#461): a capped pole, a
+ * swallowtail cloth with a fold, and a ripple that runs along the P0 flag. */
 export function pennant(c, x, y, pr, t) {
   if (!pr || pr === 'P3') return;
-  R(c, x - 1, y - 5, 1, 9, P.stoneD);
-  if (pr === 'P0') { const w = blink(t, 300) ? 1 : 0; R(c, x, y - 5, 5, 4, P.o); R(c, x, y - 4, 4 + w, 2, P.p0); }
-  else { R(c, x, y - 5, 4, 3, P.o); R(c, x, y - 4, 3, 1, pr === 'P1' ? P.gold : P.white); }
+  detail(c, x - 1, y - 5, g => {
+    px(g, 0, 1, 2, 17, P.stoneD); px(g, 1, 2, 1, 16, P.stone); px(g, 0, 0, 2, 1, P.gold);
+    if (pr === 'P0') {
+      const w = blink(t, 300) ? 1 : 0;
+      for (let j = 0; j < 8; j++) {
+        const len = 8 + w * (j % 2) - (j === 3 || j === 4 ? 2 : 0), ripple = (j + (w ? 1 : 0)) % 4 === 0;
+        px(g, 2, j, len + 1, 1, P.o);
+        if (j > 0 && j < 7) px(g, 2, j, len, 1, ripple ? '#a01818' : P.p0);
+      }
+      px(g, 2, 1, 6, 1, '#f06050');
+    } else {
+      const cloth = pr === 'P1' ? P.gold : P.white, fold = pr === 'P1' ? '#c09020' : '#c8c8d0';
+      [7, 7, 6, 6, 5, 4].forEach((len, j) => { px(g, 2, j, len + 1, 1, P.o); if (j > 0 && j < 5) px(g, 2, j, len, 1, j === 3 ? fold : cloth); });
+    }
+  });
 }

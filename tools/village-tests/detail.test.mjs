@@ -12,7 +12,7 @@ const { DETAIL, prepare, detail, sceneScale, toScene } = await import(V + 'detai
 const { state } = await import(V + 'state.js');
 const scenery = await import(V + 'scenery.js');
 const { person } = await import(V + 'people.js');
-const { SHADE } = await import(V + 'palette.js');
+const { R, SHADE, shadow } = await import(V + 'palette.js');
 const houses = await import(V + 'sprites/houses.js');
 const { THEMES } = await import(V + 'themes/registry.js');
 await import(V + 'themes/medieval.js');
@@ -47,19 +47,16 @@ function drawn(paint, d) {
 }
 const doubled = rects => rects.map(([x, y, w, h, col, a]) => [x * DETAIL, y * DETAIL, w * DETAIL, h * DETAIL, col, a]);
 
-/* 1×-only sprites from every corner of the village: pennants and cobwebs.
- * (Crates are drawn at 2× since #420, people since #419, buildings since
- * #421 and tags since #456: their tests are crates.test.mjs,
- * people2x.test.mjs, upscale.test.mjs and badge.test.mjs.) */
+/* A 1× drawing: palette primitives in scene pixels. (Every sprite is now
+ * drawn at 2×: crates since #420, people #419, buildings #421, tags #456,
+ * pennants, cobwebs and smoke #461. Their tests are crates.test.mjs,
+ * people2x.test.mjs, upscale.test.mjs, badge.test.mjs and the one below.) */
 const SCENE = c => {
   state.T = THEMES.medieval;
-  houses.pennant(c, 60, 20, 'P0', 0);
-  houses.cobwebs(c, 70, 20);
-  for (const T of Object.values(THEMES)) {
-    state.T = T;
-  }
+  R(c, 3, 4, 5, 2, '#406080'); shadow(c, 10, 12, 6, 2); R(c, 20, 1, 1, 9, '#e02828');
+  R(c, 30, 7, 7, 7, '#202030'); R(c, 31, 8, 5, 5, '#f8f8f8');
+  for (let k = 0; k < 4; k++) R(c, 40 + k * 2, 3 + k, 1, 1, '#f8d040');
 };
-
 /* The scene at a fixed moment. People animate from the clock (performance.now:
  * a robot's sparks blink every 120 ms), so two drawings a few milliseconds
  * apart can differ by a frame. That made this test fail on CI's slower
@@ -142,3 +139,25 @@ test('buildings are drawn at 2× (#421): in half scene pixels, where the 1× bui
   }
 });
 
+
+/* Pennants, cobwebs and chimney smoke are drawn at 2× (#461), inside the
+ * boxes they drew in at 1×, so nothing around them moves. */
+test('pennants, cobwebs and smoke draw in half pixels, inside their 1× boxes', () => {
+  state.T = THEMES.medieval;
+  const cases = [
+    ['P0 pennant', c => houses.pennant(c, 60, 20, 'P0', 0), [59, 15, 6, 9]],
+    ['P0 pennant, waved', c => houses.pennant(c, 60, 20, 'P0', 300), [59, 15, 6, 9]],
+    ['P1 pennant', c => houses.pennant(c, 60, 20, 'P1', 0), [59, 15, 5, 9]],
+    ['cobwebs', c => houses.cobwebs(c, 70, 20), [71, 29, 14, 3]],
+    ['smoke', c => houses.puffs(c, 40, 40, 500, '#fff', '#888'), [38, 27, 5, 15]],
+  ];
+  for (const [what, paint, [bx, by, bw, bh]] of cases) {
+    const rects = drawn(paint, DETAIL);
+    assert.ok(rects.length > 0, `${what} draws`);
+    assert.ok(rects.some(([x, y, w, h]) => [x, y, w, h].some(v => v % 2)), `${what} has detail finer than a scene pixel`);
+    for (const [x, y, w, h] of rects) {
+      assert.ok(x >= bx * 2 && y >= by * 2 && x + w <= (bx + bw) * 2 && y + h <= (by + bh) * 2, `${what}: (${x}, ${y}, ${w}, ${h}) is outside its box`);
+    }
+  }
+  assert.equal(drawn(c => houses.pennant(c, 60, 20, 'P3', 0), DETAIL).length, 0, 'a P3 house has no pennant');
+});

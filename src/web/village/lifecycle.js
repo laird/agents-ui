@@ -4,7 +4,9 @@
  * The walks themselves, what each change between two polls sets
  * off, are the trips (trips.js). */
 import { state } from './state.js';
-import { P, R, blink, shadow, subHat, waveFrame } from './palette.js';
+import { P, SHADE, blink, subHat, waveFrame } from './palette.js';
+import { detail } from './detail.js';
+import { px } from './art2x.js';
 import { cobwebs, pennant, puffs } from './sprites/houses.js';
 import { ICONS, badge, badgeSize, bubble, tether, zzz } from './scenery.js';
 import { dent, glint, ribbon, roped } from './crates.js';
@@ -101,7 +103,10 @@ registerLayer({ z: 70, draw(c, scene, t) {
   v.houses.forEach((h, i) => {
     const lot = lots[i]; if (!lot) return;
     const st = h.status, tt = t + i * 311, rest = restOf(h, wall);
-    shadow(c, lot.x + 2, lot.y + 16, 16, 2); shadow(c, lot.x + 16, lot.y + 4, 2, 12);
+    // Its shadow, at 2× (#461): soft at the far ends.
+    detail(c, lot.x + 2, lot.y + 4, g => {
+      px(g, 1, 24, 30, 4, SHADE); px(g, 0, 25, 1, 2, SHADE); px(g, 28, 1, 4, 23, SHADE); px(g, 29, 0, 2, 1, SHADE);
+    });
     tap(lot.x, lot.y - 4, 16, 25, { kind: 'house', i });
     if (st === 'building') state.T.scaffold(c, lot.x, lot.y, tt);
     else (state.T.B[h.kind] || state.T.B.workshop)(c, lot.x, lot.y, st, state.reduce ? 0 : tt);
@@ -110,7 +115,12 @@ registerLayer({ z: 70, draw(c, scene, t) {
     if (st === 'blocked') ring(c, lot.x + 8, lot.y + 19, tt);
     // Busy: smoke from the chimney while anyone works inside.
     if ((st === 'working' || (h.subagents || []).length) && !state.reduce) puffs(c, lot.x + 3, lot.y - 3, tt + 400, ...state.T.steam);
-    if (st === 'unknown') R(c, lot.x - 1, lot.y - 6, 18, 23, 'rgba(32,34,60,.6)');
+    // Fog over a house whose agent can't be read, thinning at its edges (2×, #461).
+    if (st === 'unknown') detail(c, lot.x - 1, lot.y - 6, g => {
+      px(g, 2, 2, 32, 42, 'rgba(32,34,60,.6)');
+      px(g, 0, 4, 2, 38, 'rgba(32,34,60,.35)'); px(g, 34, 4, 2, 38, 'rgba(32,34,60,.35)');
+      px(g, 4, 0, 28, 2, 'rgba(32,34,60,.35)'); px(g, 4, 44, 28, 2, 'rgba(32,34,60,.35)');
+    });
     const away = state.porters.some(p => p.seed === h.id && t >= p.t0 && at.get(p));
     if (!away) {
       // Just finished: standing at the door under a ✓. Otherwise idle: sitting on the doorstep, asleep.
@@ -144,7 +154,8 @@ registerLayer({ z: 70, draw(c, scene, t) {
       tap(lot.x + 11, lot.y + 16, 5, 5, { kind: 'crate', n: h.issue, at: 'house', i });
       if (!state.reduce && !QUIET_ACTIONS.has(h.action) && blink(tt, 150)) {
         const k = Math.floor(tt / 150) % 3;
-        R(c, lot.x + 12 + k, lot.y + 14 - (k % 2), 1, 1, P.gold); R(c, lot.x + 15 - k, lot.y + 15, 1, 1, P.white);
+        // Sparks off the work, in half pixels (2×, #461).
+        detail(c, lot.x + 12, lot.y + 14, g => { px(g, 2 * k, -(k % 2) * 2, 1, 1, P.gold); px(g, 2 * k + 1, 1 - (k % 2) * 2, 1, 1, '#f8e070'); px(g, 6 - 2 * k, 2, 1, 1, P.white); px(g, 7 - 2 * k, 3, 1, 1, P.white); });
       }
     }
     if (st === 'working' && h.action) actionSign(c, lot.x + 4, lot.y - 4, h.action);
