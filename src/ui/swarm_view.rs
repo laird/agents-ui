@@ -648,6 +648,21 @@ impl SwarmView {
         result
     }
 
+    /// Close the `/` search (Enter) and keep the issue that was selected in the
+    /// search's rows selected among all of them, rather than whichever issue
+    /// now sits at the same row.
+    pub fn close_search_keeping_selection(&mut self, issues: &[GitHubIssue]) {
+        let picked = self
+            .issues_table
+            .selected()
+            .and_then(|i| self.apply_filters(issues).get(i).map(|issue| issue.number));
+        self.issue_search = None;
+        if let Some(n) = picked {
+            let row = self.apply_filters(issues).iter().position(|i| i.number == n);
+            self.issues_table.select(Some(row.unwrap_or(0)));
+        }
+    }
+
     /// Render a full-screen issue list for the given project.
     pub fn render_issue_list(
         &mut self,
@@ -1696,6 +1711,22 @@ mod tests {
         let results = view.apply_filters(&issues);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].number, 42);
+    }
+
+    #[test]
+    fn closing_search_keeps_the_picked_issue_selected() {
+        let mut view = SwarmView::new();
+        let issues = vec![
+            make_issue(1, "Add dark mode", &[]),
+            make_issue(2, "Fix login bug", &[]),
+            make_issue(3, "Fix logout flow", &[]),
+        ];
+        view.issue_search = Some(TextInput::with_text("fix".to_string()));
+        view.issues_table.select(Some(1)); // #3, the second match
+        view.close_search_keeping_selection(&issues);
+        assert!(view.issue_search.is_none());
+        let selected = view.issues_table.selected().unwrap();
+        assert_eq!(view.apply_filters(&issues)[selected].number, 3);
     }
 
     #[test]

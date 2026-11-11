@@ -2869,7 +2869,12 @@ impl App {
                             self.swarm_view.issues_table.select(Some(0));
                         }
                         KeyCode::Enter => {
-                            self.swarm_view.issue_search = None;
+                            // Keep the issue that was picked selected once every row is back.
+                            let issues = self.swarms.get(swarm_idx)
+                                .and_then(|s| self.issue_caches.get(&s.project_name))
+                                .map(|c| c.issues.as_slice())
+                                .unwrap_or(&[]);
+                            self.swarm_view.close_search_keeping_selection(issues);
                         }
                         KeyCode::Down | KeyCode::Char('j') => {
                             self.swarm_view.next_issue(search_filtered_count);
