@@ -648,6 +648,15 @@ impl SwarmView {
         result
     }
 
+    /// The issue on the selected row of the rows `apply_filters` gives: what the
+    /// Issues panel and the full-screen list both show, so what their actions on
+    /// the selection act on (#469).
+    pub fn selected_filtered_issue<'a>(&self, issues: &'a [GitHubIssue]) -> Option<&'a GitHubIssue> {
+        self.issues_table
+            .selected()
+            .and_then(|i| self.apply_filters(issues).get(i).copied())
+    }
+
     /// Close the `/` search (Enter) and keep the issue that was selected in the
     /// search's rows selected among all of them, rather than whichever issue
     /// now sits at the same row.
@@ -671,15 +680,9 @@ impl SwarmView {
         project_name: &str,
         issues: &[GitHubIssue],
     ) {
-        let filtered: Vec<&GitHubIssue> = issues
-            .iter()
-            .filter(|i| i.matches_filter(self.issue_filter))
-            .filter(|i| {
-                self.issue_search
-                    .as_ref()
-                    .map_or(true, |s| matches_search(i, s.text()))
-            })
-            .collect();
+        // The same rows, in the same order, as the key handler acts on (#469):
+        // every filter (state, type, priority, search), sorted as apply_filters sorts.
+        let filtered = self.apply_filters(issues);
 
         let avail = issues.iter().filter(|i| !i.is_blocked() && !i.is_being_worked()).count();
         let blocked = issues.iter().filter(|i| i.is_blocked()).count();
@@ -1560,6 +1563,61 @@ mod tests {
         assert!(rendered.contains("Issues (all: 1)"));
         assert!(rendered.contains("demo"));
         assert!(rendered.contains("#12"));
+    }
+
+    /// #469: the full-screen issue list (`L`) draws the rows its key handler
+    /// acts on. With a type filter set, row *i* on screen is `apply_filters`'s
+    /// row *i*, and the highlighted row is the issue Enter, `d` and `x` take.
+    #[test]
+    fn issue_list_rows_are_the_rows_its_actions_use() {
+        use crate::model::issue::{IssuePriority, IssueType};
+        let issue = |number: u32, title: &str, priority: IssuePriority, issue_type: IssueType| GitHubIssue {
+            number,
+            title: title.to_string(),
+            state: IssueState::Open,
+            priority,
+            issue_type,
+            labels: vec![],
+            is_working: false,
+            assigned_worker: None,
+            updated_at: None,
+            url: None,
+            depends_on: Vec::new(),
+        };
+        let issues = vec![
+            issue(5, "five", IssuePriority::P3, IssueType::Bug),
+            issue(6, "six", IssuePriority::P1, IssueType::Enhancement),
+            issue(7, "seven", IssuePriority::P1, IssueType::Bug),
+            issue(8, "eight", IssuePriority::P2, IssueType::Bug),
+        ];
+        let mut view = SwarmView::new();
+        view.issue_type_filter = Some(IssueType::Bug);
+        view.issues_table.select(Some(1));
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 16)).unwrap();
+        terminal.draw(|f| view.render_issue_list(f, f.area(), "demo", &issues)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let width = buffer.area.width as usize;
+        let lines: Vec<String> = buffer
+            .content()
+            .chunks(width)
+            .map(|row| row.iter().map(|cell| cell.symbol()).collect())
+            .collect();
+        let shown: Vec<u32> = lines
+            .iter()
+            .filter_map(|l| l.trim_start_matches(['│', ' ']).split_whitespace().next()?.parse().ok())
+            .collect();
+
+        let acted_on: Vec<u32> = view.apply_filters(&issues).iter().map(|i| i.number).collect();
+        assert_eq!(acted_on, vec![7, 8, 5], "bugs only, by priority");
+        assert_eq!(shown, acted_on, "the list shows the rows its actions index into");
+        assert_eq!(view.selected_filtered_issue(&issues).map(|i| i.number), Some(8));
+        // The highlighted row on screen is #8's: the issue the actions take.
+        let highlighted: Vec<usize> = (0..lines.len())
+            .filter(|&y| buffer[(10, y as u16)].bg == theme::selected_style().bg.unwrap())
+            .collect();
+        let row_8 = lines.iter().position(|l| l.contains("eight")).expect("row for #8");
+        assert_eq!(highlighted, vec![row_8], "the highlighted row is #8, the issue acted on");
     }
 
     #[test]

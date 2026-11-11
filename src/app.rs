@@ -3693,17 +3693,15 @@ impl App {
     }
 
     async fn handle_issue_list_key(&mut self, key: KeyEvent, swarm_idx: usize) -> Result<()> {
+        // Every count and action here uses the rows the list draws:
+        // apply_filters, with every filter and the search (#469).
+        let shown_count = self.swarms.get(swarm_idx)
+            .and_then(|s| self.issue_caches.get(&s.project_name))
+            .map(|c| self.swarm_view.apply_filters(&c.issues).len())
+            .unwrap_or(0);
         // Search mode: route keys to the TextInput
         if self.swarm_view.issue_search.is_some() {
-            let search_filtered_count = if let Some(swarm) = self.swarms.get(swarm_idx) {
-                if let Some(cache) = self.issue_caches.get(&swarm.project_name) {
-                    let q = self.swarm_view.issue_search.as_ref().unwrap().text();
-                    cache.issues.iter()
-                        .filter(|i| i.matches_filter(self.swarm_view.issue_filter))
-                        .filter(|i| crate::ui::swarm_view::matches_search(i, q))
-                        .count()
-                } else { 0 }
-            } else { 0 };
+            let search_filtered_count = shown_count;
 
             match key.code {
                 KeyCode::Esc => {
@@ -3711,7 +3709,12 @@ impl App {
                     self.swarm_view.issues_table.select(Some(0));
                 }
                 KeyCode::Enter => {
-                    self.swarm_view.issue_search = None;
+                    // Keep the issue that was picked selected once every row is back.
+                    let issues = self.swarms.get(swarm_idx)
+                        .and_then(|s| self.issue_caches.get(&s.project_name))
+                        .map(|c| c.issues.as_slice())
+                        .unwrap_or(&[]);
+                    self.swarm_view.close_search_keeping_selection(issues);
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
                     self.swarm_view.next_issue(search_filtered_count);
@@ -3746,10 +3749,7 @@ impl App {
             return Ok(());
         }
 
-        let issue_count = self.swarms.get(swarm_idx)
-            .and_then(|s| self.issue_caches.get(&s.project_name))
-            .map(|c| c.issues.iter().filter(|i| i.matches_filter(self.swarm_view.issue_filter)).count())
-            .unwrap_or(0);
+        let issue_count = shown_count;
 
         match key.code {
             KeyCode::Esc => {
@@ -3777,13 +3777,11 @@ impl App {
             KeyCode::Enter => {
                 // Drill into issue detail view
                 if let Some(swarm) = self.swarms.get(swarm_idx) {
-                    let issues: Vec<&GitHubIssue> = self.issue_caches
+                    let issues = self.issue_caches
                         .get(&swarm.project_name)
-                        .map(|c| c.issues.iter().filter(|i| i.matches_filter(self.swarm_view.issue_filter)).collect())
-                        .unwrap_or_default();
-                    if let Some(issue) = self.swarm_view.selected_issue()
-                        .and_then(|idx| issues.get(idx))
-                    {
+                        .map(|c| c.issues.as_slice())
+                        .unwrap_or(&[]);
+                    if let Some(issue) = self.swarm_view.selected_filtered_issue(issues) {
                         let num = issue.number;
                         let repo_path = swarm.repo_path.clone();
                         let transport = self.transport.clone();
