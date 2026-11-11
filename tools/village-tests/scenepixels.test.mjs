@@ -7,11 +7,11 @@
 // the bare ×DETAIL transform (prepare(), detail.js) is drawn in scene pixels.
 // Each is traced to the function that drew it, and none may come from a
 // sprite: the buildings, crates, people and their props, and every mark #455
-// redrew at 2× inside detail(), and the ground, roads, yards and water (#471).
-// Scenery that still paints in scene pixels (trees, the lock, harbour and ship, the environment
-// row, banners, barges, Medieval's decoration and hedge, shadows) is listed in
-// SCENERY,
-// so a new caller has to be named there or drawn at 2×.
+// redrew at 2× inside detail(), and now the trees and decoration (#473) and
+// the ground, roads, yards and water (#471). Scenery that still paints in
+// scene pixels (the lock, harbour and ship, the supply boat, the environment
+// row, banners, barges, shadows) is listed in SCENERY, so a new caller has to
+// be named there or drawn at 2×.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
