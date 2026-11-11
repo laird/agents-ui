@@ -1,10 +1,12 @@
 /* The Medieval village theme. */
-import { P, R, hash, shadow } from '../palette.js';
+import { P, R, SHADE, SHINE, hash, shadow } from '../palette.js';
 import { B, scaffold } from '../sprites/houses.js';
 import { crate } from '../crates.js';
-import { FLOWERS, board, boat, grass, hall, harbour, lock, path, ship, tree, water } from '../scenery.js';
+import { FLOWERS, boat, grass, harbour, lock, path, ship, tree, water } from '../scenery.js';
+import { board, dock, hall } from './medievalbuildings.js';
+import { drawn2x } from '../sprites/houseparts.js';
 import { detail } from '../detail.js';
-import { dither, px } from '../art2x.js';
+import { bricks, dither, px } from '../art2x.js';
 import { registerTheme } from './registry.js';
 
 /* ---------- Decoration ----------
@@ -90,22 +92,43 @@ const medievalBorder = (c, W, H) => {
 };
 
 /* The gatehouse on the road to the quay: a stone arch over the road, and one
- * inspection table per gate slot, its lamp lit while busy. `g` is
- * layout().gate; busy holds the busy slots (1-based). */
+ * inspection table per gate slot, its lantern lit while busy. `g` is
+ * layout().gate; busy holds the busy slots (1-based). Drawn at 2× (#463),
+ * in detail pixels from the scene's origin. */
 function gatehouse(c, g, t, busy) {
   const { x0, y, w, rx, rw } = g;
-  R(c, rx - 3, y + 2, 2, 20, P.o); R(c, rx - 2, y + 3, 1, 18, P.stone);
-  R(c, rx + rw + 1, y + 2, 2, 20, P.o); R(c, rx + rw + 1, y + 3, 1, 18, P.stone);
-  R(c, rx - 4, y, rw + 8, 4, P.o); R(c, rx - 3, y + 1, rw + 6, 2, P.stoneL);
-  R(c, x0, y + 4, w, 19, P.o); R(c, x0 + 1, y + 5, w - 2, 17, P.stone);
-  for (let yy = y + 7; yy < y + 21; yy += 3) for (let xx = x0 + 2 + ((yy % 2) ? 2 : 0); xx < x0 + w - 2; xx += 5) R(c, xx, yy, 1, 1, P.stoneD);
-  R(c, x0 - 1, y, w + 2, 5, P.o); R(c, x0, y + 1, w, 3, P.red);
-  g.tables.forEach(([tx, ty], k) => {
-    const on = busy.has(k + 1);
-    R(c, tx + 4, ty - 9, 6, 6, P.o); R(c, tx + 5, ty - 8, 4, 4, on ? P.lamp : P.dark);
-    R(c, tx, ty + 5, 9, 2, P.o); R(c, tx + 1, ty + 5, 7, 1, P.wood); R(c, tx + 1, ty + 7, 1, 2, P.woodD); R(c, tx + 7, ty + 7, 1, 2, P.woodD);
+  detail(c, 0, 0, d => {
+    const X = 2 * x0, Y = 2 * y, W = 2 * w, RX = 2 * rx, RW = 2 * rw;
+    // The arch: two coursed pillars under a lintel with its keystone.
+    [RX - 6, RX + RW + 2].forEach(k => {
+      px(d, k, Y + 4, 4, 40, P.o); px(d, k + 1, Y + 5, 2, 38, P.stone); px(d, k + 1, Y + 5, 1, 38, P.stoneL);
+      for (let j = Y + 9; j < Y + 42; j += 6) px(d, k + 1, j, 2, 1, P.stoneD);
+    });
+    px(d, RX - 8, Y, RW + 16, 8, P.o); px(d, RX - 7, Y + 1, RW + 14, 6, P.stoneL);
+    for (let k = RX - 4; k < RX + RW + 6; k += 5) px(d, k, Y + 2, 1, 5, P.stone);
+    px(d, RX + (RW >> 1) - 2, Y + 1, 4, 6, P.stone); px(d, RX - 7, Y + 6, RW + 14, 1, P.stone);
+    // The gatehouse itself: dressed stone under a tiled red roof.
+    px(d, X, Y + 8, W, 38, P.o); px(d, X + 1, Y + 9, W - 2, 36, P.stone);
+    bricks(d, X + 1, Y + 11, W - 2, 34, 10, 5, P.stoneD);
+    px(d, X + W - 5, Y + 9, 4, 36, SHADE);
+    px(d, X - 2, Y, W + 4, 10, P.o); px(d, X - 1, Y + 1, W + 2, 8, P.red);
+    for (let j = Y + 4, n = 0; j < Y + 9; j += 3, n++) {
+      px(d, X - 1, j, W + 2, 1, P.redD);
+      for (let k = X + 1 + (n % 2) * 3; k < X + W; k += 6) px(d, k, j - 2, 1, 2, P.redD);
+    }
+    px(d, X - 1, Y + 1, W + 2, 1, SHINE); px(d, X + 1, Y + 10, W - 2, 1, SHADE);
+    g.tables.forEach(([tx, ty], k) => {
+      const on = busy.has(k + 1), TX = 2 * tx, TY = 2 * ty;
+      // A lantern on the wall over the table, and the table on its legs.
+      px(d, TX + 8, TY - 18, 12, 12, P.o); px(d, TX + 10, TY - 16, 8, 8, on ? P.lamp : P.dark);
+      px(d, TX + 13, TY - 16, 2, 8, P.o); px(d, TX + 10, TY - 13, 8, 1, P.o);
+      if (on) { px(d, TX + 11, TY - 15, 1, 2, P.white); px(d, TX + 10, TY - 9, 8, 1, P.gold); }
+      px(d, TX, TY + 10, 18, 4, P.o); px(d, TX + 1, TY + 10, 16, 2, P.wood); px(d, TX + 1, TY + 10, 16, 1, P.woodL);
+      [TX + 2, TX + 14].forEach(lx => px(d, lx, TY + 14, 2, 4, P.woodD));
+    });
   });
 }
+drawn2x(gatehouse);
 
 export const MEDIEVAL = {
   name: 'Medieval village',
@@ -114,7 +137,7 @@ export const MEDIEVAL = {
   weather: { style: 'storm', cloud: '#50506a', cloudD: '#30303f', rain: '#a8d0f0', tint: 'rgba(16,20,44,0.32)', flash: 'rgba(255,255,236,0.38)', alarm: '#f03030' },
   labels: { docks: 'Docks', board: 'Notice board', houses: 'Houses', quay: 'Quay', castle: 'Harbour', hall: 'Castle', ship: 'Ship', sails: 'sails', gate: 'Gatehouse' },
   ground: grass, road: path, yard: path, channel: water,
-  dock(c, x, y, w) { R(c, x, y, w, 7, P.o); R(c, x + 1, y, w - 2, 6, P.plank); },
+  dock,
   tree, hall, board, crate, B, scaffold, gate: lock, destination: harbour, vessel: ship, supply: boat, gatehouse, decor: medievalDecor, border: medievalBorder,
   // Deck slots for cargo (from the harbour's x and the canal's y), the "+N"
   // badge past them, and the box the ship takes up.

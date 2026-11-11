@@ -1,11 +1,10 @@
 /* Things and scenery: speech bubbles, "zzz", "+N" badges, grass, paths, water, trees,
  * the castle, the board, the locks, the harbour, the ship and the supply boat. */
 import { state } from './state.js';
-import { NOTECOL, P, R, ROPE, STATE, blink, glassOf, hash, shadow } from './palette.js';
+import { NOTECOL, P, R, ROPE, STATE, blink, hash, shadow } from './palette.js';
 import { crate } from './crates.js';
 import { detail } from './detail.js';
 import { bricks, disc, planks, px } from './art2x.js';
-import { note } from './cvdmarks.js';
 import { bitmap, rounded, tail, write } from './glyphs2x.js';
 
 /* ---------- People and things ---------- */
@@ -154,33 +153,6 @@ export function tree(c, x, y) {
     [[7, 8], [13, 12], [15, 5], [9, 14]].forEach(([dx, dy]) => { px(g, dx, dy, 3, 1, P.leafL); px(g, dx + 1, dy + 1, 2, 1, P.leafD); });
     if (hash(x, y) < 0.3) [[8, 12], [17, 8]].forEach(([fx, fy]) => { px(g, fx, fy, 2, 2, '#e05050'); px(g, fx, fy, 1, 1, '#f8a0a0'); });
   });
-}
-/* The manager's castle: a keep with banners between two round-roofed
- * towers, behind a crenellated curtain wall. 40 wide, centred on the
- * 32-wide hall slot; the gate opens when the manager waits on you. */
-export function hall(c, x, y, st) {
-  const x0 = x - 4, gy = y + 22, lit = glassOf(st);
-  R(c, x0 + 12, y - 2, 16, 20, P.o); R(c, x0 + 13, y - 1, 14, 18, P.stoneL);
-  for (let k = 0; k < 16; k += 3) R(c, x0 + 12 + k, y - 4, 2, 2, P.o);
-  R(c, x0 + 16, y + 3, 2, 4, lit); R(c, x0 + 22, y + 3, 2, 4, lit);
-  [x0 + 14, x0 + 25].forEach(bx => { R(c, bx, y + 1, 2, 7, '#804098'); R(c, bx, y + 1, 2, 1, P.gold); R(c, bx, y + 8, 1, 1, '#804098'); });
-  R(c, x0 + 20, y - 11, 1, 7, P.stoneD); R(c, x0 + 21, y - 11, 5, 3, P.o); R(c, x0 + 21, y - 10, 4, 1, P.gold);
-  R(c, x0, gy - 12, 40, 12, P.o); R(c, x0 + 1, gy - 11, 38, 10, P.stone);
-  for (let k = 0; k < 40; k += 4) R(c, x0 + k, gy - 14, 2, 2, P.o);
-  for (let yy = gy - 9; yy < gy - 1; yy += 3) for (let xx = x0 + 2 + ((yy % 2) ? 2 : 0); xx < x0 + 38; xx += 5) R(c, xx, yy, 1, 1, P.stoneD);
-  [x0, x0 + 32].forEach(tx => {
-    R(c, tx, y - 4, 8, gy - y + 4, P.o); R(c, tx + 1, y - 3, 6, gy - y + 2, P.stoneL);
-    R(c, tx + 3, y + 3, 2, 3, lit);
-    for (let r = 0; r < 4; r++) { R(c, tx + 3 - r, y - 8 + r, 2 + 2 * r, 1, P.o); if (r) R(c, tx + 4 - r, y - 8 + r, 2 * r, 1, r % 2 ? P.red : P.redD); }
-  });
-  R(c, x0 + 16, gy - 9, 8, 9, P.o);
-  if (st === 'blocked') R(c, x0 + 17, gy - 8, 6, 8, P.o);
-  else { R(c, x0 + 17, gy - 8, 6, 8, P.woodD); for (let k = 0; k < 6; k += 2) R(c, x0 + 17 + k, gy - 8, 1, 8, P.stoneD); }
-}
-export function board(c, x, y, notes) {
-  R(c, x + 1, y + 9, 1, 6, P.woodD); R(c, x + 16, y + 9, 1, 6, P.woodD);
-  R(c, x, y, 18, 11, P.o); R(c, x + 1, y + 1, 16, 9, P.wood);
-  notes.slice(0, 8).forEach((n, i) => note(c, x + 2 + (i % 4) * 4, y + 2 + Math.floor(i / 4) * 4, n.label, P.white));
 }
 export function lock(c, x, cy, open, flag) {
   R(c, x - 1, cy - 4, 8, 4, P.o); R(c, x, cy - 3, 6, 2, P.stone);
