@@ -5,7 +5,7 @@ import { detail } from '../detail.js';
 import { disc, dither, px } from '../art2x.js';
 import { CRATE_W, CRATE_H, seal, stencil } from '../crates.js';
 import { registerTheme } from './registry.js';
-import { MB, MC, MLIT, MSHADE, mWin } from './modernhouses.js';
+import { BLIND, CRANE_D, MB, MC, MLIT, MSHADE, mWin } from './modernhouses.js';
 
 /* The theme's colours, kept with its offices (modernhouses.js). */
 export const M = MC;
@@ -102,7 +102,7 @@ export const MODERN = {
       const lit = mWin(st);
       for (let wy = -12; wy < 24; wy += 6) for (let wx = 22; wx < 58; wx += 6) {
         px(g, wx, wy, 4, 4, lit); px(g, wx, wy + 3, 4, 1, MSHADE);
-        if (st === 'working') px(g, wx, wy, 4, 1, '#e8c060'); else if (lit === M.glassL) px(g, wx, wy, 1, 1, P.white);
+        if (st === 'working') px(g, wx, wy, 4, 1, BLIND); else if (lit === M.glassL) px(g, wx, wy, 1, 1, P.white);
       }
       [26, 38, 50].forEach(mx => { px(g, mx, -14, 1, 40, M.glassL); px(g, mx + 1, -14, 1, 40, M.glass); });
       for (let k = 0; k < 12; k++) px(g, 30 + k, -14 + 3 * k, 1, 2, MLIT);
@@ -171,9 +171,9 @@ export const MODERN = {
       }
       px(g, 2, 4, 2, 28, M.steelD); px(g, 28, 4, 2, 28, M.steelD);
       px(g, 14, -8, 4, 40, M.crane); px(g, 14, -8, 1, 40, P.o);
-      for (let yy = -4; yy < 32; yy += 4) px(g, 15, yy, 3, 1, '#b88810');
+      for (let yy = -4; yy < 32; yy += 4) px(g, 15, yy, 3, 1, CRANE_D);
       px(g, 4, -8, 26, 4, M.crane); px(g, 4, -8, 26, 1, '#f8e070');
-      for (let xx = 6; xx < 28; xx += 4) px(g, xx, -6, 2, 1, '#b88810');
+      for (let xx = 6; xx < 28; xx += 4) px(g, xx, -6, 2, 1, CRANE_D);
       if (blink(t, 90)) {
         const sx = 2 * (4 + Math.floor(hash(Math.floor(t / 90), 5) * 8));
         px(g, sx, 12, 2, 2, P.white); px(g, sx - 1, 12, 1, 1, P.gold); px(g, sx + 2, 13, 1, 1, P.gold);

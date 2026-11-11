@@ -23,7 +23,7 @@ export const MC = {
 };
 /* See-through shade and light, laid over whatever is under them. */
 export const MSHADE = 'rgba(32,32,48,0.28)', MLIT = 'rgba(255,255,255,0.32)';
-const CRANE_D = '#b88810', BLIND = '#e8c060';
+export const CRANE_D = '#b88810', BLIND = '#e8c060';
 
 export const mWin = st => st === 'working' ? P.lamp : (st === 'unknown' || st === 'stopped') ? P.dark : MC.glassL;
 
