@@ -91,5 +91,5 @@ test('lobes share one outline: no outline pixel inside where two discs overlap',
   assert.notEqual(at.get('8,5'), 'O', 'the overlap is filled');
   assert.equal(at.get('0,5'), 'O', 'the left edge is outlined');
   assert.equal(at.get('15,5'), 'O', 'the right edge is outlined');
-  assert.ok(Math.max(...[...at.keys()].map(k => +k.split(',')[0])) === 15, 'it spans both discs');
+  assert.equal(Math.max(...[...at.keys()].map(k => +k.split(',')[0])), 15, 'it spans both discs');
 });

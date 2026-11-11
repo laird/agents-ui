@@ -28,7 +28,7 @@ function crystal(g, cx, top, w, h, cols) {
 }
 /* A glowing mushroom: a dome cap `w` wide at (x, y) on a pale stem `stem`
  * tall, lit on top, its gills shaded underneath, spots on the cap. */
-const GLOW_M = { light: '#ff9ce0', fill: F.magenta, dark: F.magentaD }, GLOW_C = { light: F.cyanL, fill: F.cyan, dark: F.cyanD };
+const GLOW_M = { light: '#ff9ce0', fill: F.magenta, dark: F.magentaD }, GLOW_C = CYAN;
 function mushroom(g, x, y, w, stem, cols) {
   const sx = x + (w >> 1) - 1, ch = Math.max(3, w >> 1);
   px(g, sx - 1, y + ch - 1, 4, stem + 1, P.o); px(g, sx, y + ch - 1, 2, stem, F.hullL); px(g, sx + 1, y + ch, 1, stem - 1, F.hull);

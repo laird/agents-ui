@@ -46,7 +46,7 @@ test('a decoration has its outline and its shadow', () => {
   for (const [name, [k]] of Object.entries(DECOR)) {
     assert.ok(drawn(c => T.decor(c, 40, 30, k, 0)).some(r => r.col === P.o), `${name} is outlined`);
   }
-  // Everything but the flowerbed (its box sits flat on the ground) casts a soft shadow.
+  // Everything but the flowerbed and the log (both lie flat on the ground, as at 1×) casts a soft shadow.
   for (const name of ['bush', 'rocks', 'haystack', 'fence'])
     assert.ok(drawn(c => T.decor(c, 40, 30, DECOR[name][0], 0)).some(r => r.col === SHADE), `${name} casts a shadow`);
 });
