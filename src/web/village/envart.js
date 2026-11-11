@@ -223,7 +223,7 @@ const ENV_FONT = Object.fromEntries(Object.entries({
   Z: '###..#.#.#..###', 0: '####.##.##.####', 1: '.#.##..#..#.###', 2: '##...#.#.#..###', 3: '##...#.#...###.',
   4: '#.##.####..#..#', 5: '####..##...###.', 6: '.###..####.####', 7: '###..#.#..#..#.', 8: '####.#####.####',
   9: '####.####..###.', '-': '......###......', '.': '.............#.', _: '............###',
-}).map(([ch, cells]) => [ch, cells.padEnd(15, '.').match(/.../g)]));
+}).map(([ch, cells]) => [ch, cells.match(/.../g)]));
 /* At most seven letters fit across the board. */
 export const signText = name => String(name || '').toUpperCase().slice(0, 7);
 
