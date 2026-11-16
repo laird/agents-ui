@@ -6,7 +6,7 @@
 # USAGE:
 #   tools/omarchy-plugin/install.sh [--host <ssh host>] [--enable] [--uninstall] [--dry-run]
 #   tools/omarchy-plugin/install.sh --screensaver [--never-sleep] [--server URL]
-#                                   [--cycle S] [--dim H-H] [--sound] [--host <ssh host>] [--uninstall] [--dry-run]
+#                                   [page options] [--host <ssh host>] [--uninstall] [--dry-run]
 #   tools/omarchy-plugin/install.sh --notify [--server URL] [--quiet H-H]
 #                                   [--host <ssh host>] [--uninstall] [--dry-run]
 #
@@ -28,12 +28,8 @@
 #                  when idle (idle.lock: 0), so the village stays up for good.
 #                  For a status display like nuc-1; leave it off elsewhere.
 #   --server URL   the agents-tui server (default http://nuc-1:7890)
-#   --cycle S      seconds on each swarm when there are several (default 30, 0 stays)
-#   --dim H-H      dim between these hours, e.g. 23-7 (default: never dims)
-#   --sound        quiet sound cues on transitions: a bell when something starts
-#                  waiting on you, thunder and birdsong as the build breaks and
-#                  mends, a horn when a deploy reaches production. Silent in the
-#                  --dim hours. Off by default.
+#   The page options (--cycle, --dim, ...) are one file each in
+#   agents-village-screensaver/options/; --help lists them.
 #
 # Notifications (--notify): a desktop notification when a house or the
 # manager starts waiting on you, a merge bounces at the gate, the build breaks
@@ -57,9 +53,13 @@ QUIET=""
 NEVER_SLEEP=false
 SERVER="http://nuc-1:7890"
 SERVER_GIVEN=false
-CYCLE=30
-DIM=""
-SOUND=false
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The screensaver's page options, one file each (agents-village-screensaver/options/).
+# shellcheck source=agents-village-screensaver/options.sh
+. "$HERE/agents-village-screensaver/options.sh"
+saver_load_options
+SAVER_VALUES=(${SAVER_DEFAULTS[@]+"${SAVER_DEFAULTS[@]}"})
+SAVER_GIVEN=""   # the flags given, for the check below
 need() { [ "$2" -ge 2 ] || { echo "install.sh: $1 needs a value" >&2; exit 1; }; }
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -72,30 +72,53 @@ while [ $# -gt 0 ]; do
     --quiet) need "$1" $#; QUIET="$2"; shift 2 ;;
     --never-sleep|--no-lock) NEVER_SLEEP=true; shift ;;
     --server) need "$1" $#; SERVER="${2%/}"; SERVER_GIVEN=true; shift 2 ;;
-    --cycle) need "$1" $#; CYCLE="$2"; shift 2 ;;
-    --dim) need "$1" $#; DIM="$2"; shift 2 ;;
-    --sound) SOUND=true; shift ;;
-    -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
-    *) echo "install.sh: unknown argument: $1" >&2; exit 1 ;;
+    -h|--help)
+      sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'
+      echo; echo "The screensaver's page options (with --screensaver):"
+      i=0
+      while [ "$i" -lt "${#SAVER_FLAGS[@]}" ]; do
+        printf '  %-14s %s\n' "${SAVER_FLAGS[$i]} ${SAVER_HINTS[$i]}" "${SAVER_HELPS[$i]}"
+        i=$((i + 1))
+      done
+      exit 0 ;;
+    *)
+      if i=$(saver_option_index "$1"); then
+        need "$1" $#; SAVER_VALUES[$i]="$2"; SAVER_GIVEN="$SAVER_GIVEN $1"; shift 2
+      else
+        echo "install.sh: unknown argument: $1" >&2; exit 1
+      fi ;;
   esac
 done
-if [ "$SCREENSAVER" != true ] && { [ "$NEVER_SLEEP" = true ] || [ "$DIM" != "" ] || [ "$SOUND" = true ]; }; then
-  echo "install.sh: --never-sleep, --dim and --sound go with --screensaver" >&2; exit 1
+if [ "$SCREENSAVER" != true ] && { [ "$NEVER_SLEEP" = true ] || [ -n "$SAVER_GIVEN" ]; }; then
+  given=$SAVER_GIVEN
+  [ "$NEVER_SLEEP" != true ] || given=" --never-sleep$given"
+  echo "install.sh:$given go with --screensaver" >&2; exit 1
 fi
 [ "$SCREENSAVER" != true ] || [ "$NOTIFY" != true ] || { echo "install.sh: --screensaver and --notify install separately; run it once for each" >&2; exit 1; }
 [ "$NOTIFY" = true ] || [ "$QUIET" = "" ] || { echo "install.sh: --quiet goes with --notify" >&2; exit 1; }
 # Two different hours: Notify.js reads 7-7 as no quiet hours at all.
 [ -z "$QUIET" ] || { [[ $QUIET =~ ^([01]?[0-9]|2[0-3])-([01]?[0-9]|2[0-3])$ ]] && [ $((10#${BASH_REMATCH[1]})) -ne $((10#${BASH_REMATCH[2]})) ]; } \
   || { echo "install.sh: --quiet takes two different hours, like 23-7" >&2; exit 1; }
-[[ $CYCLE =~ ^[0-9]+$ ]] || { echo "install.sh: --cycle takes whole seconds" >&2; exit 1; }
-[ -z "$DIM" ] || [[ $DIM =~ ^([01]?[0-9]|2[0-3])-([01]?[0-9]|2[0-3])$ ]] || { echo "install.sh: --dim takes hours like 23-7" >&2; exit 1; }
+i=0
+while [ "$i" -lt "${#SAVER_KEYS[@]}" ]; do
+  [[ ${SAVER_VALUES[$i]} =~ ${SAVER_CHECKS[$i]} ]] || { echo "install.sh: ${SAVER_ERRORS[$i]}" >&2; exit 1; }
+  i=$((i + 1))
+done
+# The page options as CONFIGURE takes them (key, type, value; three words
+# each), and in words for a dry run.
+SAVER_ARGS=() SAVER_WORDS=""
+i=0
+while [ "$i" -lt "${#SAVER_KEYS[@]}" ]; do
+  SAVER_ARGS+=("${SAVER_KEYS[$i]}" "${SAVER_TYPES[$i]}" "${SAVER_VALUES[$i]}")
+  [ -z "${SAVER_VALUES[$i]}" ] || SAVER_WORDS="$SAVER_WORDS, ${SAVER_KEYS[$i]} ${SAVER_VALUES[$i]}"
+  i=$((i + 1))
+done
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ "$SCREENSAVER" = true ]; then
   ID="agents-ui.village-screensaver"
   NAME="agents-village-screensaver"
   # The files the plugin needs; tests stay in the repo.
-  FILES=(manifest.json Service.qml village-screensaver offline.html README.md)
+  FILES=(manifest.json Service.qml village-screensaver offline.html README.md options.sh options)
   WHAT="the Agents village screensaver"
 elif [ "$NOTIFY" = true ]; then
   ID="agents-ui.village-notify"
@@ -110,7 +133,7 @@ else
   WHAT="the Agents village widget"
 fi
 SRC="$HERE/$NAME"
-for f in "${FILES[@]}"; do [ -f "$SRC/$f" ] || { echo "install.sh: missing $SRC/$f" >&2; exit 1; }; done
+for f in "${FILES[@]}"; do [ -e "$SRC/$f" ] || { echo "install.sh: missing $SRC/$f" >&2; exit 1; }; done
 
 # On $HOST, a command runs in a login shell. ssh alone gives a non-login,
 # non-interactive shell, which lacks the session environment `omarchy` needs
@@ -192,10 +215,17 @@ mkdir -p "$dir" "$(dirname "$shell")"
 [ -f "$backup" ] || cp "$shell" "$backup"
 timeout=$(jq -r ".idle.screensaver // 150" "$backup")
 [ "$timeout" -gt 0 ] 2>/dev/null || timeout=150
-jq -n --arg server "$1" --argjson cycle "$2" --arg dim "$3" --argjson timeout "$timeout" --argjson sound "$5" \
-  "{server: \$server, cycle: \$cycle, dim: \$dim, timeout: \$timeout, sound: \$sound}" > "$dir/screensaver.json"
+server=$1; never=$2; shift 2
+# Then each page option: key, type (number or string), value.
+settings=$(jq -n --arg server "$server" --argjson timeout "$timeout" "{server: \$server, timeout: \$timeout}")
+while [ $# -ge 3 ]; do
+  if [ "$2" = number ]; then settings=$(printf "%s" "$settings" | jq --arg k "$1" --argjson v "$3" ".[\$k] = \$v")
+  else settings=$(printf "%s" "$settings" | jq --arg k "$1" --arg v "$3" ".[\$k] = \$v"); fi
+  shift 3
+done
+printf "%s\n" "$settings" > "$dir/screensaver.json"
 tmp=$(mktemp)
-jq --argjson never "$4" ".idle = ((.idle // {}) + {screensaver: 0} + (if \$never then {lock: 0} else {} end))" "$shell" > "$tmp"
+jq --argjson never "$never" ".idle = ((.idle // {}) + {screensaver: 0} + (if \$never then {lock: 0} else {} end))" "$shell" > "$tmp"
 cat "$tmp" > "$shell"; rm -f "$tmp"'
 RESTORE='shell="$HOME/.config/omarchy/shell.json"; dir="$HOME/.config/agents-ui"; backup="$dir/shell.json.before-screensaver"
 if [ -f "$backup" ] && [ -f "$shell" ]; then
@@ -255,11 +285,11 @@ if [ -z "$HOST" ]; then
   [ -L "$DEST" ] || [ ! -e "$DEST" ] || run rm -rf "$DEST"
   run ln -sfn "$SRC" "$DEST"
 else
-  run sh -c "mkdir -p \"\$HOME/$DEST_REL\" && rm -f \"\$HOME/$DEST_REL\"/*"
+  run sh -c "mkdir -p \"\$HOME/$DEST_REL\" && rm -rf \"\$HOME/$DEST_REL\"/*"
   if [ "$DRY_RUN" = true ]; then
     echo "would copy ${FILES[*]} to $HOST:~/$DEST_REL/"
   else
-    (cd "$SRC" && scp -q -p "${FILES[@]}" "$HOST:$DEST_REL/")
+    (cd "$SRC" && scp -q -p -r "${FILES[@]}" "$HOST:$DEST_REL/")
   fi
 fi
 shell_ok
@@ -272,8 +302,8 @@ if [ "$SCREENSAVER" = true ]; then
     echo "install.sh: Omarchy's own screensaver and idle settings were left as they were." >&2
     exit 1
   fi
-  run_script "write ~/.config/agents-ui/screensaver.json (server $SERVER, cycle ${CYCLE}s${DIM:+, dim $DIM}$([ "$SOUND" = true ] && echo ', sound on')) and set idle.screensaver to 0$([ "$NEVER_SLEEP" = true ] && echo ' and idle.lock to 0') in ~/.config/omarchy/shell.json" \
-    "$CONFIGURE" sh "$SERVER" "$CYCLE" "$DIM" "$NEVER_SLEEP" "$SOUND"
+  run_script "write ~/.config/agents-ui/screensaver.json (server $SERVER$SAVER_WORDS) and set idle.screensaver to 0$([ "$NEVER_SLEEP" = true ] && echo ' and idle.lock to 0') in ~/.config/omarchy/shell.json" \
+    "$CONFIGURE" sh "$SERVER" "$NEVER_SLEEP" ${SAVER_ARGS[@]+"${SAVER_ARGS[@]}"}
   echo "Installed $WHAT${HOST:+ on $HOST}: after the idle time Omarchy's screensaver used, the village opens full screen; any input closes it."
   echo "It shows $SERVER. Try it now, from a terminal${HOST:+ on $HOST}: ~/$DEST_REL/village-screensaver force"
   if [ "$NEVER_SLEEP" = true ]; then
