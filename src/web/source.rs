@@ -108,7 +108,8 @@ pub trait IssueTracker: Send + Sync {
     /// Open issues for the repository at `repo`; none when it can't be read.
     fn issues<'a>(&'a self, transport: &'a ServerTransport, repo: &'a Path, project: &'a str) -> BoxFuture<'a, Vec<IssueSnapshot>>;
     /// Which subtasks make each open feature (a parent issue split into
-    /// subtasks); none when the tracker can't say.
+    /// subtasks), and each recently closed one marked `closed`; none when the
+    /// tracker can't say.
     fn features<'a>(&'a self, _transport: &'a ServerTransport, _repo: &'a Path) -> BoxFuture<'a, Vec<FeatureLink>> {
         Box::pin(async { Vec::new() })
     }
@@ -209,8 +210,11 @@ impl IssueTracker for GitHubIssues {
     }
     fn features<'a>(&'a self, transport: &'a ServerTransport, repo: &'a Path) -> BoxFuture<'a, Vec<FeatureLink>> {
         Box::pin(async move {
-            let parents = crate::github::fetch_feature_parents(transport, repo).await;
-            self.links.get(transport, repo, &parents).await
+            let (open, closed) = crate::github::fetch_feature_parents(transport, repo).await;
+            let mut links = self.links.get(transport, repo, &open).await;
+            let ended = self.links.get(transport, repo, &closed).await.into_iter().map(|l| FeatureLink { closed: true, ..l });
+            links.extend(ended);
+            links
         })
     }
     fn merge_comments<'a>(&'a self, transport: &'a ServerTransport, repo: &'a Path) -> BoxFuture<'a, Vec<(u32, String, String)>> {
@@ -784,6 +788,7 @@ mod tests {
                 flaky: Vec::new(),
                 github: None,
                 features: Vec::new(),
+                shipped: Vec::new(),
             };
             Box::pin(async move { vec![Reading { village, issues: Vec::new() }] })
         }

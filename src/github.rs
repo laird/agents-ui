@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 
 use crate::model::issue::{
     FEATURE_LINK_QUERY, FEATURE_PARENTS_QUERY, FeatureLink, GhIssueJson, GitHubIssue,
-    feature_link_from_json, feature_parents_from_json, subtask_search_query,
+    closed_feature_parents_from_json, feature_link_from_json, feature_parents_from_json, subtask_search_query,
 };
 use crate::project_management::ProjectManagementClient;
 use crate::transport::ServerTransport;
@@ -471,9 +471,10 @@ pub async fn fetch_feature_link(
     feature_link_from_json(&output.stdout)
 }
 
-/// The repository's open feature parents: issues with sub-issues, or labelled
-/// `decomposed`. One GraphQL round trip; none when `gh` fails.
-pub async fn fetch_feature_parents(transport: &ServerTransport, repo_path: &Path) -> Vec<u32> {
+/// The repository's feature parents, `(open, recently closed)`: issues with
+/// sub-issues, or labelled `decomposed`. One GraphQL round trip; none when
+/// `gh` fails.
+pub async fn fetch_feature_parents(transport: &ServerTransport, repo_path: &Path) -> (Vec<u32>, Vec<u32>) {
     let args: Vec<String> = [
         "api",
         "graphql",
@@ -488,14 +489,14 @@ pub async fn fetch_feature_parents(transport: &ServerTransport, repo_path: &Path
     .chain(std::iter::once(format!("query={FEATURE_PARENTS_QUERY}")))
     .collect();
     match gh_repo_output(transport, repo_path, &args).await {
-        Ok(o) if o.status.success() => feature_parents_from_json(&o.stdout),
+        Ok(o) if o.status.success() => (feature_parents_from_json(&o.stdout), closed_feature_parents_from_json(&o.stdout)),
         Ok(o) => {
             tracing::debug!("feature parents: {}", String::from_utf8_lossy(&o.stderr).trim());
-            Vec::new()
+            Default::default()
         }
         Err(e) => {
             tracing::debug!("feature parents: {e}");
-            Vec::new()
+            Default::default()
         }
     }
 }

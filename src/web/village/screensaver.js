@@ -16,6 +16,7 @@ import { state } from './state.js';
 import { buildEntry, staleWords, cycleOrder, dimmedAt, dismisses, driftAt, gateWords, saverOptions, saverSummary } from './saver.js';
 import { OVERVIEW_NAME, nextSaverScene, overviewIslands, overviewWords } from './overviewmodel.js';
 import { esc, fit } from './panels.js';
+import { shippedLine } from './shipdecide.js';
 import { placeOverlays } from './registry.js';
 import { RECAP_MS, recapHeading, recapLines, recapModel, recapSince } from './recap.js';
 
@@ -53,6 +54,9 @@ function renderSaverStrip(box, lastOk) {
   const stops = s.stops.map(st => `<span class="ss-item"><b>${st.count}</b> ${esc(st.name)}</span>`).join('');
   const b = buildEntry(s.build);
   const build = b ? `<span class="ss-item ss-build${b.red ? ' ss-red' : ''}"><b>${esc(b.text)}</b>${b.detail ? ' ' + esc(b.detail) : ''}</span>` : '';
+  // An epic that reached production lately (#482): "Shipped: <epic>".
+  const shippedNow = shippedLine(v.shipped, Date.now());
+  const shipped = shippedNow ? `<span class="ss-item ss-shipped">★ <b>${esc(shippedNow)}</b></span>` : '';
   box.innerHTML = `<div class="ss-row">
       <span class="ss-name">${esc(title)}</span>
       ${build}
@@ -64,6 +68,7 @@ function renderSaverStrip(box, lastOk) {
     </div>
     <div class="ss-row">
       <span class="ss-item${s.gate.failed ? ' ss-red' : ''}">Gate <b>${esc(gateWords(s.gate))}</b></span>
+      ${shipped}
       <span class="ss-item"><b>${s.quay}</b> at the quay</span>
       ${stops}
       ${s.landed ? `<span class="ss-item" title="Issues GitHub closed as completed today; the average is over the full days before today">` +

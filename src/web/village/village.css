@@ -225,6 +225,7 @@
   .ss-red, .ss-red b { color: #ff5a4a !important; }
   /* Held by a usage limit (#484): blue, as the well's hourglass; not red, it is not waiting on you. */
   .ss-limit, .ss-limit b { color: #7ab8f0 !important; }
+  .ss-shipped, .ss-shipped b { color: #ffd84a !important; }
   .ss-time { margin-left: auto; font-weight: 400; color: var(--ink-dim); }
   .ss-wait { margin-left: auto; }
   /* "Since you last looked" (#479): a card over the dimmed map for 20 s. */

@@ -505,6 +505,9 @@ pub struct VillageSnapshot {
     /// Parent issues split into subtasks, followed from spec to production.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub features: Vec<super::feature::Feature>,
+    /// Epics that reached the last stop today, newest first (#482).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shipped: Vec<super::feature::Shipped>,
     /// The integration branch's build health (`build.rs`): CI, the sentinel,
     /// the merge gate, or what an outside report says.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1183,13 +1186,16 @@ pub struct SwarmVillages {
     since: SinceMemory,
     /// Each repo's conflicted files by issue, kept after the job's log is overwritten.
     conflicts: std::sync::Mutex<HashMap<String, HashMap<u32, Vec<String>>>>,
+    /// Per repo, the epics that shipped today (#482): a voyage is reported
+    /// for an hour, the flag flies for the day.
+    shipped: std::sync::Mutex<HashMap<String, super::feature::ShipMemory>>,
     /// CI answers per repo, re-asked when the tip moves (`build.rs`).
     ci: super::build::CiCache,
 }
 
 impl SwarmVillages {
     pub fn new(issues: Box<dyn IssueTracker>, pipeline: Box<dyn PipelineSource>, activity: Box<dyn ActivitySource>) -> Self {
-        Self { issues, pipeline, activity, extras: TtlCache::new(extras_ttl()), since: Default::default(), conflicts: Default::default(), ci: Default::default() }
+        Self { issues, pipeline, activity, extras: TtlCache::new(extras_ttl()), since: Default::default(), conflicts: Default::default(), shipped: Default::default(), ci: Default::default() }
     }
 
     async fn village(&self, transport: &ServerTransport, swarm: &SwarmSnapshot) -> Reading {
@@ -1254,8 +1260,15 @@ impl SwarmVillages {
         village.pipeline.merge_stats = merge_stats;
         village.flaky = flaky;
         self.since.stamp(&swarm.repo_path, &mut village.houses, chrono::Utc::now());
-        super::feature::attach_parents(&mut village.backlog, &links);
-        village.features = super::feature::build(&village, &links);
+        // A closed parent flies no flag, but may still have shipped today.
+        let open: Vec<_> = links.iter().filter(|l| !l.closed).cloned().collect();
+        super::feature::attach_parents(&mut village.backlog, &open);
+        village.features = super::feature::build(&village, &open);
+        village.shipped = {
+            let mut memory = self.shipped.lock().unwrap_or_else(|e| e.into_inner());
+            let remembered = memory.entry(swarm.repo_path.clone()).or_default();
+            remembered.read(&village, &links, chrono::Local::now().date_naive())
+        };
         self.activity.attach(transport, &mut village);
         Reading { village, issues }
     }
