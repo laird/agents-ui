@@ -79,7 +79,9 @@ fn the_valley_draws_ropes_caravans_and_barges() {
     assert!(valley.contains("valleyCaravans(lay, g).forEach(tr => drawValleyCaravan(ctx, tr, lay.W, VALLEY_MARGIN));"));
     // A click on each opens its dialog.
     assert!(valley.contains("if (barge) { openInfo(bargeWords(barge)); return; }"));
-    assert!(valley.contains("if (rope) { openInfo(ropeWords(rope.rope)); return; }"));
+    assert!(valley.contains("if (rope) openInfo(ropeWords(rope.rope));"));
+    // A repo is asked before a rope, so a rope ending on its edge never takes its clicks.
+    assert!(valley.find("const k = valleyAt(lay.cells, x, y);").unwrap() < valley.find("const rope = valleyRopeAt(").unwrap());
     assert!(valley.contains("if (train) { openInfo(caravanWords(train)); return; }"));
     // And each has a keyboard target, opening what a click would.
     assert!(valley.contains("linkKeys(vkeys, links, ox0, oy0, s, openInfo).forEach(b => keep.add(b));"));

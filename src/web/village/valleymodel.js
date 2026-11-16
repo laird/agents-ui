@@ -222,33 +222,49 @@ export const CARAVAN_LEAD = 10, CARAVAN_CRATE = 7, BARGE_TRIP_MS = 16000;
 
 const repoIndex = (group, name) => ((group && group.repos) || []).findIndex(r => r.name === name);
 
-/* Each rope as a segment between the facing sides of its two repos:
- * { x0, y0, x1, y1, rope }. Ropes between the same two repos stand apart. */
+/* Each rope as a line between its two repos: { pts: [[x, y], ...], rope }.
+ * Neighbours with nothing between them are joined straight, side to side
+ * (or top to bottom in one column); otherwise the rope climbs from each
+ * repo's top to the strip above the map and runs along it, so it never
+ * crosses another repo. Ropes between the same two repos stand apart. */
 export function valleyRopes(lay, group) {
-  const pairs = {};
+  const pairs = {}, cells = lay.cells;
+  const inAny = (x, y, skip) => cells.some(c => !skip.includes(c) && x >= c.x && x < c.x + c.w && y >= c.y && y < c.y + c.h);
+  const clear = ([x0, y0], [x1, y1], skip) => {
+    const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1);
+    for (let k = 0; k <= n; k += 2) if (inAny(x0 + (x1 - x0) * k / n, y0 + (y1 - y0) * k / n, skip)) return false;
+    return true;
+  };
   return ((group && group.ropes) || []).map(rope => {
-    const a = lay.cells[repoIndex(group, rope.from.repo)], b = lay.cells[repoIndex(group, rope.to.repo)];
+    const a = cells[repoIndex(group, rope.from.repo)], b = cells[repoIndex(group, rope.to.repo)];
     if (!a || !b || a === b) return null;
-    const key = [rope.from.repo, rope.to.repo].sort().join('|'), k = (pairs[key] = (pairs[key] ?? -1) + 1) % 6;
+    const key = [rope.from.repo, rope.to.repo].sort().join('|'), k = (pairs[key] = (pairs[key] ?? -1) + 1) % 4;
+    let p0, p1;
     if (a.x + a.w <= b.x || b.x + b.w <= a.x) {
       const east = a.x < b.x;
-      return { x0: east ? a.x + a.w : a.x, y0: a.y + 14 + 6 * k, x1: east ? b.x : b.x + b.w, y1: b.y + 14 + 6 * k, rope };
+      p0 = [east ? a.x + a.w : a.x, a.y + 14 + 6 * k]; p1 = [east ? b.x : b.x + b.w, b.y + 14 + 6 * k];
+    } else {
+      const south = a.y < b.y;
+      p0 = [a.x + 24 + 10 * k, south ? a.y + a.h : a.y]; p1 = [b.x + 24 + 10 * k, south ? b.y : b.y + b.h];
     }
-    const south = a.y < b.y;
-    return { x0: a.x + 24 + 10 * k, y0: south ? a.y + a.h : a.y, x1: b.x + 24 + 10 * k, y1: south ? b.y : b.y + b.h, rope };
+    if (clear(p0, p1, [a, b])) return { pts: [p0, p1], rope };
+    // Round the others: up from each repo's top to the strip above the map.
+    const top = 3 + 3 * k, xa = a.x + a.w - 12 - 6 * k, xb = b.x + b.w - 12 - 6 * k;
+    return { pts: [[xa, a.y], [xa, top], [xb, top], [xb, b.y]], rope };
   }).filter(Boolean);
 }
 
 /* Distance from (x, y) to the segment (x0, y0)–(x1, y1). */
-function toSegment(x, y, { x0, y0, x1, y1 }) {
+function toSegment(x, y, [x0, y0], [x1, y1]) {
   const dx = x1 - x0, dy = y1 - y0, len = dx * dx + dy * dy;
   const u = len ? Math.max(0, Math.min(1, ((x - x0) * dx + (y - y0) * dy) / len)) : 0;
   return Math.hypot(x - (x0 + u * dx), y - (y0 + u * dy));
 }
 
-/* The rope within `r` scene pixels of (x, y), or null. */
+/* The rope within `r` scene pixels of (x, y), or null. valley.js asks only
+ * outside the repos, so a click on a repo always opens it. */
 export function valleyRopeAt(ropes, x, y, r = 3) {
-  return ropes.find(rp => toSegment(x, y, rp) <= r) || null;
+  return ropes.find(rp => rp.pts.slice(1).some((p, k) => toSegment(x, y, rp.pts[k], p) <= r)) || null;
 }
 
 const issueLink = i => (i && i.url ? { label: `${i.repo}#${i.number}`, url: i.url } : null);

@@ -15,15 +15,18 @@ import { CARAVAN_CRATE, CARAVAN_LEAD, bargeWords, caravanWords, ropeWords } from
 
 const LINK_ROPE = '#c8a060', LINK_ROPE_D = '#7a5a28', LINK_HIDE = '#8a5a30', LINK_WOOD = '#a87038', LINK_WOOD_D = '#6b4426', LINK_TRACK = 'rgba(80,56,32,.45)';
 
-/* A rope: a twisted line that sags a little at its middle, a knot at each end. */
+/* A rope: a twisted line, sagging a little when it runs straight between
+ * neighbours; a knot at each end. */
 export function drawValleyRope(c, rp) {
-  const { x0, y0, x1, y1 } = rp, steps = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1);
-  for (let k = 0; k <= steps; k++) {
-    const f = k / steps, sag = Math.round(3 * Math.sin(Math.PI * f));
-    const x = Math.round(x0 + (x1 - x0) * f), y = Math.round(y0 + (y1 - y0) * f) + sag;
-    R(c, x, y, 1, 1, k % 3 === 0 ? LINK_ROPE_D : LINK_ROPE);
-  }
-  [[x0, y0], [x1, y1]].forEach(([x, y]) => { R(c, x - 1, y - 1, 3, 3, P.o); R(c, x, y, 1, 1, LINK_ROPE); });
+  const pts = rp.pts, sagging = pts.length === 2;
+  pts.slice(1).forEach(([x1, y1], seg) => {
+    const [x0, y0] = pts[seg], steps = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1);
+    for (let k = 0; k <= steps; k++) {
+      const f = k / steps, sag = sagging ? Math.round(3 * Math.sin(Math.PI * f)) : 0;
+      R(c, Math.round(x0 + (x1 - x0) * f), Math.round(y0 + (y1 - y0) * f) + sag, 1, 1, k % 3 === 0 ? LINK_ROPE_D : LINK_ROPE);
+    }
+  });
+  [pts[0], pts[pts.length - 1]].forEach(([x, y]) => { R(c, x - 1, y - 1, 3, 3, P.o); R(c, x, y, 1, 1, LINK_ROPE); });
 }
 
 /* A caravan: a horse at its head, then a crate per repo (full once landed),
@@ -72,9 +75,13 @@ export function linkKeys(box, { ropes, trains, barges }, ox, oy, s, open) {
     Object.assign(b.style, { left: ox + rect.x * s + 'px', top: oy + rect.y * s + 'px', width: rect.w * s + 'px', height: rect.h * s + 'px' });
     keep.add(b);
   };
-  ropes.forEach(rp => key(`rope:${rp.rope.from.repo}#${rp.rope.from.number}>${rp.rope.to.repo}#${rp.rope.to.number}`, ropeWords(rp.rope),
-    { x: Math.min(rp.x0, rp.x1) - 2, y: Math.min(rp.y0, rp.y1) - 2, w: Math.abs(rp.x1 - rp.x0) + 4, h: Math.abs(rp.y1 - rp.y0) + 7 }));
+  ropes.forEach(rp => {
+    // Its first leg: a target small enough not to cover the repos it joins.
+    const [[x0, y0], [x1, y1]] = rp.pts;
+    key(`rope:${rp.rope.from.repo}#${rp.rope.from.number}>${rp.rope.to.repo}#${rp.rope.to.number}`, ropeWords(rp.rope),
+      { x: Math.min(x0, x1) - 2, y: Math.min(y0, y1) - 2, w: Math.abs(x1 - x0) + 4, h: Math.abs(y1 - y0) + 7 });
+  });
   trains.forEach(t => key(`caravan:${t.caravan.parent.repo}#${t.caravan.parent.number}`, caravanWords(t), { x: t.x, y: t.y, w: t.w, h: 12 }));
-  barges.forEach((b, k) => key(`barge:${b.barge.from}>${b.barge.to}:${k}`, bargeWords(b), { x: b.x - 7, y: b.y - 6, w: 14, h: 9 }));
+  barges.forEach(b => key(`barge:${b.barge.from}>${b.barge.to}:${b.barge.why}`, bargeWords(b), { x: b.x - 7, y: b.y - 6, w: 14, h: 9 }));
   return keep;
 }

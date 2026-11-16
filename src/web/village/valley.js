@@ -129,14 +129,15 @@ cv.addEventListener('click', e => {
   if (ship) { openInfo(shipWords(ship)); return; }
   const barge = valleyBargeAt(valleyBarges(lay, g, state.reduce ? 0 : performance.now()), x, y);
   if (barge) { openInfo(bargeWords(barge)); return; }
-  const rope = valleyRopeAt(valleyRopes(lay, g), x, y);
-  if (rope) { openInfo(ropeWords(rope.rope)); return; }
   const train = valleyCaravanAt(valleyCaravans(lay, g), x, y);
   if (train) { openInfo(caravanWords(train)); return; }
   const cell = gridAt(lay, x, y);
   if (cell) { openInfo(gridWords(cell.cell)); return; }
+  // A repo before a rope: a rope ends on its edge, and a click there opens the repo.
   const k = valleyAt(lay.cells, x, y);
-  if (k !== null) openRepo(g.repos[k]);
+  if (k !== null) { openRepo(g.repos[k]); return; }
+  const rope = valleyRopeAt(valleyRopes(lay, g), x, y);
+  if (rope) openInfo(ropeWords(rope.rope));
 });
 
 /* Over the map: each repo's name and summary, and a keyboard target per

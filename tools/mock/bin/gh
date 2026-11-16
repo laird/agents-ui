@@ -97,7 +97,7 @@ if demo:
     src = os.path.realpath(os.path.join(demo, "src"))
     repos = os.path.realpath(os.path.join(demo, "home", "repos"))
     valley = os.path.isdir(os.path.join(demo, "state", "valley"))
-    if valley and os.path.realpath(cwd).startswith(repos + os.sep):
+    if valley and os.path.realpath(cwd).startswith(repos + os.sep) and args[:2] != ["auth", "status"]:
         name = os.path.relpath(os.path.realpath(cwd), repos).split(os.sep)[0]
         answer = valley_repo(demo, name, args)
         if answer is None:
@@ -136,6 +136,8 @@ if demo:
         if args[:2] == ["api", "graphql"]:
             print(json.dumps(graphql(demo, name, args)))
             sys.exit(0)
+        # The live shop village's CI (its build, so breakage.rs sees it red); the
+        # job's log is read again from the valley's ~/repos/shop, above.
         if valley and name == "shop" and args[:1] == ["api"]:
             path = next((a for a in args[1:] if a.startswith("repos/")), "")
             if re.search(r"/actions/jobs/\d+/logs$", path):

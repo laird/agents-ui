@@ -33,13 +33,32 @@ const SHOP = {
 test('a rope runs between the facing sides of its two repos; two between the same pair stand apart', () => {
   const lay = valleyLayout(SHOP), ropes = valleyRopes(lay, SHOP), [lib, web, api] = lay.cells;
   assert.equal(ropes.length, 3);
-  // web (east) to lib-core (west): from web's west side to lib-core's east side.
-  assert.deepEqual([ropes[0].x0, ropes[0].x1], [web.x, lib.x + lib.w]);
-  assert.notEqual(ropes[0].y0, ropes[1].y0, 'two ropes between web and lib-core stand apart');
+  // web (east) to lib-core (west), neighbours: straight, from web's west side to lib-core's east side.
+  assert.deepEqual(ropes[0].pts.map(p => p[0]), [web.x, lib.x + lib.w]);
+  assert.notEqual(ropes[0].pts[0][1], ropes[1].pts[0][1], 'two ropes between web and lib-core stand apart');
   // api is below web in the same column: from api's top to web's bottom.
-  assert.deepEqual([ropes[2].y0, ropes[2].y1], [api.y, web.y + web.h]);
-  assert.equal(valleyRopeAt(ropes, Math.round((ropes[0].x0 + ropes[0].x1) / 2), ropes[0].y0).rope, SHOP.ropes[0]);
+  assert.deepEqual(ropes[2].pts.map(p => p[1]), [api.y, web.y + web.h]);
+  const [[x0, y0], [x1]] = ropes[0].pts;
+  assert.equal(valleyRopeAt(ropes, Math.round((x0 + x1) / 2), y0).rope, SHOP.ropes[0]);
   assert.equal(valleyRopeAt(ropes, lib.x + 2, lib.y + lib.h - 2), null);
+});
+
+test('a rope between repos with another in the way goes round, through the strip above the map', () => {
+  // lib-core (column 0) to admin (column 2): web (column 1) stands between them on the same row.
+  const g = { ...SHOP, repos: [...SHOP.repos, repo('admin', 2)], edges: [...SHOP.edges, { from: 'web', to: 'admin', via: 'package' }],
+    ropes: [{ from: ref('admin', 3, 'Admin cents'), to: ref('lib-core', 12, 'Money type') }] };
+  const lay = valleyLayout(g), [rp] = valleyRopes(lay, g), [lib, web, , admin] = lay.cells;
+  assert.equal(rp.pts.length, 4);
+  assert.ok(rp.pts.every(([, y]) => y <= Math.max(lib.y, admin.y)), 'never below the repos\' tops');
+  assert.ok(rp.pts[1][1] < web.y, 'above web, not across it');
+  // No point of it lies inside web.
+  rp.pts.slice(1).forEach(([x1, y1], k) => {
+    const [x0, y0] = rp.pts[k];
+    for (let f = 0; f <= 1; f += 0.05) {
+      const x = x0 + (x1 - x0) * f, y = y0 + (y1 - y0) * f;
+      assert.ok(!(x >= web.x && x < web.x + web.w && y >= web.y && y < web.y + web.h), 'crosses web');
+    }
+  });
 });
 
 test('a rope to a repo the valley does not draw is left out', () => {
