@@ -49,11 +49,12 @@ pub struct ControlBody {
 pub type Refusal = (StatusCode, &'static str);
 
 /// Whether the worker is idle, so a nudge can't land in the middle of its
-/// work: the TUI's `f` key only starts an `Idle` worker's loop, and one that
-/// has finished (`Done: ...`) is just as free. A worker waiting on a question
-/// would take the command as its answer, so it isn't.
+/// work: only `Idle`, as the TUI's `f` key. Not `Done: ...`: that status
+/// can outlive the issue it reports while the loop is already on the next
+/// one, and the command would land in a busy session. A worker waiting on a
+/// question would take the command as its answer, so it isn't idle either.
 pub fn is_idle(agent: &AgentSnapshot) -> bool {
-    !agent.waiting_for_input && (agent.state == "Idle" || agent.state.starts_with("Done"))
+    !agent.waiting_for_input && agent.state == "Idle"
 }
 
 /// What a nudge types into the worker's pane, or why it can't.
@@ -69,19 +70,25 @@ pub fn nudge_command(agent: &AgentSnapshot, runtime: &AgentType) -> Result<Strin
         .ok_or((StatusCode::CONFLICT, "this runtime has no worker loop to start"))
 }
 
-/// The issue the worker holds: its own claim, or else the open issue the
-/// tracker shows assigned to it as `working`.
+/// The issue the worker holds: the open issue the tracker shows assigned to
+/// it as `working`, or else its own status's issue, unless the tracker shows
+/// that one assigned to another worker (a stale status must never release a
+/// peer's lock).
 pub fn claimed_issue(swarm: &SwarmSnapshot, agent: &AgentSnapshot) -> Option<u32> {
     if agent.is_manager {
         return None;
     }
-    agent.current_issue.or_else(|| {
-        swarm
-            .issues
-            .iter()
-            .find(|i| i.is_working && i.assigned_worker.as_deref() == Some(agent.role.as_str()))
-            .map(|i| i.number)
-    })
+    let mine = |w: &Option<String>| w.as_deref() == Some(agent.role.as_str());
+    swarm
+        .issues
+        .iter()
+        .find(|i| i.is_working && mine(&i.assigned_worker))
+        .map(|i| i.number)
+        .or_else(|| {
+            agent.current_issue.filter(|n| {
+                !swarm.issues.iter().any(|i| i.number == *n && i.assigned_worker.is_some() && !mine(&i.assigned_worker))
+            })
+        })
 }
 
 /// The explicit-release comment, in autocoder's shape, so peers and
@@ -243,7 +250,8 @@ mod tests {
     #[test]
     fn a_nudge_starts_an_idle_workers_loop_as_the_f_key_does() {
         assert_eq!(nudge_command(&worker("Idle"), &AgentType::Claude).unwrap(), "/autocoder:fix-loop");
-        assert_eq!(nudge_command(&worker("Done: #7"), &AgentType::Claude).unwrap(), "/autocoder:fix-loop");
+        // "Done" can outlive its issue while the loop is on the next one: busy.
+        assert_eq!(nudge_command(&worker("Done: #7"), &AgentType::Claude).unwrap_err().0, StatusCode::CONFLICT);
         // A wrapper-supervised runtime gets its wrapper, whatever the TUI would send.
         let droid = supervisor::for_runtime(&AgentType::Droid).start_worker_loop_command(&AgentType::Droid);
         assert_eq!(nudge_command(&worker("Idle"), &AgentType::Droid).ok(), droid);
@@ -272,7 +280,13 @@ mod tests {
         };
         let other = IssueSnapshot { number: 4, is_working: true, assigned_worker: Some("worker-2".into()), ..Default::default() };
         assert_eq!(claimed_issue(&swarm(vec![other.clone(), assigned]), &worker("Idle")), Some(9));
-        assert_eq!(claimed_issue(&swarm(vec![other]), &worker("Idle")), None);
+        assert_eq!(claimed_issue(&swarm(vec![other.clone()]), &worker("Idle")), None);
+        // The tracker's assignment wins over a stale status, and a status
+        // naming a peer's issue releases nothing.
+        let stale = AgentSnapshot { current_issue: Some(4), ..worker("Idle") };
+        assert_eq!(claimed_issue(&swarm(vec![other.clone()]), &stale), None);
+        let both = IssueSnapshot { number: 9, is_working: true, assigned_worker: Some("worker-1".into()), ..Default::default() };
+        assert_eq!(claimed_issue(&swarm(vec![other, both]), &stale), Some(9));
         let s = swarm(vec![]);
         assert_eq!(claimed_issue(&s, &AgentSnapshot { current_issue: Some(3), ..s.manager.clone() }), None);
     }
