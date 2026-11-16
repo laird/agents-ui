@@ -56,6 +56,9 @@ pub struct Stage {
     /// Seconds since the stage before it; absent for `opened`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secs: Option<u64>,
+    /// The stage it was measured from; absent for `opened`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
 }
 
 /// Where an issue's time went.
@@ -135,13 +138,14 @@ pub fn travel(issue: &Issue, log: &str, deployments: &[Deployment]) -> TravelLog
     }
 
     let mut stages = Vec::with_capacity(points.len());
-    let mut prev: Option<DateTime<FixedOffset>> = None;
+    let mut prev: Option<(DateTime<FixedOffset>, String)> = None;
     for (key, t) in points {
         // A stage recorded before the one it follows (a commit before the
         // claim) took no time of its own.
-        let secs = prev.map(|p| (t - p).num_seconds().max(0) as u64);
-        prev = Some(prev.map_or(t, |p| p.max(t)));
-        stages.push(Stage { key, at: t.to_rfc3339(), secs });
+        let secs = prev.as_ref().map(|(p, _)| (t - *p).num_seconds().max(0) as u64);
+        let from = prev.as_ref().map(|(_, k)| k.clone());
+        prev = Some((prev.as_ref().map_or(t, |(p, _)| (*p).max(t)), key.clone()));
+        stages.push(Stage { key, at: t.to_rfc3339(), secs, from });
     }
     let slowest = stages.iter().filter_map(|s| s.secs.map(|x| (x, &s.key))).max_by_key(|(x, _)| *x).filter(|(x, _)| *x > 0).map(|(_, k)| k.clone());
 
@@ -157,12 +161,28 @@ pub fn travel(issue: &Issue, log: &str, deployments: &[Deployment]) -> TravelLog
     TravelLog { number: n, title: issue.title.clone(), state: state.into(), stages, bounces, slowest }
 }
 
-/// The median seconds of each stage over the landed `logs`.
+/// Whether a stage measured from `from` is the wait its median is of. A
+/// stage after a missing one (no commit names the issue, so `landed` is
+/// measured from the claim) covers two waits, and would inflate the median
+/// of the one it is filed under.
+fn comparable(key: &str, from: Option<&str>) -> bool {
+    match key {
+        "approved" => from == Some("opened"),
+        // An issue nobody had to approve waits for a worker from its opening.
+        "claimed" => matches!(from, Some("opened" | "approved")),
+        "first_commit" => from == Some("claimed"),
+        "landed" => from == Some("first_commit"),
+        _ => key.starts_with("deployed:") && from.is_some_and(|f| f == "landed" || f.starts_with("deployed:")),
+    }
+}
+
+/// The median seconds of each stage over the landed `logs`, counting only
+/// stages measured from the one they follow ([`comparable`]).
 pub fn stage_medians<'a>(logs: impl IntoIterator<Item = &'a TravelLog>) -> BTreeMap<String, u64> {
     let mut by: BTreeMap<String, Vec<u64>> = BTreeMap::new();
     for l in logs.into_iter().filter(|l| l.state == "landed") {
         for s in &l.stages {
-            if let Some(x) = s.secs {
+            if let (Some(x), true) = (s.secs, comparable(&s.key, s.from.as_deref())) {
                 by.entry(s.key.clone()).or_default().push(x);
             }
         }
@@ -338,11 +358,26 @@ mod tests {
         let a = travel(&issue(LANDED), LOG, &[]);
         let mut b = a.clone();
         b.stages.iter_mut().filter(|s| s.key == "approved").for_each(|s| s.secs = Some(2 * 3600));
-        let open = TravelLog { state: "open".into(), stages: vec![Stage { key: "approved".into(), at: String::new(), secs: Some(1) }], ..Default::default() };
+        let open = TravelLog { state: "open".into(), stages: vec![Stage { key: "approved".into(), at: String::new(), secs: Some(1), from: Some("opened".into()) }], ..Default::default() };
         let m = stage_medians([&a, &b, &open]);
         assert_eq!(m.get("approved"), Some(&(13 * 3600)));
         assert_eq!(m.get("landed"), Some(&(3 * 3600)));
         assert!(!m.contains_key("opened"));
+    }
+
+    /// A stage after a missing one covers two waits: it stays in the issue's
+    /// own log but not in the medians.
+    #[test]
+    fn medians_leave_out_stages_after_a_missing_one() {
+        let no_commit = travel(&issue(LANDED), "", &[]);
+        let landed = no_commit.stages.iter().find(|s| s.key == "landed").unwrap();
+        assert_eq!((landed.from.as_deref(), landed.secs), (Some("claimed"), Some(4 * 3600)));
+        let m = stage_medians([&no_commit]);
+        assert!(!m.contains_key("landed"));
+        assert_eq!(m.get("claimed"), Some(&(22 * 3600)));
+        assert!(comparable("claimed", Some("opened")));
+        assert!(comparable("deployed:release", Some("deployed:nuc-1")));
+        assert!(!comparable("deployed:nuc-1", Some("claimed")));
     }
 
     #[test]

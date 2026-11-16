@@ -273,7 +273,11 @@ The stages are inferred from what the server already reads:
 - **first commit** is the earliest commit on the integration branch whose
   subject names the issue (`#N` or `issue-N`);
 - **each environment** is reached at the first Deployment to it created after
-  the landing, whether or not that deploy succeeded.
+  the landing (of the newest 100), whether or not that deploy succeeded.
+
+A median counts a stage only when the one before it was reached too: with no
+commit naming the issue, its landing is measured from the claim and covers
+coding as well, so it stays out of the "coding and the gate" median.
 
 The log is read when you ask for it (`GET
 /api/swarms/<project>/issues/<n>/travel`, kept for a minute), and the

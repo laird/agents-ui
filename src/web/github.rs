@@ -41,6 +41,9 @@ use crate::transport::ServerTransport;
 /// Days the summary covers, today included.
 pub const DAYS: usize = 14;
 
+/// How far back the travel log's medians look for an issue's first commit (#495).
+const AUTHORED_DAYS: i64 = 60;
+
 /// How long a summary is reused: 90 s, or `AGENTS_UI_GITHUB_REFRESH_SECS`
 /// held between 60 and 120 s, so a wall display never eats the rate limit.
 pub fn refresh_ttl() -> Duration {
@@ -354,12 +357,15 @@ pub async fn fetch(transport: &ServerTransport, repo: &Path, integration: &str) 
         let out = transport.output("git", &args, Some(repo)).await.ok()?;
         out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
     };
-    // The travel log's medians (#495) date first commits by author, which a rebase keeps.
+    // The travel log's medians (#495) date first commits by author, which a
+    // rebase keeps. An issue landed in the window may have been started well
+    // before it, so this log reaches further back (`--since` is by commit date).
     let authored = async {
         if integration.is_empty() {
             return None;
         }
-        let args: Vec<String> = vec!["log".into(), format!("origin/{integration}"), format!("--since={since}"), "--format=%aI%x09%s".into()];
+        let back = (today - chrono::Duration::days(AUTHORED_DAYS)).format("%Y-%m-%d").to_string();
+        let args: Vec<String> = vec!["log".into(), format!("origin/{integration}"), format!("--since={back}"), "--format=%aI%x09%s".into()];
         let out = transport.output("git", &args, Some(repo)).await.ok()?;
         out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
     };

@@ -16,7 +16,9 @@ import { bounceWords, medianWords, rowWords, travelRows, travelUrl } from './tra
 /* The dialog this part last filled: a slow answer for an earlier one is dropped. */
 let travelToken = 0;
 
-async function showTravel(box, project, n, mine) {
+async function showTravel(box, project, n) {
+  // Each click is its own ask: a slower answer for an earlier click is dropped.
+  const mine = ++travelToken;
   box.innerHTML = `<p class="dim" role="status">Reading the travel log of #${n}…</p>`;
   let log = null, status = 0;
   try {
@@ -45,13 +47,13 @@ registerDialogPart(info => {
   const old = document.getElementById('d-travel');
   const box = old.cloneNode(false);
   old.replaceWith(box);
-  const mine = ++travelToken;
+  ++travelToken;
   const project = info.project, v = project && (state.scenes[project] || {}).v;
   if (!v || v.plane === 'runtime') return;
   const n = info.travel || (info.house && info.house.issue) || null;
   if (n) {
     box.innerHTML = '<div class="opts"><button data-travel="1">Travel log</button></div>';
-    box.querySelector('button').addEventListener('click', () => showTravel(box, project, n, mine));
+    box.querySelector('button').addEventListener('click', () => showTravel(box, project, n));
   }
   document.querySelectorAll('#d-meta li[data-n]').forEach(li => {
     const k = Number(li.dataset.n);
@@ -59,7 +61,7 @@ registerDialogPart(info => {
     const b = document.createElement('button');
     b.className = 'travel-log'; b.textContent = 'log';
     b.setAttribute('aria-label', `Travel log of #${k}`);
-    b.addEventListener('click', () => showTravel(box, project, k, mine));
+    b.addEventListener('click', () => showTravel(box, project, k));
     li.appendChild(b);
   });
 });
