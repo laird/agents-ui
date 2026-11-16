@@ -66,6 +66,16 @@ pub fn behind(pinned: &str, pin: Pin, latest: &str) -> Option<bool> {
     if pin == Pin::Exact {
         return older();
     }
+    // An upper bound (`<2`, `<=1.9`, Cargo's `>=1.2, <2`): behind once the
+    // release reaches it.
+    if let Some(at) = p.find('<') {
+        let (bound, inclusive) = match p[at + 1..].strip_prefix('=') {
+            Some(rest) => (rest, true),
+            None => (&p[at + 1..], false),
+        };
+        let past = compare(latest, bound)?;
+        return Some(if inclusive { past == Ordering::Greater } else { past != Ordering::Less });
+    }
     // `>=1.2`, `*`, `x`, `latest`: anything newer is taken.
     if p.starts_with(">=") || p.starts_with('>') || p == "*" || p.eq_ignore_ascii_case("x") || p == "latest" || p.contains("||") {
         return version_numbers(latest).map(|_| false);
@@ -77,8 +87,10 @@ pub fn behind(pinned: &str, pin: Pin, latest: &str) -> Option<bool> {
     }
     // Wildcards (`1.x`, `1.4.*`) fix only the parts before them.
     let fixed = p.trim_start_matches(|c: char| !c.is_ascii_digit()).split('.').take_while(|s| s.parse::<u64>().is_ok()).count();
-    let wild = p.contains('x') || p.contains('*') || p.contains('X');
-    let exact = p.starts_with('=') || (pin == Pin::Npm && p.chars().next().is_some_and(|c| c.is_ascii_digit()) && !wild);
+    let wild = p.contains('x') || p.contains('*') || p.contains('X') || (pin == Pin::Npm && p.chars().next().is_some_and(|c| c.is_ascii_digit()) && want.len() < 3);
+    // npm: a full bare version is exact; a partial one (`1`, `1.2`) is an x-range.
+    let npm_exact = pin == Pin::Npm && p.chars().next().is_some_and(|c| c.is_ascii_digit()) && !wild && want.len() >= 3;
+    let exact = p.starts_with('=') || npm_exact;
     if exact {
         return older();
     }
@@ -263,6 +275,10 @@ mod tests {
         assert_eq!(b("~1.3", Pin::Cargo, "v1.4.0"), Some(true));
         assert_eq!(b("~1.4", Pin::Cargo, "v1.4.7"), Some(false));
         assert_eq!(b(">=1.2", Pin::Cargo, "v9.0.0"), Some(false));
+        assert_eq!(b(">=1.2, <2", Pin::Cargo, "v2.0.0"), Some(true), "an upper bound the release reached");
+        assert_eq!(b(">=1.2, <2", Pin::Cargo, "v1.9.0"), Some(false));
+        assert_eq!(b("<=1.9", Pin::Npm, "v1.9.0"), Some(false));
+        assert_eq!(b("<2.0", Pin::Npm, "v3.0.0"), Some(true));
         // npm: a bare version is exact; ^ ~ x * as npm reads them.
         assert_eq!(b("^1.2.0", Pin::Npm, "v1.4.0"), Some(false));
         assert_eq!(b("^1.9.0", Pin::Npm, "v2.0.0"), Some(true));
@@ -271,6 +287,9 @@ mod tests {
         assert_eq!(b("1.3.x", Pin::Npm, "v1.4.0"), Some(true));
         assert_eq!(b("*", Pin::Npm, "v3.0.0"), Some(false));
         assert_eq!(b("1.3.0", Pin::Npm, "v1.4.0"), Some(true), "exact in package.json");
+        assert_eq!(b("1", Pin::Npm, "v1.4.0"), Some(false), "a partial bare version is an x-range to npm");
+        assert_eq!(b("1.3", Pin::Npm, "v1.4.0"), Some(true));
+        assert_eq!(b("1.4", Pin::Npm, "v1.4.2"), Some(false));
         assert_eq!(b("1.4.0", Pin::Npm, "v1.4.0"), Some(false));
         // A range never runs ahead of the release it is compared with.
         assert_eq!(b("^1.4.0", Pin::Npm, "v1.3.0"), Some(false));
