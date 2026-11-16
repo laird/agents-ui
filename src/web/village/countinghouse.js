@@ -54,9 +54,10 @@ export function countingArt(c, x, y, bars, theme = state.T) {
     const bx = 52, by = 12, bw = 16, bh = 22;
     px(d, bx + 2, by + bh, 2, 10, P.o); px(d, bx + bw - 4, by + bh, 2, 10, P.o);
     px(d, bx, by, bw, bh, P.o); px(d, bx + 1, by + 1, bw - 2, bh - 2, k.board);
-    bars.slice(-7).forEach((b, i) => {
+    const week = bars.slice(-7);
+    week.forEach((b, i) => {
       const h = Math.max(1, Math.round(b.share * (bh - 4)));
-      px(d, bx + 1 + i * 2, by + bh - 2 - h, 1, h, i === bars.length - 1 ? k.coin : k.bar);
+      px(d, bx + 1 + i * 2, by + bh - 2 - h, 1, h, i === week.length - 1 ? k.coin : k.bar);
     });
   });
 }
