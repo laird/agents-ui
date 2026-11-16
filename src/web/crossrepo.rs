@@ -56,13 +56,17 @@ pub struct Native {
     pub subs: Vec<(String, u32)>,
     /// The issues it is blocked by.
     pub blocked_by: Vec<(String, u32)>,
+    /// It has more sub-issues than the read returned: its caravan can't be
+    /// known to have arrived.
+    pub subs_cut: bool,
 }
 
 /// The native relations of a repo's 100 most recently updated issues, open
-/// or closed: about 7,000 nodes, well inside GraphQL's limits. A relation on
-/// an older issue is not seen.
+/// or closed: about 7,000 nodes, well inside GraphQL's limits (a call costs 2
+/// of the 5,000 GraphQL points an hour). A relation on an older issue is not
+/// seen; past 50 sub-issues an epic's caravan never shows as arrived.
 pub const NATIVE_QUERY: &str = "query($owner:String!,$name:String!){repository(owner:$owner,name:$name){issues(first:100,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number \
-    subIssues(first:50){nodes{number repository{nameWithOwner}}} blockedBy(first:20){nodes{number repository{nameWithOwner}}}}}}}";
+    subIssues(first:50){totalCount nodes{number repository{nameWithOwner}}} blockedBy(first:20){nodes{number repository{nameWithOwner}}}}}}}";
 
 /// [`NATIVE_QUERY`]'s answer → each issue's relations, by number; `None`
 /// when it isn't one (an error, a schema without these fields).
@@ -84,7 +88,12 @@ pub fn parse_native(json: &[u8]) -> Option<HashMap<u32, Native>> {
     Some(
         nodes
             .iter()
-            .filter_map(|n| Some((u32::try_from(n.get("number")?.as_u64()?).ok()?, Native { subs: refs(n, "subIssues"), blocked_by: refs(n, "blockedBy") })))
+            .filter_map(|n| {
+                let subs = refs(n, "subIssues");
+                let total = n.pointer("/subIssues/totalCount").and_then(|t| t.as_u64()).unwrap_or(0);
+                let subs_cut = total > subs.len() as u64;
+                Some((u32::try_from(n.get("number")?.as_u64()?).ok()?, Native { subs, blocked_by: refs(n, "blockedBy"), subs_cut }))
+            })
             .filter(|(_, r)| !r.subs.is_empty() || !r.blocked_by.is_empty())
             .collect(),
     )
@@ -260,6 +269,8 @@ pub fn links(repos: &[(String, String)], issues: &HashMap<String, Vec<CrossIssue
 
     let mut ropes = Vec::new();
     let mut children: BTreeMap<(String, u32), BTreeSet<(String, u32)>> = BTreeMap::new();
+    // Parents with more native sub-issues than were read (#532).
+    let mut cut: BTreeSet<(String, u32)> = BTreeSet::new();
     for (name, slug) in repos {
         for i in issues.get(name).into_iter().flatten() {
             let body = i.body.as_deref().unwrap_or("");
@@ -279,6 +290,9 @@ pub fn links(repos: &[(String, String)], issues: &HashMap<String, Vec<CrossIssue
                     children.entry(p).or_default().insert((slug.clone(), i.number));
                 }
             }
+            if i.native.subs_cut {
+                cut.insert((slug.clone(), i.number));
+            }
             for c in listed(body, slug).into_iter().chain(i.native.subs.iter().cloned()) {
                 if name_of.contains_key(c.0.as_str()) {
                     children.entry((slug.clone(), i.number)).or_default().insert(c);
@@ -289,6 +303,7 @@ pub fn links(repos: &[(String, String)], issues: &HashMap<String, Vec<CrossIssue
 
     let mut caravans = Vec::new();
     for ((pslug, pn), kids) in children {
+        let partial = cut.contains(&(pslug.clone(), pn));
         let Some((pname, parent)) = find(&pslug, pn) else { continue };
         let mut by_repo: BTreeMap<&str, (Vec<u32>, bool)> = BTreeMap::new();
         for (s, n) in &kids {
@@ -310,7 +325,8 @@ pub fn links(repos: &[(String, String)], issues: &HashMap<String, Vec<CrossIssue
         }
         let mut crates: Vec<CaravanCrate> = by_repo.into_iter().map(|(repo, (issues, loaded))| CaravanCrate { repo: repo.into(), issues, loaded }).collect();
         crates.sort_by_key(|c| order.get(c.repo.as_str()).copied().unwrap_or(usize::MAX));
-        let arrived = crates.iter().all(|c| c.loaded);
+        // Sub-issues the read cut off aren't known to have landed.
+        let arrived = !partial && crates.iter().all(|c| c.loaded);
         caravans.push(Caravan { parent: iref(pname, parent), crates, arrived });
     }
     (ropes, caravans)
@@ -465,7 +481,7 @@ mod tests {
 
     /// [`NATIVE_QUERY`]'s answer, as GitHub gives it, cut to what matters.
     const NATIVE: &str = r#"{"data":{"repository":{"issues":{"nodes":[
-      {"number":1,"subIssues":{"nodes":[{"number":2,"repository":{"nameWithOwner":"acme/lib-core"}},{"number":9,"repository":{"nameWithOwner":"Acme/Web"}}]},"blockedBy":{"nodes":[]}},
+      {"number":1,"subIssues":{"totalCount":2,"nodes":[{"number":2,"repository":{"nameWithOwner":"acme/lib-core"}},{"number":9,"repository":{"nameWithOwner":"Acme/Web"}}]},"blockedBy":{"nodes":[]}},
       {"number":5,"subIssues":{"nodes":[]},"blockedBy":{"nodes":[]}},
       {"number":12,"subIssues":{"nodes":[]},"blockedBy":{"nodes":[{"number":40,"repository":{"nameWithOwner":"acme/api"}}]}}
     ]}}}}"#;
@@ -486,20 +502,17 @@ mod tests {
         let mut issues = HashMap::new();
         // Nothing in any body: only GitHub's own relations link them.
         let mut lib = vec![issue(1, "Money everywhere", "OPEN", None, ""), issue(2, "Money type", "CLOSED", Some("COMPLETED"), ""), issue(12, "Add the money type", "OPEN", None, "")];
-        let mut api = vec![issue(40, "Charge in cents", "OPEN", None, "")];
+        let api = vec![issue(40, "Charge in cents", "OPEN", None, "")];
         let web = vec![issue(9, "Show cents", "OPEN", None, "")];
         let native = parse_native(NATIVE.as_bytes()).unwrap();
         attach_native(&mut lib, &native);
-        // The api repo's read: #40 is blocked by lib-core#12, natively.
-        let api_native: HashMap<u32, Native> = [(40, Native { blocked_by: vec![("acme/lib-core".into(), 12)], ..Default::default() })].into();
-        attach_native(&mut api, &api_native);
         issues.insert("lib-core".to_string(), lib.clone());
         issues.insert("api".to_string(), api);
         issues.insert("web".to_string(), web);
         let (ropes, caravans) = links(&group(), &issues);
         let got: Vec<(String, u32, String, u32)> = ropes.iter().map(|r| (r.from.repo.clone(), r.from.number, r.to.repo.clone(), r.to.number)).collect();
-        // lib-core#12 "blocked by api#40" natively, and api#40 by lib-core#12: both open, both drawn.
-        assert_eq!(got, vec![("lib-core".into(), 12, "api".into(), 40), ("api".into(), 40, "lib-core".into(), 12)]);
+        // lib-core#12 is blocked by api#40, natively: one rope, that way only.
+        assert_eq!(got, vec![("lib-core".into(), 12, "api".into(), 40)]);
         assert_eq!(caravans.len(), 1);
         let crates: Vec<(&str, Vec<u32>, bool)> = caravans[0].crates.iter().map(|k| (k.repo.as_str(), k.issues.clone(), k.loaded)).collect();
         assert_eq!(crates, vec![("lib-core", vec![2], true), ("web", vec![9], false)]);
@@ -511,6 +524,25 @@ mod tests {
         let (ropes, caravans) = links(&group(), &issues);
         assert_eq!(ropes.iter().filter(|r| r.from.number == 12).count(), 1);
         assert_eq!(caravans[0].crates.iter().find(|k| k.repo == "web").map(|k| k.issues.clone()), Some(vec![9]));
+    }
+
+    /// An epic with more native sub-issues than the read returns (50) never
+    /// arrives on the ones it saw.
+    #[test]
+    fn a_cut_off_list_of_sub_issues_never_arrives() {
+        let answer = r#"{"data":{"repository":{"issues":{"nodes":[{"number":1,"subIssues":{"totalCount":60,"nodes":[
+          {"number":2,"repository":{"nameWithOwner":"acme/lib-core"}},{"number":9,"repository":{"nameWithOwner":"acme/web"}}]},"blockedBy":{"nodes":[]}}]}}}}"#;
+        let native = parse_native(answer.as_bytes()).unwrap();
+        assert!(native[&1].subs_cut);
+        assert!(!parse_native(NATIVE.as_bytes()).unwrap()[&1].subs_cut, "all read: not cut");
+        let mut lib = vec![issue(1, "Epic", "OPEN", None, ""), issue(2, "A", "CLOSED", Some("COMPLETED"), "")];
+        attach_native(&mut lib, &native);
+        let mut issues = HashMap::new();
+        issues.insert("lib-core".to_string(), lib);
+        issues.insert("web".to_string(), vec![issue(9, "B", "CLOSED", Some("COMPLETED"), "")]);
+        let c = &links(&group(), &issues).1[0];
+        assert!(c.crates.iter().all(|k| k.loaded), "every crate it saw has landed");
+        assert!(!c.arrived, "but 58 sub-issues weren't read");
     }
 
     #[test]
