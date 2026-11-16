@@ -47,7 +47,9 @@ export function panelLines(g, repo, integration) {
     line(`${howMany(g.open_prs, 'open pull request')}${age ? `, the oldest ${age} old` : ''}`, ghSearch(repo, 'pulls', 'is:pr is:open'));
   }
   if (g.review_requests == null) line("Review requests: GitHub couldn't be read");
-  else line(`${howMany(g.review_requests, 'review request')} waiting on you`, ghSearch(repo, 'pulls', 'is:pr is:open review-requested:@me'), g.review_requests > 0);
+  // The count is for the account agents-tui's `gh` is signed in as; the link's
+  // @me is whoever is signed in to the browser, usually the same person.
+  else line(`${howMany(g.review_requests, 'review request')} for agents-tui's GitHub account`, ghSearch(repo, 'pulls', 'is:pr is:open review-requested:@me'), g.review_requests > 0);
   if (g.open_issues == null) line("Open issues by label: GitHub couldn't be read");
   else {
     const proposals = by.proposal || 0, blocked = blockedLabels(by);

@@ -20,7 +20,7 @@ const q = s => encodeURIComponent(s);
 test('a line per count, each linking its GitHub search', () => {
   assert.deepEqual(panelLines(g, repo, 'master'), [
     { text: '3 open pull requests, the oldest 13 d old', url: `${repo}/pulls?q=${q('is:pr is:open')}` },
-    { text: '1 review request waiting on you', url: `${repo}/pulls?q=${q('is:pr is:open review-requested:@me')}`, mine: true },
+    { text: "1 review request for agents-tui's GitHub account", url: `${repo}/pulls?q=${q('is:pr is:open review-requested:@me')}`, mine: true },
     { text: '2 proposals awaiting approval', url: `${repo}/issues?q=${q('is:issue is:open label:proposal')}`, mine: true },
     { text: 'Blocked: 1 needs-clarification', url: `${repo}/issues?q=${q('is:issue is:open label:needs-clarification')}` },
     { text: 'By priority: P1 1 · P2 1 · P3 2', url: `${repo}/issues?q=${q('is:issue is:open label:P1,P2,P3')}` },

@@ -70,7 +70,8 @@ pub struct Summary {
     /// When the oldest open pull request was opened (RFC 3339).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oldest_pr_at: Option<String>,
-    /// Open pull requests asking for your review, yours or your team's (#492).
+    /// Open pull requests asking for a review from the account this server's
+    /// `gh` is signed in as, or its teams (#492): `review-requested:@me`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review_requests: Option<u32>,
     /// Open issues (#492); absent when they couldn't be listed.
