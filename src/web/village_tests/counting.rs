@@ -7,8 +7,8 @@ use super::*;
 
 #[test]
 fn village_draws_the_counting_house_from_usage() {
-    let main = village_asset("main.js").unwrap().1;
-    assert!(main.contains("import './countinghouse.js';"));
+    // Loaded by main.js through the generated module list (#520): it only has to be there.
+    assert!(village_asset("countinghouse.js").is_some());
     let layout = village_asset("layout.js").unwrap().1;
     // A slot of its own only when the village has `usage`, and the map widens for it.
     assert!(layout.contains("const counting = countingUsage(v) ?"));

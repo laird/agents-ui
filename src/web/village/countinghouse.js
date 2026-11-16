@@ -85,7 +85,7 @@ registerLabels((sc, theme) => {
 
 /* In the Key: the house and a week on its board, today busiest. */
 const COUNTING_SAMPLE = [0.3, 0.6, 0.4, 0.8, 0.5, 0.2, 1].map(share => ({ share }));
-registerKey({ group: 'other', rows: theme => [
+registerKey({ group: 'other', order: 65, rows: theme => [
   [c => countingArt(c, 1, 1, COUNTING_SAMPLE, theme),
     `${countingLook(theme).name} at the east edge: the tokens the swarm used, read from Claude Code's transcripts; its board has a bar per day for the last week, today's in the sign's colour (click it for today, the week and the costliest issues)`, COUNTING_SIZE.w + 2],
 ] });
