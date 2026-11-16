@@ -24,15 +24,16 @@ desktop notifier (`../agents-village-notify`, `install.sh --notify`).
 
 When something starts waiting on you (an item first appears in that list),
 the widget sends one notification: "2 need you", what is new, and a click that
-opens the village on that house's dialog. It carries a fixed id, so the next
-one replaces it instead of stacking. The first poll after the widget starts,
-or after the server could not be reached, only records what it sees.
+opens the village on that house's dialog. Each one replaces the widget's last,
+so they never stack. The first answer after the widget starts, or after its
+server changes, only records what it sees; a poll that fails changes nothing,
+so what starts waiting while the server is unreachable is news when it answers.
 
-While the desktop notifier is installed (`~/.config/agents-ui/notify.json`
-exists and does not say `"enabled": false`), the widget sends nothing: the
-notifier says the same things and more (the build, deploys), and a machine
-running both is notified once. Turn the widget's own off with **Notify** in its
-settings.
+While the desktop notifier covers it, the widget sends nothing: that is, its
+`~/.config/agents-ui/notify.json` exists, is not `"enabled": false`, watches
+the same server (nuc-1 when it names none) and notifies `needs`. The notifier
+says the same things and more (the build, deploys), and a machine running both
+is notified once. Turn the widget's own off with **Notify** in its settings.
 
 With a village open in the panel, the icon counts that village; otherwise it
 counts every village on the server. Left-click opens the panel. Right-click opens
@@ -60,7 +61,8 @@ A village shows:
 
 **Join swarm** runs `swarm <machine>` (`~/.local/bin/swarm`, from
 `remote-swarm-setup.sh`) in a terminal, or focuses that terminal if it is
-already open (`omarchy-launch-or-focus-tui --app-id=org.omarchy.swarm-<machine>`).
+already open (`omarchy-launch-or-focus-tui --app-id=org.omarchy.swarm-<machine>-join`;
+the `-join` keeps `nuc` from finding nuc-1's terminal).
 It shows once **Machine** is set and `swarm` is on `PATH`. Omarchy runs that
 command through `eval`, so the machine must be a plain host name (letters,
 digits, `.`, `_`, `-`, starting with a letter or digit); for anything else the

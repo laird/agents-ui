@@ -99,8 +99,12 @@ assert not warnings, "QML warnings:\n" + "\n".join(warnings)
 # (Earlier checks feed other recorded villages through `one`, and a conflict
 # appearing there is news too; the house below is the one checked.)
 notes = [l for l in ran.splitlines() if l.startswith("omarchy-notification-send ") and "wt-1: #4 Checkout" in l]
-assert len(notes) == 1, "one notification for the house, on the rising edge only:\n" + ran
-assert notes[0].startswith("omarchy-notification-send --app-name Agents village -u critical -r 4930 1 needs you wt-1: #4 Checkout --exec "), notes[0]
+# Twice: when it starts waiting, and when it waits again after an answer
+# seen between two blips. Never for still waiting, nor from the widget with
+# notify off.
+assert len(notes) == 2, "a notification per rising edge, no more:\n" + ran
+assert notes[0].startswith("omarchy-notification-send --app-name Agents village -u critical -p "), notes[0]
+assert " 1 needs you wt-1: #4 Checkout --exec " in notes[0], notes[0]
 joins = [l for l in ran.splitlines() if l.startswith("omarchy-launch-or-focus-tui ")]
-assert joins == ["omarchy-launch-or-focus-tui --app-id=org.omarchy.swarm-nuc swarm nuc"], "join runs for nuc only:\n" + ran
+assert joins == ["omarchy-launch-or-focus-tui --app-id=org.omarchy.swarm-nuc-join swarm nuc"], "join runs for nuc only:\n" + ran
 print(f'{{"qml_checks": {len(checks)}, "failed": 0}}')

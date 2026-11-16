@@ -104,6 +104,13 @@ ShellRoot {
       check("a new view starts with no highlight", two.cursor, -1)
       two.moveCursor(1)
       check("in a village, Needs you comes first", two.navItems[two.cursor].section, "needs")
+      two.moveCursor(1)
+      check("then the houses", two.navItems[two.cursor].id, "house:wt-1")
+      // A note lands on the board above the highlighted house: it stays on the house.
+      var more = JSON.parse(Fixtures.twoVillages)
+      more.villages[1].board = [{ number: 5, label: "needs-design", title: "x", url: "https://x/5" }]
+      two.apply(Fixtures.twoSwarms, JSON.stringify(more))
+      check("the highlight stays on its row when rows above it change", two.navItems[two.cursor].id, "house:wt-1")
       two.back()
 
       console.log("join swarm")
@@ -121,8 +128,8 @@ ShellRoot {
           pipeline: { gates: [], stops: [], quay: [] },
           houses: [{ id: "/src/shop-wt-1", role: "worker-1", status: blocked ? "blocked" : "working", issue: 4, issue_title: "Checkout", links: [] }] }] })
       }
-      check("no notifier installed: the widget notifies", quiet.notifies, false)
-      check("by default it does", joiner.notifies, true)
+      check("notify off in its settings: the widget does not notify", quiet.notifies, false)
+      check("no notifier installed, notify on: the widget notifies", joiner.notifies, true)
       joiner.apply(Fixtures.swarms, waiting(false))
       check("first poll: nothing", joiner.lastNotice, null)
       joiner.apply(Fixtures.swarms, waiting(true))
@@ -131,7 +138,13 @@ ShellRoot {
       joiner.apply(Fixtures.swarms, waiting(true))
       joiner.apply("", "")
       joiner.apply(Fixtures.swarms, waiting(true))
-      check("back after the server was down: recorded, not sent again", joiner.needKeys.length, 1)
+      check("back after the server was down: still waiting is not news", joiner.lastNotice.title, "1 needs you")
+      check("the keys outlast the blip", joiner.needKeys.length, 1)
+      joiner.apply("", "")
+      joiner.apply(Fixtures.swarms, waiting(false))
+      joiner.apply("", "")
+      joiner.apply(Fixtures.swarms, waiting(true))
+      check("what starts waiting during a blip is news when it answers", joiner.needKeys.length, 1)
       quiet.apply(Fixtures.swarms, waiting(false))
       quiet.apply(Fixtures.swarms, waiting(true))
       check("notify off: worked out, not sent", quiet.lastNotice.title, "1 needs you")
@@ -141,7 +154,14 @@ ShellRoot {
       check("unreachable", one.reachable, false)
       check("the badge says so", one.badge.reachable, false)
 
-      console.log(failures === 0 ? "ALL OK" : failures + " FAILED")
+      // The notifications and the terminal are processes started from the
+      // event loop: give them a moment before qml_check.py reads what ran.
+      finish.start()
+    }
+    Timer {
+      id: finish
+      interval: 1500
+      onTriggered: console.log(harness.failures === 0 ? "ALL OK" : harness.failures + " FAILED")
     }
   }
 }

@@ -209,10 +209,19 @@ test("join swarm: a plain machine name only, since omarchy-launch-or-focus evals
   for (const ok of ["nuc", "nuc-1", "box.local", "A9_b-c.d"]) assert.ok(M.validMachine(ok), ok)
   for (const bad of ["nuc; rm -rf ~", "$(id)", "-rf", "", " nuc", "nuc box", "`id`", "a/b", "x".repeat(65), null, undefined])
     assert.ok(!M.validMachine(bad), String(bad))
-  assert.deepStrictEqual(M.joinCommand("nuc"), ["omarchy-launch-or-focus-tui", "--app-id=org.omarchy.swarm-nuc", "swarm", "nuc"])
+  assert.deepStrictEqual(M.joinCommand("nuc"), ["omarchy-launch-or-focus-tui", "--app-id=org.omarchy.swarm-nuc-join", "swarm", "nuc"])
   assert.strictEqual(M.joinCommand("nuc; rm -rf ~"), null)
   assert.strictEqual(M.joinCommand("$(id)"), null)
   assert.strictEqual(M.joinCommand("-rf"), null)
+})
+
+test("join swarm: one machine's terminal never matches another's (omarchy-launch-or-focus matches \\b<class>\\b)", () => {
+  const finds = (m, cls) => new RegExp("\\b" + M.joinAppId(m) + "\\b", "i").test(cls)
+  assert.ok(finds("nuc", M.joinAppId("nuc")))
+  assert.ok(!finds("nuc", M.joinAppId("nuc-1")), "nuc is not nuc-1")
+  assert.ok(!finds("nuc", M.joinAppId("nuc.lan")))
+  assert.ok(!finds("a.b", M.joinAppId("axb")), "a dot is not a wildcard")
+  assert.ok(finds("box.lan", M.joinAppId("box.lan")))
 })
 
 test("join swarm: hidden without a machine or without swarm here, disabled for a bad name", () => {
@@ -243,9 +252,11 @@ test("notify: one replaceable notification saying how many, what is new and wher
   const all = M.needsNow(BASE, waitingDoc(true))
   const n = M.notice(BASE, all, all)
   assert.deepStrictEqual(n, { title: "1 needs you", body: "wt-1: #4 Checkout", url: BASE + "/village#shop&house=wt-1" })
-  const cmd = M.noticeCommand(n)
-  assert.deepStrictEqual(cmd.slice(0, 9), ["omarchy-notification-send", "--app-name", "Agents village", "-u", "critical", "-r", String(M.NOTICE_ID), "1 needs you", "wt-1: #4 Checkout"])
-  assert.strictEqual(cmd[9], "--exec", "--exec comes last: the rest is the click's argv")
+  const cmd = M.noticeCommand(n, 0)
+  assert.deepStrictEqual(cmd.slice(0, 9), ["omarchy-notification-send", "--app-name", "Agents village", "-u", "critical", "-p", "1 needs you", "wt-1: #4 Checkout", "--exec"],
+    "the first: no id to replace; -p prints the one it gets; --exec comes last, the rest is the click's argv")
+  assert.deepStrictEqual(M.noticeCommand(n, 812).slice(5, 8), ["-p", "-r", "812"], "the next replaces the widget's own last notice")
+  assert.strictEqual(M.noticeCommand({ title: "t", body: "#4 Vec<u8> & co", url: "u" }, 0)[7], "#4 Vec&lt;u8&gt; &amp; co", "the body is markup-escaped")
   assert.strictEqual(cmd[cmd.length - 1], n.url)
   assert.strictEqual(M.notice(BASE, all, []), null)
   const many = Array.from({ length: 6 }, (_, i) => ({ project: "p", what: "w" + i, title: "t", key: String(i) }))
@@ -253,19 +264,27 @@ test("notify: one replaceable notification saying how many, what is new and wher
   assert.strictEqual(M.notice(BASE, many, many).title, "6 need you")
 })
 
-test("notify: the widget stays quiet while the desktop notifier is installed", () => {
-  assert.strictEqual(M.widgetNotifies(true, null), true)
-  assert.strictEqual(M.widgetNotifies(false, null), false)
-  assert.strictEqual(M.widgetNotifies(true, '{"server":"http://nuc-1:7890"}'), false)
-  assert.strictEqual(M.widgetNotifies(true, '{"enabled":false}'), true, "a notifier turned off hands it back")
-  assert.strictEqual(M.widgetNotifies(true, "{not json"), false, "a notifier whose settings don't parse still runs")
+test("notify: the widget stays quiet only while the desktop notifier covers it", () => {
+  const nuc = "http://nuc-1:7890"
+  assert.strictEqual(M.widgetNotifies(true, null, nuc), true, "no notifier")
+  assert.strictEqual(M.widgetNotifies(false, null, nuc), false, "notify off")
+  assert.strictEqual(M.widgetNotifies(true, '{"server":"http://nuc-1:7890/"}', nuc), false, "the notifier watches this server")
+  assert.strictEqual(M.widgetNotifies(true, '{}', nuc), false, "the notifier's default server is nuc-1")
+  assert.strictEqual(M.widgetNotifies(true, '{"server":"http://other:7890"}', nuc), true, "it watches another server")
+  assert.strictEqual(M.widgetNotifies(true, '{"kinds":["build"]}', nuc), true, "it does not notify what needs you")
+  assert.strictEqual(M.widgetNotifies(true, '{"enabled":false}', nuc), true, "a notifier turned off hands it back")
+  assert.strictEqual(M.widgetNotifies(true, "{not json", nuc), false, "a notifier whose settings don't parse still runs")
 })
 
 test("keyboard: the rows in panel order, and a cursor held at the ends", () => {
   const rows = [{ project: "a" }, { project: "b" }]
-  assert.deepStrictEqual(M.navRows(rows, [], [], ""), [{ section: "swarms", pick: "a" }, { section: "swarms", pick: "b" }])
-  assert.deepStrictEqual(M.navRows(rows, [{ url: "n" }], [{ url: "h1" }, { url: "h2" }], "a").map(r => r.section + ":" + r.url),
-    ["needs:n", "houses:h1", "houses:h2"])
+  assert.deepStrictEqual(M.navRows(rows, [], [], ""), [{ section: "swarms", id: "swarm:a", pick: "a" }, { section: "swarms", id: "swarm:b", pick: "b" }])
+  const nav = M.navRows(rows, [{ key: "k", url: "n" }], [{ name: "wt-1", url: "h1" }, { name: "wt-2", url: "h2" }], "a")
+  assert.deepStrictEqual(nav.map(r => r.section + ":" + r.url), ["needs:n", "houses:h1", "houses:h2"])
+  assert.strictEqual(M.cursorFor(nav, "house:wt-2"), 2)
+  assert.strictEqual(M.cursorFor(nav.slice(1), "house:wt-2"), 1, "the same row when one above it goes")
+  assert.strictEqual(M.cursorFor(nav, "house:wt-9"), -1)
+  assert.strictEqual(M.cursorFor(nav, ""), -1)
   assert.strictEqual(M.moveCursor(-1, 1, 3), 0)
   assert.strictEqual(M.moveCursor(-1, -1, 3), 2)
   assert.strictEqual(M.moveCursor(0, -1, 3), 0)

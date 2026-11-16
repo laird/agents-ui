@@ -70,14 +70,20 @@ Panel {
   readonly property string joinState: Model.joinState(machine, swarmOnPath)
   // notify.json of the desktop notifier, or null when it is not installed.
   property var notifierConfig: null
-  readonly property bool notifies: Model.widgetNotifies(notifySetting, notifierConfig)
-  // What needed you at the last poll (keys), null before the first one.
+  readonly property bool notifies: Model.widgetNotifies(notifySetting, notifierConfig, base)
+  // What needed you at the last answer (keys), null before the first one.
   property var needKeys: null
   property var lastNotice: null
-  // The highlighted row (Model.navRows), -1 for none.
+  // The id the daemon gave the last notice, so the next one replaces it.
+  property int noticeId: 0
+  // The highlighted row (Model.navRows): its index, and its id, which keeps
+  // it on the same row when the rows above it change.
   property int cursor: -1
+  property string cursorId: ""
   readonly property var navItems: Model.navRows(rows, attentionItems, houses, project)
-  onProjectChanged: cursor = -1
+  onProjectChanged: { cursor = -1; cursorId = "" }
+  onNavItemsChanged: cursor = Model.cursorFor(navItems, cursorId)
+  onCursorChanged: if (cursor >= 0) Qt.callLater(revealCursor)
 
   readonly property color foreground: bar ? bar.foreground : Commons.Color.foreground
   readonly property color urgent: bar ? bar.urgent : Commons.Color.urgent
@@ -101,7 +107,7 @@ Panel {
 
   function refresh() {
     get("/api/village", function(doc) {
-      if (doc === null) { root.reachable = false; root.needKeys = null; return }
+      if (doc === null) { root.reachable = false; return }
       root.noteReleases(doc)
       root.noteNeeds(doc)
       root.villagesDoc = doc
@@ -109,6 +115,8 @@ Panel {
       root.lastOk = Date.now()
     })
     get("/api/swarms", function(doc) { if (doc !== null) root.swarmsDoc = doc })
+    // Installing the desktop notifier creates this file; see it without a restart.
+    notifierFile.reload()
   }
 
   // A release (the last stop's deployment changing) sets the ship sailing.
@@ -131,7 +139,18 @@ Panel {
     var n = Model.notice(base, all, r.fresh)
     if (!n) return
     lastNotice = n
-    if (notifies) Quickshell.execDetached(Model.noticeCommand(n))
+    if (!notifies) return
+    // One at a time, so each knows the id to replace; a newer one waits.
+    if (sending) pendingNotice = n
+    else sendNotice(n)
+  }
+  property var pendingNotice: null
+  // Our own flag: Process.running does not turn true until the process starts.
+  property bool sending: false
+  function sendNotice(n) {
+    sending = true
+    noticeSender.command = Model.noticeCommand(n, noticeId)
+    noticeSender.running = true
   }
 
   function join() {
@@ -139,7 +158,21 @@ Panel {
     if (cmd && joinState === "ready") Quickshell.execDetached(cmd)
   }
 
-  function moveCursor(dy) { cursor = Model.moveCursor(cursor, dy, navItems.length) }
+  function moveCursor(dy) {
+    cursor = Model.moveCursor(cursor, dy, navItems.length)
+    cursorId = cursor >= 0 ? navItems[cursor].id : ""
+  }
+  // Scroll the panel so the highlighted row is in view.
+  function revealCursor() {
+    var row = null
+    for (var i = 0; i < rowItems.length; i++) if (rowItems[i] && rowItems[i].current) row = rowItems[i]
+    if (!row) return
+    var y = row.mapToItem(column, 0, 0).y
+    if (y < flick.contentY) flick.contentY = y
+    else if (y + row.height > flick.contentY + flick.height) flick.contentY = y + row.height - flick.height
+  }
+  // The rows that can be highlighted, registered as they are made.
+  property var rowItems: []
   function activateCursor() {
     var item = navItems[cursor]
     if (!item) return
@@ -151,7 +184,7 @@ Panel {
   function apply(swarmsText, villagesText) {
     swarmsDoc = Model.parse(swarmsText)
     var doc = Model.parse(villagesText)
-    if (doc !== null) { noteReleases(doc); noteNeeds(doc) } else needKeys = null
+    if (doc !== null) { noteReleases(doc); noteNeeds(doc) }
     villagesDoc = doc
     reachable = villagesDoc !== null
     if (reachable) lastOk = Date.now()
@@ -170,11 +203,31 @@ Panel {
     Quickshell.execDetached(["sh", "-c", 'command -v omarchy-launch-webapp >/dev/null && exec omarchy-launch-webapp "$1" || exec omarchy-launch-browser "$1"', "sh", url])
   }
 
-  onOpenedChanged: if (opened) { nowMs = Date.now(); refresh() }
-  onBaseChanged: { swarmsDoc = null; villagesDoc = null; reachable = false; refresh() }
+  onOpenedChanged: if (opened) {
+    nowMs = Date.now(); refresh()
+    if (machine !== "" && !swarmCheck.running) swarmCheck.running = true
+  }
+  // Another server: what waited on the old one says nothing about the new one.
+  onBaseChanged: { swarmsDoc = null; villagesDoc = null; reachable = false; needKeys = null; refresh() }
   Component.onCompleted: refresh()
 
+  // Sends the notice; prints the id the daemon gave it (-p).
+  Process {
+    id: noticeSender
+    stdout: StdioCollector {
+      onStreamFinished: { var id = parseInt(this.text.trim(), 10); if (id > 0) root.noticeId = id }
+    }
+    onExited: {
+      root.sending = false
+      if (!root.pendingNotice) return
+      var n = root.pendingNotice
+      root.pendingNotice = null
+      Qt.callLater(function() { root.sendNotice(n) })
+    }
+  }
+
   // Is `swarm` installed here? The Join swarm button hides when it isn't.
+  // Checked again each time the panel opens, so installing it needs no restart.
   Process {
     id: swarmCheck
     command: ["sh", "-c", "command -v swarm >/dev/null"]
@@ -511,6 +564,8 @@ Panel {
     // Highlighted from the keyboard (j/k, the arrows).
     property bool current: false
     signal clicked()
+    Component.onCompleted: root.rowItems = root.rowItems.concat([row])
+    Component.onDestruction: root.rowItems = root.rowItems.filter(function(r) { return r !== row })
     foreground: root.foreground
     hasCursor: mouse.containsMouse || current
     implicitHeight: content.implicitHeight + Style.spacing.rowPaddingX
