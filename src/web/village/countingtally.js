@@ -21,7 +21,7 @@ export function countingUsage(v) {
 }
 
 /* A token count in a few characters: 950, 12k, 340k, 1.2M, 12M, 3.4B. */
-export function tokenWords(n) {
+export function tokenAmount(n) {
   if (!Number.isFinite(n) || n < 0) return '?';
   const short = (x, unit) => `${x < 10 ? Math.round(x * 10) / 10 : Math.round(x)}${unit}`;
   if (n < 1000) return String(Math.round(n));
@@ -32,7 +32,7 @@ export function tokenWords(n) {
 
 /* Its label's subtitle: today's total. */
 export function countingSub(u) {
-  return u ? `${tokenWords(u.today.total)} tokens today` : '';
+  return u ? `${tokenAmount(u.today.total)} tokens today` : '';
 }
 
 /* The last 7 days for the tally board: each day's share of the busiest, 0..1. */
@@ -52,8 +52,8 @@ export function countingDate(iso) {
 
 /* What one count is made of. */
 const parts = t => [
-  `in ${tokenWords(t.input)}`, `out ${tokenWords(t.output)}`,
-  `cache write ${tokenWords(t.cache_write)}`, `cache read ${tokenWords(t.cache_read)}`,
+  `in ${tokenAmount(t.input)}`, `out ${tokenAmount(t.output)}`,
+  `cache write ${tokenAmount(t.cache_write)}`, `cache read ${tokenAmount(t.cache_read)}`,
 ].join(' · ');
 
 /* The dialog: a line for today, then the facts. */
@@ -64,13 +64,13 @@ export function countingFacts(u) {
   const issues = (Array.isArray(u.issues) ? u.issues : []).filter(i => i && Number.isFinite(i.issue) && isCount(i.week) && i.week.total > 0)
     .sort((a, b) => b.week.total - a.week.total).slice(0, COUNTING_TOP);
   const meta = [
-    `Today: ${tokenWords(u.today.total)} tokens (${parts(u.today)})`,
-    ...(days.length ? [`Last ${days.length} days: ${tokenWords(week)} tokens`] : []),
-    ...days.map(d => `${countingDate(d.date)}: ${tokenWords(d.total)}`),
-    ...(issues.length ? ['Costliest this week:', ...issues.map(i => `#${i.issue}: ${tokenWords(i.week.total)} this week${isCount(i.total) ? ` (${tokenWords(i.total.total)} in all)` : ''}`)]
+    `Today: ${tokenAmount(u.today.total)} tokens (${parts(u.today)})`,
+    ...(days.length ? [`Last ${days.length} days: ${tokenAmount(week)} tokens`] : []),
+    ...days.map(d => `${countingDate(d.date)}: ${tokenAmount(d.total)}`),
+    ...(issues.length ? ['Costliest this week:', ...issues.map(i => `#${i.issue}: ${tokenAmount(i.week.total)} this week${isCount(i.total) ? ` (${tokenAmount(i.total.total)} in all)` : ''}`)]
       : ['No issue has used tokens this week']),
     ...(u.catching_up ? ['Still reading older transcripts: the totals will grow'] : []),
     'Tokens, not dollars: what they cost depends on the plan',
   ];
-  return { line: `${tokenWords(u.today.total)} tokens used today, read from Claude Code's transcripts`, meta };
+  return { line: `${tokenAmount(u.today.total)} tokens used today, read from Claude Code's transcripts`, meta };
 }

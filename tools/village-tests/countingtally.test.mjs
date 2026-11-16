@@ -3,7 +3,7 @@
 // Also run by `cargo test village_node_tests`.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { COUNTING_TOP, countingBars, countingDate, countingFacts, countingSub, countingUsage, tokenWords } from '../../src/web/village/countingtally.js';
+import { COUNTING_TOP, countingBars, countingDate, countingFacts, countingSub, countingUsage, tokenAmount } from '../../src/web/village/countingtally.js';
 
 const t = (total, k = 0.25) => ({ input: total * k, output: total * k, cache_write: total * k, cache_read: total * k, total });
 const USAGE = {
@@ -20,16 +20,16 @@ const USAGE = {
 };
 
 test('token counts in a few characters', () => {
-  assert.equal(tokenWords(0), '0');
-  assert.equal(tokenWords(950), '950');
-  assert.equal(tokenWords(1_000), '1k');
-  assert.equal(tokenWords(12_345), '12k');
-  assert.equal(tokenWords(340_000), '340k');
-  assert.equal(tokenWords(1_234_000), '1.2M');
-  assert.equal(tokenWords(12_400_000), '12M');
-  assert.equal(tokenWords(3_400_000_000), '3.4B');
-  assert.equal(tokenWords(NaN), '?');
-  assert.equal(tokenWords(-1), '?');
+  assert.equal(tokenAmount(0), '0');
+  assert.equal(tokenAmount(950), '950');
+  assert.equal(tokenAmount(1_000), '1k');
+  assert.equal(tokenAmount(12_345), '12k');
+  assert.equal(tokenAmount(340_000), '340k');
+  assert.equal(tokenAmount(1_234_000), '1.2M');
+  assert.equal(tokenAmount(12_400_000), '12M');
+  assert.equal(tokenAmount(3_400_000_000), '3.4B');
+  assert.equal(tokenAmount(NaN), '?');
+  assert.equal(tokenAmount(-1), '?');
 });
 
 test('no usage, or a broken one, is no counting house', () => {
