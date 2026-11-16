@@ -180,3 +180,26 @@ fn village_html_reaches_every_object_by_keyboard() {
     assert!(body.contains(".hk:focus-visible"));
     assert!(body.contains("b.setAttribute('aria-label', [info.title, info.line].filter(Boolean).join(': '));"));
 }
+
+#[test]
+fn village_html_orders_and_moves_keyboard_targets() {
+    // #478: Tab order, arrow keys, 1-9 in a question, a ring in each theme's colour.
+    let nav = village_asset("keynav.js").expect("keynav.js is embedded").1;
+    assert!(nav.contains("registerOverlay(orderKeys, 31);"), "ordered after placeKeys (30)");
+    assert!(nav.contains("const want = keyOrder(entries).map(e => e.b)"));
+    assert!(nav.contains("focused.focus({ preventScroll: true })"), "re-ordering keeps focus");
+    assert!(nav.contains("const to = from && nearest(from, all, dir);"));
+    assert!(nav.contains("optionFor(e.key, buttons.map(b => b.dataset.key || ''))"));
+    assert!(nav.contains("b.style.setProperty('--focus', b.theme.focus)"));
+    assert!(nav.contains("registerKey({ group: 'Keyboard'"));
+    let dialogs = village_asset("dialogs.js").unwrap().1;
+    assert!(dialogs.contains(r#"data-key="${esc(o.key || '')}""#), "answer buttons carry their key");
+    let css = village_asset("village.css").unwrap().1;
+    assert!(css.contains("outline: 3px solid var(--focus, var(--gold))"));
+    for theme in ["themes/medieval.js", "themes/modern.js", "themes/future.js"] {
+        assert!(village_asset(theme).unwrap().1.contains("  focus: "), "{theme} has no focus colour");
+    }
+    // The screensaver still closes on any key, ahead of the map's keys.
+    let saver = village_asset("screensaver.js").unwrap().1;
+    assert!(saver.contains("window.addEventListener(type, onInput, { passive: true, capture: true })"));
+}

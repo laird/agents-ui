@@ -112,7 +112,9 @@
    * Tab reaches what a click does. The mouse still goes to the map. */
   .hitkeys { position: absolute; inset: 0; pointer-events: none; }
   .hk { position: absolute; pointer-events: none; padding: 0; margin: 0; border: 0; background: none; opacity: 0; }
-  .hk:focus-visible { opacity: 1; outline: 3px solid var(--gold); outline-offset: 1px; }
+  /* The ring in the target's theme colour (keynav.js), on a dark band so it
+   * reads on grass, asphalt and deck alike (#478). */
+  .hk:focus-visible { opacity: 1; outline: 3px solid var(--focus, var(--gold)); outline-offset: 1px; box-shadow: 0 0 0 5px rgba(6,8,20,.85); }
   .al { position: absolute; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 700 var(--lf, 11px)/1.2 var(--mono); color: var(--gold); background: rgba(6,8,20,.78); border: 1px solid var(--gold); border-radius: 3px; padding: 1px 5px; }
   .al small { font-weight: 400; color: var(--ink-dim); }
   .alabels.compact small { display: none; }

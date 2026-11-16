@@ -146,6 +146,8 @@ export const MEDIEVAL = {
   name: 'Medieval village',
   // In a world the platform is drawn in another theme, so the two read apart.
   pair: 'modern',
+  // The keyboard's focus ring (keynav.js): lamplight.
+  focus: P.gold,
   weather: { style: 'storm', cloud: '#50506a', cloudD: '#30303f', rain: '#a8d0f0', tint: 'rgba(16,20,44,0.32)', flash: 'rgba(255,255,236,0.38)', alarm: '#f03030' },
   labels: { docks: 'Docks', board: 'Notice board', houses: 'Houses', quay: 'Quay', castle: 'Harbour', hall: 'Castle', ship: 'Ship', sails: 'sails', gate: 'Gatehouse' },
   ground: grass, road: path, yard: cobbles, channel: water,

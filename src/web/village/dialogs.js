@@ -27,7 +27,7 @@ export function ask(house) {
   const box = document.getElementById('d-q'), q = house.question;
   if (!q || !house.answer_url) { box.innerHTML = ''; return; }
   box.innerHTML = `<p class="q">${esc(q.prompt)}</p><div class="opts">${q.options.map((o, i) =>
-      `<button data-opt="${i}">${q.kind === 'menu' ? esc(o.key) + '. ' : ''}${esc(o.label)}</button>`).join('')}</div><p class="dim" id="d-q-msg" role="status"></p>`;
+      `<button data-opt="${i}" data-key="${esc(o.key || '')}">${q.kind === 'menu' ? esc(o.key) + '. ' : ''}${esc(o.label)}</button>`).join('')}</div><p class="dim" id="d-q-msg" role="status"></p>`;
   const buttons = [...box.querySelectorAll('[data-opt]')], msg = document.getElementById('d-q-msg');
   const busy = on => buttons.forEach(b => { b.disabled = on; });
   buttons.forEach(b => b.addEventListener('click', async () => {

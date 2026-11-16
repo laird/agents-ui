@@ -18,6 +18,7 @@ import './voyages.js';
 import './worlds.js';
 import './panels.js';
 import './dialogs.js';
+import './keynav.js';
 import './labels.js';
 import './key.js';
 import './screensaver.js';

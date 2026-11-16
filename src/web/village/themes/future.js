@@ -44,6 +44,8 @@ function mushroom(g, x, y, w, stem, cols) {
 export const FUTURE = {
   name: 'Future',
   pair: 'modern',
+  // The keyboard's focus ring (keynav.js): neon cyan.
+  focus: F.cyan,
   // A broken build in orbit: a red alert, pulsing, with light bars and roof alarms.
   weather: { style: 'alert', cloud: '#501828', cloudD: '#300818', rain: '#ff7090', tint: 'rgba(224,24,48,0.20)', alarm: '#ff2040' },
   labels: { docks: 'Cargo bay', board: 'Holo-board', houses: 'Pods', quay: 'Launch rail', castle: 'Spaceport', hall: 'Command dome', ship: 'Shuttle', sails: 'launches', gate: 'Scanner arch' },
