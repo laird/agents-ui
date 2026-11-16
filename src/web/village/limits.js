@@ -6,9 +6,10 @@
  * quiet village is not mistaken for a stalled one. No DOM: tested under node
  * (tools/village-tests/limits.test.mjs). The well itself is well.js. */
 
-/* Whether a house's crew is held by a limit. A working house has got past it,
- * and a blocked one is waiting on you first. */
-export const limited = h => !!(h && h.limit && h.status !== 'working' && h.status !== 'blocked' && h.status !== 'stopped');
+/* Whether a house's crew is held by a limit: idle or done with one. A
+ * working house has got past it, a blocked one is waiting on you first, and
+ * stalled, unknown or starting keep their own look. */
+export const limited = h => !!(h && h.limit && (h.status === 'idle' || h.status === 'done'));
 
 /* When it lifts, as the runtime said it: "3pm (Europe/London)", "in 2 hours". */
 export const resetsOf = h => (h && h.limit && h.limit.resets) || null;
@@ -27,9 +28,9 @@ export function limitSub(h) {
 }
 
 /* The village at its limit: most of its houses (more than half of those not
- * stopped) are limited. `{ n, of, resets }`, or null. `resets` is the
- * soonest the runtime named, as it named it; the first, when they differ in
- * a way that can't be compared. */
+ * stopped) are limited. `{ n, of, resets }`, or null. `resets` is the first
+ * reset a limited house names, in the runtime's words: they are free text
+ * ("3pm (Europe/London)", "in 2 hours"), so they are not compared. */
 export function villageLimit(v) {
   const houses = ((v && v.houses) || []).filter(h => h.status !== 'stopped');
   const held = houses.filter(limited);

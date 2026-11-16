@@ -218,22 +218,26 @@ pub struct UsageLimit {
     pub resets: Option<String>,
 }
 
-/// What a limit message says, lowercased. Phrases a runtime prints, not
-/// words that turn up in prose about limits ("rate limit" alone is not one).
+/// What a limit message says, lowercased: the runtimes' own wording, not
+/// words that turn up in prose or test output about limits ("rate limited",
+/// "retry limit reached", "returns error 429" are none of these).
 const LIMIT_PHRASES: &[&str] = &[
-    "limit reached",
     "hit your limit",
     "hit your usage limit",
+    "usage limit reached",
+    "hour limit reached",
+    "weekly limit reached",
+    "session limit reached",
+    "opus limit reached",
     "rate_limit_error",
-    "rate limit exceeded",
-    "rate limited",
-    "quota exceeded",
     "resource_exhausted",
     "429 too many requests",
-    "error: 429",
-    "error 429",
-    "(429)",
 ];
+
+/// A line that starts the agent's next turn: Claude Code's `●`/`⏺` reply and
+/// `✻ Worked for 3s`, Codex's `•`. One after the message means the agent
+/// went on, so the limit has lifted.
+const NEXT_TURN: &[char] = &['●', '⏺', '✻', '•'];
 
 /// The pane's lines with text, at most this many from the bottom: the limit
 /// message sits just above the input box and the status line under it.
@@ -242,13 +246,16 @@ const LIMIT_TAIL: usize = 14;
 /// A usage or rate limit the agent stopped on, from the last lines of its
 /// pane. `None` when there is none, or it has scrolled out of the bottom.
 pub fn parse_limit(pane: &str) -> Option<UsageLimit> {
-    let stripped = strip_ansi(pane);
-    let lines: Vec<&str> = stripped.lines().filter(|l| !l.trim().is_empty()).collect();
-    let tail = &lines[lines.len().saturating_sub(LIMIT_TAIL)..];
+    // Only the bottom: walk up from the end, never the whole scrollback.
+    let mut tail: Vec<String> = pane.lines().rev().filter(|l| !l.trim().is_empty()).take(LIMIT_TAIL).map(strip_ansi).collect();
+    tail.reverse();
     let at = tail.iter().rposition(|l| {
         let lower = l.to_lowercase();
         LIMIT_PHRASES.iter().any(|p| lower.contains(p))
     })?;
+    if tail[at + 1..].iter().any(|l| l.trim_start().starts_with(NEXT_TURN)) {
+        return None;
+    }
     // The reset time is on the message's line, or wrapped onto the next.
     let resets = tail[at..].iter().take(2).find_map(|l| reset_words(l));
     Some(UsageLimit { resets })
@@ -931,6 +938,11 @@ mod tests {
     #[test]
     fn prose_about_limits_and_old_messages_are_not_a_limit() {
         assert_eq!(parse_limit("● I added a rate limit to the API client.\n> \n"), None, "talking about one");
+        assert_eq!(parse_limit("● The client is now rate limited to 10 req/s.\n> \n"), None);
+        assert_eq!(parse_limit("  retry limit reached after 3 attempts\n  GET /x returns error 429 (429)\n"), None, "test output");
+        // Resumed after the reset: a reply and its timing under the old message.
+        let resumed = "  ⎿  You've hit your limit · resets 3pm\n> continue\n● Carrying on with the tests.\n✻ Worked for 4s\n❯ \n";
+        assert_eq!(parse_limit(resumed), None, "the agent went on");
         assert_eq!(parse_limit(""), None);
         // A limit that has since scrolled far up: the agent went on working.
         let mut pane = String::from("You've hit your limit · resets 3pm\n");

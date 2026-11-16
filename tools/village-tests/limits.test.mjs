@@ -14,10 +14,11 @@ const { saverSummary } = await import(V + 'saver.js');
 
 const held = (status = 'idle', resets = '3pm (Europe/London)') => ({ status, limit: resets ? { resets } : {} });
 
-test('a house is limited while it is not working, blocked or stopped', () => {
+test('a house is limited while it is idle or done with a limit', () => {
   assert.equal(limited(held('idle')), true);
   assert.equal(limited(held('done')), true);
-  assert.equal(limited(held('stalled')), true);
+  assert.equal(limited(held('stalled')), false, 'stalled keeps its own look: no second figure at the well');
+  assert.equal(limited(held('unknown')), false);
   assert.equal(limited(held('working')), false, 'got past it');
   assert.equal(limited(held('blocked')), false, 'waiting on you comes first');
   assert.equal(limited(held('stopped')), false);

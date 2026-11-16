@@ -14,7 +14,7 @@ export const FRESH_DONE_MS = 5 * 60 * 1000;
  * `h.since` is when the server first saw the house in its status. A 'done'
  * with no `since` keeps its ✓: nothing says how long ago it finished. */
 export function restOf(h, nowMs) {
-  if (limited(h) && (h.status === 'idle' || h.status === 'done')) return 'limited';
+  if (limited(h)) return 'limited';
   if (h.status === 'idle') return 'asleep';
   if (h.status !== 'done') return null;
   const at = h.since ? Date.parse(h.since) : NaN;

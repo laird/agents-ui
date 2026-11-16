@@ -341,14 +341,14 @@ impl SwarmSource for HerdrSwarms {
     }
 }
 
-/// Each agent's context use, from the last few lines of its pane, where
-/// Claude Code's status line is, and any usage limit it stopped on, which
-/// is printed just above its input box (#484). All panes at once: one short
-/// read each.
 /// Lines read from the bottom of each pane: the status line and input box
 /// take about six, and a limit message sits a few lines above them.
 const PANE_TAIL: u32 = 16;
 
+/// Each agent's context use, from the last few lines of its pane, where
+/// Claude Code's status line is, and any usage limit it stopped on, which
+/// is printed just above its input box (#484). All panes at once: one short
+/// read each.
 async fn read_context(transport: &ServerTransport, agents: &mut [HerdrAgent]) {
     let reads: Vec<_> = agents
         .iter()

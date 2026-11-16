@@ -59,9 +59,10 @@ function needsYou(v) {
 
 // Houses held by a usage or rate limit (#484): counted apart from those
 // waiting on you, since they wait on the limit, not on a person. As the
-// village page's limits.js reads it: not while working, blocked or stopped.
+// village page's limits.js reads it (QML's JavaScript can't import that
+// module, so this mirrors it): idle or done with a limit.
 function isLimited(h) {
-  return !!(h && h.limit && h.status !== "working" && h.status !== "blocked" && h.status !== "stopped")
+  return !!(h && h.limit && (h.status === "idle" || h.status === "done"))
 }
 
 function limited(v) {

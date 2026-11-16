@@ -204,7 +204,10 @@ fn village_html_shows_context_barrels() {
 fn village_limited_workers_wait_at_a_dry_well() {
     let body = &village_source();
     // rest.js hands a limited worker to the well, so lifecycle.js draws no sleeper.
-    assert!(body.contains("if (limited(h) && (h.status === 'idle' || h.status === 'done')) return 'limited';"));
+    assert!(body.contains("if (limited(h)) return 'limited';"));
+    // Nobody is drawn or tapped at the door, and the second crew member keeps off the well.
+    assert!(body.contains("if ((['idle', 'done', 'blocked', 'working'].includes(st) && rest !== 'limited') || slumped) tap("));
+    assert!(body.contains("if (h.crew.length > 1 && st !== 'working' && rest !== 'limited') { person("));
     assert!(body.contains("well(c, lot.x + WELL.dx, lot.y + WELL.dy);"));
     assert!(body.contains("person(c, lot.x + AT_WELL.dx, lot.y + AT_WELL.dy, h.id, 'stand', { status: 'idle' });"));
     assert!(body.contains("(scene.limitBubbles || []).forEach(([x, y]) => limitBubble(c, x, y));"));

@@ -134,9 +134,10 @@ registerLayer({ z: 70, draw(c, scene, t) {
       // Robots show every status, so a stalled one sits slumped at its door.
       const slumped = state.T.robots && st === 'stalled';
       if (slumped) person(c, lot.x + 4, lot.y + 9, h.id, 'stand', { status: st });
-      if (['idle', 'done', 'blocked', 'working'].includes(st) || slumped) tap(lot.x + 4, lot.y + 8, 8, 12, { kind: 'person', i, who: h.crew[0] });
+      if ((['idle', 'done', 'blocked', 'working'].includes(st) && rest !== 'limited') || slumped) tap(lot.x + 4, lot.y + 8, 8, 12, { kind: 'person', i, who: h.crew[0] });
     }
-    if (h.crew.length > 1 && st !== 'working') { person(c, lot.x + 12, lot.y + 11, h.id + '#crew'); tap(lot.x + 12, lot.y + 11, 8, 12, { kind: 'person', i, who: h.crew[1] }); }
+    // A second crew member stands by the door, except where the dry well is (well.js).
+    if (h.crew.length > 1 && st !== 'working' && rest !== 'limited') { person(c, lot.x + 12, lot.y + 11, h.id + '#crew'); tap(lot.x + 12, lot.y + 11, 8, 12, { kind: 'person', i, who: h.crew[1] }); }
     if (h.crew.length > 1 && st === 'working' && !state.reduce) puffs(c, lot.x + 3, lot.y - 3, tt + 700, ...state.T.steam);
     // Sub-agents keep the house busy: one figure each out front (SUB_SLOTS),
     // and a "+N" badge for any that don't fit.
