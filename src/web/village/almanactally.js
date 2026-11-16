@@ -42,7 +42,9 @@ export function almanacBar(landed, most, room = ALMANAC_BAR_W) {
  * Today's row grows with the gate's own tally (`pipeline.merge_stats`, #431)
  * between GitHub reads, as crates leave the quay. That tally counts the UTC
  * day and the rows the server's own, so it is used only while the two are
- * the same date: otherwise it would count yesterday's landings again. */
+ * the same date: otherwise it would count yesterday's landings again. The
+ * larger of the two is shown, so nothing is counted twice (#509); `live` is
+ * set when the gate's count is the one shown, and the dialog says so. */
 export function almanacRows(gh, ms = null, utcDay = new Date().toISOString().slice(0, 10)) {
   const days = almanacDays(gh);
   if (!days) return [];
@@ -50,8 +52,9 @@ export function almanacRows(gh, ms = null, utcDay = new Date().toISOString().sli
   const rows = shown.map((d, k) => {
     const today = k === shown.length - 1 && d.date === on;
     const live = today && ms && utcDay === on ? ms : {};
+    const gate = (live.landed_today || 0) > (d.landed || 0) || (live.bounced_today || 0) > (d.bounced || 0);
     return {
-      date: d.date, today,
+      date: d.date, today, live: gate,
       landed: Math.max(d.landed || 0, live.landed_today || 0),
       bounced: Math.max(d.bounced || 0, live.bounced_today || 0),
       opened: d.opened || 0, deploys: d.deploys || 0,
@@ -90,10 +93,13 @@ export function almanacDate(date) {
   return `${ALMANAC_WEEKDAYS[d.getUTCDay()]} ${+m[3]} ${ALMANAC_MONTHS[+m[2] - 1]}`;
 }
 
+/* Said under the days when today's row shows the merge gate's count (#509). */
+export const ALMANAC_LIVE_NOTE = "Today's row may show the merge gate's own count, which is ahead of GitHub's until GitHub is read again";
+
 const almanacSum = (rows, k) => rows.reduce((n, r) => n + (r[k] || 0), 0);
 /* The label's line: "7 landed today (avg 9)", the average over the days before today. */
-export function almanacToday(gh, ms = null) {
-  const rows = almanacRows(gh, ms);
+export function almanacToday(gh, ms = null, utcDay) {
+  const rows = almanacRows(gh, ms, utcDay);
   if (!rows.length) return null;
   const last = rows[rows.length - 1], before = last.today ? rows.slice(0, -1) : rows;
   const avg = before.length ? Math.round(almanacSum(before, 'landed') / before.length) : 0;
@@ -101,8 +107,8 @@ export function almanacToday(gh, ms = null) {
 }
 
 /* The dialog: the totals over the days shown, the median claimed→landed, as_of, then each day. */
-export function almanacFacts(gh, ms = null) {
-  const rows = almanacRows(gh, ms);
+export function almanacFacts(gh, ms = null, utcDay) {
+  const rows = almanacRows(gh, ms, utcDay);
   if (!rows.length) return null;
   const n = rows.length, reverts = rows.some(r => r.reverted != null);
   const median = almanacSpan(gh.median_claim_to_land_secs);
@@ -115,6 +121,7 @@ export function almanacFacts(gh, ms = null) {
     median ? `Median from claimed to landed: ${median}` : 'Median from claimed to landed: no claims on record',
     `As of ${almanacAsOf(gh.as_of)}`,
     ...rows.map(r => `${almanacDate(r.date)}${r.today ? ' (today)' : ''}: landed ${r.landed} · bounced ${r.bounced}${r.reverted ? ` · reverted ${r.reverted}` : ''} · opened ${r.opened} · deploys ${r.deploys}`),
+    ...(rows.some(r => r.live) ? [ALMANAC_LIVE_NOTE] : []),
   ];
-  return { line: almanacToday(gh, ms), meta };
+  return { line: almanacToday(gh, ms, utcDay), meta };
 }
