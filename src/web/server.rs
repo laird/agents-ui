@@ -1166,6 +1166,10 @@ pub async fn run(addrs: &[SocketAddr], read_only: bool, state: WebServerState) -
             post(super::proposals::api_decision_handler),
         )
         .route(
+            "/api/swarms/{project}/agents/{role}/control",
+            post(super::controls::api_control_handler),
+        )
+        .route(
             "/api/swarms/{project}/agents/{role}/pane/stream",
             get(api_pane_stream_handler),
         )
@@ -1263,6 +1267,10 @@ mod tests {
             .route(
                 "/api/swarms/{project}/issues/{number}/decision",
                 post(crate::web::proposals::api_decision_handler),
+            )
+            .route(
+                "/api/swarms/{project}/agents/{role}/control",
+                post(crate::web::controls::api_control_handler),
             )
             .with_state(state)
     }
@@ -1403,6 +1411,45 @@ mod tests {
         assert_eq!(wordless.status(), StatusCode::UNPROCESSABLE_ENTITY);
         let unknown = app.oneshot(decision("p", r#"{"action":"delete"}"#)).await.unwrap();
         assert!(unknown.status().is_client_error());
+    }
+
+    fn control(project: &str, role: &str, body: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/swarms/{project}/agents/{role}/control"))
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_read_only_server_refuses_worker_controls() {
+        let shared = std::sync::Arc::new(std::sync::RwLock::new(vec![sample_swarm("p")]));
+        let app = make_app(make_web_state(shared)).layer(axum::middleware::from_fn(reject_writes));
+        for action in ["nudge", "release"] {
+            let resp = app.clone().oneshot(control("p", "worker-1", &format!(r#"{{"action":"{action}"}}"#))).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::FORBIDDEN, "{action}");
+        }
+    }
+
+    #[tokio::test]
+    async fn worker_controls_refuse_before_touching_a_pane_or_the_tracker() {
+        let mut s = sample_swarm("p");
+        s.workers.push(AgentSnapshot { role: "worker-2".into(), state: "Working #5".into(), ..sample_agent("worker-2", false) });
+        let shared = std::sync::Arc::new(std::sync::RwLock::new(vec![s]));
+        let app = make_app(make_web_state(shared));
+        let status = |project: &'static str, role: &'static str, body: &'static str| {
+            let app = app.clone();
+            async move { app.oneshot(control(project, role, body)).await.unwrap().status() }
+        };
+        assert_eq!(status("ghost", "worker-1", r#"{"action":"nudge"}"#).await, StatusCode::NOT_FOUND);
+        assert_eq!(status("p", "worker-9", r#"{"action":"nudge"}"#).await, StatusCode::NOT_FOUND);
+        assert_eq!(status("p", "worker-1", r#"{"action":"restart"}"#).await, StatusCode::UNPROCESSABLE_ENTITY);
+        // Busy: nothing is typed into its work.
+        assert_eq!(status("p", "worker-2", r#"{"action":"nudge"}"#).await, StatusCode::CONFLICT);
+        // Holds no issue: nothing to release.
+        assert_eq!(status("p", "worker-1", r#"{"action":"release"}"#).await, StatusCode::CONFLICT);
+        assert_eq!(status("p", "manager", r#"{"action":"release"}"#).await, StatusCode::CONFLICT);
     }
 
     #[tokio::test]
