@@ -18,7 +18,7 @@ fn the_overview_is_drawn_selected_and_picked() {
     assert!(body.contains("view.overview ? OVERVIEW_NAME : view.world || view.village"));
     assert!(!body.contains("select(view.world || view.village)"), "every re-select goes through viewName");
     // A click on an island opens it; the village's own click handler leaves the overview alone.
-    assert!(body.contains("if (!state.view || state.view.overview) return; // overview.js answers its clicks"));
+    assert!(body.contains("if (!state.view || state.view.overview || state.view.valley) return; // overview.js and valley.js answer their clicks"));
     assert!(body.contains("if (k !== null) openSwarm(islands[k].name);"));
     // Each island has a keyboard target that says how it is.
     assert!(body.contains("okeys.className = 'hitkeys ovkeys';"));
