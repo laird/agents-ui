@@ -6,7 +6,7 @@
 # USAGE:
 #   tools/omarchy-plugin/install.sh [--host <ssh host>] [--enable] [--uninstall] [--dry-run]
 #   tools/omarchy-plugin/install.sh --screensaver [--never-sleep] [--server URL]
-#                                   [--cycle S] [--dim H-H] [--host <ssh host>] [--uninstall] [--dry-run]
+#                                   [--cycle S] [--dim H-H] [--sound] [--host <ssh host>] [--uninstall] [--dry-run]
 #   tools/omarchy-plugin/install.sh --notify [--server URL] [--quiet H-H]
 #                                   [--host <ssh host>] [--uninstall] [--dry-run]
 #
@@ -30,6 +30,10 @@
 #   --server URL   the agents-tui server (default http://nuc-1:7890)
 #   --cycle S      seconds on each swarm when there are several (default 30, 0 stays)
 #   --dim H-H      dim between these hours, e.g. 23-7 (default: never dims)
+#   --sound        quiet sound cues on transitions: a bell when something starts
+#                  waiting on you, thunder and birdsong as the build breaks and
+#                  mends, a horn when a deploy reaches production. Silent in the
+#                  --dim hours. Off by default.
 #
 # Notifications (--notify): a desktop notification when a house or the
 # manager starts waiting on you, a merge bounces at the gate, the build breaks
@@ -55,6 +59,7 @@ SERVER="http://nuc-1:7890"
 SERVER_GIVEN=false
 CYCLE=30
 DIM=""
+SOUND=false
 need() { [ "$2" -ge 2 ] || { echo "install.sh: $1 needs a value" >&2; exit 1; }; }
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -69,12 +74,13 @@ while [ $# -gt 0 ]; do
     --server) need "$1" $#; SERVER="${2%/}"; SERVER_GIVEN=true; shift 2 ;;
     --cycle) need "$1" $#; CYCLE="$2"; shift 2 ;;
     --dim) need "$1" $#; DIM="$2"; shift 2 ;;
+    --sound) SOUND=true; shift ;;
     -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
     *) echo "install.sh: unknown argument: $1" >&2; exit 1 ;;
   esac
 done
-if [ "$SCREENSAVER" != true ] && { [ "$NEVER_SLEEP" = true ] || [ "$DIM" != "" ]; }; then
-  echo "install.sh: --never-sleep and --dim go with --screensaver" >&2; exit 1
+if [ "$SCREENSAVER" != true ] && { [ "$NEVER_SLEEP" = true ] || [ "$DIM" != "" ] || [ "$SOUND" = true ]; }; then
+  echo "install.sh: --never-sleep, --dim and --sound go with --screensaver" >&2; exit 1
 fi
 [ "$SCREENSAVER" != true ] || [ "$NOTIFY" != true ] || { echo "install.sh: --screensaver and --notify install separately; run it once for each" >&2; exit 1; }
 [ "$NOTIFY" = true ] || [ "$QUIET" = "" ] || { echo "install.sh: --quiet goes with --notify" >&2; exit 1; }
@@ -186,8 +192,8 @@ mkdir -p "$dir" "$(dirname "$shell")"
 [ -f "$backup" ] || cp "$shell" "$backup"
 timeout=$(jq -r ".idle.screensaver // 150" "$backup")
 [ "$timeout" -gt 0 ] 2>/dev/null || timeout=150
-jq -n --arg server "$1" --argjson cycle "$2" --arg dim "$3" --argjson timeout "$timeout" \
-  "{server: \$server, cycle: \$cycle, dim: \$dim, timeout: \$timeout}" > "$dir/screensaver.json"
+jq -n --arg server "$1" --argjson cycle "$2" --arg dim "$3" --argjson timeout "$timeout" --argjson sound "$5" \
+  "{server: \$server, cycle: \$cycle, dim: \$dim, timeout: \$timeout, sound: \$sound}" > "$dir/screensaver.json"
 tmp=$(mktemp)
 jq --argjson never "$4" ".idle = ((.idle // {}) + {screensaver: 0} + (if \$never then {lock: 0} else {} end))" "$shell" > "$tmp"
 cat "$tmp" > "$shell"; rm -f "$tmp"'
@@ -266,8 +272,8 @@ if [ "$SCREENSAVER" = true ]; then
     echo "install.sh: Omarchy's own screensaver and idle settings were left as they were." >&2
     exit 1
   fi
-  run_script "write ~/.config/agents-ui/screensaver.json (server $SERVER, cycle ${CYCLE}s${DIM:+, dim $DIM}) and set idle.screensaver to 0$([ "$NEVER_SLEEP" = true ] && echo ' and idle.lock to 0') in ~/.config/omarchy/shell.json" \
-    "$CONFIGURE" sh "$SERVER" "$CYCLE" "$DIM" "$NEVER_SLEEP"
+  run_script "write ~/.config/agents-ui/screensaver.json (server $SERVER, cycle ${CYCLE}s${DIM:+, dim $DIM}$([ "$SOUND" = true ] && echo ', sound on')) and set idle.screensaver to 0$([ "$NEVER_SLEEP" = true ] && echo ' and idle.lock to 0') in ~/.config/omarchy/shell.json" \
+    "$CONFIGURE" sh "$SERVER" "$CYCLE" "$DIM" "$NEVER_SLEEP" "$SOUND"
   echo "Installed $WHAT${HOST:+ on $HOST}: after the idle time Omarchy's screensaver used, the village opens full screen; any input closes it."
   echo "It shows $SERVER. Try it now, from a terminal${HOST:+ on $HOST}: ~/$DEST_REL/village-screensaver force"
   if [ "$NEVER_SLEEP" = true ]; then

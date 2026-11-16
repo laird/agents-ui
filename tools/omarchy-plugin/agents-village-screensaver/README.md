@@ -15,6 +15,7 @@ tools/omarchy-plugin/install.sh --screensaver --uninstall     # Omarchy's own sc
 Add `--dry-run` to any of them to see what would change. `--cycle S` sets the
 seconds spent on each swarm when there are several (default 30, 0 stays on
 one). `--dim 23-7` dims the display between those hours. It is never blanked.
+`--sound` turns on quiet sound cues (below); they are off by default.
 
 ## What is on screen
 
@@ -53,6 +54,23 @@ so the page closes itself on input. A dashboard tab never does.
   when the screensaver starts, `offline.html` says the same and opens the
   village once the server answers.
 
+## Sound cues
+
+Off unless asked for: `--sound` at install (`"sound": true` in
+`screensaver.json`), or `sound=1` in the page's query. The cues mark changes,
+never a state that lasts, and play at most once each in two minutes:
+
+- a soft bell when more starts waiting on you;
+- thunder when the build breaks, and birdsong when it is green again;
+- a ship's horn when a deploy docks at the production (right-most) environment.
+
+Each theme has its own voice (a medieval bell, an office chime, a sci-fi
+tone), synthesized in the page; there are no sound files. They are silent in
+the `dim` hours. Chromium holds audio until the first click, which a
+screensaver never gets, so with sound on the launcher starts its kiosk windows
+with `--autoplay-policy=no-user-gesture-required`. A plain browser tab plays
+them only after you have clicked in it.
+
 ## How it fits into Omarchy
 
 Omarchy's idle service (`omarchy.idle`) runs its text screensaver after
@@ -84,7 +102,7 @@ because the shell's `PATH` starts with `/usr/share/omarchy/bin`. So:
 Settings (`~/.config/agents-ui/screensaver.json`, written by the installer):
 
 ```json
-{ "server": "http://nuc-1:7890", "cycle": 30, "dim": "23-7", "timeout": 150, "recap": 30 }
+{ "server": "http://nuc-1:7890", "cycle": 30, "dim": "23-7", "timeout": 150, "recap": 30, "sound": false }
 ```
 
 ## Tests

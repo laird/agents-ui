@@ -47,6 +47,7 @@ cfg="$HOME/.config/agents-ui/screensaver.json"
 [ "$(jq -r .server "$cfg")" = "http://box:7890" ] && ok "server written" || fail "server: $(cat "$cfg")"
 [ "$(jq -r .cycle "$cfg")" = 20 ] && [ "$(jq -r .dim "$cfg")" = 23-7 ] && ok "cycle and dim written" || fail "cycle/dim: $(cat "$cfg")"
 [ "$(jq -r .timeout "$cfg")" = 120 ] && ok "takes Omarchy's screensaver timeout" || fail "timeout: $(cat "$cfg")"
+[ "$(jq -r .sound "$cfg")" = false ] && ok "sound off unless asked" || fail "sound: $(cat "$cfg")"
 s="$HOME/.config/omarchy/shell.json"
 [ "$(jq -c .idle "$s")" = '{"screensaver":0,"lock":0}' ] && ok "never-sleep: screensaver and lock off" || fail "idle: $(jq -c .idle "$s")"
 [ "$(jq -r .bar.position "$s")" = top ] && ok "rest of shell.json kept" || fail "bar lost"
@@ -259,6 +260,8 @@ export HOME=$ORIG_HOME PATH=$ORIG_PATH
 bash "$INSTALL" --never-sleep >/dev/null 2>&1 && fail "--never-sleep without --screensaver accepted" || ok "--never-sleep needs --screensaver"
 bash "$INSTALL" --screensaver --dim 25-3 --dry-run >/dev/null 2>&1 && fail "bad --dim accepted" || ok "bad --dim refused"
 bash "$INSTALL" --screensaver --cycle x --dry-run >/dev/null 2>&1 && fail "bad --cycle accepted" || ok "bad --cycle refused"
+bash "$INSTALL" --sound --dry-run >/dev/null 2>&1 && fail "--sound without --screensaver accepted" || ok "--sound needs --screensaver"
+out=$(bash "$INSTALL" --screensaver --sound --dry-run 2>&1) && grep -q "sound on" <<<"$out" && ok "dry run says sound on" || fail "sound dry run: $out"
 bash "$INSTALL" --notify --quiet 7 --dry-run >/dev/null 2>&1 && fail "bad --quiet accepted" || ok "bad --quiet refused"
 bash "$INSTALL" --notify --quiet 7-7 --dry-run >/dev/null 2>&1 && fail "--quiet 7-7 accepted" || ok "--quiet with one hour twice refused"
 bash "$INSTALL" --notify --quiet 08-09 --dry-run >/dev/null 2>&1 && ok "--quiet with leading zeros taken" || fail "--quiet 08-09 refused"
@@ -274,6 +277,10 @@ out=$(bash "$LAUNCHER" --dry-run 2>&1) || fail "launcher dry run exited: $out"
 grep -q "opens:   file://.*/offline.html#http%3A%2F%2F127.0.0.1%3A9%2Fvillage%3Fscreensaver%3D1%26dismiss%3D1%26cycle%3D45%26dim%3D22-6" <<<"$out" \
   && ok "launcher opens the offline page for a server that does not answer" || fail "launcher: $out"
 grep -q "class:   org.omarchy.screensaver" <<<"$out" && ok "launcher window is Omarchy's screensaver class" || fail "class: $out"
+grep -q "sound:   off" <<<"$out" && ! grep -q "sound%3D1" <<<"$out" && ok "launcher: no sound unless set" || fail "sound: $out"
+echo '{ "server": "http://127.0.0.1:9", "sound": true }' > "$HOME/.config/agents-ui/screensaver.json"
+out=$(bash "$LAUNCHER" --dry-run 2>&1) || fail "launcher dry run exited: $out"
+grep -q "cycle%3D30%26sound%3D1" <<<"$out" && grep -q "sound:   on" <<<"$out" && ok "launcher asks the page for sound when set" || fail "sound: $out"
 
 # "Since you last looked" (#479): since= is the last unlock of the machine,
 # only after a spell of at least `recap` minutes, and never on a forced run.

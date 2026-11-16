@@ -19,7 +19,9 @@ test('the mode is on from the query or the hash, and off otherwise', () => {
 });
 
 test('a project in the hash is pinned; otherwise it cycles every 30 s', () => {
-  assert.deepEqual(saverOptions('?screensaver=1', ''), { on: true, pinned: null, cycle: 30, dim: null, dismiss: false, overview: false });
+  assert.deepEqual(saverOptions('?screensaver=1', ''), { on: true, pinned: null, cycle: 30, dim: null, dismiss: false, overview: false, sound: false });
+  assert.equal(saverOptions('?screensaver=1&sound=1', '').sound, true);
+  assert.equal(saverOptions('?screensaver=1&sound=0', '').sound, false);
   const pinned = saverOptions('', '#shop&screensaver');
   assert.equal(pinned.pinned, 'shop');
   assert.equal(pinned.cycle, 0);

@@ -8,7 +8,8 @@
  * put), `dim=<from>-<to>` night hours, `dismiss=1` to close on input (only
  * the Omarchy launcher asks for that; a dashboard tab never closes itself),
  * `overview=1` to show every swarm at once (#481): first, between swarms
- * while cycling, or alone with `cycle=0`. */
+ * while cycling, or alone with `cycle=0`),
+ * `sound=1` for quiet cues on transitions (#489, sounds.js; off by default). */
 
 import { limitedCount, signWords, villageLimit } from './limits.js';
 
@@ -38,6 +39,7 @@ export function saverOptions(search, hash) {
     dim: nightHours(q.get('dim')),
     dismiss: q.get('dismiss') === '1',
     overview: ['1', 'true', 'on'].includes(q.get('overview')),
+    sound: ['1', 'true', 'on'].includes(q.get('sound')),
   };
 }
 
