@@ -89,6 +89,11 @@ fn in_window(at: &str, first: NaiveDate, offset: &FixedOffset) -> bool {
 
 /// Every `#N` in a text, in order.
 pub fn issue_refs(text: &str) -> Vec<u32> {
+    refs_with_lead(text).into_iter().map(|(n, _)| n).collect()
+}
+
+/// Every `#N` in a text with the few words of its clause just before it, lowercased.
+fn refs_with_lead(text: &str) -> Vec<(u32, String)> {
     let b = text.as_bytes();
     let mut out = Vec::new();
     for (k, _) in text.match_indices('#') {
@@ -98,10 +103,32 @@ pub fn issue_refs(text: &str) -> Vec<u32> {
         }
         let digits: String = text[k + 1..].chars().take_while(|c| c.is_ascii_digit()).collect();
         if let Ok(n) = digits.parse() {
-            out.push(n);
+            // Only this clause: back to the last `#`, punctuation or line break.
+            let start = text[..k].rfind(|c: char| matches!(c, '#' | '.' | ';' | ',' | '\n' | '(')).map_or(0, |i| i + 1);
+            let before = &text[start..k];
+            let words: Vec<&str> = before.split_whitespace().rev().take(4).collect();
+            out.push((n, words.into_iter().rev().collect::<Vec<_>>().join(" ").to_lowercase()));
         }
     }
     out
+}
+
+/// The issues a commit subject lands: `Implement #N`, `Fix #N`, `Closes #N`
+/// and the like. A `Review of #N` or a mention lands nothing.
+pub fn landing_refs(subject: &str) -> Vec<u32> {
+    const VERBS: [&str; 9] = ["implement", "fix", "fixes", "fixed", "close", "closes", "closed", "resolve", "resolves"];
+    refs_with_lead(subject)
+        .into_iter()
+        .filter(|(_, lead)| lead.split_whitespace().last().is_some_and(|w| VERBS.contains(&w.trim_matches(|c: char| !c.is_alphanumeric()))))
+        .map(|(n, _)| n)
+        .collect()
+}
+
+/// The issues a report names as what regressed: `#N` with "regression" or
+/// "regressed" just before it ("a regression from #N", "regressed in #N"),
+/// not "a regression test for #N".
+pub fn regression_refs(text: &str) -> Vec<u32> {
+    refs_with_lead(text).into_iter().filter(|(_, lead)| lead.contains("regress") && !lead.contains("test")).map(|(n, _)| n).collect()
 }
 
 /// What came back, from `issues` (`gh issue list --json number,title,body,
@@ -140,12 +167,12 @@ pub fn find(issues: &[u8], log: Option<&str>, first: NaiveDate, offset: FixedOff
                 continue;
             }
             let Some(rest) = subject.strip_prefix("Revert \"") else {
-                relanded.extend(issue_refs(subject));
+                relanded.extend(landing_refs(subject));
                 continue;
             };
             // A revert of a revert lands the work again.
-            if rest.starts_with("Revert \"") {
-                relanded.extend(issue_refs(rest));
+            if let Some(again) = rest.strip_prefix("Revert \"") {
+                relanded.extend(landing_refs(again));
                 continue;
             }
             for n in issue_refs(rest).into_iter().take(1) {
@@ -161,10 +188,7 @@ pub fn find(issues: &[u8], log: Option<&str>, first: NaiveDate, offset: FixedOff
             continue;
         }
         let text = format!("{}\n{}", r.title, r.body.as_deref().unwrap_or(""));
-        if !text.to_ascii_lowercase().contains("regression") {
-            continue;
-        }
-        for n in issue_refs(&text) {
+        for n in regression_refs(&text) {
             if n != r.number && landed.contains(&n) && seen.insert(n) {
                 items.push(Returned { number: n, title: title(n), how: "regression".into(), at: Some(r.created_at.clone()), report: Some(r.number), ..Returned::default() });
             }
@@ -191,12 +215,13 @@ mod tests {
       {"number": 13, "title": "Reverted one", "state": "CLOSED", "stateReason": "COMPLETED", "createdAt": "2026-11-05T09:00:00Z", "closedAt": "2026-11-07T09:00:00Z", "labels": []},
       {"number": 14, "title": "Reverted, landed again", "state": "CLOSED", "stateReason": "COMPLETED", "createdAt": "2026-11-05T09:00:00Z", "closedAt": "2026-11-07T09:00:00Z", "labels": []},
       {"number": 15, "title": "Not planned", "state": "CLOSED", "stateReason": "NOT_PLANNED", "createdAt": "2026-11-05T09:00:00Z", "closedAt": "2026-11-07T09:00:00Z", "labels": []},
-      {"number": 20, "title": "Checkout crashes, a regression from #12", "body": "Since #12 landed", "state": "OPEN", "createdAt": "2026-11-10T09:00:00Z", "labels": [{"name": "bug"}]},
+      {"number": 20, "title": "Checkout crashes, a regression from #12", "body": "Since #12 landed; see also #14", "state": "OPEN", "createdAt": "2026-11-10T09:00:00Z", "labels": [{"name": "bug"}]},
       {"number": 21, "title": "Regression in #15?", "body": "", "state": "OPEN", "createdAt": "2026-11-10T09:00:00Z", "labels": [{"name": "bug"}]},
       {"number": 22, "title": "Fixed regression from #13", "body": "", "state": "CLOSED", "stateReason": "COMPLETED", "createdAt": "2026-11-10T09:00:00Z", "closedAt": "2026-11-11T09:00:00Z", "labels": [{"name": "bug"}]},
-      {"number": 23, "title": "Mentions #12 but is no regression", "body": "", "state": "OPEN", "createdAt": "2026-11-10T09:00:00Z", "labels": [{"name": "bug"}]}
+      {"number": 23, "title": "Add a regression test for #14", "body": "", "state": "OPEN", "createdAt": "2026-11-10T09:00:00Z", "labels": [{"name": "bug"}]}
     ]"#;
-    const LOG: &str = "2026-11-12T10:00:00Z\tImplement #14: again, fixed\n\
+    const LOG: &str = "2026-11-13T10:00:00Z\tReview of #13: a review lands nothing\n\
+                       2026-11-12T10:00:00Z\tImplement #14: again, fixed\n\
                        2026-11-09T10:00:00Z\tRevert \"Implement #14: first try\"\n\
                        2026-11-08T10:00:00Z\tRevert \"Fix #13: reverted one\"\n\
                        2026-11-07T10:00:00Z\tFix #13: reverted one\n\
@@ -229,11 +254,27 @@ mod tests {
     fn a_revert_of_a_revert_lands_the_work_again() {
         let log = "2026-11-10T10:00:00Z\tRevert \"Revert \"Fix #13: x\"\"\n2026-11-08T10:00:00Z\tRevert \"Fix #13: x\"\n";
         assert!(find(b"[]", Some(log), first(), utc()).unwrap().items.is_empty());
+        let log = "2026-11-10T10:00:00Z\tReview of #13: still reverted\n2026-11-08T10:00:00Z\tRevert \"Fix #13: x\"\n";
+        assert_eq!(find(b"[]", Some(log), first(), utc()).unwrap().items.len(), 1, "a review lands nothing");
+        let log = "2026-11-10T10:00:00Z\tFix #13: properly this time\n2026-11-08T10:00:00Z\tRevert \"Fix #13: x\"\n";
+        assert!(find(b"[]", Some(log), first(), utc()).unwrap().items.is_empty());
     }
 
     #[test]
     fn issue_refs_reads_hashes_on_their_own() {
         assert_eq!(issue_refs("a regression from #12, see #3 and a#4 or /x#5"), vec![12, 3]);
         assert_eq!(issue_refs("#"), Vec::<u32>::new());
+        assert_eq!(issue_refs("é#1 ü #2"), vec![1, 2], "non-ASCII before a hash is not a panic");
+    }
+
+    #[test]
+    fn landings_and_regressions_are_read_from_the_words_before_the_hash() {
+        assert_eq!(landing_refs("Implement #497: returned goods"), vec![497]);
+        assert_eq!(landing_refs("Fix #12, closes #13"), vec![12, 13]);
+        assert_eq!(landing_refs("Review of #497: words"), Vec::<u32>::new());
+        assert_eq!(landing_refs("Re-sync origin/master into feature/issue-508"), Vec::<u32>::new());
+        assert_eq!(regression_refs("Checkout crashes, a regression from #12; see #14"), vec![12]);
+        assert_eq!(regression_refs("Regressed in #12"), vec![12]);
+        assert_eq!(regression_refs("Add a regression test for #14"), Vec::<u32>::new());
     }
 }
