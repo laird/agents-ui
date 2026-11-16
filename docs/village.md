@@ -550,59 +550,144 @@ or `platform reports no build IDs`), then the build IDs its workers report.
 ## A valley of related repos
 
 Repos that depend on each other (a library and the apps built on it, a
-service and its clients) can be drawn as one valley. The repos the others
-build on sit upstream, to the west. Their consumers sit downstream, to the
-east. A river runs along each package dependency and a road along each API
-one. Each repo is a small village:
+service and its clients) can be drawn as one valley at
+`/village?valley=<group>`. The repos the others build on sit upstream, to
+the west, and their consumers downstream, to the east. A river runs along
+each package dependency and a road along each API one.
 
-- its shore is red when something waits on you (or its build or a deploy is
-  broken), amber when a house is blocked or stalled, green otherwise;
-- three houses count its working, idle and blocked agents;
-- its label gives its backlog and the release its last stop runs.
+### Declaring a group
 
-A repo with no running swarm is still there, grey and faded: dormant.
-Clicking a repo opens its own village.
-
-Declare the groups in `~/.agents-ui/group.json`, or in the file
-`--group <path>` names. The file is a list of groups. Each repo is named by
-its project name (the village's name) or its path. Each repo lists what it
-depends on, and how: `package` (it builds against the other's package) or
-`api` (it calls the other's API):
+Declare the groups in `~/.agents-ui/group.json`, or in the file that
+`--group <path>` names. The file is a list of groups:
 
 ```json
 [
   { "name": "shop", "repos": [
     { "repo": "lib-core" },
-    { "repo": "~/src/api", "depends_on": [{ "repo": "lib-core", "via": "package" }] },
+    { "repo": "~/src/billing", "depends_on": [{ "repo": "lib-core", "via": "package" }] },
     { "repo": "web", "depends_on": [
       { "repo": "lib-core", "via": "package" },
-      { "repo": "api", "via": "api" } ] } ] }
+      { "repo": "billing", "via": "api", "expects": ">=2.3", "contract": "openapi.json" } ] } ] }
 ]
 ```
 
-Then open `/village?valley=shop`. `GET /api/valley` gives the same thing as
-JSON: each group's repos upstream to downstream, its edges, and a summary of
-each repo. What is wrong with the file is said there and in the bar, and
-nothing stops: JSON that doesn't parse, a repo that depends on one not in
-its group, a repo listed twice, a cycle of package dependencies (its repos
-are put last). `tools/mock/demo.sh` declares a `demo` group, so
-`/village?valley=demo` shows one without real swarms.
+| Field | Where | Meaning |
+|---|---|---|
+| `name` | group | The group's name: `/village?valley=<name>`. |
+| `repos` | group | Its repos, in any order. |
+| `repo` | repo | The repo's project name (the village's name) or its path (`~/` allowed). A repo named by path is that directory on this machine. One named by project is found through its running village. |
+| `depends_on` | repo | What it depends on (optional): a list of `{ repo, via, ... }`. Each `repo` names another repo of the same group by its name or its path; the two are matched by name (a path's last part). |
+| `via` | dependency | `package`: it builds against the other's published package (a river, and the other sits upstream). `api`: it calls the other's API (a road, and the environment grid). |
+| `expects` | `api` dependency | The provider's version range this repo expects, such as `>=2.3`, `>=1.2, <2`, `^2.3`, `~2.3`, `2.x` or `*`. A bare version is a caret, and `\|\|` joins alternatives. It marks the grid's mismatches. |
+| `contract` | `api` dependency | A file in the provider's repo (an OpenAPI spec, say) whose `info.version` is compared with `expects`, instead of the provider's release. |
 
-What ties the repos together on GitHub is drawn over the valley:
+A repo's name in the valley is its project name, or the last part of its
+path. What is wrong with the file is said in the bar and in `/api/valley`,
+and nothing stops. That covers JSON that doesn't parse, an unknown field, a
+dependency on a repo not in the group or on itself, a repo listed twice, and a cycle of
+package dependencies (its repos are put last). `api` dependencies are drawn
+but don't decide what is upstream.
 
-- **A rope** between two repos: an open issue in one waits on an open issue
-  in the other (a `Depends on:` or `Blocked by:` line naming it, or GitHub's
-  own blocked-by). Its dialog names both and links them.
-- **A caravan** below the valley: a parent issue with subtasks in several
-  repos (`Sub-task of`, a task list, or GitHub's own sub-issues), a crate per
-  repo, full once that repo's part has landed. It travels its row as crates
-  load and flies a flag once it has arrived. Its dialog lists each repo's part.
-- **A barge** going back up a river: a consumer's red build names the
-  library upstream (its failing job's log, or one of its issues). Its dialog
+### What the page shows
+
+**Each repo is a small village.** Its shore is red when something waits on
+you (or its build or a deploy is broken), amber when a house is blocked or
+stalled, and green otherwise. Three houses count its working, idle and
+blocked agents. Its label gives its backlog and the release its last stop
+runs. A repo with no running swarm is still there, grey and faded: dormant.
+Clicking a repo, or Enter on its keyboard target, opens its own village.
+
+**Ships carry versions down the rivers.** For each `package` dependency,
+the valley reads which version of the library the consumer pins, and the
+library's latest release. The pin comes from the lockfile first, then the
+manifest: `Cargo.lock`/`Cargo.toml`, `package-lock.json`/`package.json`, or
+`go.mod`. The latest release is the library's last stop's tag, else its
+newest version tag. A consumer pinned to an older version has a ship waiting
+at its dock, labelled with the version it hasn't taken. A release made in the
+last 24 hours sails down the river to each consumer that has taken it. A
+click on a ship says which versions, and since when.
+
+**The environment grid shows API dependencies.** Below the valley, the
+repos joined by `api` dependencies form a grid: a row per repo, a column per
+environment (each repo's `.autocoder.json` environments), and the prod
+column drawn as a city. Each cell is the version that repo runs there. A
+cell is marked red when its version is outside what a neighbour in the same
+environment `expects` of it (compared against its `contract`'s
+`info.version` when one is named). A version that can't be read is not
+marked: it is unknown, not wrong. A click on a cell says which neighbour,
+which versions and which environment.
+
+**GitHub's links between the repos are drawn over the valley.** Each repo's
+issues are read in the background every 90 s, so the first poll shows none
+and the next one does. The read covers the newest 300 issues from
+`gh issue list`, plus GitHub's own sub-issue and blocked-by links for the 100
+most recently updated.
+
+- **A rope** between two repos means an open issue in one waits on an open
+  issue in the other. That comes from a `Depends on:` or `Blocked by:` line
+  naming `owner/repo#N` or its URL, or from GitHub's own blocked-by. A closed
+  blocker blocks nothing, and a repo outside the group isn't drawn.
+  Neighbours are tied straight. A rope between repos with another between
+  them goes round through the strip above the map. Its dialog names both
+  issues and links them.
+- **A caravan** below the valley is a parent issue whose subtasks live in
+  more than one repo. A subtask can say `Sub-task of <ref>` or
+  `Parent: <ref>`, the parent can list it in a task list (`- [ ] <ref>`), or
+  GitHub's own sub-issues can link them. It has a crate per repo, full once
+  every subtask there has landed (closed as completed). It travels its row as
+  crates load, and flies a flag once it has arrived. Its dialog lists each
+  repo's part, with links.
+- **A barge** going back up a river means a consumer's build is red and its
+  failure names a library upstream. Either a failing job's log names a
+  package the library publishes, or one of the consumer's issues names the
+  library's repo. It sails from the consumer toward the library. Its dialog
   says why, and links the failing run.
 
-Each has a keyboard target. `VALLEY=1 tools/mock/demo.sh` shows one of each
-(the demo's GitHub is a fixture, and shop's CI is red).
+Ships, grid cells, ropes, caravans and barges each have a keyboard target
+too.
+
+### The answer: `GET /api/valley`
+
+`GET /api/valley` gives all of this as JSON: `manifest` (the file read),
+`found`, `errors` (about the file as a whole), and `groups`. Each group has:
+
+- `name`;
+- `repos`, upstream to downstream, each with:
+  - `name`, `repo`;
+  - `project` (its village, when one runs) and `dormant`;
+  - `depth` (0 for a repo that builds on no other);
+  - `summary`: `working`, `idle`, `blocked`, `backlog`, `release`, and
+    `health` (`red`, `amber`, `green` or `dormant`);
+- `edges`, each `{ from, to, via }` from the repo depended on to the one
+  depending on it:
+  - a `package` edge adds `pinned`, `latest`, `latest_at` and `behind`;
+  - an `api` edge adds `expects` and `contract`;
+  - each is absent when it can't be read;
+- `grid`: `envs`, `repos`, and `cells` of `{ repo, env, version, mismatches }`.
+  Each mismatch is `{ neighbour, env, expects, version, contract }`;
+- `ropes`: `{ from, to }`, each end an issue `{ repo, number, title, state, url }`;
+- `caravans`: `{ parent, crates, arrived }`, each crate
+  `{ repo, slug, issues, loaded }`;
+- `barges`: `{ from, to, why, run }`;
+- `errors`: what is wrong with this group's part of the file.
+
+It only reads, so a `--read-only` server has it too.
+
+### In the demo
+
+`tools/mock/demo.sh` declares a `demo` group: lib-core, the two consumers
+built on it (shop and larkspur), and billing, a service shop calls. Open
+`/village?valley=demo`:
+
+- **Ships:** lib-core has released v1.4.0, and larkspur still pins 1.3.0, so
+  a ship waits at its dock.
+- **Grid:** billing runs v2.2.0 in staging and v2.4.0 in prod, and shop
+  expects `>=2.3`, so billing's staging cell is marked.
+- **Ropes, caravan, barge:** `VALLEY=1 tools/mock/demo.sh` adds one of each.
+  The demo's GitHub is a fixture served by `tools/mock/bin/gh`. shop#7 waits
+  on lib-core#12, a rope. lib-core#1 has subtasks in lib-core, shop and
+  larkspur, two of three landed, a caravan. shop's CI is red with a log
+  naming lib-core, a barge, which also puts a storm over shop.
 
 ## Sources
 

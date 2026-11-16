@@ -110,3 +110,27 @@ fn the_valley_demo_has_a_rope_a_caravan_and_a_barge() {
         assert!(!issues.is_empty(), "{name}");
     }
 }
+
+/// #531: the example manifest in docs/village.md is one the valley reads
+/// cleanly, with every field it documents.
+#[test]
+fn the_documented_manifest_parses() {
+    let doc = include_str!("../../../docs/village.md");
+    let section = &doc[doc.find("### Declaring a group").unwrap()..];
+    let start = section.find("```json\n").unwrap() + "```json\n".len();
+    let json = &section[start..start + section[start..].find("```").unwrap()];
+    let (groups, errors) = crate::web::valley::valley(json, &[]);
+    assert!(errors.is_empty(), "{errors:?}");
+    let g = &groups[0];
+    assert!(g.errors.is_empty(), "{:?}", g.errors);
+    assert_eq!(g.name, "shop");
+    let names: Vec<&str> = g.repos.iter().map(|r| r.name.as_str()).collect();
+    assert_eq!(names, ["lib-core", "billing", "web"], "upstream first");
+    let api = g.edges.iter().find(|e| e.via == crate::web::valley::Via::Api).unwrap();
+    assert_eq!((api.from.as_str(), api.to.as_str()), ("billing", "web"));
+    assert_eq!((api.expects.as_deref(), api.contract.as_deref()), (Some(">=2.3"), Some("openapi.json")));
+    // Every manifest field is in the table.
+    for field in ["`name`", "`repos`", "`repo`", "`depends_on`", "`via`", "`expects`", "`contract`"] {
+        assert!(section.contains(&format!("| {field} |")), "{field} is documented");
+    }
+}
