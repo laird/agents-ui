@@ -18,6 +18,7 @@ import { ARRIVE_IN, SAIL_OUT, UNLOAD, pickup, tripAt } from './trips.js';
 import { workOf } from './ship.js';
 import { crateState, whereWaitedOn } from './docks.js';
 import { contextWords } from './barrels.js';
+import { tokenWords } from './coins.js';
 import { fxOn, fxRest } from './controlfx.js';
 import { limitWords, limited } from './limits.js';
 import { houseName, issueItems, issueLabel, issueOf, link, repoUrl, sessionOf } from './dialogs.js';
@@ -267,7 +268,7 @@ registerHit({ kind: 'house', dialog(o, sc) {
   return { title: `${houseName(v, h)} · ${h.branch || h.kind}`, line: h.issue ? `#${h.issue} ${h.issue_title || ''}` : (h.issue_title || `No ${work} claimed`),
     meta: [`${runtime ? 'Workstream' : 'Worktree'}: ${h.id}`, h.branch ? `Branch: ${h.branch}` : null, `Agent: ${h.role}`,
       `Status: ${h.status}${h.action && h.action !== h.status ? ' · ' + h.action : ''}${h.priority ? ' · ' + h.priority : ''}`,
-      since ? `${h.status.charAt(0).toUpperCase() + h.status.slice(1)} since ${since}` : null, limitWords(h), contextWords(h),
+      since ? `${h.status.charAt(0).toUpperCase() + h.status.slice(1)} since ${since}` : null, limitWords(h), contextWords(h), ...tokenWords(h),
       `Crew: ${h.crew.join(', ') || '—'}`, ...(h.subagents || []).map(sa => `${runtime ? 'Agent' : 'Sub-agent'}: ${subWords(sa, v)}`)],
     links: [...(h.links || []), issue, ...(runtime ? [] : branchLinks(repo, h.branch, h.links, br)), compare], house: h,
     // Worker controls (#506, controls.js): the server says which it can run.
