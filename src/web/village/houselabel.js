@@ -2,6 +2,7 @@
  * What the label under a house says without a click (#402): its name, the
  * issue it is on, and the first words of that issue's title. No DOM, so its
  * tests run under node (tests/houselabel.test.mjs). */
+import { limitSub, limited } from './limits.js';
 
 /* A title cut to its first few words, ending in an ellipsis when cut. */
 export const TITLE_WORDS = 4, TITLE_CHARS = 24;
@@ -19,9 +20,11 @@ export function shortTitle(title, words = TITLE_WORDS, chars = TITLE_CHARS) {
 
 /* A house's label: `parts` read as one line (`wt-1 · #400`) and wrap between
  * them when the lot is narrow; `sub` is the short title, shown when there is
- * room. A house on no issue keeps its name, and says `idle` when it is. */
+ * room. A house on no issue keeps its name, and says `idle` when it is. A
+ * house held by a usage limit says that instead, and when it lifts (#484). */
 export function houseLabel(name, house, title) {
   const n = house && house.issue;
+  if (limited(house)) return { parts: n ? [name, `· #${n}`] : [name], sub: limitSub(house) };
   if (!n) return { parts: [name], sub: house && house.status === 'idle' ? 'idle' : null };
   return { parts: [name, `· #${n}`], sub: shortTitle(title) || null };
 }

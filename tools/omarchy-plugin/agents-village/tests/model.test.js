@@ -35,7 +35,7 @@ test("parse and server urls", () => {
 
 test("the list is the dashboard's swarms, with village counts", () => {
   const rows = M.swarmRows(swarms, villages)
-  assert.deepStrictEqual(rows, [{ project: "agents-ui", workflow: "autocoder", houses: 3, working: 3, waiting: 2, stopped: false }])
+  assert.deepStrictEqual(rows, [{ project: "agents-ui", workflow: "autocoder", houses: 3, working: 3, waiting: 2, limited: 0, stopped: false }])
   const [s2, v2] = twoSwarms()
   assert.deepStrictEqual(M.swarmRows(s2, v2).map(r => [r.project, r.waiting]), [["agents-ui", 2], ["shop", 1]])
   // A server with only outside reports lists its villages.
@@ -64,7 +64,7 @@ test("houses: worktree, branch, issue, status, session link", () => {
   assert.deepStrictEqual(rows[0], {
     name: "wt-2", role: "worker-2", branch: "feature/issue-378", issue: 378,
     title: "Omarchy bar widget for the village: live swarm status in the bar, a panel summary, and Open village",
-    status: "working", context: null, url: BASE + "/#/swarm/agents-ui/agent/worker-2"
+    status: "working", context: null, limit: null, url: BASE + "/#/swarm/agents-ui/agent/worker-2"
   })
   assert.deepStrictEqual(rows.map(r => r.name), ["wt-2", "wt-3", "wt-4"])
   assert.strictEqual(M.houseName("shop", "/src/other-repo", "worker-9"), "other-repo")
@@ -145,10 +145,23 @@ test("repo link and timestamps", () => {
   assert.strictEqual(M.ago(1000, 1000 + 3 * 60000), "3m ago")
 })
 
+test("houses held by a usage limit are counted apart from those that need you (#484)", () => {
+  const v = { project: "shop", houses: [
+    { id: "/src/shop-wt-1", role: "worker-1", status: "idle", limit: { resets: "3pm (Europe/London)" }, links: [] },
+    { id: "/src/shop-wt-2", role: "worker-2", status: "idle", limit: {}, links: [] },
+    { id: "/src/shop-wt-3", role: "worker-3", status: "working", limit: { resets: "3pm" }, links: [] },
+    { id: "/src/shop-wt-4", role: "worker-4", status: "blocked", links: [] }
+  ], board: [], backlog: [], pipeline: { quay: [], stops: [] } }
+  assert.strictEqual(M.limited(v), 2, "working again is not limited")
+  assert.strictEqual(M.needsYou(v), 1, "only the blocked one needs you")
+  assert.deepStrictEqual(M.swarmRows({ swarms: [] }, { villages: [v] }).map(r => [r.waiting, r.limited]), [[1, 2]])
+  assert.deepStrictEqual(M.houseRows(BASE, v, null).map(r => r.limit), ["limited · til 3pm (Europe/London)", "rate limited", null, null])
+})
+
 test("a swarm of only its manager (zero workers) is still listed", () => {
   const s = { swarms: [{ project_name: "solo", workflow: "autocoder", stopped: false, busy_count: 0, attention_count: 0, workers: [] }] }
   const v = { villages: [{ project: "solo", framework: "autocoder", manager: { role: "manager", status: "idle" }, houses: [], board: [], backlog: [], pipeline: { quay: [], stops: [] } }] }
-  assert.deepStrictEqual(M.swarmRows(s, v), [{ project: "solo", workflow: "autocoder", houses: 0, working: 0, waiting: 0, stopped: false }])
+  assert.deepStrictEqual(M.swarmRows(s, v), [{ project: "solo", workflow: "autocoder", houses: 0, working: 0, waiting: 0, limited: 0, stopped: false }])
   assert.deepStrictEqual(M.swarmRows(s, { villages: [] }).map(r => r.houses), [0], "before its village arrives")
   assert.deepStrictEqual(M.houseRows(BASE, v.villages[0], s.swarms[0]), [])
   assert.strictEqual(M.chooseProject(M.swarmRows(s, v), "", ""), "solo")

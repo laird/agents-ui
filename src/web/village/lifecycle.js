@@ -18,6 +18,7 @@ import { ARRIVE_IN, SAIL_OUT, UNLOAD, pickup, tripAt } from './trips.js';
 import { workOf } from './ship.js';
 import { crateState, whereWaitedOn } from './docks.js';
 import { contextWords } from './barrels.js';
+import { limitWords, limited } from './limits.js';
 import { houseName, issueItems, issueLabel, issueOf, link, repoUrl, sessionOf } from './dialogs.js';
 import { houseLabel, managerSub } from './houselabel.js';
 import { branchLinks, commitsLink } from './ghlinks.js';
@@ -133,9 +134,10 @@ registerLayer({ z: 70, draw(c, scene, t) {
       // Robots show every status, so a stalled one sits slumped at its door.
       const slumped = state.T.robots && st === 'stalled';
       if (slumped) person(c, lot.x + 4, lot.y + 9, h.id, 'stand', { status: st });
-      if (['idle', 'done', 'blocked', 'working'].includes(st) || slumped) tap(lot.x + 4, lot.y + 8, 8, 12, { kind: 'person', i, who: h.crew[0] });
+      if ((['idle', 'done', 'blocked', 'working'].includes(st) && rest !== 'limited') || slumped) tap(lot.x + 4, lot.y + 8, 8, 12, { kind: 'person', i, who: h.crew[0] });
     }
-    if (h.crew.length > 1 && st !== 'working') { person(c, lot.x + 12, lot.y + 11, h.id + '#crew'); tap(lot.x + 12, lot.y + 11, 8, 12, { kind: 'person', i, who: h.crew[1] }); }
+    // A second crew member stands by the door, except where the dry well is (well.js).
+    if (h.crew.length > 1 && st !== 'working' && rest !== 'limited') { person(c, lot.x + 12, lot.y + 11, h.id + '#crew'); tap(lot.x + 12, lot.y + 11, 8, 12, { kind: 'person', i, who: h.crew[1] }); }
     if (h.crew.length > 1 && st === 'working' && !state.reduce) puffs(c, lot.x + 3, lot.y - 3, tt + 700, ...state.T.steam);
     // Sub-agents keep the house busy: one figure each out front (SUB_SLOTS),
     // and a "+N" badge for any that don't fit.
@@ -162,7 +164,7 @@ registerLayer({ z: 70, draw(c, scene, t) {
     if (st === 'working' && h.action) actionSign(c, lot.x + 4, lot.y - 4, h.action);
     if (subs.length > SUB_SLOTS.length) { const more = subs.length - SUB_SLOTS.length, { w, h } = badgeSize(more); badge(c, lot.x + 12, lot.y + 4, more); tap(lot.x + 11, lot.y + 2, w, h, { kind: 'house', i }); }
     if (st === 'blocked') alarms.push([lot.x + 8 - (ALARM.w >> 1), lot.y - ALARM.h - 2]);
-    else if (ICONS[st] && rest !== 'asleep') bubbles.push([lot.x + 4, lot.y - 3, st]);
+    else if (ICONS[st] && rest !== 'asleep' && rest !== 'limited') bubbles.push([lot.x + 4, lot.y - 3, st]);
   });
 } });
 /* Trips: whoever is walking, with the crate carried overhead, or still
@@ -249,7 +251,7 @@ registerHit({ kind: 'hall', dialog(o, sc, theme) {
   const v = sc.v, runtime = isRuntime(v);
   const m = v.manager, s = sessionOf(m), swarm = s && s.url.replace(/\/agent\/[^/]+$/, '');
   return { title: `${theme.labels.hall} · manager`, line: m.issue ? `#${m.issue} ${m.issue_title || ''}` : (m.issue_title || 'The manager of this swarm'),
-    meta: [`Status: ${m.status}`, contextWords(m), `Crew: ${m.crew.join(', ') || '—'}`, ...(m.subagents || []).map(sa => `${runtime ? 'Worker' : 'Sub-agent'}: ${subWords(sa, v)}`), m.action ? `Now: ${m.action}` : null],
+    meta: [`Status: ${m.status}`, limitWords(m), contextWords(m), `Crew: ${m.crew.join(', ') || '—'}`, ...(m.subagents || []).map(sa => `${runtime ? 'Worker' : 'Sub-agent'}: ${subWords(sa, v)}`), m.action ? `Now: ${m.action}` : null],
     links: [...(m.links || []), link('Swarm view', swarm), runtime ? null : commitsLink(repoUrl(v), v.pipeline.integration)], house: m };
 } });
 registerHit({ kind: 'house', dialog(o, sc) {
@@ -263,14 +265,14 @@ registerHit({ kind: 'house', dialog(o, sc) {
   return { title: `${houseName(v, h)} · ${h.branch || h.kind}`, line: h.issue ? `#${h.issue} ${h.issue_title || ''}` : (h.issue_title || `No ${work} claimed`),
     meta: [`${runtime ? 'Workstream' : 'Worktree'}: ${h.id}`, h.branch ? `Branch: ${h.branch}` : null, `Agent: ${h.role}`,
       `Status: ${h.status}${h.action && h.action !== h.status ? ' · ' + h.action : ''}${h.priority ? ' · ' + h.priority : ''}`,
-      since ? `${h.status.charAt(0).toUpperCase() + h.status.slice(1)} since ${since}` : null, contextWords(h),
+      since ? `${h.status.charAt(0).toUpperCase() + h.status.slice(1)} since ${since}` : null, limitWords(h), contextWords(h),
       `Crew: ${h.crew.join(', ') || '—'}`, ...(h.subagents || []).map(sa => `${runtime ? 'Agent' : 'Sub-agent'}: ${subWords(sa, v)}`)],
     links: [...(h.links || []), issue, ...(runtime ? [] : branchLinks(repo, h.branch, h.links, br)), compare], house: h };
 } });
 registerHit({ kind: 'person', dialog(o, sc) {
   const v = sc.v, h = v.houses[o.i]; if (!h) return null;
   return { title: `${o.who || h.role} · agent`, line: h.issue ? `Working on #${h.issue} ${h.issue_title || ''}` : `Status: ${h.status}`,
-    meta: [`Lives in ${houseName(v, h)}`, `Status: ${h.status}`, h.action ? `Now: ${h.action}` : null],
+    meta: [`Lives in ${houseName(v, h)}`, `Status: ${h.status}`, limitWords(h), h.action ? `Now: ${h.action}` : null],
     links: [sessionOf(h), h.issue ? link(issueLabel(h.issue), issueOf(v, h.issue).url) : null] };
 } });
 registerHit({ kind: 'sub', dialog(o, sc) {
@@ -328,7 +330,7 @@ registerLabels((sc, theme) => {
   v.houses.forEach((h, i) => {
     const lot = lay.lots[i]; if (!lot) return;
     const l = houseLabel(houseName(v, h), h, h.issue && (h.issue_title || issueOf(v, h.issue).title));
-    out.push({ x: lot.x + 8, y: lot.y + 17, anchor: 'top', text: l.parts.join(' '), parts: l.parts, sub: l.sub, cls: 'house ' + h.status, width: LW - 1 });
+    out.push({ x: lot.x + 8, y: lot.y + 17, anchor: 'top', text: l.parts.join(' '), parts: l.parts, sub: l.sub, cls: 'house ' + h.status + (limited(h) ? ' limited' : ''), width: LW - 1 });
   });
   return out;
 }, 10);

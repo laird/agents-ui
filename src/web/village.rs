@@ -175,6 +175,10 @@ pub struct House {
     /// That window's size (`1M`, `200k`), when the status line says.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window: Option<String>,
+    /// A usage or rate limit its crew stopped on (#484): the worker waits at
+    /// a dry well instead of sleeping. None while it works.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<crate::model::status::UsageLimit>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1294,6 +1298,7 @@ mod tests {
             mux: Default::default(),
             context_pct: None,
             context_window: None,
+            limit: None,
         }
     }
 

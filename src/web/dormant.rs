@@ -54,6 +54,7 @@ pub fn dormant_swarm(root: &Path, manifests: &[SwarmManifest]) -> Option<SwarmSn
         mux: Default::default(),
         context_pct: None,
         context_window: None,
+        limit: None,
     };
     Some(SwarmSnapshot {
         project_name: project,
