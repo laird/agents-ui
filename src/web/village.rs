@@ -513,6 +513,11 @@ pub struct VillageSnapshot {
     /// this week, newest first (`flaky.rs`, #501).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub flaky: Vec<super::flaky::Flaky>,
+    /// What GitHub says about recent work (`github.rs`, #498): landed,
+    /// opened, bounced, reverted and deployed per day. Absent when `gh` can't
+    /// be asked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub github: Option<super::github::Summary>,
 }
 
 /// Labels checked in order; the first that matches decides the house.
@@ -1242,6 +1247,7 @@ impl SwarmVillages {
         let mut village = build_gated(swarm, &issues, pipeline, &gate);
         if !swarm.repo_path.is_empty() {
             village.build = Some(super::build::read(&self.ci, transport, &repo, &integration, &gate).await);
+            village.github = self.issues.summary(transport, &repo, &integration).await;
         }
         village.pipeline.titles = pipeline_titles(&village.pipeline, &issues, &closed);
         village.pipeline.bounces = bounces;
@@ -1261,6 +1267,7 @@ impl VillageSource for SwarmVillages {
     }
     fn forget(&self, repo: &std::path::Path) {
         self.extras.forget(&repo.to_path_buf());
+        self.issues.forget(repo);
     }
     fn read<'a>(&'a self, transport: &'a ServerTransport, swarms: &'a [SwarmSnapshot]) -> BoxFuture<'a, Vec<Reading>> {
         Box::pin(async move {
@@ -1343,6 +1350,45 @@ mod tests {
         assert_eq!(j["flaky"][0]["issue"], 341);
         let back: VillageSnapshot = serde_json::from_value(j).unwrap();
         assert_eq!(back.flaky, v.flaky);
+    }
+
+    /// #498: the tracker's GitHub summary reaches the village as `github`,
+    /// read once per refresh however often the village is polled, and is
+    /// left out when the tracker has none (no `gh`, not signed in).
+    #[tokio::test]
+    async fn the_github_summary_reaches_the_village_once_per_refresh() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct Summarized(super::super::github::Summaries, std::sync::Arc<AtomicUsize>);
+        impl IssueTracker for Summarized {
+            fn name(&self) -> &'static str {
+                "summarized"
+            }
+            fn issues<'a>(&'a self, _: &'a ServerTransport, _: &'a Path, _: &'a str) -> BoxFuture<'a, Vec<IssueSnapshot>> {
+                Box::pin(async { Vec::new() })
+            }
+            fn summary<'a>(&'a self, _: &'a ServerTransport, repo: &'a Path, _: &'a str) -> BoxFuture<'a, Option<super::super::github::Summary>> {
+                Box::pin(self.0.get_with(repo, || async {
+                    self.1.fetch_add(1, Ordering::SeqCst);
+                    Some(super::super::github::Summary { as_of: "2026-11-16T06:00:00Z".into(), ..Default::default() })
+                }))
+            }
+        }
+        let transport = ServerTransport::new(None);
+        let reads = std::sync::Arc::new(AtomicUsize::new(0));
+        let tracker = Summarized(super::super::github::Summaries::new(Duration::from_secs(90)), reads.clone());
+        let villages = SwarmVillages::new(Box::new(tracker), Box::new(super::super::source::Nothing), Box::new(super::super::source::Nothing));
+        let s = swarm(vec![]);
+        for _ in 0..3 {
+            let r = villages.village(&transport, &s).await;
+            assert_eq!(r.village.github.as_ref().map(|g| g.as_of.as_str()), Some("2026-11-16T06:00:00Z"));
+        }
+        let json = serde_json::to_value(&villages.village(&transport, &s).await.village).unwrap();
+        assert_eq!(json["github"]["as_of"], "2026-11-16T06:00:00Z");
+        assert_eq!(reads.load(Ordering::SeqCst), 1, "four polls, one read");
+        // Without a summary there is no field, and the village is drawn as before.
+        let quiet = SwarmVillages::new(Box::new(super::super::source::Nothing), Box::new(super::super::source::Nothing), Box::new(super::super::source::Nothing));
+        let json = serde_json::to_value(&quiet.village(&transport, &s).await.village).unwrap();
+        assert!(json.get("github").is_none());
     }
 
     /// #431: the gate's bounces and today's tally ride on the pipeline, and
