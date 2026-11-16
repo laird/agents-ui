@@ -25,4 +25,6 @@ fn the_form_files_through_the_server_and_a_403_links_to_github() {
     assert!(body.contains("if (status === 403) return { words: 'This dashboard is read-only: file it on GitHub.', url: repo ? `${repo}/issues/new` : null };"));
     // Fields by name through `elements`, never `form.title` (the form's own attribute).
     assert!(body.contains("const field = n => form.elements.namedItem(n);"));
+    // Focused once the dialog shows, not while it is still hidden.
+    assert!(body.contains("requestAnimationFrame(() => field('title').focus());"));
 }

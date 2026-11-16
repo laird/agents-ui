@@ -28,7 +28,7 @@ const options = (list, chosen) => list.map(x => `<option${x === chosen ? ' selec
 
 /* The form, in `box`, filing into village `v`. */
 function issueForm(box, v) {
-  box.innerHTML = `<form class="new-issue"><label>Title <input name="title" maxlength="256" required></label>` +
+  box.innerHTML = `<form class="new-issue"><label>Title <input name="title" required></label>` +
     '<label>Body <textarea name="body" rows="4"></textarea></label>' +
     `<div class="row"><label>Type <select name="type">${options(ISSUE_TYPES, 'enhancement')}</select></label>` +
     `<label>Priority <select name="priority">${options(ISSUE_PRIORITIES, 'P3')}</select></label>` +
@@ -36,7 +36,8 @@ function issueForm(box, v) {
   const form = box.querySelector('form'), msg = form.querySelector('[role=status]'), send = form.querySelector('button');
   // By name through `elements`: `form.title` is the form's own title attribute.
   const field = n => form.elements.namedItem(n);
-  field('title').focus();
+  // After the frame: opened from the top bar, the dialog is shown only once the parts have run.
+  requestAnimationFrame(() => field('title').focus());
   form.addEventListener('submit', async e => {
     e.preventDefault();
     const req = issueRequest({ title: field('title').value, body: field('body').value, type: field('type').value, priority: field('priority').value });

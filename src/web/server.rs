@@ -1235,7 +1235,7 @@ mod tests {
             .route("/village/{*path}", get(village_file_handler))
             .route("/api/village", get(api_village_handler))
             .route("/api/swarms", get(api_swarms_handler).post(api_launch_swarm_handler))
-        .route("/api/swarms/{project}/issues", post(crate::web::newissue::api_new_issue_handler))
+            .route("/api/swarms/{project}/issues", post(crate::web::newissue::api_new_issue_handler))
             .route("/api/repos", get(api_repos_handler))
             .route("/api/agent-types", get(api_agent_types_handler))
             .route("/api/swarms/{project}", delete(api_stop_swarm_handler))
