@@ -104,7 +104,8 @@ function place(v, slot, per) {
     [0, 0, W, 14], [4, 8, 62, 46], [4, 46, cx0 + vw, 14], [hallX - 10, 4, 74, 46],
     [roadX - 2, 46, RD + 4, quayY - 40], [roadX - 18, quayY - 12, W, H],
     ...(gate ? [[4, gate.y - 2, gate.x0 + gate.w, GATE_H + 2]] : []),
-    [forestX - 2, 12, devW, canalY - 46], ...(envs.length ? [[0, rowTop - 2, W, H]] : [])
+    [forestX - 2, 12, devW, canalY - 46], ...(envs.length ? [[0, rowTop - 2, W, H]] : []),
+    ...(v.github ? [[ghSignAt(hallX).x - 1, 18, GH_SIGN.w + 2, 30]] : [])
   ];
   for (let r = 0; r < rows; r++) {
     const left = roadX - per * LW, right = roadX + RD + per * LW;
@@ -127,6 +128,10 @@ function place(v, slot, per) {
   }
   return { per, rows, cx0, vw, roadX, hallX, top, lots, quayY, canalY, lockStart, castleX, W, H, decor, banners, devW, devH, envs, envCy, gate, slot };
 }
+/* The GitHub panel's sign (ghpanel.js, #492): between the docks and the
+ * hall, in scene pixels. */
+export const GH_SIGN = { w: 15, h: 20 };
+export const ghSignAt = hallX => ({ x: Math.max(67, ((56 + hallX) >> 1) - 7), y: 22 });
 /* The environment row's sizes: each environment village, the river between
  * two, where the first stands (room on its left for the stream incidents
  * take up to the docks, worlds.js), and its band over and under its river. */

@@ -14,6 +14,7 @@ import './ghosts.js';
 import './scoreboard.js';
 import './barrels.js';
 import './well.js';
+import './ghpanel.js';
 import './features.js';
 import './envrow.js';
 import './voyages.js';
