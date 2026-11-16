@@ -142,6 +142,15 @@ where
                 temporal.push(value.trim_start_matches("--temporal=").to_string());
             }
             "--read-only" => read_only = true,
+            "--group" => {
+                let Some(value) = iter.next() else {
+                    anyhow::bail!("--group requires the path of a group manifest (group.json)");
+                };
+                web::valley::set_manifest_path(std::path::PathBuf::from(value.as_ref()));
+            }
+            value if value.starts_with("--group=") => {
+                web::valley::set_manifest_path(std::path::PathBuf::from(value.trim_start_matches("--group=")));
+            }
             "--world" => {
                 let Some(value) = iter.next() else {
                     anyhow::bail!("--world requires <dev>=<platform>, e.g. shop=temporal:agents");

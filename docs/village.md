@@ -545,6 +545,48 @@ Without build IDs the village can't tell, and says so in the bar, next to the
 world's name: `· release abc1234 running on the platform` (or `rolling out`,
 or `platform reports no build IDs`), then the build IDs its workers report.
 
+
+## A valley of related repos
+
+Repos that depend on each other (a library and the apps built on it, a
+service and its clients) can be drawn as one valley. The repos the others
+build on sit upstream, to the west. Their consumers sit downstream, to the
+east. A river runs along each package dependency and a road along each API
+one. Each repo is a small village:
+
+- its shore is red when something waits on you (or its build or a deploy is
+  broken), amber when a house is blocked or stalled, green otherwise;
+- three houses count its working, idle and blocked agents;
+- its label gives its backlog and the release its last stop runs.
+
+A repo with no running swarm is still there, grey and faded: dormant.
+Clicking a repo opens its own village.
+
+Declare the groups in `~/.agents-ui/group.json`, or in the file
+`--group <path>` names. The file is a list of groups. Each repo is named by
+its project name (the village's name) or its path. Each repo lists what it
+depends on, and how: `package` (it builds against the other's package) or
+`api` (it calls the other's API):
+
+```json
+[
+  { "name": "shop", "repos": [
+    { "repo": "lib-core" },
+    { "repo": "~/src/api", "depends_on": [{ "repo": "lib-core", "via": "package" }] },
+    { "repo": "web", "depends_on": [
+      { "repo": "lib-core", "via": "package" },
+      { "repo": "api", "via": "api" } ] } ] }
+]
+```
+
+Then open `/village?valley=shop`. `GET /api/valley` gives the same thing as
+JSON: each group's repos upstream to downstream, its edges, and a summary of
+each repo. What is wrong with the file is said there and in the bar, and
+nothing stops: JSON that doesn't parse, a repo that depends on one not in
+its group, a repo listed twice, a cycle of package dependencies (its repos
+are put last). `tools/mock/demo.sh` declares a `demo` group, so
+`/village?valley=demo` shows one without real swarms.
+
 ## Sources
 
 Every village is drawn from one neutral report. Any framework can provide one through an adapter (`--framework`); see [village-protocol.md](village-protocol.md).

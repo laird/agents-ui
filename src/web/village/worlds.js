@@ -22,6 +22,7 @@ import { bricks, planks, px } from './art2x.js';
 import { SAIL } from './ship.js';
 import { fit } from './panels.js';
 import { drawOverview } from './overview.js';
+import { drawValley } from './valley.js';
 
 function offscreen(sc) {
   if (!sc.canvas) { sc.canvas = document.createElement('canvas'); sc.cx = sc.canvas.getContext('2d'); }
@@ -181,6 +182,7 @@ export function draw(t) {
   if (!view) return;
   prepare(ctx);
   if (view.overview) { drawOverview(t); return; }
+  if (view.valley) { drawValley(t); return; }
   if (view.world) { const w = state.worlds.find(x => x.name === view.world); if (w) drawWorld(t, w); return; }
   const sc = state.scenes[view.village];
   if (sc && sc.v) drawVillage(ctx, sc, t);

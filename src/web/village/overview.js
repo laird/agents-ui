@@ -41,7 +41,7 @@ export function sizeOverview() {
 /* A house, 16 × 16 scene pixels at (x, y), big enough to read across a
  * room: a lit window when working, a dark one when idle, an orange wall when
  * blocked or stalled. Drawn one scene pixel per pixel (detail's d = 1). */
-function ovHouse(c, x, y, kind) {
+export function ovHouse(c, x, y, kind) {
   const wall = kind === 'blocked' ? STATE.blocked : P.plank, glass = kind === 'working' ? P.lamp : P.dark;
   detail(c, x, y, g => {
     // The roof: three steps, outlined.
