@@ -315,12 +315,135 @@ function repoUrl(v) {
   return ""
 }
 
+// ---- Joining the swarm (#493) ------------------------------------------------
+// The Join swarm button runs `swarm <machine>` (remote-swarm-setup.sh installs
+// it) in a terminal, focusing it if it is already open. omarchy-launch-or-focus
+// runs its launch command through `eval`, so a machine name is a plain host
+// name or nothing: anything else (`nuc; rm -rf ~`, `$(id)`, `-rf`) disables it.
+var MACHINE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
+function validMachine(m) {
+  return MACHINE.test(String(m === undefined || m === null ? "" : m))
+}
+
+// The terminal's window class for a machine. omarchy-launch-or-focus finds an
+// open one by regex, \b<class>\b, so the class ends in "-join" (else `nuc`
+// would focus nuc-1's terminal: `-` is a word boundary) and a `.` in the name,
+// a regex wildcard, becomes `_`.
+function joinAppId(m) {
+  return "org.omarchy.swarm-" + String(m).replace(/\./g, "_") + "-join"
+}
+
+// The command for the button, or null when the machine name can't be used.
+function joinCommand(m) {
+  if (!validMachine(m)) return null
+  return ["omarchy-launch-or-focus-tui", "--app-id=" + joinAppId(m), "swarm", m]
+}
+
+// What the button shows: hidden with no machine set or no `swarm` here,
+// disabled for a name that can't be used.
+function joinState(m, swarmOnPath) {
+  var name = String(m || "").trim()
+  if (name === "" || !swarmOnPath) return "hidden"
+  return validMachine(name) ? "ready" : "disabled"
+}
+
+// ---- Notifying from the bar (#493) -----------------------------------------
+// The same rule as the desktop notifier (agents-village-notify, #480): what
+// needs you is attention(), and news is a key the last answer did not have.
+// The first answer after the widget starts (or its server changes) only
+// records; a poll that fails changes nothing, so what starts waiting during
+// a blip is news when the server answers. Keys carry their project.
+function needsNow(base, villagesDoc) {
+  var out = []
+  villagesOf(villagesDoc).forEach(function(v) {
+    attention(base, v).forEach(function(a) { out.push(Object.assign({ project: v.project, id: v.project + "|" + a.key }, a)) })
+  })
+  return out
+}
+
+// { keys, fresh }: this poll's keys, and the items that are news since `prevKeys`
+// (null: nothing seen yet, so nothing is news).
+function freshNeeds(prevKeys, items) {
+  var keys = items.map(function(i) { return i.id })
+  var fresh = prevKeys ? items.filter(function(i) { return prevKeys.indexOf(i.id) < 0 }) : []
+  return { keys: keys, fresh: fresh }
+}
+
+// Whether the widget sends its own notification: its `notify` setting is on
+// and the desktop notifier is not already covering it: installed here (its
+// notify.json), enabled, watching this widget's server, and notifying what
+// needs you. One sender, so nothing is notified twice, and none missing.
+function widgetNotifies(setting, notifyJsonText, base) {
+  if (setting === false) return false
+  if (notifyJsonText === null || notifyJsonText === undefined) return true
+  var n = parse(notifyJsonText)
+  if (!n) return false  // there, but unreadable: the notifier runs on its defaults
+  if (n.enabled === false) return true
+  if (Array.isArray(n.kinds) && n.kinds.indexOf("needs") < 0) return true
+  return base !== undefined && baseUrl(n.server || "") !== base
+}
+
+// Notification daemons (mako, swaync) read the body as Pango markup.
+function markup(text) {
+  return String(text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+}
+
+// The one notification: "<n> need you", what is new, and the village to open.
+// Each replaces the widget's last one (the id the daemon gave it, printed by
+// -p), so they never stack, and no other notification is touched.
+function notice(base, all, fresh) {
+  if (!fresh.length) return null
+  var lines = fresh.slice(0, 4).map(function(i) { return i.what + ": " + i.title })
+  if (fresh.length > 4) lines.push("and " + (fresh.length - 4) + " more")
+  var first = fresh[0]
+  return {
+    title: all.length + (all.length === 1 ? " needs you" : " need you"),
+    body: lines.join("\n"),
+    url: villageUrl(base, first.project) + (first.house ? "&house=" + encodeURIComponent(first.house) : "")
+  }
+}
+
+function noticeCommand(n, replaceId) {
+  var replace = Number(replaceId) > 0 ? ["-r", String(Math.floor(Number(replaceId)))] : []
+  return ["omarchy-notification-send", "--app-name", "Agents village", "-u", "critical", "-p"].concat(replace, [
+    n.title, markup(n.body), "--exec", "sh", "-c",
+    'command -v omarchy-launch-webapp >/dev/null && exec omarchy-launch-webapp "$1" || exec omarchy-launch-browser "$1"', "sh", n.url])
+}
+
+// ---- Keyboard navigation (#493) ----------------------------------------------
+// The rows j/k and the arrows move over, in the order the panel shows them:
+// the swarm list, or a village's Needs you then Houses. Each says what Enter does.
+// `id` names the row across polls, so the highlight stays on it when rows
+// above it come or go.
+function navRows(rows, attentionItems, houseItems, project) {
+  if (project === "") return rows.map(function(r) { return { section: "swarms", id: "swarm:" + r.project, pick: r.project } })
+  return attentionItems.map(function(a) { return { section: "needs", id: "needs:" + a.key, url: a.url } })
+    .concat(houseItems.map(function(h) { return { section: "houses", id: "house:" + h.name, url: h.url } }))
+}
+
+// Where the highlight is after the rows changed: the same row, or none.
+function cursorFor(items, id) {
+  if (!id) return -1
+  for (var i = 0; i < items.length; i++) if (items[i].id === id) return i
+  return -1
+}
+
+// Where the highlight goes: -1 (none) to the first row, then along, held at the ends.
+function moveCursor(cursor, dy, count) {
+  if (count <= 0) return -1
+  if (cursor < 0 || cursor >= count) return dy < 0 ? count - 1 : 0
+  return Math.max(0, Math.min(count - 1, cursor + dy))
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     parse: parse, baseUrl: baseUrl, absolute: absolute, villageUrl: villageUrl,
     villageFor: villageFor, swarmFor: swarmFor, needsYou: needsYou, limited: limited, limitWords: limitWords, swarmRows: swarmRows,
     chooseProject: chooseProject, canGoBack: canGoBack, houseName: houseName, houseRows: houseRows,
     flow: flow, attention: attention, features: features, badge: badge, ago: ago, repoUrl: repoUrl,
-    releaseKey: releaseKey, questionOf: questionOf, releases: releases, buildState: buildState, buildWords: buildWords, clock: clock
+    releaseKey: releaseKey, questionOf: questionOf,
+    validMachine: validMachine, joinCommand: joinCommand, joinState: joinState, needsNow: needsNow, freshNeeds: freshNeeds,
+    widgetNotifies: widgetNotifies, markup: markup, notice: notice, noticeCommand: noticeCommand, joinAppId: joinAppId,
+    navRows: navRows, moveCursor: moveCursor, cursorFor: cursorFor, releases: releases, buildState: buildState, buildWords: buildWords, clock: clock
   }
 }

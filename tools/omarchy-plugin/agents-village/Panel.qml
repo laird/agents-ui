@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Quickshell
+import Quickshell.Io
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
@@ -13,7 +14,10 @@ import "Model.js" as Model
 // swarm's village. With one swarm it goes straight to that village.
 //
 // Display only: it reads /api/swarms and /api/village and never sends
-// anything to an agent, so it works against a --read-only server.
+// anything to an agent, so it works against a --read-only server. It can
+// open a terminal on the swarm (Join swarm: `swarm <machine>`), and notify
+// when something starts waiting on you, unless the desktop notifier
+// (agents-village-notify) is installed to do that.
 Panel {
   id: root
   moduleName: "agents-village"
@@ -26,6 +30,8 @@ Panel {
   readonly property bool showWorking: setting("showWorking", true) !== false
   readonly property bool showAlert: setting("showAlert", true) !== false
   readonly property bool showSailing: setting("showSailing", true) !== false
+  readonly property string machine: String(setting("machine", "") || "").trim()
+  readonly property bool notifySetting: setting("notify", true) !== false
 
   // ---- What the server said ----------------------------------------------
   property var swarmsDoc: null
@@ -59,6 +65,26 @@ Panel {
   readonly property string repo: Model.repoUrl(village)
   readonly property string host: base.replace(/^[a-z]+:\/\//i, "").replace(/:\d+$/, "")
 
+  // ---- Join swarm, notifying, the keyboard (#493) ------------------------------
+  property bool swarmOnPath: false
+  readonly property string joinState: Model.joinState(machine, swarmOnPath)
+  // notify.json of the desktop notifier, or null when it is not installed.
+  property var notifierConfig: null
+  readonly property bool notifies: Model.widgetNotifies(notifySetting, notifierConfig, base)
+  // What needed you at the last answer (keys), null before the first one.
+  property var needKeys: null
+  property var lastNotice: null
+  // The id the daemon gave the last notice, so the next one replaces it.
+  property int noticeId: 0
+  // The highlighted row (Model.navRows): its index, and its id, which keeps
+  // it on the same row when the rows above it change.
+  property int cursor: -1
+  property string cursorId: ""
+  readonly property var navItems: Model.navRows(rows, attentionItems, houses, project)
+  onProjectChanged: { cursor = -1; cursorId = "" }
+  onNavItemsChanged: cursor = Model.cursorFor(navItems, cursorId)
+  onCursorChanged: if (cursor >= 0) Qt.callLater(revealCursor)
+
   readonly property color foreground: bar ? bar.foreground : Commons.Color.foreground
   readonly property color urgent: bar ? bar.urgent : Commons.Color.urgent
   readonly property color dim: Qt.darker(foreground, 1.55)
@@ -83,11 +109,14 @@ Panel {
     get("/api/village", function(doc) {
       if (doc === null) { root.reachable = false; return }
       root.noteReleases(doc)
+      root.noteNeeds(doc)
       root.villagesDoc = doc
       root.reachable = true
       root.lastOk = Date.now()
     })
     get("/api/swarms", function(doc) { if (doc !== null) root.swarmsDoc = doc })
+    // Installing the desktop notifier creates this file; see it without a restart.
+    notifierFile.reload()
   }
 
   // A release (the last stop's deployment changing) sets the ship sailing.
@@ -101,11 +130,61 @@ Panel {
     nowMs = Date.now()
   }
 
+  // Something started waiting on you: one notification, replacing the last.
+  // The first poll, and the first after the server came back, only record.
+  function noteNeeds(doc) {
+    var all = Model.needsNow(base, doc)
+    var r = Model.freshNeeds(needKeys, all)
+    needKeys = r.keys
+    var n = Model.notice(base, all, r.fresh)
+    if (!n) return
+    lastNotice = n
+    if (!notifies) return
+    // One at a time, so each knows the id to replace; a newer one waits.
+    if (sending) pendingNotice = n
+    else sendNotice(n)
+  }
+  property var pendingNotice: null
+  // Our own flag: Process.running does not turn true until the process starts.
+  property bool sending: false
+  function sendNotice(n) {
+    sending = true
+    noticeSender.command = Model.noticeCommand(n, noticeId)
+    noticeSender.running = true
+  }
+
+  function join() {
+    var cmd = Model.joinCommand(machine)
+    if (cmd && joinState === "ready") Quickshell.execDetached(cmd)
+  }
+
+  function moveCursor(dy) {
+    cursor = Model.moveCursor(cursor, dy, navItems.length)
+    cursorId = cursor >= 0 ? navItems[cursor].id : ""
+  }
+  // Scroll the panel so the highlighted row is in view.
+  function revealCursor() {
+    var row = null
+    for (var i = 0; i < rowItems.length; i++) if (rowItems[i] && rowItems[i].current) row = rowItems[i]
+    if (!row) return
+    var y = row.mapToItem(column, 0, 0).y
+    if (y < flick.contentY) flick.contentY = y
+    else if (y + row.height > flick.contentY + flick.height) flick.contentY = y + row.height - flick.height
+  }
+  // The rows that can be highlighted, registered as they are made.
+  property var rowItems: []
+  function activateCursor() {
+    var item = navItems[cursor]
+    if (!item) return
+    if (item.pick !== undefined) pick(item.pick)
+    else openUrl(item.url || "")
+  }
+
   // The harness feeds recorded answers through the same path.
   function apply(swarmsText, villagesText) {
     swarmsDoc = Model.parse(swarmsText)
     var doc = Model.parse(villagesText)
-    if (doc !== null) noteReleases(doc)
+    if (doc !== null) { noteReleases(doc); noteNeeds(doc) }
     villagesDoc = doc
     reachable = villagesDoc !== null
     if (reachable) lastOk = Date.now()
@@ -124,9 +203,47 @@ Panel {
     Quickshell.execDetached(["sh", "-c", 'command -v omarchy-launch-webapp >/dev/null && exec omarchy-launch-webapp "$1" || exec omarchy-launch-browser "$1"', "sh", url])
   }
 
-  onOpenedChanged: if (opened) { nowMs = Date.now(); refresh() }
-  onBaseChanged: { swarmsDoc = null; villagesDoc = null; reachable = false; refresh() }
+  onOpenedChanged: if (opened) {
+    nowMs = Date.now(); refresh()
+    if (machine !== "" && !swarmCheck.running) swarmCheck.running = true
+  }
+  // Another server: what waited on the old one says nothing about the new one.
+  onBaseChanged: { swarmsDoc = null; villagesDoc = null; reachable = false; needKeys = null; refresh() }
   Component.onCompleted: refresh()
+
+  // Sends the notice; prints the id the daemon gave it (-p).
+  Process {
+    id: noticeSender
+    stdout: StdioCollector {
+      onStreamFinished: { var id = parseInt(this.text.trim(), 10); if (id > 0) root.noticeId = id }
+    }
+    onExited: {
+      root.sending = false
+      if (!root.pendingNotice) return
+      var n = root.pendingNotice
+      root.pendingNotice = null
+      Qt.callLater(function() { root.sendNotice(n) })
+    }
+  }
+
+  // Is `swarm` installed here? The Join swarm button hides when it isn't.
+  // Checked again each time the panel opens, so installing it needs no restart.
+  Process {
+    id: swarmCheck
+    command: ["sh", "-c", "command -v swarm >/dev/null"]
+    running: root.machine !== ""
+    onExited: function(code) { root.swarmOnPath = code === 0 }
+  }
+
+  FileView {
+    id: notifierFile
+    path: Quickshell.env("HOME") + "/.config/agents-ui/notify.json"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: root.notifierConfig = notifierFile.text()
+    onLoadFailed: root.notifierConfig = null
+  }
 
   Timer {
     interval: root.intervalMs
@@ -152,6 +269,7 @@ Panel {
         + (root.badge.build === "red" || root.badge.build === "running" ? " · " + root.badge.buildWords : "")
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.RightButton) root.openVillage()
+      else if (buttonCode === Qt.MiddleButton) root.join()
       else root.toggle()
     }
 
@@ -205,11 +323,14 @@ Panel {
       anchors.fill: parent
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
+      onMoveRequested: function(dx, dy) { if (dy !== 0) root.moveCursor(dy) }
+      onActivateRequested: root.activateCursor()
       onTextKey: function(t) {
         var key = t.toLowerCase()
         if (key === "r") root.refresh()
         else if (key === "o") root.openVillage()
         else if (key === "b" && root.canGoBack) root.back()
+        else if (key === "s") root.join()
       }
 
       Flickable {
@@ -276,7 +397,9 @@ Panel {
               model: root.rows
               Row2 {
                 required property var modelData
+                required property int index
                 width: parent.width
+                current: root.cursor === index
                 name: modelData.project
                 sub: modelData.workflow
                 trailing: modelData.stopped ? "stopped"
@@ -337,7 +460,9 @@ Panel {
                 model: root.attentionItems
                 Row2 {
                   required property var modelData
+                  required property int index
                   width: parent.width
+                  current: root.cursor === index
                   name: modelData.what
                   sub: modelData.title
                   alert: true
@@ -355,7 +480,9 @@ Panel {
                 model: root.houses
                 Row2 {
                   required property var modelData
+                  required property int index
                   width: parent.width
+                  current: root.cursor === root.attentionItems.length + index
                   name: modelData.name + (modelData.branch !== "" ? "  " + modelData.branch : "")
                   sub: modelData.issue ? "#" + modelData.issue + " " + modelData.title : modelData.title
                   trailing: (modelData.limit !== null ? modelData.limit : modelData.status) + (modelData.context !== null ? " · " + modelData.context + "%" : "")
@@ -389,6 +516,14 @@ Panel {
             width: parent.width
             spacing: Style.space(8)
             Label { text: "Open village"; link: true; onClicked: root.openVillage() }
+            Label {
+              id: joinLabel
+              visible: root.joinState !== "hidden"
+              text: root.joinState === "ready" ? "Join swarm" : "Join swarm (bad machine name)"
+              link: root.joinState === "ready"
+              color: root.joinState === "ready" ? Commons.Color.accent : root.dim
+              onClicked: root.join()
+            }
             Label { text: "Dashboard"; link: true; onClicked: root.openUrl(root.base + "/") }
             Item { Layout.fillWidth: true }
             Label { text: "Refresh"; link: true; color: root.dim; onClicked: root.refresh() }
@@ -427,9 +562,13 @@ Panel {
     property string sub: ""
     property string trailing: ""
     property bool alert: false
+    // Highlighted from the keyboard (j/k, the arrows).
+    property bool current: false
     signal clicked()
+    Component.onCompleted: root.rowItems = root.rowItems.concat([row])
+    Component.onDestruction: root.rowItems = root.rowItems.filter(function(r) { return r !== row })
     foreground: root.foreground
-    hasCursor: mouse.containsMouse
+    hasCursor: mouse.containsMouse || current
     implicitHeight: content.implicitHeight + Style.spacing.rowPaddingX
 
     MouseArea {

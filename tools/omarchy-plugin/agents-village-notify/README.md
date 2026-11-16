@@ -41,7 +41,10 @@ this service notifies when an item first appears in it. Each item carries a
 and `tests/notify.test.js` fails if the two differ: after changing the bar
 widget's, `cp agents-village/Model.js agents-village-notify/`.
 
-This service is the only thing that sends notifications. The bar widget, the
+While this service is installed it is the only thing that sends
+notifications. The bar widget sends its own "needs you" notification only
+where this service does not cover it (no `notify.json`, `"enabled": false`,
+another server, or no `needs` in `kinds`), and the
 village page and the screensaver send none, so a machine running all of them
 is notified once.
 

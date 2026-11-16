@@ -25,6 +25,18 @@ ShellRoot {
       settings: ({ serverUrl: "http://127.0.0.1:9" })
     }
     BarPanel {
+      id: joiner
+      settings: ({ serverUrl: "http://127.0.0.1:9", machine: "nuc" })
+    }
+    BarPanel {
+      id: evil
+      settings: ({ serverUrl: "http://127.0.0.1:9", machine: "nuc; rm -rf ~" })
+    }
+    BarPanel {
+      id: quiet
+      settings: ({ serverUrl: "http://127.0.0.1:9", notify: false })
+    }
+    BarPanel {
       id: pinned
       settings: ({ serverUrl: "http://127.0.0.1:9", village: "shop" })
     }
@@ -80,12 +92,76 @@ ShellRoot {
       check("a red build turns the icon red", one.buildRed, true)
       check("the panel says what fails", one.buildWords.indexOf("build red · 3 tests failing since ") === 0, true)
 
+      console.log("keyboard")
+      two.apply(Fixtures.twoSwarms, Fixtures.twoVillages)
+      check("no row highlighted at first", two.cursor, -1)
+      two.moveCursor(1)
+      check("j/down highlights the first swarm", two.cursor, 0)
+      two.moveCursor(1); two.moveCursor(1)
+      check("held at the last", two.cursor, 1)
+      two.activateCursor()
+      check("enter opens the highlighted swarm", two.project, "shop")
+      check("a new view starts with no highlight", two.cursor, -1)
+      two.moveCursor(1)
+      check("in a village, Needs you comes first", two.navItems[two.cursor].section, "needs")
+      two.moveCursor(1)
+      check("then the houses", two.navItems[two.cursor].id, "house:wt-1")
+      // A note lands on the board above the highlighted house: it stays on the house.
+      var more = JSON.parse(Fixtures.twoVillages)
+      more.villages[1].board = [{ number: 5, label: "needs-design", title: "x", url: "https://x/5" }]
+      two.apply(Fixtures.twoSwarms, JSON.stringify(more))
+      check("the highlight stays on its row when rows above it change", two.navItems[two.cursor].id, "house:wt-1")
+      two.back()
+
+      console.log("join swarm")
+      // The Process check for `swarm` runs on its own; settle it for the checks.
+      joiner.swarmOnPath = true; evil.swarmOnPath = true
+      check("ready with a machine and swarm here", joiner.joinState, "ready")
+      check("disabled for a name that is not a host", evil.joinState, "disabled")
+      check("hidden without a machine", one.joinState, "hidden")
+      joiner.join()
+      evil.join()
+
+      console.log("notify")
+      var waiting = function(blocked) {
+        return JSON.stringify({ villages: [{ project: "shop", manager: { status: "idle", links: [] }, board: [], backlog: [],
+          pipeline: { gates: [], stops: [], quay: [] },
+          houses: [{ id: "/src/shop-wt-1", role: "worker-1", status: blocked ? "blocked" : "working", issue: 4, issue_title: "Checkout", links: [] }] }] })
+      }
+      check("notify off in its settings: the widget does not notify", quiet.notifies, false)
+      check("no notifier installed, notify on: the widget notifies", joiner.notifies, true)
+      joiner.apply(Fixtures.swarms, waiting(false))
+      check("first poll: nothing", joiner.lastNotice, null)
+      joiner.apply(Fixtures.swarms, waiting(true))
+      check("a house starts waiting", joiner.lastNotice.title, "1 needs you")
+      check("opening its dialog", joiner.lastNotice.url, "http://127.0.0.1:9/village#shop&house=wt-1")
+      joiner.apply(Fixtures.swarms, waiting(true))
+      joiner.apply("", "")
+      joiner.apply(Fixtures.swarms, waiting(true))
+      check("back after the server was down: still waiting is not news", joiner.lastNotice.title, "1 needs you")
+      check("the keys outlast the blip", joiner.needKeys.length, 1)
+      joiner.apply("", "")
+      joiner.apply(Fixtures.swarms, waiting(false))
+      joiner.apply("", "")
+      joiner.apply(Fixtures.swarms, waiting(true))
+      check("what starts waiting during a blip is news when it answers", joiner.needKeys.length, 1)
+      quiet.apply(Fixtures.swarms, waiting(false))
+      quiet.apply(Fixtures.swarms, waiting(true))
+      check("notify off: worked out, not sent", quiet.lastNotice.title, "1 needs you")
+
       console.log("server down")
       one.apply("", "")
       check("unreachable", one.reachable, false)
       check("the badge says so", one.badge.reachable, false)
 
-      console.log(failures === 0 ? "ALL OK" : failures + " FAILED")
+      // The notifications and the terminal are processes started from the
+      // event loop: give them a moment before qml_check.py reads what ran.
+      finish.start()
+    }
+    Timer {
+      id: finish
+      interval: 1500
+      onTriggered: console.log(harness.failures === 0 ? "ALL OK" : harness.failures + " FAILED")
     }
   }
 }

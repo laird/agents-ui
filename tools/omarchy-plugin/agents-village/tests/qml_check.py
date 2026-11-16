@@ -57,6 +57,18 @@ with tempfile.TemporaryDirectory(prefix="agents-village-qml-") as directory:
     runtime = harness / "runtime"
     runtime.mkdir(mode=0o700)
     env["XDG_RUNTIME_DIR"] = str(runtime)
+    # A HOME of its own (no desktop notifier installed), and stand-ins for
+    # what the widget runs, recording their arguments: the checks must never
+    # send a real notification or open a terminal (#493).
+    (harness / "home").mkdir()
+    env["HOME"] = str(harness / "home")
+    stubs = harness / "bin"
+    stubs.mkdir()
+    calls = harness / "calls"
+    for name in ("omarchy-notification-send", "omarchy-launch-or-focus-tui", "swarm", "omarchy-launch-browser", "omarchy-launch-webapp"):
+        (stubs / name).write_text(f'#!/bin/sh\nprintf "%s\\n" "{name} $*" >> "{calls}"\n')
+        (stubs / name).chmod(0o755)
+    env["PATH"] = f"{stubs}:{os.environ['PATH']}"
 
     shell = subprocess.Popen(["quickshell", "-p", str(harness)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
     timer = threading.Timer(30, shell.kill)
@@ -69,6 +81,7 @@ with tempfile.TemporaryDirectory(prefix="agents-village-qml-") as directory:
     timer.cancel()
     shell.kill()
     shell.wait()
+    ran = calls.read_text() if calls.exists() else ""
 
 plain = re.sub(r"\x1b\[[0-9;]*m", "", "".join(lines))
 checks = re.findall(r"qml:\s+(ok|FAIL)\s+(.*?)\s*$", plain, re.MULTILINE)
@@ -81,4 +94,17 @@ if os.environ.get("QML_CHECK_VERBOSE"):
 # QML warnings or errors about this widget's own files are bugs too.
 warnings = [l for l in plain.splitlines() if re.search(r"(BarPanel|Model)\.(qml|js)", l)]
 assert not warnings, "QML warnings:\n" + "\n".join(warnings)
+# What the widget ran: one notification for the house that started waiting,
+# the terminal for a good machine name, nothing for a bad one.
+# (Earlier checks feed other recorded villages through `one`, and a conflict
+# appearing there is news too; the house below is the one checked.)
+notes = [l for l in ran.splitlines() if l.startswith("omarchy-notification-send ") and "wt-1: #4 Checkout" in l]
+# Twice: when it starts waiting, and when it waits again after an answer
+# seen between two blips. Never for still waiting, nor from the widget with
+# notify off.
+assert len(notes) == 2, "a notification per rising edge, no more:\n" + ran
+assert notes[0].startswith("omarchy-notification-send --app-name Agents village -u critical -p "), notes[0]
+assert " 1 needs you wt-1: #4 Checkout --exec " in notes[0], notes[0]
+joins = [l for l in ran.splitlines() if l.startswith("omarchy-launch-or-focus-tui ")]
+assert joins == ["omarchy-launch-or-focus-tui --app-id=org.omarchy.swarm-nuc-join swarm nuc"], "join runs for nuc only:\n" + ran
 print(f'{{"qml_checks": {len(checks)}, "failed": 0}}')
