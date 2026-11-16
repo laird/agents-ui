@@ -289,6 +289,10 @@ pub struct Agent {
     /// That window's size, as the agent's status line writes it (`1M`, `200k`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window: Option<String>,
+    /// A usage or rate limit it stopped on (#484): `{}`, or `{"resets": "3pm"}`
+    /// when the runtime says when it lifts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<crate::model::status::UsageLimit>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -651,6 +655,8 @@ fn house(id: String, ws: &Workstream, tasks: &HashMap<&str, &Task>) -> House {
         since: None,
         context_pct: fullest.and_then(|a| a.context_pct),
         context_window: fullest.and_then(|a| a.context_window.clone()),
+        // A working house has got past any limit its pane still shows.
+        limit: if status == HouseStatus::Working { None } else { ws.agents.iter().find_map(|a| a.limit.clone()) },
     }
 }
 
@@ -877,11 +883,18 @@ fn swarm_workstream(id: String, crew: &[&super::AgentSnapshot], project: &str) -
                     Some(pct) => Some(crate::model::status::ContextUse { pct, window: a.context_window.clone() }),
                     None => crate::model::status::parse_context(&a.pane_content),
                 };
+                let state = swarm_agent_state(a);
                 Agent {
                     name: a.role.clone(),
-                    state: swarm_agent_state(a),
                     context_pct: ctx.as_ref().map(|c| c.pct),
                     context_window: ctx.and_then(|c| c.window),
+                    // An agent at work again has got past it.
+                    limit: if state == AgentState::Working {
+                        None
+                    } else {
+                        a.limit.clone().or_else(|| crate::model::status::parse_limit(&a.pane_content))
+                    },
+                    state,
                     ..Agent::default()
                 }
             })
@@ -1263,6 +1276,36 @@ mod tests {
         assert_eq!((v.manager.context_pct, v.manager.context_window.as_deref()), (Some(12), Some("200k")));
         let json = serde_json::to_value(&v.houses).unwrap();
         assert!(json.as_array().unwrap().iter().filter(|h| h.get("context_pct").is_some()).count() == 1, "absent when unknown");
+    }
+
+    #[test]
+    fn a_house_whose_agent_hit_a_usage_limit_says_so_and_when_it_lifts() {
+        let agent = |role: &str, wt: &str, state: &str, pane: &str| serde_json::json!({"id": role, "role": role, "state": state, "is_manager": false,
+            "waiting_for_input": false, "current_issue": null, "current_issue_title": null, "pane_content": pane, "tmux_target": "",
+            "health": "Healthy", "completed_issue_count": 0, "resurrection_attempts": 0, "status_timestamp": null, "worktree_path": wt});
+        let limited = "  ⎿  You've hit your limit · resets 3pm (Europe/London)\n❯ \n  ctx 40% of 1M\n";
+        let swarm: SwarmSnapshot = serde_json::from_value(serde_json::json!({
+            "project_name": "shop", "repo_path": "", "agent_type": "claude", "workflow": null, "tmux_session": "",
+            "stopped": false, "busy_count": 0, "idle_count": 0, "attention_count": 0, "issues": [],
+            "workers": [
+                agent("worker-1", "/src/shop-wt-1", "Idle", limited),
+                // Working again: the message still on screen is behind it.
+                agent("worker-2", "/src/shop-wt-2", "Working", limited),
+                agent("worker-3", "/src/shop-wt-3", "Idle", "all done\n❯ \n"),
+            ],
+            "manager": agent("manager", "", "Idle", "5-hour limit reached ∙ resets 7pm\n"),
+        }))
+        .unwrap();
+        let report = swarm_report(&swarm, &[], &Pipeline::default());
+        let v = to_village(&report).village;
+        let house = |id: &str| v.houses.iter().find(|h| h.id == id).unwrap();
+        assert_eq!(house("/src/shop-wt-1").limit.as_ref().and_then(|l| l.resets.as_deref()), Some("3pm (Europe/London)"));
+        assert_eq!(house("/src/shop-wt-1").status, HouseStatus::Idle, "its status is its own; the limit says why");
+        assert_eq!(house("/src/shop-wt-2").limit, None, "working again");
+        assert_eq!(house("/src/shop-wt-3").limit, None);
+        assert_eq!(v.manager.limit.as_ref().and_then(|l| l.resets.as_deref()), Some("7pm"));
+        let json = serde_json::to_value(&v.houses).unwrap();
+        assert_eq!(json.as_array().unwrap().iter().filter(|h| h.get("limit").is_some()).count(), 1, "absent when there is none");
     }
 
     #[test]

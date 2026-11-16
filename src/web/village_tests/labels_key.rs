@@ -11,7 +11,7 @@ fn village_html_labels_each_area_and_house() {
     assert!(body.contains("LABELS.forEach(({ fn }) => fn(sc, theme).forEach(l => {"));
     assert!(body.contains("registerOverlay(placeLabels, 20);"));
     assert!(body.contains("const l = houseLabel(houseName(v, h), h, h.issue && (h.issue_title || issueOf(v, h.issue).title));"));
-    assert!(body.contains("parts: l.parts, sub: l.sub, cls: 'house ' + h.status, width: LW - 1"));
+    assert!(body.contains("parts: l.parts, sub: l.sub, cls: 'house ' + h.status + (limited(h) ? ' limited' : ''), width: LW - 1"));
     // The hall names the manager's issue when it has one.
     assert!(body.contains("theme.labels.hall, managerSub(v.manager)"));
     // Houses are named for their worktree, less the project prefix.

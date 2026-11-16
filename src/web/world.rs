@@ -183,6 +183,7 @@ mod tests {
                 since: None,
                 context_pct: None,
                 context_window: None,
+                limit: None,
         }
     }
 

@@ -404,6 +404,7 @@ Panel {
                 sub: modelData.workflow
                 trailing: modelData.stopped ? "stopped"
                   : modelData.working + " working" + (modelData.waiting > 0 ? " · " + modelData.waiting + " need you" : "")
+                    + (modelData.limited > 0 ? " · " + modelData.limited + " limited" : "")
                 alert: modelData.waiting > 0
                 onClicked: root.pick(modelData.project)
               }
@@ -484,7 +485,7 @@ Panel {
                   current: root.cursor === root.attentionItems.length + index
                   name: modelData.name + (modelData.branch !== "" ? "  " + modelData.branch : "")
                   sub: modelData.issue ? "#" + modelData.issue + " " + modelData.title : modelData.title
-                  trailing: modelData.status + (modelData.context !== null ? " · " + modelData.context + "%" : "")
+                  trailing: (modelData.limit !== null ? modelData.limit : modelData.status) + (modelData.context !== null ? " · " + modelData.context + "%" : "")
                   alert: modelData.status === "blocked"
                   onClicked: root.openUrl(modelData.url)
                 }

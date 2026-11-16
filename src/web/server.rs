@@ -1291,6 +1291,7 @@ mod tests {
             mux: Default::default(),
             context_pct: None,
             context_window: None,
+            limit: None,
         }
     }
 

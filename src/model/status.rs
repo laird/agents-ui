@@ -206,6 +206,84 @@ pub fn parse_context(pane: &str) -> Option<ContextUse> {
     })
 }
 
+/// A runtime's usage or rate limit, read from the message it prints when it
+/// stops on one (#484): Claude Code's "You've hit your limit · resets 3pm
+/// (Europe/London)" or "5-hour limit reached ∙ resets 7pm", Codex's "You've
+/// hit your usage limit ... try again in 2 hours", an API's 429.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct UsageLimit {
+    /// When it lifts, in the runtime's own words (`3pm (Europe/London)`,
+    /// `in 2 hours`), when the message says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resets: Option<String>,
+}
+
+/// What a limit message says, lowercased: the runtimes' own wording, not
+/// words that turn up in prose or test output about limits ("rate limited",
+/// "retry limit reached", "returns error 429" are none of these).
+const LIMIT_PHRASES: &[&str] = &[
+    "hit your limit",
+    "hit your usage limit",
+    "usage limit reached",
+    "hour limit reached",
+    "weekly limit reached",
+    "session limit reached",
+    "opus limit reached",
+    "rate_limit_error",
+    "resource_exhausted",
+    "429 too many requests",
+];
+
+/// A line that starts the agent's next turn: Claude Code's `●`/`⏺` reply and
+/// `✻ Worked for 3s`, Codex's `•`. One after the message means the agent
+/// went on, so the limit has lifted.
+const NEXT_TURN: &[char] = &['●', '⏺', '✻', '•'];
+
+/// The pane's lines with text, at most this many from the bottom: the limit
+/// message sits just above the input box and the status line under it.
+const LIMIT_TAIL: usize = 14;
+
+/// A usage or rate limit the agent stopped on, from the last lines of its
+/// pane. `None` when there is none, or it has scrolled out of the bottom.
+pub fn parse_limit(pane: &str) -> Option<UsageLimit> {
+    // Only the bottom: walk up from the end, never the whole scrollback.
+    let mut tail: Vec<String> = pane.lines().rev().filter(|l| !l.trim().is_empty()).take(LIMIT_TAIL).map(strip_ansi).collect();
+    tail.reverse();
+    let at = tail.iter().rposition(|l| {
+        let lower = l.to_lowercase();
+        LIMIT_PHRASES.iter().any(|p| lower.contains(p))
+    })?;
+    if tail[at + 1..].iter().any(|l| l.trim_start().starts_with(NEXT_TURN)) {
+        return None;
+    }
+    // The reset time is on the message's line, or wrapped onto the next.
+    let resets = tail[at..].iter().take(2).find_map(|l| reset_words(l));
+    Some(UsageLimit { resets })
+}
+
+/// "3pm (Europe/London)" from "... · resets 3pm (Europe/London)", "in 2
+/// hours" from "... try again in 2 hours.".
+fn reset_words(line: &str) -> Option<String> {
+    let lower = line.to_lowercase();
+    const MARKS: &[(&str, &str)] = &[
+        ("will reset at ", ""),
+        ("resets at ", ""),
+        ("reset at ", ""),
+        ("resets ", ""),
+        ("try again at ", ""),
+        ("try again in ", "in "),
+        ("retry in ", "in "),
+    ];
+    let (i, mark, prefix) = MARKS.iter().find_map(|(m, pre)| lower.find(m).map(|i| (i, *m, *pre)))?;
+    // `lower` and `line` differ in byte length only where lowercasing changes
+    // it, which a clock time never does; fall back to `lower` if so.
+    let src = if lower.len() == line.len() { line } else { lower.as_str() };
+    let rest = src[i + mark.len()..].trim();
+    let words = rest.trim_end_matches(['.', '!', ' ', '│', '|']).trim();
+    let words: String = words.chars().take(40).collect();
+    (!words.is_empty()).then(|| format!("{prefix}{words}"))
+}
+
 /// True when the pane is waiting on a human keypress.
 ///
 /// One detector, because there used to be two: the TUI checked for the strings
@@ -832,6 +910,47 @@ mod tests {
         "  5. Chat about this\n",
         "Enter to select \u{00b7} \u{2191}/\u{2193} to navigate \u{00b7} Esc to cancel\n",
     );
+
+    #[test]
+    fn a_usage_limit_is_read_from_the_bottom_of_the_pane() {
+        let claude = "● Done with the first half.\n\n  ⎿  You've hit your limit · resets 3pm (Europe/London)\n\n────\n❯ \n────\n  ctx 40% of 1M | Opus 5\n";
+        assert_eq!(parse_limit(claude), Some(UsageLimit { resets: Some("3pm (Europe/London)".into()) }));
+        assert_eq!(
+            parse_limit("5-hour limit reached ∙ resets 7pm\n> \n"),
+            Some(UsageLimit { resets: Some("7pm".into()) })
+        );
+        assert_eq!(
+            parse_limit("Claude usage limit reached. Your limit will reset at 5pm (America/New_York).\n"),
+            Some(UsageLimit { resets: Some("5pm (America/New_York)".into()) })
+        );
+        assert_eq!(
+            parse_limit("■ You've hit your usage limit. Upgrade to Pro or try again in 2 hours 5 minutes.\n"),
+            Some(UsageLimit { resets: Some("in 2 hours 5 minutes".into()) })
+        );
+        assert_eq!(parse_limit("API Error: 429 {\"type\":\"rate_limit_error\"}\n"), Some(UsageLimit { resets: None }), "no time given");
+        // The reset wrapped onto the next line.
+        assert_eq!(
+            parse_limit("Weekly limit reached\n  resets Oct 9, 4pm\n").and_then(|l| l.resets),
+            Some("Oct 9, 4pm".into())
+        );
+    }
+
+    #[test]
+    fn prose_about_limits_and_old_messages_are_not_a_limit() {
+        assert_eq!(parse_limit("● I added a rate limit to the API client.\n> \n"), None, "talking about one");
+        assert_eq!(parse_limit("● The client is now rate limited to 10 req/s.\n> \n"), None);
+        assert_eq!(parse_limit("  retry limit reached after 3 attempts\n  GET /x returns error 429 (429)\n"), None, "test output");
+        // Resumed after the reset: a reply and its timing under the old message.
+        let resumed = "  ⎿  You've hit your limit · resets 3pm\n> continue\n● Carrying on with the tests.\n✻ Worked for 4s\n❯ \n";
+        assert_eq!(parse_limit(resumed), None, "the agent went on");
+        assert_eq!(parse_limit(""), None);
+        // A limit that has since scrolled far up: the agent went on working.
+        let mut pane = String::from("You've hit your limit · resets 3pm\n");
+        for i in 0..20 {
+            pane.push_str(&format!("line {i}\n"));
+        }
+        assert_eq!(parse_limit(&pane), None);
+    }
 
     #[test]
     fn context_use_comes_from_the_status_line() {

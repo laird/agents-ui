@@ -145,6 +145,10 @@
   .al.house small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .al.house.working { border-color: #38c848; }
   .al.house.blocked { border-color: #e02828; }
+  /* Held by a usage limit (#484, well.js): blue, as the well's hourglass. */
+  .al.house.limited { border-color: #3890e0; }
+  .al.limitsign { color: #fff; background: #1c5a9c; border-color: #3890e0; font-weight: bold; }
+  .al.limitsign small { color: #d8e8f8; font-weight: normal; }
   .legend-btn { background: var(--win-bot); color: var(--gold); border: 2px solid var(--win-inner); border-radius: 50%; font: 700 14px var(--mono); width: 30px; height: 30px; padding: 0; cursor: pointer; }
   .legend-btn[aria-expanded="true"] { background: var(--gold); color: #241400; }
   /* The key: every symbol on the map, drawn by the renderer itself. */
@@ -211,6 +215,8 @@
   .ss-item b, .ss-wait b { color: var(--ink); font-variant-numeric: tabular-nums; }
   .ss-working b { color: #58e068; }
   .ss-red, .ss-red b { color: #ff5a4a !important; }
+  /* Held by a usage limit (#484): blue, as the well's hourglass; not red, it is not waiting on you. */
+  .ss-limit, .ss-limit b { color: #7ab8f0 !important; }
   .ss-time { margin-left: auto; font-weight: 400; color: var(--ink-dim); }
   .ss-wait { margin-left: auto; }
   .ss-off { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .6em; padding: 32px; text-align: center; background: var(--night); }
