@@ -8,16 +8,17 @@
  *   modern    a glitching hologram, cyan, its scanlines slipping;
  *   future    a static-noise sprite, its pixels crawling.
  * A click (or Enter, #478) lists the failures: when, which issue's merge was
- * being gated, and the log. Which ghosts, where and how faint is decided in
+ * being gated, and the log, with a button that files them as `Flaky: <test>`
+ * or adds them to the open one (#503). Which ghosts, where and how faint is decided in
  * ghostmarks.js; the art is drawn at 2× here. */
 import { state } from './state.js';
 import { P, hash } from './palette.js';
 import { detail } from './detail.js';
 import { pixmap, px } from './art2x.js';
-import { registerHit, registerKey, registerLabels, registerLayer, tap } from './registry.js';
+import { registerDialogPart, registerHit, registerKey, registerLabels, registerLayer, tap } from './registry.js';
 import { issueLabel, issueOf, link } from './dialogs.js';
 import { when } from './bouncemarks.js';
-import { failureLines, ghostRoom, ghostSpot, ghostTags, ghostsOf, noteFlakyIssues } from './ghostmarks.js';
+import { failureLines, flakyButtonWords, flakyFileUrl, flakyFileWords, ghostRoom, ghostSpot, ghostTags, ghostsOf, noteFlakyIssues } from './ghostmarks.js';
 import { MODERN } from './themes/modern.js';
 import { FUTURE } from './themes/future.js';
 
@@ -86,8 +87,34 @@ registerHit({ kind: 'ghost', dialog(o, sc) {
     line: `Failed and then passed on the same tree ${f.count === 1 ? 'once' : f.count + ' times'} this week${f.issue ? `, filed as #${f.issue}` : ''}`,
     meta: failureLines(f, when),
     links: [it ? link(issueLabel(f.issue), it.url) : null],
+    flaky: { project: v.project, test: f.test, issue: f.issue || null },
   };
 } });
+
+/* The ghost's button (#503): files `Flaky: <test>` with its failures, or adds
+ * them to the open one, then says which issue; a read-only server says so. */
+registerDialogPart(info => {
+  // A fresh box each time, so no listener is left from the last dialog.
+  const old = document.getElementById('d-flaky');
+  const box = old.cloneNode(false);
+  old.replaceWith(box);
+  const f = info.flaky; if (!f) return;
+  box.innerHTML = '<button type="button"></button><p class="dim" role="status"></p>';
+  const button = box.querySelector('button'), msg = box.querySelector('[role=status]');
+  button.textContent = flakyButtonWords(f);
+  button.addEventListener('click', async () => {
+    button.disabled = true; msg.textContent = 'Filing…';
+    try {
+      const res = await fetch(flakyFileUrl(f.project), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ test: f.test }) });
+      const body = await res.json().catch(() => ({}));
+      msg.textContent = flakyFileWords(res.status, body);
+      if (res.ok) { button.remove(); return; }
+    } catch (e) {
+      msg.textContent = "Can't reach agents-tui.";
+    }
+    button.disabled = false;
+  });
+});
 
 /* One label over the ghosts, fixed there so it can't drift from them (other
  * labels keep clear): each test and its count, wrapping between them, and

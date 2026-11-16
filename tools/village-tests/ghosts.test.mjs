@@ -90,3 +90,17 @@ test('the dialog lists each failure: when, whose merge, and the log', () => {
   assert.deepEqual(failureLines(f, () => '16 Nov 08:10'), ['16 Nov 08:10 · gating #498 · /tmp/autocoder-merge-r-498.log']);
   assert.deepEqual(failureLines({}, () => ''), []);
 });
+
+test('"File flaky issue" (#503): its words, where it posts, what the answer says', async () => {
+  const { flakyButtonWords, flakyFileUrl, flakyFileWords } = await import('../../src/web/village/ghostmarks.js');
+  assert.equal(flakyButtonWords({ test: 'a::b', issue: null }), 'File flaky issue');
+  assert.equal(flakyButtonWords({ test: 'a::b', issue: 358 }), 'Add these failures to #358');
+  assert.equal(flakyFileUrl('my shop'), '/api/swarms/my%20shop/flaky');
+  assert.equal(flakyFileWords(200, { ok: true, action: 'created', number: 509 }), 'Filed as #509');
+  assert.equal(flakyFileWords(200, { ok: true, action: 'commented', number: 358 }), 'Added these failures to #358');
+  assert.equal(flakyFileWords(200, { ok: true, action: 'created', number: null }), 'Filed as the issue');
+  assert.equal(flakyFileWords(403, {}), 'This dashboard is read-only: file it on GitHub.');
+  assert.equal(flakyFileWords(404, { error: 'that test has not flaked here this week' }), 'that test has not flaked here this week');
+  assert.equal(flakyFileWords(502, { error: 'gh: not logged in' }), 'gh: not logged in');
+  assert.equal(flakyFileWords(500, {}), 'Could not file it (500)');
+});

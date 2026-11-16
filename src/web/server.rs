@@ -1165,6 +1165,7 @@ pub async fn run(addrs: &[SocketAddr], read_only: bool, state: WebServerState) -
             "/api/swarms/{project}/issues/{number}/decision",
             post(super::proposals::api_decision_handler),
         )
+        .route("/api/swarms/{project}/flaky", post(super::flaky::api_file_handler))
         .route(
             "/api/swarms/{project}/agents/{role}/control",
             post(super::controls::api_control_handler).get(super::control_preview::api_control_preview_handler),
@@ -1268,6 +1269,7 @@ mod tests {
                 "/api/swarms/{project}/issues/{number}/decision",
                 post(crate::web::proposals::api_decision_handler),
             )
+            .route("/api/swarms/{project}/flaky", post(crate::web::flaky::api_file_handler))
             .route(
                 "/api/swarms/{project}/agents/{role}/control",
                 post(crate::web::controls::api_control_handler).get(crate::web::control_preview::api_control_preview_handler),
@@ -1411,6 +1413,35 @@ mod tests {
         assert_eq!(wordless.status(), StatusCode::UNPROCESSABLE_ENTITY);
         let unknown = app.oneshot(decision("p", r#"{"action":"delete"}"#)).await.unwrap();
         assert!(unknown.status().is_client_error());
+    }
+
+    fn file_flaky(project: &str, body: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/swarms/{project}/flaky"))
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_read_only_server_refuses_to_file_a_flaky_test() {
+        // #503: the ghost's button reads the 403 and says so (ghosts.js).
+        let shared = std::sync::Arc::new(std::sync::RwLock::new(vec![sample_swarm("p")]));
+        let app = make_app(make_web_state(shared)).layer(axum::middleware::from_fn(reject_writes));
+        let resp = app.oneshot(file_flaky("p", r#"{"test":"a::b"}"#)).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn filing_a_flaky_test_needs_a_swarm_that_saw_it_flake() {
+        let shared = std::sync::Arc::new(std::sync::RwLock::new(vec![sample_swarm("p")]));
+        let app = make_app(make_web_state(shared));
+        let ghost = app.clone().oneshot(file_flaky("nowhere", r#"{"test":"a::b"}"#)).await.unwrap();
+        assert_eq!(ghost.status(), StatusCode::NOT_FOUND);
+        // A test this repo's gate never saw flake is refused before any tracker is asked.
+        let unseen = app.oneshot(file_flaky("p", r#"{"test":"no::such::test"}"#)).await.unwrap();
+        assert_eq!(unseen.status(), StatusCode::NOT_FOUND);
     }
 
     fn control(project: &str, role: &str, body: &str) -> Request<Body> {

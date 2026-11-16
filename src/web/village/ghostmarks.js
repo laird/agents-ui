@@ -82,3 +82,18 @@ export function ghostSpot(g, k, t = 0, still = true) {
 export function failureLines(f, clock) {
   return ((f && f.runs) || []).map(r => [r.when ? clock(r.when) : '', r.issue ? `gating #${r.issue}` : '', r.log || ''].filter(Boolean).join(' · ')).filter(Boolean);
 }
+
+/* "File flaky issue" in the ghost's dialog (#503): where it posts, and what
+ * the answer says. A read-only server answers 403 before anything is filed. */
+export const flakyFileUrl = project => `/api/swarms/${encodeURIComponent(project)}/flaky`;
+export function flakyFileWords(status, body) {
+  if (status >= 200 && status < 300) {
+    const n = body && body.number ? `#${body.number}` : 'the issue';
+    return body && body.action === 'commented' ? `Added these failures to ${n}` : `Filed as ${n}`;
+  }
+  if (status === 403) return 'This dashboard is read-only: file it on GitHub.';
+  if (status === 404) return (body && body.error) || 'Nothing to file: this test has not flaked here this week.';
+  return (body && body.error) || `Could not file it (${status})`;
+}
+/* The button's words: comment on the open issue, or file a new one. */
+export const flakyButtonWords = f => (f.issue ? `Add these failures to #${f.issue}` : 'File flaky issue');

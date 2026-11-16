@@ -130,6 +130,20 @@ fn the_gatehouse_marks_and_the_world_frame_draw_at_2x() {
     }
 }
 
+/// #503: the ghost's dialog files its `Flaky:` issue.
+#[test]
+fn a_ghost_files_its_flaky_issue() {
+    // #503: the ghost's dialog carries a button that posts the test, in its own box.
+    let ghosts = village_asset("ghosts.js").unwrap().1;
+    assert!(ghosts.contains("flaky: { project: v.project, test: f.test, issue: f.issue || null },"));
+    assert!(ghosts.contains("registerDialogPart(info => {"));
+    assert!(ghosts.contains("const old = document.getElementById('d-flaky');"), "a fresh box per dialog");
+    assert!(ghosts.contains("fetch(flakyFileUrl(f.project), { method: 'POST'"));
+    assert!(ghosts.contains("msg.textContent = flakyFileWords(res.status, body);"), "the answer, a 403 included, is said");
+    let page = village_asset("index.html").unwrap().1;
+    assert!(page.contains(r#"<div id="d-flaky"></div>"#));
+}
+
 /// #502: a ghost over the gatehouse for each flaky test (#501's `flaky`),
 /// fading with time clean; a click lists the failures. Which ghosts, where
 /// and how faint is ghostmarks.js, tested under node (ghosts.test.mjs).
