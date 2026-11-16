@@ -10,8 +10,10 @@
 //! false`, so the card says it couldn't check rather than "nothing happened".
 //!
 //! Each fresh answer costs two GitHub searches per village, and the endpoint
-//! has no authentication, so answers are kept for [`FRESH`] ([`SinceCache`]):
-//! a later moment is answered from the kept one, an earlier one waits (429).
+//! has no authentication, so answers are kept for [`FRESH`] ([`SinceCache`])
+//! and GitHub is asked at most once per [`GAP`]: a later moment is cut from
+//! the kept answer, an earlier one is asked afresh unless GitHub was asked
+//! less than [`GAP`] ago (then a 429). A moment in the future is a 400.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -115,10 +117,22 @@ pub async fn village_since(transport: &ServerTransport, project: &str, repo: &st
 
 /// How long an answer is kept.
 pub const FRESH: Duration = Duration::from_secs(60);
+/// The least time between two askings of GitHub: two searches per village
+/// each, against GitHub's 30 searches a minute.
+pub const GAP: Duration = Duration::from_secs(20);
 
-/// The last answer, for [`FRESH`]: (when, the moment it was asked about, the villages).
 #[derive(Default)]
-pub struct SinceCache(tokio::sync::Mutex<Option<(Instant, i64, Vec<VillageSince>)>>);
+struct Kept {
+    /// The last answer in which GitHub answered for some village: (when, the
+    /// moment it was asked about, the villages).
+    answer: Option<(Instant, i64, Vec<VillageSince>)>,
+    /// When GitHub was last asked, whatever it said.
+    asked: Option<Instant>,
+}
+
+/// The last answer, for [`FRESH`] (see the module comment).
+#[derive(Default)]
+pub struct SinceCache(tokio::sync::Mutex<Kept>);
 
 /// The kept answer cut down to changes at or after `t`.
 pub fn narrow(villages: &[VillageSince], t: i64) -> Vec<VillageSince> {
@@ -135,23 +149,31 @@ pub fn narrow(villages: &[VillageSince], t: i64) -> Vec<VillageSince> {
 }
 
 impl SinceCache {
-    /// The answer for `t`: the kept one when it is fresh and asked about `t`
-    /// or earlier, `None` (too soon) when it is fresh but later than `t`,
-    /// else a new one from `fetch`. Requests wait on each other, so a burst
-    /// costs one fetch.
-    pub async fn answer<F, Fut>(&self, t: i64, now: Instant, fetch: F) -> Option<Vec<VillageSince>>
+    /// The answer for `t`: cut from the kept one when that is fresh and
+    /// asked about `t` or earlier; else a new one from `fetch`, unless GitHub
+    /// was asked less than [`GAP`] ago (`None`: too soon). `clock` is read
+    /// once the lock is held. Requests wait on each other, so a burst costs
+    /// one fetch. An answer in which no village was checked is not kept.
+    pub async fn answer<F, Fut>(&self, t: i64, clock: impl Fn() -> Instant, fetch: F) -> Option<Vec<VillageSince>>
     where
         F: FnOnce() -> Fut,
         Fut: std::future::Future<Output = Vec<VillageSince>>,
     {
         let mut kept = self.0.lock().await;
-        if let Some((at, kept_t, villages)) = kept.as_ref() {
-            if now.saturating_duration_since(*at) < FRESH {
-                return (*kept_t <= t).then(|| narrow(villages, t));
+        let now = clock();
+        if let Some((at, kept_t, villages)) = kept.answer.as_ref() {
+            if now.saturating_duration_since(*at) < FRESH && *kept_t <= t {
+                return Some(narrow(villages, t));
             }
         }
+        if kept.asked.is_some_and(|a| now.saturating_duration_since(a) < GAP) {
+            return None;
+        }
+        kept.asked = Some(now);
         let villages = fetch().await;
-        *kept = Some((now, t, villages.clone()));
+        if villages.iter().any(|v| v.checked) {
+            kept.answer = Some((now, t, villages.clone()));
+        }
         Some(villages)
     }
 }
@@ -219,16 +241,34 @@ mod tests {
             calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             vec![village.clone()]
         };
-        assert_eq!(cache.answer(t0, start, fetch).await.unwrap()[0].closed.len(), 2);
+        let at = |s: u64| move || start + Duration::from_secs(s);
+        let n = || calls.load(std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(cache.answer(t0, at(0), fetch).await.unwrap()[0].closed.len(), 2);
         // Ten minutes later in the moment asked about, a second later in time: from the kept answer.
-        let later = cache.answer(t0 + 300, start + Duration::from_secs(1), fetch).await.unwrap();
+        let later = cache.answer(t0 + 300, at(1), fetch).await.unwrap();
         assert_eq!(later[0].closed.iter().map(|c| c.number).collect::<Vec<_>>(), vec![5]);
-        // An earlier moment can't be cut from it: too soon.
-        assert!(cache.answer(t0 - 3600, start + Duration::from_secs(2), fetch).await.is_none());
-        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
-        // Once it is stale, anything is asked again.
-        assert!(cache.answer(t0 - 3600, start + FRESH, fetch).await.is_some());
-        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert_eq!(n(), 1);
+        // An earlier moment can't be cut from it: asked afresh, but not twice within GAP.
+        assert!(cache.answer(t0 - 3600, at(2), fetch).await.is_none(), "too soon after the first asking");
+        assert!(cache.answer(t0 - 3600, at(GAP.as_secs()), fetch).await.is_some());
+        assert_eq!(n(), 2);
+        // That earlier answer is now the kept one: the first moment is cut from it.
+        assert!(cache.answer(t0, at(GAP.as_secs() + 1), fetch).await.is_some());
+        assert_eq!(n(), 2);
+    }
+
+    /// Whoever asks about a later moment first can't lock out an earlier one
+    /// for longer than GAP, and an answer GitHub didn't give is not kept.
+    #[tokio::test]
+    async fn a_later_moment_or_a_failure_does_not_hold_the_cache() {
+        let cache = SinceCache::default();
+        let start = Instant::now();
+        let at = |s: u64| move || start + Duration::from_secs(s);
+        let unchecked = || async { vec![VillageSince { project: "shop".into(), checked: false, closed: vec![], merged: vec![] }] };
+        assert!(!cache.answer(1_794_800_000, at(0), unchecked).await.unwrap()[0].checked);
+        let checked = || async { vec![VillageSince { project: "shop".into(), checked: true, closed: vec![], merged: vec![] }] };
+        // The failure was not kept, so the next asking (after GAP) goes to GitHub.
+        assert!(cache.answer(1_794_800_000, at(GAP.as_secs()), checked).await.unwrap()[0].checked);
     }
 
     #[tokio::test]

@@ -71,7 +71,7 @@ recap_since() {
   [[ $RECAP =~ ^[0-9]+$ ]] && [ "$RECAP" -gt 0 ] || return
   # A unix time, as `date +%s` writes it: anything else (hand-edited, cut
   # short) is no record, rather than octal or an overflow in $(( )).
-  [ -f "$LAST_CLOSED" ] && since=$(tr -dc '0-9' < "$LAST_CLOSED")
+  [ -f "$LAST_CLOSED" ] && since=$(head -c 32 "$LAST_CLOSED" | tr -d '[:space:]')
   [[ $since =~ ^[1-9][0-9]{8,10}$ ]] || since=""
   if [ -z "$since" ]; then
     [[ $TIMEOUT =~ ^[0-9]+$ ]] || TIMEOUT=150
