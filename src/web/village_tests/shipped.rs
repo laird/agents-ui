@@ -13,7 +13,7 @@ fn a_shipped_epic_fires_fireworks_flies_on_the_hall_and_is_named_by_the_screensa
     assert!(body.contains("wfFireworks(c, lay.castleX, lay.canalY, t, fw,") && body.contains("wfFireworks(c, lay.roadX - 8, lay.quayY, t, fw,"));
     // The flag on the hall, clickable, named on hover.
     assert!(body.contains("const s = hallFlag(v.shipped);"));
-    assert!(body.contains("registerHit({ kind: 'shipped', dialog(o, sc) {"));
+    assert!(body.contains("registerHit({ kind: 'shipped', dialog(o, sc, theme) {"));
     assert!(body.contains("hallFlagWords(h.sc.v.shipped)"));
     // The screensaver's strip.
     assert!(body.contains("const shippedNow = shippedLine(v.shipped, Date.now());"));

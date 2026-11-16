@@ -237,6 +237,9 @@ pub fn shipped(village: &VillageSnapshot, links: &[FeatureLink]) -> Vec<Shipped>
 /// (#482). A voyage cannot say which of its issues are new: an earlier
 /// deployment marked `inactive` is not its `previous`, so it carries its whole
 /// history. Only an epic this memory has seen short of the last stop can ship.
+/// It is kept in memory only: after a restart, today's flags are gone, and an
+/// epic that deploys before the server has seen it short of the stop never ships
+/// (a missed celebration, never a false one).
 #[derive(Debug, Default)]
 pub struct ShipMemory {
     /// Epics seen short of the last stop, with their links: one closed and
@@ -246,7 +249,8 @@ pub struct ShipMemory {
     today: Vec<Shipped>,
 }
 
-/// How many epics short of the last stop [`ShipMemory`] keeps; the oldest go first.
+/// How many epics short of the last stop [`ShipMemory`] keeps; past it, the
+/// lowest-numbered go first (each reading puts back those still short).
 const PENDING_KEEP: usize = 200;
 
 impl ShipMemory {
@@ -258,9 +262,15 @@ impl ShipMemory {
                 all.push(link.clone());
             }
         }
-        let seen = shipped(village, &all).into_iter().filter(|s| self.pending.contains_key(&s.number)).collect();
-        for f in follow(village, &all) {
-            if f.live {
+        // A reading that can't tell what the last stop runs says nothing about
+        // what is short of it: every epic would look short, and all ship next time.
+        let known = village.pipeline.stops.last().is_some_and(|s| s.source != StopSource::Unknown);
+        let seen = match known {
+            true => shipped(village, &all).into_iter().filter(|s| self.pending.contains_key(&s.number)).collect(),
+            false => Vec::new(),
+        };
+        for f in follow(village, &all).into_iter().filter(|_| known) {
+            if f.live || f.build.total == 0 {
                 self.pending.remove(&f.number);
             } else if let Some(link) = all.iter().find(|l| l.parent == f.number) {
                 self.pending.insert(f.number, link.clone());
@@ -731,5 +741,20 @@ mod tests {
         v.pipeline.stops[3].issues.extend([461, 462, 463, 464]);
         v.pipeline.voyages = vec![docked("prod", &[464], &chrono::Local::now().to_rfc3339())];
         assert_eq!(memory.read(&v, &[], today).iter().map(|s| s.number).collect::<Vec<_>>(), vec![460]);
+    }
+
+    #[test]
+    fn a_reading_that_cannot_tell_what_prod_runs_ships_nothing_later() {
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 11, 16).unwrap();
+        let mut memory = ShipMemory::default();
+        let mut v = village(&[], [&[], &[], &[], &[461, 462, 463, 464]], vec![], vec![]);
+        v.pipeline.voyages = vec![docked("prod", &[461, 462, 463, 464], &chrono::Local::now().to_rfc3339())];
+        assert!(memory.read(&v, &[four()], today).is_empty());
+        // The deployments can't be read: prod is unknown, and the epic looks short of it.
+        let mut blind = v.clone();
+        blind.pipeline.stops[3].source = StopSource::Unknown;
+        assert!(memory.read(&blind, &[four()], today).is_empty());
+        // Back again, with the whole-history voyage: still not shipped.
+        assert!(memory.read(&v, &[four()], today).is_empty());
     }
 }
