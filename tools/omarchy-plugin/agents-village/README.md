@@ -16,6 +16,12 @@ A house glyph, with:
   release already there when the widget starts;
 - **dimmed:** the server can't be reached. The tooltip says so.
 
+The red dot is lit while `Model.attention()` lists anything, the same list as
+the panel's **Needs you**. That is the one rule for "needs you": the desktop
+notifier (`../agents-village-notify`, `install.sh --notify`) notifies when an
+item first appears in it. The widget itself sends no notifications, so a
+machine running both is notified once.
+
 With a village open in the panel, the icon counts that village; otherwise it
 counts every village on the server. Left-click opens the panel. Right-click opens
 the full village.

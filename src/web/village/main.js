@@ -23,6 +23,7 @@ import './proposals.js';
 import './labels.js';
 import './key.js';
 import './screensaver.js';
+import './houselink.js';
 import { start } from './data.js';
 
 start();

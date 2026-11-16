@@ -9,6 +9,7 @@ mod fit;
 mod gatehouse;
 mod labels_key;
 mod lifecycle;
+mod notify;
 mod proposals;
 mod screensaver;
 mod themes;

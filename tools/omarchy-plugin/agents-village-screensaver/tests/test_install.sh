@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests for install.sh --screensaver, in a throwaway HOME with stand-ins for
+# Tests for install.sh --screensaver (and --notify), in a throwaway HOME with stand-ins for
 # the omarchy commands: what it writes, what it changes in shell.json, and
 # that --uninstall puts the idle settings back. Also the launcher's --dry-run.
 #   bash tools/omarchy-plugin/agents-village-screensaver/tests/test_install.sh
@@ -227,10 +227,41 @@ grep -q "nothing was changed" <<<"$out" && ok "says nothing was changed" || fail
 rm -rf "$T"
 export HOME=$ORIG_HOME PATH=$ORIG_PATH
 
+# --- notifications (--notify, #480): the service linked and enabled, its settings written
+sandbox
+mkdir -p "$HOME/.config/agents-ui"
+echo '{ "kinds": ["build"], "interval": 30 }' > "$HOME/.config/agents-ui/notify.json"
+out=$(bash "$INSTALL" --notify --server http://box:7890/ --quiet 22-6 2>&1) || fail "notify install exited $?: $out"
+n="$HOME/.config/agents-ui/notify.json"
+[ "$(jq -c . "$n")" = '{"kinds":["build"],"interval":30,"server":"http://box:7890","quiet":"22-6"}' ] \
+  && ok "notify: server and quiet written, other settings kept" || fail "notify.json: $(cat "$n")"
+[ -L "$HOME/.config/omarchy/plugins/agents-village-notify" ] && ok "notify: plugin linked" || fail "notify: not linked"
+grep -q "omarchy plugin enable agents-ui.village-notify" "$T/calls" && ok "notify: service enabled" || fail "notify: not enabled: $(cat "$T/calls")"
+[ ! -e "$HOME/.config/agents-ui/screensaver.json" ] && ok "notify: the screensaver is left alone" || fail "notify wrote screensaver.json"
+bash "$INSTALL" --notify >/dev/null 2>&1 || fail "notify reinstall"
+[ "$(jq -r .quiet "$n")" = 22-6 ] && [ "$(jq -r .server "$n")" = http://nuc-1:7890 ] \
+  && ok "notify: reinstall without --quiet keeps the quiet hours" || fail "notify reinstall: $(cat "$n")"
+out=$(bash "$INSTALL" --notify --uninstall 2>&1) || fail "notify uninstall exited: $out"
+[ ! -e "$HOME/.config/omarchy/plugins/agents-village-notify" ] && [ ! -e "$n" ] && ok "notify: uninstall removes it and its settings" || fail "notify uninstall left things"
+grep -q "omarchy plugin disable agents-ui.village-notify" "$T/calls" && ok "notify: uninstall disables it" || fail "notify: not disabled"
+rm -rf "$T"
+remote_sandbox
+out=$(bash "$INSTALL" --notify --host box 2>&1) || fail "remote notify install exited $?: $out"
+rn="$REMOTE/home/.config/omarchy/plugins/agents-village-notify"
+[ -f "$rn/Model.js" ] && [ ! -L "$rn/Model.js" ] && [ -f "$rn/Notify.js" ] && [ -f "$rn/Service.qml" ] \
+  && ok "notify: remote copy has Notify.js and Model.js" || fail "notify remote copy: $(ls -la "$rn" 2>&1)"
+grep -q "omarchy plugin enable agents-ui.village-notify (OMARCHY_PATH=/fake/omarchy)" "$T/remote-calls" \
+  && ok "notify: remote install enables it with OMARCHY_PATH set" || fail "notify remote enable: $(cat "$T/remote-calls")"
+rm -rf "$T"
+export HOME=$ORIG_HOME PATH=$ORIG_PATH
+
 # --- bad arguments
 bash "$INSTALL" --never-sleep >/dev/null 2>&1 && fail "--never-sleep without --screensaver accepted" || ok "--never-sleep needs --screensaver"
 bash "$INSTALL" --screensaver --dim 25-3 --dry-run >/dev/null 2>&1 && fail "bad --dim accepted" || ok "bad --dim refused"
 bash "$INSTALL" --screensaver --cycle x --dry-run >/dev/null 2>&1 && fail "bad --cycle accepted" || ok "bad --cycle refused"
+bash "$INSTALL" --notify --quiet 7 --dry-run >/dev/null 2>&1 && fail "bad --quiet accepted" || ok "bad --quiet refused"
+bash "$INSTALL" --quiet 23-7 --dry-run >/dev/null 2>&1 && fail "--quiet without --notify accepted" || ok "--quiet needs --notify"
+bash "$INSTALL" --notify --screensaver --dry-run >/dev/null 2>&1 && fail "--notify with --screensaver accepted" || ok "--notify and --screensaver install separately"
 
 # --- the launcher's dry run: the page it opens, from the settings file
 sandbox

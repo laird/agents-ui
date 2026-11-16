@@ -90,17 +90,18 @@ test("flow strip: backlog, board, houses, gate, quay, each stop", () => {
 test("attention: the board, failed gates, blocked houses", () => {
   const v = M.villageFor(villages, "agents-ui")
   assert.deepStrictEqual(M.attention(BASE, v), [
-    { what: "Merge conflict", title: "#370", url: "https://github.com/laird/agents-ui/issues/370" },
-    { what: "needs-approval", title: "#365 Record release Deployments from a release-published workflow (needs the workflow token scope)", url: "https://github.com/laird/agents-ui/issues/365" }
+    { key: "gate:370:conflict", kind: "gate", what: "Merge conflict", title: "#370", url: "https://github.com/laird/agents-ui/issues/370" },
+    { key: "board:365:needs-approval", kind: "needs", what: "needs-approval", title: "#365 Record release Deployments from a release-published workflow (needs the workflow token scope)", url: "https://github.com/laird/agents-ui/issues/365" }
   ])
-  const blocked = { project: "shop", manager: { status: "blocked", title: "Allow npm publish?", links: [{ url: "/#/swarm/shop/agent/manager" }] },
+  const blocked = { project: "shop", manager: { status: "blocked", title: "Allow npm publish?", question: { prompt: "Allow  npm\n publish?" }, links: [{ url: "/#/swarm/shop/agent/manager" }] },
     houses: [{ id: "/src/shop-wt-1", role: "worker-1", status: "blocked", issue: 4, issue_title: "Checkout", links: [{ url: "/#/swarm/shop/agent/worker-1" }] }],
     board: [], pipeline: { gates: [{ issue: 9, state: "red-base", landed: true }] } }
   assert.deepStrictEqual(M.attention(BASE, blocked), [
-    { what: "Manager", title: "Allow npm publish?", url: BASE + "/#/swarm/shop/agent/manager" },
-    { what: "wt-1", title: "#4 Checkout", url: BASE + "/#/swarm/shop/agent/worker-1" }
+    { key: "manager", kind: "needs", house: "manager", what: "Manager", title: "Allow npm publish?", question: "Allow npm publish?", url: BASE + "/#/swarm/shop/agent/manager" },
+    { key: "house:/src/shop-wt-1:4", kind: "needs", house: "wt-1", what: "wt-1", title: "#4 Checkout", question: "", url: BASE + "/#/swarm/shop/agent/worker-1" }
   ], "a red base that landed anyway needs nobody")
-  assert.strictEqual(M.needsYou(blocked), 2)
+  assert.strictEqual(M.needsYou(blocked), 2, "the red dot counts the same list")
+  assert.strictEqual(M.needsYou(v), M.attention(BASE, v).length)
 })
 
 test("features carry their build progress", () => {

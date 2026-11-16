@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # install.sh — put the Agents village into Omarchy, here or on another Omarchy
-# machine on the tailnet: the bar widget, or the village as the screensaver.
+# machine on the tailnet: the bar widget, the village as the screensaver, or
+# desktop notifications from it.
 #
 # USAGE:
 #   tools/omarchy-plugin/install.sh [--host <ssh host>] [--enable] [--uninstall] [--dry-run]
 #   tools/omarchy-plugin/install.sh --screensaver [--never-sleep] [--server URL]
 #                                   [--cycle S] [--dim H-H] [--host <ssh host>] [--uninstall] [--dry-run]
+#   tools/omarchy-plugin/install.sh --notify [--server URL] [--quiet H-H]
+#                                   [--host <ssh host>] [--uninstall] [--dry-run]
 #
 #   (no --host)  link this checkout's plugin into ~/.config/omarchy/plugins/, so
 #                edits here show up as you save them
@@ -28,6 +31,14 @@
 #   --cycle S      seconds on each swarm when there are several (default 30, 0 stays)
 #   --dim H-H      dim between these hours, e.g. 23-7 (default: never dims)
 #
+# Notifications (--notify): a desktop notification when a house or the
+# manager starts waiting on you, a merge bounces at the gate, the build breaks
+# or is fixed, or a deploy lands or fails. Settings go in
+# ~/.config/agents-ui/notify.json (see agents-village-notify/README.md).
+#   --server URL   the agents-tui server (default http://nuc-1:7890)
+#   --quiet H-H    no notifications between these hours, e.g. 23-7 (default:
+#                  the screensaver's --dim hours, if it has any)
+#
 # The widget reads http://nuc-1:7890 by default; set Server in its settings to
 # point it elsewhere.
 set -euo pipefail
@@ -37,6 +48,8 @@ ENABLE=false
 UNINSTALL=false
 DRY_RUN=false
 SCREENSAVER=false
+NOTIFY=false
+QUIET=""
 NEVER_SLEEP=false
 SERVER="http://nuc-1:7890"
 CYCLE=30
@@ -49,6 +62,8 @@ while [ $# -gt 0 ]; do
     --uninstall) UNINSTALL=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
     --screensaver) SCREENSAVER=true; shift ;;
+    --notify) NOTIFY=true; shift ;;
+    --quiet) need "$1" $#; QUIET="$2"; shift 2 ;;
     --never-sleep|--no-lock) NEVER_SLEEP=true; shift ;;
     --server) need "$1" $#; SERVER="${2%/}"; shift 2 ;;
     --cycle) need "$1" $#; CYCLE="$2"; shift 2 ;;
@@ -60,6 +75,9 @@ done
 if [ "$SCREENSAVER" != true ] && { [ "$NEVER_SLEEP" = true ] || [ "$DIM" != "" ]; }; then
   echo "install.sh: --never-sleep and --dim go with --screensaver" >&2; exit 1
 fi
+[ "$SCREENSAVER" != true ] || [ "$NOTIFY" != true ] || { echo "install.sh: --screensaver and --notify install separately; run it once for each" >&2; exit 1; }
+[ "$NOTIFY" = true ] || [ "$QUIET" = "" ] || { echo "install.sh: --quiet goes with --notify" >&2; exit 1; }
+[ -z "$QUIET" ] || [[ $QUIET =~ ^([01]?[0-9]|2[0-3])-([01]?[0-9]|2[0-3])$ ]] || { echo "install.sh: --quiet takes hours like 23-7" >&2; exit 1; }
 [[ $CYCLE =~ ^[0-9]+$ ]] || { echo "install.sh: --cycle takes whole seconds" >&2; exit 1; }
 [ -z "$DIM" ] || [[ $DIM =~ ^([01]?[0-9]|2[0-3])-([01]?[0-9]|2[0-3])$ ]] || { echo "install.sh: --dim takes hours like 23-7" >&2; exit 1; }
 
@@ -70,6 +88,12 @@ if [ "$SCREENSAVER" = true ]; then
   # The files the plugin needs; tests stay in the repo.
   FILES=(manifest.json Service.qml village-screensaver offline.html README.md)
   WHAT="the Agents village screensaver"
+elif [ "$NOTIFY" = true ]; then
+  ID="agents-ui.village-notify"
+  NAME="agents-village-notify"
+  # Model.js is a copy of the bar widget's (tests/notify.test.js keeps them equal).
+  FILES=(manifest.json Service.qml Notify.js Model.js README.md)
+  WHAT="Agents village notifications"
 else
   ID="agents-ui.village"
   NAME="agents-village"
@@ -172,12 +196,22 @@ if [ -f "$backup" ] && [ -f "$shell" ]; then
 fi
 rm -f "$backup" "$dir/screensaver.json"'
 
+# The notifier's settings: the server, and quiet hours when given. Anything
+# else already in notify.json (kinds, interval) stays.
+NOTIFY_CONFIGURE='set -e
+dir="$HOME/.config/agents-ui"; f="$dir/notify.json"
+mkdir -p "$dir"
+[ -s "$f" ] && jq -e "type == \"object\"" "$f" >/dev/null 2>&1 || echo "{}" > "$f"
+tmp=$(mktemp)
+jq --arg server "$1" --arg quiet "$2" ".server = \$server | if \$quiet != \"\" then .quiet = \$quiet else . end" "$f" > "$tmp"
+cat "$tmp" > "$f"; rm -f "$tmp"'
+
 DEST_REL=".config/omarchy/plugins/$NAME"
 
 # Before changing anything: `omarchy` has to run where the plugin goes, or the
 # install would stop half way, with Omarchy's screensaver already turned off
 # in shell.json and the village's never turned on.
-if [ "$UNINSTALL" != true ] && { [ "$SCREENSAVER" = true ] || [ "$ENABLE" = true ]; }; then
+if [ "$UNINSTALL" != true ] && { [ "$SCREENSAVER" = true ] || [ "$NOTIFY" = true ] || [ "$ENABLE" = true ]; }; then
   if [ "$DRY_RUN" = true ]; then
     echo "would check that omarchy runs${HOST:+ on $HOST} (omarchy plugin list)"
   elif ! err=$(run sh -c 'command -v omarchy >/dev/null || { echo "omarchy: command not found"; exit 1; }; omarchy plugin list 2>&1 >/dev/null' 2>&1); then
@@ -190,6 +224,9 @@ fi
 if [ "$UNINSTALL" = true ]; then
   run sh -c "command -v omarchy >/dev/null && omarchy plugin disable $ID >/dev/null 2>&1 || true"
   run sh -c "rm -rf \"\$HOME/$DEST_REL\""
+  if [ "$NOTIFY" = true ]; then
+    run sh -c 'rm -f "$HOME/.config/agents-ui/notify.json"'
+  fi
   if [ "$SCREENSAVER" = true ]; then
     run_script "put Omarchy's own screensaver and idle settings back (from ~/.config/agents-ui/shell.json.before-screensaver)" "$RESTORE"
   fi
@@ -233,6 +270,16 @@ if [ "$SCREENSAVER" = true ]; then
   else
     echo "Omarchy still locks the session on its own idle timer."
   fi
+  exit 0
+fi
+
+if [ "$NOTIFY" = true ]; then
+  # A service has nowhere to be placed: enabling it is what starts it.
+  run_script "write the server ($SERVER)${QUIET:+ and quiet hours ($QUIET)} to ~/.config/agents-ui/notify.json" \
+    "$NOTIFY_CONFIGURE" sh "$SERVER" "$QUIET"
+  enable_plugin || exit 1
+  echo "Installed $WHAT${HOST:+ on $HOST}: a notification when something in the village at $SERVER needs you, the build breaks or is fixed, or a deploy lands."
+  echo "Settings: ~/.config/agents-ui/notify.json${HOST:+ on $HOST}."
   exit 0
 fi
 

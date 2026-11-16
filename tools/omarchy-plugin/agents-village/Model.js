@@ -52,17 +52,9 @@ function swarmFor(swarmsDoc, project) {
   return null
 }
 
-// Anything in a village waiting on a person: a blocked house or manager, a
-// note on the board, a gate that handed work back.
+// How many things in a village wait on a person: attention()'s list, counted.
 function needsYou(v) {
-  if (!v) return 0
-  var n = (v.board || []).length
-  ;(v.houses || []).forEach(function(h) { if (h.status === "blocked") n++ })
-  if (v.manager && v.manager.status === "blocked") n++
-  ;((v.pipeline && v.pipeline.gates) || []).forEach(function(g) {
-    if (g.state === "failed" || g.state === "conflict" || (g.state === "red-base" && !g.landed)) n++
-  })
-  return n
+  return attention("", v).length
 }
 
 function working(v) {
@@ -159,25 +151,41 @@ function flow(v) {
 
 var GATE_WORDS = { failed: "Gate failed", conflict: "Merge conflict", "red-base": "Red base" }
 
-// Everything waiting on a person, each with where to go about it.
+// Everything waiting on a person, each with where to go about it. This is the
+// one rule for "needs you": the red dot is lit while it lists anything, and
+// the notifier (agents-village-notify) notifies when an item first appears.
+// `key` names the item the same way on every poll, so the two never disagree
+// about what is new; `kind` is "needs" (a person must answer or decide) or
+// "gate" (a merge bounced); `house` is the name a village deep link takes
+// (`/village#<project>&house=<house>`), for the manager and houses.
 function attention(base, v) {
   if (!v) return []
   var out = []
   if (v.manager && v.manager.status === "blocked") {
-    out.push({ what: "Manager", title: v.manager.title || "is waiting on you", url: absolute(base, sessionLink(v.manager.links)) })
+    out.push({ key: "manager", kind: "needs", house: "manager", what: "Manager", title: v.manager.title || "is waiting on you",
+      question: questionOf(v.manager), url: absolute(base, sessionLink(v.manager.links)) })
   }
   ;(v.houses || []).forEach(function(h) {
     if (h.status !== "blocked") return
-    out.push({ what: houseName(v.project, h.id, h.role), title: h.issue ? "#" + h.issue + " " + (h.issue_title || "") : "is waiting on you", url: absolute(base, sessionLink(h.links)) })
+    var name = houseName(v.project, h.id, h.role)
+    out.push({ key: "house:" + (h.id || name) + ":" + (h.issue || ""), kind: "needs", house: name, what: name,
+      title: h.issue ? "#" + h.issue + " " + (h.issue_title || "") : "is waiting on you",
+      question: questionOf(h), url: absolute(base, sessionLink(h.links)) })
   })
   ;((v.pipeline && v.pipeline.gates) || []).forEach(function(g) {
     if (!GATE_WORDS[g.state] || (g.state === "red-base" && g.landed)) return
-    out.push({ what: GATE_WORDS[g.state], title: "#" + g.issue, url: g.failure_url || "" })
+    out.push({ key: "gate:" + g.issue + ":" + g.state, kind: "gate", what: GATE_WORDS[g.state], title: "#" + g.issue, url: g.failure_url || "" })
   })
   ;(v.board || []).forEach(function(n) {
-    out.push({ what: n.label || "blocked", title: "#" + n.number + " " + (n.title || ""), url: n.url || "" })
+    out.push({ key: "board:" + n.number + ":" + (n.label || ""), kind: "needs", what: n.label || "blocked", title: "#" + n.number + " " + (n.title || ""), url: n.url || "" })
   })
   return out
+}
+
+// The question an agent waits on, in one line: "Proceed? (y/n)". "" for none.
+function questionOf(h) {
+  var q = h && h.question
+  return q && q.prompt ? String(q.prompt).replace(/\s+/g, " ").trim() : ""
 }
 
 function features(v) {
@@ -290,6 +298,6 @@ if (typeof module !== "undefined") {
     villageFor: villageFor, swarmFor: swarmFor, needsYou: needsYou, swarmRows: swarmRows,
     chooseProject: chooseProject, canGoBack: canGoBack, houseName: houseName, houseRows: houseRows,
     flow: flow, attention: attention, features: features, badge: badge, ago: ago, repoUrl: repoUrl,
-    releaseKey: releaseKey, releases: releases, buildState: buildState, buildWords: buildWords, clock: clock
+    releaseKey: releaseKey, questionOf: questionOf, releases: releases, buildState: buildState, buildWords: buildWords, clock: clock
   }
 }
