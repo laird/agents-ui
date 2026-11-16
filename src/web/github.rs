@@ -219,13 +219,16 @@ pub async fn fetch(transport: &ServerTransport, repo: &Path, integration: &str) 
 
 /// Summaries per repo and integration branch, each reused for
 /// [`refresh_ttl`]: polls inside it make no `gh` calls. A failed read is
-/// cached too, so a signed-out `gh` isn't asked again on every poll. Reads
-/// take turns, so polls arriving together while it is stale wait for one read
-/// instead of each starting their own.
+/// cached too, so a signed-out `gh` isn't asked again on every poll. Polls of
+/// one repo arriving together while its summary is stale wait for one read
+/// instead of each starting their own; other repos don't wait on it.
 pub struct Summaries {
-    cache: TtlCache<(PathBuf, String), Option<Summary>>,
-    reading: tokio::sync::Mutex<()>,
+    cache: TtlCache<Key, Option<Summary>>,
+    /// One lock per repo and branch, held while it is read.
+    reading: std::sync::Mutex<std::collections::HashMap<Key, std::sync::Arc<tokio::sync::Mutex<()>>>>,
 }
+
+type Key = (PathBuf, String);
 
 impl Default for Summaries {
     fn default() -> Self {
@@ -235,7 +238,7 @@ impl Default for Summaries {
 
 impl Summaries {
     pub fn new(ttl: Duration) -> Self {
-        Self { cache: TtlCache::new(ttl), reading: tokio::sync::Mutex::new(()) }
+        Self { cache: TtlCache::new(ttl), reading: Default::default() }
     }
 
     pub async fn get(&self, transport: &ServerTransport, repo: &Path, integration: &str) -> Option<Summary> {
@@ -244,8 +247,10 @@ impl Summaries {
 
     /// `get`, with the read given: what the cache does, testable without `gh`.
     pub async fn get_with<F: std::future::Future<Output = Option<Summary>>>(&self, repo: &Path, integration: &str, read: impl FnOnce() -> F) -> Option<Summary> {
-        let _turn = self.reading.lock().await;
-        self.cache.get_or((repo.to_path_buf(), integration.to_string()), read).await
+        let key = (repo.to_path_buf(), integration.to_string());
+        let lock = self.reading.lock().unwrap_or_else(|e| e.into_inner()).entry(key.clone()).or_default().clone();
+        let _turn = lock.lock().await;
+        self.cache.get_or(key, read).await
     }
 
     /// Drop what was read for `repo`, on every integration branch.
@@ -410,5 +415,30 @@ mod tests {
         let again = reads.clone();
         cache.get_with(Path::new("/src/shop"), "master", || async move { again.fetch_add(1, Ordering::SeqCst); None }).await;
         assert_eq!(reads.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn a_slow_read_of_one_repo_does_not_hold_up_another() {
+        let cache = std::sync::Arc::new(Summaries::new(Duration::from_secs(90)));
+        cache.get_with(Path::new("/src/fast"), "master", || async { Some(Summary::default()) }).await;
+        let (slow_started, release) = (std::sync::Arc::new(tokio::sync::Notify::new()), std::sync::Arc::new(tokio::sync::Notify::new()));
+        let slow = {
+            let (cache, started, release) = (cache.clone(), slow_started.clone(), release.clone());
+            tokio::spawn(async move {
+                cache
+                    .get_with(Path::new("/src/slow"), "master", || async move {
+                        started.notify_one();
+                        release.notified().await;
+                        Some(Summary::default())
+                    })
+                    .await
+            })
+        };
+        slow_started.notified().await;
+        // While /src/slow is still being read, /src/fast's cached summary comes straight back.
+        let fast = tokio::time::timeout(Duration::from_secs(1), cache.get_with(Path::new("/src/fast"), "master", || async { None })).await;
+        assert!(matches!(fast, Ok(Some(_))), "served from the cache without waiting");
+        release.notify_one();
+        assert!(slow.await.unwrap().is_some());
     }
 }
