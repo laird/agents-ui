@@ -541,6 +541,20 @@ agents-tui --headless --source swarms=none --temporal agents # a pod watching on
 agents-tui --headless --source issues=none --source pipeline=none
 ```
 
+The `github` issues source also gives each swarm village a summary of recent
+work, served on `/api/village` as `github` (`src/web/github.rs`): `as_of`,
+and for each of the last 14 days (the server's local dates) how many issues
+landed and were opened, how often the merge gate bounced work (its comments
+and its push retries), how many reverts the integration branch took, and how
+many commits were deployed (a deploy and its release count once), plus
+`median_claim_to_land_secs` (from the last claim before each landing). It is
+one `gh issue list`, one deployments listing and a local `git log` per repo,
+read together and cached for 90 s (`AGENTS_UI_GITHUB_REFRESH_SECS`, held
+between 60 and 120), so a wall display polling every few seconds costs
+GitHub one set of calls a minute and a half. It only reads, so
+a `--read-only` server has it too. With no `gh`, or `gh` signed out, there is
+no `github` field and the village is drawn as before.
+
 To add a source (an AgentEx platform, a Jira backlog, a different CI),
 implement the layer's trait and give it a name in the registry at the bottom
 of `source.rs`. The startup log lists the sources that are running.

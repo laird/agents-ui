@@ -202,6 +202,7 @@ mod tests {
             builds: Vec::new(),
             build: None,
             flaky: Vec::new(),
+            github: None,
             features: Vec::new(),
         }
     }

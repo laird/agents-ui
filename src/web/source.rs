@@ -122,6 +122,13 @@ pub trait IssueTracker: Send + Sync {
     fn merge_comments<'a>(&'a self, _transport: &'a ServerTransport, _repo: &'a Path) -> BoxFuture<'a, Vec<(u32, String, String)>> {
         Box::pin(async { Vec::new() })
     }
+    /// A summary of recent work for the village (`github.rs`, #498), cached
+    /// by the tracker; none when it can't say.
+    fn summary<'a>(&'a self, _transport: &'a ServerTransport, _repo: &'a Path, _integration: &'a str) -> BoxFuture<'a, Option<super::github::Summary>> {
+        Box::pin(async { None })
+    }
+    /// Drop what it cached for `repo`.
+    fn forget(&self, _repo: &Path) {}
 }
 
 /// Where pushed work has got to on its way to production.
@@ -172,11 +179,13 @@ impl ActivitySource for Nothing {
 /// costs at most one `gh` round trip per refresh.
 pub struct GitHubIssues {
     links: crate::github::FeatureLinks,
+    /// One summary per repo, refreshed every 90 s at most (#498).
+    summaries: super::github::Summaries,
 }
 
 impl Default for GitHubIssues {
     fn default() -> Self {
-        Self { links: crate::github::FeatureLinks::new(super::village::extras_ttl()) }
+        Self { links: crate::github::FeatureLinks::new(super::village::extras_ttl()), summaries: Default::default() }
     }
 }
 
@@ -213,6 +222,12 @@ impl IssueTracker for GitHubIssues {
             list.iter().map(|i| IssueSnapshot::from_issue(i, None)).collect()
         })
     }
+    fn summary<'a>(&'a self, transport: &'a ServerTransport, repo: &'a Path, integration: &'a str) -> BoxFuture<'a, Option<super::github::Summary>> {
+        Box::pin(self.summaries.get(transport, repo, integration))
+    }
+    fn forget(&self, repo: &Path) {
+        self.summaries.forget(repo);
+    }
 }
 
 /// Values reused until they're `ttl` old, so slow sources (`gh`, `git
@@ -248,6 +263,13 @@ impl<K: Eq + Hash, V: Clone> TtlCache<K, V> {
     pub fn forget(&self, key: &K) {
         if let Ok(mut m) = self.entries.lock() {
             m.remove(key);
+        }
+    }
+
+    /// Drop every value whose key matches.
+    pub fn forget_where(&self, mut drop: impl FnMut(&K) -> bool) {
+        if let Ok(mut m) = self.entries.lock() {
+            m.retain(|k, _| !drop(k));
         }
     }
 }
@@ -760,6 +782,7 @@ mod tests {
                 builds: vec!["abcdef1".into()],
                 build: None,
                 flaky: Vec::new(),
+                github: None,
                 features: Vec::new(),
             };
             Box::pin(async move { vec![Reading { village, issues: Vec::new() }] })

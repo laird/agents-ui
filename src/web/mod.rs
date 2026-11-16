@@ -7,6 +7,7 @@ pub mod feature;
 pub mod flaky;
 pub mod framework;
 pub mod gate;
+pub mod github;
 pub mod herdr;
 pub mod kubernetes;
 pub mod newissue;

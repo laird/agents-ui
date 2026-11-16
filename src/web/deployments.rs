@@ -423,7 +423,8 @@ pub async fn locate(transport: &ServerTransport, repo: &Path, environment: &str,
     found.filter(|d| is_sha(&d.sha))
 }
 
-async fn gh_api(transport: &ServerTransport, repo: &Path, path: &str) -> Option<String> {
+/// `gh api <path>` in `repo`: its output, or `None` when it fails.
+pub(super) async fn gh_api(transport: &ServerTransport, repo: &Path, path: &str) -> Option<String> {
     let args = vec!["api".to_string(), path.to_string()];
     let out = transport.output("gh", &args, Some(repo)).await.ok()?;
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
