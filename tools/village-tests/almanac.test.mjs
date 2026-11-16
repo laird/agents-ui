@@ -166,6 +166,8 @@ test("the dialog says when today's row shows the gate's count (#509)", () => {
   assert.equal(T.almanacRows(gh, { landed_today: 1, bounced_today: 0 }, on)[13].live, false, "GitHub's count is the one shown");
   assert.equal(T.almanacRows(gh, null, on)[13].live, false);
   assert.ok(T.almanacRows(gh, { landed_today: 0, bounced_today: 7 }, on)[13].live, 'a bounce the gate saw first counts too');
+  const tomorrow = new Date(Date.parse(on + 'T00:00:00Z') + 86400000).toISOString().slice(0, 10);
+  assert.equal(T.almanacRows(gh, { landed_today: 9, bounced_today: 0 }, tomorrow)[13].live, false, "another day's tally is not shown");
   assert.ok(!T.almanacFacts(gh, null, on).meta.includes(T.ALMANAC_LIVE_NOTE));
   const f = T.almanacFacts(gh, { landed_today: 9, bounced_today: 0 }, on);
   assert.equal(f.meta[f.meta.length - 1], T.ALMANAC_LIVE_NOTE, 'said under the days');

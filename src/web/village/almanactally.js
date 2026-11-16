@@ -94,7 +94,7 @@ export function almanacDate(date) {
 }
 
 /* Said under the days when today's row shows the merge gate's count (#509). */
-export const ALMANAC_LIVE_NOTE = "Today's landed and bounced include the merge gate's own count of what left the quay since GitHub was last read; GitHub's count takes over on its next read";
+export const ALMANAC_LIVE_NOTE = "Today's row may show the merge gate's own count, which is ahead of GitHub's until GitHub is read again";
 
 const almanacSum = (rows, k) => rows.reduce((n, r) => n + (r[k] || 0), 0);
 /* The label's line: "7 landed today (avg 9)", the average over the days before today. */
