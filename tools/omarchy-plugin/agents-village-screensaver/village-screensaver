@@ -15,11 +15,11 @@
 # ~/.config/agents-ui/screensaver.json (written by install.sh --screensaver):
 #   { "server": "http://nuc-1:7890", "cycle": 30, "dim": "23-7", "timeout": 150, "recap": 30 }
 #
-# "Since you last looked" (#479): when the screensaver last closed at least
+# "Since you last looked" (#479): when the machine was last unlocked at least
 # `recap` minutes ago (default 30; 0 turns it off), the page opens with a
-# summary of what happened since then (since=<unix seconds>). Closing it, by
-# any input or by locking, is "looking": that time is kept in
-# ${XDG_STATE_HOME:-~/.local/state}/agents-village-screensaver/last-closed.
+# summary of what happened since then (since=<unix seconds>). Service.qml
+# watches Omarchy's lock and keeps the time of the last unlock in
+# ${XDG_STATE_HOME:-~/.local/state}/agents-village-screensaver/last-unlock.
 # With no record yet, the spell is counted from when the session went idle.
 #
 # It does nothing while the session is locked or the screensaver is already
@@ -59,11 +59,11 @@ DIM=$(setting dim "")
 TIMEOUT=$(setting timeout 150)
 RECAP=$(setting recap 30)
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/agents-village-screensaver"
-LAST_CLOSED="$STATE_DIR/last-closed"
+LAST_UNLOCK="$STATE_DIR/last-unlock"
 NOW=${AGENTS_VILLAGE_SCREENSAVER_NOW:-$(date +%s)}
 
-# When the quiet spell began: the screensaver's last close, or failing that
-# when the session went idle. Empty when the spell is shorter than `recap`
+# When the quiet spell began: the last unlock, or failing that when the
+# session went idle. Empty when the spell is shorter than `recap`
 # minutes, or on a forced run (someone is at the keyboard).
 recap_since() {
   local since=""
@@ -71,7 +71,7 @@ recap_since() {
   [[ $RECAP =~ ^[0-9]+$ ]] && [ "$RECAP" -gt 0 ] || return
   # A unix time, as `date +%s` writes it: anything else (hand-edited, cut
   # short) is no record, rather than octal or an overflow in $(( )).
-  [ -f "$LAST_CLOSED" ] && since=$(head -c 32 "$LAST_CLOSED" | tr -d '[:space:]')
+  [ -f "$LAST_UNLOCK" ] && since=$(head -c 32 "$LAST_UNLOCK" | tr -d '[:space:]')
   [[ $since =~ ^[1-9][0-9]{8,10}$ ]] || since=""
   if [ -z "$since" ]; then
     [[ $TIMEOUT =~ ^[0-9]+$ ]] || TIMEOUT=150
@@ -135,8 +135,6 @@ cursor() {  # cursor <true|false>: hide or show the pointer
 
 stop_all() {
   cursor false
-  # A close is a look only if a screensaver window was up to be looked away from.
-  [ ${#ours[@]} -gt 0 ] && mkdir -p "$STATE_DIR" && date +%s > "$LAST_CLOSED"
   pkill -f "[a]gents-village-screensaver-profile" 2>/dev/null
   exit 0
 }

@@ -34,10 +34,11 @@ so the page closes itself on input. A dashboard tab never does.
   dimmed map for 20 seconds: issues landed and closed, pull requests merged,
   deploys (with their versions), what bounced at the gate, and what is
   waiting on you, in red. A spell with nothing in it says "Nothing happened".
-  The spell runs from when the screensaver last closed (closing it is
-  looking), or from when the session went idle if it never has, and the card
-  only shows when the spell is at least `recap` minutes long (default 30, 0
-  turns it off). Any input closes it.
+  The spell runs from the last unlock of the machine: the service watches
+  Omarchy's lock while the session is idle or locked and keeps the time of
+  each unlock in `~/.local/state/agents-village-screensaver/last-unlock`. The
+  card only shows when that was at least `recap` minutes ago (default 30, 0
+  turns it off); with no unlock seen yet there is none. Any input closes it.
 - For burn-in, the whole scene drifts a few pixels, and it dims in the night
   hours if `dim` is set.
 - When the server stops answering, the map gives way to a large
