@@ -17,6 +17,8 @@ import { fadeLive } from './features.js';
 import { draw, updateWorld, worldWords } from './worlds.js';
 import { legend, renderLegend } from './key.js';
 import { hashName } from './saver.js';
+import { OVERVIEW_NAME, overviewIslands, overviewWords } from './overviewmodel.js';
+import { sizeOverview } from './overview.js';
 import { arrangeDocks } from './docks.js';
 
 const pick = document.getElementById('pick');
@@ -66,10 +68,25 @@ function describe(v) {
   const fw = v.workflow || v.framework;
   return [fw, v.plane].filter(Boolean).map(x => '· ' + x).join(' ');
 }
-/* Show a village (`shop`) or a world (`world:shop`); `shop@release` scrolls
- * to that environment's village. */
+/* The name of what is shown, as the URL and the picker give it. */
+export const viewName = view => (view ? (view.overview ? OVERVIEW_NAME : view.world || view.village) : undefined);
+
+/* Every swarm at once (#481), when there is one to show. */
+function selectOverview() {
+  state.view = { overview: true };
+  sizeOverview();
+  document.getElementById('workflow').textContent = '\u00b7 ' + overviewWords(overviewIslands(state.villages, state.worlds));
+  nameBar('All swarms', null);
+  fit();
+  if (state.reduce) draw(0);
+  placeOverlays();
+}
+
+/* Show a village (`shop`) or a world (`world:shop`), or every swarm (`*`);
+ * `shop@release` scrolls to that environment's village. */
 function select(want) {
   const { villages, worlds } = state, [name, env] = String(want).split('@');
+  if (name === OVERVIEW_NAME && villages.length) { selectOverview(); return; }
   const w = worlds.find(x => x.name === name);
   const v = villages.find(x => x.project === name);
   if (w) state.view = { world: w.name };
@@ -107,14 +124,16 @@ async function poll() {
     const t = performance.now();
     villages.forEach(v => updateScene(v, t));
     worlds.forEach(w => updateWorld(w, t));
-    const names = [...worlds.map(w => w.name), ...villages.map(v => v.project)];
-    const label = n => { const w = worlds.find(x => x.name === n); return w ? `${w.dev} \u21c4 ${w.platform}` : n; };
-    pick.hidden = names.length < 2;
+    const swarms = [...worlds.map(w => w.name), ...villages.map(v => v.project)];
+    // The picker ends with every swarm at once (#481).
+    const names = swarms.length ? [...swarms, OVERVIEW_NAME] : swarms;
+    const label = n => { const w = worlds.find(x => x.name === n); return n === OVERVIEW_NAME ? 'All swarms' : w ? `${w.dev} \u21c4 ${w.platform}` : n; };
+    pick.hidden = swarms.length < 2;
     if (pick.options.length !== names.length || [...pick.options].some((o, i) => o.value !== names[i])) {
       pick.innerHTML = names.map(n => `<option value="${esc(n)}">${esc(label(n))}</option>`).join('');
     }
     const view = state.view;
-    const want = String(hashName(location.hash) || (view && (view.world || view.village)) || names[0] || '');
+    const want = String(hashName(location.hash) || viewName(view) || names[0] || '');
     if (names.includes(want.split('@')[0])) pick.value = want.split('@')[0];
     document.getElementById('empty').hidden = villages.length > 0;
     cv.hidden = villages.length === 0;
@@ -153,7 +172,7 @@ export function start() {
     try { localStorage.setItem('village-theme', themeName); } catch {}
     const view = state.view;
     if (!legend.hidden) renderLegend();
-    if (view) select(view.world || view.village);
+    if (view) select(viewName(view));
   });
   pick.addEventListener('change', () => { location.hash = pick.value; select(pick.value); });
   window.addEventListener('hashchange', () => select(hashName(location.hash)));
@@ -162,7 +181,7 @@ export function start() {
 
   if (!state.reduce) {
     // The first frame records what is clickable; place the keyboard targets then, not a poll later.
-    const placed = () => String(state.view && (state.view.world || state.view.village));
+    const placed = () => String(viewName(state.view));
     const loop = t => { draw(t); if (!kbuttons.size && kbox.dataset.placed !== placed()) { kbox.dataset.placed = placed(); placeKeys(); } requestAnimationFrame(loop); };
     requestAnimationFrame(loop);
   }

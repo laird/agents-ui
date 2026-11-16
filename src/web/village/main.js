@@ -21,6 +21,7 @@ import './shipped.js';
 import './envrow.js';
 import './voyages.js';
 import './worlds.js';
+import './overview.js';
 import './panels.js';
 import './dialogs.js';
 import './keynav.js';

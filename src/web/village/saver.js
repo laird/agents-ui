@@ -6,7 +6,9 @@
  * The mode is `/village?screensaver=1` or `/village#<project>&screensaver`.
  * Options ride along in the query: `cycle=<seconds>` between swarms (0 stays
  * put), `dim=<from>-<to>` night hours, `dismiss=1` to close on input (only
- * the Omarchy launcher asks for that; a dashboard tab never closes itself). */
+ * the Omarchy launcher asks for that; a dashboard tab never closes itself),
+ * `overview=1` to show every swarm at once (#481): first, between swarms
+ * while cycling, or alone with `cycle=0`. */
 
 import { limitedCount, signWords, villageLimit } from './limits.js';
 
@@ -35,6 +37,7 @@ export function saverOptions(search, hash) {
     cycle: asked !== null ? asked : pinned ? 0 : 30,
     dim: nightHours(q.get('dim')),
     dismiss: q.get('dismiss') === '1',
+    overview: ['1', 'true', 'on'].includes(q.get('overview')),
   };
 }
 

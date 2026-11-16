@@ -3,7 +3,8 @@
  * screen as an idle display, readable from across the room. No bar, picker or
  * buttons; the map fitted to the whole display with its area labels on; a
  * large status strip under it; a big "can't reach" in place of a frozen map.
- * With several swarms it cycles through them. Burn-in care: the scene drifts
+ * With several swarms it cycles through them, and with `overview=1` shows
+ * every swarm at once (#481) between them, or alone. Burn-in care: the scene drifts
  * a few pixels, and dims in the night hours if asked. It is never blanked.
  *
  * After a quiet spell (the launcher's `since=`) a "since you last looked"
@@ -12,7 +13,8 @@
  * What it shows and when is decided in saver.js; this only puts it on screen.
  * data.js says after each poll whether the server answered ('village:polled'). */
 import { state } from './state.js';
-import { buildEntry, staleWords, cycleOrder, dimmedAt, dismisses, driftAt, gateWords, nextName, saverOptions, saverSummary } from './saver.js';
+import { buildEntry, staleWords, cycleOrder, dimmedAt, dismisses, driftAt, gateWords, saverOptions, saverSummary } from './saver.js';
+import { OVERVIEW_NAME, nextSaverScene, overviewIslands, overviewWords } from './overviewmodel.js';
 import { esc, fit } from './panels.js';
 import { shippedLine } from './shipdecide.js';
 import { placeOverlays } from './registry.js';
@@ -29,7 +31,22 @@ function shownVillage() {
   return state.villages.find(v => v.project === name) || null;
 }
 
+/* The strip under the overview: how many swarms need you, and the houses in all of them. */
+function renderOverviewStrip(box, lastOk) {
+  const islands = overviewIslands(state.villages, state.worlds), sum = k => islands.reduce((n, i) => n + i[k], 0);
+  const red = islands.some(i => i.health === 'red');
+  box.innerHTML = `<div class="ss-row">
+      <span class="ss-name">All swarms</span>
+      <span class="ss-item ss-working"><b>${sum('working')}</b> working</span>
+      <span class="ss-item"><b>${sum('idle')}</b> idle</span>
+      <span class="ss-item${sum('blocked') ? ' ss-red' : ''}"><b>${sum('blocked')}</b> blocked or stalled</span>
+      <span class="ss-time">${lastOk ? 'Updated ' + new Date(lastOk).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span>
+    </div>
+    <div class="ss-row"><span class="ss-wait${red ? ' ss-red' : ''}">${esc(overviewWords(islands))}</span></div>`;
+}
+
 function renderSaverStrip(box, lastOk) {
+  if (state.view && state.view.overview) { renderOverviewStrip(box, lastOk); return; }
   const v = shownVillage();
   if (!v) { box.innerHTML = '<div class="ss-row"><span class="ss-name">Looking for swarms…</span></div>'; return; }
   const s = saverSummary(v), view = state.view;
@@ -100,13 +117,15 @@ async function showRecap(card, since) {
   for (const type of ['keydown', 'pointerdown']) window.addEventListener(type, close, true);
 }
 
-/* Show another swarm: replace the hash (never push it, so the launcher's
+/* Show another swarm (or the overview, between them, with `overview=1`): replace the hash (never push it, so the launcher's
  * window keeps one history entry and may close itself) and let data.js's
  * hashchange handler select it. */
+let lastSwarm = null;
 function cycleSaver() {
   const names = cycleOrder(state.villages, state.worlds);
-  const view = state.view, current = view && (view.world || view.village);
-  const next = nextName(names, current);
+  const view = state.view, current = view && (view.overview ? OVERVIEW_NAME : view.world || view.village);
+  if (current && current !== OVERVIEW_NAME) lastSwarm = current;
+  const next = nextSaverScene(names, current, lastSwarm, saverOpts.overview);
   if (!next || next === current) return;
   history.replaceState(null, '', location.pathname + location.search + '#' + encodeURIComponent(next) + '&screensaver');
   window.dispatchEvent(new HashChangeEvent('hashchange'));
@@ -137,6 +156,8 @@ if (saverOpts.on) {
   state.screensaver = true;
   document.documentElement.classList.add('screensaver');
   document.title = 'Village screensaver';
+  // `overview=1` with no swarm named starts on every swarm at once.
+  if (saverOpts.overview && !saverOpts.pinned) history.replaceState(null, '', location.pathname + location.search + '#' + OVERVIEW_NAME + '&screensaver');
   // The area labels stay on, whatever was remembered.
   document.getElementById('labels-on').checked = true;
   const strip = document.createElement('div'), off = document.createElement('div');

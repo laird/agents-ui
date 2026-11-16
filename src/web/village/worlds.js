@@ -21,6 +21,7 @@ import { DETAIL, detail, prepare } from './detail.js';
 import { bricks, planks, px } from './art2x.js';
 import { SAIL } from './ship.js';
 import { fit } from './panels.js';
+import { drawOverview } from './overview.js';
 
 function offscreen(sc) {
   if (!sc.canvas) { sc.canvas = document.createElement('canvas'); sc.cx = sc.canvas.getContext('2d'); }
@@ -174,11 +175,12 @@ function roadUp(t, w, g, Ps, Ds) {
     cart(ctx, at[0] - 7, at[1] - 6, w.shipping.length);
   }
 }
-/* One frame of what is shown: a village, or a world. */
+/* One frame of what is shown: a village, a world, or every swarm (#481). */
 export function draw(t) {
   const view = state.view;
   if (!view) return;
   prepare(ctx);
+  if (view.overview) { drawOverview(t); return; }
   if (view.world) { const w = state.worlds.find(x => x.name === view.world); if (w) drawWorld(t, w); return; }
   const sc = state.scenes[view.village];
   if (sc && sc.v) drawVillage(ctx, sc, t);
