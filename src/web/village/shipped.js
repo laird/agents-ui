@@ -69,13 +69,13 @@ registerLayer({ z: 145, draw(c, { v, lay }, t) {
   });
 } });
 
-registerHit({ kind: 'shipped', dialog(o, sc) {
+registerHit({ kind: 'shipped', dialog(o, sc, theme) {
   const list = sc.v.shipped || [], s = list[0], stops = sc.v.pipeline.stops, last = stops[stops.length - 1];
   if (!s) return null;
   const when = agoWords(s.at);
   return {
     title: `Shipped: #${s.number} ${s.title}`,
-    line: `Every subtask reached ${last ? last.name : 'production'}${when ? ' ' + when : ''}. Its flag flies on the ${state.T.labels.hall.toLowerCase()} for the rest of the day.`,
+    line: `Every subtask reached ${last ? last.name : 'production'}${when ? ' ' + when : ''}. Its flag flies on the ${(theme || state.T).labels.hall.toLowerCase()} for the rest of the day.`,
     meta: list.slice(1).map(x => `Also shipped today: #${x.number} ${x.title}`),
     links: list.map(x => link(`Epic #${x.number}`, x.url)),
   };

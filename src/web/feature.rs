@@ -204,7 +204,9 @@ pub struct Shipped {
 /// subtasks rode a voyage that docked there: when the newest such voyage
 /// arrived is when the feature shipped. A docked voyage is reported for an
 /// hour (`DOCKED_FOR_SECS`), so this sees a shipping only that long;
-/// [`remember_shipped`] keeps it for the rest of the day.
+/// [`remember_shipped`] keeps it for the rest of the day. A voyage's cargo
+/// may be its whole history, so this alone would ship every live epic again
+/// on each deploy: [`ShipMemory`] lets only an epic seen short of it ship.
 pub fn shipped(village: &VillageSnapshot, links: &[FeatureLink]) -> Vec<Shipped> {
     let Some(last) = village.pipeline.stops.last() else {
         return Vec::new();
@@ -229,6 +231,46 @@ pub fn shipped(village: &VillageSnapshot, links: &[FeatureLink]) -> Vec<Shipped>
             Some(Shipped { number: f.number, title: f.title, url: f.url, at: at.to_string() })
         })
         .collect()
+}
+
+/// Per repo, what tells an epic shipping now from one that shipped long ago
+/// (#482). A voyage cannot say which of its issues are new: an earlier
+/// deployment marked `inactive` is not its `previous`, so it carries its whole
+/// history. Only an epic this memory has seen short of the last stop can ship.
+#[derive(Debug, Default)]
+pub struct ShipMemory {
+    /// Epics seen short of the last stop, with their links: one closed and
+    /// gone from the recently closed parents by the time it deploys still ships.
+    pending: std::collections::BTreeMap<u32, FeatureLink>,
+    /// What shipped today.
+    today: Vec<Shipped>,
+}
+
+/// How many epics short of the last stop [`ShipMemory`] keeps; the oldest go first.
+const PENDING_KEEP: usize = 200;
+
+impl ShipMemory {
+    /// What shipped today, after this reading of the village and its links.
+    pub fn read(&mut self, village: &VillageSnapshot, links: &[FeatureLink], today: chrono::NaiveDate) -> Vec<Shipped> {
+        let mut all = links.to_vec();
+        for (n, link) in &self.pending {
+            if !all.iter().any(|l| l.parent == *n) {
+                all.push(link.clone());
+            }
+        }
+        let seen = shipped(village, &all).into_iter().filter(|s| self.pending.contains_key(&s.number)).collect();
+        for f in follow(village, &all) {
+            if f.live {
+                self.pending.remove(&f.number);
+            } else if let Some(link) = all.iter().find(|l| l.parent == f.number) {
+                self.pending.insert(f.number, link.clone());
+            }
+        }
+        while self.pending.len() > PENDING_KEEP {
+            self.pending.pop_first();
+        }
+        remember_shipped(&mut self.today, seen, today)
+    }
 }
 
 /// What shipped today, newest first: `remembered` (kept between readings)
@@ -655,5 +697,39 @@ mod tests {
         let tomorrow = today.succ_opt().unwrap();
         assert!(remember_shipped(&mut memory, vec![], tomorrow).is_empty());
         assert!(memory.is_empty());
+    }
+
+    #[test]
+    fn only_an_epic_seen_short_of_prod_ships_and_a_later_deploy_does_not_ship_it_again() {
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 11, 16).unwrap();
+        let now = chrono::Local::now().to_rfc3339();
+        let mut memory = ShipMemory::default();
+        // Already live when first seen, its subtasks in a deploy's whole-history cargo: not new.
+        let mut v = village(&[], [&[], &[], &[], &[461, 462, 463, 464]], vec![], vec![]);
+        v.pipeline.voyages = vec![docked("prod", &[461, 462, 463, 464], &now)];
+        assert!(memory.read(&v, &[four()], today).is_empty());
+        // Another epic in uat, then in prod: it ships, and the old one still doesn't.
+        let other = FeatureLink { parent: 470, title: "Other".into(), ..link((471..=472).map(child).collect()) };
+        let mut v = village(&[], [&[], &[], &[471, 472], &[461, 462, 463, 464]], vec![], vec![]);
+        assert!(memory.read(&v, &[four(), other.clone()], today).is_empty());
+        v.pipeline.stops[2].issues.clear();
+        v.pipeline.stops[3].issues.extend([471, 472]);
+        v.pipeline.voyages = vec![docked("prod", &[461, 462, 463, 464, 471, 472], &now)];
+        let got = memory.read(&v, &[four(), other.clone()], today);
+        assert_eq!(got.iter().map(|s| s.number).collect::<Vec<_>>(), vec![470]);
+        // Remembered for the day; not shipped a second time.
+        assert_eq!(memory.read(&v, &[four(), other], today).len(), 1);
+    }
+
+    #[test]
+    fn an_epic_gone_from_the_links_by_the_time_it_deploys_still_ships() {
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 11, 16).unwrap();
+        let mut memory = ShipMemory::default();
+        let mut v = village(&[], [&[], &[], &[461, 462, 463, 464], &[]], vec![], vec![]);
+        assert!(memory.read(&v, &[four()], today).is_empty());
+        v.pipeline.stops[2].issues.clear();
+        v.pipeline.stops[3].issues.extend([461, 462, 463, 464]);
+        v.pipeline.voyages = vec![docked("prod", &[464], &chrono::Local::now().to_rfc3339())];
+        assert_eq!(memory.read(&v, &[], today).iter().map(|s| s.number).collect::<Vec<_>>(), vec![460]);
     }
 }

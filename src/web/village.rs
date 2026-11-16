@@ -1188,7 +1188,7 @@ pub struct SwarmVillages {
     conflicts: std::sync::Mutex<HashMap<String, HashMap<u32, Vec<String>>>>,
     /// Per repo, the epics that shipped today (#482): a voyage is reported
     /// for an hour, the flag flies for the day.
-    shipped: std::sync::Mutex<HashMap<String, Vec<super::feature::Shipped>>>,
+    shipped: std::sync::Mutex<HashMap<String, super::feature::ShipMemory>>,
     /// CI answers per repo, re-asked when the tip moves (`build.rs`).
     ci: super::build::CiCache,
 }
@@ -1265,10 +1265,9 @@ impl SwarmVillages {
         super::feature::attach_parents(&mut village.backlog, &open);
         village.features = super::feature::build(&village, &open);
         village.shipped = {
-            let seen = super::feature::shipped(&village, &links);
             let mut memory = self.shipped.lock().unwrap_or_else(|e| e.into_inner());
             let remembered = memory.entry(swarm.repo_path.clone()).or_default();
-            super::feature::remember_shipped(remembered, seen, chrono::Local::now().date_naive())
+            remembered.read(&village, &links, chrono::Local::now().date_naive())
         };
         self.activity.attach(transport, &mut village);
         Reading { village, issues }
