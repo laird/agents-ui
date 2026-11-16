@@ -20,6 +20,7 @@ mod proposals;
 mod screensaver;
 mod shipped;
 mod themes;
+mod valley;
 mod travel;
 
 pub(super) use super::server::{VILLAGE_FILES as VILLAGE_ASSETS, village_asset};

@@ -79,7 +79,19 @@ else
 fi
 sleep 1
 
+# A group of related repos (#510): lib-core, the two consumers built on it
+# (shop and larkspur, both live here) and billing, a service shop calls. lib-core
+# and billing have no swarm, so they are dormant.
+mkdir -p "$DEMO/home/.agents-ui"
+cat > "$DEMO/home/.agents-ui/group.json" <<'GROUP'
+[{ "name": "demo", "repos": [
+  { "repo": "lib-core" },
+  { "repo": "shop", "depends_on": [{ "repo": "lib-core", "via": "package" }, { "repo": "billing", "via": "api" }] },
+  { "repo": "larkspur", "depends_on": [{ "repo": "lib-core", "via": "package" }] },
+  { "repo": "billing", "depends_on": [{ "repo": "lib-core", "via": "package" }] } ] }]
+GROUP
 echo "Village:    http://127.0.0.1:$PORT/village"
+echo "Valley:     http://127.0.0.1:$PORT/village?valley=demo"
 echo "Platform:   http://127.0.0.1:$PORT/village#$platform"
 echo "World:      http://127.0.0.1:$PORT/village#world:shop"
 echo "Demo files: $DEMO"

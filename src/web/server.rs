@@ -1154,6 +1154,7 @@ pub async fn run(addrs: &[SocketAddr], read_only: bool, state: WebServerState) -
         .route("/village", get(village_handler))
         .route("/village/{*path}", get(village_file_handler))
         .route("/api/village", get(api_village_handler))
+        .route("/api/valley", get(super::valley::api_valley_handler))
         .route("/api/village/since", get(api_village_since_handler))
         .route("/api/swarms", get(api_swarms_handler).post(api_launch_swarm_handler))
         .route("/api/swarms/{project}/issues", post(crate::web::newissue::api_new_issue_handler))

@@ -124,7 +124,7 @@ export function objAt(e) {
   return o ? { o, sc, theme: themeAt(sc) } : null;
 }
 cv.addEventListener('click', e => {
-  if (!state.view || state.view.overview) return; // overview.js answers its clicks
+  if (!state.view || state.view.overview || state.view.valley) return; // overview.js and valley.js answer their clicks
   const h = objAt(e);
   if (h && act(h.o, h.sc, h.theme)) hovered = false;
   else groundHint(e);

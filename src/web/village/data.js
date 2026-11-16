@@ -19,6 +19,7 @@ import { legend, renderLegend } from './key.js';
 import { hashName } from './saver.js';
 import { OVERVIEW_NAME, overviewIslands, overviewWords } from './overviewmodel.js';
 import { sizeOverview } from './overview.js';
+import { selectValley, valleyWanted } from './valley.js';
 import { arrangeDocks } from './docks.js';
 
 const pick = document.getElementById('pick');
@@ -69,7 +70,7 @@ function describe(v) {
   return [fw, v.plane].filter(Boolean).map(x => '· ' + x).join(' ');
 }
 /* The name of what is shown, as the URL and the picker give it. */
-export const viewName = view => (view ? (view.overview ? OVERVIEW_NAME : view.world || view.village) : undefined);
+export const viewName = view => (view ? (view.overview ? OVERVIEW_NAME : view.valley ? 'valley:' + view.valley : view.world || view.village) : undefined);
 
 /* Every swarm at once (#481), when there is one to show. */
 function selectOverview() {
@@ -86,6 +87,8 @@ function selectOverview() {
  * `shop@release` scrolls to that environment's village. */
 function select(want) {
   const { villages, worlds } = state, [name, env] = String(want).split('@');
+  // `?valley=<group>`: the group's valley, whatever the hash says (#510).
+  if (valleyWanted()) { nameBar(`Valley \u00b7 ${valleyWanted()}`, null); selectValley(valleyWanted()); return; }
   if (name === OVERVIEW_NAME && villages.length) { selectOverview(); return; }
   const w = worlds.find(x => x.name === name);
   const v = villages.find(x => x.project === name);
@@ -135,13 +138,17 @@ async function poll() {
     const view = state.view;
     const want = String(hashName(location.hash) || viewName(view) || names[0] || '');
     if (names.includes(want.split('@')[0])) pick.value = want.split('@')[0];
-    document.getElementById('empty').hidden = villages.length > 0;
-    cv.hidden = villages.length === 0;
-    if (!villages.length) document.getElementById('empty').textContent = 'No swarms running. Start one from the dashboard or the agents-tui terminal.';
-    else select(want.includes('@') && want.split('@')[0] === pick.value ? want : pick.value || names[0]);
+    if (valleyWanted()) { pick.hidden = true; select(); } // the valley says itself what is missing
+    else {
+      document.getElementById('empty').hidden = villages.length > 0;
+      cv.hidden = villages.length === 0;
+      if (!villages.length) document.getElementById('empty').textContent = 'No swarms running. Start one from the dashboard or the agents-tui terminal.';
+      else select(want.includes('@') && want.split('@')[0] === pick.value ? want : pick.value || names[0]);
+    }
     // The shown village's build, in words (weather.js draws it).
     const world = worlds.find(w => w.name === pick.value);
-    const shown = villages.find(v => v.project === (world ? world.dev : pick.value));
+    // A valley is many villages: no one build speaks for it.
+    const shown = valleyWanted() ? null : villages.find(v => v.project === (world ? world.dev : pick.value));
     const build = shown ? buildWords(shown.build) : '';
     const status = document.getElementById('status');
     status.textContent = 'Live · updated ' + new Date().toLocaleTimeString() + (build ? ' · ' + build : '');
