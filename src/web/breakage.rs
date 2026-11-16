@@ -206,7 +206,7 @@ mod tests {
         Library { name: name.into(), slug: Some(slug.into()), packages: packages.iter().map(|s| s.to_string()).collect() }
     }
     fn issue(number: u32, state: &str, body: &str) -> CrossIssue {
-        CrossIssue { number, title: "t".into(), state: state.into(), state_reason: None, body: Some(body.into()) }
+        CrossIssue { number, title: "t".into(), state: state.into(), state_reason: None, body: Some(body.into()), ..Default::default() }
     }
     const RUN: Option<&str> = Some("https://github.com/acme/api/actions/runs/9");
 
