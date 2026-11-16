@@ -57,6 +57,24 @@ function needsYou(v) {
   return attention("", v).length
 }
 
+// Houses held by a usage or rate limit (#484): counted apart from those
+// waiting on you, since they wait on the limit, not on a person. As the
+// village page's limits.js reads it: not while working, blocked or stopped.
+function isLimited(h) {
+  return !!(h && h.limit && h.status !== "working" && h.status !== "blocked" && h.status !== "stopped")
+}
+
+function limited(v) {
+  return v ? (v.houses || []).filter(isLimited).length : 0
+}
+
+// What a limited house says instead of its status: "limited · til 3pm".
+function limitWords(h) {
+  if (!isLimited(h)) return null
+  var r = h.limit.resets
+  return r ? "limited · " + (/^in /.test(r) ? r : "til " + r) : "rate limited"
+}
+
 function working(v) {
   return v ? (v.houses || []).filter(function(h) { return h.status === "working" }).length : 0
 }
@@ -73,12 +91,13 @@ function swarmRows(swarmsDoc, villagesDoc) {
       houses: v ? (v.houses || []).length : (s.workers || []).length,
       working: v ? working(v) : Number(s.busy_count || 0),
       waiting: v ? needsYou(v) : Number(s.attention_count || 0),
+      limited: limited(v),
       stopped: !!s.stopped
     }
   })
   if (rows.length > 0) return rows
   return villagesOf(villagesDoc).map(function(v) {
-    return { project: v.project, workflow: v.framework || "", houses: (v.houses || []).length, working: working(v), waiting: needsYou(v), stopped: false }
+    return { project: v.project, workflow: v.framework || "", houses: (v.houses || []).length, working: working(v), waiting: needsYou(v), limited: limited(v), stopped: false }
   })
 }
 
@@ -122,6 +141,7 @@ function houseRows(base, v, swarm) {
       title: h.issue_title || h.title || "",
       status: h.status || "unknown",
       context: w && w.context_pct !== null && w.context_pct !== undefined ? Number(w.context_pct) : null,
+      limit: limitWords(h),
       url: absolute(base, sessionLink(h.links))
     }
   })
@@ -297,7 +317,7 @@ function repoUrl(v) {
 if (typeof module !== "undefined") {
   module.exports = {
     parse: parse, baseUrl: baseUrl, absolute: absolute, villageUrl: villageUrl,
-    villageFor: villageFor, swarmFor: swarmFor, needsYou: needsYou, swarmRows: swarmRows,
+    villageFor: villageFor, swarmFor: swarmFor, needsYou: needsYou, limited: limited, limitWords: limitWords, swarmRows: swarmRows,
     chooseProject: chooseProject, canGoBack: canGoBack, houseName: houseName, houseRows: houseRows,
     flow: flow, attention: attention, features: features, badge: badge, ago: ago, repoUrl: repoUrl,
     releaseKey: releaseKey, questionOf: questionOf, releases: releases, buildState: buildState, buildWords: buildWords, clock: clock

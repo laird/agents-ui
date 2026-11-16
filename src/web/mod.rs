@@ -60,6 +60,9 @@ pub struct AgentSnapshot {
     /// That window's size as the status line writes it (`1M`, `200k`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window: Option<String>,
+    /// A usage or rate limit it stopped on, from the bottom of its pane (#484).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<crate::model::status::UsageLimit>,
 }
 
 /// Where an agent's terminal lives (shared with the terminal view's model).
@@ -137,12 +140,14 @@ pub fn new_shared_state() -> SharedWebState {
 }
 
 impl AgentSnapshot {
-    /// Read `context_pct` and `context_window` from the pane's status line.
+    /// Read `context_pct` and `context_window` from the pane's status line,
+    /// and `limit` from the lines above it.
     pub fn with_context_from_pane(mut self) -> Self {
         if let Some(ctx) = crate::model::status::parse_context(&self.pane_content) {
             self.context_pct = Some(ctx.pct);
             self.context_window = ctx.window;
         }
+        self.limit = crate::model::status::parse_limit(&self.pane_content);
         self
     }
 
@@ -170,6 +175,7 @@ impl AgentSnapshot {
             mux: Mux::Tmux,
             context_pct: None,
             context_window: None,
+            limit: None,
         }
         .with_context_from_pane()
     }

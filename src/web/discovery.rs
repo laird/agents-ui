@@ -165,6 +165,7 @@ fn stopped_placeholder_agent(project_name: &str, role: &str, is_manager: bool) -
         mux: Default::default(),
         context_pct: None,
         context_window: None,
+        limit: None,
     }
 }
 
@@ -486,6 +487,7 @@ this swarm is running without a manager."
         mux: Default::default(),
         context_pct: None,
         context_window: None,
+        limit: None,
     }
 }
 
@@ -596,6 +598,7 @@ async fn build_agent_snapshot(
         mux: Default::default(),
         context_pct: None,
         context_window: None,
+        limit: None,
     }
     .with_context_from_pane()
 }

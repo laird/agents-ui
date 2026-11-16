@@ -57,7 +57,7 @@ test('the strip counts houses, the gate, the quay, each stop and what waits on y
     },
   };
   assert.deepEqual(saverSummary(v), {
-    project: 'shop', working: 2, blocked: 1, idle: 2,
+    project: 'shop', working: 2, blocked: 1, limited: 0, limit: null, idle: 2,
     // 2 on the board, 1 blocked house, the manager, a failed gate and a conflict.
     waiting: 6,
     gate: { queued: 1, gating: 2, failed: 2 },

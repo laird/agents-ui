@@ -87,7 +87,7 @@ fn village_idle_workers_sleep_instead_of_a_lingering_tick() {
     let body = &village_source();
     assert!(body.contains("const st = h.status, tt = t + i * 311, rest = restOf(h, wall);"));
     assert!(body.contains("if (rest === 'asleep') { person(c, lot.x + 4, lot.y + 9, h.id, 'sit', { status: 'asleep' }); sleepers.push("));
-    assert!(body.contains("if (ICONS[st] && rest !== 'asleep') bubbles.push(["), "no ✓ over a sleeper");
+    assert!(body.contains("if (ICONS[st] && rest !== 'asleep' && rest !== 'limited') bubbles.push(["), "no ✓ over a sleeper, or one at the well");
     assert!(body.contains("(sleepers || []).forEach(([x, y, dt]) => zzz(c, x, y, t + dt));"));
     // Every theme: people sit, robots sit with dim eyes and no hover.
     assert!(body.contains("if (kind === 'sit') return ['........', '........', ...r.slice(0, 9), r[11]];"));
@@ -189,9 +189,31 @@ fn village_html_shows_context_barrels() {
     // The house and hall dialogs say how full it is.
     assert!(body.contains("return `Context ${h.context_pct}%${of}${note}`;"));
     assert!(body.contains("contextWords(h),"));
-    assert!(body.contains("meta: [`Status: ${m.status}`, contextWords(m),"));
+    assert!(body.contains("meta: [`Status: ${m.status}`, limitWords(m), contextWords(m),"));
     // And the Key explains it, through registerKey.
     assert!(body.contains("registerKey({ group: \"Beside a house: its agent's context\", rows: theme => ["));
     assert!(body.contains("`${CTX_FULL}% or more, red; flashing from ${CTX_WEDGE}%: about to wedge`"));
     assert!(!body.contains("retryTag(") && !body.contains("brokenCrate("), "the gate markers are #433's bounces");
+}
+
+/// #484: a worker held by a usage or rate limit stands at a dry well under
+/// an hourglass instead of sleeping, and a sign at the hall says when the
+/// village resumes when most of it is held. What is limited, and the words,
+/// are tested under node (tools/village-tests/limits.test.mjs); this is the wiring.
+#[test]
+fn village_limited_workers_wait_at_a_dry_well() {
+    let body = &village_source();
+    // rest.js hands a limited worker to the well, so lifecycle.js draws no sleeper.
+    assert!(body.contains("if (limited(h) && (h.status === 'idle' || h.status === 'done')) return 'limited';"));
+    assert!(body.contains("well(c, lot.x + WELL.dx, lot.y + WELL.dy);"));
+    assert!(body.contains("person(c, lot.x + AT_WELL.dx, lot.y + AT_WELL.dy, h.id, 'stand', { status: 'idle' });"));
+    assert!(body.contains("(scene.limitBubbles || []).forEach(([x, y]) => limitBubble(c, x, y));"));
+    assert!(body.contains("limitSign(c, lay.hallX - 10, 30);"));
+    assert!(body.contains("text: signWords(s), sub: `${s.n} of ${s.of} limited`, cls: 'limitsign'"));
+    // The dialogs and the house label say so, and when it lifts.
+    assert!(body.contains("limitWords(h), contextWords(h),"));
+    assert!(body.contains("if (limited(house)) return { parts: n ? [name, `· #${n}`] : [name], sub: limitSub(house) };"));
+    assert!(body.contains(".al.house.limited { border-color: #3890e0; }"));
+    // The Key explains it.
+    assert!(body.contains("registerKey({ group: 'Beside a house: a usage limit', rows: theme => ["));
 }

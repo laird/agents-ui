@@ -601,6 +601,7 @@ mod tests {
             mux: Default::default(),
             context_pct: None,
             context_window: None,
+            limit: None,
         };
         SwarmSnapshot {
             project_name: project.into(),
@@ -743,6 +744,7 @@ mod tests {
                 since: None,
                 context_pct: None,
                 context_window: None,
+                limit: None,
             };
             let village = VillageSnapshot {
                 project: "ops".into(),

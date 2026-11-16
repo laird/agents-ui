@@ -47,6 +47,8 @@ pub struct HerdrAgent {
     /// Its context use, from the status line at the bottom of its pane
     /// (`herdr pane read`); not in `herdr agent list`.
     pub context: Option<crate::model::status::ContextUse>,
+    /// A usage or rate limit it stopped on, from the lines above that (#484).
+    pub limit: Option<crate::model::status::UsageLimit>,
 }
 
 /// `herdr workspace list` output → workspace id (`w5`) to its label
@@ -99,6 +101,7 @@ pub fn parse_agents(json: &str) -> Vec<HerdrAgent> {
                         cwd: s("cwd").or_else(|| s("foreground_cwd"))?,
                         agent: s("agent"),
                         context: None,
+                        limit: None,
                     })
                 })
                 .collect()
@@ -154,6 +157,7 @@ fn snapshot(agent: &HerdrAgent, project: &str, role: &str, is_manager: bool, bra
         mux: super::Mux::Herdr,
         context_pct: agent.context.as_ref().map(|c| c.pct),
         context_window: agent.context.as_ref().and_then(|c| c.window.clone()),
+        limit: agent.limit.clone(),
     }
 }
 
@@ -242,7 +246,7 @@ pub fn swarms_from_agents(
                 Some(m) => snapshot(&agents[m.agent], &project, "manager", true, m.branch.as_ref()),
                 None => {
                     let mut missing = snapshot(
-                        &HerdrAgent { pane_id: String::new(), name: None, status: "unknown".into(), cwd: String::new(), agent: None, context: None },
+                        &HerdrAgent { pane_id: String::new(), name: None, status: "unknown".into(), cwd: String::new(), agent: None, context: None, limit: None },
                         &project,
                         "manager",
                         true,
@@ -338,20 +342,26 @@ impl SwarmSource for HerdrSwarms {
 }
 
 /// Each agent's context use, from the last few lines of its pane, where
-/// Claude Code's status line is. All panes at once: one short read each.
+/// Claude Code's status line is, and any usage limit it stopped on, which
+/// is printed just above its input box (#484). All panes at once: one short
+/// read each.
+/// Lines read from the bottom of each pane: the status line and input box
+/// take about six, and a limit message sits a few lines above them.
+const PANE_TAIL: u32 = 16;
+
 async fn read_context(transport: &ServerTransport, agents: &mut [HerdrAgent]) {
     let reads: Vec<_> = agents
         .iter()
         .map(|a| {
-            let args = super::pane::herdr_read_args(&a.pane_id, 6, "text");
+            let args = super::pane::herdr_read_args(&a.pane_id, PANE_TAIL, "text");
             async move { transport.output("herdr", &args, None).await.ok() }
         })
         .collect();
     let outs = futures::future::join_all(reads).await;
     for (agent, out) in agents.iter_mut().zip(outs) {
-        agent.context = out
-            .filter(|o| o.status.success())
-            .and_then(|o| crate::model::status::parse_context(&String::from_utf8_lossy(&o.stdout)));
+        let tail = out.filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
+        agent.context = tail.as_deref().and_then(crate::model::status::parse_context);
+        agent.limit = tail.as_deref().and_then(crate::model::status::parse_limit);
     }
 }
 

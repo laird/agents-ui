@@ -38,6 +38,7 @@ function renderSaverStrip(box, lastOk) {
       <span class="ss-item ss-working"><b>${s.working}</b> working</span>
       <span class="ss-item"><b>${s.idle}</b> idle</span>
       <span class="ss-item${s.blocked ? ' ss-red' : ''}"><b>${s.blocked}</b> blocked</span>
+      ${s.limit ? `<span class="ss-item ss-limit"><b>${esc(s.limit)}</b></span>` : s.limited ? `<span class="ss-item ss-limit"><b>${s.limited}</b> limited</span>` : ''}
       <span class="ss-time">${lastOk ? 'Updated ' + new Date(lastOk).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span>
     </div>
     <div class="ss-row">

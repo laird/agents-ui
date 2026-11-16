@@ -1,12 +1,14 @@
 /* ---------- Screensaver: the decisions ----------
- * What the screensaver mode (screensaver.js) shows and when, with no DOM and
- * no imports, so node can test it (tools/omarchy-plugin/
- * agents-village-screensaver/tests/saver.test.mjs).
+ * What the screensaver mode (screensaver.js) shows and when, with no DOM
+ * (its one import, limits.js, has none either), so node can test it
+ * (tools/omarchy-plugin/agents-village-screensaver/tests/saver.test.mjs).
  *
  * The mode is `/village?screensaver=1` or `/village#<project>&screensaver`.
  * Options ride along in the query: `cycle=<seconds>` between swarms (0 stays
  * put), `dim=<from>-<to>` night hours, `dismiss=1` to close on input (only
  * the Omarchy launcher asks for that; a dashboard tab never closes itself). */
+
+import { limitedCount, signWords, villageLimit } from './limits.js';
 
 /* The village or world the hash names: `#shop&screensaver` is `shop`. */
 export function hashName(hash) {
@@ -38,19 +40,23 @@ export function saverOptions(search, hash) {
 
 /* What the status strip says about one village. "Waiting on you" counts what
  * the bar widget counts: blocked houses and manager, the board, and a gate
- * that handed work back. */
+ * that handed work back. Houses held by a usage limit are counted apart
+ * (#484): they wait on the limit, not on you; `limit` is the hall's sign when
+ * most of the village is held. */
 export function saverSummary(v) {
   const houses = (v && v.houses) || [];
   const p = (v && v.pipeline) || {};
   const gates = p.gates || [];
   const n = st => houses.filter(h => h.status === st).length;
   const handedBack = gates.filter(g => g.state === 'failed' || g.state === 'conflict' || (g.state === 'red-base' && !g.landed)).length;
-  const blocked = n('blocked');
+  const blocked = n('blocked'), held = limitedCount(v);
   return {
     project: v ? v.project : '',
     working: n('working'),
     blocked,
-    idle: houses.length - n('working') - blocked,
+    limited: held,
+    limit: signWords(villageLimit(v)),
+    idle: houses.length - n('working') - blocked - held,
     waiting: ((v && v.board) || []).length + blocked + (v && v.manager && v.manager.status === 'blocked' ? 1 : 0) + handedBack,
     gate: {
       queued: gates.filter(g => g.state === 'queued').length,
