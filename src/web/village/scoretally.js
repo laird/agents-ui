@@ -4,10 +4,13 @@
  * that conflict most. No DOM, so node tests it
  * (tools/village-tests/scoretally.test.mjs). */
 
-/* "landed 14 · bounced 6 today", or null when the gate reports no tally. */
+/* "merged 14 · bounced 6 today", or null when the gate reports no tally.
+ * "Merged", not "landed" (#508): these are the gate's own landings, which the
+ * screensaver strip's "landed today" (issues GitHub closed as completed)
+ * need not match. */
 export function scoreLine(ms) {
   if (!ms) return null;
-  return `landed ${ms.landed_today || 0} · bounced ${ms.bounced_today || 0} today`;
+  return `merged ${ms.landed_today || 0} · bounced ${ms.bounced_today || 0} today`;
 }
 
 /* The hotspots, most conflicted first (then by name), as the sign lists them:

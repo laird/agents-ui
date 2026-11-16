@@ -221,8 +221,9 @@ house dressed for rework (a cart with a red rag, a REJECTED parcel, a red
 force field), under a red tag saying why and how often ("↺2 conflict"), with
 broken boards beside it from the second bounce. A new bounce plays once: the
 crate jams at the gate and is carried home. East of the gatehouse a slate
-shows today's tally, landed in green and bounced in red ("landed 14 · bounced
-6 today"), and a sign with a red flame stands beside it once anything has
+shows today's tally, merged in green and bounced in red ("merged 14 · bounced
+6 today": the gate's own landings, which the screensaver's "landed today",
+issues GitHub closed as completed, need not match), and a sign with a red flame stands beside it once anything has
 conflicted: click it for the files that conflict most, most first
 (`src/web/village/main.js ×4`). The Key shows each of these marks.
 `CONFLICTS=1 tools/mock/demo.sh` scripts bounces to watch them.

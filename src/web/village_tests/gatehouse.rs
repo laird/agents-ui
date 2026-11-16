@@ -100,14 +100,14 @@ fn village_html_shows_the_gate_scoreboard_and_hotspots() {
     // At 2× (#458) the counts are chits drawn in detail pixels where numberTag put them.
     assert!(body.contains("chit(d, 2, 2, landed, LANDED, P.o);"));
     assert!(body.contains("chit(d, 4 + 2 * wl, 2, bounced, BOUNCED, P.white);"));
-    assert!(body.contains("return `landed ${ms.landed_today || 0} · bounced ${ms.bounced_today || 0} today`;"));
+    assert!(body.contains("return `merged ${ms.landed_today || 0} · bounced ${ms.bounced_today || 0} today`;"));
     // The sign stands only when something conflicted, and its dialog lists them in order.
     assert!(body.contains("if ((ms.hotspots || []).length) {"));
     assert!(body.contains("return { title: 'Conflict hotspots', line: 'The files that conflict most today: work that touches them bounces back from the gate.', meta: lines };"));
     assert!(body.contains(".sort((a, b) => b.count - a.count || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0))"));
     // The Key names the slate and the sign (bounces.js names the rework crate).
     assert!(body.contains("registerKey({ group: 'other', rows: () => ["));
-    assert!(body.contains("[c => slate(c, 1, 1, 14, 6), 'Slate by the gatehouse: work landed (green) and bounced (red) today', 26],"));
+    assert!(body.contains("[c => slate(c, 1, 1, 14, 6), 'Slate by the gatehouse: work the merge gate merged (green) and bounced (red) today', 26],"));
 }
 
 #[test]

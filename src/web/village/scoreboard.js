@@ -1,6 +1,6 @@
 /* ---------- The gate's scoreboard and hotspots sign ----------
  * The inefficiency view (#435), beside the gatehouse: a slate with today's
- * tally, landed in green and bounced in red, and a signpost with a red flame
+ * tally, merged in green and bounced in red, and a signpost with a red flame
  * for the files that conflict most. A click on either says it in words
  * (scoretally.js). Drawn only when the gate reports a tally
  * (`pipeline.merge_stats`, #431); the sign only when something conflicted. */
@@ -73,7 +73,9 @@ registerLayer({ z: 76, draw(c, { v, lay }, t) {
 registerHit({ kind: 'scoreboard', dialog(o, sc) {
   const ms = sc.v.pipeline.merge_stats || {}, top = hotspotLines(ms)[0];
   return { title: 'The merge gate today', line: `Work ${scoreLine(ms)}`,
-    meta: ['Landed (green): merged onto the integration branch', 'Bounced (red): handed back to its worker, a conflict or a failed gate',
+    meta: ['Merged (green): the merge gate landed it on the integration branch',
+      'Bounced (red): handed back to its worker, a conflict or a failed gate',
+      'Counted by the gate itself: an issue closed by hand or by a commit outside the gate is not here, and is in the screensaver\'s "landed today" (issues GitHub closed as completed)',
       top ? `Most conflicted: ${top}` : null] };
 } });
 registerHit({ kind: 'hotspots', dialog(o, sc) {
@@ -94,6 +96,6 @@ registerLabels(sc => {
 
 /* In the Key, beside the bounce marks. */
 registerKey({ group: 'other', rows: () => [
-  [c => slate(c, 1, 1, 14, 6), 'Slate by the gatehouse: work landed (green) and bounced (red) today', 26],
+  [c => slate(c, 1, 1, 14, 6), 'Slate by the gatehouse: work the merge gate merged (green) and bounced (red) today', 26],
   [c => hotspotSign(c, 3, 0, 0), 'Sign with a red flame by the gatehouse: the files that conflict most (click it)', 16]] });
 

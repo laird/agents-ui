@@ -6,9 +6,10 @@ import assert from 'node:assert/strict';
 import { hotspotLines, scoreLine } from '../../src/web/village/scoretally.js';
 
 test("the scoreboard says today's totals", () => {
-  assert.equal(scoreLine({ landed_today: 14, bounced_today: 6, hotspots: [] }), 'landed 14 · bounced 6 today');
-  assert.equal(scoreLine({ landed_today: 0, bounced_today: 0 }), 'landed 0 · bounced 0 today');
-  assert.equal(scoreLine({}), 'landed 0 · bounced 0 today', 'missing counts read as none');
+  // "merged", not "landed" (#508): the gate's own landings, not the strip's GitHub count.
+  assert.equal(scoreLine({ landed_today: 14, bounced_today: 6, hotspots: [] }), 'merged 14 · bounced 6 today');
+  assert.equal(scoreLine({ landed_today: 0, bounced_today: 0 }), 'merged 0 · bounced 0 today');
+  assert.equal(scoreLine({}), 'merged 0 · bounced 0 today', 'missing counts read as none');
   assert.equal(scoreLine(null), null, 'no tally from the gate: no scoreboard');
 });
 

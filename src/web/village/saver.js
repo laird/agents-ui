@@ -70,18 +70,24 @@ export function saverSummary(v) {
   };
 }
 
-/* "7 landed today (avg 9)" (#500): today's landed issues and the mean over the
- * days #498's GitHub summary carries (14, today last), rounded, as
- * { today, avg }. null, and the strip shows nothing, when there is no summary
- * (no gh, or not signed in), when a day's count is not a number, or when the
- * newest day is not `today` (the viewer's date, YYYY-MM-DD): just after
- * midnight the cached summary still ends at yesterday. */
+/* "7 landed today (avg 9)" (#500): issues GitHub closed as completed today,
+ * and the mean per day, rounded, as { today, avg }. The mean leaves today out
+ * (#508), so a morning doesn't drag it down: it is over the full days before
+ * today in #498's summary (14, today last), counted from the first of them
+ * that landed anything, so a young repo averages over its own days. `avg` is
+ * null, and the strip shows no average, until there is such a day. null, and
+ * the strip shows nothing, when there is no summary (no gh, or not signed
+ * in), when a day's count is not a number, or when the newest day is not
+ * `today` (the viewer's date, YYYY-MM-DD): just after midnight the cached
+ * summary still ends at yesterday. */
 export function landedWords(github, today = localDate(new Date())) {
   const days = github && Array.isArray(github.days) ? github.days : [];
   if (!days.length || !days.every(d => d && Number.isFinite(d.landed))) return null;
   const last = days[days.length - 1];
   if (last.date !== today) return null;
-  return { today: last.landed, avg: Math.round(days.reduce((sum, d) => sum + d.landed, 0) / days.length) };
+  const before = days.slice(0, -1), first = before.findIndex(d => d.landed > 0);
+  const full = first < 0 ? [] : before.slice(first);
+  return { today: last.landed, avg: full.length ? Math.round(full.reduce((sum, d) => sum + d.landed, 0) / full.length) : null };
 }
 export const localDate = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 

@@ -34,7 +34,9 @@ fn village_html_has_a_screensaver_mode() {
     assert!(body.contains("html.ss-dim { filter: brightness(.4); }"));
     // Today's landed count beside the 14-day mean (#500), only when the village has a GitHub summary.
     assert!(body.contains("landed: landedWords(v && v.github),"));
-    assert!(body.contains("${s.landed ? `<span class=\"ss-item\"><b>${s.landed.today}</b> landed today (avg <b>${s.landed.avg}</b>)</span>` : ''}"));
+    // The average only once there is a full day to average (#508), and the tooltip says where it comes from.
+    assert!(body.contains("`<b>${s.landed.today}</b> landed today${s.landed.avg === null ? '' : ` (avg <b>${s.landed.avg}</b>)`}</span>`"));
+    assert!(body.contains("title=\"Issues GitHub closed as completed today; the average is over the full days before today\""));
 }
 
 /// The installer and launcher (bash, in a throwaway HOME) and the page's
