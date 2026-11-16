@@ -13,8 +13,8 @@
 //!   completed); the caravan has `arrived` when every crate is loaded.
 //!
 //! Both are read from issue bodies, as `gh issue list --json number,title,
-//! state,stateReason,body` gives them, once per repo and cached like the
-//! other GitHub reads (`fetch`). GitHub's own sub-issue and blocked-by
+//! state,stateReason,body` gives them, once per repo every 90 s, in the
+//! background: a poll never waits on GitHub (`fetch`). GitHub's own sub-issue and blocked-by
 //! relations are not in that listing, so a link written only there is not
 //! seen. A repo GitHub can't be asked about is left out, not an error.
 
@@ -235,10 +235,18 @@ pub fn links(repos: &[(String, String)], issues: &HashMap<String, Vec<CrossIssue
         let Some((pname, parent)) = find(&pslug, pn) else { continue };
         let mut by_repo: BTreeMap<&str, (Vec<u32>, bool)> = BTreeMap::new();
         for (s, n) in &kids {
-            let Some((repo, kid)) = find(s, *n) else { continue };
+            // A subtask in the group the read didn't reach (older than it) is
+            // not known to have landed: its crate isn't loaded.
+            let (repo, landed) = match find(s, *n) {
+                Some((repo, kid)) => (repo, kid.landed()),
+                None => match name_of.get(s.as_str()) {
+                    Some(repo) => (*repo, false),
+                    None => continue,
+                },
+            };
             let e = by_repo.entry(repo).or_insert((Vec::new(), true));
             e.0.push(*n);
-            e.1 &= kid.landed();
+            e.1 &= landed;
         }
         if by_repo.len() < 2 {
             continue;
@@ -254,23 +262,57 @@ pub fn links(repos: &[(String, String)], issues: &HashMap<String, Vec<CrossIssue
 /// How long a repo's issues are reused: as long as the village's GitHub summary.
 const FRESH: Duration = Duration::from_secs(90);
 
-/// A repo's issues for [`links`], read with `gh` in its directory and kept
-/// [`FRESH`]; None when GitHub can't be asked (no `gh`, not signed in, not
-/// on GitHub). A failed read is kept too, so it isn't retried on every poll.
-pub async fn fetch(transport: &ServerTransport, dir: &Path) -> Option<Vec<CrossIssue>> {
-    type Cache = tokio::sync::Mutex<HashMap<std::path::PathBuf, (Instant, Option<Vec<CrossIssue>>)>>;
-    static CACHE: OnceLock<Cache> = OnceLock::new();
-    let mut cache = CACHE.get_or_init(Default::default).lock().await;
-    if let Some((_, v)) = cache.get(dir).filter(|(at, _)| at.elapsed() < FRESH) {
-        return v.clone();
+/// What was last read of one repo: when, its `owner/repo`, and its issues.
+#[derive(Debug, Clone, Default)]
+pub struct RepoRead {
+    pub slug: Option<String>,
+    pub issues: Option<Vec<CrossIssue>>,
+}
+
+type Reads = std::sync::Mutex<HashMap<std::path::PathBuf, (Instant, RepoRead)>>;
+static READS: OnceLock<Reads> = OnceLock::new();
+/// The repos being read now: one refresh each at a time.
+static READING: OnceLock<std::sync::Mutex<std::collections::HashSet<std::path::PathBuf>>> = OnceLock::new();
+
+/// A repo's `owner/repo` and issues for [`links`], as last read: never read
+/// on the poll that asks. When nothing has been read yet, or it is older
+/// than [`FRESH`], a read starts in the background (one per repo at a time)
+/// and this poll gets what there was, or nothing; the next poll gets the new
+/// read. A repo GitHub can't be asked about reads as no slug or no issues.
+pub fn fetch(transport: &ServerTransport, dir: &Path) -> RepoRead {
+    let reads = READS.get_or_init(Default::default);
+    let held = reads.lock().unwrap_or_else(|e| e.into_inner()).get(dir).cloned();
+    if held.as_ref().is_some_and(|(at, _)| at.elapsed() < FRESH) {
+        return held.map(|(_, r)| r).unwrap_or_default();
+    }
+    // No runtime (a plain test): nothing to read in, and nothing marked as being read.
+    if tokio::runtime::Handle::try_current().is_ok()
+        && READING.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner()).insert(dir.to_path_buf())
+    {
+        let (transport, dir) = (transport.clone(), dir.to_path_buf());
+        tokio::spawn(async move {
+            let read = read_repo(&transport, &dir).await;
+            READS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner()).insert(dir.clone(), (Instant::now(), read));
+            READING.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner()).remove(&dir);
+        });
+    }
+    held.map(|(_, r)| r).unwrap_or_default()
+}
+
+/// One read of a repo: its origin's `owner/repo`, and its issues with their
+/// bodies (`gh issue list --state all`, the newest 300: a blocker or subtask
+/// older than that is not seen, and its rope or caravan crate is left out).
+async fn read_repo(transport: &ServerTransport, dir: &Path) -> RepoRead {
+    let slug = crate::github::origin_web_url(transport, dir).await.as_deref().and_then(slug_of);
+    if slug.is_none() {
+        return RepoRead::default();
     }
     let args: Vec<String> = ["issue", "list", "--state", "all", "--limit", "300", "--json", "number,title,state,stateReason,body"].map(String::from).to_vec();
-    let read = match crate::github::gh_repo_output(transport, dir, &args).await {
+    let issues = match crate::github::gh_repo_output(transport, dir, &args).await {
         Ok(out) if out.status.success() => serde_json::from_slice::<Vec<CrossIssue>>(&out.stdout).ok(),
         _ => None,
     };
-    cache.insert(dir.to_path_buf(), (Instant::now(), read.clone()));
-    read
+    RepoRead { slug, issues }
 }
 
 #[cfg(test)]
@@ -342,6 +384,12 @@ mod tests {
         }
         let (_, caravans) = links(&group(), &issues);
         assert!(caravans[0].arrived && caravans[0].crates.iter().all(|k| k.loaded));
+        // A listed subtask the read didn't reach: not known to have landed.
+        issues.get_mut("lib-core").unwrap()[0].body = Some("- [x] acme/lib-core#2\n- [ ] acme/web#9\n- [ ] acme/web#3".into());
+        let c = &links(&group(), &issues).1[0];
+        assert_eq!(c.crates.last().map(|k| (k.issues.clone(), k.loaded)), Some((vec![3, 9], false)));
+        assert!(!c.arrived);
+        issues.get_mut("lib-core").unwrap()[0].body = Some("Tasks:\n- [x] acme/lib-core#2\n- [ ] acme/web#9".into());
         // Closed as not planned is not landed.
         issues.get_mut("web").unwrap()[0].state_reason = Some("NOT_PLANNED".into());
         assert!(!links(&group(), &issues).1[0].arrived);

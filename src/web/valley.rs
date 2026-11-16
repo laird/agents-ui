@@ -561,15 +561,17 @@ async fn dormant_stops(transport: &super::super::transport::ServerTransport, vil
 }
 
 /// Each group's ropes and caravans (#528): the issues of every repo of it on
-/// this machine and on GitHub, read with `gh` and cached (`crossrepo::fetch`).
-/// A repo with no directory here, or one GitHub can't be asked about, is left out.
-async fn add_links(transport: &super::super::transport::ServerTransport, groups: &mut [ValleyGroup], villages: &[VillageSnapshot]) {
+/// this machine and on GitHub, as last read in the background
+/// (`crossrepo::fetch`): the first poll has none, the next has them. A repo
+/// with no directory here, or one GitHub can't be asked about, is left out.
+fn add_links(transport: &super::super::transport::ServerTransport, groups: &mut [ValleyGroup], villages: &[VillageSnapshot]) {
     for g in groups.iter_mut() {
         let (mut repos, mut issues) = (Vec::new(), HashMap::new());
         for r in &g.repos {
             let Some(dir) = repo_dir(&r.repo, villages) else { continue };
-            let Some(slug) = crate::github::origin_web_url(transport, &dir).await.as_deref().and_then(super::crossrepo::slug_of) else { continue };
-            if let Some(list) = super::crossrepo::fetch(transport, &dir).await {
+            let read = super::crossrepo::fetch(transport, &dir);
+            let Some(slug) = read.slug else { continue };
+            if let Some(list) = read.issues {
                 issues.insert(r.name.clone(), list);
             }
             repos.push((r.name.clone(), slug));
@@ -591,7 +593,7 @@ pub async fn api_valley_handler(
     let answer = tokio::task::spawn_blocking(move || read_with(&manifest_path(), &villages, &dormant)).await;
     axum::Json(match answer {
         Ok(mut valley) => {
-            add_links(&state.transport, &mut valley.groups, &around).await;
+            add_links(&state.transport, &mut valley.groups, &around);
             serde_json::json!(valley)
         }
         Err(e) => serde_json::json!({ "manifest": manifest_path().to_string_lossy(), "found": true, "groups": [], "errors": [format!("can't read the valley: {e}")] }),
