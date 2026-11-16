@@ -2,8 +2,8 @@
 //! `POST /api/swarms/{project}/issues/{number}/decision` with
 //! `{ "action": "approve" | "reject" | "changes", "comment": "..." }`.
 //!
-//! - **approve** removes the `proposal` label, as the TUI's approve key does
-//!   (`App::approve_selected_issue`), and says so on the issue. Without the
+//! - **approve** says so on the issue, then removes the `proposal` label, as
+//!   the TUI's approve key does (`App::approve_selected_issue`). Without the
 //!   label the issue is claimable, so its crate leaves the board for the docks.
 //! - **reject** closes the issue, with the reason when one is given.
 //! - **changes** posts the comment (required) and leaves it a proposal, for
@@ -58,9 +58,11 @@ pub fn decision_commands(
         None => head.to_string(),
     };
     Ok(match action {
+        // The comment first: if removing the label then fails, the issue is
+        // still a proposal and a retry works (a 409 would say it was decided).
         Action::Approve => vec![
-            client.remove_label(number, "proposal"),
             client.comment_issue(number, &with("✅ Approved from the village board.")),
+            client.remove_label(number, "proposal"),
         ],
         Action::Reject => vec![client.close_issue(number, &with("❌ Rejected from the village board."))],
         Action::Changes => {
@@ -144,10 +146,10 @@ mod tests {
     }
 
     #[test]
-    fn approving_removes_the_proposal_label_then_says_so() {
+    fn approving_says_so_then_removes_the_proposal_label() {
         let cmds = decision_commands(&gh(), 7, Action::Approve, None).unwrap();
-        assert_eq!(cmds[0].args, vec!["issue", "edit", "7", "--remove-label", "proposal"]);
-        assert_eq!(cmds[1].args[..3], ["issue", "comment", "7"]);
+        assert_eq!(cmds[0].args[..3], ["issue", "comment", "7"]);
+        assert_eq!(cmds[1].args, vec!["issue", "edit", "7", "--remove-label", "proposal"]);
         assert_eq!(cmds.len(), 2);
     }
 

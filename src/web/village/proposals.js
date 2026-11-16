@@ -67,6 +67,7 @@ function bulkBox(root, project, picks, rows) {
       const msg = root.querySelector('[role=status]');
       let done = 0, failed = '';
       for (const n of picks) {
+        if (rows.get(n.number)?.classList.contains('decided')) continue; // decided from its own row meanwhile
         msg.textContent = `Approving #${n.number}…`;
         const r = await decide(project, n.number, 'approve');
         const row = rows.get(n.number);
