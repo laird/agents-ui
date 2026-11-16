@@ -7,8 +7,9 @@
 //!
 //! - one `gh issue list --state all` of the issues updated in the window,
 //!   with their comments: what was opened, what landed and when it was
-//!   claimed, and where the merge gate handed work back (its comments, as
-//!   `gate::comment_bounce` reads them, #431);
+//!   claimed, where the merge gate handed work back (its comments, as
+//!   `gate::comment_bounce` reads them, #431), and what came back
+//!   (`returned.rs`, #497);
 //! - one `gh api .../deployments`: what was deployed each day;
 //! - the integration branch's `git log`, locally: what was reverted, and
 //!   what landed in the last 24 h (#492); and its root commits' author
@@ -99,6 +100,14 @@ pub struct Summary {
     /// `claimed`, `first_commit`, `landed`, `deployed:<environment>`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub stage_medians: BTreeMap<String, u64>,
+    /// Landed work that came back in the window (#497, `returned.rs`):
+    /// reopened, reverted, or named by a regression report.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub returned: Vec<super::returned::Returned>,
+    /// Issues landed in the window, those reopened since included: the
+    /// share of them in `returned` is the swarm's quality figure.
+    #[serde(default)]
+    pub returned_of: u32,
 }
 
 /// The oldest of the root commits' author dates (`git log --max-parents=0
@@ -130,6 +139,7 @@ pub struct Day {
 
 /// An issue as `gh issue list --json number,state,createdAt,closedAt,stateReason,comments` gives it.
 /// The travel log (#495, `travel.rs`) reads the same shape, one issue at a time.
+/// The read also asks for its body and labels, for `returned.rs` (#497).
 #[derive(Debug, Clone, Default, Deserialize)]
 pub(crate) struct Issue {
     #[serde(default)]
@@ -183,6 +193,7 @@ fn local_date(at: &str, offset: &FixedOffset) -> Option<NaiveDate> {
 /// read: its reverts and push retries). `today` and `offset` are the
 /// server's local date and offset from UTC.
 pub fn summarize(issues: &[u8], deployments: Option<&str>, log: Option<&str>, today: NaiveDate, offset: FixedOffset, as_of: String) -> Option<Summary> {
+    let issues_json = issues;
     let issues: Vec<Issue> = serde_json::from_slice(issues).ok()?;
     let first = today - chrono::Duration::days(DAYS as i64 - 1);
     let mut days: Vec<Day> = (0..DAYS)
@@ -240,7 +251,8 @@ pub fn summarize(issues: &[u8], deployments: Option<&str>, log: Option<&str>, to
             }
         }
     }
-    Some(Summary { as_of, days, median_claim_to_land_secs: median(&mut waits), closed_today, ..Summary::default() })
+    let goods = super::returned::find(issues_json, log, first, offset).unwrap_or_default();
+    Some(Summary { as_of, days, median_claim_to_land_secs: median(&mut waits), closed_today, returned: goods.items, returned_of: goods.landed, ..Summary::default() })
 }
 
 /// An open pull request as `gh pr list --json number,createdAt` gives it.
@@ -326,7 +338,7 @@ pub async fn fetch(transport: &ServerTransport, repo: &Path, integration: &str) 
     let args: Vec<String> = [
         "issue", "list", "--state", "all", "--limit", "500",
         "--search", &format!("updated:>={since}"),
-        "--json", "number,title,state,createdAt,closedAt,stateReason,comments",
+        "--json", "number,title,body,labels,state,createdAt,closedAt,stateReason,comments",
     ]
     .iter()
     .map(|s| s.to_string())

@@ -182,3 +182,13 @@ test("the gate's UTC tally joins today's row only on the same date", () => {
   const other = new Date(Date.parse(on + 'T00:00:00Z') + 86400000).toISOString().slice(0, 10);
   assert.notEqual(T.almanacRows(gh, ms, other)[13].landed, 99);
 });
+
+test('the almanac says how much landed work came back (#497)', async () => {
+  const { almanacFacts } = await import('../../src/web/village/almanactally.js');
+  const today = new Date().toISOString().slice(0, 10);
+  const days = Array.from({ length: 14 }, (_, k) => ({ date: k === 13 ? today : `2000-01-${String(k + 1).padStart(2, '0')}`, landed: 3, opened: 1, bounced: 0, deploys: 0 }));
+  const facts = almanacFacts({ as_of: `${today}T06:00:00Z`, days, returned_of: 42, returned: [{ number: 1, how: 'reopened' }] });
+  assert.ok(facts.meta.includes('Came back: 1 of 42 landed came back (2%), reopened, reverted or named in a regression'), facts.meta.join('\n'));
+  const none = almanacFacts({ as_of: `${today}T06:00:00Z`, days });
+  assert.ok(!none.meta.some(m => m.startsWith('Came back')));
+});
