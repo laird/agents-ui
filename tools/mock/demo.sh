@@ -81,14 +81,27 @@ sleep 1
 
 # A group of related repos (#510): lib-core, the two consumers built on it
 # (shop and larkspur, both live here) and billing, a service shop calls. lib-core
-# and billing have no swarm, so they are dormant.
+# and billing have no swarm, so they are dormant. Each is a small repo under
+# the demo's HOME, so the valley can read versions (#511): lib-core has
+# released v1.4.0; shop and billing have taken it, larkspur still pins 1.3.0,
+# so a ship waits at its dock.
 mkdir -p "$DEMO/home/.agents-ui"
+demo_repo() {  # demo_repo <name> <file> <contents>: a repo under ~/repos
+  mkdir -p "$DEMO/home/repos/$1" && printf '%s\n' "$3" > "$DEMO/home/repos/$1/$2"
+}
+demo_repo lib-core Cargo.toml $'[package]\nname = "lib-core"\nversion = "1.4.0"'
+(cd "$DEMO/home/repos/lib-core" && git init -q && git add -A \
+  && git -c user.name=demo -c user.email=demo@localhost -c commit.gpgsign=false commit -qm "lib-core" \
+  && git -c tag.gpgsign=false tag v1.3.0 && git -c tag.gpgsign=false tag v1.4.0) || echo "demo: could not tag lib-core; the valley shows no ships" >&2
+demo_repo shop Cargo.lock $'[[package]]\nname = "lib-core"\nversion = "1.4.0"'
+demo_repo larkspur package-lock.json '{"packages":{"node_modules/lib-core":{"version":"1.3.0"}}}'
+demo_repo billing Cargo.toml $'[dependencies]\nlib-core = "1.4"'
 cat > "$DEMO/home/.agents-ui/group.json" <<'GROUP'
 [{ "name": "demo", "repos": [
-  { "repo": "lib-core" },
-  { "repo": "shop", "depends_on": [{ "repo": "lib-core", "via": "package" }, { "repo": "billing", "via": "api" }] },
-  { "repo": "larkspur", "depends_on": [{ "repo": "lib-core", "via": "package" }] },
-  { "repo": "billing", "depends_on": [{ "repo": "lib-core", "via": "package" }] } ] }]
+  { "repo": "~/repos/lib-core" },
+  { "repo": "~/repos/shop", "depends_on": [{ "repo": "~/repos/lib-core", "via": "package" }, { "repo": "~/repos/billing", "via": "api" }] },
+  { "repo": "~/repos/larkspur", "depends_on": [{ "repo": "~/repos/lib-core", "via": "package" }] },
+  { "repo": "~/repos/billing", "depends_on": [{ "repo": "~/repos/lib-core", "via": "package" }] } ] }]
 GROUP
 echo "Village:    http://127.0.0.1:$PORT/village"
 echo "Valley:     http://127.0.0.1:$PORT/village?valley=demo"

@@ -143,6 +143,8 @@
   .al.ov small { display: block; }
   .al.ov-red small { color: #ff8070; }
   .al.ov-amber small { color: #f8c060; }
+  /* A ship waiting at a consumer's dock in the valley (#511): the version it waits to take. */
+  .al.ov-ship { transform: translate(-50%, 0); color: #fff; background: #8a2a20; border-color: #ff8070; font-size: calc(var(--lf, 11px) - 2px); padding: 0 3px; }
   .al.ghost { color: var(--ink); border-color: #a8b8d0; font-size: calc(var(--lf, 11px) - 2px); padding: 0 3px; white-space: normal; text-align: center; }
   .al.ghost span + span::before { content: '· '; }
   #d-travel h3 { margin: .6em 0 .2em; font-size: 1em; }

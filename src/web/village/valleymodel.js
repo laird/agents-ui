@@ -35,7 +35,7 @@ export function valleyLayout(group) {
   // Rivers and roads keep to the gaps, never under a repo: a river that
   // skips a column climbs to the lane above every row; a road leaves its
   // repo's west side and runs along the lane below every row.
-  const top = m >> 1, rivers = [], roads = [];
+  const top = m >> 1, rivers = [], riverEdges = [], roads = [];
   ((group && group.edges) || []).forEach(e => {
     const a = at[e.from], b = at[e.to];
     if (!a || !b) return;
@@ -43,12 +43,78 @@ export function valleyLayout(group) {
       const x0 = a.x + w, y0 = a.y + (h >> 1), x1 = b.x, y1 = b.y + (h >> 1), out = x0 + (gx >> 1), into = x1 - (gx >> 1);
       if (out === into) rivers.push(y0 === y1 ? [[x0, y0], [x1, y1]] : [[x0, y0], [out, y0], [out, y1], [x1, y1]]);
       else rivers.push([[x0, y0], [out, y0], [out, top], [into, top], [into, y1], [x1, y1]]);
+      riverEdges.push(e);
     } else {
       const xa = a.x - 14, xb = b.x - 14, ya = a.y + h - 12, yb = b.y + h - 12;
       roads.push([[a.x, ya], [xa, ya], [xa, lane], [xb, lane], [xb, yb], [b.x, yb]]);
     }
   });
-  return { W, H, cells, rivers, roads };
+  return { W, H, cells, rivers, riverEdges, roads };
+}
+
+/* ---------- Ships: releases flowing downstream (#511) ----------
+ * Each `package` edge says what its consumer pins and the library's latest
+ * release (`/api/valley`, pins.rs). A consumer behind the latest release has
+ * a ship waiting at its dock, labelled with the version it is waiting to
+ * take. A release made within SHIP_SAIL_MS sails down the river to each
+ * consumer that has taken it. */
+export const SHIP_SAIL_MS = 24 * 3600 * 1000, SHIP_TRIP_MS = 12000, SHIP_DOCK = 10;
+
+/* The point `f` (0–1) of the way along a polyline. */
+export function along(poly, f) {
+  const legs = poly.slice(1).map(([x, y], k) => Math.abs(x - poly[k][0]) + Math.abs(y - poly[k][1]));
+  let d = Math.max(0, Math.min(1, f)) * legs.reduce((a, b) => a + b, 0);
+  for (let k = 0; k < legs.length; k++) {
+    if (d <= legs[k] || k === legs.length - 1) {
+      const [x0, y0] = poly[k], [x1, y1] = poly[k + 1], u = legs[k] ? Math.min(1, d / legs[k]) : 0;
+      return [Math.round(x0 + (x1 - x0) * u), Math.round(y0 + (y1 - y0) * u)];
+    }
+    d -= legs[k];
+  }
+  return poly[0];
+}
+
+/* The ships on the valley's rivers at time `t` (ms of animation), `now` the
+ * wall clock: { x, y, edge, waiting }. A waiting ship sits SHIP_DOCK pixels
+ * short of its consumer; a sailing one loops down the river every SHIP_TRIP_MS. */
+export function valleyShips(lay, t, now = Date.now()) {
+  const ships = [];
+  (lay.riverEdges || []).forEach((e, k) => {
+    if (!e.latest) return;
+    const poly = lay.rivers[k], [ex, ey] = poly[poly.length - 1];
+    if (e.behind) { ships.push({ x: ex - SHIP_DOCK, y: ey, edge: e, waiting: true }); return; }
+    const made = Date.parse(e.latest_at || '');
+    if (e.behind === false && made && now - made >= 0 && now - made < SHIP_SAIL_MS) {
+      const [x, y] = along(poly, (t % SHIP_TRIP_MS) / SHIP_TRIP_MS);
+      ships.push({ x, y, edge: e, waiting: false });
+    }
+  });
+  return ships;
+}
+
+/* The ship within `r` scene pixels of (x, y), or null. */
+export function valleyShipAt(ships, x, y, r = 6) {
+  return ships.find(s => Math.abs(s.x - x) <= r && Math.abs(s.y - y) <= r) || null;
+}
+
+/* "2026-11-16T09:00:00Z" as "16 Nov 09:00", in local time; '' when unknown. */
+export function shipWhen(at) {
+  const d = new Date(Date.parse(at || ''));
+  if (isNaN(d)) return '';
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], p = n => String(n).padStart(2, '0');
+  return `${d.getDate()} ${months[d.getMonth()]} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/* What a click on a ship says: which versions, and since when. */
+export function shipWords(ship) {
+  const e = ship.edge, when = shipWhen(e.latest_at), since = when ? ` since ${when}` : '';
+  return ship.waiting
+    ? { title: `${e.from} ${e.latest} waits at ${e.to}'s dock`,
+      line: `${e.to} pins ${e.from} ${e.pinned}, behind ${e.latest}${since}.`,
+      meta: [`Pinned by ${e.to}: ${e.pinned}`, `Latest release of ${e.from}: ${e.latest}${when ? ` (${when})` : ''}`] }
+    : { title: `${e.from} ${e.latest} sails to ${e.to}`,
+      line: `A new release${since}; ${e.to} pins ${e.pinned}, so it has it.`,
+      meta: [`Pinned by ${e.to}: ${e.pinned}`, `Latest release of ${e.from}: ${e.latest}${when ? ` (${when})` : ''}`] };
 }
 
 /* The repo under (x, y), or null. */

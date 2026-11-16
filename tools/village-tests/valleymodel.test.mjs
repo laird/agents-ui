@@ -119,3 +119,51 @@ test('why nothing is drawn: no manifest, or no such group', () => {
   assert.match(valleyMissing({ found: true, manifest: 'g.json', groups: [], errors: ["can't read the manifest: bad"] }, 'shop'), /can't read the manifest: bad/);
   assert.equal(valleyMissing({ found: true, manifest: 'g.json', groups: [{ name: 'shop' }] }, 'shop'), null);
 });
+
+// Ships (#511): releases flowing downstream along the package edges.
+const { along, valleyShips, valleyShipAt, shipWords, SHIP_DOCK, SHIP_SAIL_MS, SHIP_TRIP_MS } = await import('../../src/web/village/valleymodel.js');
+
+test('a point along a river is measured along its legs', () => {
+  const poly = [[0, 0], [10, 0], [10, 10]];
+  assert.deepEqual(along(poly, 0), [0, 0]);
+  assert.deepEqual(along(poly, 0.5), [10, 0]);
+  assert.deepEqual(along(poly, 0.75), [10, 5]);
+  assert.deepEqual(along(poly, 1), [10, 10]);
+  assert.deepEqual(along(poly, 2), [10, 10], 'past the end stays at the end');
+});
+
+test('a consumer behind waits with a ship at its dock; a fresh release sails; else none', () => {
+  const now = Date.parse('2026-11-16T12:00:00Z');
+  const g = { ...SHOP, edges: [
+    { from: 'lib-core', to: 'web', via: 'package', pinned: '1.3.0', latest: 'v1.4.0', latest_at: '2026-11-15T09:00:00Z', behind: true },
+    { from: 'lib-core', to: 'api', via: 'package', pinned: '1.4.0', latest: 'v1.4.0', latest_at: '2026-11-16T09:00:00Z', behind: false },
+    { from: 'api', to: 'admin', via: 'package', pinned: '2.0', latest: 'v2.0.0', latest_at: '2026-11-01T09:00:00Z', behind: false },
+    { from: 'api', to: 'web', via: 'api' },
+  ] };
+  const lay = valleyLayout(g);
+  assert.equal(lay.riverEdges.length, 3, 'one river per package edge, in order');
+  const ships = valleyShips(lay, 0, now);
+  assert.equal(ships.length, 2, 'the old release no longer sails');
+  const [wait, sail] = ships;
+  const end = lay.rivers[0][lay.rivers[0].length - 1];
+  assert.deepEqual([wait.x, wait.y, wait.waiting, wait.edge.to], [end[0] - SHIP_DOCK, end[1], true, 'web']);
+  assert.deepEqual([sail.x, sail.y, sail.waiting], [...lay.rivers[1][0], false], 'it sets out from the library');
+  const mid = valleyShips(lay, SHIP_TRIP_MS / 2, now)[1];
+  assert.deepEqual([mid.x, mid.y], along(lay.rivers[1], 0.5), 'and goes down the river');
+  assert.equal(valleyShips(lay, 0, now + SHIP_SAIL_MS).length, 1, 'a day on, only the waiting ship');
+  assert.equal(valleyShipAt(ships, wait.x + 3, wait.y - 2), wait);
+  assert.equal(valleyShipAt(ships, wait.x + 30, wait.y), null);
+  // Nothing known: no ships.
+  assert.deepEqual(valleyShips(valleyLayout(SHOP), 0, now), []);
+});
+
+test("a ship's dialog says which versions, and since when", () => {
+  const e = { from: 'lib-core', to: 'web', pinned: '1.3.0', latest: 'v1.4.0', latest_at: '2026-11-15T09:00:00Z', behind: true };
+  const w = shipWords({ edge: e, waiting: true });
+  assert.equal(w.title, "lib-core v1.4.0 waits at web's dock");
+  assert.match(w.line, /^web pins lib-core 1\.3\.0, behind v1\.4\.0 since \d+ Nov \d\d:\d\d\.$/);
+  assert.ok(w.meta.includes('Pinned by web: 1.3.0'));
+  const s = shipWords({ edge: { ...e, pinned: '1.4.0', behind: false, latest_at: undefined }, waiting: false });
+  assert.equal(s.title, 'lib-core v1.4.0 sails to web');
+  assert.equal(s.line, 'A new release; web pins 1.4.0, so it has it.');
+});

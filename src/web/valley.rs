@@ -29,10 +29,11 @@ use serde::{Deserialize, Serialize};
 use super::village::{HouseStatus, VillageSnapshot};
 
 /// How one repo depends on another.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Via {
     /// It builds against the other's package: the river runs from it.
+    #[default]
     Package,
     /// It calls the other's API: a road between them (the grid, in phase 3).
     Api,
@@ -61,11 +62,22 @@ struct GroupDef {
 }
 
 /// An edge from the repo depended on (upstream) to the one depending on it.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
 pub struct Edge {
     pub from: String,
     pub to: String,
     pub via: Via,
+    /// For a `package` edge (#511): the version of `from` that `to` pins
+    /// (`pins.rs`), `from`'s latest release and when it was made, and
+    /// whether the pin is older. Each absent when it can't be read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pinned: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub behind: Option<bool>,
 }
 
 /// What the valley says about one repo, from its village.
@@ -157,6 +169,37 @@ fn village_for<'a>(repo: &str, villages: &'a [VillageSnapshot]) -> Option<&'a Vi
         .or_else(|| villages.iter().find(|v| v.project == name))
 }
 
+/// The directory a manifest repo is in, on this machine: its path when the
+/// manifest gives one that is there, else its village's repo.
+fn repo_dir(repo: &str, villages: &[VillageSnapshot]) -> Option<PathBuf> {
+    let home = dirs::home_dir().map(|h| h.to_string_lossy().into_owned()).unwrap_or_default();
+    let path = PathBuf::from(repo.strip_prefix("~/").map_or_else(|| repo.to_string(), |rest| format!("{home}/{rest}")));
+    if repo.contains('/') && path.is_dir() {
+        return Some(path);
+    }
+    village_for(repo, villages).map(|v| PathBuf::from(&v.repo_path)).filter(|p| !p.as_os_str().is_empty() && p.is_dir())
+}
+
+/// A `package` edge's versions (#511): what the consumer pins, the
+/// library's latest release (its `release` stop's tag, else its newest
+/// version tag), and whether the pin is behind it.
+fn versions(e: &mut Edge, lib: &str, user: &str, villages: &[VillageSnapshot]) {
+    let lib_dir = repo_dir(lib, villages);
+    let stop = village_for(lib, villages).and_then(|v| v.pipeline.stops.iter().find(|s| s.name == "release" && s.tag.is_some()));
+    let (latest, latest_at) = match stop {
+        Some(s) => (s.tag.clone(), s.deployed_at.clone()),
+        None => lib_dir.as_deref().and_then(super::pins::latest_tag).map_or((None, None), |(t, at)| (Some(t), at)),
+    };
+    let names = super::pins::package_names(lib_dir.as_deref().unwrap_or(Path::new("/nonexistent")), &repo_name(lib));
+    e.pinned = repo_dir(user, villages).and_then(|d| super::pins::pinned(&d, &names));
+    e.behind = match (&e.pinned, &latest) {
+        (Some(p), Some(l)) => super::pins::compare(p, l).map(|o| o == std::cmp::Ordering::Less),
+        _ => None,
+    };
+    e.latest = latest;
+    e.latest_at = latest_at;
+}
+
 /// What the valley says about a village.
 fn summarize(v: &VillageSnapshot) -> Summary {
     let count = |st: HouseStatus| v.houses.iter().filter(|h| h.status == st).count();
@@ -215,11 +258,16 @@ fn build_group(def: &GroupDef, villages: &[VillageSnapshot]) -> ValleyGroup {
             } else if &from == to {
                 errors.push(format!("{}: {to} depends on itself", def.name));
             } else if !edges.iter().any(|e: &Edge| e.from == from && e.to == *to && e.via == dep.via) {
-                edges.push(Edge { from, to: to.clone(), via: dep.via });
+                edges.push(Edge { from, to: to.clone(), via: dep.via, ..Default::default() });
             }
         }
     }
     let depth = order(&names, &edges, &def.name, &mut errors);
+    let def_of = |name: &str| defs.iter().zip(&names).find(|(_, n)| n.as_str() == name).map(|(d, _)| *d);
+    for e in edges.iter_mut().filter(|e| e.via == Via::Package) {
+        let (Some(lib), Some(user)) = (def_of(&e.from), def_of(&e.to)) else { continue };
+        versions(e, &lib.repo, &user.repo, villages);
+    }
     let mut repos: Vec<ValleyRepo> = defs
         .iter()
         .zip(&names)
@@ -362,6 +410,55 @@ mod tests {
         { "repo": "lib-core" } ] }]"#;
 
     #[test]
+    fn package_edges_say_what_is_pinned_and_whether_it_is_behind() {
+        let root = std::env::temp_dir().join(format!("agents-ui-valley-pins-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = |n: &str| {
+            let d = root.join(n);
+            std::fs::create_dir_all(&d).unwrap();
+            d
+        };
+        // lib-core: no village, so its newest version tag is its latest release.
+        let lib = dir("lib-core");
+        std::fs::write(lib.join("Cargo.toml"), "[package]\nname = \"lib-core\"\n").unwrap();
+        for args in [&["init", "-q"][..], &["commit", "-q", "--allow-empty", "-m", "a"], &["tag", "v1.3.0"], &["tag", "v1.4.0"]] {
+            let ok = std::process::Command::new("git").arg("-C").arg(&lib).args(args).env("GIT_AUTHOR_NAME", "t").env("GIT_AUTHOR_EMAIL", "t@t").env("GIT_COMMITTER_NAME", "t").env("GIT_COMMITTER_EMAIL", "t@t").output().unwrap().status.success();
+            assert!(ok);
+        }
+        std::fs::write(dir("shop").join("Cargo.lock"), "[[package]]\nname = \"lib-core\"\nversion = \"1.3.0\"\n").unwrap();
+        std::fs::write(dir("web").join("package-lock.json"), r#"{"packages":{"node_modules/lib-core":{"version":"1.4.0"}}}"#).unwrap();
+        dir("docs");
+        // lib-ui: its village's release stop is its latest release.
+        let mut ui = village("lib-ui", &[]);
+        ui.repo_path = dir("lib-ui").to_string_lossy().into_owned();
+        ui.pipeline.stops.push(Stop { name: "release".into(), tag: Some("v2.0.0".into()), deployed_at: Some("2026-11-16T09:00:00Z".into()), ..Default::default() });
+        std::fs::write(dir("api").join("package.json"), r#"{"dependencies":{"lib-ui":"^1.9.0"}}"#).unwrap();
+        let p = |n: &str| root.join(n).to_string_lossy().into_owned();
+        let text = format!(
+            r#"[{{ "name": "g", "repos": [ {{ "repo": "{lib}" }}, {{ "repo": "lib-ui" }},
+                {{ "repo": "{shop}", "depends_on": [{{ "repo": "{lib}", "via": "package" }}] }},
+                {{ "repo": "{web}", "depends_on": [{{ "repo": "{lib}", "via": "package" }}, {{ "repo": "{shop}", "via": "api" }}] }},
+                {{ "repo": "{api}", "depends_on": [{{ "repo": "lib-ui", "via": "package" }}] }},
+                {{ "repo": "{docs}", "depends_on": [{{ "repo": "{lib}", "via": "package" }}] }} ] }}]"#,
+            lib = p("lib-core"), shop = p("shop"), web = p("web"), api = p("api"), docs = p("docs")
+        );
+        let (groups, errors) = valley(&text, &[ui]);
+        assert!(errors.is_empty() && groups[0].errors.is_empty(), "{errors:?} {:?}", groups[0].errors);
+        let edge = |from: &str, to: &str| groups[0].edges.iter().find(|e| e.from == from && e.to == to).unwrap().clone();
+        let e = edge("lib-core", "shop");
+        assert_eq!((e.pinned.as_deref(), e.latest.as_deref(), e.behind), (Some("1.3.0"), Some("v1.4.0"), Some(true)));
+        assert!(e.latest_at.is_some(), "when the tag was made");
+        assert_eq!(edge("lib-core", "web").behind, Some(false));
+        let e = edge("lib-ui", "api");
+        assert_eq!((e.pinned.as_deref(), e.latest.as_deref(), e.latest_at.as_deref(), e.behind), (Some("^1.9.0"), Some("v2.0.0"), Some("2026-11-16T09:00:00Z"), Some(true)));
+        let e = edge("lib-core", "docs");
+        assert_eq!((e.pinned, e.behind), (None, None), "nothing to read: skipped, not an error");
+        let e = edge("shop", "web");
+        assert_eq!((e.pinned, e.latest), (None, None), "an api edge has no versions");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
     fn repos_go_upstream_to_downstream_along_the_package_edges() {
         let (groups, errors) = valley(SHOP, &[]);
         assert!(errors.is_empty(), "{errors:?}");
@@ -371,8 +468,8 @@ mod tests {
         // web only calls api's API, so it is not below it; api builds on lib-ui, two down.
         assert_eq!(order, vec![("lib-core", 0), ("web", 1), ("lib-ui", 1), ("api", 2)]);
         assert_eq!(g.edges.len(), 5);
-        assert!(g.edges.contains(&Edge { from: "api".into(), to: "web".into(), via: Via::Api }));
-        assert!(g.edges.contains(&Edge { from: "lib-ui".into(), to: "api".into(), via: Via::Package }));
+        assert!(g.edges.contains(&Edge { from: "api".into(), to: "web".into(), via: Via::Api, ..Default::default() }));
+        assert!(g.edges.contains(&Edge { from: "lib-ui".into(), to: "api".into(), via: Via::Package, ..Default::default() }));
     }
 
     #[test]
