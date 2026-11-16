@@ -114,7 +114,7 @@ registerDialogPart(info => {
     }
     button.disabled = false;
   });
-});
+}, 10);
 
 /* One label over the ghosts, fixed there so it can't drift from them (other
  * labels keep clear): each test and its count, wrapping between them, and

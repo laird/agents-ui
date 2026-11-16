@@ -76,4 +76,4 @@ registerDialogPart(info => {
   old.replaceWith(box);
   const token = ++ctlToken;
   if (info.controls) fillControls(box, info.controls, token);
-});
+}, 30);

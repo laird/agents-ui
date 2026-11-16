@@ -96,7 +96,7 @@ function drawTrail(c, x0, y0, x1, y1, col, t) {
 
 /* Before anything is drawn: a whole-feature barge carries its subtasks'
  * crates, so they are not drawn loose (scene.hid). */
-registerLayer({ z: -5, draw(c, scene) {
+registerLayer({ z: -4.5, draw(c, scene) {
   const barges = scene.barges = bargesFor(scene.v, scene.lay);
   scene.hid = new Set(barges.flatMap(b => b.issues));
 } });

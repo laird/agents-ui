@@ -126,9 +126,10 @@ modules register (`registry.js`). To add something to the village:
 3. **Nothing to import by hand**: `build.rs` writes `modules.js`, which
    imports every module (sorted by path) after `main.js` has loaded the
    themes and `layout.js` (#520). Import what the module itself uses; where
-   it registers into a shared list (`registerKey`, `registerLabels`,
-   `registerOverlay`), give it an `order` no other module uses, since load
-   order decides nothing (`tools/village-tests/loadorder.test.mjs`).
+   it registers into a shared list (`registerLayer`'s `z`, `registerKey`,
+   `registerLabels`, `registerOverlay`, `registerDialogPart`), give it an
+   `order` no other module uses, since load order decides nothing
+   (`tools/village-tests/loadorder.test.mjs`).
 4. **Tests next to the work**: page tests in `src/web/village_tests/` (the
    feature area's file, or a new one), and a DOM-free module's in
    `tools/village-tests/<module>.test.mjs`. No list to add them to.

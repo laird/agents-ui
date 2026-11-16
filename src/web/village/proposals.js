@@ -96,4 +96,4 @@ registerDialogPart(info => {
     if (li) { decideRow(li, project, note); rows.set(note.number, li); }
   }
   bulkBox(document.getElementById('d-act'), project, bulkPicks(notes), rows);
-});
+}, 20);

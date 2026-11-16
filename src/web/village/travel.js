@@ -64,4 +64,4 @@ registerDialogPart(info => {
     b.addEventListener('click', () => showTravel(box, project, k));
     li.appendChild(b);
   });
-});
+}, 50);

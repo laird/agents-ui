@@ -17,7 +17,7 @@ import { debris, reworked } from './bounceart.js';
 /* Where the house's crate sits (lifecycle.js draws it there). */
 const crateAt = lot => [lot.x + 11, lot.y + 16];
 
-registerLayer({ z: 75, draw(c, { v, lay }, t) {
+registerLayer({ z: 75.5, draw(c, { v, lay }, t) {
   bounceMarks(v).forEach(m => {
     const lot = lay.lots[m.i]; if (!lot) return;
     const [x, y] = crateAt(lot);

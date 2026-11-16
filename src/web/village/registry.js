@@ -18,7 +18,7 @@
  *       'subagents', 'notes') or a new heading, shown after them.
  *   registerOverlay(fn, order)   fn() places something over the map (feature
  *       banners, area labels, keyboard targets) after it moves or changes.
- *   registerDialogPart(fn)   fn(info) adds to a dialog openInfo() just drew
+ *   registerDialogPart(fn, order)   fn(info) adds to a dialog openInfo() just drew
  *       (the board's proposal buttons); it runs for every dialog.
  *
  * `order` and `z` are numbers; lower goes first. */
@@ -56,8 +56,9 @@ export function registerOverlay(fn, order = 0) {
 }
 
 export const DIALOG_PARTS = [];
-export function registerDialogPart(fn) {
-  DIALOG_PARTS.push(fn);
+export function registerDialogPart(fn, order = 0) {
+  DIALOG_PARTS.push(Object.assign(fn, { order }));
+  byOrder(DIALOG_PARTS);
 }
 
 /* What is clickable comes from what is drawn: paint() records a rectangle

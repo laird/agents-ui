@@ -67,4 +67,4 @@ registerDialogPart(info => {
   if (!v) return;
   box.innerHTML = '<div class="opts"><button data-new="1">New issue</button></div>';
   box.querySelector('[data-new]').addEventListener('click', () => issueForm(box, v));
-});
+}, 40);

@@ -64,7 +64,7 @@ registerLayer({ z: 6, draw(c, { lay }, t) {
   tap(0, lay.envCy, lay.W, 14, { kind: 'canal' });
 } });
 /* The villages: ground, road, docks, houses by rank, the sign and the warehouse. */
-registerLayer({ z: 60, draw(c, { v, lay }, t) {
+registerLayer({ z: 60.5, draw(c, { v, lay }, t) {
   lay.envs.forEach(e => {
     const { x, w, s, cy, top } = e, health = healthOf(s), signY = cy - 30;
     if (e.platform) tap(x, cy - SHED.up - 4, w, SHED.up + 4, { kind: 'env', i: e.i });
@@ -103,7 +103,7 @@ registerLayer({ z: 60, draw(c, { v, lay }, t) {
   });
 } });
 /* What each environment runs: crates in the warehouse bay, under their banners. */
-registerLayer({ z: 85, draw(c, { v, lay }, t) {
+registerLayer({ z: 85.5, draw(c, { v, lay }, t) {
   lay.envs.forEach(e => {
     const sx = e.x + SHED.dx, sy = e.cy - SHED.up, { slots, more } = baySlots(cargoGroups(v, e.s.cargo || []), e.s.cargo_more || 0);
     slots.forEach((sl, k) => {

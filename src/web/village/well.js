@@ -70,7 +70,7 @@ export function limitSign(c, x, y) {
 
 /* The well and its worker, after the houses (lifecycle.js leaves a limited
  * worker to this, rest.js), and the bubble over everything. */
-registerLayer({ z: 72, draw(c, scene, t) {
+registerLayer({ z: 72.3, draw(c, scene, t) {
   const { v, lay, at } = scene, out = scene.limitBubbles = [];
   v.houses.forEach((h, i) => {
     const lot = lay.lots[i]; if (!lot || !limited(h)) return;

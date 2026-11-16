@@ -22,7 +22,9 @@ IMPORT = re.compile(r"^import\s+(?:\{[^}]*\}\s+from\s+)?'([^']+)';", re.M)
 
 def module_list():
     """modules.js as build.rs writes it (#520): every script but main.js, sorted."""
-    return "".join(f"import './{f}';\n" for f in sorted(p.relative_to(VILLAGE).as_posix() for p in VILLAGE.rglob("*.js")) if f != "main.js")
+    scripts = sorted(p.relative_to(VILLAGE).as_posix() for p in VILLAGE.rglob("*.js")
+                     if not any(part.startswith(".") for part in p.relative_to(VILLAGE).parts))
+    return "".join(f"import './{f}';\n" for f in scripts if f != "main.js")
 
 
 class ReplayBuildTest(unittest.TestCase):

@@ -34,7 +34,7 @@ export function controlDone(c, action) {
 }
 
 /* A stopped house, dark until the next poll says so itself. */
-registerLayer({ z: 72, draw(c, { v, lay }, t) {
+registerLayer({ z: 72.6, draw(c, { v, lay }, t) {
   v.houses.forEach((h, i) => {
     const lot = lay.lots[i], fx = lot && fxOn(v.project, h, t);
     if (fx && fx.dark) darkHouse(c, lot.x, lot.y);

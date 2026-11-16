@@ -8,7 +8,7 @@ use super::*;
 #[test]
 fn dialogs_offer_an_issues_travel_log() {
     assert!(village_asset("index.html").unwrap().1.contains("<div id=\"d-travel\"></div>"));
-    assert!(village_asset("main.js").unwrap().1.contains("import './travel.js';"));
+    assert!(village_asset("modules.js").unwrap().1.contains("import './travel.js';"));
     // A crate names its issue; a house's is its claimed issue.
     assert!(village_asset("lifecycle.js").unwrap().1.contains("travel: o.n };"));
     let travel = village_asset("travel.js").unwrap().1;

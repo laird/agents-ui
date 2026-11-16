@@ -1,7 +1,8 @@
 // The village's modules load in an order build.rs generates (#520): every
 // module, sorted by path, after the themes and layout.js (main.js). So no
 // list a module registers into may depend on that order: each `order` given
-// to registerKey, registerLabels and registerOverlay is distinct, and the
+// to registerKey, registerLabels, registerOverlay and registerDialogPart, and
+// each layer's `z`, is distinct, and the
 // themes register in the order the Style picker lists them.
 //   node --test tools/village-tests/
 // Also run by `cargo test village_node_tests`.
@@ -28,7 +29,7 @@ globalThis.requestAnimationFrame = () => 0;
 performance.now = () => 0;
 
 await loadPage();
-const { KEYS, LABELS, OVERLAYS } = await import(new URL('registry.js', VILLAGE));
+const { DIALOG_PARTS, KEYS, LABELS, LAYERS, OVERLAYS } = await import(new URL('registry.js', VILLAGE));
 const { THEMES } = await import(new URL('themes/registry.js', VILLAGE));
 
 const ties = list => {
@@ -41,7 +42,10 @@ test('every key group, label set and overlay has an order of its own', () => {
   assert.deepEqual(ties(KEYS), [], 'two registerKey calls share an order: give the new one its own (`order`)');
   assert.deepEqual(ties(LABELS), [], 'two registerLabels calls share an order: give the new one its own');
   assert.deepEqual(ties(OVERLAYS), [], 'two registerOverlay calls share an order: give the new one its own');
-  assert.ok(KEYS.length >= 10 && LABELS.length >= 10 && OVERLAYS.length >= 6, 'the whole page loaded');
+  // A layer's z is its order: two at one z would draw (and take clicks) in load order.
+  assert.deepEqual(ties(LAYERS), [], 'two registerLayer calls share a z: give the new one its own');
+  assert.deepEqual(ties(DIALOG_PARTS), [], 'two registerDialogPart calls share an order: give the new one its own');
+  assert.ok(KEYS.length >= 10 && LABELS.length >= 10 && OVERLAYS.length >= 6 && LAYERS.length >= 30 && DIALOG_PARTS.length >= 5, 'the whole page loaded');
 });
 
 test("the key's groups keep the order they had when main.js listed every module", () => {
