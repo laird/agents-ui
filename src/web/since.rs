@@ -9,11 +9,11 @@
 //! A village whose repository GitHub can't be asked about has `checked:
 //! false`, so the card says it couldn't check rather than "nothing happened".
 //!
-//! Each fresh answer costs two GitHub searches per village, and the endpoint
-//! has no authentication, so answers are kept for [`FRESH`] ([`SinceCache`])
-//! and GitHub is asked at most once per [`GAP`]: a later moment is cut from
-//! the kept answer, an earlier one is asked afresh unless GitHub was asked
-//! less than [`GAP`] ago (then a 429). A moment in the future is a 400.
+//! Asking costs two GitHub searches per village, and the endpoint has no
+//! authentication, so what a caller sends never decides what GitHub is asked
+//! ([`SinceCache`]): the server asks about one fixed window, the last
+//! [`WINDOW`], at most once per [`FRESH`], and cuts every answer from that.
+//! A moment before the window is answered for the window (`from` says so).
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -115,24 +115,16 @@ pub async fn village_since(transport: &ServerTransport, project: &str, repo: &st
     v
 }
 
-/// How long an answer is kept.
+/// How long an answer is kept: GitHub is asked at most this often.
 pub const FRESH: Duration = Duration::from_secs(60);
-/// The least time between two askings of GitHub: two searches per village
-/// each, against GitHub's 30 searches a minute.
-pub const GAP: Duration = Duration::from_secs(20);
+/// How far back GitHub is asked about: a spell longer than this is answered
+/// for this much of it.
+pub const WINDOW: i64 = 3 * 24 * 3600;
 
+/// The last answer: (when it was fetched, the start of its window in unix
+/// seconds, the villages).
 #[derive(Default)]
-struct Kept {
-    /// The last answer in which GitHub answered for some village: (when, the
-    /// moment it was asked about, the villages).
-    answer: Option<(Instant, i64, Vec<VillageSince>)>,
-    /// When GitHub was last asked, whatever it said.
-    asked: Option<Instant>,
-}
-
-/// The last answer, for [`FRESH`] (see the module comment).
-#[derive(Default)]
-pub struct SinceCache(tokio::sync::Mutex<Kept>);
+pub struct SinceCache(tokio::sync::Mutex<Option<(Instant, i64, Vec<VillageSince>)>>);
 
 /// The kept answer cut down to changes at or after `t`.
 pub fn narrow(villages: &[VillageSince], t: i64) -> Vec<VillageSince> {
@@ -149,32 +141,26 @@ pub fn narrow(villages: &[VillageSince], t: i64) -> Vec<VillageSince> {
 }
 
 impl SinceCache {
-    /// The answer for `t`: cut from the kept one when that is fresh and
-    /// asked about `t` or earlier; else a new one from `fetch`, unless GitHub
-    /// was asked less than [`GAP`] ago (`None`: too soon). `clock` is read
-    /// once the lock is held. Requests wait on each other, so a burst costs
-    /// one fetch. An answer in which no village was checked is not kept.
-    pub async fn answer<F, Fut>(&self, t: i64, clock: impl Fn() -> Instant, fetch: F) -> Option<Vec<VillageSince>>
+    /// The answer for `t`, as (the moment it covers from, the villages). The
+    /// kept answer serves while it is fresh; otherwise `fetch(window start)`
+    /// asks GitHub about the last [`WINDOW`] before `now` (unix seconds) and
+    /// is kept. `t` only cuts the answer down, so no caller can make GitHub
+    /// be asked more than once per [`FRESH`]. `clock` is read once the lock
+    /// is held, and requests wait on each other.
+    pub async fn answer<F, Fut>(&self, t: i64, now: i64, clock: impl Fn() -> Instant, fetch: F) -> (i64, Vec<VillageSince>)
     where
-        F: FnOnce() -> Fut,
+        F: FnOnce(i64) -> Fut,
         Fut: std::future::Future<Output = Vec<VillageSince>>,
     {
         let mut kept = self.0.lock().await;
-        let now = clock();
-        if let Some((at, kept_t, villages)) = kept.answer.as_ref() {
-            if now.saturating_duration_since(*at) < FRESH && *kept_t <= t {
-                return Some(narrow(villages, t));
-            }
+        let at = clock();
+        if !kept.as_ref().is_some_and(|(fetched, _, _)| at.saturating_duration_since(*fetched) < FRESH) {
+            let from = now - WINDOW;
+            *kept = Some((at, from, fetch(from).await));
         }
-        if kept.asked.is_some_and(|a| now.saturating_duration_since(a) < GAP) {
-            return None;
-        }
-        kept.asked = Some(now);
-        let villages = fetch().await;
-        if villages.iter().any(|v| v.checked) {
-            kept.answer = Some((now, t, villages.clone()));
-        }
-        Some(villages)
+        let (_, window, villages) = kept.as_ref().expect("kept above");
+        let from = t.max(*window);
+        (from, narrow(villages, from))
     }
 }
 
@@ -226,49 +212,37 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn answers_are_kept_a_minute_and_narrowed_to_a_later_moment() {
+    async fn github_is_asked_about_the_window_once_a_minute_whatever_is_asked() {
         let cache = SinceCache::default();
-        let t0 = 1_794_800_000; // 2026-11-16T03:33:20Z
+        let now = 1_794_800_000; // 2026-11-16T03:33:20Z
         let start = Instant::now();
+        let at = |s: u64| move || start + Duration::from_secs(s);
         let village = VillageSince {
             project: "shop".into(),
             checked: true,
-            closed: vec![change(5, "2026-11-16T03:40:00Z"), change(4, "2026-11-16T03:35:00Z")],
+            closed: vec![change(5, "2026-11-16T03:00:00Z"), change(4, "2026-11-15T00:00:00Z"), change(3, "2026-11-10T00:00:00Z")],
             merged: vec![],
         };
-        let calls = std::sync::atomic::AtomicU32::new(0);
-        let fetch = || async {
-            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            vec![village.clone()]
+        let asked = std::sync::Mutex::new(Vec::new());
+        let fetch = |from: i64| {
+            asked.lock().unwrap().push(from);
+            let v = village.clone();
+            async move { vec![v] }
         };
-        let at = |s: u64| move || start + Duration::from_secs(s);
-        let n = || calls.load(std::sync::atomic::Ordering::SeqCst);
-        assert_eq!(cache.answer(t0, at(0), fetch).await.unwrap()[0].closed.len(), 2);
-        // Ten minutes later in the moment asked about, a second later in time: from the kept answer.
-        let later = cache.answer(t0 + 300, at(1), fetch).await.unwrap();
-        assert_eq!(later[0].closed.iter().map(|c| c.number).collect::<Vec<_>>(), vec![5]);
-        assert_eq!(n(), 1);
-        // An earlier moment can't be cut from it: asked afresh, but not twice within GAP.
-        assert!(cache.answer(t0 - 3600, at(2), fetch).await.is_none(), "too soon after the first asking");
-        assert!(cache.answer(t0 - 3600, at(GAP.as_secs()), fetch).await.is_some());
-        assert_eq!(n(), 2);
-        // That earlier answer is now the kept one: the first moment is cut from it.
-        assert!(cache.answer(t0, at(GAP.as_secs() + 1), fetch).await.is_some());
-        assert_eq!(n(), 2);
-    }
-
-    /// Whoever asks about a later moment first can't lock out an earlier one
-    /// for longer than GAP, and an answer GitHub didn't give is not kept.
-    #[tokio::test]
-    async fn a_later_moment_or_a_failure_does_not_hold_the_cache() {
-        let cache = SinceCache::default();
-        let start = Instant::now();
-        let at = |s: u64| move || start + Duration::from_secs(s);
-        let unchecked = || async { vec![VillageSince { project: "shop".into(), checked: false, closed: vec![], merged: vec![] }] };
-        assert!(!cache.answer(1_794_800_000, at(0), unchecked).await.unwrap()[0].checked);
-        let checked = || async { vec![VillageSince { project: "shop".into(), checked: true, closed: vec![], merged: vec![] }] };
-        // The failure was not kept, so the next asking (after GAP) goes to GitHub.
-        assert!(cache.answer(1_794_800_000, at(GAP.as_secs()), checked).await.unwrap()[0].checked);
+        let numbers = |a: &(i64, Vec<VillageSince>)| a.1[0].closed.iter().map(|c| c.number).collect::<Vec<_>>();
+        // An hour ago: GitHub is asked about the whole window, the answer is cut to the hour.
+        let a = cache.answer(now - 3600, now, at(0), fetch).await;
+        assert_eq!((a.0, numbers(&a)), (now - 3600, vec![5]));
+        // A day and a half ago, then a week ago, then the future, all within the minute: no more asking.
+        assert_eq!(numbers(&cache.answer(now - 36 * 3600, now, at(5), fetch).await), vec![5, 4]);
+        let week = cache.answer(now - 7 * 86400, now, at(10), fetch).await;
+        assert_eq!(week.0, now - WINDOW, "a spell longer than the window is answered for the window");
+        assert_eq!(numbers(&week), vec![5, 4]);
+        assert!(cache.answer(now + 99_999, now, at(20), fetch).await.1[0].closed.is_empty());
+        assert_eq!(*asked.lock().unwrap(), vec![now - WINDOW]);
+        // A minute on, it is asked again.
+        cache.answer(now - 3600, now + 60, at(FRESH.as_secs()), fetch).await;
+        assert_eq!(*asked.lock().unwrap(), vec![now - WINDOW, now + 60 - WINDOW]);
     }
 
     #[tokio::test]
