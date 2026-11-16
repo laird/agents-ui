@@ -583,8 +583,11 @@ Declare the groups in `~/.agents-ui/group.json`, or in the file that
 
 A repo's name in the valley is its project name, or the last part of its
 path. What is wrong with the file is said in the bar and in `/api/valley`,
-and nothing stops. That covers JSON that doesn't parse, an unknown field, a
-dependency on a repo not in the group or on itself, a repo listed twice, and a cycle of
+and the server carries on. JSON that doesn't parse, or a field not in the
+table, makes the whole file unreadable: no group is drawn until it is
+fixed. Within a readable file, each problem is reported and the rest is
+drawn: a dependency on a repo not in the group or on itself, a repo listed
+twice, a group name used twice (only the first is used), and a cycle of
 package dependencies (its repos are put last). `api` dependencies are drawn
 but don't decide what is upstream.
 
@@ -602,8 +605,10 @@ the valley reads which version of the library the consumer pins, and the
 library's latest release. The pin comes from the lockfile first, then the
 manifest: `Cargo.lock`/`Cargo.toml`, `package-lock.json`/`package.json`, or
 `go.mod`. The latest release is the library's last stop's tag, else its
-newest version tag. A consumer pinned to an older version has a ship waiting
-at its dock, labelled with the version it hasn't taken. A release made in the
+newest version tag. A consumer behind the latest release has a ship waiting
+at its dock, labelled with the version it hasn't taken: its lockfile pins
+an older version, or (with no lockfile) its manifest's range doesn't take
+the latest. A release made in the
 last 24 hours sails down the river to each consumer that has taken it. A
 click on a ship says which versions, and since when.
 
@@ -649,27 +654,31 @@ too.
 ### The answer: `GET /api/valley`
 
 `GET /api/valley` gives all of this as JSON: `manifest` (the file read),
-`found`, `errors` (about the file as a whole), and `groups`. Each group has:
+`found`, `errors` (about the file as a whole; optional), and `groups`. A field that
+is optional is left out when there is nothing to say, not sent empty or
+null. Each group has:
 
 - `name`;
 - `repos`, upstream to downstream, each with:
   - `name`, `repo`;
-  - `project` (its village, when one runs) and `dormant`;
+  - `project` (its village, when one runs; optional) and `dormant`;
   - `depth` (0 for a repo that builds on no other);
-  - `summary`: `working`, `idle`, `blocked`, `backlog`, `release`, and
-    `health` (`red`, `amber`, `green` or `dormant`);
+  - `summary`: `working`, `idle`, `blocked`, `backlog`, `release`
+    (optional), and `health` (`red`, `amber`, `green` or `dormant`);
 - `edges`, each `{ from, to, via }` from the repo depended on to the one
   depending on it:
   - a `package` edge adds `pinned`, `latest`, `latest_at` and `behind`;
   - an `api` edge adds `expects` and `contract`;
   - each is absent when it can't be read;
-- `grid`: `envs`, `repos`, and `cells` of `{ repo, env, version, mismatches }`.
-  Each mismatch is `{ neighbour, env, expects, version, contract }`;
+- `grid` (optional: only when repos are joined by `api` dependencies):
+  `envs`, `repos`, and `cells` of `{ repo, env, version, mismatches }`
+  (`version` and `mismatches` optional). Each mismatch is
+  `{ neighbour, env, expects, version, contract }` (`contract` optional);
 - `ropes`: `{ from, to }`, each end an issue `{ repo, number, title, state, url }`;
 - `caravans`: `{ parent, crates, arrived }`, each crate
   `{ repo, slug, issues, loaded }`;
-- `barges`: `{ from, to, why, run }`;
-- `errors`: what is wrong with this group's part of the file.
+- `barges`: `{ from, to, why, run }` (`run` optional);
+- `errors` (optional): what is wrong with this group's part of the file.
 
 It only reads, so a `--read-only` server has it too.
 
