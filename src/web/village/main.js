@@ -20,6 +20,7 @@ import './panels.js';
 import './dialogs.js';
 import './keynav.js';
 import './proposals.js';
+import './newissue.js';
 import './labels.js';
 import './key.js';
 import './screensaver.js';

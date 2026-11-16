@@ -7,6 +7,7 @@ pub mod framework;
 pub mod gate;
 pub mod herdr;
 pub mod kubernetes;
+pub mod newissue;
 pub mod pane;
 pub mod proposals;
 pub mod server;

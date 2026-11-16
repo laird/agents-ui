@@ -1126,6 +1126,7 @@ pub async fn run(addrs: &[SocketAddr], read_only: bool, state: WebServerState) -
         .route("/village/{*path}", get(village_file_handler))
         .route("/api/village", get(api_village_handler))
         .route("/api/swarms", get(api_swarms_handler).post(api_launch_swarm_handler))
+        .route("/api/swarms/{project}/issues", post(crate::web::newissue::api_new_issue_handler))
         .route("/api/repos", get(api_repos_handler))
         .route("/api/agent-types", get(api_agent_types_handler))
         .route(
@@ -1234,6 +1235,7 @@ mod tests {
             .route("/village/{*path}", get(village_file_handler))
             .route("/api/village", get(api_village_handler))
             .route("/api/swarms", get(api_swarms_handler).post(api_launch_swarm_handler))
+        .route("/api/swarms/{project}/issues", post(crate::web::newissue::api_new_issue_handler))
             .route("/api/repos", get(api_repos_handler))
             .route("/api/agent-types", get(api_agent_types_handler))
             .route("/api/swarms/{project}", delete(api_stop_swarm_handler))
@@ -1347,6 +1349,37 @@ mod tests {
             .header("content-type", "application/json")
             .body(Body::from(body.to_string()))
             .unwrap()
+    }
+
+    fn new_issue(project: &str, body: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/swarms/{project}/issues"))
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_read_only_server_refuses_a_new_issue() {
+        // The village's form reads the 403 and links to GitHub instead (newissue.js).
+        let shared = std::sync::Arc::new(std::sync::RwLock::new(vec![sample_swarm("p")]));
+        let app = make_app(make_web_state(shared)).layer(axum::middleware::from_fn(reject_writes));
+        let resp = app.oneshot(new_issue("p", r#"{"title":"T"}"#)).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn a_new_issue_needs_a_swarm_a_title_and_allowed_labels() {
+        let shared = std::sync::Arc::new(std::sync::RwLock::new(vec![sample_swarm("p")]));
+        let app = make_app(make_web_state(shared));
+        let ghost = app.clone().oneshot(new_issue("ghost", r#"{"title":"T"}"#)).await.unwrap();
+        assert_eq!(ghost.status(), StatusCode::NOT_FOUND);
+        // Refused before the tracker is asked.
+        let untitled = app.clone().oneshot(new_issue("p", r#"{"title":"  "}"#)).await.unwrap();
+        assert_eq!(untitled.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let proposal = app.oneshot(new_issue("p", r#"{"title":"T","labels":["proposal"]}"#)).await.unwrap();
+        assert_eq!(proposal.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
 
     #[tokio::test]
