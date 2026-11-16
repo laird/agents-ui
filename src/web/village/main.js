@@ -32,6 +32,7 @@ import './newissue.js';
 import './labels.js';
 import './key.js';
 import './screensaver.js';
+import './sounds.js';
 import './houselink.js';
 import './travel.js';
 import { start } from './data.js';

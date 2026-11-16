@@ -13,7 +13,7 @@
 # The agents-village-screensaver shell service runs this when the session goes
 # idle; `force` runs it by hand. Settings come from
 # ~/.config/agents-ui/screensaver.json (written by install.sh --screensaver):
-#   { "server": "http://nuc-1:7890", "cycle": 30, "dim": "23-7", "timeout": 150, "recap": 30 }
+#   { "server": "http://nuc-1:7890", "cycle": 30, "dim": "23-7", "timeout": 150, "recap": 30, "sound": false }
 #
 # "Since you last looked" (#479): when the machine was last unlocked at least
 # `recap` minutes ago (default 30; 0 turns it off), the page opens with a
@@ -21,6 +21,9 @@
 # watches Omarchy's lock and keeps the time of the last unlock in
 # ${XDG_STATE_HOME:-~/.local/state}/agents-village-screensaver/last-unlock.
 # With no unlock recorded yet there is no card.
+#
+# "sound": true adds quiet cues on transitions (#489), and lets the kiosk
+# windows play audio without a click first.
 #
 # It does nothing while the session is locked or the screensaver is already
 # up, nor (unless forced) while Omarchy's stay-awake indicator is on or its
@@ -57,6 +60,7 @@ SERVER=${SERVER%/}
 CYCLE=$(setting cycle 30)
 DIM=$(setting dim "")
 RECAP=$(setting recap 30)
+SOUND=$(setting sound false)
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/agents-village-screensaver"
 LAST_UNLOCK="$STATE_DIR/last-unlock"
 NOW=${AGENTS_VILLAGE_SCREENSAVER_NOW:-$(date +%s)}
@@ -82,6 +86,7 @@ village_url() {
   local since
   since=$(recap_since)
   [ -n "$since" ] && q="$q&since=${since}"
+  [ "$SOUND" = true ] && q="$q&sound=1"
   echo "$SERVER/village?$q"
 }
 
@@ -111,6 +116,7 @@ if [ "$DRY_RUN" = true ]; then
   echo "opens:   $(start_url)"
   echo "browser: $(browser || echo 'none found')"
   echo "class:   $CLASS"
+  echo "sound:   $([ "$SOUND" = true ] && echo on || echo off)"
   exit 0
 fi
 
@@ -123,6 +129,9 @@ fi
 [[ $(omarchy-shell lock isLocked 2>/dev/null) == "true" ]] && exit 0
 BROWSER=$(browser) || { echo "village-screensaver: no Chromium-family browser found" >&2; exit 1; }
 URL=$(start_url)
+# Chromium holds audio until a click; a screensaver never gets one.
+AUDIO=()
+[ "$SOUND" = true ] && AUDIO=(--autoplay-policy=no-user-gesture-required)
 
 cursor() {  # cursor <true|false>: hide or show the pointer
   hyprctl eval "hl.config({ cursor = { invisible = $1 } })" &>/dev/null || hyprctl keyword cursor:invisible "$1" &>/dev/null || true
@@ -165,7 +174,7 @@ while read -r m special; do
     "--user-data-dir=$PROFILES/$MARK-$m" "--class=$CLASS" \
     --kiosk --no-first-run --no-default-browser-check --disable-session-crashed-bubble \
     --disable-extensions --disable-sync --disable-background-networking \
-    --disable-features=Translate --noerrdialogs --password-store=basic "$URL"
+    --disable-features=Translate --noerrdialogs --password-store=basic ${AUDIO[@]+"${AUDIO[@]}"} "$URL"
   deadline=$((SECONDS + 8))
   while ((SECONDS < deadline)) && IFS= read -r -t $((deadline - SECONDS)) -u "$events" line; do
     if [[ $line == openwindow\>\>*,$CLASS,* ]]; then ours[$(window_of "$line")]=1; break; fi
