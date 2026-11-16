@@ -8,8 +8,13 @@
 //!
 //! A village whose repository GitHub can't be asked about has `checked:
 //! false`, so the card says it couldn't check rather than "nothing happened".
+//!
+//! Each fresh answer costs two GitHub searches per village, and the endpoint
+//! has no authentication, so answers are kept for [`FRESH`] ([`SinceCache`]):
+//! a later moment is answered from the kept one, an earlier one waits (429).
 
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -95,7 +100,8 @@ async fn gh_list(transport: &ServerTransport, repo: &Path, what: &str, query: &s
 pub async fn village_since(transport: &ServerTransport, project: &str, repo: &str, t: i64) -> VillageSince {
     let mut v = VillageSince { project: project.to_string(), checked: false, closed: vec![], merged: vec![] };
     let (Some(at), Some(since)) = (search_time(t), DateTime::<Utc>::from_timestamp(t, 0)) else { return v };
-    if repo.is_empty() || !Path::new(repo).is_dir() {
+    // Over ssh the repository is on the other host: let gh say whether it is one.
+    if repo.is_empty() || (!transport.is_remote() && !Path::new(repo).is_dir()) {
         return v;
     }
     let repo = Path::new(repo);
@@ -105,6 +111,49 @@ pub async fn village_since(transport: &ServerTransport, project: &str, repo: &st
     v.closed = closed.unwrap_or_default();
     v.merged = merged.unwrap_or_default();
     v
+}
+
+/// How long an answer is kept.
+pub const FRESH: Duration = Duration::from_secs(60);
+
+/// The last answer, for [`FRESH`]: (when, the moment it was asked about, the villages).
+#[derive(Default)]
+pub struct SinceCache(tokio::sync::Mutex<Option<(Instant, i64, Vec<VillageSince>)>>);
+
+/// The kept answer cut down to changes at or after `t`.
+pub fn narrow(villages: &[VillageSince], t: i64) -> Vec<VillageSince> {
+    let Some(since) = DateTime::<Utc>::from_timestamp(t, 0) else { return villages.to_vec() };
+    let keep = |c: &&Change| DateTime::parse_from_rfc3339(&c.at).is_ok_and(|a| a.with_timezone(&Utc) >= since);
+    villages
+        .iter()
+        .map(|v| VillageSince {
+            closed: v.closed.iter().filter(keep).cloned().collect(),
+            merged: v.merged.iter().filter(keep).cloned().collect(),
+            ..v.clone()
+        })
+        .collect()
+}
+
+impl SinceCache {
+    /// The answer for `t`: the kept one when it is fresh and asked about `t`
+    /// or earlier, `None` (too soon) when it is fresh but later than `t`,
+    /// else a new one from `fetch`. Requests wait on each other, so a burst
+    /// costs one fetch.
+    pub async fn answer<F, Fut>(&self, t: i64, now: Instant, fetch: F) -> Option<Vec<VillageSince>>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Vec<VillageSince>>,
+    {
+        let mut kept = self.0.lock().await;
+        if let Some((at, kept_t, villages)) = kept.as_ref() {
+            if now.saturating_duration_since(*at) < FRESH {
+                return (*kept_t <= t).then(|| narrow(villages, t));
+            }
+        }
+        let villages = fetch().await;
+        *kept = Some((now, t, villages.clone()));
+        Some(villages)
+    }
 }
 
 #[cfg(test)]
@@ -148,6 +197,38 @@ mod tests {
     fn garbage_is_no_answer_and_an_empty_list_is_an_answer() {
         assert_eq!(parse_changes("not json", &at("2026-11-15T20:00:00Z")), None);
         assert_eq!(parse_changes("[]", &at("2026-11-15T20:00:00Z")), Some(vec![]));
+    }
+
+    fn change(n: u32, at: &str) -> Change {
+        Change { number: n, title: String::new(), at: at.into(), reason: None }
+    }
+
+    #[tokio::test]
+    async fn answers_are_kept_a_minute_and_narrowed_to_a_later_moment() {
+        let cache = SinceCache::default();
+        let t0 = 1_794_800_000; // 2026-11-16T03:33:20Z
+        let start = Instant::now();
+        let village = VillageSince {
+            project: "shop".into(),
+            checked: true,
+            closed: vec![change(5, "2026-11-16T03:40:00Z"), change(4, "2026-11-16T03:35:00Z")],
+            merged: vec![],
+        };
+        let calls = std::sync::atomic::AtomicU32::new(0);
+        let fetch = || async {
+            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            vec![village.clone()]
+        };
+        assert_eq!(cache.answer(t0, start, fetch).await.unwrap()[0].closed.len(), 2);
+        // Ten minutes later in the moment asked about, a second later in time: from the kept answer.
+        let later = cache.answer(t0 + 300, start + Duration::from_secs(1), fetch).await.unwrap();
+        assert_eq!(later[0].closed.iter().map(|c| c.number).collect::<Vec<_>>(), vec![5]);
+        // An earlier moment can't be cut from it: too soon.
+        assert!(cache.answer(t0 - 3600, start + Duration::from_secs(2), fetch).await.is_none());
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        // Once it is stale, anything is asked again.
+        assert!(cache.answer(t0 - 3600, start + FRESH, fetch).await.is_some());
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
     }
 
     #[tokio::test]

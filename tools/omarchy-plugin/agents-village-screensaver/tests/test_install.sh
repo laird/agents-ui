@@ -263,6 +263,11 @@ echo '{ "server": "http://127.0.0.1:9", "recap": 1, "timeout": 3600 }' > "$HOME/
 rm "$XDG_STATE_HOME/agents-village-screensaver/last-closed"
 out=$(AGENTS_VILLAGE_SCREENSAVER_NOW=$NOW bash "$LAUNCHER" --dry-run 2>&1)
 grep -q "%26since%3D$((NOW - 3600))" <<<"$out" && ok "with no record, the spell starts when the session went idle" || fail "since: $out"
+for junk in 0089 99999999999999999999999 x; do
+  echo "$junk" > "$XDG_STATE_HOME/agents-village-screensaver/last-closed"
+  out=$(AGENTS_VILLAGE_SCREENSAVER_NOW=$NOW bash "$LAUNCHER" --dry-run 2>&1)
+  grep -q "%26since%3D$((NOW - 3600))" <<<"$out" && ok "a corrupt record ($junk) is no record" || fail "junk $junk: $out"
+done
 unset XDG_STATE_HOME
 rm -rf "$T"
 export HOME=$ORIG_HOME

@@ -460,6 +460,7 @@ async fn main() -> Result<()> {
             transport,
             village: village_cache(&cli),
             swarm_sources: std::sync::Arc::new(cli.sources.swarm_sources()),
+            since: Default::default(),
         };
         let (addrs, read_only) = (web_addrs(&cli, port), cli.read_only);
         tokio::spawn(async move {
@@ -522,6 +523,7 @@ async fn run_headless(cli: &CliOptions) -> Result<()> {
         transport: ServerTransport::new(cli.server.clone()),
         village: village_cache(&cli),
         swarm_sources: std::sync::Arc::new(cli.sources.swarm_sources()),
+        since: Default::default(),
     };
 
     // Unlike the TUI path, this awaits the server instead of detaching it --

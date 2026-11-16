@@ -69,7 +69,10 @@ recap_since() {
   local since=""
   [ "$FORCE" = true ] && return
   [[ $RECAP =~ ^[0-9]+$ ]] && [ "$RECAP" -gt 0 ] || return
+  # A unix time, as `date +%s` writes it: anything else (hand-edited, cut
+  # short) is no record, rather than octal or an overflow in $(( )).
   [ -f "$LAST_CLOSED" ] && since=$(tr -dc '0-9' < "$LAST_CLOSED")
+  [[ $since =~ ^[1-9][0-9]{8,10}$ ]] || since=""
   if [ -z "$since" ]; then
     [[ $TIMEOUT =~ ^[0-9]+$ ]] || TIMEOUT=150
     since=$((NOW - TIMEOUT))
@@ -132,10 +135,13 @@ cursor() {  # cursor <true|false>: hide or show the pointer
 
 stop_all() {
   cursor false
-  mkdir -p "$STATE_DIR" && date +%s > "$LAST_CLOSED"
+  # A close is a look only if a screensaver window was up to be looked away from.
+  [ ${#ours[@]} -gt 0 ] && mkdir -p "$STATE_DIR" && date +%s > "$LAST_CLOSED"
   pkill -f "[a]gents-village-screensaver-profile" 2>/dev/null
   exit 0
 }
+# The screensaver windows this run opened, by address.
+declare -A ours=()
 trap stop_all INT TERM HUP QUIT
 
 hypr_focus_monitor() {
@@ -154,7 +160,6 @@ exec {events}< <(socat -U - "UNIX-CONNECT:$SOCKET")
 
 # The window address a Hyprland event is about: `openwindow>>ADDR,...`.
 window_of() { local rest=${1#*>>}; echo "${rest%%,*}"; }
-declare -A ours=()
 
 # One window per monitor, each a browser of its own (its own profile), so it
 # opens on that monitor and closing one is noticed. Wait for each to map
