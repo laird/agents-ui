@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use super::framework::{Task, TaskState, task_number};
+use super::deployments::VoyageState;
 use super::village::{Crate, HouseStatus, Pipeline, Promotion, StopSource, VillageSnapshot};
 use crate::model::issue::{Child, FeatureLink, LinkedBy};
 
@@ -187,6 +188,64 @@ fn follow(village: &VillageSnapshot, links: &[FeatureLink]) -> Vec<Feature> {
         .collect()
 }
 
+/// An epic whose last subtask reached the last stop today (#482): the village
+/// sets off fireworks when it arrives, and its flag flies on the hall for the
+/// rest of the day.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Shipped {
+    pub number: u32,
+    pub title: String,
+    pub url: String,
+    /// When the voyage that made it live docked, RFC 3339.
+    pub at: String,
+}
+
+/// Features that are live (every counted subtask at the last stop) and whose
+/// subtasks rode a voyage that docked there: when the newest such voyage
+/// arrived is when the feature shipped. A docked voyage is reported for an
+/// hour (`DOCKED_FOR_SECS`), so this sees a shipping only that long;
+/// [`remember_shipped`] keeps it for the rest of the day.
+pub fn shipped(village: &VillageSnapshot, links: &[FeatureLink]) -> Vec<Shipped> {
+    let Some(last) = village.pipeline.stops.last() else {
+        return Vec::new();
+    };
+    let docked: Vec<_> = village
+        .pipeline
+        .voyages
+        .iter()
+        .filter(|v| v.to == last.name && v.state == VoyageState::Docked)
+        .filter_map(|v| v.finished_at.as_deref().map(|at| (v, at)))
+        .collect();
+    follow(village, links)
+        .into_iter()
+        .filter(|f| f.live)
+        .filter_map(|f| {
+            let counted: Vec<u32> = f.subtasks.iter().filter(|s| !s.dropped).map(|s| s.number).collect();
+            let at = docked
+                .iter()
+                .filter(|(v, _)| v.issues.iter().any(|n| counted.contains(n)))
+                .map(|(_, at)| *at)
+                .max_by_key(|at| chrono::DateTime::parse_from_rfc3339(at).ok())?;
+            Some(Shipped { number: f.number, title: f.title, url: f.url, at: at.to_string() })
+        })
+        .collect()
+}
+
+/// What shipped today, newest first: `remembered` (kept between readings)
+/// with `seen` added, and anything that shipped before `today` (local) let go.
+/// A feature seen again keeps when it first shipped.
+pub fn remember_shipped(remembered: &mut Vec<Shipped>, seen: Vec<Shipped>, today: chrono::NaiveDate) -> Vec<Shipped> {
+    for s in seen {
+        if !remembered.iter().any(|r| r.number == s.number) {
+            remembered.push(s);
+        }
+    }
+    let at = |s: &Shipped| chrono::DateTime::parse_from_rfc3339(&s.at).ok();
+    remembered.retain(|s| at(s).is_some_and(|t| t.with_timezone(&chrono::Local).date_naive() == today));
+    remembered.sort_by_key(|s| std::cmp::Reverse(at(s)));
+    remembered.clone()
+}
+
 /// Fill each backlog crate's `parent` from the feature links: the feature
 /// whose subtasks include it. A crate that already names its parent (a
 /// report task's `parent`) keeps it.
@@ -226,6 +285,7 @@ pub fn links_from_tasks(tasks: &[Task]) -> Vec<FeatureLink> {
                     spec_url: None,
                     linked_by: LinkedBy::SubIssues,
                     children: vec![child],
+                    closed: false,
                 });
             }
         }
@@ -266,6 +326,7 @@ mod tests {
             spec_url: Some("https://github.com/acme/app/blob/main/docs/specs/carts.md".into()),
             linked_by: LinkedBy::SubIssues,
             children,
+            closed: false,
         }
     }
 
@@ -319,6 +380,7 @@ mod tests {
             flaky: Vec::new(),
             github: None,
             features: vec![],
+            shipped: vec![],
         }
     }
 
@@ -521,5 +583,77 @@ mod tests {
         assert_eq!(json["build"], serde_json::json!({"landed": 1, "total": 1}));
         assert_eq!(json["stages"][2], serde_json::json!({"name": "uat", "reached": 1, "total": 1, "unknown": false}));
         assert_eq!(json["stuck"], serde_json::json!([]));
+    }
+
+    fn docked(to: &str, issues: &[u32], at: &str) -> crate::web::village::Voyage {
+        crate::web::village::Voyage {
+            from: "uat".into(),
+            to: to.into(),
+            state: VoyageState::Docked,
+            issues: issues.to_vec(),
+            finished_at: Some(at.into()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn an_epic_ships_when_the_voyage_carrying_its_last_subtasks_docks_in_prod() {
+        let mut v = village(&[], [&[], &[], &[], &[461, 462, 463, 464]], vec![], vec![]);
+        v.pipeline.voyages = vec![docked("prod", &[463, 464, 999], "2026-11-16T10:00:00Z")];
+        let got = shipped(&v, &[four()]);
+        assert_eq!(got, vec![Shipped {
+            number: 460,
+            title: "Saved carts".into(),
+            url: "https://github.com/acme/app/issues/460".into(),
+            at: "2026-11-16T10:00:00Z".into()
+        }]);
+        // Its newest voyage is the one that counts.
+        v.pipeline.voyages.push(docked("prod", &[461], "2026-11-16T11:30:00+00:00"));
+        assert_eq!(shipped(&v, &[four()])[0].at, "2026-11-16T11:30:00+00:00");
+    }
+
+    #[test]
+    fn nothing_ships_short_of_prod_or_without_a_docked_voyage() {
+        // One subtask still in uat: not live.
+        let mut v = village(&[], [&[], &[], &[461], &[462, 463, 464]], vec![], vec![]);
+        v.pipeline.voyages = vec![docked("prod", &[462], "2026-11-16T10:00:00Z")];
+        assert!(shipped(&v, &[four()]).is_empty());
+        // Live, but the voyage docked in uat, or is still under sail, or carried none of it.
+        let mut v = village(&[], [&[], &[], &[], &[461, 462, 463, 464]], vec![], vec![]);
+        v.pipeline.voyages = vec![docked("uat", &[461], "2026-11-16T10:00:00Z")];
+        assert!(shipped(&v, &[four()]).is_empty());
+        v.pipeline.voyages = vec![crate::web::village::Voyage { state: VoyageState::Sailing, ..docked("prod", &[461], "2026-11-16T10:00:00Z") }];
+        assert!(shipped(&v, &[four()]).is_empty());
+        v.pipeline.voyages = vec![docked("prod", &[999], "2026-11-16T10:00:00Z")];
+        assert!(shipped(&v, &[four()]).is_empty());
+    }
+
+    #[test]
+    fn a_closed_epic_still_ships() {
+        let mut v = village(&[], [&[], &[], &[], &[461, 462, 463, 464]], vec![], vec![]);
+        v.pipeline.voyages = vec![docked("prod", &[464], "2026-11-16T10:00:00Z")];
+        let closed = FeatureLink { closed: true, ..four() };
+        assert_eq!(shipped(&v, &[closed]).len(), 1);
+    }
+
+    #[test]
+    fn what_shipped_is_kept_for_the_rest_of_the_local_day() {
+        let local = |h: u32| {
+            use chrono::TimeZone;
+            chrono::Local.with_ymd_and_hms(2026, 11, 16, h, 0, 0).unwrap().to_rfc3339()
+        };
+        let one = |n: u32, at: String| Shipped { number: n, title: format!("Epic {n}"), url: String::new(), at };
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 11, 16).unwrap();
+        let mut memory = Vec::new();
+        let got = remember_shipped(&mut memory, vec![one(460, local(9))], today);
+        assert_eq!(got.len(), 1);
+        // Once its voyage is no longer reported, it is still remembered; a
+        // later one goes first, and seeing 460 again keeps its first time.
+        let got = remember_shipped(&mut memory, vec![one(470, local(15)), one(460, local(16))], today);
+        assert_eq!(got.iter().map(|s| (s.number, s.at.clone())).collect::<Vec<_>>(), vec![(470, local(15)), (460, local(9))]);
+        // The next day it is gone.
+        let tomorrow = today.succ_opt().unwrap();
+        assert!(remember_shipped(&mut memory, vec![], tomorrow).is_empty());
+        assert!(memory.is_empty());
     }
 }

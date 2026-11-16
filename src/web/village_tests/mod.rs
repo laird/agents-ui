@@ -17,6 +17,7 @@ mod newissue;
 mod notify;
 mod proposals;
 mod screensaver;
+mod shipped;
 mod themes;
 
 pub(super) use super::server::{VILLAGE_FILES as VILLAGE_ASSETS, village_asset};

@@ -204,6 +204,7 @@ mod tests {
             flaky: Vec::new(),
             github: None,
             features: Vec::new(),
+            shipped: Vec::new(),
         }
     }
 
