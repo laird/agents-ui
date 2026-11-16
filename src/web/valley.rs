@@ -20,7 +20,8 @@
 //! running swarm is still there, dormant. What is wrong with the manifest (bad
 //! JSON, an unknown repo, a cycle) is said in the answer, never a crash.
 //! Each group also carries its `ropes` and `caravans`: issues linked across
-//! its repos on GitHub (`crossrepo.rs`, #528).
+//! its repos on GitHub (`crossrepo.rs`, #528), and its `barges`: a red
+//! consumer's failure sent back to a library it names (`breakage.rs`, #529).
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -145,6 +146,9 @@ pub struct ValleyGroup {
     /// Parent issues whose subtasks are spread over several repos of the group.
     #[serde(default)]
     pub caravans: Vec<super::crossrepo::Caravan>,
+    /// Red consumers' failures sent back to a library they name (`breakage.rs`, #529).
+    #[serde(default)]
+    pub barges: Vec<super::breakage::Barge>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -418,7 +422,7 @@ fn build_group(def: &GroupDef, villages: &[VillageSnapshot], dormant: &HashMap<S
         kept(&CACHE, format!("{}\0{file}\0{sha}", dir.to_string_lossy()), || super::grid::contract_at(&dir, file, sha))
     };
     let grid = super::grid::build(&stops, &edges, &contract);
-    ValleyGroup { name: def.name.clone(), repos, edges, grid, errors, ropes: Vec::new(), caravans: Vec::new() }
+    ValleyGroup { name: def.name.clone(), repos, edges, grid, errors, ropes: Vec::new(), caravans: Vec::new(), barges: Vec::new() }
 }
 
 /// Each repo's depth: the longest run of `package` edges above it. Repos on
@@ -560,15 +564,17 @@ async fn dormant_stops(transport: &super::super::transport::ServerTransport, vil
     out
 }
 
-/// Each group's ropes and caravans (#528): the issues of every repo of it on
+/// Each group's ropes and caravans (#528) and barges (#529): the issues of every repo of it on
 /// this machine and on GitHub, as last read in the background
 /// (`crossrepo::fetch`): the first poll has none, the next has them. A repo
 /// with no directory here, or one GitHub can't be asked about, is left out.
 fn add_links(transport: &super::super::transport::ServerTransport, groups: &mut [ValleyGroup], villages: &[VillageSnapshot]) {
     for g in groups.iter_mut() {
         let (mut repos, mut issues) = (Vec::new(), HashMap::new());
+        let mut dirs: HashMap<String, PathBuf> = HashMap::new();
         for r in &g.repos {
             let Some(dir) = repo_dir(&r.repo, villages) else { continue };
+            dirs.insert(r.name.clone(), dir.clone());
             let read = super::crossrepo::fetch(transport, &dir);
             let Some(slug) = read.slug else { continue };
             if let Some(list) = read.issues {
@@ -577,6 +583,29 @@ fn add_links(transport: &super::super::transport::ServerTransport, groups: &mut 
             repos.push((r.name.clone(), slug));
         }
         (g.ropes, g.caravans) = super::crossrepo::links(&repos, &issues);
+        // Barges (#529): each red consumer, against what it depends on here.
+        let slug_of: HashMap<&str, &str> = repos.iter().map(|(n, s)| (n.as_str(), s.as_str())).collect();
+        let mut barges = Vec::new();
+        for r in &g.repos {
+            let (Some(dir), Some(v)) = (dirs.get(&r.name), village_for(&r.repo, villages)) else { continue };
+            let Some((run, jobs)) = super::breakage::failing(v.build.as_ref()) else { continue };
+            let libs: Vec<super::breakage::Library> = g
+                .edges
+                .iter()
+                .filter(|e| e.to == r.name)
+                .map(|e| super::breakage::Library {
+                    name: e.from.clone(),
+                    slug: slug_of.get(e.from.as_str()).map(|s| s.to_string()),
+                    packages: dirs.get(&e.from).map(|d| super::pins::package_names(d, &e.from)).unwrap_or_default(),
+                })
+                .collect();
+            if libs.is_empty() {
+                continue;
+            }
+            let logs = super::breakage::job_logs(transport, dir, &jobs);
+            barges.extend(super::breakage::barges(&r.name, run.as_deref(), &logs, issues.get(&r.name).map(Vec::as_slice).unwrap_or(&[]), &libs));
+        }
+        g.barges = barges;
     }
 }
 
@@ -628,6 +657,7 @@ mod tests {
         let json = serde_json::to_value(&groups[0]).unwrap();
         assert_eq!(json["ropes"], serde_json::json!([]));
         assert_eq!(json["caravans"], serde_json::json!([]));
+        assert_eq!(json["barges"], serde_json::json!([]));
     }
 
     #[test]

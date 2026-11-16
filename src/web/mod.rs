@@ -1,3 +1,4 @@
+pub mod breakage;
 pub mod build;
 pub mod control_preview;
 pub mod controls;
