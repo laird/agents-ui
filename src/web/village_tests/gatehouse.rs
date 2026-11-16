@@ -129,3 +129,27 @@ fn the_gatehouse_marks_and_the_world_frame_draw_at_2x() {
         assert!(worlds.contains(f), "missing: {f}");
     }
 }
+
+/// #502: a ghost over the gatehouse for each flaky test (#501's `flaky`),
+/// fading with time clean; a click lists the failures. Which ghosts, where
+/// and how faint is ghostmarks.js, tested under node (ghosts.test.mjs).
+#[test]
+fn flaky_tests_haunt_the_gatehouse() {
+    let ghosts = village_asset("ghosts.js").unwrap().1;
+    // Drawn over the gatehouse (z 75), at 2×, in each theme's way; nothing without a gate.
+    assert!(ghosts.contains("registerLayer({ z: 78, draw(c, { v, lay }, t) {"));
+    assert!(ghosts.contains("const g = lay.gate; if (!g) return;"));
+    assert!(ghosts.contains("if (theme === MODERN) {") && ghosts.contains("} else if (theme === FUTURE) {"));
+    assert!(ghosts.contains("c.globalAlpha *= alpha;"), "a ghost fades");
+    assert!(ghosts.contains("tap(x, y, 6, 7, { kind: 'ghost', test: f.test });"));
+    // The dialog lists the failures and links the Flaky: issue.
+    assert!(ghosts.contains("registerHit({ kind: 'ghost', dialog(o, sc) {"));
+    assert!(ghosts.contains("meta: failureLines(f, when),"));
+    // One label, fixed over the ghosts, and a Key row.
+    assert!(ghosts.contains("anchor: 'bottom', fixed: true, cls: 'ghost'"));
+    assert!(ghosts.contains("registerKey({ group: 'other', rows: theme => ["));
+    let css = village_asset("village.css").unwrap().1;
+    assert!(css.contains(".al.ghost {"));
+    let main = village_asset("main.js").unwrap().1;
+    assert!(main.contains("import './ghosts.js';"));
+}

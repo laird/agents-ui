@@ -10,6 +10,7 @@ import './ship.js';
 import './gatehouse.js';
 import './weather.js';
 import './bounces.js';
+import './ghosts.js';
 import './scoreboard.js';
 import './barrels.js';
 import './well.js';
