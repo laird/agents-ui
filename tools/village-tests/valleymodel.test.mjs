@@ -54,10 +54,35 @@ test('a river runs along each package edge, east side to west side; a road along
   assert.ok(r[1][0] > core.x + core.w && r[1][0] < api.x, 'it turns in the gap');
   // Every leg is level or plumb.
   [...rivers, ...roads].forEach(p => p.slice(1).forEach(([x, y], k) => assert.ok(x === p[k][0] || y === p[k][1])));
-  // The road leaves api's bottom and comes up into web's.
+  // The road leaves api's west side and comes into web's.
   const road = roads[0];
-  assert.equal(road[0][1], api.y + api.h);
-  assert.equal(road[road.length - 1][1], web.y + web.h);
+  assert.deepEqual([road[0][0], road[road.length - 1][0]], [api.x, web.x]);
+  noLegUnderARepo(cells, [...rivers, ...roads]);
+});
+
+/* No leg of a river or road runs through the inside of any repo. */
+function noLegUnderARepo(cells, paths) {
+  paths.forEach(p => p.slice(1).forEach(([x1, y1], k) => {
+    const [x0, y0] = p[k], lo = [Math.min(x0, x1), Math.min(y0, y1)], hi = [Math.max(x0, x1), Math.max(y0, y1)];
+    cells.forEach((c, i) => assert.ok(hi[0] <= c.x || lo[0] >= c.x + c.w || hi[1] <= c.y || lo[1] >= c.y + c.h,
+      `the leg ${JSON.stringify([p[k], [x1, y1]])} runs under repo ${i}`));
+  }));
+}
+
+test('a river that skips a column, and a road within one column, keep to the gaps', () => {
+  // core -> web -> api, and core -> api straight: the straight one would run under web.
+  const skip = { repos: [repo('core', 0), repo('web', 1), repo('api', 2)],
+    edges: [{ from: 'core', to: 'web', via: 'package' }, { from: 'web', to: 'api', via: 'package' }, { from: 'core', to: 'api', via: 'package' }] };
+  let lay = valleyLayout(skip);
+  noLegUnderARepo(lay.cells, lay.rivers);
+  // The demo's shape: billing calls shop's API, larkspur between them in the same column.
+  const col = { repos: [repo('lib', 0), repo('shop', 1), repo('larkspur', 1), repo('billing', 1)],
+    edges: [{ from: 'billing', to: 'shop', via: 'api' }, { from: 'lib', to: 'shop', via: 'package' }, { from: 'lib', to: 'billing', via: 'package' }] };
+  lay = valleyLayout(col);
+  noLegUnderARepo(lay.cells, [...lay.rivers, ...lay.roads]);
+  const road = lay.roads[0], [, shop, , billing] = lay.cells;
+  assert.equal(road[0][1], billing.y + billing.h - 12, 'it leaves billing');
+  assert.equal(road[road.length - 1][1], shop.y + shop.h - 12, 'and comes into shop');
 });
 
 test('an edge to a repo not in the valley draws nothing; an empty group still has a size', () => {

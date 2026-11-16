@@ -22,6 +22,7 @@ import { SHORE, ovHouse } from './overview.js';
 import { repoWords, valleyAt, valleyLayout, valleyMissing, valleyName, valleyWords } from './valleymodel.js';
 
 const VALLEY_SHORE = { ...SHORE, dormant: '#808890' };
+const VALLEY_HEALTH = { red: 'needs you', amber: 'blocked or stalled', green: 'all well', dormant: 'dormant' };
 let valleyResp = null; // the last /api/valley answer
 
 /* The group the URL names, when the page is a valley. */
@@ -100,7 +101,11 @@ export function drawValley(t) {
 
 /* Open a repo's own village; a repo with no village has nothing to open. */
 function openRepo(r) {
-  if (r && r.project) location.href = location.pathname + '#' + encodeURIComponent(r.project);
+  if (!r || !r.project) return;
+  // The rest of the query (the theme, the screensaver) goes along; the valley doesn't.
+  const q = new URLSearchParams(location.search);
+  q.delete('valley');
+  location.href = location.pathname + (String(q) ? '?' + q : '') + '#' + encodeURIComponent(r.project);
 }
 cv.addEventListener('click', e => {
   const g = state.view && state.view.valley && shownGroup();
@@ -143,7 +148,8 @@ export function placeValley() {
     if (vkeys.children[k] !== b) vkeys.insertBefore(b, vkeys.children[k] || null);
     keep.add(b);
     b.disabled = !repo.project;
-    b.setAttribute('aria-label', `${words.text}: ${words.sub}${repo.project ? '. Open its village' : ''}`);
+    const health = VALLEY_HEALTH[(repo.summary || {}).health];
+    b.setAttribute('aria-label', `${words.text}: ${health && !repo.dormant ? health + ', ' : ''}${words.sub}${repo.project ? '. Open its village' : ''}`);
     Object.assign(b.style, { left: ox0 + c.x * s + 'px', top: oy0 + c.y * s + 'px', width: c.w * s + 'px', height: c.h * s + 'px' });
   });
   [...vkeys.children].forEach(b => { if (!keep.has(b)) b.remove(); });

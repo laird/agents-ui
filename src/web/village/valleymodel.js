@@ -32,18 +32,20 @@ export function valleyLayout(group) {
   const W = 2 * m + cols * w + (cols - 1) * gx;
   // The roads' lane runs below the lowest row.
   const lane = m + rows * h + (rows - 1) * gy + 14, H = lane + 12;
-  const rivers = [], roads = [];
+  // Rivers and roads keep to the gaps, never under a repo: a river that
+  // skips a column climbs to the lane above every row; a road leaves its
+  // repo's west side and runs along the lane below every row.
+  const top = m >> 1, rivers = [], roads = [];
   ((group && group.edges) || []).forEach(e => {
     const a = at[e.from], b = at[e.to];
     if (!a || !b) return;
     if (e.via === 'package') {
-      // Out of the upstream repo's east side, down (or up) in the gap after it, into the downstream one's west side.
-      const x0 = a.x + w, y0 = a.y + (h >> 1), x1 = b.x, y1 = b.y + (h >> 1), mid = x0 + (gx >> 1);
-      rivers.push(y0 === y1 ? [[x0, y0], [x1, y1]] : [[x0, y0], [mid, y0], [mid, y1], [x1, y1]]);
+      const x0 = a.x + w, y0 = a.y + (h >> 1), x1 = b.x, y1 = b.y + (h >> 1), out = x0 + (gx >> 1), into = x1 - (gx >> 1);
+      if (out === into) rivers.push(y0 === y1 ? [[x0, y0], [x1, y1]] : [[x0, y0], [out, y0], [out, y1], [x1, y1]]);
+      else rivers.push([[x0, y0], [out, y0], [out, top], [into, top], [into, y1], [x1, y1]]);
     } else {
-      // From the bottom of one to the bottom of the other, along the lane.
-      const xa = a.x + (w >> 1) - 6, xb = b.x + (w >> 1) + 6;
-      roads.push([[xa, a.y + h], [xa, lane], [xb, lane], [xb, b.y + h]]);
+      const xa = a.x - 14, xb = b.x - 14, ya = a.y + h - 12, yb = b.y + h - 12;
+      roads.push([[a.x, ya], [xa, ya], [xa, lane], [xb, lane], [xb, yb], [b.x, yb]]);
     }
   });
   return { W, H, cells, rivers, roads };

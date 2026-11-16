@@ -148,7 +148,8 @@ fn repo_name(repo: &str) -> String {
 /// The village a manifest repo is: by project name, by path, or by a path's last part.
 fn village_for<'a>(repo: &str, villages: &'a [VillageSnapshot]) -> Option<&'a VillageSnapshot> {
     let home = dirs::home_dir().map(|h| h.to_string_lossy().into_owned()).unwrap_or_default();
-    let path = repo.strip_prefix("~/").map_or_else(|| repo.trim_end_matches('/').to_string(), |rest| format!("{home}/{rest}"));
+    let path = repo.strip_prefix("~/").map_or_else(|| repo.to_string(), |rest| format!("{home}/{rest}"));
+    let path = path.trim_end_matches('/');
     let name = repo_name(repo);
     villages
         .iter()
@@ -226,7 +227,8 @@ fn build_group(def: &GroupDef, villages: &[VillageSnapshot]) -> ValleyGroup {
             let village = village_for(&d.repo, villages);
             let dormant = village.is_none_or(is_dormant);
             let mut summary = village.map(summarize).unwrap_or_default();
-            if dormant {
+            // At rest, unless something there still waits on you.
+            if dormant && summary.health != "red" {
                 summary.health = "dormant".to_string();
             }
             ValleyRepo {
@@ -274,10 +276,17 @@ fn order(names: &[String], edges: &[Edge], group: &str, errors: &mut Vec<String>
     }
     let stuck: Vec<&String> = names.iter().filter(|n| indegree[n.as_str()] > 0).collect();
     if !stuck.is_empty() {
-        errors.push(format!(
-            "{group}: a dependency cycle among {}",
-            stuck.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
-        ));
+        // Name only the repos on a cycle: drop, again and again, any stuck repo
+        // no other stuck repo builds on (it is merely downstream of a cycle).
+        let mut on: Vec<&str> = stuck.iter().map(|s| s.as_str()).collect();
+        loop {
+            let keep: Vec<&str> = on.iter().copied().filter(|n| pkg.iter().any(|e| e.from == *n && on.contains(&e.to.as_str()))).collect();
+            if keep.len() == on.len() {
+                break;
+            }
+            on = keep;
+        }
+        errors.push(format!("{group}: a dependency cycle among {}", on.join(", ")));
         let below = depth.values().copied().max().map_or(0, |d| d + 1);
         for n in stuck {
             depth.insert(n.clone(), below);
@@ -378,6 +387,12 @@ mod tests {
         assert_eq!(g.errors, vec!["loop: a dependency cycle among a, b"]);
         let order: Vec<(&str, usize)> = g.repos.iter().map(|r| (r.name.as_str(), r.depth)).collect();
         assert_eq!(order, vec![("c", 0), ("d", 1), ("a", 2), ("b", 2)]);
+        // A repo merely downstream of a cycle is placed with it but not named on it.
+        let text = r#"[{ "name": "loop", "repos": [
+            { "repo": "a", "depends_on": [{ "repo": "b", "via": "package" }] },
+            { "repo": "b", "depends_on": [{ "repo": "a", "via": "package" }] },
+            { "repo": "e", "depends_on": [{ "repo": "a", "via": "package" }] } ] }]"#;
+        assert_eq!(valley(text, &[]).0[0].errors, vec!["loop: a dependency cycle among a, b"]);
         // An api cycle is no cycle: it orders nothing.
         let text = r#"[{ "name": "calls", "repos": [
             { "repo": "a", "depends_on": [{ "repo": "b", "via": "api" }] },
@@ -444,6 +459,24 @@ mod tests {
         let core = groups[0].repos.iter().find(|r| r.name == "lib-core").unwrap();
         assert!(core.dormant);
         assert_eq!(core.project.as_deref(), Some("lib-core"));
+        assert_eq!(core.summary.health, "dormant");
+        // At rest, but something on its board waits on you: still red.
+        let mut waiting = village("lib-core", &[]);
+        waiting.manager.status = HouseStatus::Stopped;
+        waiting.board = vec![Default::default()];
+        let (groups, _) = valley(SHOP, &[waiting]);
+        assert_eq!(groups[0].repos.iter().find(|r| r.name == "lib-core").unwrap().summary.health, "red");
+    }
+
+    #[test]
+    fn a_path_is_matched_with_or_without_its_trailing_slash() {
+        let text = r#"[{ "name": "g", "repos": [{ "repo": "/src/web/" }] }]"#;
+        let mut web = village("frontend", &[HouseStatus::Working]);
+        web.repo_path = "/src/web".into();
+        let mut decoy = village("web", &[]);
+        decoy.repo_path = "/elsewhere/web".into();
+        let (groups, _) = valley(text, &[decoy, web]);
+        assert_eq!(groups[0].repos[0].project.as_deref(), Some("frontend"), "the path wins over a same-named village");
     }
 
     #[test]

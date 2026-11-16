@@ -14,7 +14,12 @@ fn the_valley_page_draws_the_group_and_opens_a_repo_on_click() {
     // Rivers along package edges, roads along api ones, from the layout.
     assert!(body.contains("lay.rivers.forEach(") && body.contains("lay.roads.forEach("));
     // A click, or Enter on a repo's target, opens its village; a repo without one has nothing to open.
-    assert!(body.contains("if (r && r.project) location.href = location.pathname + '#' + encodeURIComponent(r.project);"));
+    assert!(body.contains("if (!r || !r.project) return;"));
+    assert!(body.contains("q.delete('valley');"));
+    // Clicks on the valley are its own: no village hint under them.
+    assert!(body.contains("if (!state.view || state.view.overview || state.view.valley) return;"));
+    // No one village's build speaks for the valley in the status line.
+    assert!(body.contains("const shown = valleyWanted() ? null :"));
     assert!(body.contains("b.disabled = !repo.project;"));
     // Nothing to draw says why.
     assert!(body.contains("const missing = valleyMissing(valleyResp, name);"));

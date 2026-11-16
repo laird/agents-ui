@@ -147,7 +147,8 @@ async function poll() {
     }
     // The shown village's build, in words (weather.js draws it).
     const world = worlds.find(w => w.name === pick.value);
-    const shown = villages.find(v => v.project === (world ? world.dev : pick.value));
+    // A valley is many villages: no one build speaks for it.
+    const shown = valleyWanted() ? null : villages.find(v => v.project === (world ? world.dev : pick.value));
     const build = shown ? buildWords(shown.build) : '';
     const status = document.getElementById('status');
     status.textContent = 'Live · updated ' + new Date().toLocaleTimeString() + (build ? ' · ' + build : '');
