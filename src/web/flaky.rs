@@ -79,8 +79,11 @@ pub struct FlakyRun {
 /// The finished runs in one log: (place in the log, tree sha, outcome). A run
 /// is finished once another starts after it, or the job is done; until then
 /// it may still fail. A run with no test results (a cached tree, a run cut
-/// off) says nothing and is left out.
-pub fn runs_in_log(log: &str, job_done: bool) -> Vec<(usize, String, Outcome)> {
+/// off) or one the gate says failed without naming a test says nothing and
+/// is left out. Each run comes with its place in the log and which time its
+/// tree is gated there (0 for the first): the second is what keys it, as it
+/// stays the same when `tail` cuts the log's start off.
+pub fn runs_in_log(log: &str, job_done: bool) -> Vec<(usize, usize, String, Outcome)> {
     let mut segments: Vec<(String, Vec<&str>)> = Vec::new();
     for line in log.lines() {
         if let Some(rest) = line.trim_start().strip_prefix(RUN_START) {
@@ -91,20 +94,31 @@ pub fn runs_in_log(log: &str, job_done: bool) -> Vec<(usize, String, Outcome)> {
         }
     }
     let last = segments.len().saturating_sub(1);
+    let mut seen: std::collections::HashMap<String, usize> = Default::default();
+    let nth: Vec<usize> = segments
+        .iter()
+        .map(|(sha, _)| {
+            let n = seen.entry(sha.clone()).or_default();
+            *n += 1;
+            *n - 1
+        })
+        .collect();
     segments
         .into_iter()
         .enumerate()
         .filter(|(i, (sha, _))| !sha.is_empty() && (*i < last || job_done))
         .filter_map(|(i, (sha, lines))| {
+            let nth = nth[i];
             let failed: Vec<String> = lines
                 .iter()
                 .filter_map(|l| l.trim().strip_prefix("test ")?.strip_suffix(" ... FAILED").map(str::to_string))
                 .collect();
             let results: Vec<&&str> = lines.iter().filter(|l| l.trim_start().starts_with("test result:")).collect();
+            let gate_failed = lines.iter().any(|l| l.trim_start().starts_with("❌ Tests fail"));
             if !failed.is_empty() {
-                Some((i, sha, Outcome::Failed(failed)))
-            } else if !results.is_empty() && results.iter().all(|l| l.contains("test result: ok")) {
-                Some((i, sha, Outcome::Passed))
+                Some((i, nth, sha, Outcome::Failed(failed)))
+            } else if !gate_failed && !results.is_empty() && results.iter().all(|l| l.contains("test result: ok")) {
+                Some((i, nth, sha, Outcome::Passed))
             } else {
                 None
             }
@@ -114,12 +128,15 @@ pub fn runs_in_log(log: &str, job_done: bool) -> Vec<(usize, String, Outcome)> {
 
 /// Add the finished runs in `jobs`' logs to `runs`, once each, then drop
 /// those older than the window. `log_path` names each job's log.
-pub fn record(runs: &mut Vec<Run>, jobs: &[Job], log_path: &dyn Fn(u32) -> String, now: i64) {
+pub fn record<'a>(runs: &mut Vec<Run>, jobs: impl IntoIterator<Item = &'a Job>, log_path: &dyn Fn(u32) -> String, now: i64) {
     for job in jobs {
         let started = job.started.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64);
+        if started.is_some_and(|s| now - s >= WINDOW_SECS) {
+            continue; // its runs would be dropped below anyway
+        }
         let done = !job.alive || job.exit.is_some();
-        for (i, sha, outcome) in runs_in_log(&job.log, done) {
-            let key = format!("{}:{}:{i}:{sha}", job.issue, started.unwrap_or(0));
+        for (i, nth, sha, outcome) in runs_in_log(&job.log, done) {
+            let key = format!("{}:{}:{sha}:{nth}", job.issue, started.unwrap_or(0));
             if runs.iter().any(|r| r.key == key) {
                 continue;
             }
@@ -177,10 +194,12 @@ pub fn save(path: &Path, runs: &[Run]) {
         let _ = std::fs::create_dir_all(dir);
     }
     // Whole file or nothing: write beside it, then rename over it.
-    let tmp = path.with_extension("json.tmp");
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = path.with_extension(format!("json.{}.{n}.tmp", std::process::id()));
     if let Ok(bytes) = serde_json::to_vec(runs) {
-        if std::fs::write(&tmp, bytes).is_ok() {
-            let _ = std::fs::rename(&tmp, path);
+        if std::fs::write(&tmp, bytes).is_ok() && std::fs::rename(&tmp, path).is_err() {
+            let _ = std::fs::remove_file(&tmp);
         }
     }
 }
@@ -188,13 +207,29 @@ pub fn save(path: &Path, runs: &[Run]) {
 /// Record what `jobs` show for `repo`, and say which tests are flaky. Local
 /// only, like the gate's files; a repo with no id has none.
 pub fn read_local(repo: &Path, jobs: &[Job], open: &[IssueSnapshot]) -> Vec<Flaky> {
+    // One at a time: every browser's poll lands here, and two that load, add
+    // and save together would each drop what the other added.
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _held = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(id) = super::gate::local_repo_id(repo) else { return Vec::new() };
     let path = store_path(&id);
     let mut runs = load(&path);
     let before = runs.clone();
     let tmp = std::env::var("AUTOCODER_TMP").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/tmp".to_string());
     let log_path = |issue: u32| format!("{tmp}/autocoder-merge-{id}-{issue}.log");
-    record(&mut runs, jobs, &log_path, chrono::Utc::now().timestamp());
+    // A log that hasn't grown since the last poll has nothing new to say.
+    static READ: std::sync::Mutex<Option<std::collections::HashMap<(String, u32, Option<std::time::SystemTime>), usize>>> = std::sync::Mutex::new(None);
+    let mut read = READ.lock().unwrap_or_else(|e| e.into_inner());
+    let read = read.get_or_insert_with(Default::default);
+    let changed: Vec<&Job> = jobs
+        .iter()
+        .filter(|j| {
+            // Its length, and one more once it is done (its last run then counts).
+            let size = j.log.len() + usize::from(!j.alive || j.exit.is_some());
+            read.insert((id.clone(), j.issue, j.started), size) != Some(size)
+        })
+        .collect();
+    record(&mut runs, changed, &log_path, chrono::Utc::now().timestamp());
     if runs != before {
         save(&path, &runs);
     }
@@ -237,14 +272,28 @@ mod tests {
     #[test]
     fn reads_each_finished_runs_tree_and_outcome() {
         let runs = runs_in_log(FAIL_A, true);
-        assert_eq!(runs, vec![(0, "44c8402c".to_string(), Outcome::Failed(vec!["web::village_tests::notify::notify_and_widget_model_tests_pass".into()]))]);
-        assert_eq!(runs_in_log(PASS_B, true), vec![(0, "5ede65f1".to_string(), Outcome::Passed)]);
+        assert_eq!(runs, vec![(0, 0, "44c8402c".to_string(), Outcome::Failed(vec!["web::village_tests::notify::notify_and_widget_model_tests_pass".into()]))]);
+        assert_eq!(runs_in_log(PASS_B, true), vec![(0, 0, "5ede65f1".to_string(), Outcome::Passed)]);
         // Two runs in one log: the first is finished even while the job runs on.
         let both = format!("{PASS_B}{FAIL_A}");
-        assert_eq!(runs_in_log(&both, false), vec![(0, "5ede65f1".to_string(), Outcome::Passed)]);
+        assert_eq!(runs_in_log(&both, false), vec![(0, 0, "5ede65f1".to_string(), Outcome::Passed)]);
         assert_eq!(runs_in_log(&both, true).len(), 2);
         // A run still going, or with no results (a cached tree), says nothing.
         assert!(runs_in_log("🧪 Gating the integrated tree aa: cargo test\ngate-cache: tree aa passed before\n", true).is_empty());
+        // The gate says it failed but no test is named: not a pass.
+        assert!(runs_in_log("🧪 Gating the integrated tree aa: x\ntest result: ok. 3 passed\n❌ Tests fail on the integrated tree aa.\n", true).is_empty());
+    }
+
+    #[test]
+    fn a_run_keeps_its_key_when_the_logs_start_is_cut_off() {
+        // `tail` drops the first run once the log is long: the rest are not new.
+        let mut runs = Vec::new();
+        let long = format!("{PASS_B}{FAIL_A}{PASS_A}");
+        record(&mut runs, &[job(9, 100, &long, true)], &path, NOW + 300);
+        let cut = format!("{FAIL_A}{PASS_A}");
+        record(&mut runs, &[job(9, 100, &cut, true)], &path, NOW + 360);
+        assert_eq!(runs.len(), 3);
+        assert_eq!(flaky(&runs, &[])[0].count, 1);
     }
 
     #[test]

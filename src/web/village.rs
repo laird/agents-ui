@@ -1224,7 +1224,10 @@ impl SwarmVillages {
         // Flaky tests (#501): each finished gate run is recorded as it is seen,
         // since the logs are overwritten when a merge is relaunched.
         let flaky = if gate.local {
-            let (repo, jobs, open) = (repo.clone(), gate.jobs.clone(), issues.clone());
+            // Only this week's jobs: older runs would be dropped anyway.
+            let week = std::time::SystemTime::now() - std::time::Duration::from_secs(super::flaky::WINDOW_SECS as u64);
+            let jobs: Vec<_> = gate.jobs.iter().filter(|j| j.started.is_none_or(|s| s >= week)).cloned().collect();
+            let (repo, open) = (repo.clone(), issues.clone());
             tokio::task::spawn_blocking(move || super::flaky::read_local(&repo, &jobs, &open)).await.unwrap_or_default()
         } else {
             Vec::new()
