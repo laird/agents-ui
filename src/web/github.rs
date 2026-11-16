@@ -32,10 +32,15 @@ use crate::transport::ServerTransport;
 /// Days the summary covers, today included.
 pub const DAYS: usize = 14;
 
-/// How long a summary is reused: 90 s, or `AGENTS_UI_GITHUB_REFRESH_SECS`.
-/// Between 60 and 120 s, so a wall display doesn't eat the rate limit.
+/// How long a summary is reused: 90 s, or `AGENTS_UI_GITHUB_REFRESH_SECS`
+/// held between 60 and 120 s, so a wall display never eats the rate limit.
 pub fn refresh_ttl() -> Duration {
-    std::env::var("AGENTS_UI_GITHUB_REFRESH_SECS").ok().and_then(|s| s.parse().ok()).map(Duration::from_secs).unwrap_or(Duration::from_secs(90))
+    ttl_from(std::env::var("AGENTS_UI_GITHUB_REFRESH_SECS").ok().as_deref())
+}
+
+/// [`refresh_ttl`] from the variable's value, if any.
+pub fn ttl_from(secs: Option<&str>) -> Duration {
+    Duration::from_secs(secs.and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(90).clamp(60, 120))
 }
 
 /// What GitHub says about a repo's recent work.
@@ -60,12 +65,15 @@ pub struct Day {
     pub landed: u32,
     /// Issues opened that day.
     pub opened: u32,
-    /// Times the merge gate handed work back that day (a conflict or a failed gate).
+    /// Times the merge gate handed work back that day: a conflict or a failed
+    /// gate (its comments), or a push rejected and re-synced (its commits).
     pub bounced: u32,
     /// Reverts on the integration branch that day; absent when its log can't be read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reverted: Option<u32>,
-    /// GitHub Deployments created that day.
+    /// Commits deployed that day: GitHub Deployments created, one per commit
+    /// however many environments it went to (a deploy and its release are
+    /// one), whatever their outcome.
     pub deploys: u32,
 }
 
@@ -105,15 +113,15 @@ fn local_date(at: &str, offset: &FixedOffset) -> Option<NaiveDate> {
 }
 
 /// The summary from what was read: `issues` (`gh issue list` JSON),
-/// `deployments` (the deployments listing, if it could be read), and
-/// `reverts` (`git log --format=%cI%x09%s` of the integration branch, if it
-/// could be read). `today` and `offset` are the server's local date and
-/// offset from UTC.
-pub fn summarize(issues: &[u8], deployments: Option<&str>, reverts: Option<&str>, today: NaiveDate, offset: FixedOffset, as_of: String) -> Option<Summary> {
+/// `deployments` (the deployments listing, if it could be read), and `log`
+/// (`git log --format=%cI%x09%s` of the integration branch, if it could be
+/// read: its reverts and push retries). `today` and `offset` are the
+/// server's local date and offset from UTC.
+pub fn summarize(issues: &[u8], deployments: Option<&str>, log: Option<&str>, today: NaiveDate, offset: FixedOffset, as_of: String) -> Option<Summary> {
     let issues: Vec<Issue> = serde_json::from_slice(issues).ok()?;
     let first = today - chrono::Duration::days(DAYS as i64 - 1);
     let mut days: Vec<Day> = (0..DAYS)
-        .map(|k| Day { date: (first + chrono::Duration::days(k as i64)).format("%Y-%m-%d").to_string(), reverted: reverts.map(|_| 0), ..Day::default() })
+        .map(|k| Day { date: (first + chrono::Duration::days(k as i64)).format("%Y-%m-%d").to_string(), reverted: log.map(|_| 0), ..Day::default() })
         .collect();
     let slot = |at: &str| local_date(at, &offset).filter(|d| *d >= first && *d <= today).map(|d| (d - first).num_days() as usize);
     let mut waits = Vec::new();
@@ -126,9 +134,11 @@ pub fn summarize(issues: &[u8], deployments: Option<&str>, reverts: Option<&str>
         if let (true, Some(closed)) = (landed, issue.closed_at.as_deref()) {
             if let Some(k) = slot(closed) {
                 days[k].landed += 1;
-                let claimed = issue.comments.iter().filter(|c| is_claim(&c.body)).filter_map(|c| DateTime::parse_from_rfc3339(&c.created_at).ok()).min();
-                if let (Some(from), Ok(to)) = (claimed, DateTime::parse_from_rfc3339(closed)) {
-                    if to >= from {
+                // The claim that led to this landing: the last before it, not
+                // an earlier attempt that was abandoned.
+                if let Ok(to) = DateTime::parse_from_rfc3339(closed) {
+                    let claimed = issue.comments.iter().filter(|c| is_claim(&c.body)).filter_map(|c| DateTime::parse_from_rfc3339(&c.created_at).ok()).filter(|at| *at <= to).max();
+                    if let Some(from) = claimed {
                         waits.push((to - from).num_seconds() as u64);
                     }
                 }
@@ -141,17 +151,24 @@ pub fn summarize(issues: &[u8], deployments: Option<&str>, reverts: Option<&str>
         }
     }
     if let Some(json) = deployments {
+        let mut seen = std::collections::HashSet::new();
         for d in super::deployments::parse_deployments(json) {
             if let Some(k) = slot(&d.created_at) {
-                days[k].deploys += 1;
+                days[k].deploys += seen.insert((k, d.sha.clone())) as u32;
             }
         }
     }
-    if let Some(log) = reverts {
+    if let Some(log) = log {
         for line in log.lines() {
             let Some((at, subject)) = line.split_once('\t') else { continue };
             if let (true, Some(k)) = (subject.starts_with("Revert "), slot(at)) {
                 *days[k].reverted.get_or_insert(0) += 1;
+            }
+        }
+        // A push rejected and re-synced is a bounce too, as the village's marks count it (#431).
+        for (_, b) in super::gate::push_retry_bounces(log) {
+            if let Some(k) = b.at.as_deref().and_then(slot) {
+                days[k].bounced += 1;
             }
         }
     }
@@ -168,7 +185,9 @@ fn median(xs: &mut [u64]) -> Option<u64> {
 }
 
 /// Read GitHub and git for `repo`, whose work lands on `integration`. `None`
-/// when `gh` can't list its issues (missing, signed out, rate limited).
+/// when `gh` can't list its issues (missing, signed out, rate limited). The
+/// three reads run together. The issue list stops at 500, about three times
+/// what this repo updates in 14 days.
 pub async fn fetch(transport: &ServerTransport, repo: &Path, integration: &str) -> Option<Summary> {
     let now = chrono::Local::now();
     let (today, offset) = (now.date_naive(), *now.offset());
@@ -181,36 +200,31 @@ pub async fn fetch(transport: &ServerTransport, repo: &Path, integration: &str) 
     .iter()
     .map(|s| s.to_string())
     .collect();
-    let out = crate::github::gh_repo_output(transport, repo, &args).await.ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let args = vec!["api".to_string(), "repos/{owner}/{repo}/deployments?per_page=100".to_string()];
-    let deployments = transport
-        .output("gh", &args, Some(repo))
-        .await
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
-    let reverts = if integration.is_empty() {
-        None
-    } else {
-        let args: Vec<String> = ["log".to_string(), format!("origin/{integration}"), format!("--since={since}"), "--format=%cI%x09%s".to_string()].to_vec();
-        transport
-            .output("git", &args, Some(repo))
-            .await
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+    let issues = async {
+        let out = crate::github::gh_repo_output(transport, repo, &args).await.ok()?;
+        out.status.success().then_some(out.stdout)
     };
-    summarize(&out.stdout, deployments.as_deref(), reverts.as_deref(), today, offset, now.to_rfc3339_opts(chrono::SecondsFormat::Secs, false))
+    let deployments = super::deployments::gh_api(transport, repo, "repos/{owner}/{repo}/deployments?per_page=100");
+    let log = async {
+        if integration.is_empty() {
+            return None;
+        }
+        let args: Vec<String> = vec!["log".into(), format!("origin/{integration}"), format!("--since={since}"), "--format=%cI%x09%s".into()];
+        let out = transport.output("git", &args, Some(repo)).await.ok()?;
+        out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+    };
+    let (issues, deployments, log) = futures::join!(issues, deployments, log);
+    summarize(&issues?, deployments.as_deref(), log.as_deref(), today, offset, now.to_rfc3339_opts(chrono::SecondsFormat::Secs, false))
 }
 
-/// Summaries per repo, each reused for [`refresh_ttl`]: polls inside it make
-/// no `gh` calls. A failed read is cached too, so a signed-out `gh` isn't
-/// asked again on every poll.
+/// Summaries per repo and integration branch, each reused for
+/// [`refresh_ttl`]: polls inside it make no `gh` calls. A failed read is
+/// cached too, so a signed-out `gh` isn't asked again on every poll. Reads
+/// take turns, so polls arriving together while it is stale wait for one read
+/// instead of each starting their own.
 pub struct Summaries {
-    cache: TtlCache<PathBuf, Option<Summary>>,
+    cache: TtlCache<(PathBuf, String), Option<Summary>>,
+    reading: tokio::sync::Mutex<()>,
 }
 
 impl Default for Summaries {
@@ -221,20 +235,22 @@ impl Default for Summaries {
 
 impl Summaries {
     pub fn new(ttl: Duration) -> Self {
-        Self { cache: TtlCache::new(ttl) }
+        Self { cache: TtlCache::new(ttl), reading: tokio::sync::Mutex::new(()) }
     }
 
     pub async fn get(&self, transport: &ServerTransport, repo: &Path, integration: &str) -> Option<Summary> {
-        self.get_with(repo, || fetch(transport, repo, integration)).await
+        self.get_with(repo, integration, || fetch(transport, repo, integration)).await
     }
 
     /// `get`, with the read given: what the cache does, testable without `gh`.
-    pub async fn get_with<F: std::future::Future<Output = Option<Summary>>>(&self, repo: &Path, read: impl FnOnce() -> F) -> Option<Summary> {
-        self.cache.get_or(repo.to_path_buf(), read).await
+    pub async fn get_with<F: std::future::Future<Output = Option<Summary>>>(&self, repo: &Path, integration: &str, read: impl FnOnce() -> F) -> Option<Summary> {
+        let _turn = self.reading.lock().await;
+        self.cache.get_or((repo.to_path_buf(), integration.to_string()), read).await
     }
 
+    /// Drop what was read for `repo`, on every integration branch.
     pub fn forget(&self, repo: &Path) {
-        self.cache.forget(&repo.to_path_buf());
+        self.cache.forget_where(|(r, _)| r == repo);
     }
 }
 
@@ -261,12 +277,14 @@ mod tests {
     ]"#;
 
     const DEPLOYMENTS: &str = r#"[
-      {"id": 2, "sha": "c1155de", "created_at": "2026-11-16T05:40:00Z", "description": "Release v2026.11.16.1"},
-      {"id": 1, "sha": "a8064d0", "created_at": "2026-11-16T05:39:00Z"},
+      {"id": 3, "sha": "c1155de", "created_at": "2026-11-16T05:41:00Z", "environment": "release", "description": "Release v2026.11.16.1"},
+      {"id": 2, "sha": "c1155de", "created_at": "2026-11-16T05:40:00Z", "environment": "nuc-1"},
+      {"id": 1, "sha": "a8064d0", "created_at": "2026-11-16T05:39:00Z", "environment": "nuc-1"},
       {"id": 0, "sha": "1dce1fa", "created_at": "2026-11-12T08:00:00Z"}
     ]"#;
 
     const LOG: &str = "2026-11-16T05:00:00+00:00\tImplement #484: a usage or rate limit\n\
+                       2026-11-16T04:00:00+00:00\tRe-sync origin/master into feature/issue-491 (push retry 1)\n\
                        2026-11-15T09:00:00+00:00\tRevert \"Implement #476: shadows at 2×\"\n";
 
     fn utc() -> FixedOffset {
@@ -286,14 +304,14 @@ mod tests {
         let t = day("2026-11-16");
         assert_eq!(t.landed, 2, "not planned and an old close are not landings");
         assert_eq!(t.opened, 1);
-        assert_eq!(t.bounced, 2, "a conflict and a failed gate");
-        assert_eq!(t.deploys, 2);
+        assert_eq!(t.bounced, 3, "a conflict, a failed gate, and a push re-synced");
+        assert_eq!(t.deploys, 2, "c1155de to nuc-1 and its release is one deploy; a8064d0 another");
         assert_eq!(t.reverted, Some(0));
         assert_eq!(day("2026-11-15").reverted, Some(1));
         assert_eq!((day("2026-11-15").opened, day("2026-11-14").opened), (1, 1));
         assert_eq!(day("2026-11-12").deploys, 1);
-        // Claim to land: 45m 16s (from the first claim) and 1h; the median of two is their mean.
-        assert_eq!(s.median_claim_to_land_secs, Some((2716 + 3600) / 2));
+        // Claim to land, from the last claim before it landed: 44m and 1h; the median of two is their mean.
+        assert_eq!(s.median_claim_to_land_secs, Some((2640 + 3600) / 2));
         assert_eq!(s.as_of, "2026-11-16T06:00:00Z");
     }
 
@@ -327,11 +345,11 @@ mod tests {
         };
         let cache = Summaries::new(Duration::from_secs(90));
         let repo = Path::new("/src/shop");
-        assert!(cache.get_with(repo, read).await.is_some());
-        assert!(cache.get_with(repo, read).await.is_some());
+        assert!(cache.get_with(repo, "master", read).await.is_some());
+        assert!(cache.get_with(repo, "master", read).await.is_some());
         assert_eq!(reads.load(Ordering::SeqCst), 1, "the second poll is served from the cache");
         cache.forget(repo);
-        cache.get_with(repo, read).await;
+        cache.get_with(repo, "master", read).await;
         assert_eq!(reads.load(Ordering::SeqCst), 2);
         // A failed read is cached too: a signed-out gh isn't asked on every poll.
         let fails = AtomicUsize::new(0);
@@ -340,14 +358,57 @@ mod tests {
             None
         };
         let other = Path::new("/src/other");
-        assert_eq!(cache.get_with(other, fail).await, None);
-        assert_eq!(cache.get_with(other, fail).await, None);
+        assert_eq!(cache.get_with(other, "master", fail).await, None);
+        assert_eq!(cache.get_with(other, "master", fail).await, None);
         assert_eq!(fails.load(Ordering::SeqCst), 1);
     }
 
     #[test]
     fn the_refresh_is_between_one_and_two_minutes() {
-        let ttl = refresh_ttl();
-        assert!(ttl >= Duration::from_secs(60) && ttl <= Duration::from_secs(120), "{ttl:?}");
+        assert_eq!(ttl_from(None), Duration::from_secs(90));
+        assert_eq!(ttl_from(Some("75")), Duration::from_secs(75));
+        assert_eq!(ttl_from(Some("0")), Duration::from_secs(60), "never every poll");
+        assert_eq!(ttl_from(Some("600")), Duration::from_secs(120));
+        assert_eq!(ttl_from(Some("soon")), Duration::from_secs(90));
+    }
+
+    #[test]
+    fn an_abandoned_claim_is_not_counted_in_the_wait() {
+        let issues = r#"[{"number": 9, "state": "CLOSED", "createdAt": "2026-11-01T00:00:00Z", "closedAt": "2026-11-16T05:00:00Z", "stateReason": "COMPLETED",
+          "comments": [{"body": "🔒 claim nuc-1 1", "createdAt": "2026-11-06T00:00:00Z"},
+                       {"body": "🔒 claim nuc-2 2", "createdAt": "2026-11-16T04:00:00Z"},
+                       {"body": "🔒 claim nuc-3 3", "createdAt": "2026-11-16T06:00:00Z"}]}]"#;
+        let s = summarize(issues.as_bytes(), None, None, today(), utc(), String::new()).unwrap();
+        assert_eq!(s.median_claim_to_land_secs, Some(3600), "the last claim before it landed; one after it is not");
+    }
+
+    #[tokio::test]
+    async fn polls_arriving_together_wait_for_one_read() {
+        let reads = std::sync::Arc::new(AtomicUsize::new(0));
+        let cache = std::sync::Arc::new(Summaries::new(Duration::from_secs(90)));
+        let polls: Vec<_> = (0..4)
+            .map(|_| {
+                let (cache, reads) = (cache.clone(), reads.clone());
+                tokio::spawn(async move {
+                    cache
+                        .get_with(Path::new("/src/shop"), "master", || async move {
+                            reads.fetch_add(1, Ordering::SeqCst);
+                            tokio::time::sleep(Duration::from_millis(20)).await;
+                            Some(Summary::default())
+                        })
+                        .await
+                })
+            })
+            .collect();
+        for p in polls {
+            assert!(p.await.unwrap().is_some());
+        }
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+        // Another integration branch is another read; forgetting the repo forgets both.
+        cache.get_with(Path::new("/src/shop"), "main", || async { Some(Summary::default()) }).await;
+        cache.forget(Path::new("/src/shop"));
+        let again = reads.clone();
+        cache.get_with(Path::new("/src/shop"), "master", || async move { again.fetch_add(1, Ordering::SeqCst); None }).await;
+        assert_eq!(reads.load(Ordering::SeqCst), 2);
     }
 }

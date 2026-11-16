@@ -265,6 +265,13 @@ impl<K: Eq + Hash, V: Clone> TtlCache<K, V> {
             m.remove(key);
         }
     }
+
+    /// Drop every value whose key matches.
+    pub fn forget_where(&self, mut drop: impl FnMut(&K) -> bool) {
+        if let Ok(mut m) = self.entries.lock() {
+            m.retain(|k, _| !drop(k));
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

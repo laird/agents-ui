@@ -1367,7 +1367,7 @@ mod tests {
                 Box::pin(async { Vec::new() })
             }
             fn summary<'a>(&'a self, _: &'a ServerTransport, repo: &'a Path, _: &'a str) -> BoxFuture<'a, Option<super::super::github::Summary>> {
-                Box::pin(self.0.get_with(repo, || async {
+                Box::pin(self.0.get_with(repo, "master", || async {
                     self.1.fetch_add(1, Ordering::SeqCst);
                     Some(super::super::github::Summary { as_of: "2026-11-16T06:00:00Z".into(), ..Default::default() })
                 }))
