@@ -55,6 +55,8 @@ pub struct WebServerState {
     pub village: super::source::Villages,
     /// The swarm sources, asked again live for `GET /api/swarms?explain=1`.
     pub swarm_sources: std::sync::Arc<Vec<Box<dyn super::source::SwarmSource>>>,
+    /// The last `/api/village/since` answer, kept a minute (#479).
+    pub since: std::sync::Arc<super::since::SinceCache>,
 }
 
 async fn index_handler() -> Html<&'static str> {
@@ -93,16 +95,18 @@ struct SinceQuery {
 
 /// What closed and merged in each village since `t` (unix seconds), for the
 /// screensaver's "since you last looked" card (#479, `since.rs`). Without a
-/// usable `t`, a 400.
+/// usable `t`, a 400; an earlier `t` than a minute-old answer covers, a 429.
 /// `GET /api/village/since?t=<unix seconds>`
 async fn api_village_since_handler(State(state): State<WebServerState>, Query(q): Query<SinceQuery>) -> Result<Json<Value>, StatusCode> {
     let t = q.t.filter(|t| super::since::search_time(*t).is_some()).ok_or(StatusCode::BAD_REQUEST)?;
-    let swarms = state.swarms.read().map(|s| s.clone()).unwrap_or_default();
-    let snapshot = state.village.snapshot(&state.transport, &swarms).await;
-    let mut villages = Vec::new();
-    for v in &snapshot.villages {
-        villages.push(super::since::village_since(&state.transport, &v.project, &v.repo_path, t).await);
-    }
+    let fetch = || async {
+        let swarms = state.swarms.read().map(|s| s.clone()).unwrap_or_default();
+        let snapshot = state.village.snapshot(&state.transport, &swarms).await;
+        // One village's questions don't wait on another's.
+        let asks = snapshot.villages.iter().map(|v| super::since::village_since(&state.transport, &v.project, &v.repo_path, t));
+        futures::future::join_all(asks).await
+    };
+    let villages = state.since.answer(t, std::time::Instant::now(), fetch).await.ok_or(StatusCode::TOO_MANY_REQUESTS)?;
     Ok(Json(json!({ "t": t, "villages": villages })))
 }
 
@@ -1251,6 +1255,7 @@ mod tests {
             transport: ServerTransport::default(),
             village: Default::default(),
             swarm_sources: Default::default(),
+            since: Default::default(),
         }
     }
 
