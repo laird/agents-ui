@@ -1182,9 +1182,8 @@ impl ActivitySource for ClaudeActivity {
             && let Some(home) = dirs::home_dir()
         {
             attach_subagents(village, &home, SystemTime::now());
-            if let Ok(mut cache) = super::usage::shared().lock() {
-                super::usage::attach(&mut cache, village, &home.join(".claude").join("projects"), SystemTime::now(), &super::usage::local_day);
-            }
+            let mut cache = super::usage::shared().lock().unwrap_or_else(|e| e.into_inner());
+            super::usage::attach(&mut cache, village, &home.join(".claude").join("projects"), SystemTime::now(), &super::usage::local_day);
         }
     }
 }

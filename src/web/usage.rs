@@ -22,9 +22,13 @@ use std::time::{Duration, SystemTime};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// Bytes of transcript read per refresh, across every file: the first pass
-/// over a long history is spread over several refreshes.
+/// Bytes of transcript read per [`BUDGET_EVERY`], across every file, village
+/// and request: the first pass over a long history is spread out. A single
+/// line longer than this is skipped.
 pub const READ_BUDGET: u64 = 32 * 1024 * 1024;
+
+/// How often the read budget comes back.
+pub const BUDGET_EVERY: Duration = Duration::from_secs(10);
 
 /// Transcripts untouched for longer than this aren't read.
 pub const KEEP: Duration = Duration::from_secs(30 * 24 * 3600);
@@ -77,7 +81,8 @@ pub struct DayTokens {
     pub tokens: Tokens,
 }
 
-/// One issue's tokens: all of it, and this week's (the last [`DAYS`] days).
+/// One issue's tokens: all of it in transcripts touched within [`KEEP`], and
+/// this week's (the last [`DAYS`] days).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct IssueTokens {
     pub issue: u32,
@@ -151,7 +156,11 @@ impl FileTally {
     /// Read what was appended to `path` since last time, at most `budget`
     /// bytes. A file that shrank was rewritten: it is counted afresh.
     /// Returns the bytes read and whether any are left.
-    fn update(&mut self, path: &Path, budget: u64, day: &dyn Fn(DateTime<Utc>) -> String) -> (u64, bool) {
+    ///
+    /// The budget can be what another file left, less than a line: then
+    /// nothing is read (the line waits for a fuller budget). Only a line
+    /// longer than `longest` with all of it to spend is skipped.
+    fn update(&mut self, path: &Path, budget: u64, longest: u64, day: &dyn Fn(DateTime<Utc>) -> String) -> (u64, bool) {
         let Ok(mut file) = std::fs::File::open(path) else { return (0, false) };
         let Ok(len) = file.metadata().map(|m| m.len()) else { return (0, false) };
         if len < self.offset {
@@ -167,12 +176,12 @@ impl FileTally {
         }
         // Only whole lines: the rest is read again once it ends.
         let Some(end) = buf.iter().rposition(|b| *b == b'\n').map(|i| i + 1) else {
-            // One line longer than the budget: skip it rather than stick on it.
-            if want == budget {
+            // One line longer than the whole budget: skip it rather than stick on it.
+            if want == budget && budget >= longest {
                 self.offset += want;
                 return (want, self.offset < len);
             }
-            return (0, false);
+            return (0, want == budget);
         };
         self.count(&String::from_utf8_lossy(&buf[..end]), day);
         self.offset += end as u64;
@@ -180,10 +189,13 @@ impl FileTally {
     }
 }
 
-/// Every transcript read so far, kept between refreshes.
+/// Every transcript read so far, kept between refreshes, and the read
+/// budget spent since it last came back.
 #[derive(Default)]
 pub struct UsageCache {
     files: HashMap<PathBuf, FileTally>,
+    budget_since: Option<std::time::Instant>,
+    spent: u64,
 }
 
 /// The transcripts of one Claude project dir: its sessions, and their
@@ -207,6 +219,16 @@ fn transcripts(project_dir: &Path, now: SystemTime) -> Vec<PathBuf> {
 }
 
 impl UsageCache {
+    /// What is left of the read budget at `at`: it comes back in full every
+    /// [`BUDGET_EVERY`], however many villages and requests ask.
+    fn allowance(&mut self, at: std::time::Instant) -> u64 {
+        if self.budget_since.is_none_or(|t| at.saturating_duration_since(t) >= BUDGET_EVERY) {
+            self.budget_since = Some(at);
+            self.spent = 0;
+        }
+        READ_BUDGET - self.spent
+    }
+
     /// Bring every transcript under `dirs` up to date (within the budget),
     /// then sum them: per dir, and over all of them. Returns the per-dir
     /// tallies, the whole, and whether anything was left unread.
@@ -222,7 +244,7 @@ impl UsageCache {
             let mut sum = Tally::new();
             for path in transcripts(dir, now) {
                 let file = self.files.entry(path.clone()).or_default();
-                let (read, more) = file.update(&path, left, day);
+                let (read, more) = file.update(&path, left, READ_BUDGET, day);
                 left -= read;
                 behind |= more;
                 for (k, t) in &file.tally {
@@ -232,6 +254,7 @@ impl UsageCache {
             }
             per_dir.insert(dir.clone(), sum);
         }
+        self.spent += budget - left;
         (per_dir, all, behind)
     }
 }
@@ -272,8 +295,9 @@ fn village_usage(all: &Tally, today: &str, catching_up: bool) -> Usage {
 }
 
 /// Attach token use to a village: each house with a worktree gets its
-/// tokens today and on its issue, the village its usage. `projects` is
-/// `~/.claude/projects`.
+/// tokens today and on its issue, the village its usage. The manager's
+/// transcripts count in the village's usage; it has no house to carry its
+/// own. `projects` is `~/.claude/projects`.
 pub fn attach(cache: &mut UsageCache, village: &mut super::village::VillageSnapshot, projects: &Path, now: SystemTime, day: &dyn Fn(DateTime<Utc>) -> String) {
     let dir = |cwd: &str| projects.join(super::village::claude_project_dir_name(cwd));
     let mut dirs: Vec<PathBuf> = village.houses.iter().filter(|h| h.id.starts_with('/')).map(|h| dir(&h.id)).collect();
@@ -283,7 +307,8 @@ pub fn attach(cache: &mut UsageCache, village: &mut super::village::VillageSnaps
     if dirs.is_empty() {
         return;
     }
-    let (per_dir, all, behind) = cache.refresh(&dirs, now, READ_BUDGET, day);
+    let budget = cache.allowance(std::time::Instant::now());
+    let (per_dir, all, behind) = cache.refresh(&dirs, now, budget, day);
     let today = day(DateTime::<Utc>::from(now));
     for house in village.houses.iter_mut().filter(|h| h.id.starts_with('/')) {
         let Some(mine) = per_dir.get(&dir(&house.id)) else { continue };
@@ -363,18 +388,18 @@ mod tests {
         let path = d.join("s.jsonl");
         std::fs::write(&path, format!("{}\n{}", turn("a", "2026-11-16T01:00:00Z", "x", 1, 0, 0, 0), &turn("b", "2026-11-16T01:00:00Z", "x", 2, 0, 0, 0)[..20])).unwrap();
         let mut f = FileTally::default();
-        f.update(&path, u64::MAX, &utc_day);
+        f.update(&path, u64::MAX, u64::MAX, &utc_day);
         assert_eq!(f.tally[&("2026-11-16".into(), None)].input, 1, "a half-written line waits");
         // Nothing new: nothing read.
-        assert_eq!(f.update(&path, u64::MAX, &utc_day), (0, false));
+        assert_eq!(f.update(&path, u64::MAX, u64::MAX, &utc_day), (0, false));
         // The line ends, and the same message repeats on the next.
         let whole = format!("{}\n{}\n{}\n", turn("a", "2026-11-16T01:00:00Z", "x", 1, 0, 0, 0), turn("b", "2026-11-16T01:00:00Z", "x", 2, 0, 0, 0), turn("b", "2026-11-16T01:00:00Z", "x", 2, 0, 0, 0));
         std::fs::write(&path, &whole).unwrap();
-        f.update(&path, u64::MAX, &utc_day);
+        f.update(&path, u64::MAX, u64::MAX, &utc_day);
         assert_eq!(f.tally[&("2026-11-16".into(), None)].input, 3);
         // Rewritten shorter: counted afresh.
         std::fs::write(&path, format!("{}\n", turn("c", "2026-11-16T01:00:00Z", "x", 5, 0, 0, 0))).unwrap();
-        f.update(&path, u64::MAX, &utc_day);
+        f.update(&path, u64::MAX, u64::MAX, &utc_day);
         assert_eq!(f.tally[&("2026-11-16".into(), None)].input, 5);
         std::fs::remove_dir_all(&d).ok();
     }
@@ -387,12 +412,45 @@ mod tests {
         std::fs::write(&path, lines.join("\n") + "\n").unwrap();
         let line = lines[0].len() as u64 + 1;
         let mut f = FileTally::default();
-        let (read, more) = f.update(&path, line * 4 + 3, &utc_day);
+        let (read, more) = f.update(&path, line * 4 + 3, line * 4 + 3, &utc_day);
         assert_eq!((read, more), (line * 4, true));
         assert_eq!(f.tally[&("2026-11-16".into(), None)].input, 4);
-        while f.update(&path, line * 4 + 3, &utc_day).1 {}
+        while f.update(&path, line * 4 + 3, line * 4 + 3, &utc_day).1 {}
         assert_eq!(f.tally[&("2026-11-16".into(), None)].input, 10);
         std::fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn a_budget_left_short_by_another_file_reads_nothing_and_loses_nothing() {
+        let d = temp("short");
+        let path = d.join("s.jsonl");
+        let lines: Vec<String> = (0..3).map(|k| turn(&format!("m{k}"), "2026-11-16T01:00:00Z", "x", 1, 0, 0, 0)).collect();
+        std::fs::write(&path, lines.join("\n") + "\n").unwrap();
+        let mut f = FileTally::default();
+        // Ten bytes left over from another file: less than a line.
+        assert_eq!(f.update(&path, 10, READ_BUDGET, &utc_day), (0, true));
+        assert_eq!(f.offset, 0, "the line waits, whole");
+        f.update(&path, READ_BUDGET, READ_BUDGET, &utc_day);
+        assert_eq!(f.tally[&("2026-11-16".into(), None)].input, 3);
+        // A line longer than the whole budget is skipped, and the next one read.
+        let budget = lines[0].len() as u64 + 10;
+        let long = format!("{}\n{}\n", "x".repeat(3 * budget as usize), lines[0]);
+        std::fs::write(&path, &long).unwrap();
+        let mut f = FileTally::default();
+        assert_eq!(f.update(&path, budget, budget, &utc_day), (budget, true));
+        while f.update(&path, budget, budget, &utc_day).1 {}
+        assert_eq!(f.tally[&("2026-11-16".into(), None)].input, 1);
+        std::fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn the_budget_comes_back_every_so_often_however_many_ask() {
+        let mut c = UsageCache::default();
+        let t0 = std::time::Instant::now();
+        assert_eq!(c.allowance(t0), READ_BUDGET);
+        c.spent = READ_BUDGET - 5;
+        assert_eq!(c.allowance(t0 + Duration::from_secs(1)), 5);
+        assert_eq!(c.allowance(t0 + BUDGET_EVERY), READ_BUDGET);
     }
 
     #[test]
