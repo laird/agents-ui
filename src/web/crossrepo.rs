@@ -13,10 +13,14 @@
 //!   completed); the caravan has `arrived` when every crate is loaded.
 //!
 //! Both are read from issue bodies, as `gh issue list --json number,title,
-//! state,stateReason,body` gives them, once per repo every 90 s, in the
-//! background: a poll never waits on GitHub (`fetch`). GitHub's own sub-issue and blocked-by
-//! relations are not in that listing, so a link written only there is not
-//! seen. A repo GitHub can't be asked about is left out, not an error.
+//! state,stateReason,body` gives them, and from GitHub's own sub-issue and
+//! blocked-by relations (#532), which that listing leaves out: one `gh api
+//! graphql` read of the 100 most recently updated issues' `subIssues` and
+//! `blockedBy` ([`NATIVE_QUERY`]). A native sub-issue counts as a task-list
+//! entry, a native blocker as a `Blocked by:` line. When the GraphQL read
+//! fails, the bodies alone are used. Each repo is read once every 90 s, in
+//! the background: a poll never waits on GitHub (`fetch`). A repo GitHub
+//! can't be asked about is left out, not an error.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
@@ -40,6 +44,59 @@ pub struct CrossIssue {
     pub state_reason: Option<String>,
     #[serde(default)]
     pub body: Option<String>,
+    /// GitHub's own relations, from [`NATIVE_QUERY`]: not in `gh issue list`.
+    #[serde(skip)]
+    pub native: Native,
+}
+
+/// An issue's native relations, as (`owner/repo` lowercased, number).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Native {
+    /// Its sub-issues.
+    pub subs: Vec<(String, u32)>,
+    /// The issues it is blocked by.
+    pub blocked_by: Vec<(String, u32)>,
+}
+
+/// The native relations of a repo's 100 most recently updated issues, open
+/// or closed: about 7,000 nodes, well inside GraphQL's limits. A relation on
+/// an older issue is not seen.
+pub const NATIVE_QUERY: &str = "query($owner:String!,$name:String!){repository(owner:$owner,name:$name){issues(first:100,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number \
+    subIssues(first:50){nodes{number repository{nameWithOwner}}} blockedBy(first:20){nodes{number repository{nameWithOwner}}}}}}}";
+
+/// [`NATIVE_QUERY`]'s answer → each issue's relations, by number; `None`
+/// when it isn't one (an error, a schema without these fields).
+pub fn parse_native(json: &[u8]) -> Option<HashMap<u32, Native>> {
+    let v: serde_json::Value = serde_json::from_slice(json).ok()?;
+    let nodes = v.pointer("/data/repository/issues/nodes")?.as_array()?;
+    let refs = |n: &serde_json::Value, field: &str| -> Vec<(String, u32)> {
+        n.get(field)
+            .and_then(|f| f.get("nodes"))
+            .and_then(|a| a.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|r| {
+                let slug = r.pointer("/repository/nameWithOwner")?.as_str()?.to_ascii_lowercase();
+                Some((slug, u32::try_from(r.get("number")?.as_u64()?).ok()?))
+            })
+            .collect()
+    };
+    Some(
+        nodes
+            .iter()
+            .filter_map(|n| Some((u32::try_from(n.get("number")?.as_u64()?).ok()?, Native { subs: refs(n, "subIssues"), blocked_by: refs(n, "blockedBy") })))
+            .filter(|(_, r)| !r.subs.is_empty() || !r.blocked_by.is_empty())
+            .collect(),
+    )
+}
+
+/// Give each issue its native relations.
+pub fn attach_native(issues: &mut [CrossIssue], native: &HashMap<u32, Native>) {
+    for i in issues {
+        if let Some(r) = native.get(&i.number) {
+            i.native = r.clone();
+        }
+    }
 }
 
 impl CrossIssue {
@@ -208,7 +265,7 @@ pub fn links(repos: &[(String, String)], issues: &HashMap<String, Vec<CrossIssue
             let body = i.body.as_deref().unwrap_or("");
             if i.open() {
                 let mut seen = BTreeSet::new();
-                for (s, n) in blockers(body, slug) {
+                for (s, n) in blockers(body, slug).into_iter().chain(i.native.blocked_by.iter().cloned()) {
                     if s == *slug || !seen.insert((s.clone(), n)) {
                         continue;
                     }
@@ -222,7 +279,7 @@ pub fn links(repos: &[(String, String)], issues: &HashMap<String, Vec<CrossIssue
                     children.entry(p).or_default().insert((slug.clone(), i.number));
                 }
             }
-            for c in listed(body, slug) {
+            for c in listed(body, slug).into_iter().chain(i.native.subs.iter().cloned()) {
                 if name_of.contains_key(c.0.as_str()) {
                     children.entry((slug.clone(), i.number)).or_default().insert(c);
                 }
@@ -308,10 +365,21 @@ async fn read_repo(transport: &ServerTransport, dir: &Path) -> RepoRead {
         return RepoRead::default();
     }
     let args: Vec<String> = ["issue", "list", "--state", "all", "--limit", "300", "--json", "number,title,state,stateReason,body"].map(String::from).to_vec();
-    let issues = match crate::github::gh_repo_output(transport, dir, &args).await {
+    let mut issues = match crate::github::gh_repo_output(transport, dir, &args).await {
         Ok(out) if out.status.success() => serde_json::from_slice::<Vec<CrossIssue>>(&out.stdout).ok(),
         _ => None,
     };
+    // GitHub's own relations (#532); a failed read leaves the bodies' alone.
+    if let (Some(list), Some((owner, name))) = (issues.as_mut(), slug.as_deref().and_then(|s| s.split_once('/'))) {
+        let args: Vec<String> =
+            vec!["api".into(), "graphql".into(), "-f".into(), format!("query={NATIVE_QUERY}"), "-f".into(), format!("owner={owner}"), "-f".into(), format!("name={name}")];
+        if let Ok(out) = crate::github::gh_repo_output(transport, dir, &args).await
+            && out.status.success()
+            && let Some(native) = parse_native(&out.stdout)
+        {
+            attach_native(list, &native);
+        }
+    }
     RepoRead { slug, issues }
 }
 
@@ -320,7 +388,7 @@ mod tests {
     use super::*;
 
     fn issue(number: u32, title: &str, state: &str, reason: Option<&str>, body: &str) -> CrossIssue {
-        CrossIssue { number, title: title.into(), state: state.into(), state_reason: reason.map(Into::into), body: Some(body.into()) }
+        CrossIssue { number, title: title.into(), state: state.into(), state_reason: reason.map(Into::into), body: Some(body.into()), ..Default::default() }
     }
     fn group() -> Vec<(String, String)> {
         vec![("lib-core".into(), "acme/lib-core".into()), ("api".into(), "acme/api".into()), ("web".into(), "acme/web".into())]
@@ -393,6 +461,73 @@ mod tests {
         // Closed as not planned is not landed.
         issues.get_mut("web").unwrap()[0].state_reason = Some("NOT_PLANNED".into());
         assert!(!links(&group(), &issues).1[0].arrived);
+    }
+
+    /// [`NATIVE_QUERY`]'s answer, as GitHub gives it, cut to what matters.
+    const NATIVE: &str = r#"{"data":{"repository":{"issues":{"nodes":[
+      {"number":1,"subIssues":{"nodes":[{"number":2,"repository":{"nameWithOwner":"acme/lib-core"}},{"number":9,"repository":{"nameWithOwner":"Acme/Web"}}]},"blockedBy":{"nodes":[]}},
+      {"number":5,"subIssues":{"nodes":[]},"blockedBy":{"nodes":[]}},
+      {"number":12,"subIssues":{"nodes":[]},"blockedBy":{"nodes":[{"number":40,"repository":{"nameWithOwner":"acme/api"}}]}}
+    ]}}}}"#;
+
+    #[test]
+    fn native_relations_are_parsed_by_issue() {
+        let n = parse_native(NATIVE.as_bytes()).unwrap();
+        assert_eq!(n.len(), 2, "an issue with no relations is left out");
+        assert_eq!(n[&1].subs, vec![("acme/lib-core".into(), 2), ("acme/web".into(), 9)]);
+        assert_eq!(n[&12].blocked_by, vec![("acme/api".into(), 40)]);
+        // An error answer (a schema without these fields, a bad token) is not a read.
+        assert_eq!(parse_native(br#"{"errors":[{"message":"Field 'blockedBy' doesn't exist"}]}"#), None);
+        assert_eq!(parse_native(b"not json"), None);
+    }
+
+    #[test]
+    fn native_sub_issues_load_caravans_and_native_blockers_tie_ropes() {
+        let mut issues = HashMap::new();
+        // Nothing in any body: only GitHub's own relations link them.
+        let mut lib = vec![issue(1, "Money everywhere", "OPEN", None, ""), issue(2, "Money type", "CLOSED", Some("COMPLETED"), ""), issue(12, "Add the money type", "OPEN", None, "")];
+        let mut api = vec![issue(40, "Charge in cents", "OPEN", None, "")];
+        let web = vec![issue(9, "Show cents", "OPEN", None, "")];
+        let native = parse_native(NATIVE.as_bytes()).unwrap();
+        attach_native(&mut lib, &native);
+        // The api repo's read: #40 is blocked by lib-core#12, natively.
+        let api_native: HashMap<u32, Native> = [(40, Native { blocked_by: vec![("acme/lib-core".into(), 12)], ..Default::default() })].into();
+        attach_native(&mut api, &api_native);
+        issues.insert("lib-core".to_string(), lib.clone());
+        issues.insert("api".to_string(), api);
+        issues.insert("web".to_string(), web);
+        let (ropes, caravans) = links(&group(), &issues);
+        let got: Vec<(String, u32, String, u32)> = ropes.iter().map(|r| (r.from.repo.clone(), r.from.number, r.to.repo.clone(), r.to.number)).collect();
+        // lib-core#12 "blocked by api#40" natively, and api#40 by lib-core#12: both open, both drawn.
+        assert_eq!(got, vec![("lib-core".into(), 12, "api".into(), 40), ("api".into(), 40, "lib-core".into(), 12)]);
+        assert_eq!(caravans.len(), 1);
+        let crates: Vec<(&str, Vec<u32>, bool)> = caravans[0].crates.iter().map(|k| (k.repo.as_str(), k.issues.clone(), k.loaded)).collect();
+        assert_eq!(crates, vec![("lib-core", vec![2], true), ("web", vec![9], false)]);
+
+        // The same link in a body and natively is one rope, one crate entry.
+        lib[2].body = Some("Blocked by: acme/api#40".into());
+        lib[0].body = Some("- [ ] acme/web#9".into());
+        issues.insert("lib-core".to_string(), lib);
+        let (ropes, caravans) = links(&group(), &issues);
+        assert_eq!(ropes.iter().filter(|r| r.from.number == 12).count(), 1);
+        assert_eq!(caravans[0].crates.iter().find(|k| k.repo == "web").map(|k| k.issues.clone()), Some(vec![9]));
+    }
+
+    #[test]
+    fn without_native_relations_the_bodies_alone_count() {
+        // A failed GraphQL read attaches nothing: the issues are as the listing gave them.
+        let mut lib = vec![issue(1, "Epic", "OPEN", None, "- [ ] acme/web#9")];
+        attach_native(&mut lib, &HashMap::new());
+        assert_eq!(lib[0].native, Native::default());
+        let mut issues = HashMap::new();
+        issues.insert("lib-core".to_string(), lib);
+        issues.insert("web".to_string(), vec![issue(9, "Show cents", "OPEN", None, "")]);
+        issues.insert("api".to_string(), vec![]);
+        let (_, caravans) = links(&group(), &issues);
+        // One repo's subtask alone is no caravan; the parent's own repo has none here.
+        assert!(caravans.is_empty());
+        issues.get_mut("lib-core").unwrap().push(issue(2, "Money type", "OPEN", None, "Sub-task of #1"));
+        assert_eq!(links(&group(), &issues).1.len(), 1, "the bodies still make the caravan");
     }
 
     #[test]
