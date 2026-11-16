@@ -25,3 +25,15 @@ fn dialogs_offer_an_issues_travel_log() {
     // The dialog knows which village it is in.
     assert!(village_asset("dialogs.js").unwrap().1.contains("if (info && !info.project && sc && sc.v) info.project = sc.v.project;"));
 }
+
+/// #517: a landed crate's dialog and its travel log say what the issue cost,
+/// from `usage.issues` (#514), when it is on record.
+#[test]
+fn a_landed_issue_says_its_tokens_on_the_crate_and_in_the_travel_log() {
+    let life = village_asset("lifecycle.js").unwrap().1;
+    assert!(life.contains("import { landedTokenWords } from './landedtokens.js';"));
+    assert!(life.contains("cr ? null : tokenLine(v, o.n)"), "only crates past the docks: landed work");
+    let travel = village_asset("travel.js").unwrap().1;
+    assert!(travel.contains("const cost = landedTokenWords(v, n);"));
+    assert!(travel.contains("esc(cost.line)"));
+}

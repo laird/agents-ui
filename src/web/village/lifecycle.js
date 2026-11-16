@@ -12,12 +12,14 @@ import { ICONS, badge, badgeSize, bubble, tether, zzz } from './scenery.js';
 import { dent, glint, ribbon, roped } from './crates.js';
 import { restOf } from './rest.js';
 import { QUIET_ACTIONS, actionSign, drawAction, person, wander } from './people.js';
+import { landedTokenWords } from './landedtokens.js';
 import { registerHit, registerLabels, registerLayer, tap } from './registry.js';
 import { LW, slotPos } from './layout.js';
 import { ARRIVE_IN, SAIL_OUT, UNLOAD, pickup, tripAt } from './trips.js';
 import { workOf } from './ship.js';
 import { crateState, whereWaitedOn } from './docks.js';
 import { contextWords } from './barrels.js';
+import { tokenWords } from './coins.js';
 import { fxOn, fxRest } from './controlfx.js';
 import { limitWords, limited } from './limits.js';
 import { houseName, issueItems, issueLabel, issueOf, link, repoUrl, sessionOf } from './dialogs.js';
@@ -267,7 +269,7 @@ registerHit({ kind: 'house', dialog(o, sc) {
   return { title: `${houseName(v, h)} · ${h.branch || h.kind}`, line: h.issue ? `#${h.issue} ${h.issue_title || ''}` : (h.issue_title || `No ${work} claimed`),
     meta: [`${runtime ? 'Workstream' : 'Worktree'}: ${h.id}`, h.branch ? `Branch: ${h.branch}` : null, `Agent: ${h.role}`,
       `Status: ${h.status}${h.action && h.action !== h.status ? ' · ' + h.action : ''}${h.priority ? ' · ' + h.priority : ''}`,
-      since ? `${h.status.charAt(0).toUpperCase() + h.status.slice(1)} since ${since}` : null, limitWords(h), contextWords(h),
+      since ? `${h.status.charAt(0).toUpperCase() + h.status.slice(1)} since ${since}` : null, limitWords(h), contextWords(h), ...tokenWords(h),
       `Crew: ${h.crew.join(', ') || '—'}`, ...(h.subagents || []).map(sa => `${runtime ? 'Agent' : 'Sub-agent'}: ${subWords(sa, v)}`)],
     links: [...(h.links || []), issue, ...(runtime ? [] : branchLinks(repo, h.branch, h.links, br)), compare], house: h,
     // Worker controls (#506, controls.js): the server says which it can run.
@@ -309,11 +311,14 @@ registerHit({ kind: 'supply', key: false, dialog(o, sc, theme) {
 } });
 /* A crate says its priority, its epic and, at the docks, whether it is ready
  * or what it waits on. Hovering over one opens this too (`hover`). */
+/* A landed crate's cost (#517): its tokens from claim to land, when on record. */
+const tokenLine = (v, n) => { const w = landedTokenWords(v, n); return w && `${w.line} (${w.detail})`; };
 registerHit({ kind: 'crate', hover: true, dialog(o, sc, theme) {
   const v = sc.v, it = issueOf(v, o.n), cr = o.at === 'backlog' ? v.backlog.find(c => c.number === o.n) : null;
   const epic = cr && cr.parent ? epicOf(v, cr.parent) : null;
   return { title: `#${o.n} ${it.title}`.trim(), line: crateWhere(o, v, theme),
-    meta: [`Priority: ${it.priority || 'none'}`, epic ? `Epic: ${epic.words}` : null, cr ? stateWords(v, cr) : null],
+    meta: [`Priority: ${it.priority || 'none'}`, epic ? `Epic: ${epic.words}` : null, cr ? stateWords(v, cr) : null,
+      cr ? null : tokenLine(v, o.n)],
     links: [link(issueLabel(o.n), it.url), epic ? link(`Epic #${cr.parent}`, epic.url) : null],
     travel: o.n }; // its travel log (#495, travel.js)
 } });

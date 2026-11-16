@@ -5,6 +5,7 @@
 
 mod almanac;
 mod controls;
+mod coins;
 mod core;
 mod envrow;
 mod fit;
