@@ -128,6 +128,8 @@ pub struct IssueRef {
     pub title: String,
     /// `open` or `closed`.
     pub state: String,
+    /// Its page on GitHub, for the valley's dialogs (#530).
+    pub url: String,
 }
 
 /// An open issue held up by an open issue in another repo of the group.
@@ -143,6 +145,8 @@ pub struct Rope {
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
 pub struct CaravanCrate {
     pub repo: String,
+    /// The repo's `owner/repo`, so the page can link its issues (#530).
+    pub slug: String,
     pub issues: Vec<u32>,
     /// Every subtask here has landed.
     pub loaded: bool,
@@ -260,11 +264,13 @@ pub fn links(repos: &[(String, String)], issues: &HashMap<String, Vec<CrossIssue
         let name = *name_of.get(slug)?;
         issues.get(name)?.iter().find(|i| i.number == n).map(|i| (name, i))
     };
+    let slug_of: HashMap<&str, &str> = repos.iter().map(|(n, s)| (n.as_str(), s.as_str())).collect();
     let iref = |repo: &str, i: &CrossIssue| IssueRef {
         repo: repo.to_string(),
         number: i.number,
         title: i.title.clone(),
         state: if i.open() { "open" } else { "closed" }.into(),
+        url: format!("https://github.com/{}/issues/{}", slug_of.get(repo).copied().unwrap_or_default(), i.number),
     };
 
     let mut ropes = Vec::new();
@@ -323,7 +329,7 @@ pub fn links(repos: &[(String, String)], issues: &HashMap<String, Vec<CrossIssue
         if by_repo.len() < 2 {
             continue;
         }
-        let mut crates: Vec<CaravanCrate> = by_repo.into_iter().map(|(repo, (issues, loaded))| CaravanCrate { repo: repo.into(), issues, loaded }).collect();
+        let mut crates: Vec<CaravanCrate> = by_repo.into_iter().map(|(repo, (issues, loaded))| CaravanCrate { repo: repo.into(), slug: slug_of.get(repo).copied().unwrap_or_default().into(), issues, loaded }).collect();
         crates.sort_by_key(|c| order.get(c.repo.as_str()).copied().unwrap_or(usize::MAX));
         // Sub-issues the read cut off aren't known to have landed.
         let arrived = !partial && crates.iter().all(|c| c.loaded);
@@ -434,6 +440,7 @@ mod tests {
         // Not: #13 (closed), elsewhere/other (outside the group), #41 (same repo), #42 (closed itself).
         assert_eq!(got, vec![("api".into(), 40, "lib-core".into(), 12), ("web".into(), 7, "api".into(), 40)]);
         assert_eq!(ropes[0].to.title, "Add the money type");
+        assert_eq!(ropes[0].to.url, "https://github.com/acme/lib-core/issues/12");
         assert_eq!(ropes[0].to.state, "open");
     }
 
@@ -453,6 +460,7 @@ mod tests {
         issues.insert("web".to_string(), vec![issue(9, "Show cents", "OPEN", None, "")]);
         let (_, caravans) = links(&group(), &issues);
         assert_eq!(caravans.len(), 1, "the one-repo epic is no caravan");
+        assert_eq!(caravans[0].crates[1].slug, "acme/api");
         let c = &caravans[0];
         assert_eq!((c.parent.repo.as_str(), c.parent.number), ("lib-core", 1));
         let crates: Vec<(&str, Vec<u32>, bool)> = c.crates.iter().map(|k| (k.repo.as_str(), k.issues.clone(), k.loaded)).collect();

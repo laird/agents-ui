@@ -588,6 +588,22 @@ its group, a repo listed twice, a cycle of package dependencies (its repos
 are put last). `tools/mock/demo.sh` declares a `demo` group, so
 `/village?valley=demo` shows one without real swarms.
 
+What ties the repos together on GitHub is drawn over the valley:
+
+- **A rope** between two repos: an open issue in one waits on an open issue
+  in the other (a `Depends on:` or `Blocked by:` line naming it, or GitHub's
+  own blocked-by). Its dialog names both and links them.
+- **A caravan** below the valley: a parent issue with subtasks in several
+  repos (`Sub-task of`, a task list, or GitHub's own sub-issues), a crate per
+  repo, full once that repo's part has landed. It travels its row as crates
+  load and flies a flag once it has arrived. Its dialog lists each repo's part.
+- **A barge** going back up a river: a consumer's red build names the
+  library upstream (its failing job's log, or one of its issues). Its dialog
+  says why, and links the failing run.
+
+Each has a keyboard target. `VALLEY=1 tools/mock/demo.sh` shows one of each
+(the demo's GitHub is a fixture, and shop's CI is red).
+
 ## Sources
 
 Every village is drawn from one neutral report. Any framework can provide one through an adapter (`--framework`); see [village-protocol.md](village-protocol.md).

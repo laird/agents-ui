@@ -2,7 +2,13 @@
 """gh shim: the simulated repos' GitHub from the swarm simulator (issues,
 feature parents and sub-issues over GraphQL, Deployments, and a recorded
 fortnight of closed issues for the almanac, almanac_history.py); everything else
-(and any other repo) goes to the real gh."""
+(and any other repo) goes to the real gh.
+
+With VALLEY=1 (demo.sh writes state/valley/), the valley's repos under
+~/repos get their GitHub from there too (#530): their issues, whose bodies
+tie a rope and make a caravan, and shop's CI is red with a log naming
+lib-core, so a barge goes back up the river. Nothing about those repos goes
+to the real gh then."""
 import json
 import os
 import re
@@ -58,11 +64,49 @@ def deployments(demo, name, path):
     return [{k: v for k, v in d.items() if k != "statuses"} for d in listing]
 
 
+def valley_repo(demo, name, args):
+    """A valley repo's GitHub (#530): its issues, no native links, the red job's log."""
+    path = next((a for a in args[1:] if a.startswith("repos/")), "")
+    if args[:2] == ["issue", "list"]:
+        return state(demo, "valley", name, [])
+    if args[:2] == ["api", "graphql"]:
+        return {"data": {"repository": {"issues": {"nodes": []}}}}
+    if re.search(r"/actions/jobs/\d+/logs$", path):
+        return None  # the log, as text: said by the caller
+    if "/deployments" in path:
+        return []
+    return False
+
+
+def red_ci(path):
+    """shop's CI with VALLEY=1: one failed job whose log names lib-core (#530)."""
+    if "/check-runs" in path:
+        return {"check_runs": [{"id": 77, "name": "test (ubuntu-latest)", "status": "completed", "conclusion": "failure",
+                                "html_url": "https://github.com/demo/shop/actions/runs/9001/job/77"}]}
+    if "/actions/runs?" in path:
+        return {"workflow_runs": []}
+    return False
+
+
+VALLEY_LOG = "error[E0433]: failed to resolve: could not find `Cents` in `money`\n --> src/cart.rs:4:5\n  | use lib-core::money::Cents;\n"
+
 demo = os.environ.get("AGENTS_UI_DEMO_DIR")
 args = sys.argv[1:]
 cwd = os.getcwd()
 if demo:
     src = os.path.realpath(os.path.join(demo, "src"))
+    repos = os.path.realpath(os.path.join(demo, "home", "repos"))
+    valley = os.path.isdir(os.path.join(demo, "state", "valley"))
+    if valley and os.path.realpath(cwd).startswith(repos + os.sep):
+        name = os.path.relpath(os.path.realpath(cwd), repos).split(os.sep)[0]
+        answer = valley_repo(demo, name, args)
+        if answer is None:
+            sys.stdout.write(VALLEY_LOG)
+            sys.exit(0)
+        if answer is False:
+            sys.exit(1)
+        print(json.dumps(answer))
+        sys.exit(0)
     if args[:2] == ["auth", "status"]:
         print("Logged in to github.com (swarm simulator)")
         sys.exit(0)
@@ -92,6 +136,15 @@ if demo:
         if args[:2] == ["api", "graphql"]:
             print(json.dumps(graphql(demo, name, args)))
             sys.exit(0)
+        if valley and name == "shop" and args[:1] == ["api"]:
+            path = next((a for a in args[1:] if a.startswith("repos/")), "")
+            if re.search(r"/actions/jobs/\d+/logs$", path):
+                sys.stdout.write(VALLEY_LOG)
+                sys.exit(0)
+            ci = red_ci(path)
+            if ci is not False:
+                print(json.dumps(ci))
+                sys.exit(0)
         if args[:1] == ["api"] and len(args) > 1 and "/deployments" in args[1]:
             print(json.dumps(deployments(demo, name, args[1])))
             sys.exit(0)

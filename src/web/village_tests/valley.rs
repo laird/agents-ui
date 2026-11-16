@@ -62,8 +62,49 @@ fn the_valley_draws_its_environment_grid() {
     let body = &village_source();
     assert!(body.contains("drawGrid(ctx, lay, state);"));
     assert!(body.contains("if (cell) { openInfo(gridWords(cell.cell)); return; }"));
-    assert!(body.contains("+ gridLabels(lay, ox0, oy0, s);"));
+    assert!(body.contains("+ gridLabels(lay, ox0, oy0, s)"));
     assert!(body.contains("gridKeys(vkeys, lay, ox0, oy0, s, c => openInfo(gridWords(c))).forEach(b => keep.add(b));"));
     let grid = village_asset("valleygrid.js").unwrap().1;
     assert!(grid.contains("if (g.city) {"), "the prod column is a city");
+}
+
+/// #530: ropes, caravans and barges are drawn, clickable and keyboard targets.
+#[test]
+fn the_valley_draws_ropes_caravans_and_barges() {
+    assert!(village_asset("modules.js").unwrap().1.contains("import './valleylinks.js';"));
+    let valley = village_asset("valley.js").unwrap().1;
+    // Drawn: barges on the rivers, ropes over the repos, caravans in their band.
+    assert!(valley.contains("valleyBarges(lay, g, state.reduce ? 0 : t).forEach(b => drawValleyBarge(ctx, b));"));
+    assert!(valley.contains("valleyRopes(lay, g).forEach(rp => drawValleyRope(ctx, rp));"));
+    assert!(valley.contains("valleyCaravans(lay, g).forEach(tr => drawValleyCaravan(ctx, tr, lay.W, VALLEY_MARGIN));"));
+    // A click on each opens its dialog.
+    assert!(valley.contains("if (barge) { openInfo(bargeWords(barge)); return; }"));
+    assert!(valley.contains("if (rope) { openInfo(ropeWords(rope.rope)); return; }"));
+    assert!(valley.contains("if (train) { openInfo(caravanWords(train)); return; }"));
+    // And each has a keyboard target, opening what a click would.
+    assert!(valley.contains("linkKeys(vkeys, links, ox0, oy0, s, openInfo).forEach(b => keep.add(b));"));
+    let links = village_asset("valleylinks.js").unwrap().1;
+    assert!(links.contains("b.onclick = () => open(words);"));
+}
+
+/// #530: `VALLEY=1 tools/mock/demo.sh` serves one rope, one caravan and a barge
+/// through the real code path (the gh shim answers for the valley's repos).
+#[test]
+fn the_valley_demo_has_a_rope_a_caravan_and_a_barge() {
+    let demo = include_str!("../../../tools/mock/demo.sh");
+    assert!(demo.contains("VALLEY=1 tools/mock/demo.sh"));
+    assert!(demo.contains(r#""Depends on: demo/lib-core#12""#), "shop#7 waits on lib-core#12: a rope");
+    assert!(demo.contains(r#"- [ ] demo/larkspur#4"#), "lib-core#1's subtasks span three repos: a caravan");
+    assert!(demo.contains(r#"remote add origin "https://github.com/demo/$r""#));
+    let shim = include_str!("../../../tools/mock/bin/gh");
+    assert!(shim.contains("use lib-core::money::Cents;"), "shop's red log names lib-core: a barge");
+    assert!(shim.contains(r#""conclusion": "failure""#));
+    // The fixtures parse as the issues crossrepo.rs reads.
+    for name in ["lib-core.json", "shop.json", "larkspur.json"] {
+        let start = demo.find(&format!("state/valley/{name}\" <<'ISSUES'\n")).unwrap();
+        let body = &demo[start..];
+        let body = &body[body.find('\n').unwrap() + 1..body.find("\nISSUES\n").unwrap()];
+        let issues: Vec<crate::web::crossrepo::CrossIssue> = serde_json::from_str(body).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert!(!issues.is_empty(), "{name}");
+    }
 }

@@ -22,6 +22,7 @@
 #   VOYAGES=1 tools/mock/demo.sh       # nuc-1 and release Deployments on a 120 s loop: a deploy, a promotion, a failure
 #   GATE=1 tools/mock/demo.sh          # finished work goes through a merge gate: queue, gate, pass, fail, conflict, a train
 #   CONFLICTS=1 tools/mock/demo.sh     # the merge gate's bounces, scripted: a conflict fixed, a failed gate, push retries, a hotspot
+#   VALLEY=1 tools/mock/demo.sh        # the valley's ropes, caravan and barge (#530): fixture GitHub issues, shop's CI red
 #   PORT=8080 tools/mock/demo.sh
 #   touch "$AGENTS_UI_DEMO_DIR/state/release-now"   # cut a release of "shop" now: its ship sails
 #   tools/mock/demo.sh --source issues=none   # extra flags go to agents-tui
@@ -120,6 +121,32 @@ cat > "$DEMO/home/.agents-ui/group.json" <<'GROUP'
   { "repo": "~/repos/larkspur", "depends_on": [{ "repo": "~/repos/lib-core", "via": "package" }] },
   { "repo": "~/repos/billing", "depends_on": [{ "repo": "~/repos/lib-core", "via": "package" }] } ] }]
 GROUP
+# VALLEY=1 (#530): what ties the valley's repos together on GitHub, served by
+# the gh shim from state/valley/ (the demo has no GitHub). shop#7 waits on
+# lib-core#12 (a rope); lib-core#1 has subtasks in lib-core, shop and
+# larkspur, two of three landed (a caravan); and shop's CI is red with a log
+# naming lib-core (a barge back up the river, and a storm over shop).
+if [ -n "${VALLEY:-}" ]; then
+  mkdir -p "$DEMO/state/valley"
+  cat > "$DEMO/state/valley/lib-core.json" <<'ISSUES'
+[{"number": 1, "title": "Money everywhere", "state": "OPEN", "body": "Prices in cents, across the repos.\n\n- [x] demo/lib-core#2\n- [x] demo/shop#9\n- [ ] demo/larkspur#4"},
+ {"number": 2, "title": "The money type", "state": "CLOSED", "stateReason": "COMPLETED", "body": ""},
+ {"number": 12, "title": "Cents arithmetic", "state": "OPEN", "body": ""}]
+ISSUES
+  cat > "$DEMO/state/valley/shop.json" <<'ISSUES'
+[{"number": 7, "title": "Charge in cents", "state": "OPEN", "body": "Depends on: demo/lib-core#12"},
+ {"number": 9, "title": "Cents in the cart", "state": "CLOSED", "stateReason": "COMPLETED", "body": "Sub-task of demo/lib-core#1"}]
+ISSUES
+  cat > "$DEMO/state/valley/larkspur.json" <<'ISSUES'
+[{"number": 4, "title": "Cents in reports", "state": "OPEN", "body": "Sub-task of demo/lib-core#1"}]
+ISSUES
+  # A GitHub origin for each, so the valley knows which repo an issue link names.
+  for r in lib-core shop larkspur; do
+    git -C "$DEMO/home/repos/$r" rev-parse --git-dir >/dev/null 2>&1 || git init -q "$DEMO/home/repos/$r"
+    git -C "$DEMO/home/repos/$r" remote remove origin 2>/dev/null || true
+    git -C "$DEMO/home/repos/$r" remote add origin "https://github.com/demo/$r"
+  done
+fi
 echo "Village:    http://127.0.0.1:$PORT/village"
 echo "Valley:     http://127.0.0.1:$PORT/village?valley=demo"
 echo "Platform:   http://127.0.0.1:$PORT/village#$platform"

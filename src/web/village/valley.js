@@ -8,6 +8,9 @@
  * release. A repo with no running swarm is drawn dormant, faded. Clicking a
  * repo (or Enter on its keyboard target) opens its own village.
  *
+ * Ropes, caravans and barges (#530, valleylinks.js) show what ties the
+ * repos together on GitHub.
+ *
  * Like the overview (#481), the valley is not a village scene: draw()
  * (worlds.js) hands it its frame and data.js's select() shows it. Where
  * everything sits is decided in valleymodel.js. */
@@ -19,7 +22,9 @@ import { numberTag, numberTagSize } from './scenery.js';
 import { registerOverlay } from './registry.js';
 import { esc, fit } from './panels.js';
 import { SHORE, ovHouse } from './overview.js';
-import { gridAt, gridWords, repoWords, valleyShipAt, shipWords, valleyAt, valleyLayout, valleyMissing, valleyName, valleyShips, valleyWords } from './valleymodel.js';
+import { gridAt, gridWords, repoWords, valleyShipAt, shipWords, valleyAt, valleyLayout, valleyMissing, valleyName, valleyShips, valleyWords,
+  bargeWords, caravanWords, ropeWords, valleyBargeAt, valleyBarges, valleyCaravanAt, valleyCaravans, valleyRopeAt, valleyRopes, VALLEY_MARGIN } from './valleymodel.js';
+import { caravanLabels, drawValleyBarge, drawValleyCaravan, drawValleyRope, linkKeys } from './valleylinks.js';
 import { drawGrid, gridKeys, gridLabels } from './valleygrid.js';
 import { drawShip, shipKeys, shipLabels } from './valleyships.js';
 import { openInfo } from './dialogs.js';
@@ -100,7 +105,10 @@ export function drawValley(t) {
   lay.roads.forEach(p => p.slice(1).forEach(([x, y], k) => leg(p[k][0], p[k][1], x, y, 6, (lx, ly, lw, lh) => state.T.road(ctx, lx, ly, lw, lh))));
   lay.rivers.forEach(p => p.slice(1).forEach(([x, y], k) => leg(p[k][0], p[k][1], x, y, 8, (lx, ly, lw, lh) => state.T.channel(ctx, lx, ly, lw, lh, t, 1))));
   valleyShips(lay, state.reduce ? 0 : t).forEach(sh => drawShip(ctx, sh)); // releases flowing downstream (#511)
+  valleyBarges(lay, g, state.reduce ? 0 : t).forEach(b => drawValleyBarge(ctx, b)); // breakage going back upstream (#530)
   g.repos.forEach((r, k) => drawRepo(ctx, r, lay.cells[k]));
+  valleyRopes(lay, g).forEach(rp => drawValleyRope(ctx, rp)); // cross-repo blockers (#530)
+  valleyCaravans(lay, g).forEach(tr => drawValleyCaravan(ctx, tr, lay.W, VALLEY_MARGIN)); // features across repos (#530)
   drawGrid(ctx, lay, state); // the api-joined repos by environment (#512)
 }
 
@@ -119,6 +127,12 @@ cv.addEventListener('click', e => {
   const x = toScene((e.clientX - rect.left) / rect.width * cv.width), y = toScene((e.clientY - rect.top) / rect.height * cv.height);
   const lay = valleyLayout(g), ship = valleyShipAt(valleyShips(lay, state.reduce ? 0 : performance.now()), x, y);
   if (ship) { openInfo(shipWords(ship)); return; }
+  const barge = valleyBargeAt(valleyBarges(lay, g, state.reduce ? 0 : performance.now()), x, y);
+  if (barge) { openInfo(bargeWords(barge)); return; }
+  const rope = valleyRopeAt(valleyRopes(lay, g), x, y);
+  if (rope) { openInfo(ropeWords(rope.rope)); return; }
+  const train = valleyCaravanAt(valleyCaravans(lay, g), x, y);
+  if (train) { openInfo(caravanWords(train)); return; }
   const cell = gridAt(lay, x, y);
   if (cell) { openInfo(gridWords(cell.cell)); return; }
   const k = valleyAt(lay.cells, x, y);
@@ -138,6 +152,7 @@ export function placeValley() {
   vbox.hidden = vkeys.hidden = !on;
   if (!on) { vbox.innerHTML = ''; vkeys.innerHTML = ''; return; }
   const lay = valleyLayout(g), { cells } = lay, ships = valleyShips(lay, 0);
+  const links = { ropes: valleyRopes(lay, g), trains: valleyCaravans(lay, g), barges: valleyBarges(lay, g, 0) };
   const r = cv.getBoundingClientRect(), vr = vViewport.getBoundingClientRect(), s = shownScale();
   const ox0 = r.left - vr.left + vViewport.scrollLeft, oy0 = r.top - vr.top + vViewport.scrollTop;
   vbox.style.setProperty('--lf', Math.round(Math.max(10, Math.min(16, 3 + 2.5 * s))) + 'px');
@@ -145,7 +160,7 @@ export function placeValley() {
     const c = cells[k], words = repoWords(repo), health = (repo.summary || {}).health;
     return `<div class="al ov ov-${esc(health || 'dormant')}" aria-hidden="true" style="left:${ox0 + (c.x + c.w / 2) * s}px;top:${oy0 + (c.y + 2) * s}px;max-width:${(c.w + 8) * s}px;border-color:${VALLEY_SHORE[health] || VALLEY_SHORE.dormant}">` +
       `${esc(words.text)}<small>${esc(words.sub)}</small></div>`;
-  }).join('') + shipLabels(ships, ox0, oy0, s) + gridLabels(lay, ox0, oy0, s);
+  }).join('') + shipLabels(ships, ox0, oy0, s) + gridLabels(lay, ox0, oy0, s) + caravanLabels(links.trains, ox0, oy0, s);
   const keep = new Set();
   g.repos.forEach((repo, k) => {
     const c = cells[k], words = repoWords(repo);
@@ -163,6 +178,7 @@ export function placeValley() {
   });
   shipKeys(vkeys, ships, ox0, oy0, s, sh => openInfo(shipWords(sh))).forEach(b => keep.add(b));
   gridKeys(vkeys, lay, ox0, oy0, s, c => openInfo(gridWords(c))).forEach(b => keep.add(b));
+  linkKeys(vkeys, links, ox0, oy0, s, openInfo).forEach(b => keep.add(b));
   [...vkeys.children].forEach(b => { if (!keep.has(b)) b.remove(); });
 }
 registerOverlay(placeValley, 26);

@@ -7,6 +7,9 @@
  * roads run, so node tests it (tools/village-tests/valleymodel.test.mjs).
  * valley.js draws it. */
 
+/* Each caravan's row in its band below the lane, and the gap above the band (#530). */
+export const CARAVAN_ROW = 16, CARAVAN_GAP = 10;
+
 /* A repo's patch of ground, the gaps between, and the margin round it all. */
 export const VALLEY_CELL = { w: 104, h: 72 }, VALLEY_GAP = { x: 64, y: 40 }, VALLEY_MARGIN = 24;
 
@@ -49,8 +52,10 @@ export function valleyLayout(group) {
       roads.push([[a.x, ya], [xa, ya], [xa, lane], [xb, lane], [xb, yb], [b.x, yb]]);
     }
   });
-  const grid = gridLayout(group && group.grid, lane + 24);
-  return { W: Math.max(W, grid ? grid.W : 0), H: grid ? grid.bottom + m : H, cells, rivers, riverEdges, roads, grid };
+  // Caravans (#530) travel a band of their own below the lane, a row each.
+  const nCar = ((group && group.caravans) || []).length, band = nCar ? CARAVAN_GAP + nCar * CARAVAN_ROW : 0, caravanTop = lane + 6 + CARAVAN_GAP;
+  const grid = gridLayout(group && group.grid, lane + 24 + band);
+  return { W: Math.max(W, grid ? grid.W : 0), H: grid ? grid.bottom + m : H + band, cells, rivers, riverEdges, roads, grid, caravanTop };
 }
 
 /* ---------- The environment grid (#512) ----------
@@ -205,4 +210,122 @@ export function valleyMissing(resp, name) {
     return `No group named "${name}" in ${resp.manifest}.${why}` + (names.length ? ` Groups: ${names.join(', ')}.` : '');
   }
   return null;
+}
+
+/* ---------- Ropes, caravans and barges (#530) ----------
+ * From `/api/valley`'s `ropes`, `caravans` (crossrepo.rs, #528) and
+ * `barges` (breakage.rs, #529): where each is drawn and what a click on it
+ * says. valleylinks.js draws them. */
+
+/* A caravan's lead (the horse) and each crate, in scene pixels. */
+export const CARAVAN_LEAD = 10, CARAVAN_CRATE = 7, BARGE_TRIP_MS = 16000;
+
+const repoIndex = (group, name) => ((group && group.repos) || []).findIndex(r => r.name === name);
+
+/* Each rope as a segment between the facing sides of its two repos:
+ * { x0, y0, x1, y1, rope }. Ropes between the same two repos stand apart. */
+export function valleyRopes(lay, group) {
+  const pairs = {};
+  return ((group && group.ropes) || []).map(rope => {
+    const a = lay.cells[repoIndex(group, rope.from.repo)], b = lay.cells[repoIndex(group, rope.to.repo)];
+    if (!a || !b || a === b) return null;
+    const key = [rope.from.repo, rope.to.repo].sort().join('|'), k = (pairs[key] = (pairs[key] ?? -1) + 1) % 6;
+    if (a.x + a.w <= b.x || b.x + b.w <= a.x) {
+      const east = a.x < b.x;
+      return { x0: east ? a.x + a.w : a.x, y0: a.y + 14 + 6 * k, x1: east ? b.x : b.x + b.w, y1: b.y + 14 + 6 * k, rope };
+    }
+    const south = a.y < b.y;
+    return { x0: a.x + 24 + 10 * k, y0: south ? a.y + a.h : a.y, x1: b.x + 24 + 10 * k, y1: south ? b.y : b.y + b.h, rope };
+  }).filter(Boolean);
+}
+
+/* Distance from (x, y) to the segment (x0, y0)–(x1, y1). */
+function toSegment(x, y, { x0, y0, x1, y1 }) {
+  const dx = x1 - x0, dy = y1 - y0, len = dx * dx + dy * dy;
+  const u = len ? Math.max(0, Math.min(1, ((x - x0) * dx + (y - y0) * dy) / len)) : 0;
+  return Math.hypot(x - (x0 + u * dx), y - (y0 + u * dy));
+}
+
+/* The rope within `r` scene pixels of (x, y), or null. */
+export function valleyRopeAt(ropes, x, y, r = 3) {
+  return ropes.find(rp => toSegment(x, y, rp) <= r) || null;
+}
+
+const issueLink = i => (i && i.url ? { label: `${i.repo}#${i.number}`, url: i.url } : null);
+
+/* What a click on a rope says: which issue waits on which, with links. */
+export function ropeWords(rope) {
+  const { from: a, to: b } = rope;
+  return {
+    title: `${a.repo}#${a.number} waits on ${b.repo}#${b.number}`,
+    line: `${a.repo}#${a.number} can't go on until ${b.repo}#${b.number} is done.`,
+    meta: [`Waiting: ${a.repo}#${a.number} ${a.title}`, `Blocking: ${b.repo}#${b.number} ${b.title}`],
+    links: [issueLink(a), issueLink(b)].filter(Boolean),
+  };
+}
+
+/* Each caravan as a train in its row: { x, y, w, caravan, loaded, total }.
+ * It travels the row as its crates load (the share loaded), and stands at
+ * the east end once it has arrived. */
+export function valleyCaravans(lay, group) {
+  const m = VALLEY_MARGIN;
+  return ((group && group.caravans) || []).map((caravan, k) => {
+    const total = caravan.crates.length, loaded = caravan.crates.filter(c => c.loaded).length;
+    const w = CARAVAN_LEAD + total * CARAVAN_CRATE, track = Math.max(0, lay.W - 2 * m - w - 60);
+    const share = caravan.arrived ? 1 : (total ? loaded / total : 0);
+    return { x: m + Math.round(share * track), y: lay.caravanTop + k * CARAVAN_ROW, w, caravan, loaded, total };
+  });
+}
+
+/* The caravan under (x, y), or null. */
+export function valleyCaravanAt(trains, x, y) {
+  return trains.find(t => x >= t.x - 2 && x < t.x + t.w + 2 && y >= t.y - 2 && y < t.y + CARAVAN_ROW - 4) || null;
+}
+
+/* What a click on a caravan says: each repo's part, landed or not, with links. */
+export function caravanWords(train) {
+  const { caravan: c, loaded, total } = train, p = c.parent;
+  const crateIssue = (cr, n) => (cr.slug ? { label: `${cr.repo}#${n}`, url: `https://github.com/${cr.slug}/issues/${n}` } : null);
+  return {
+    title: `Caravan: ${p.repo}#${p.number} ${p.title}`,
+    line: c.arrived ? 'Arrived: every repo\'s part has landed.' : `${loaded} of ${total} repos' parts landed.`,
+    meta: c.crates.map(cr => `${cr.repo}: ${cr.issues.map(n => '#' + n).join(', ')} · ${cr.loaded ? 'landed' : 'not yet'}`),
+    links: [issueLink(p), ...c.crates.flatMap(cr => cr.issues.map(n => crateIssue(cr, n)))].filter(Boolean),
+  };
+}
+
+/* Each barge on its way back up the river from the consumer to the library
+ * its failure names: { x, y, barge }. With `t` (ms of animation) it sails
+ * upstream every BARGE_TRIP_MS; at 0 (reduced motion) it waits mid-river. A
+ * consumer and library with no river between them: it waits at the
+ * consumer's west side. Several on one river keep apart. */
+export function valleyBarges(lay, group, t) {
+  const seen = {};
+  return ((group && group.barges) || []).map(barge => {
+    const n = seen[barge.from + '>' + barge.to] = (seen[barge.from + '>' + barge.to] ?? -1) + 1;
+    const k = (lay.riverEdges || []).findIndex(e => e.from === barge.to && e.to === barge.from);
+    if (k >= 0) {
+      const f = t ? 1 - (t % BARGE_TRIP_MS) / BARGE_TRIP_MS : 0.5;
+      const [x, y] = along(lay.rivers[k], (f + n * 0.2) % 1);
+      return { x, y, barge };
+    }
+    const cell = lay.cells[repoIndex(group, barge.from)];
+    return cell ? { x: cell.x - 10, y: cell.y + (cell.h >> 1) + n * 8, barge } : null;
+  }).filter(Boolean);
+}
+
+/* The barge within `r` scene pixels of (x, y), or null. */
+export function valleyBargeAt(barges, x, y, r = 6) {
+  return barges.find(b => Math.abs(b.x - x) <= r && Math.abs(b.y - y) <= r) || null;
+}
+
+/* What a click on a barge says: whose build fails, why it names the library, and the run. */
+export function bargeWords(b) {
+  const { from, to, why, run } = b.barge;
+  return {
+    title: `${from}'s build fails, back to ${to}`,
+    line: `${from} is red, and the failure names ${to}: ${why}.`,
+    meta: [`From: ${from} (the consumer)`, `To: ${to} (the library)`],
+    links: run ? [{ label: 'The failing run', url: run }] : [],
+  };
 }
