@@ -39,6 +39,25 @@ fn village_html_has_a_screensaver_mode() {
     assert!(body.contains("title=\"Issues GitHub closed as completed today; the average is over the full days before today\""));
 }
 
+/// "Since you last looked" (#479): after a quiet spell the launcher passes
+/// `since=`; the page asks the server what closed and merged, and shows the
+/// card over the dimmed map for 20 s. Its decisions are tested under node
+/// (recap.js).
+#[test]
+fn screensaver_opens_with_a_since_you_last_looked_card() {
+    let body = &village_source();
+    assert!(body.contains("const since = recapSince(location.search)"));
+    assert!(body.contains("fetch(`/api/village/since?t=${Math.floor(since / 1000)}`"));
+    assert!(body.contains("if (reachable && !recapped) { recapped = true; showRecap(card, since); }"));
+    assert!(body.contains("setTimeout(close, RECAP_MS);"));
+    assert!(body.contains("export const RECAP_MS = 20000;"));
+    assert!(body.contains("html.ss-recap-on .stage, html.ss-recap-on .ss-strip { filter: brightness(.3);"));
+    assert!(body.contains("Nothing happened${m.waiting ? '' : ', and nothing is waiting on you'}."));
+    let launcher = include_str!("../../../tools/omarchy-plugin/agents-village-screensaver/village-screensaver");
+    assert!(launcher.contains("[ -n \"$since\" ] && q=\"$q&since=${since}\""));
+    assert!(launcher.contains("date +%s > \"$LAST_CLOSED\""));
+}
+
 /// The installer and launcher (bash, in a throwaway HOME) and the page's
 /// decisions (node, when it is installed).
 #[test]

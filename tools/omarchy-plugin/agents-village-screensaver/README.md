@@ -30,6 +30,14 @@ so the page closes itself on input. A dashboard tab never does.
   is waiting on you (in red when anything is).
 - With several swarms it cycles through each world, then each village that is
   not part of a world.
+- After a quiet spell it opens with a "since you last looked" card over the
+  dimmed map for 20 seconds: issues landed and closed, pull requests merged,
+  deploys (with their versions), what bounced at the gate, and what is
+  waiting on you, in red. A spell with nothing in it says "Nothing happened".
+  The spell runs from when the screensaver last closed (closing it is
+  looking), or from when the session went idle if it never has, and the card
+  only shows when the spell is at least `recap` minutes long (default 30, 0
+  turns it off). Any input closes it.
 - For burn-in, the whole scene drifts a few pixels, and it dims in the night
   hours if `dim` is set.
 - When the server stops answering, the map gives way to a large
@@ -68,14 +76,14 @@ because the shell's `PATH` starts with `/usr/share/omarchy/bin`. So:
 Settings (`~/.config/agents-ui/screensaver.json`, written by the installer):
 
 ```json
-{ "server": "http://nuc-1:7890", "cycle": 30, "dim": "23-7", "timeout": 150 }
+{ "server": "http://nuc-1:7890", "cycle": 30, "dim": "23-7", "timeout": 150, "recap": 30 }
 ```
 
 ## Tests
 
 ```bash
 bash tools/omarchy-plugin/agents-village-screensaver/tests/test_install.sh   # installer and launcher, in a throwaway HOME
-node --test tools/omarchy-plugin/agents-village-screensaver/tests/            # the page's decisions (src/web/village/saver.js)
+node --test tools/omarchy-plugin/agents-village-screensaver/tests/            # the page's decisions (src/web/village/saver.js, recap.js)
 python3 tools/omarchy-plugin/agents-village-screensaver/tests/qml_check.py   # the real Service.qml in Quickshell, offscreen
 ```
 

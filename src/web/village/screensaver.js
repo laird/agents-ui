@@ -6,12 +6,16 @@
  * With several swarms it cycles through them. Burn-in care: the scene drifts
  * a few pixels, and dims in the night hours if asked. It is never blanked.
  *
+ * After a quiet spell (the launcher's `since=`) a "since you last looked"
+ * card covers the dimmed map for its first 20 seconds (#479, recap.js).
+ *
  * What it shows and when is decided in saver.js; this only puts it on screen.
  * data.js says after each poll whether the server answered ('village:polled'). */
 import { state } from './state.js';
 import { buildEntry, staleWords, cycleOrder, dimmedAt, dismisses, driftAt, gateWords, nextName, saverOptions, saverSummary } from './saver.js';
 import { esc, fit } from './panels.js';
 import { placeOverlays } from './registry.js';
+import { RECAP_MS, recapHeading, recapLines, recapModel, recapSince } from './recap.js';
 
 const saverOpts = saverOptions(location.search, location.hash);
 
@@ -54,6 +58,39 @@ function renderSaverStrip(box, lastOk) {
 function renderSaverOffline(box, lastOk) {
   box.innerHTML = `<div class="ss-off-big">Can't reach agents-tui on ${esc(location.hostname || 'this server')}</div>
     <div class="ss-off-small">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · ${lastOk ? 'last answer ' + staleWords(Date.now() - lastOk) : 'no answer yet'} · retrying</div>`;
+}
+
+/* The "since you last looked" card (#479): what closed and merged (asked of
+ * the server, which asks GitHub), deploys, bounces and what waits on you,
+ * over the dimmed map, then the live village. Input takes it away at once. */
+async function showRecap(card, since) {
+  let changes = null;
+  try {
+    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 8000);
+    const res = await fetch(`/api/village/since?t=${Math.floor(since / 1000)}`, { signal: ctl.signal });
+    clearTimeout(timer);
+    if (res.ok) changes = await res.json();
+  } catch { /* unchecked: the card says so */ }
+  const m = recapModel(state.villages, changes, since);
+  const several = m.villages.length > 1;
+  const body = m.villages.map(r => {
+    const lines = recapLines(r);
+    if (!lines.length && several) return '';
+    return `<div class="ss-recap-village">${several ? `<div class="ss-recap-name">${esc(r.project)}</div>` : ''}
+      ${lines.map(l => `<div class="ss-recap-line${l.red ? ' ss-red' : ''}">${esc(l.text)}</div>`).join('')}</div>`;
+  }).join('');
+  const quiet = m.quiet ? `<div class="ss-recap-line">Nothing happened${m.waiting ? '' : ', and nothing is waiting on you'}.</div>` : '';
+  const unchecked = m.unchecked.length ? `<div class="ss-recap-note">Couldn't ask GitHub about ${esc(m.unchecked.join(', '))}</div>` : '';
+  card.innerHTML = `<div class="ss-recap-head">${esc(recapHeading(since))}</div>${quiet}${body}${unchecked}`;
+  card.hidden = false;
+  document.documentElement.classList.add('ss-recap-on');
+  const close = () => {
+    card.hidden = true;
+    document.documentElement.classList.remove('ss-recap-on');
+    for (const type of ['keydown', 'pointerdown']) window.removeEventListener(type, close, true);
+  };
+  setTimeout(close, RECAP_MS);
+  for (const type of ['keydown', 'pointerdown']) window.addEventListener(type, close, true);
 }
 
 /* Show another swarm: replace the hash (never push it, so the launcher's
@@ -100,10 +137,16 @@ if (saverOpts.on) {
   off.className = 'ss-off'; off.id = 'ss-off'; off.hidden = true; off.setAttribute('role', 'alert');
   document.body.append(strip, off);
 
+  const since = recapSince(location.search), card = document.createElement('div');
+  card.className = 'ss-recap'; card.id = 'ss-recap'; card.hidden = true; card.setAttribute('aria-live', 'polite');
+  document.body.append(card);
+  let recapped = !since;
+
   let lastOk = 0, reachable = true;
   window.addEventListener('village:polled', e => {
     reachable = e.detail.ok;
     if (reachable) lastOk = e.detail.at;
+    if (reachable && !recapped) { recapped = true; showRecap(card, since); }
     document.documentElement.classList.toggle('ss-offline', !reachable);
     off.hidden = reachable;
     if (reachable) renderSaverStrip(strip, lastOk); else renderSaverOffline(off, lastOk);

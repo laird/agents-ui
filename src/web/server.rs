@@ -86,6 +86,26 @@ async fn api_village_handler(State(state): State<WebServerState>) -> Json<Value>
     Json(json!(snapshot))
 }
 
+#[derive(Deserialize, Default)]
+struct SinceQuery {
+    t: Option<i64>,
+}
+
+/// What closed and merged in each village since `t` (unix seconds), for the
+/// screensaver's "since you last looked" card (#479, `since.rs`). Without a
+/// usable `t`, a 400.
+/// `GET /api/village/since?t=<unix seconds>`
+async fn api_village_since_handler(State(state): State<WebServerState>, Query(q): Query<SinceQuery>) -> Result<Json<Value>, StatusCode> {
+    let t = q.t.filter(|t| super::since::search_time(*t).is_some()).ok_or(StatusCode::BAD_REQUEST)?;
+    let swarms = state.swarms.read().map(|s| s.clone()).unwrap_or_default();
+    let snapshot = state.village.snapshot(&state.transport, &swarms).await;
+    let mut villages = Vec::new();
+    for v in &snapshot.villages {
+        villages.push(super::since::village_since(&state.transport, &v.project, &v.repo_path, t).await);
+    }
+    Ok(Json(json!({ "t": t, "villages": villages })))
+}
+
 /// `GET /api/swarms?explain=1` asks for each agent's recognition too.
 #[derive(Deserialize, Default)]
 struct SwarmsQuery {
@@ -1125,6 +1145,7 @@ pub async fn run(addrs: &[SocketAddr], read_only: bool, state: WebServerState) -
         .route("/village", get(village_handler))
         .route("/village/{*path}", get(village_file_handler))
         .route("/api/village", get(api_village_handler))
+        .route("/api/village/since", get(api_village_since_handler))
         .route("/api/swarms", get(api_swarms_handler).post(api_launch_swarm_handler))
         .route("/api/swarms/{project}/issues", post(crate::web::newissue::api_new_issue_handler))
         .route("/api/repos", get(api_repos_handler))
@@ -1239,6 +1260,7 @@ mod tests {
             .route("/village", get(village_handler))
             .route("/village/{*path}", get(village_file_handler))
             .route("/api/village", get(api_village_handler))
+            .route("/api/village/since", get(api_village_since_handler))
             .route("/api/swarms", get(api_swarms_handler).post(api_launch_swarm_handler))
             .route("/api/swarms/{project}/issues", post(crate::web::newissue::api_new_issue_handler))
             .route("/api/repos", get(api_repos_handler))
@@ -1745,6 +1767,26 @@ mod tests {
         assert!(body.contains("text: flagLabel(f.number, f.title, b), cls: 'flag', edge: g.col, width: 29 };"));
         assert!(body.contains("return `#${n}${name ? ' ' + name : ''} · ${b.landed}/${b.total}`;"));
         assert!(body.contains("const edge = l.edge && /^#[0-9a-f]{3,8}$/i.test(l.edge) ? `border-color:${l.edge};` : '';"));
+    }
+
+    /// `/api/village/since?t=` (#479): each village's closed issues and merged
+    /// pull requests since `t`; a village GitHub can't be asked about is
+    /// unchecked, and no usable `t` is a 400.
+    #[tokio::test]
+    async fn api_village_since_answers_per_village_and_needs_a_time() {
+        let shared = new_shared_state();
+        shared.write().unwrap().push(sample_swarm("my-project"));
+        let state = make_web_state(shared);
+        let body = get_json(make_app(state.clone()), "/api/village/since?t=1794800000").await;
+        assert_eq!(body["t"], 1794800000);
+        let v = &body["villages"][0];
+        assert_eq!(v["project"], "my-project");
+        assert_eq!(v["checked"], false, "/repos/my-project is not a repository here");
+        assert_eq!(v["closed"], json!([]));
+        for uri in ["/api/village/since", "/api/village/since?t=x", "/api/village/since?t=-1"] {
+            let resp = make_app(state.clone()).oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap()).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{uri}");
+        }
     }
 
     #[tokio::test]
