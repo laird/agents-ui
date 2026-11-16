@@ -14,6 +14,7 @@ mod ghpanel;
 mod labels_key;
 mod lifecycle;
 mod newissue;
+mod overview;
 mod notify;
 mod proposals;
 mod screensaver;

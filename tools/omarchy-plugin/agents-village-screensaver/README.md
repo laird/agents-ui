@@ -39,6 +39,13 @@ so the page closes itself on input. A dashboard tab never does.
   each unlock in `~/.local/state/agents-village-screensaver/last-unlock`. The
   card only shows when that was at least `recap` minutes ago (default 30, 0
   turns it off); with no unlock seen yet there is none. Any input closes it.
+- `overview=1` in the page's query shows every swarm at once (#481): each is
+  an island, its shore red when something waits on you, the build is broken
+  or a deploy failed, amber when a house is blocked or stalled, and green
+  otherwise, with its working, idle and blocked houses counted. It comes
+  back between swarms while cycling; with `cycle=0` it stays, for a wall
+  display. `/village#*` opens it in a browser, and it is the last entry
+  in the picker ("All swarms"). Clicking an island opens that village.
 - For burn-in, the whole scene drifts a few pixels, and it dims in the night
   hours if `dim` is set.
 - When the server stops answering, the map gives way to a large
