@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """gh shim: the simulated repos' GitHub from the swarm simulator (issues,
-feature parents and sub-issues over GraphQL, Deployments); everything else
+feature parents and sub-issues over GraphQL, Deployments, and a recorded
+fortnight of closed issues for the almanac, almanac_history.py); everything else
 (and any other repo) goes to the real gh."""
 import json
 import os
@@ -68,7 +69,14 @@ if demo:
     if os.path.realpath(cwd).startswith(src + os.sep):
         name = os.path.basename(os.path.realpath(cwd)).split("-wt-")[0]
         if args[:2] == ["issue", "list"]:
-            sys.stdout.write(json.dumps(state(demo, "issues", name, [])))
+            issues = state(demo, "issues", name, [])
+            # The village's GitHub summary (#498) asks for closings: add a
+            # recorded fortnight, so the almanac (#499) has days to draw.
+            if any("closedAt" in a and "stateReason" in a for a in args):
+                sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                from almanac_history import history
+                issues = issues + history()
+            sys.stdout.write(json.dumps(issues))
             sys.exit(0)
         if args[:2] == ["pr", "list"]:
             # Two open pull requests, one asking for your review (the GitHub panel, #492).

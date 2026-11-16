@@ -8,6 +8,7 @@ import { featureColours, hash, shadow } from './palette.js';
 import { THEMES } from './themes/registry.js';
 import { registerLayer } from './registry.js';
 import { inRow } from './envlabels.js';
+import { ALMANAC_SIZE, almanacDays } from './almanactally.js';
 
 export const cv = document.getElementById('map'), ctx = cv.getContext('2d');
 /* On-screen pixels per scene pixel on the map (its canvas is DETAIL times finer). */
@@ -79,7 +80,11 @@ function place(v, slot, per) {
   // houses; the map widens if they need the room. No features, no strip.
   const fcols = featureColours(v.features);
   const banners = (v.features || []).map((f, k) => ({ f, x: forestX + 12 + k * 30, y: 14, col: fcols.get(f.number) }));
-  const devW = Math.max(cx0 + vw + 40, roadX + 70, castleX + 46, gate ? gate.x0 + gate.w + 4 : 0, banners.length ? forestX + 12 + banners.length * 30 : 0);
+  const eastW = Math.max(cx0 + vw + 40, roadX + 70, castleX + 46, gate ? gate.x0 + gate.w + 4 : 0, banners.length ? forestX + 12 + banners.length * 30 : 0);
+  // The almanac (#499, almanac.js): a field at the village's east edge, in a
+  // clearing past everything else, when GitHub's summary came with the village.
+  const almanac = almanacDays(v.github) ? { x: eastW + 2, y: 18, ...ALMANAC_SIZE } : null;
+  const devW = almanac ? almanac.x + almanac.w + 8 : eastW;
   // The environment row (#445): under the dev village, a village per
   // environment on a river of its own along the bottom, left to right,
   // production right-most (docs/environment-row.md). Each stands just over the
@@ -105,7 +110,8 @@ function place(v, slot, per) {
     [roadX - 2, 46, RD + 4, quayY - 40], [roadX - 18, quayY - 12, W, H],
     ...(gate ? [[4, gate.y - 2, gate.x0 + gate.w, GATE_H + 2]] : []),
     [forestX - 2, 12, devW, canalY - 46], ...(envs.length ? [[0, rowTop - 2, W, H]] : []),
-    ...(v.github ? [[ghSignAt(hallX).x - 1, 18, GH_SIGN.w + 2, 30]] : [])
+    ...(v.github ? [[ghSignAt(hallX).x - 1, 18, GH_SIGN.w + 2, 30]] : []),
+    ...(almanac ? [[almanac.x - 4, almanac.y - 4, almanac.w + 8, almanac.h + 14]] : [])
   ];
   for (let r = 0; r < rows; r++) {
     const left = roadX - per * LW, right = roadX + RD + per * LW;
@@ -126,7 +132,7 @@ function place(v, slot, per) {
     const zone = Math.floor(hash(x >> 5, y >> 5) * 6), k = hash(x + 11, y + 7) < 0.7 ? zone : Math.floor(hash(y, x + 3) * 6);
     decor.push({ x: x + Math.floor(hash(y, x) * 4), y: y + Math.floor(hash(x, y + 1) * 3), k });
   }
-  return { per, rows, cx0, vw, roadX, hallX, top, lots, quayY, canalY, lockStart, castleX, W, H, decor, banners, devW, devH, envs, envCy, gate, slot };
+  return { per, rows, almanac, cx0, vw, roadX, hallX, top, lots, quayY, canalY, lockStart, castleX, W, H, decor, banners, devW, devH, envs, envCy, gate, slot };
 }
 /* The GitHub panel's sign (ghpanel.js, #492): between the docks and the
  * hall, in scene pixels. */
@@ -152,6 +158,12 @@ export const slotPos = (i, n = 40) => (n <= 24
 export function inBannerStrip(lay, x, y) {
   const b = lay.banners;
   return b.length > 0 && y < 48 && x >= b[0].x - 14 && x <= b[b.length - 1].x + 22;
+}
+
+/* The clearing the almanac stands in: no forest tree there, nor over its label. */
+export function inAlmanacClearing(lay, x, y) {
+  const a = lay.almanac;
+  return !!a && x > a.x - 16 && x < a.x + a.w + 2 && y > a.y - 16 && y < a.y + a.h + 10;
 }
 
 /* Where a walk along `pts` is `t - p.t0` after it set off at `p.speed`, or null once over. */
@@ -236,7 +248,7 @@ registerLayer({ z: 20, draw(c, { lay }) {
 /* The forest east of the houses (clear of the banner strip), groves and props on free ground. */
 registerLayer({ z: 40, draw(c, { lay }, t) {
   const { devW, hallX, canalY, cx0, vw } = lay;
-  for (let x = Math.max(cx0 + vw + 6, hallX + 64); x < devW - 14; x += 15) for (let y = 16; y < canalY - 38; y += 16) if (hash(x, y) < 0.55 && !inBannerStrip(lay, x, y)) state.T.tree(c, x + Math.floor(hash(y, x) * 4), y);
+  for (let x = Math.max(cx0 + vw + 6, hallX + 64); x < devW - 14; x += 15) for (let y = 16; y < canalY - 38; y += 16) if (hash(x, y) < 0.55 && !inBannerStrip(lay, x, y) && !inAlmanacClearing(lay, x, y)) state.T.tree(c, x + Math.floor(hash(y, x) * 4), y);
   lay.decor.forEach(d => d.tree ? state.T.tree(c, d.x, d.y) : state.T.decor && state.T.decor(c, d.x, d.y, d.k, state.reduce ? 0 : t));
   shadow(c, hallX - 2, 40, 42, 2);
 } });

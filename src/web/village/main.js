@@ -12,6 +12,7 @@ import './weather.js';
 import './bounces.js';
 import './ghosts.js';
 import './scoreboard.js';
+import './almanac.js';
 import './barrels.js';
 import './well.js';
 import './ghpanel.js';
