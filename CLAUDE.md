@@ -64,11 +64,11 @@ file.
   different animation frames, which passes on a fast machine and fails on CI
   (#450).
 
-- **Each tool and area's own tests** (the mock demo and its `VOYAGES` and
-  `CONFLICTS` stories, the screensaver, notifications, the bar widget,
-  replay pages, history replays) are in `docs/testing/`, one file per tool:
-  `ls docs/testing/`. A new tool's test instructions go in a new file there,
-  not here, so two branches adding tools never edit the same lines (#521).
+- **Each tool's own tests** (the mock demos, the Omarchy plugins, the
+  replay tools, ...) are in `docs/testing/`, one file per tool: `ls
+  docs/testing/`. A new tool's test instructions go in a new file there, and
+  nothing here names it, so two branches adding tools never edit the same
+  lines (#521).
 
 Filesystem tests use unique paths under `std::env::temp_dir()` (there is no `tempfile` crate). No mocking of tmux — integration-level tmux testing is done manually via `tmux new-session -d` + `cargo run`.
 

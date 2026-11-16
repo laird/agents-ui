@@ -3,7 +3,7 @@
 The notifier is `tools/omarchy-plugin/agents-village-notify/`; the page's
 `#<project>&house=<name>` deep link is `src/web/village/deeplink.js` +
 `houselink.js`. Its `Model.js` is a copy of the bar widget's, kept equal by
-its node test.
+`tests/notify.test.js`.
 
 Tests:
 
