@@ -394,11 +394,10 @@ fn unreachable(source: &TemporalSource) -> VillageSnapshot {
     let mut v = build_village(source, &[], &HashMap::new(), &HashMap::new(), &[]);
     v.manager.status = HouseStatus::Unknown;
     v.board.push(Note {
-        number: 0,
         title: format!("Can't reach Temporal's HTTP API at {}", source.http_url),
         label: "unreachable".to_string(),
         url: source.ui_url.clone(),
-        priority: None,
+        ..Default::default()
     });
     v
 }

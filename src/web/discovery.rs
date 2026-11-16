@@ -151,21 +151,8 @@ fn stopped_placeholder_agent(project_name: &str, role: &str, is_manager: bool) -
         role: role.to_string(),
         state: "Stopped".to_string(),
         is_manager,
-        waiting_for_input: false,
-        current_issue: None,
-        current_issue_title: None,
-        pane_content: String::new(),
-        tmux_target: String::new(),
         health: "Unknown".to_string(),
-        completed_issue_count: 0,
-        resurrection_attempts: 0,
-        status_timestamp: None,
-        worktree_path: String::new(),
-        branch: None,
-        mux: Default::default(),
-        context_pct: None,
-        context_window: None,
-        limit: None,
+        ..Default::default()
     }
 }
 
@@ -180,18 +167,13 @@ fn stopped_swarm_snapshot(
     SwarmSnapshot {
         project_name: project_name.to_string(),
         repo_path: state.repo_path.clone(),
-        repo_key: String::new(),
-        manager_by: None,
         agent_type: state.agent_type.clone(),
         workflow: state.workflow.clone(),
         tmux_session: state.tmux_session.clone(),
         stopped: true,
-        busy_count: 0,
-        idle_count: 0,
-        attention_count: 0,
         manager: stopped_placeholder_agent(project_name, "manager", true),
         workers,
-        issues: Vec::new(),
+        ..Default::default()
     }
 }
 
@@ -442,15 +424,14 @@ async fn build_swarm_snapshot(
         repo_key,
         manager_by,
         agent_type: agent_type.to_string(),
-        workflow: None,
         tmux_session: session_name.to_string(),
-        stopped: false,
         busy_count,
         idle_count,
         attention_count,
         manager,
         workers,
-        issues: Vec::new(), // populated by TUI path; standalone discovery doesn't fetch issues
+        // `issues` stay empty: the TUI path fills them, standalone discovery doesn't fetch them.
+        ..Default::default()
     }))
 }
 
@@ -471,23 +452,11 @@ fn missing_manager_snapshot(project_name: &str) -> AgentSnapshot {
         role: "manager".to_string(),
         state: "Missing".to_string(),
         is_manager: true,
-        waiting_for_input: false,
-        current_issue: None,
-        current_issue_title: None,
         pane_content: "No 'review' window in this tmux session -- \
 this swarm is running without a manager."
             .to_string(),
-        tmux_target: String::new(),
         health: "Unknown".to_string(),
-        completed_issue_count: 0,
-        resurrection_attempts: 0,
-        status_timestamp: None,
-        worktree_path: String::new(),
-        branch: None,
-        mux: Default::default(),
-        context_pct: None,
-        context_window: None,
-        limit: None,
+        ..Default::default()
     }
 }
 
@@ -583,22 +552,15 @@ async fn build_agent_snapshot(
         is_manager,
         waiting_for_input,
         current_issue,
-        current_issue_title: None,
         pane_content,
         tmux_target: target.to_string(),
         health: health_str.to_string(),
-        completed_issue_count: 0,
-        resurrection_attempts: 0,
-        status_timestamp: None,
         worktree_path: worktree_path
             .as_ref()
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_default(),
         branch,
-        mux: Default::default(),
-        context_pct: None,
-        context_window: None,
-        limit: None,
+        ..Default::default()
     }
     .with_context_from_pane()
 }

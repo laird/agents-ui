@@ -27,8 +27,9 @@ pub mod world;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 
-/// Snapshot of a single agent suitable for JSON serialization.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// Snapshot of a single agent suitable for JSON serialization. Built outside
+/// this module with `..Default::default()`, so a new field breaks no one (#519).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct AgentSnapshot {
     pub id: String,
     pub role: String,
@@ -93,7 +94,7 @@ pub struct IssueSnapshot {
 }
 
 /// Snapshot of a full swarm suitable for JSON serialization.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct SwarmSnapshot {
     pub project_name: String,
     pub repo_path: String,
@@ -392,5 +393,114 @@ mod tests {
         let read = state.read().unwrap();
         assert_eq!(read.len(), 1);
         assert_eq!(read[0], snap);
+    }
+
+    /// The web model's shared structs, and the file each is defined in: built
+    /// anywhere else, they take `..Default::default()`, so a new field compiles
+    /// without touching another branch's code (#519).
+    const SHARED: &[(&str, &str)] = &[
+        ("AgentSnapshot", "src/web/mod.rs"),
+        ("SwarmSnapshot", "src/web/mod.rs"),
+        ("IssueSnapshot", "src/web/mod.rs"),
+        ("VillageSnapshot", "src/web/village.rs"),
+        ("House", "src/web/village.rs"),
+        ("Crate", "src/web/village.rs"),
+        ("Note", "src/web/village.rs"),
+    ];
+
+    /// Every `Name { ... }` literal in `text` whose body has no `..`: its line.
+    fn literals_without_rest(text: &str, name: &str) -> Vec<usize> {
+        let bytes = text.as_bytes();
+        let mut out = Vec::new();
+        let needle = format!("{name} {{");
+        let mut from = 0;
+        while let Some(i) = text[from..].find(&needle).map(|i| i + from) {
+            from = i + needle.len();
+            let prev = text[..i].chars().next_back();
+            if prev.is_some_and(|c| c.is_alphanumeric() || c == '_') {
+                continue;
+            }
+            // A definition, an impl, or a function's return type opening its body.
+            let lead = text[..i].trim_end_matches(|c: char| c.is_alphanumeric() || c == '_' || c == ':').trim_end();
+            if ["struct", "impl", "for", "enum", "->"].iter().any(|k| lead.ends_with(k)) {
+                continue;
+            }
+            let (mut depth, mut j) = (0usize, i + needle.len() - 1);
+            while j < bytes.len() {
+                match bytes[j] {
+                    b'{' => depth += 1,
+                    b'}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                j += 1;
+            }
+            let body = &text[i + needle.len()..j.min(text.len())];
+            // A literal of shorthand fields alone breaks on a new field too.
+            if !body.trim().is_empty() && !has_rest(body) {
+                out.push(text[..i].matches('\n').count() + 1);
+            }
+        }
+        out
+    }
+
+    /// Whether a literal's body ends in its own `..rest`, not a nested literal's.
+    fn has_rest(body: &str) -> bool {
+        let (mut depth, mut in_str, mut prev) = (0i32, false, ' ');
+        for c in body.chars() {
+            match c {
+                '"' if prev != '\\' => in_str = !in_str,
+                '(' | '[' | '{' if !in_str => depth += 1,
+                ')' | ']' | '}' if !in_str => depth -= 1,
+                '.' if !in_str && depth == 0 && prev == '.' => return true,
+                _ => {}
+            }
+            prev = c;
+        }
+        false
+    }
+
+    fn rust_files(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                rust_files(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    #[test]
+    fn shared_model_structs_are_built_with_default_outside_their_module() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut files = Vec::new();
+        rust_files(&root.join("src"), &mut files);
+        let mut bad = Vec::new();
+        for path in files {
+            let rel = path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
+            let text = std::fs::read_to_string(&path).unwrap();
+            // The struct's own module may set every field; its tests may not.
+            let tests_at = text.find("#[cfg(test)]\nmod tests").map_or(usize::MAX, |i| text[..i].matches('\n').count() + 1);
+            for (name, home) in SHARED {
+                for line in literals_without_rest(&text, name) {
+                    if rel != *home || line > tests_at {
+                        bad.push(format!("{rel}:{line} {name}"));
+                    }
+                }
+            }
+        }
+        assert!(bad.is_empty(), "build these with `..Default::default()` (#519):\n{}", bad.join("\n"));
+    }
+
+    #[test]
+    fn literals_without_rest_finds_only_full_literals() {
+        let src = "fn f() -> Hut {\n    Hut { id: a, ..Default::default() }\n}\nlet h = Hut { id: a, role: b };\nstruct Hut {\n    id: String,\n}\nlet n = MyHut { id: a };\n\
+            let v = Hut { id: a, pipe: Pipe { x: 1, ..Pipe::default() } };\nlet s = Hut { id: \"..\".into() };\n";
+        assert_eq!(literals_without_rest(src, "Hut"), vec![4, 9, 10]);
     }
 }

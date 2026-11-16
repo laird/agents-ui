@@ -652,11 +652,11 @@ fn house(id: String, ws: &Workstream, tasks: &HashMap<&str, &Task>) -> House {
         question: if status == HouseStatus::Blocked { ws.question.clone() } else { None },
         answer_url: ws.answer_url.clone(),
         branch: ws.branch.clone(),
-        since: None,
         context_pct: fullest.and_then(|a| a.context_pct),
         context_window: fullest.and_then(|a| a.context_window.clone()),
         // A working house has got past any limit its pane still shows.
         limit: if status == HouseStatus::Working { None } else { ws.agents.iter().find_map(|a| a.limit.clone()) },
+        ..Default::default()
     }
 }
 
@@ -767,8 +767,8 @@ pub fn to_village(report: &Report) -> Reading {
             continue;
         }
         match t.state {
-            TaskState::Blocked | TaskState::Failed => board.push(Note { number: n, title: t.title.clone(), label: note_label(t), url: t.url.clone(), priority: priority(&t.priority) }),
-            TaskState::Open => backlog.push(Crate { number: n, title: t.title.clone(), kind: house_kind(&t.labels), priority: priority(&t.priority), url: t.url.clone(), waits_on: waits_on(t), parent: t.parent.as_deref().filter(|p| !p.trim().is_empty()).map(task_number) }),
+            TaskState::Blocked | TaskState::Failed => board.push(Note { number: n, title: t.title.clone(), label: note_label(t), url: t.url.clone(), priority: priority(&t.priority), ..Default::default() }),
+            TaskState::Open => backlog.push(Crate { number: n, title: t.title.clone(), kind: house_kind(&t.labels), priority: priority(&t.priority), url: t.url.clone(), waits_on: waits_on(t), parent: t.parent.as_deref().filter(|p| !p.trim().is_empty()).map(task_number), ..Default::default() }),
             TaskState::Claimed | TaskState::Done => {}
         }
     }
@@ -787,9 +787,9 @@ pub fn to_village(report: &Report) -> Reading {
             labels: t.labels.clone(),
             is_blocked: t.state == TaskState::Blocked,
             is_working: t.state == TaskState::Claimed,
-            assigned_worker: None,
             url: t.url.clone().unwrap_or_default(),
             depends_on: t.depends_on.iter().map(|d| task_number(d)).collect(),
+            ..Default::default()
         })
         .collect();
 
@@ -805,11 +805,8 @@ pub fn to_village(report: &Report) -> Reading {
         board,
         pipeline,
         builds: report.builds.clone(),
-        features: Vec::new(),
-        shipped: Vec::new(),
         build: report.build.clone(),
-        flaky: Vec::new(),
-        github: None,
+        ..Default::default()
     };
     village.features = super::feature::build(&village, &super::feature::links_from_tasks(&report.tasks));
     Reading { village, issues }
@@ -1129,7 +1126,7 @@ impl ReportVillages {
     fn broken(&self, why: &str) -> Reading {
         let mut r = to_village(&Report { project: self.spec.label(), framework: "unknown".into(), ..Report::default() });
         r.village.manager.status = HouseStatus::Unknown;
-        r.village.board.push(Note { number: 0, title: format!("Can't read {}: {why}", self.spec.label()), label: "unreachable".to_string(), url: None, priority: None });
+        r.village.board.push(Note { title: format!("Can't read {}: {why}", self.spec.label()), label: "unreachable".to_string(), ..Default::default() });
         r
     }
 }
@@ -1350,11 +1347,7 @@ mod tests {
             state: "open".into(),
             priority: "P2".into(),
             labels: labels.iter().map(|l| l.to_string()).collect(),
-            is_blocked: false,
-            is_working: false,
-            assigned_worker: None,
-            url: String::new(),
-            depends_on: Vec::new(),
+            ..Default::default()
         };
         let swarm: SwarmSnapshot = serde_json::from_value(serde_json::json!({
             "project_name": "shop", "repo_path": "", "agent_type": "claude", "workflow": null, "tmux_session": "",

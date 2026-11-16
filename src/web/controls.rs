@@ -422,22 +422,9 @@ mod tests {
             id: "p/worker-1".into(),
             role: "worker-1".into(),
             state: state.into(),
-            is_manager: false,
-            waiting_for_input: false,
-            current_issue: None,
-            current_issue_title: None,
-            pane_content: String::new(),
             tmux_target: "claude-p:0.1".into(),
             health: "Healthy".into(),
-            completed_issue_count: 0,
-            resurrection_attempts: 0,
-            status_timestamp: None,
-            worktree_path: String::new(),
-            branch: None,
-            mux: Default::default(),
-            limit: None,
-            context_pct: None,
-            context_window: None,
+            ..Default::default()
         }
     }
 
@@ -445,18 +432,13 @@ mod tests {
         SwarmSnapshot {
             project_name: "p".into(),
             repo_path: "/repos/p".into(),
-            repo_key: String::new(),
-            manager_by: None,
             agent_type: "Claude".into(),
-            workflow: None,
             tmux_session: "claude-p".into(),
-            stopped: false,
-            busy_count: 0,
             idle_count: 1,
-            attention_count: 0,
             manager: AgentSnapshot { role: "manager".into(), is_manager: true, ..worker("Idle") },
             workers: vec![worker("Idle")],
             issues,
+            ..Default::default()
         }
     }
 

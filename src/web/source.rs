@@ -613,37 +613,14 @@ mod tests {
             role: role.into(),
             state: "Idle".into(),
             is_manager: role == "manager",
-            waiting_for_input: false,
-            current_issue: None,
-            current_issue_title: None,
-            pane_content: String::new(),
-            tmux_target: String::new(),
             health: "Healthy".into(),
-            completed_issue_count: 0,
-            resurrection_attempts: 0,
-            status_timestamp: None,
-            worktree_path: String::new(),
-            branch: None,
-            mux: Default::default(),
-            context_pct: None,
-            context_window: None,
-            limit: None,
+            ..Default::default()
         };
         SwarmSnapshot {
             project_name: project.into(),
-            repo_path: String::new(),
-            repo_key: String::new(),
-            manager_by: None,
             agent_type: "claude".into(),
-            workflow: None,
-            tmux_session: String::new(),
-            stopped: false,
-            busy_count: 0,
-            idle_count: 0,
-            attention_count: 0,
             manager: agent("manager"),
-            workers: Vec::new(),
-            issues: Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -757,38 +734,16 @@ mod tests {
                 role: "CheckoutWorkstream".into(),
                 kind: HouseKind::Workshop,
                 status: HouseStatus::Working,
-                issue: None,
-                issue_title: None,
-                priority: None,
-                crew: Vec::new(),
-                subagents: Vec::new(),
-                action: None,
-                links: Vec::new(),
-                question: None,
-                answer_url: None,
-                branch: None,
-                since: None,
-                context_pct: None,
-                context_window: None,
-                limit: None,
+                ..Default::default()
             };
             let village = VillageSnapshot {
                 project: "ops".into(),
                 plane: crate::web::framework::Plane::Runtime,
                 framework: "fixed".into(),
-                workflow: None,
-                repo_path: String::new(),
                 manager: house("workers"),
                 houses: vec![house("checkout-7")],
-                backlog: Vec::new(),
-                board: Vec::new(),
-                pipeline: Pipeline::default(),
                 builds: vec!["abcdef1".into()],
-                build: None,
-                flaky: Vec::new(),
-                github: None,
-                features: Vec::new(),
-                shipped: Vec::new(),
+                ..Default::default()
             };
             Box::pin(async move { vec![Reading { village, issues: Vec::new() }] })
         }

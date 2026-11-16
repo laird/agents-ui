@@ -191,7 +191,7 @@ fn follow(village: &VillageSnapshot, links: &[FeatureLink]) -> Vec<Feature> {
 /// An epic whose last subtask reached the last stop today (#482): the village
 /// sets off fireworks when it arrives, and its flag flies on the hall for the
 /// rest of the day.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Shipped {
     pub number: u32,
     pub title: String,
@@ -357,7 +357,10 @@ mod tests {
     #[test]
     fn backlog_crates_learn_their_feature() {
         let crate_n = |number: u32, parent: Option<u32>| Crate {
-            number, title: String::new(), kind: HouseKind::Feature, priority: None, url: None, waits_on: vec![], parent,
+            number,
+            kind: HouseKind::Feature,
+            parent,
+            ..Default::default()
         };
         let mut backlog = vec![crate_n(461, None), crate_n(462, Some(7)), crate_n(500, None)];
         attach_parents(&mut backlog, &[link(vec![child(461), child(462)])]);
@@ -389,19 +392,7 @@ mod tests {
             kind: HouseKind::Feature,
             status,
             issue,
-            issue_title: None,
-            priority: None,
-            crew: vec![],
-            subagents: vec![],
-            action: None,
-            links: vec![],
-            question: None,
-            answer_url: None,
-            branch: None,
-            since: None,
-            context_pct: None,
-            context_window: None,
-            limit: None,
+            ..Default::default()
         }
     }
 
@@ -414,25 +405,17 @@ mod tests {
         let names = ["master-green", "dev", "uat", "prod"];
         VillageSnapshot {
             project: "app".into(),
-            plane: Default::default(),
             framework: "autocoder".into(),
-            workflow: None,
             repo_path: "/repo".into(),
             manager: house(None, HouseStatus::Idle),
             houses,
-            backlog: vec![],
             board,
             pipeline: Pipeline {
                 quay: quay.to_vec(),
                 stops: names.iter().zip(stops).map(|(n, i)| stop(n, i, StopSource::Branch)).collect(),
                 ..Pipeline::default()
             },
-            builds: vec![],
-            build: None,
-            flaky: Vec::new(),
-            github: None,
-            features: vec![],
-            shipped: vec![],
+            ..Default::default()
         }
     }
 
@@ -492,7 +475,7 @@ mod tests {
 
     #[test]
     fn blocked_subtasks_make_the_feature_stuck() {
-        let board = vec![Note { number: 463, title: "Sub 463".into(), label: "needs-design".into(), url: None, priority: None }];
+        let board = vec![Note { number: 463, title: "Sub 463".into(), label: "needs-design".into(), ..Default::default() }];
         let v = village(&[461], [&[], &[], &[], &[]], vec![house(Some(462), HouseStatus::Blocked)], board);
         let f = &follow(&v, &[four()])[0];
         assert_eq!(f.stuck, vec![462, 463]);
@@ -569,7 +552,7 @@ mod tests {
     fn specified_or_worked_on_subtasks_keep_the_flag() {
         let none = village(&[], [&[], &[], &[], &[]], vec![], vec![]);
         assert!(flagged(&none, four()), "backlog");
-        let board = vec![Note { number: 461, title: "Sub 461".into(), label: "needs-design".into(), url: None, priority: None }];
+        let board = vec![Note { number: 461, title: "Sub 461".into(), label: "needs-design".into(), ..Default::default() }];
         let pinned = village(&[], [&[], &[], &[], &[462, 463, 464]], vec![], board);
         assert!(flagged(&pinned, four()), "board");
         let worked = village(&[], [&[], &[], &[], &[462, 463, 464]], vec![house(Some(461), HouseStatus::Working)], vec![]);
