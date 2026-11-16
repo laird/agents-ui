@@ -3,6 +3,7 @@
 //! the embedded page (`VILLAGE_ASSETS`), so they need no server; the HTTP
 //! tests that serve it stay in `server.rs`.
 
+mod controls;
 mod core;
 mod envrow;
 mod fit;

@@ -86,7 +86,7 @@
   .dialog .opts button:disabled { opacity: .5; cursor: default; }
   /* A proposal's decision under it on the board (proposals.js). */
   .dialog .decide { margin: 2px 0 8px; }
-  .dialog .decide .opts button, #d-act .opts button { font-size: 12px; padding: 3px 8px; }
+  .dialog .decide .opts button, #d-act .opts button, #d-ctl .opts button { font-size: 12px; padding: 3px 8px; }
   .dialog .decide .ask { display: flex; gap: 6px; margin-top: 4px; }
   .dialog .decide textarea { flex: 1; font: 13px var(--mono); color: var(--ink); background: var(--win-bot); border: 2px solid var(--gold); border-radius: 4px; }
   .dialog .decide .ask button { position: static; font: 700 12px var(--mono); color: var(--ink); background: var(--win-bot); border: 2px solid var(--gold); border-radius: 4px; padding: 3px 8px; cursor: pointer; }
@@ -140,6 +140,7 @@
   .al.buildsign small { color: #ffe0e0; letter-spacing: 0; font-weight: normal; }
   .al.ghost { color: var(--ink); border-color: #a8b8d0; font-size: calc(var(--lf, 11px) - 2px); padding: 0 3px; white-space: normal; text-align: center; }
   .al.ghost span + span::before { content: '· '; }
+  #d-ctl pre.sent { white-space: pre-wrap; max-height: 12em; overflow: auto; margin: .3em 0; padding: .4em .6em; font: inherit; font-size: .9em; background: rgba(0,0,0,.25); border-left: 3px solid var(--gold); }
   .al.flag { font-size: calc(var(--lf, 11px) - 1px); color: var(--ink); border-width: 2px; padding: 0 3px; white-space: normal; text-align: center; }
   .al.house { font-size: calc(var(--lf, 11px) - 1px); color: var(--ink); border-color: var(--win-inner); padding: 0 3px; }
   .al.house { white-space: normal; text-align: center; }

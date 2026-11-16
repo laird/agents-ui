@@ -1167,7 +1167,7 @@ pub async fn run(addrs: &[SocketAddr], read_only: bool, state: WebServerState) -
         )
         .route(
             "/api/swarms/{project}/agents/{role}/control",
-            post(super::controls::api_control_handler),
+            post(super::controls::api_control_handler).get(super::control_preview::api_control_preview_handler),
         )
         .route(
             "/api/swarms/{project}/agents/{role}/pane/stream",
@@ -1270,7 +1270,7 @@ mod tests {
             )
             .route(
                 "/api/swarms/{project}/agents/{role}/control",
-                post(crate::web::controls::api_control_handler),
+                post(crate::web::controls::api_control_handler).get(crate::web::control_preview::api_control_preview_handler),
             )
             .with_state(state)
     }
@@ -1460,6 +1460,33 @@ mod tests {
         assert_eq!(status("p", "worker-4", r#"{"action":"restart"}"#).await, StatusCode::CONFLICT);
         // A herdr pane can't be restarted from the server yet: said so, not attempted.
         assert_eq!(status("p", "worker-3", r#"{"action":"restart"}"#).await, StatusCode::NOT_IMPLEMENTED);
+    }
+
+    /// #506: `GET .../control?action=` says what the POST would send, or the
+    /// refusal it would give, sending nothing; a read-only server answers it
+    /// too (the page hides its buttons from /api/config instead).
+    #[tokio::test]
+    async fn worker_controls_preview_what_they_would_send() {
+        let mut s = sample_swarm("p");
+        s.workers[0].state = "Idle".into();
+        let shared = std::sync::Arc::new(std::sync::RwLock::new(vec![s]));
+        let app = make_app(make_web_state(shared)).layer(axum::middleware::from_fn(reject_writes));
+        let get = |uri: &'static str| {
+            let app = app.clone();
+            async move {
+                let resp = app.oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap()).await.unwrap();
+                let status = resp.status();
+                let body: serde_json::Value = serde_json::from_slice(&axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap()).unwrap();
+                (status, body)
+            }
+        };
+        let (status, body) = get("/api/swarms/p/agents/worker-1/control?action=nudge").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["action"], "nudge");
+        assert!(body["sent"].as_str().is_some_and(|s| !s.is_empty()));
+        assert_eq!(get("/api/swarms/p/agents/worker-1/control?action=release").await.0, StatusCode::CONFLICT);
+        assert_eq!(get("/api/swarms/p/agents/worker-1/control?action=restart").await.0, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(get("/api/swarms/ghost/agents/worker-1/control?action=nudge").await.0, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
