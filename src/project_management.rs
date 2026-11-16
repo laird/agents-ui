@@ -103,6 +103,30 @@ impl ProjectManagementClient {
         ProjectCommand::new(self.program(), args)
     }
 
+    /// Which tracker this client talks to.
+    pub fn backend(&self) -> ProjectManagementBackend {
+        self.backend
+    }
+
+    /// Open issues matching a search (`gh issue list --search`), so a lookup
+    /// by title is not cut off by `--limit` on a busy repo.
+    pub fn search_open_issues(&self, query: &str, json_fields: &str, limit: usize) -> ProjectCommand {
+        let mut args = vec![
+            "issue".to_string(),
+            "list".to_string(),
+            "--state".to_string(),
+            "open".to_string(),
+            "--search".to_string(),
+            query.to_string(),
+            "--limit".to_string(),
+            limit.to_string(),
+            "--json".to_string(),
+            json_fields.to_string(),
+        ];
+        self.append_backend_auth_args(&mut args);
+        ProjectCommand::new(self.program(), args)
+    }
+
     pub fn view_issue(&self, issue_id: impl std::fmt::Display) -> ProjectCommand {
         let mut args = vec![
             "issue".to_string(),

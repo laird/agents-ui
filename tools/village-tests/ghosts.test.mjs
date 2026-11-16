@@ -97,7 +97,9 @@ test('"File flaky issue" (#503): its words, where it posts, what the answer says
   assert.equal(flakyButtonWords({ test: 'a::b', issue: 358 }), 'Add these failures to #358');
   assert.equal(flakyFileUrl('my shop'), '/api/swarms/my%20shop/flaky');
   assert.equal(flakyFileWords(200, { ok: true, action: 'created', number: 509 }), 'Filed as #509');
-  assert.equal(flakyFileWords(200, { ok: true, action: 'commented', number: 358 }), 'Added these failures to #358');
+  assert.equal(flakyFileWords(200, { ok: true, action: 'commented', number: 358 }), 'Added the new failures to #358');
+  assert.equal(flakyFileWords(200, { ok: true, action: 'unchanged', number: 358 }), '#358 already lists every failure');
+  assert.equal(flakyFileWords(501, { error: 'filing a flaky test needs the GitHub tracker' }), 'filing a flaky test needs the GitHub tracker');
   assert.equal(flakyFileWords(200, { ok: true, action: 'created', number: null }), 'Filed as the issue');
   assert.equal(flakyFileWords(403, {}), 'This dashboard is read-only: file it on GitHub.');
   assert.equal(flakyFileWords(404, { error: 'that test has not flaked here this week' }), 'that test has not flaked here this week');

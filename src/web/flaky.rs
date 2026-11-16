@@ -16,6 +16,10 @@
 //! `/api/village` carries the result as `flaky`, newest first, each with the
 //! open `Flaky: <test>` issue when there is one (looked up in the open issues
 //! the village already fetched, so no extra `gh` call).
+//!
+//! `POST /api/swarms/{project}/flaky` (#503, the ghost's button) files a test
+//! as `Flaky: <test>` with its failures, or comments the ones not yet on the
+//! open issue. A write: a `--read-only` server refuses it; GitHub only.
 
 use std::path::{Path, PathBuf};
 
@@ -166,7 +170,7 @@ pub fn flaky(runs: &[Run], open: &[IssueSnapshot]) -> Vec<Flaky> {
         .map(|(test, mut fails)| {
             fails.sort_by_key(|r| std::cmp::Reverse(r.when));
             let newest = fails[0].when;
-            let title = format!("Flaky: {test}");
+            let title = issue_title(&test);
             let issue = open.iter().find(|i| i.state == "open" && i.title.trim() == title).map(|i| i.number);
             let runs = fails.iter().map(|r| FlakyRun { issue: r.issue, when: when(r.when), log: r.log.clone() }).collect();
             (newest, Flaky { test, count: fails.len() as u32, last_seen: when(newest), runs, issue })
@@ -243,13 +247,30 @@ pub fn issue_title(test: &str) -> String {
     format!("Flaky: {test}")
 }
 
-/// Its failures this week, one line each: when, whose merge was gated, the log.
-fn failure_lines(f: &Flaky) -> String {
-    f.runs
-        .iter()
-        .map(|r| format!("- {} — while gating #{}'s merge; log: `{}`", r.when, r.issue, r.log))
+/// How a failure starts its line in an issue: what tells, in a comment
+/// already posted, that this failure was reported.
+fn failure_head(r: &FlakyRun) -> String {
+    format!("- {} — while gating #{}'s merge", r.when, r.issue)
+}
+
+/// Failures one line each: when, whose merge was gated, the log.
+fn failure_lines<'a>(runs: impl IntoIterator<Item = &'a FlakyRun>) -> String {
+    runs.into_iter()
+        .map(|r| format!("{}; log: `{}`", failure_head(r), r.log))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// The failures not yet in an issue's body or comments (`gh issue view --json
+/// body,comments`), so pressing the button again never repeats them.
+pub fn unreported<'a>(f: &'a Flaky, view_json: &[u8]) -> Vec<&'a FlakyRun> {
+    let v: serde_json::Value = serde_json::from_slice(view_json).unwrap_or_default();
+    let mut text = v["body"].as_str().unwrap_or("").to_string();
+    for c in v["comments"].as_array().into_iter().flatten() {
+        text.push('\n');
+        text.push_str(c["body"].as_str().unwrap_or(""));
+    }
+    f.runs.iter().filter(|r| !text.contains(&failure_head(r))).collect()
 }
 
 /// The new issue's body: what flaked, how often, and each failure.
@@ -261,16 +282,16 @@ pub fn report_body(f: &Flaky) -> String {
          🤖 Filed from the village's ghost at the merge gate",
         test = f.test,
         n = times(f.count),
-        lines = failure_lines(f),
+        lines = failure_lines(&f.runs),
     )
 }
 
-/// A comment for the open issue: the failures seen this week.
-pub fn update_body(f: &Flaky) -> String {
+/// A comment for the open issue: the failures it does not list yet.
+pub fn update_body(f: &Flaky, new: &[&FlakyRun]) -> String {
     format!(
-        "Flaked again: {n} this week, failing and then passing on the same tree.\n\n{lines}\n\n🤖 From the village's ghost at the merge gate",
+        "Flaked again ({n} this week), failing and then passing on the same tree:\n\n{lines}\n\n🤖 From the village's ghost at the merge gate",
         n = times(f.count),
-        lines = failure_lines(f),
+        lines = failure_lines(new.iter().copied()),
     )
 }
 
@@ -288,13 +309,6 @@ pub fn open_issue_for(list_json: &[u8], test: &str) -> Option<u32> {
         .find(|i| i["title"].as_str().map(str::trim) == Some(want.as_str()))
         .and_then(|i| i["number"].as_u64())
         .and_then(|n| u32::try_from(n).ok())
-}
-
-/// The issue number at the end of the URL `gh issue create` prints.
-pub fn created_number(stdout: &[u8]) -> Option<u32> {
-    let out = String::from_utf8_lossy(stdout);
-    let url = out.lines().rev().find(|l| l.contains("/issues/"))?;
-    url.trim().rsplit('/').next()?.parse().ok()
 }
 
 #[derive(Debug, Deserialize)]
@@ -323,42 +337,59 @@ pub async fn api_file_handler(
         .ok_or_else(|| fail(StatusCode::NOT_FOUND, "no such swarm"))?;
     let repo = PathBuf::from(repo);
     let test = body.test.trim().to_string();
+    let client = crate::project_management::ProjectManagementClient::from_env();
+    if client.backend() != crate::project_management::ProjectManagementBackend::GitHub {
+        return Err(fail(StatusCode::NOT_IMPLEMENTED, "filing a flaky test needs the GitHub tracker"));
+    }
+    let id = super::gate::local_repo_id(&repo)
+        .ok_or_else(|| fail(StatusCode::INTERNAL_SERVER_ERROR, "can't tell which repo this swarm's gate records"))?;
     let found = {
-        let repo = repo.clone();
         let test = test.clone();
         tokio::task::spawn_blocking(move || {
-            let id = super::gate::local_repo_id(&repo)?;
-            flaky(&load(&store_path(&id)), &[]).into_iter().find(|f| f.test == test)
+            // Only this week's runs: the store is pruned when a village is
+            // polled, which may not have happened since a run aged out.
+            let week = chrono::Utc::now().timestamp() - WINDOW_SECS;
+            let runs: Vec<Run> = load(&store_path(&id)).into_iter().filter(|r| r.when >= week).collect();
+            flaky(&runs, &[]).into_iter().find(|f| f.test == test)
         })
         .await
-        .ok()
-        .flatten()
+        .map_err(|_| fail(StatusCode::INTERNAL_SERVER_ERROR, "could not read the gate's record"))?
     };
     let f = found.ok_or_else(|| fail(StatusCode::NOT_FOUND, "that test has not flaked here this week"))?;
 
-    let client = crate::project_management::ProjectManagementClient::from_env();
+    // One filing at a time: two clicks that both find no issue would both create one.
+    static FILING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _one = FILING.lock().await;
     let run = |cmd: crate::project_management::ProjectCommand| {
         let (transport, repo) = (state.transport.clone(), repo.clone());
         async move { transport.output(cmd.program, &cmd.args, Some(&repo)).await }
     };
-    let list = run(client.list_open_issues("number,title", 500))
-        .await
-        .map_err(|_| fail(StatusCode::BAD_GATEWAY, "could not ask the tracker"))?;
-    if !list.status.success() {
-        return Err(fail(StatusCode::BAD_GATEWAY, "the tracker would not list its issues"));
-    }
-    let existing = open_issue_for(&list.stdout, &test);
-    let (cmd, action) = match existing {
-        Some(n) => (client.comment_issue(n, &update_body(&f)), "commented"),
-        None => (client.create_issue(&issue_title(&test), Some(&report_body(&f)), &[]), "created"),
+    let ask = |out: anyhow::Result<std::process::Output>, what: &str| match out {
+        Ok(o) if o.status.success() => Ok(o.stdout),
+        Ok(o) => {
+            let err = String::from_utf8_lossy(&o.stderr).trim().to_string();
+            tracing::warn!("filing flaky {test}: {what} failed: {err}");
+            Err(fail(StatusCode::BAD_GATEWAY, if err.is_empty() { "the tracker refused it" } else { &err }))
+        }
+        Err(_) => Err(fail(StatusCode::BAD_GATEWAY, "could not reach the tracker")),
     };
-    let out = run(cmd).await.map_err(|_| fail(StatusCode::BAD_GATEWAY, "could not reach the tracker"))?;
-    if !out.status.success() {
-        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
-        tracing::warn!("filing flaky {test} failed: {err}");
-        return Err(fail(StatusCode::BAD_GATEWAY, if err.is_empty() { "the tracker refused it" } else { &err }));
-    }
-    let number = existing.or_else(|| created_number(&out.stdout));
+    let title = issue_title(&test);
+    let list = ask(run(client.search_open_issues(&format!("\"{title}\" in:title"), "number,title", 20)).await, "the search")?;
+    let (action, number) = match open_issue_for(&list, &test) {
+        Some(n) => {
+            let view = ask(run(client.view_issue_json(n, "body,comments")).await, "reading the issue")?;
+            let new = unreported(&f, &view);
+            if new.is_empty() {
+                return Ok(axum::Json(json!({ "ok": true, "action": "unchanged", "number": n })));
+            }
+            ask(run(client.comment_issue(n, &update_body(&f, &new))).await, "the comment")?;
+            ("commented", Some(n))
+        }
+        None => {
+            let out = ask(run(client.create_issue(&title, Some(&report_body(&f)), &[])).await, "creating it")?;
+            ("created", super::newissue::created(&String::from_utf8_lossy(&out)).map(|(_, n)| n))
+        }
+    };
     // The next poll's village carries the issue, so the ghost shows its link.
     state.village.forget(&repo);
     Ok(axum::Json(json!({ "ok": true, "action": action, "number": number })))
@@ -390,8 +421,21 @@ mod tests {
         assert!(body.contains("failed and then passed on the same tree 2 times this week"), "{body}");
         assert!(body.contains("- 2026-11-15T10:00:00Z — while gating #480's merge; log: `/tmp/autocoder-merge-x-480.log`"), "{body}");
         assert!(body.contains("#470"));
-        let again = update_body(&Flaky { count: 1, ..f });
-        assert!(again.starts_with("Flaked again: once this week"), "{again}");
+        let newest = [&f.runs[0]];
+        let again = update_body(&Flaky { count: 1, ..f.clone() }, &newest);
+        assert!(again.starts_with("Flaked again (once this week)"), "{again}");
+        assert!(again.contains("#480") && !again.contains("#470"), "only the failures given: {again}");
+    }
+
+    /// A second press comments only what the issue does not list yet.
+    #[test]
+    fn only_failures_not_yet_on_the_issue_are_commented() {
+        let f = sample_flaky();
+        let filed = serde_json::to_vec(&serde_json::json!({ "body": report_body(&Flaky { runs: vec![f.runs[1].clone()], ..f.clone() }), "comments": [] })).unwrap();
+        assert_eq!(unreported(&f, &filed).iter().map(|r| r.issue).collect::<Vec<_>>(), vec![480]);
+        let both = serde_json::to_vec(&serde_json::json!({ "body": "", "comments": [{ "body": report_body(&f) }] })).unwrap();
+        assert!(unreported(&f, &both).is_empty(), "everything reported: nothing to say");
+        assert_eq!(unreported(&f, b"not json").len(), 2);
     }
 
     /// The open issue is found by its exact title: a test whose name merely
@@ -405,12 +449,7 @@ mod tests {
         assert_eq!(open_issue_for(b"not json", "a::b"), None);
     }
 
-    #[test]
-    fn the_new_issue_number_is_read_from_the_url_gh_prints() {
-        assert_eq!(created_number(b"https://github.com/laird/agents-ui/issues/509\n"), Some(509));
-        assert_eq!(created_number(b"Creating issue in laird/agents-ui\n\nhttps://github.com/laird/agents-ui/issues/7\n"), Some(7));
-        assert_eq!(created_number(b""), None);
-    }
+
     use std::time::{Duration, UNIX_EPOCH};
 
     const NOW: i64 = 1_794_800_000;

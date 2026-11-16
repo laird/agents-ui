@@ -89,9 +89,11 @@ export const flakyFileUrl = project => `/api/swarms/${encodeURIComponent(project
 export function flakyFileWords(status, body) {
   if (status >= 200 && status < 300) {
     const n = body && body.number ? `#${body.number}` : 'the issue';
-    return body && body.action === 'commented' ? `Added these failures to ${n}` : `Filed as ${n}`;
+    if (body && body.action === 'unchanged') return `${n} already lists every failure`;
+    return body && body.action === 'commented' ? `Added the new failures to ${n}` : `Filed as ${n}`;
   }
   if (status === 403) return 'This dashboard is read-only: file it on GitHub.';
+  if (status === 501) return (body && body.error) || 'Filing needs the GitHub tracker.';
   if (status === 404) return (body && body.error) || 'Nothing to file: this test has not flaked here this week.';
   return (body && body.error) || `Could not file it (${status})`;
 }

@@ -1439,9 +1439,10 @@ mod tests {
         let app = make_app(make_web_state(shared));
         let ghost = app.clone().oneshot(file_flaky("nowhere", r#"{"test":"a::b"}"#)).await.unwrap();
         assert_eq!(ghost.status(), StatusCode::NOT_FOUND);
-        // A test this repo's gate never saw flake is refused before any tracker is asked.
-        let unseen = app.oneshot(file_flaky("p", r#"{"test":"no::such::test"}"#)).await.unwrap();
-        assert_eq!(unseen.status(), StatusCode::NOT_FOUND);
+        // A swarm whose gate keeps no record here is refused, saying so rather
+        // than "never flaked", before any tracker is asked.
+        let unrecorded = app.oneshot(file_flaky("p", r#"{"test":"no::such::test"}"#)).await.unwrap();
+        assert_eq!(unrecorded.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     fn control(project: &str, role: &str, body: &str) -> Request<Body> {
