@@ -12,10 +12,8 @@ tools/omarchy-plugin/install.sh --screensaver --host omarchy-1 --server http://n
 tools/omarchy-plugin/install.sh --screensaver --uninstall     # Omarchy's own screensaver and idle settings back
 ```
 
-Add `--dry-run` to any of them to see what would change. `--cycle S` sets the
-seconds spent on each swarm when there are several (default 30, 0 stays on
-one). `--dim 23-7` dims the display between those hours. It is never blanked.
-`--sound` turns on quiet sound cues (below); they are off by default.
+Add `--dry-run` to any of them to see what would change. The page options
+(`--cycle S`, `--dim H-H`, `--recap M`, ...) are listed by `install.sh --help`.
 
 ## What is on screen
 
@@ -29,47 +27,16 @@ so the page closes itself on input. A dashboard tab never does.
   working, idle and blocked, and when the page last heard from the server.
   Below that it shows the gate, the quay and each environment, and how much
   is waiting on you (in red when anything is).
-- With several swarms it cycles through each world, then each village that is
-  not part of a world.
-- After a quiet spell it opens with a "since you last looked" card over the
-  dimmed map for 20 seconds: issues landed and closed, pull requests merged,
-  deploys (with their versions), what bounced at the gate, and what is
-  waiting on you, in red. A spell with nothing in it says "Nothing happened".
-  The spell runs from the last unlock of the machine: the service watches
-  Omarchy's lock (every 5 seconds) and keeps the time of
-  each unlock in `~/.local/state/agents-village-screensaver/last-unlock`. The
-  card only shows when that was at least `recap` minutes ago (default 30, 0
-  turns it off); with no unlock seen yet there is none. Any input closes it.
-- `overview=1` in the page's query shows every swarm at once (#481): each is
-  an island, its shore red when something waits on you, the build is broken
-  or a deploy failed, amber when a house is blocked or stalled, and green
-  otherwise, with its working, idle and blocked houses counted. It comes
-  back between swarms while cycling; with `cycle=0` it stays, for a wall
-  display. `/village#*` opens it in a browser, and it is the last entry
-  in the picker ("All swarms"). Clicking an island opens that village.
-- For burn-in, the whole scene drifts a few pixels, and it dims in the night
-  hours if `dim` is set.
 - When the server stops answering, the map gives way to a large
   "Can't reach agents-tui on <host>" with the time. If the server is down
   when the screensaver starts, `offline.html` says the same and opens the
   village once the server answers.
 
-## Sound cues
+### Features
 
-Off unless asked for: `--sound` at install (`"sound": true` in
-`screensaver.json`), or `sound=1` in the page's query. The cues mark changes,
-never a state that lasts, and play at most once each in two minutes:
-
-- a soft bell when more starts waiting on you;
-- thunder when the build breaks, and birdsong when it is green again;
-- a ship's horn when a deploy docks at the production (right-most) environment.
-
-Each theme has its own voice (a medieval bell, an office chime, a sci-fi
-tone), synthesized in the page; there are no sound files. They are silent in
-the `dim` hours. Chromium holds audio until the first click, which a
-screensaver never gets, so with sound on the launcher starts its kiosk windows
-with `--autoplay-policy=no-user-gesture-required`. A plain browser tab plays
-them only after you have clicked in it.
+Everything else the screensaver does has a page of its own in
+[`features/`](features/), one file per feature. A new feature adds its own
+page there, not a line here.
 
 ## How it fits into Omarchy
 
@@ -102,13 +69,25 @@ because the shell's `PATH` starts with `/usr/share/omarchy/bin`. So:
 Settings (`~/.config/agents-ui/screensaver.json`, written by the installer):
 
 ```json
-{ "server": "http://nuc-1:7890", "cycle": 30, "dim": "23-7", "timeout": 150, "recap": 30, "sound": false }
+{ "server": "http://nuc-1:7890", "timeout": 150, "cycle": 30, "dim": "23-7", "recap": 30, "sound": false }
 ```
+
+`server` and `timeout` are the launcher's and the service's. Every other key
+is a page option.
+
+## Adding a page option
+
+One file, `options/<key>.sh`, calling `saver_option` (see `options.sh` for
+its arguments), and its tests in `tests/install/option-<key>.sh`. The
+installer then takes its flag, checks it, lists it in `--help` and writes it
+to `screensaver.json`, and the launcher puts it in the page's query
+(`key=value`, or what `saver_query_<key>` prints). `tests/install/options.sh`
+checks every option file is wired through. Nothing else changes.
 
 ## Tests
 
 ```bash
-bash tools/omarchy-plugin/agents-village-screensaver/tests/test_install.sh   # installer and launcher, in a throwaway HOME
+bash tools/omarchy-plugin/agents-village-screensaver/tests/test_install.sh   # installer and launcher, in a throwaway HOME: every tests/install/*.sh
 node --test tools/omarchy-plugin/agents-village-screensaver/tests/            # the page's decisions (src/web/village/saver.js, recap.js)
 python3 tools/omarchy-plugin/agents-village-screensaver/tests/qml_check.py   # the real Service.qml in Quickshell, offscreen
 ```
