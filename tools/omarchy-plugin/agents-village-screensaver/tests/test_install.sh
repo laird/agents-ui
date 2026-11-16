@@ -292,7 +292,7 @@ echo $((NOW - 7200)) > "$XDG_STATE_HOME/agents-village-screensaver/last-unlock"
 echo '{ "server": "http://127.0.0.1:9", "recap": 0 }' > "$HOME/.config/agents-ui/screensaver.json"
 out=$(AGENTS_VILLAGE_SCREENSAVER_NOW=$NOW bash "$LAUNCHER" --dry-run 2>&1)
 grep -q "since" <<<"$out" && fail "recap 0 still asked: $out" || ok "recap 0 turns it off"
-echo '{ "server": "http://127.0.0.1:9", "recap": 1, "timeout": 3600 }' > "$HOME/.config/agents-ui/screensaver.json"
+echo '{ "server": "http://127.0.0.1:9", "recap": 1 }' > "$HOME/.config/agents-ui/screensaver.json"
 rm "$XDG_STATE_HOME/agents-village-screensaver/last-unlock"
 out=$(AGENTS_VILLAGE_SCREENSAVER_NOW=$NOW bash "$LAUNCHER" --dry-run 2>&1)
 grep -q "since" <<<"$out" && fail "no unlock recorded still asked: $out" || ok "with no unlock recorded, no recap"

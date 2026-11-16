@@ -35,7 +35,7 @@ so the page closes itself on input. A dashboard tab never does.
   deploys (with their versions), what bounced at the gate, and what is
   waiting on you, in red. A spell with nothing in it says "Nothing happened".
   The spell runs from the last unlock of the machine: the service watches
-  Omarchy's lock while the session is idle or locked and keeps the time of
+  Omarchy's lock (every 5 seconds) and keeps the time of
   each unlock in `~/.local/state/agents-village-screensaver/last-unlock`. The
   card only shows when that was at least `recap` minutes ago (default 30, 0
   turns it off); with no unlock seen yet there is none. Any input closes it.
