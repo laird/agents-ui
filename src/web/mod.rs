@@ -440,7 +440,8 @@ mod tests {
                 j += 1;
             }
             let body = &text[i + needle.len()..j.min(text.len())];
-            if body.contains(':') && !has_rest(body) {
+            // A literal of shorthand fields alone breaks on a new field too.
+            if !body.trim().is_empty() && !has_rest(body) {
                 out.push(text[..i].matches('\n').count() + 1);
             }
         }
@@ -503,4 +504,3 @@ mod tests {
         assert_eq!(literals_without_rest(src, "Hut"), vec![4, 9, 10]);
     }
 }
-

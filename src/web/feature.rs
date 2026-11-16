@@ -191,7 +191,7 @@ fn follow(village: &VillageSnapshot, links: &[FeatureLink]) -> Vec<Feature> {
 /// An epic whose last subtask reached the last stop today (#482): the village
 /// sets off fireworks when it arrives, and its flag flies on the hall for the
 /// rest of the day.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Shipped {
     pub number: u32,
     pub title: String,
