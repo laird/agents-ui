@@ -158,6 +158,20 @@ for (const [name, theme] of Object.entries(THEMES)) {
   });
 }
 
+test("the dialog says when today's row shows the gate's count (#509)", () => {
+  const gh = summary(), on = gh.as_of.slice(0, 10);
+  const ahead = T.almanacRows(gh, { landed_today: 9, bounced_today: 0 }, on);
+  assert.equal(ahead[13].live, true);
+  assert.ok(ahead.slice(0, 13).every(r => !r.live), 'only today');
+  assert.equal(T.almanacRows(gh, { landed_today: 1, bounced_today: 0 }, on)[13].live, false, "GitHub's count is the one shown");
+  assert.equal(T.almanacRows(gh, null, on)[13].live, false);
+  assert.ok(T.almanacRows(gh, { landed_today: 0, bounced_today: 7 }, on)[13].live, 'a bounce the gate saw first counts too');
+  assert.ok(!T.almanacFacts(gh, null, on).meta.includes(T.ALMANAC_LIVE_NOTE));
+  const f = T.almanacFacts(gh, { landed_today: 9, bounced_today: 0 }, on);
+  assert.equal(f.meta[f.meta.length - 1], T.ALMANAC_LIVE_NOTE, 'said under the days');
+  assert.equal(f.line, '9 landed today (avg 2)');
+});
+
 test("the gate's UTC tally joins today's row only on the same date", () => {
   const gh = summary();
   const on = gh.as_of.slice(0, 10), ms = { landed_today: 99, bounced_today: 0 };
