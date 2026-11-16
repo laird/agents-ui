@@ -118,6 +118,16 @@ fn read(dir: &Path, file: &str) -> Option<String> {
 
 /// The names a library goes by: what it publishes, and its repo's name.
 pub fn package_names(dir: &Path, repo_name: &str) -> Vec<String> {
+    let mut names = published_names(dir);
+    if !names.iter().any(|n| n == repo_name) {
+        names.push(repo_name.to_string());
+    }
+    names
+}
+
+/// The names a library publishes: its Cargo.toml package, its package.json
+/// name, its go.mod module. Not its repo's name.
+pub fn published_names(dir: &Path) -> Vec<String> {
     let mut names = Vec::new();
     if let Some(name) = read(dir, "Cargo.toml")
         .and_then(|t| t.parse::<toml::Table>().ok())
@@ -133,9 +143,6 @@ pub fn package_names(dir: &Path, repo_name: &str) -> Vec<String> {
     }
     if let Some(module) = read(dir, "go.mod").and_then(|t| t.lines().find_map(|l| l.strip_prefix("module ").map(|m| m.trim().to_string()))) {
         names.push(module);
-    }
-    if !names.iter().any(|n| n == repo_name) {
-        names.push(repo_name.to_string());
     }
     names
 }

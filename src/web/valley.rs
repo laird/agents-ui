@@ -592,11 +592,11 @@ fn add_links(transport: &super::super::transport::ServerTransport, groups: &mut 
             let libs: Vec<super::breakage::Library> = g
                 .edges
                 .iter()
-                .filter(|e| e.to == r.name)
+                .filter(|e| e.to == r.name && e.via == Via::Package)
                 .map(|e| super::breakage::Library {
                     name: e.from.clone(),
                     slug: slug_of.get(e.from.as_str()).map(|s| s.to_string()),
-                    packages: dirs.get(&e.from).map(|d| super::pins::package_names(d, &e.from)).unwrap_or_default(),
+                    packages: dirs.get(&e.from).map(|d| super::pins::published_names(d)).unwrap_or_default(),
                 })
                 .collect();
             if libs.is_empty() {

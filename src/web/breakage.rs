@@ -5,11 +5,15 @@
 //!
 //! The consumer's failure names a library when:
 //!
-//! - the log of one of its failing CI jobs mentions one of the library's
-//!   package names (`pins::package_names`: its crate or npm name), as a whole
-//!   word, in either spelling of a Rust crate (`lib-core`, `lib_core`); or
+//! - the log of one of its failing CI jobs mentions a package the library
+//!   publishes (`pins::published_names`: its crate, npm or Go module name),
+//!   in either spelling of a Rust crate (`lib-core`, `lib_core`). A plain
+//!   one-word name (`core`) counts only where it reads as code
+//!   ([`names_package`]); or
 //! - one of its open issues names the library's repo (`owner/repo#N`, or a
 //!   link into it).
+//!
+//! Only `package` edges count: a library is what the consumer builds on.
 //!
 //! The build and its failing jobs are what the consumer's village already
 //! read (`build.rs`, cached there). The failing jobs' logs are read here with
@@ -42,7 +46,8 @@ pub struct Barge {
 }
 
 /// A library a consumer depends on: its name in the group, its `owner/repo`
-/// (lowercased, when known) and its package names.
+/// (lowercased, when known) and the package names it publishes
+/// (`pins::published_names`: not its repo's name, which is no package).
 #[derive(Debug, Clone, Default)]
 pub struct Library {
     pub name: String,
@@ -64,6 +69,20 @@ fn mentions(text: &str, word: &str) -> bool {
     })
 }
 
+/// Does a log name the package `name`? A name with a `-`, `_`, `/` or `@`
+/// in it is distinctive, so any whole-word mention counts. A plain word
+/// (`core`, `api`) is everyday log text, so it counts only where it reads
+/// as code: `core::`, `"core"`, `'core'`, `` `core` ``, `/core/`, `core@`,
+/// or Cargo's `Compiling core v…`.
+pub fn names_package(log: &str, name: &str) -> bool {
+    if name.chars().any(|c| matches!(c, '-' | '_' | '/' | '@')) {
+        return mentions(log, name);
+    }
+    [format!("{name}::"), format!("\"{name}\""), format!("'{name}'"), format!("`{name}`"), format!("/{name}/"), format!("{name}@"), format!(" {name} v")]
+        .iter()
+        .any(|form| log.contains(form.as_str()))
+}
+
 /// The barges a red consumer sends: `logs` are its failing jobs' (name, log),
 /// `issues` what was read of its issues, `libs` what it depends on in the
 /// group. One barge per library, for the first reason found: a log first.
@@ -78,7 +97,7 @@ pub fn barges(consumer: &str, run: Option<&str>, logs: &[(String, String)], issu
                 }
             }
         }
-        let in_log = logs.iter().find_map(|(job, log)| names.iter().find(|n| mentions(log, n)).map(|n| format!("the log of {job} names {n}")));
+        let in_log = logs.iter().find_map(|(job, log)| names.iter().find(|n| names_package(log, n)).map(|n| format!("the log of {job} names {n}")));
         let in_issue = || {
             let slug = lib.slug.as_deref()?;
             issues.iter().filter(|i| i.state.eq_ignore_ascii_case("open")).find_map(|i| {
@@ -107,7 +126,20 @@ pub fn failing(build: Option<&super::build::Build>) -> Option<(Option<String>, V
 /// The most of a job's log kept: its end, where a failure is reported.
 const LOG_KEEP: usize = 512 * 1024;
 
-type Logs = Mutex<HashMap<(PathBuf, u64), String>>;
+/// A job's log as read, and when; `ok` false when it couldn't be read.
+#[derive(Clone)]
+struct HeldLog {
+    at: std::time::Instant,
+    ok: bool,
+    text: String,
+}
+type Logs = Mutex<HashMap<(PathBuf, u64), HeldLog>>;
+/// Logs kept at most: the oldest read goes first.
+const LOGS_KEPT: usize = 64;
+/// A log that couldn't be read is tried again after this.
+const RETRY: std::time::Duration = std::time::Duration::from_secs(300);
+/// The longest a log read may take.
+const READ_LIMIT: std::time::Duration = std::time::Duration::from_secs(60);
 static LOGS: OnceLock<Logs> = OnceLock::new();
 static READING: OnceLock<Mutex<HashSet<(PathBuf, u64)>>> = OnceLock::new();
 
@@ -118,15 +150,20 @@ pub fn job_id(url: &str) -> Option<u64> {
 
 /// The logs of the jobs (`(name, id)`) of the repo at `dir`, as far as they
 /// have been read: a job's log is read once, in the background, and the
-/// poll after has it. A log that can't be read is kept as empty.
+/// poll after has it. A log that can't be read reads as empty, and is tried
+/// again after [`RETRY`]; a read that takes longer than [`READ_LIMIT`] is
+/// given up.
 pub fn job_logs(transport: &ServerTransport, dir: &Path, jobs: &[(String, u64)]) -> Vec<(String, String)> {
     let logs = LOGS.get_or_init(Default::default);
     let mut out = Vec::new();
     for (name, id) in jobs {
         let key = (dir.to_path_buf(), *id);
-        if let Some(log) = logs.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
-            out.push((name.clone(), log.clone()));
-            continue;
+        let held = logs.lock().unwrap_or_else(|e| e.into_inner()).get(&key).cloned();
+        if let Some(h) = &held {
+            out.push((name.clone(), h.text.clone()));
+            if h.ok || h.at.elapsed() < RETRY {
+                continue;
+            }
         }
         if tokio::runtime::Handle::try_current().is_err() || !READING.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner()).insert(key.clone()) {
             continue;
@@ -134,22 +171,24 @@ pub fn job_logs(transport: &ServerTransport, dir: &Path, jobs: &[(String, u64)])
         let transport = transport.clone();
         tokio::spawn(async move {
             let args = vec!["api".to_string(), format!("repos/{{owner}}/{{repo}}/actions/jobs/{}/logs", key.1)];
-            let log = match transport.output("gh", &args, Some(&key.0)).await {
-                Ok(o) if o.status.success() => {
+            let read = tokio::time::timeout(READ_LIMIT, transport.output("gh", &args, Some(&key.0))).await;
+            let log = match read {
+                Ok(Ok(o)) if o.status.success() => {
                     let text = String::from_utf8_lossy(&o.stdout).into_owned();
                     let mut cut = text.len().saturating_sub(LOG_KEEP);
                     while !text.is_char_boundary(cut) {
                         cut += 1;
                     }
-                    text[cut..].to_string()
+                    HeldLog { at: std::time::Instant::now(), ok: true, text: text[cut..].to_string() }
                 }
-                _ => String::new(),
+                _ => HeldLog { at: std::time::Instant::now(), ok: false, text: String::new() },
             };
             let logs = LOGS.get_or_init(Default::default);
             let mut held = logs.lock().unwrap_or_else(|e| e.into_inner());
-            // Old runs' logs are not needed again: keep the map small.
-            if held.len() > 64 {
-                held.clear();
+            // Keep the map small: the oldest read goes first.
+            while held.len() >= LOGS_KEPT {
+                let Some(oldest) = held.iter().min_by_key(|(_, h)| h.at).map(|(k, _)| k.clone()) else { break };
+                held.remove(&oldest);
             }
             held.insert(key.clone(), log);
             drop(held);
@@ -183,6 +222,17 @@ mod tests {
         let logs = vec![("test".to_string(), "thread 'main' panicked: lib-core-extra exploded; see mylib-core".to_string())];
         assert!(barges("api", RUN, &logs, &[], &[lib("lib-core", "acme/lib-core", &["lib-core"])]).is_empty());
         assert!(barges("api", RUN, &[], &[], &[lib("lib-core", "acme/lib-core", &["lib-core"])]).is_empty(), "no logs read yet");
+    }
+
+    #[test]
+    fn a_plain_word_name_counts_only_where_it_reads_as_code() {
+        let core = || lib("core", "acme/core", &["core"]);
+        let everyday = vec![("test".to_string(), "error: could not compile; core dumped\nrunning the api tests".to_string())];
+        assert!(barges("web", RUN, &everyday, &[], &[core()]).is_empty(), "core in a sentence is no package");
+        for code in ["use core::money;", "error: failed to select a version for \"core\"", "   Compiling core v0.3.1", "node_modules/core/index.js"] {
+            let logs = vec![("test".to_string(), code.to_string())];
+            assert_eq!(barges("web", RUN, &logs, &[], &[core()]).len(), 1, "{code}");
+        }
     }
 
     #[test]
