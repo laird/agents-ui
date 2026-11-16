@@ -801,6 +801,7 @@ pub fn to_village(report: &Report) -> Reading {
         builds: report.builds.clone(),
         features: Vec::new(),
         build: report.build.clone(),
+        flaky: Vec::new(),
     };
     village.features = super::feature::build(&village, &super::feature::links_from_tasks(&report.tasks));
     Reading { village, issues }

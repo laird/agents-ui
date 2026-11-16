@@ -315,6 +315,7 @@ mod tests {
             },
             builds: vec![],
             build: None,
+            flaky: Vec::new(),
             features: vec![],
         }
     }

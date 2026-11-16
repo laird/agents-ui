@@ -505,6 +505,10 @@ pub struct VillageSnapshot {
     /// the merge gate, or what an outside report says.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub build: Option<super::build::Build>,
+    /// Tests that failed at the merge gate and then passed on the same tree,
+    /// this week, newest first (`flaky.rs`, #501).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub flaky: Vec<super::flaky::Flaky>,
 }
 
 /// Labels checked in order; the first that matches decides the house.
@@ -1217,6 +1221,14 @@ impl SwarmVillages {
             super::gate::remember_conflicts(&gate.jobs, remembered);
             super::gate::bounce_history(&merge_comments, &retries, &gate.jobs, remembered)
         };
+        // Flaky tests (#501): each finished gate run is recorded as it is seen,
+        // since the logs are overwritten when a merge is relaunched.
+        let flaky = if gate.local {
+            let (repo, jobs, open) = (repo.clone(), gate.jobs.clone(), issues.clone());
+            tokio::task::spawn_blocking(move || super::flaky::read_local(&repo, &jobs, &open)).await.unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let merge_stats = (gate.local || !bounces.is_empty())
             .then(|| super::gate::merge_stats(&bounces, &gate.jobs, &chrono::Utc::now().format("%Y-%m-%d").to_string()));
         let integration = pipeline.integration.clone();
@@ -1227,6 +1239,7 @@ impl SwarmVillages {
         village.pipeline.titles = pipeline_titles(&village.pipeline, &issues, &closed);
         village.pipeline.bounces = bounces;
         village.pipeline.merge_stats = merge_stats;
+        village.flaky = flaky;
         self.since.stamp(&swarm.repo_path, &mut village.houses, chrono::Utc::now());
         super::feature::attach_parents(&mut village.backlog, &links);
         village.features = super::feature::build(&village, &links);
@@ -1300,6 +1313,28 @@ mod tests {
             url: String::new(),
             depends_on: Vec::new(),
         }
+    }
+
+    /// #501: flaky tests are the village's `flaky`, left out when there are none.
+    #[test]
+    fn flaky_tests_reach_the_village_json() {
+        use super::super::flaky::{Flaky, FlakyRun};
+        let mut v = build(&swarm(vec![]), &[], Pipeline::default());
+        assert!(serde_json::to_value(&v).unwrap().get("flaky").is_none());
+        v.flaky = vec![Flaky {
+            test: "web::a".into(),
+            count: 2,
+            last_seen: "2026-11-15T10:00:00+00:00".into(),
+            runs: vec![FlakyRun { issue: 9, when: "2026-11-15T10:00:00+00:00".into(), log: "/tmp/x.log".into() }],
+            issue: Some(341),
+        }];
+        let j = serde_json::to_value(&v).unwrap();
+        assert_eq!(j["flaky"][0]["test"], "web::a");
+        assert_eq!(j["flaky"][0]["count"], 2);
+        assert_eq!(j["flaky"][0]["runs"][0]["issue"], 9);
+        assert_eq!(j["flaky"][0]["issue"], 341);
+        let back: VillageSnapshot = serde_json::from_value(j).unwrap();
+        assert_eq!(back.flaky, v.flaky);
     }
 
     /// #431: the gate's bounces and today's tally ride on the pipeline, and

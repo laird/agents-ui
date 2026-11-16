@@ -3,6 +3,7 @@ pub mod deployments;
 pub mod discovery;
 pub mod dormant;
 pub mod feature;
+pub mod flaky;
 pub mod framework;
 pub mod gate;
 pub mod herdr;

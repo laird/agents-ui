@@ -200,6 +200,7 @@ mod tests {
             pipeline: Pipeline::default(),
             builds: Vec::new(),
             build: None,
+            flaky: Vec::new(),
             features: Vec::new(),
         }
     }
