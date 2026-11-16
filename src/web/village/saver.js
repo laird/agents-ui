@@ -73,9 +73,11 @@ export function saverSummary(v) {
 /* "7 landed today (avg 9)" (#500): issues GitHub closed as completed today,
  * and the mean per day, rounded, as { today, avg }. The mean leaves today out
  * (#508), so a morning doesn't drag it down: it is over the full days before
- * today in #498's summary (14, today last), counted from the first of them
- * that landed anything, so a young repo averages over its own days. `avg` is
- * null, and the strip shows no average, until there is such a day. null, and
+ * today in #498's summary (14, today last). A repo younger than that (its
+ * `first_commit` inside the window) averages over its full days from the
+ * first that landed anything; `avg` is null, and the strip shows no average,
+ * until it has one. An older repo averages over them all, quiet ones too
+ * (avg 0 is an answer). null, and
  * the strip shows nothing, when there is no summary (no gh, or not signed
  * in), when a day's count is not a number, or when the newest day is not
  * `today` (the viewer's date, YYYY-MM-DD): just after midnight the cached
@@ -85,8 +87,10 @@ export function landedWords(github, today = localDate(new Date())) {
   if (!days.length || !days.every(d => d && Number.isFinite(d.landed))) return null;
   const last = days[days.length - 1];
   if (last.date !== today) return null;
-  const before = days.slice(0, -1), first = before.findIndex(d => d.landed > 0);
-  const full = first < 0 ? [] : before.slice(first);
+  const before = days.slice(0, -1), born = github.first_commit;
+  const young = typeof born === 'string' && before.length > 0 && born >= before[0].date;
+  const first = before.findIndex(d => d.landed > 0);
+  const full = !young ? before : first < 0 ? [] : before.slice(first);
   return { today: last.landed, avg: full.length ? Math.round(full.reduce((sum, d) => sum + d.landed, 0) / full.length) : null };
 }
 export const localDate = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;

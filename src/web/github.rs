@@ -11,7 +11,8 @@
 //!   `gate::comment_bounce` reads them, #431);
 //! - one `gh api .../deployments`: what was deployed each day;
 //! - the integration branch's `git log`, locally: what was reverted, and
-//!   what landed in the last 24 h (#492);
+//!   what landed in the last 24 h (#492); and its root commits' author
+//!   dates, for how young the repo is (#508);
 //! - for the GitHub panel (#492): one `gh pr list` of the open pull requests,
 //!   one `gh pr list --search review-requested:@me` of those waiting on you,
 //!   and one `gh issue list --state open` with labels. The issue read above
@@ -84,6 +85,17 @@ pub struct Summary {
     /// absent when its log can't be read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commits_24h: Option<u32>,
+    /// The local date of the integration branch's first commit, `YYYY-MM-DD`
+    /// (#508): how young the repo is, so an average over [`DAYS`] can leave
+    /// out the days before it existed. Absent when the log can't be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_commit: Option<String>,
+}
+
+/// The oldest of the root commits' author dates (`git log --max-parents=0
+/// --format=%aI`: a rebase or import keeps them), as a local date `YYYY-MM-DD`.
+pub fn first_commit_date(log: &str, offset: &FixedOffset) -> Option<String> {
+    log.lines().filter_map(|l| local_date(l, offset)).min().map(|d| d.format("%Y-%m-%d").to_string())
 }
 
 /// One day's throughput.
@@ -314,9 +326,19 @@ pub async fn fetch(transport: &ServerTransport, repo: &Path, integration: &str) 
         let out = transport.output("git", &args, Some(repo)).await.ok()?;
         out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
     };
-    let (issues, deployments, log, prs, reviews, open) = futures::join!(issues, deployments, log, prs, reviews, open);
+    // The repo's age (#508): its root commits' dates, a quick local read.
+    let roots = async {
+        if integration.is_empty() {
+            return None;
+        }
+        let args: Vec<String> = vec!["log".into(), format!("origin/{integration}"), "--max-parents=0".into(), "--format=%aI".into()];
+        let out = transport.output("git", &args, Some(repo)).await.ok()?;
+        out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+    };
+    let (issues, deployments, log, prs, reviews, open, roots) = futures::join!(issues, deployments, log, prs, reviews, open, roots);
     let mut s = summarize(&issues?, deployments.as_deref(), log.as_deref(), today, offset, now.to_rfc3339_opts(chrono::SecondsFormat::Secs, false))?;
     add_panel(&mut s, prs.as_deref(), reviews.as_deref(), open.as_deref(), log.as_deref(), now.fixed_offset());
+    s.first_commit = roots.as_deref().and_then(|r| first_commit_date(r, &offset));
     Some(s)
 }
 
@@ -371,6 +393,17 @@ impl Summaries {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// #508: the repo's age is its oldest root commit's local date.
+    #[test]
+    fn the_first_commit_is_the_oldest_root_as_a_local_date() {
+        let utc = FixedOffset::east_opt(0).unwrap();
+        assert_eq!(first_commit_date("2026-11-10T09:00:00+00:00\n2026-11-03T23:30:00+00:00\n", &utc).as_deref(), Some("2026-11-03"));
+        let tokyo = FixedOffset::east_opt(9 * 3600).unwrap();
+        assert_eq!(first_commit_date("2026-11-03T23:30:00+00:00", &tokyo).as_deref(), Some("2026-11-04"));
+        assert_eq!(first_commit_date("", &utc), None);
+        assert_eq!(first_commit_date("not a date", &utc), None);
+    }
 
     /// `gh issue list --json number,state,createdAt,closedAt,stateReason,comments`
     /// as GitHub answers it, cut to what matters.

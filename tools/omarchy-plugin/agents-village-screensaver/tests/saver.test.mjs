@@ -78,20 +78,32 @@ test('"N landed today (avg M)" from the GitHub summary (#500)', () => {
   assert.deepEqual(landedWords({ days: days([9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 0]) }, today), { today: 0, avg: 9 },
     'a quiet morning does not drag the average down');
   assert.deepEqual(landedWords({ days: days([2, 1, 3]) }, today), { today: 3, avg: 2 }, 'rounded: 1.5 is 2');
-  assert.deepEqual(landedWords({ days: days([5, 0]) }, today), { today: 0, avg: 5 }, 'nothing yet today still says so');  assert.equal(landedWords(github, '2026-11-15'), null, 'just after midnight the summary still ends at yesterday: not "today"');
+  assert.deepEqual(landedWords({ days: days([5, 0]) }, today), { today: 0, avg: 5 }, 'nothing yet today still says so');
+  assert.equal(landedWords(github, '2026-11-15'), null, 'just after midnight the summary still ends at yesterday: not "today"');
   assert.equal(localDate(new Date(2026, 0, 5, 23, 59)), '2026-01-05');
 });
 
 test('a young repo averages over its own full days; a brand-new one shows no average (#508)', () => {
   const days = landed => landed.map((n, i) => ({ date: `2026-11-${String(14 - landed.length + 1 + i).padStart(2, '0')}`, landed: n, opened: 0, bounced: 0 }));
   const today = '2026-11-14';
-  // Three days old: the summary's earlier days are zeros from before it existed.
-  assert.deepEqual(landedWords({ days: days([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 2, 6]) }, today), { today: 6, avg: 3 });
+  // Three days old (its first commit in the window): the earlier days are from before it existed.
+  const young = (landed, born = '2026-11-11') => ({ days: days(landed), first_commit: born });
+  assert.deepEqual(landedWords(young([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 2, 6]), today), { today: 6, avg: 3 });
   // Counted from its first landed day, so a quiet day after it still counts.
-  assert.deepEqual(landedWords({ days: days([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 1]) }, today), { today: 1, avg: 2 });
-  // Its first day: no full day yet, so no average.
-  assert.deepEqual(landedWords({ days: days([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3]) }, today), { today: 3, avg: null });
-  assert.deepEqual(landedWords({ days: days([2]) }, today), { today: 2, avg: null });
+  assert.deepEqual(landedWords(young([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 1]), today), { today: 1, avg: 2 });
+  // Its first day, or nothing landed before today: no full day yet, so no average.
+  assert.deepEqual(landedWords(young([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3], '2026-11-14'), today), { today: 3, avg: null });
+  assert.deepEqual(landedWords(young([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3]), today), { today: 3, avg: null });
+  assert.deepEqual(landedWords({ days: days([2]), first_commit: '2026-11-14' }, today), { today: 2, avg: null });
+});
+
+test('an old repo that was quiet averages over every full day, the quiet ones too (#508)', () => {
+  const days = landed => landed.map((n, i) => ({ date: `2026-11-${String(14 - landed.length + 1 + i).padStart(2, '0')}`, landed: n, opened: 0, bounced: 0 }));
+  const today = '2026-11-14', old = { first_commit: '2025-01-01' };
+  assert.deepEqual(landedWords({ ...old, days: days([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5]) }, today), { today: 5, avg: 0 });
+  assert.deepEqual(landedWords({ ...old, days: days([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 2, 1]) }, today), { today: 1, avg: 0 }, '6 over 13 days rounds to 0');
+  // No first commit known (the log could not be read): every full day, as an old repo.
+  assert.deepEqual(landedWords({ days: days([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 13, 13, 0, 1]) }, today), { today: 1, avg: 2 });
 });
 
 test('no GitHub summary, or one that cannot be read: nothing to say', () => {
