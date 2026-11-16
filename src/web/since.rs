@@ -121,10 +121,16 @@ pub const FRESH: Duration = Duration::from_secs(60);
 /// for this much of it.
 pub const WINDOW: i64 = 3 * 24 * 3600;
 
+/// The longest GitHub is waited on. An asking that runs over is kept as an
+/// empty answer (every village unchecked) until it is [`FRESH`] no longer.
+pub const ASK_LIMIT: Duration = Duration::from_secs(60);
+
+type Kept = Option<(Instant, i64, Vec<VillageSince>)>;
+
 /// The last answer: (when it was fetched, the start of its window in unix
 /// seconds, the villages).
 #[derive(Default)]
-pub struct SinceCache(tokio::sync::Mutex<Option<(Instant, i64, Vec<VillageSince>)>>);
+pub struct SinceCache(std::sync::Arc<tokio::sync::Mutex<Kept>>);
 
 /// The kept answer cut down to changes at or after `t`.
 pub fn narrow(villages: &[VillageSince], t: i64) -> Vec<VillageSince> {
@@ -147,16 +153,31 @@ impl SinceCache {
     /// is kept. `t` only cuts the answer down, so no caller can make GitHub
     /// be asked more than once per [`FRESH`]. `clock` is read once the lock
     /// is held, and requests wait on each other.
+    ///
+    /// The asking runs as a task of its own, holding the lock: a caller that
+    /// hangs up mid-way does not cancel it, so what GitHub was asked is kept
+    /// and the next caller waits for it instead of asking again. It is given
+    /// [`ASK_LIMIT`], so a `gh` that never answers can't hold the lock.
     pub async fn answer<F, Fut>(&self, t: i64, now: i64, clock: impl Fn() -> Instant, fetch: F) -> (i64, Vec<VillageSince>)
     where
         F: FnOnce(i64) -> Fut,
-        Fut: std::future::Future<Output = Vec<VillageSince>>,
+        Fut: std::future::Future<Output = Vec<VillageSince>> + Send + 'static,
     {
-        let mut kept = self.0.lock().await;
+        let mut kept = self.0.clone().lock_owned().await;
         let at = clock();
         if !kept.as_ref().is_some_and(|(fetched, _, _)| at.saturating_duration_since(*fetched) < FRESH) {
             let from = now - WINDOW;
-            *kept = Some((at, from, fetch(from).await));
+            let ask = fetch(from);
+            let task = tokio::spawn(async move {
+                let villages = tokio::time::timeout(ASK_LIMIT, ask).await.unwrap_or_default();
+                *kept = Some((at, from, villages));
+                kept
+            });
+            match task.await {
+                Ok(guard) => kept = guard,
+                // The asking panicked: nothing is kept, and this answer is empty.
+                Err(_) => return (t.max(from), vec![]),
+            }
         }
         let (_, window, villages) = kept.as_ref().expect("kept above");
         let from = t.max(*window);
@@ -243,6 +264,30 @@ mod tests {
         // A minute on, it is asked again.
         cache.answer(now - 3600, now + 60, at(FRESH.as_secs()), fetch).await;
         assert_eq!(*asked.lock().unwrap(), vec![now - WINDOW, now + 60 - WINDOW]);
+    }
+
+    #[tokio::test]
+    async fn a_caller_that_hangs_up_does_not_cancel_the_asking() {
+        let cache = SinceCache::default();
+        let now = 1_794_800_000;
+        let asked = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let fetch = |asked: std::sync::Arc<std::sync::atomic::AtomicUsize>| {
+            move |_from: i64| {
+                asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async move {
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    vec![VillageSince { project: "shop".into(), checked: true, closed: vec![change(5, "2026-11-16T03:00:00Z")], merged: vec![] }]
+                }
+            }
+        };
+        // The first caller gives up long before GitHub answers.
+        let hung_up = tokio::time::timeout(Duration::from_millis(20), cache.answer(now - 3600, now, Instant::now, fetch(asked.clone()))).await;
+        assert!(hung_up.is_err());
+        // The next waits for that asking and gets its answer, without asking again.
+        let got = cache.answer(now - 3600, now, Instant::now, fetch(asked.clone())).await;
+        assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(got.1[0].checked);
+        assert_eq!(got.1[0].closed.len(), 1);
     }
 
     #[tokio::test]

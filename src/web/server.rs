@@ -101,7 +101,10 @@ struct SinceQuery {
 async fn api_village_since_handler(State(state): State<WebServerState>, Query(q): Query<SinceQuery>) -> Result<Json<Value>, StatusCode> {
     let now = chrono::Utc::now().timestamp();
     let t = q.t.filter(|t| super::since::search_time(*t).is_some()).ok_or(StatusCode::BAD_REQUEST)?;
-    let fetch = |from: i64| async move {
+    // The asking may outlive this request (`SinceCache::answer`), so it owns its state.
+    let asking = state.clone();
+    let fetch = move |from: i64| async move {
+        let state = asking;
         let swarms = state.swarms.read().map(|s| s.clone()).unwrap_or_default();
         let snapshot = state.village.snapshot(&state.transport, &swarms).await;
         // One village's questions don't wait on another's.

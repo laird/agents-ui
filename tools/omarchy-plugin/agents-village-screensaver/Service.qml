@@ -12,8 +12,9 @@ import Quickshell.Wayland
 // Settings: ~/.config/agents-ui/screensaver.json, re-read when it changes.
 //
 // "Since you last looked" (#479) counts from the last unlock of the machine.
-// A plugin cannot see Omarchy's lock, so while the session is idle or locked
-// this asks `omarchy-shell lock isLocked` every few seconds, and when it goes
+// A plugin cannot see Omarchy's lock, so this asks `omarchy-shell lock
+// isLocked` every few seconds, all the time (a lock can come with no idle
+// before it: the lid closing, or a lock by hand), and when it goes
 // from locked to unlocked writes the time (unix seconds) to
 // ${XDG_STATE_HOME:-~/.local/state}/agents-village-screensaver/last-unlock,
 // which village-screensaver reads.
@@ -93,12 +94,12 @@ Item {
     }
   }
 
-  // Polls only while it matters: idle (a lock may come) or locked (until it goes).
+  // Always: a lock can start and end without the session ever going idle.
   Timer {
     interval: 5000
     repeat: true
     triggeredOnStart: true
-    running: idle.isIdle || root.locked
+    running: true
     onTriggered: root.checkLock()
   }
 }

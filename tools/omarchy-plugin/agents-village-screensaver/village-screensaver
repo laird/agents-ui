@@ -20,7 +20,7 @@
 # summary of what happened since then (since=<unix seconds>). Service.qml
 # watches Omarchy's lock and keeps the time of the last unlock in
 # ${XDG_STATE_HOME:-~/.local/state}/agents-village-screensaver/last-unlock.
-# With no record yet, the spell is counted from when the session went idle.
+# With no unlock recorded yet there is no card.
 #
 # It does nothing while the session is locked or the screensaver is already
 # up, nor (unless forced) while Omarchy's stay-awake indicator is on or its
@@ -56,15 +56,14 @@ SERVER=$(setting server "http://nuc-1:7890")
 SERVER=${SERVER%/}
 CYCLE=$(setting cycle 30)
 DIM=$(setting dim "")
-TIMEOUT=$(setting timeout 150)
 RECAP=$(setting recap 30)
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/agents-village-screensaver"
 LAST_UNLOCK="$STATE_DIR/last-unlock"
 NOW=${AGENTS_VILLAGE_SCREENSAVER_NOW:-$(date +%s)}
 
-# When the quiet spell began: the last unlock, or failing that when the
-# session went idle. Empty when the spell is shorter than `recap`
-# minutes, or on a forced run (someone is at the keyboard).
+# When the quiet spell began: the last unlock. Empty with no unlock recorded,
+# when the spell is shorter than `recap` minutes, or on a forced run (someone
+# is at the keyboard).
 recap_since() {
   local since=""
   [ "$FORCE" = true ] && return
@@ -72,11 +71,7 @@ recap_since() {
   # A unix time, as `date +%s` writes it: anything else (hand-edited, cut
   # short) is no record, rather than octal or an overflow in $(( )).
   [ -f "$LAST_UNLOCK" ] && since=$(head -c 32 "$LAST_UNLOCK" | tr -d '[:space:]')
-  [[ $since =~ ^[1-9][0-9]{8,10}$ ]] || since=""
-  if [ -z "$since" ]; then
-    [[ $TIMEOUT =~ ^[0-9]+$ ]] || TIMEOUT=150
-    since=$((NOW - TIMEOUT))
-  fi
+  [[ $since =~ ^[1-9][0-9]{8,10}$ ]] || return
   ((since <= NOW && NOW - since >= RECAP * 60)) && echo "$since"
 }
 

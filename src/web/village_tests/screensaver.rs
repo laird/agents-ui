@@ -57,7 +57,10 @@ fn screensaver_opens_with_a_since_you_last_looked_card() {
     assert!(body.contains("Nothing happened${m.waiting ? '' : ', and nothing is waiting on you'}."));
     let launcher = include_str!("../../../tools/omarchy-plugin/agents-village-screensaver/village-screensaver");
     assert!(launcher.contains("[ -n \"$since\" ] && q=\"$q&since=${since}\""));
-    assert!(launcher.contains("date +%s > \"$LAST_CLOSED\""));
+    // The spell starts at the last unlock, which the service records (#479).
+    assert!(launcher.contains("LAST_UNLOCK=\"$STATE_DIR/last-unlock\""));
+    let service = include_str!("../../../tools/omarchy-plugin/agents-village-screensaver/Service.qml");
+    assert!(service.contains("if (root.locked && !now) recordUnlock()"));
 }
 
 /// The installer and launcher (bash, in a throwaway HOME) and the page's

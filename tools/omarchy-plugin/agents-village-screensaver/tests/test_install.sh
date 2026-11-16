@@ -295,11 +295,11 @@ grep -q "since" <<<"$out" && fail "recap 0 still asked: $out" || ok "recap 0 tur
 echo '{ "server": "http://127.0.0.1:9", "recap": 1, "timeout": 3600 }' > "$HOME/.config/agents-ui/screensaver.json"
 rm "$XDG_STATE_HOME/agents-village-screensaver/last-unlock"
 out=$(AGENTS_VILLAGE_SCREENSAVER_NOW=$NOW bash "$LAUNCHER" --dry-run 2>&1)
-grep -q "%26since%3D$((NOW - 3600))" <<<"$out" && ok "with no record, the spell starts when the session went idle" || fail "since: $out"
+grep -q "since" <<<"$out" && fail "no unlock recorded still asked: $out" || ok "with no unlock recorded, no recap"
 for junk in 0089 99999999999999999999999 x 17948x00000; do
   echo "$junk" > "$XDG_STATE_HOME/agents-village-screensaver/last-unlock"
   out=$(AGENTS_VILLAGE_SCREENSAVER_NOW=$NOW bash "$LAUNCHER" --dry-run 2>&1)
-  grep -q "%26since%3D$((NOW - 3600))" <<<"$out" && ok "a corrupt record ($junk) is no record" || fail "junk $junk: $out"
+  grep -q "since" <<<"$out" && fail "junk $junk: $out" || ok "a corrupt record ($junk) is no record"
 done
 unset XDG_STATE_HOME
 rm -rf "$T"
