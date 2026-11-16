@@ -630,8 +630,14 @@ impl ClaudeAdapter {
         runtime: &AgentType,
         is_manager: bool,
     ) -> Result<()> {
-        let cmd = runtime_supervisor(runtime).launch_command(runtime, session_name, is_manager);
-        proxy::send_keys(&self.transport, target, &self.command_with_local_path(&cmd)).await
+        proxy::send_keys(&self.transport, target, &self.pane_launch_command(runtime, session_name, is_manager)).await
+    }
+
+    /// What starts `runtime` in a pane of `session_name`, as typed into the
+    /// pane: the runtime's launch command, with this machine's PATH when the
+    /// pane is local. The village's restart control (#505) types the same.
+    pub fn pane_launch_command(&self, runtime: &AgentType, session_name: &str, is_manager: bool) -> String {
+        self.command_with_local_path(&runtime_supervisor(runtime).launch_command(runtime, session_name, is_manager))
     }
 
     async fn relaunch_agent_in_pane(

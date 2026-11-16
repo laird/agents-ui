@@ -1,6 +1,6 @@
-//! Worker controls from the village's house dialog (#504, for #488):
+//! Worker controls from the village's house dialog (#504, #505, for #488):
 //! `POST /api/swarms/{project}/agents/{role}/control` with
-//! `{ "action": "nudge" | "release" }`.
+//! `{ "action": "nudge" | "release" | "stop" | "restart" }`.
 //!
 //! - **nudge** starts an idle worker's loop now: it types the runtime's
 //!   start-worker-loop command into its pane, as the TUI's `f` key does
@@ -12,6 +12,16 @@
 //!   explicit-release path does, so the crate goes back to the docks. A
 //!   worker that holds no issue, or whose issue is no longer open and
 //!   `working`, is a 409.
+//! - **stop** shuts the worker down, as the TUI's `d` key: the stopped
+//!   tombstone (`.codex/stopped` in its worktree) first, so heal and revive
+//!   won't respawn it, then its pane is closed. A tmux pane gets Ctrl+C and
+//!   `exit` (`proxy::kill_pane`); a herdr pane `herdr pane close`. Its issue
+//!   is left claimed: release it first to hand it back.
+//! - **restart** interrupts the worker and starts its runtime again in the
+//!   same pane and worktree, as the supervisor's restart does: Ctrl+C, then
+//!   the runtime's launch command. Its claimed issue stays claimed, and any
+//!   tombstone is cleared. Only tmux panes: the server has no way to launch a
+//!   runtime in a herdr pane yet, so a herdr worker is a 501.
 //!
 //! Only workers have controls: the manager is a 409. An unknown swarm or role
 //! is a 404 and an unknown action a 422. A `--read-only` server refuses it
@@ -38,6 +48,8 @@ use crate::project_management::{ProjectCommand, ProjectManagementClient};
 pub enum Action {
     Nudge,
     Release,
+    Stop,
+    Restart,
 }
 
 #[derive(Debug, Deserialize)]
@@ -120,6 +132,85 @@ pub fn is_open_and_working(view: &Value) -> bool {
     open && working
 }
 
+/// One thing a stop or restart does: run a command, or wait a moment for the
+/// pane to take the last one in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Step {
+    Run(&'static str, Vec<String>),
+    Wait(u64),
+}
+
+fn run(program: &'static str, args: &[&str]) -> Step {
+    Step::Run(program, args.iter().map(|s| s.to_string()).collect())
+}
+
+/// Where the worker's tombstone goes, or why there is nowhere for it.
+fn tombstone(agent: &AgentSnapshot) -> Result<(String, String), Refusal> {
+    if agent.worktree_path.is_empty() {
+        return Err((StatusCode::CONFLICT, "that worker has no worktree to mark stopped"));
+    }
+    let dir = format!("{}/.codex", agent.worktree_path.trim_end_matches('/'));
+    let file = format!("{dir}/stopped");
+    Ok((dir, file))
+}
+
+/// What a stop runs, in order: the tombstone (so heal and revive leave it
+/// stopped), then the pane closed. Through the transport, so it works on a
+/// `--server` host too.
+pub fn stop_steps(agent: &AgentSnapshot) -> Result<Vec<Step>, Refusal> {
+    if agent.is_manager {
+        return Err((StatusCode::CONFLICT, "only workers can be stopped here"));
+    }
+    let (dir, file) = tombstone(agent)?;
+    let target = agent.tmux_target.as_str();
+    let mut steps = vec![run("mkdir", &["-p", &dir]), run("touch", &[&file])];
+    match agent.mux {
+        super::Mux::Tmux => steps.extend([
+            run("tmux", &["send-keys", "-t", target, "C-c", ""]),
+            Step::Wait(200),
+            run("tmux", &["send-keys", "-t", target, "exit", "Enter"]),
+        ]),
+        super::Mux::Herdr => steps.push(run("herdr", &["pane", "close", target])),
+    }
+    Ok(steps)
+}
+
+/// What a restart runs, in order: the tombstone cleared, Ctrl+C, then
+/// `launch` (the runtime's launch command) typed into the same pane.
+pub fn restart_steps(agent: &AgentSnapshot, launch: &str) -> Result<Vec<Step>, Refusal> {
+    if agent.is_manager {
+        return Err((StatusCode::CONFLICT, "only workers can be restarted here"));
+    }
+    if agent.mux == super::Mux::Herdr {
+        return Err((StatusCode::NOT_IMPLEMENTED, "restart isn't supported for herdr panes yet: stop it and start it from herdr"));
+    }
+    let (_, file) = tombstone(agent)?;
+    let target = agent.tmux_target.as_str();
+    Ok(vec![
+        run("rm", &["-f", &file]),
+        run("tmux", &["send-keys", "-t", target, "C-c"]),
+        Step::Wait(250),
+        run("tmux", &["send-keys", "-t", target, launch, "Enter"]),
+    ])
+}
+
+/// Run `steps` in order through the transport, stopping at the first that fails.
+async fn run_steps(transport: &crate::transport::ServerTransport, steps: &[Step]) -> Result<(), String> {
+    for step in steps {
+        match step {
+            Step::Wait(ms) => tokio::time::sleep(std::time::Duration::from_millis(*ms)).await,
+            Step::Run(program, args) => {
+                let out = transport.output(program, args, None).await.map_err(|e| e.to_string())?;
+                if !out.status.success() {
+                    let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                    return Err(if err.is_empty() { format!("{program} failed") } else { err });
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The swarm and the agent the path names, cloned out of the shared state.
 fn find(state: &WebServerState, project: &str, role: &str) -> Result<(SwarmSnapshot, AgentSnapshot), Refusal> {
     let guard = state.swarms.read().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "state unavailable"))?;
@@ -138,7 +229,7 @@ pub async fn api_control_handler(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let fail = |(code, msg): (StatusCode, &str)| (code, Json(json!({ "error": msg })));
     let (swarm, agent) = find(&state, &project, &role).map_err(fail)?;
-    let Json(body) = body.map_err(|_| fail((StatusCode::UNPROCESSABLE_ENTITY, "the action is nudge or release")))?;
+    let Json(body) = body.map_err(|_| fail((StatusCode::UNPROCESSABLE_ENTITY, "the action is nudge, release, stop or restart")))?;
 
     match body.action {
         Action::Nudge => {
@@ -150,6 +241,28 @@ pub async fn api_control_handler(
                 fail((StatusCode::BAD_GATEWAY, "could not type into its pane"))
             })?;
             Ok(Json(json!({ "ok": true, "action": "nudge", "sent": command })))
+        }
+        Action::Stop | Action::Restart => {
+            let (steps, word) = if body.action == Action::Stop {
+                (stop_steps(&agent).map_err(fail)?, "stop")
+            } else {
+                let runtime = AgentType::from_name(&swarm.agent_type).unwrap_or(AgentType::Claude);
+                let adapter = crate::adapter::claude::ClaudeAdapter::new(runtime.clone(), state.transport.clone());
+                let launch = adapter.pane_launch_command(&runtime, &swarm.tmux_session, false);
+                (restart_steps(&agent, &launch).map_err(fail)?, "restart")
+            };
+            run_steps(&state.transport, &steps).await.map_err(|err| {
+                tracing::warn!("{word} of {project}/{role} failed: {err}");
+                (StatusCode::BAD_GATEWAY, Json(json!({ "error": format!("could not {word} it: {err}") })))
+            })?;
+            let sent: Vec<String> = steps
+                .iter()
+                .filter_map(|s| match s {
+                    Step::Run(p, a) => Some(format!("{p} {}", a.join(" ")).trim_end().to_string()),
+                    Step::Wait(_) => None,
+                })
+                .collect();
+            Ok(Json(json!({ "ok": true, "action": word, "sent": sent.join("\n") })))
         }
         Action::Release => {
             if agent.is_manager {
@@ -321,6 +434,70 @@ mod tests {
     fn the_body_names_its_action() {
         let b: ControlBody = serde_json::from_value(json!({ "action": "release" })).unwrap();
         assert_eq!(b.action, Action::Release);
-        assert!(serde_json::from_value::<ControlBody>(json!({ "action": "restart" })).is_err());
+        assert!(serde_json::from_value::<ControlBody>(json!({ "action": "explode" })).is_err());
+    }
+
+    fn with_worktree(mut a: AgentSnapshot, mux: crate::web::Mux) -> AgentSnapshot {
+        a.worktree_path = "/repos/p-wt-1/".into();
+        a.mux = mux;
+        if mux == crate::web::Mux::Herdr {
+            a.tmux_target = "w5:p1".into();
+        }
+        a
+    }
+
+    fn runs(steps: &[Step]) -> Vec<String> {
+        steps
+            .iter()
+            .map(|s| match s {
+                Step::Run(p, a) => format!("{p} {}", a.join("|")),
+                Step::Wait(ms) => format!("wait {ms}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn stop_marks_the_worker_stopped_before_closing_its_pane() {
+        let tmux = stop_steps(&with_worktree(worker("Working #5"), crate::web::Mux::Tmux)).unwrap();
+        assert_eq!(
+            runs(&tmux),
+            [
+                "mkdir -p|/repos/p-wt-1/.codex",
+                "touch /repos/p-wt-1/.codex/stopped",
+                "tmux send-keys|-t|claude-p:0.1|C-c|",
+                "wait 200",
+                "tmux send-keys|-t|claude-p:0.1|exit|Enter",
+            ],
+            "as the TUI's d key (proxy::kill_pane)"
+        );
+        let herdr = stop_steps(&with_worktree(worker("Idle"), crate::web::Mux::Herdr)).unwrap();
+        assert_eq!(runs(&herdr), ["mkdir -p|/repos/p-wt-1/.codex", "touch /repos/p-wt-1/.codex/stopped", "herdr pane|close|w5:p1"]);
+    }
+
+    #[test]
+    fn restart_relaunches_in_the_same_tmux_pane_and_refuses_herdr() {
+        let steps = restart_steps(&with_worktree(worker("Working #5"), crate::web::Mux::Tmux), "claude --flags").unwrap();
+        assert_eq!(
+            runs(&steps),
+            [
+                "rm -f|/repos/p-wt-1/.codex/stopped",
+                "tmux send-keys|-t|claude-p:0.1|C-c",
+                "wait 250",
+                "tmux send-keys|-t|claude-p:0.1|claude --flags|Enter",
+            ]
+        );
+        let herdr = restart_steps(&with_worktree(worker("Idle"), crate::web::Mux::Herdr), "claude");
+        assert_eq!(herdr.unwrap_err().0, StatusCode::NOT_IMPLEMENTED);
+    }
+
+    #[test]
+    fn stop_and_restart_are_for_workers_with_a_worktree() {
+        let mut manager = with_worktree(worker("Idle"), crate::web::Mux::Tmux);
+        manager.is_manager = true;
+        assert_eq!(stop_steps(&manager).unwrap_err().0, StatusCode::CONFLICT);
+        assert_eq!(restart_steps(&manager, "claude").unwrap_err().0, StatusCode::CONFLICT);
+        assert_eq!(stop_steps(&worker("Idle")).unwrap_err().0, StatusCode::CONFLICT, "no worktree: nowhere for the tombstone");
+        assert_eq!(serde_json::from_str::<ControlBody>(r#"{"action":"stop"}"#).unwrap().action, Action::Stop);
+        assert_eq!(serde_json::from_str::<ControlBody>(r#"{"action":"restart"}"#).unwrap().action, Action::Restart);
     }
 }
