@@ -67,13 +67,13 @@ export function rowWords(r) {
   return [r.name, r.took ? `· ${r.took}` : null, r.median ? `(median ${r.median})` : null, r.slow ? '· slowest' : null].filter(Boolean).join(' ');
 }
 
-const BOUNCE_WORDS = { conflict: 'a conflict', 'gate-failed': 'a failed gate', 'push-retry': 'a push rejected and re-synced' };
+const GATE_HANDBACKS = { conflict: 'a conflict', 'gate-failed': 'a failed gate', 'push-retry': 'a push rejected and re-synced' };
 
 /* The gate's hand-backs: "Handed back by the gate 2 times: a conflict (src/x.rs), a failed gate". */
 export function bounceWords(bounces) {
   const bs = bounces || [];
   if (!bs.length) return null;
-  const each = bs.map(b => `${BOUNCE_WORDS[b.kind] || b.kind}${(b.files || []).length ? ` (${b.files.join(', ')})` : ''}`);
+  const each = bs.map(b => `${GATE_HANDBACKS[b.kind] || b.kind}${(b.files || []).length ? ` (${b.files.join(', ')})` : ''}`);
   return `Handed back by the gate ${bs.length === 1 ? 'once' : bs.length + ' times'}: ${each.join(', ')}`;
 }
 
