@@ -19,6 +19,8 @@
 //! edges, and a summary of each repo from its village. A repo with no
 //! running swarm is still there, dormant. What is wrong with the manifest (bad
 //! JSON, an unknown repo, a cycle) is said in the answer, never a crash.
+//! Each group also carries its `ropes` and `caravans`: issues linked across
+//! its repos on GitHub (`crossrepo.rs`, #528).
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -136,6 +138,13 @@ pub struct ValleyGroup {
     /// What is wrong with this group's part of the manifest.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub errors: Vec<String>,
+    /// Open issues held up by an open issue in another repo of the group
+    /// (`crossrepo.rs`, #528), read from GitHub.
+    #[serde(default)]
+    pub ropes: Vec<super::crossrepo::Rope>,
+    /// Parent issues whose subtasks are spread over several repos of the group.
+    #[serde(default)]
+    pub caravans: Vec<super::crossrepo::Caravan>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -409,7 +418,7 @@ fn build_group(def: &GroupDef, villages: &[VillageSnapshot], dormant: &HashMap<S
         kept(&CACHE, format!("{}\0{file}\0{sha}", dir.to_string_lossy()), || super::grid::contract_at(&dir, file, sha))
     };
     let grid = super::grid::build(&stops, &edges, &contract);
-    ValleyGroup { name: def.name.clone(), repos, edges, grid, errors }
+    ValleyGroup { name: def.name.clone(), repos, edges, grid, errors, ropes: Vec::new(), caravans: Vec::new() }
 }
 
 /// Each repo's depth: the longest run of `package` edges above it. Repos on
@@ -551,6 +560,24 @@ async fn dormant_stops(transport: &super::super::transport::ServerTransport, vil
     out
 }
 
+/// Each group's ropes and caravans (#528): the issues of every repo of it on
+/// this machine and on GitHub, read with `gh` and cached (`crossrepo::fetch`).
+/// A repo with no directory here, or one GitHub can't be asked about, is left out.
+async fn add_links(transport: &super::super::transport::ServerTransport, groups: &mut [ValleyGroup], villages: &[VillageSnapshot]) {
+    for g in groups.iter_mut() {
+        let (mut repos, mut issues) = (Vec::new(), HashMap::new());
+        for r in &g.repos {
+            let Some(dir) = repo_dir(&r.repo, villages) else { continue };
+            let Some(slug) = crate::github::origin_web_url(transport, &dir).await.as_deref().and_then(super::crossrepo::slug_of) else { continue };
+            if let Some(list) = super::crossrepo::fetch(transport, &dir).await {
+                issues.insert(r.name.clone(), list);
+            }
+            repos.push((r.name.clone(), slug));
+        }
+        (g.ropes, g.caravans) = super::crossrepo::links(&repos, &issues);
+    }
+}
+
 /// `GET /api/valley`: every group in the manifest, from the villages now.
 pub async fn api_valley_handler(
     axum::extract::State(state): axum::extract::State<super::server::WebServerState>,
@@ -560,9 +587,13 @@ pub async fn api_valley_handler(
     let dormant = dormant_stops(&state.transport, &snapshot.villages).await;
     // Reading repos on disk (tags, lockfiles) is blocking work (#511).
     let villages = snapshot.villages;
+    let around = villages.clone();
     let answer = tokio::task::spawn_blocking(move || read_with(&manifest_path(), &villages, &dormant)).await;
     axum::Json(match answer {
-        Ok(valley) => serde_json::json!(valley),
+        Ok(mut valley) => {
+            add_links(&state.transport, &mut valley.groups, &around).await;
+            serde_json::json!(valley)
+        }
         Err(e) => serde_json::json!({ "manifest": manifest_path().to_string_lossy(), "found": true, "groups": [], "errors": [format!("can't read the valley: {e}")] }),
     })
 }
@@ -587,6 +618,15 @@ mod tests {
         { "repo": "api", "depends_on": [{ "repo": "lib-core", "via": "package" }, { "repo": "/src/lib-ui", "via": "package" }] },
         { "repo": "/src/lib-ui", "depends_on": [{ "repo": "lib-core", "via": "package" }] },
         { "repo": "lib-core" } ] }]"#;
+
+    /// #528: every group carries its ropes and caravans, empty until GitHub is read.
+    #[test]
+    fn groups_carry_ropes_and_caravans() {
+        let (groups, _) = valley(SHOP, &[]);
+        let json = serde_json::to_value(&groups[0]).unwrap();
+        assert_eq!(json["ropes"], serde_json::json!([]));
+        assert_eq!(json["caravans"], serde_json::json!([]));
+    }
 
     #[test]
     fn package_edges_say_what_is_pinned_and_whether_it_is_behind() {

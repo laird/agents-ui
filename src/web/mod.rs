@@ -1,6 +1,7 @@
 pub mod build;
 pub mod control_preview;
 pub mod controls;
+pub mod crossrepo;
 pub mod deployments;
 pub mod discovery;
 pub mod dormant;

@@ -1,0 +1,357 @@
+//! Links between the repos of a valley's group (#528, phase 4 of #494): what
+//! `/api/valley` carries as each group's `ropes` and `caravans`.
+//!
+//! - A **rope** ties an open issue in one repo to the open issue in another
+//!   repo of the group that blocks it: a `Depends on:` or `Blocked by:` line
+//!   naming `owner/repo#N` or `https://github.com/owner/repo/issues/N`. A
+//!   closed blocker blocks nothing, and a link to a repo outside the group is
+//!   not drawn.
+//! - A **caravan** is a parent issue whose subtasks live in more than one repo
+//!   of the group: a subtask says `Sub-task of <ref>` (or `Parent: <ref>`),
+//!   or the parent lists it in a task list (`- [ ] <ref>`). One crate per
+//!   repo, `loaded` once every subtask there has landed (closed as
+//!   completed); the caravan has `arrived` when every crate is loaded.
+//!
+//! Both are read from issue bodies, as `gh issue list --json number,title,
+//! state,stateReason,body` gives them, once per repo and cached like the
+//! other GitHub reads (`fetch`). GitHub's own sub-issue and blocked-by
+//! relations are not in that listing, so a link written only there is not
+//! seen. A repo GitHub can't be asked about is left out, not an error.
+
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::path::Path;
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
+
+use serde::{Deserialize, Serialize};
+
+use crate::transport::ServerTransport;
+
+/// An issue as `gh issue list --json number,title,state,stateReason,body` gives it.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct CrossIssue {
+    #[serde(default)]
+    pub number: u32,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub state: String,
+    #[serde(default, rename = "stateReason")]
+    pub state_reason: Option<String>,
+    #[serde(default)]
+    pub body: Option<String>,
+}
+
+impl CrossIssue {
+    fn open(&self) -> bool {
+        self.state.eq_ignore_ascii_case("open")
+    }
+    /// Closed as completed: work that landed.
+    fn landed(&self) -> bool {
+        self.state.eq_ignore_ascii_case("closed")
+            && !matches!(self.state_reason.as_deref().map(str::to_ascii_uppercase).as_deref(), Some("NOT_PLANNED") | Some("DUPLICATE"))
+    }
+}
+
+/// One issue in one repo of the group.
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct IssueRef {
+    /// The repo's name in the group.
+    pub repo: String,
+    pub number: u32,
+    pub title: String,
+    /// `open` or `closed`.
+    pub state: String,
+}
+
+/// An open issue held up by an open issue in another repo of the group.
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct Rope {
+    /// The issue that waits.
+    pub from: IssueRef,
+    /// The issue it waits on.
+    pub to: IssueRef,
+}
+
+/// A parent's subtasks in one repo.
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct CaravanCrate {
+    pub repo: String,
+    pub issues: Vec<u32>,
+    /// Every subtask here has landed.
+    pub loaded: bool,
+}
+
+/// A parent issue whose subtasks are spread over several repos of the group.
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct Caravan {
+    pub parent: IssueRef,
+    /// One per repo, in the group's order.
+    pub crates: Vec<CaravanCrate>,
+    /// Every crate is loaded.
+    pub arrived: bool,
+}
+
+/// `owner/repo`, lowercased, as GitHub names it.
+pub fn slug_of(web_url: &str) -> Option<String> {
+    let rest = web_url.trim().trim_end_matches('/').strip_prefix("https://github.com/")?;
+    let mut parts = rest.split('/');
+    match (parts.next(), parts.next(), parts.next()) {
+        (Some(o), Some(r), None) if !o.is_empty() && !r.is_empty() => Some(format!("{o}/{r}").to_ascii_lowercase()),
+        _ => None,
+    }
+}
+
+fn is_slug_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')
+}
+
+/// The issues a line names, as (`owner/repo` lowercased, number): `#N` in
+/// `own`, `owner/repo#N`, and `https://github.com/owner/repo/issues/N`.
+pub fn refs(line: &str, own: &str) -> Vec<(String, u32)> {
+    let mut out = Vec::new();
+    let digits = |s: &str| s.chars().take_while(char::is_ascii_digit).collect::<String>().parse::<u32>().ok();
+    // Links first, then remove them so their `#` or number is not read twice.
+    let mut rest = line.to_string();
+    while let Some(k) = rest.find("https://github.com/") {
+        let tail = &rest[k + "https://github.com/".len()..];
+        let mut parts = tail.splitn(4, '/');
+        if let (Some(o), Some(r), Some("issues" | "pull"), Some(n)) = (parts.next(), parts.next(), parts.next(), parts.next())
+            && let Some(n) = digits(n)
+        {
+            out.push((format!("{o}/{r}").to_ascii_lowercase(), n));
+        }
+        let end = tail.find(char::is_whitespace).map_or(rest.len(), |e| k + "https://github.com/".len() + e);
+        rest.replace_range(k..end, " ");
+    }
+    let b: Vec<char> = rest.chars().collect();
+    for (k, c) in b.iter().enumerate() {
+        if *c != '#' {
+            continue;
+        }
+        let num: String = b[k + 1..].iter().take_while(|c| c.is_ascii_digit()).collect();
+        let Ok(n) = num.parse::<u32>() else { continue };
+        // What runs into the `#` from the left: `owner/repo`, or nothing.
+        let mut s = k;
+        while s > 0 && (is_slug_char(b[s - 1]) || b[s - 1] == '/') {
+            s -= 1;
+        }
+        let before: String = b[s..k].iter().collect();
+        if before.is_empty() {
+            out.push((own.to_string(), n));
+        } else if before.matches('/').count() == 1 && !before.starts_with('/') && !before.ends_with('/') {
+            out.push((before.to_ascii_lowercase(), n));
+        }
+    }
+    out
+}
+
+/// A line's label, lowercased, with list marks and emphasis taken off:
+/// `- **Depends on:** x` → `depends on: x`.
+fn plain(line: &str) -> String {
+    line.trim().trim_start_matches(['-', '*', '+', '>', ' ']).replace("**", "").replace('_', " ").trim().to_ascii_lowercase()
+}
+
+fn blockers(body: &str, own: &str) -> Vec<(String, u32)> {
+    body.lines()
+        .filter(|l| {
+            let p = plain(l);
+            p.starts_with("depends on") || p.starts_with("blocked by")
+        })
+        .flat_map(|l| refs(l, own))
+        .collect()
+}
+
+/// The parents a subtask names: `Sub-task of <ref>`, `Subtask of <ref>`, `Parent: <ref>`.
+fn parents(body: &str, own: &str) -> Vec<(String, u32)> {
+    body.lines()
+        .filter(|l| {
+            let p = plain(l).trim_start_matches('#').trim().to_string();
+            p.starts_with("sub-task of") || p.starts_with("subtask of") || p.starts_with("parent:")
+        })
+        .flat_map(|l| refs(l, own))
+        .collect()
+}
+
+/// The subtasks a parent lists in a task list: `- [ ] <ref>`, `- [x] <ref>`.
+fn listed(body: &str, own: &str) -> Vec<(String, u32)> {
+    body.lines()
+        .filter_map(|l| {
+            let t = l.trim_start().trim_start_matches(['-', '*', '+']).trim_start();
+            t.strip_prefix("[ ]").or_else(|| t.strip_prefix("[x]")).or_else(|| t.strip_prefix("[X]"))
+        })
+        .flat_map(|l| refs(l, own).into_iter().take(1))
+        .collect()
+}
+
+/// The ropes and caravans among a group's repos: `repos` is each repo's name
+/// in the group and its `owner/repo` (lowercased), upstream first; `issues`
+/// is what was read of each, by name. A repo with no issues read is left out.
+pub fn links(repos: &[(String, String)], issues: &HashMap<String, Vec<CrossIssue>>) -> (Vec<Rope>, Vec<Caravan>) {
+    let name_of: HashMap<&str, &str> = repos.iter().map(|(n, s)| (s.as_str(), n.as_str())).collect();
+    let order: HashMap<&str, usize> = repos.iter().enumerate().map(|(k, (n, _))| (n.as_str(), k)).collect();
+    let find = |slug: &str, n: u32| -> Option<(&str, &CrossIssue)> {
+        let name = *name_of.get(slug)?;
+        issues.get(name)?.iter().find(|i| i.number == n).map(|i| (name, i))
+    };
+    let iref = |repo: &str, i: &CrossIssue| IssueRef {
+        repo: repo.to_string(),
+        number: i.number,
+        title: i.title.clone(),
+        state: if i.open() { "open" } else { "closed" }.into(),
+    };
+
+    let mut ropes = Vec::new();
+    let mut children: BTreeMap<(String, u32), BTreeSet<(String, u32)>> = BTreeMap::new();
+    for (name, slug) in repos {
+        for i in issues.get(name).into_iter().flatten() {
+            let body = i.body.as_deref().unwrap_or("");
+            if i.open() {
+                let mut seen = BTreeSet::new();
+                for (s, n) in blockers(body, slug) {
+                    if s == *slug || !seen.insert((s.clone(), n)) {
+                        continue;
+                    }
+                    if let Some((other, b)) = find(&s, n).filter(|(_, b)| b.open()) {
+                        ropes.push(Rope { from: iref(name, i), to: iref(other, b) });
+                    }
+                }
+            }
+            for p in parents(body, slug) {
+                if name_of.contains_key(p.0.as_str()) {
+                    children.entry(p).or_default().insert((slug.clone(), i.number));
+                }
+            }
+            for c in listed(body, slug) {
+                if name_of.contains_key(c.0.as_str()) {
+                    children.entry((slug.clone(), i.number)).or_default().insert(c);
+                }
+            }
+        }
+    }
+
+    let mut caravans = Vec::new();
+    for ((pslug, pn), kids) in children {
+        let Some((pname, parent)) = find(&pslug, pn) else { continue };
+        let mut by_repo: BTreeMap<&str, (Vec<u32>, bool)> = BTreeMap::new();
+        for (s, n) in &kids {
+            let Some((repo, kid)) = find(s, *n) else { continue };
+            let e = by_repo.entry(repo).or_insert((Vec::new(), true));
+            e.0.push(*n);
+            e.1 &= kid.landed();
+        }
+        if by_repo.len() < 2 {
+            continue;
+        }
+        let mut crates: Vec<CaravanCrate> = by_repo.into_iter().map(|(repo, (issues, loaded))| CaravanCrate { repo: repo.into(), issues, loaded }).collect();
+        crates.sort_by_key(|c| order.get(c.repo.as_str()).copied().unwrap_or(usize::MAX));
+        let arrived = crates.iter().all(|c| c.loaded);
+        caravans.push(Caravan { parent: iref(pname, parent), crates, arrived });
+    }
+    (ropes, caravans)
+}
+
+/// How long a repo's issues are reused: as long as the village's GitHub summary.
+const FRESH: Duration = Duration::from_secs(90);
+
+/// A repo's issues for [`links`], read with `gh` in its directory and kept
+/// [`FRESH`]; None when GitHub can't be asked (no `gh`, not signed in, not
+/// on GitHub). A failed read is kept too, so it isn't retried on every poll.
+pub async fn fetch(transport: &ServerTransport, dir: &Path) -> Option<Vec<CrossIssue>> {
+    type Cache = tokio::sync::Mutex<HashMap<std::path::PathBuf, (Instant, Option<Vec<CrossIssue>>)>>;
+    static CACHE: OnceLock<Cache> = OnceLock::new();
+    let mut cache = CACHE.get_or_init(Default::default).lock().await;
+    if let Some((_, v)) = cache.get(dir).filter(|(at, _)| at.elapsed() < FRESH) {
+        return v.clone();
+    }
+    let args: Vec<String> = ["issue", "list", "--state", "all", "--limit", "300", "--json", "number,title,state,stateReason,body"].map(String::from).to_vec();
+    let read = match crate::github::gh_repo_output(transport, dir, &args).await {
+        Ok(out) if out.status.success() => serde_json::from_slice::<Vec<CrossIssue>>(&out.stdout).ok(),
+        _ => None,
+    };
+    cache.insert(dir.to_path_buf(), (Instant::now(), read.clone()));
+    read
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn issue(number: u32, title: &str, state: &str, reason: Option<&str>, body: &str) -> CrossIssue {
+        CrossIssue { number, title: title.into(), state: state.into(), state_reason: reason.map(Into::into), body: Some(body.into()) }
+    }
+    fn group() -> Vec<(String, String)> {
+        vec![("lib-core".into(), "acme/lib-core".into()), ("api".into(), "acme/api".into()), ("web".into(), "acme/web".into())]
+    }
+
+    #[test]
+    fn refs_read_every_link_form() {
+        assert_eq!(refs("Depends on: acme/lib-core#12 and #3", "acme/api"), vec![("acme/lib-core".into(), 12), ("acme/api".into(), 3)]);
+        assert_eq!(refs("Blocked by https://github.com/Acme/Lib-Core/issues/7.", "acme/api"), vec![("acme/lib-core".into(), 7)]);
+        assert_eq!(refs("see a#4, x/#5 and owner/repo/sub#6", "acme/api"), Vec::<(String, u32)>::new());
+        assert_eq!(slug_of("https://github.com/Acme/API"), Some("acme/api".into()));
+        assert_eq!(slug_of("https://gitlab.com/acme/api"), None);
+    }
+
+    #[test]
+    fn ropes_tie_open_issues_to_their_open_blockers_in_the_group() {
+        let mut issues = HashMap::new();
+        issues.insert("lib-core".to_string(), vec![issue(12, "Add the money type", "OPEN", None, ""), issue(13, "Old fix", "CLOSED", Some("COMPLETED"), "")]);
+        issues.insert("api".to_string(), vec![
+            issue(40, "Charge in cents", "OPEN", None, "Needs the money type.\n\n- **Depends on:** acme/lib-core#12\nBlocked by: acme/lib-core#13\nDepends on: elsewhere/other#1\nDepends on: #41"),
+            issue(41, "Same repo", "OPEN", None, ""),
+            issue(42, "Done already", "CLOSED", Some("COMPLETED"), "Depends on: acme/lib-core#12"),
+        ]);
+        issues.insert("web".to_string(), vec![issue(7, "Show cents", "OPEN", None, "Blocked by https://github.com/acme/api/issues/40")]);
+        let (ropes, _) = links(&group(), &issues);
+        let got: Vec<(String, u32, String, u32)> = ropes.iter().map(|r| (r.from.repo.clone(), r.from.number, r.to.repo.clone(), r.to.number)).collect();
+        // Not: #13 (closed), elsewhere/other (outside the group), #41 (same repo), #42 (closed itself).
+        assert_eq!(got, vec![("api".into(), 40, "lib-core".into(), 12), ("web".into(), 7, "api".into(), 40)]);
+        assert_eq!(ropes[0].to.title, "Add the money type");
+        assert_eq!(ropes[0].to.state, "open");
+    }
+
+    #[test]
+    fn a_caravan_is_a_parent_with_subtasks_in_several_repos() {
+        let mut issues = HashMap::new();
+        issues.insert("lib-core".to_string(), vec![
+            issue(1, "Money everywhere", "OPEN", None, "Tasks:\n- [x] acme/lib-core#2\n- [ ] acme/web#9"),
+            issue(2, "Money type", "CLOSED", Some("COMPLETED"), ""),
+            issue(5, "One-repo epic", "OPEN", None, "- [ ] #6"),
+            issue(6, "Its only task", "OPEN", None, "Sub-task of #5"),
+        ]);
+        issues.insert("api".to_string(), vec![
+            issue(30, "Cents in the API", "CLOSED", Some("COMPLETED"), "## Sub-task of acme/lib-core#1"),
+            issue(31, "Cents in errors", "OPEN", None, "Parent: https://github.com/acme/lib-core/issues/1"),
+        ]);
+        issues.insert("web".to_string(), vec![issue(9, "Show cents", "OPEN", None, "")]);
+        let (_, caravans) = links(&group(), &issues);
+        assert_eq!(caravans.len(), 1, "the one-repo epic is no caravan");
+        let c = &caravans[0];
+        assert_eq!((c.parent.repo.as_str(), c.parent.number), ("lib-core", 1));
+        let crates: Vec<(&str, Vec<u32>, bool)> = c.crates.iter().map(|k| (k.repo.as_str(), k.issues.clone(), k.loaded)).collect();
+        assert_eq!(crates, vec![("lib-core", vec![2], true), ("api", vec![30, 31], false), ("web", vec![9], false)]);
+        assert!(!c.arrived);
+
+        // Every subtask landed: the caravan has arrived.
+        for list in issues.values_mut() {
+            for i in list.iter_mut().filter(|i| [30, 31, 9].contains(&i.number)) {
+                i.state = "CLOSED".into();
+                i.state_reason = Some("COMPLETED".into());
+            }
+        }
+        let (_, caravans) = links(&group(), &issues);
+        assert!(caravans[0].arrived && caravans[0].crates.iter().all(|k| k.loaded));
+        // Closed as not planned is not landed.
+        issues.get_mut("web").unwrap()[0].state_reason = Some("NOT_PLANNED".into());
+        assert!(!links(&group(), &issues).1[0].arrived);
+    }
+
+    #[test]
+    fn a_repo_not_read_is_left_out() {
+        let mut issues = HashMap::new();
+        issues.insert("api".to_string(), vec![issue(40, "x", "OPEN", None, "Depends on: acme/lib-core#12")]);
+        let (ropes, caravans) = links(&group(), &issues);
+        assert!(ropes.is_empty() && caravans.is_empty());
+    }
+}
