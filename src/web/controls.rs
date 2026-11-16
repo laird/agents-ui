@@ -448,6 +448,9 @@ mod tests {
         // "Done" can outlive its issue while the loop is on the next one: busy.
         assert_eq!(nudge_command(&worker("Done: #7"), &AgentType::Claude).unwrap_err().0, StatusCode::CONFLICT);
         // A wrapper-supervised runtime gets its wrapper, whatever the TUI would send.
+        // The wrapper's path comes from AGENTS_DIR, which supervisor's tests set
+        // and remove: hold their lock across both reads (#527).
+        let _env = crate::testutil::env_lock();
         let droid = supervisor::for_runtime(&AgentType::Droid).start_worker_loop_command(&AgentType::Droid);
         assert_eq!(nudge_command(&worker("Idle"), &AgentType::Droid).ok(), droid);
     }
