@@ -34,3 +34,8 @@ test('no such house, no village: nothing opens', () => {
   assert.equal(houseTarget(v, null), null);
   assert.equal(houseTarget({ project: 'x' }, 'wt-1'), null);
 });
+
+test('a full id wins over another house whose short name matches it', () => {
+  const twins = { project: 'shop', houses: [{ id: '/a/shop-wt-1', role: 'w1' }, { id: '/b/shop-wt-1', role: 'w2' }] };
+  assert.deepEqual(houseTarget(twins, '/b/shop-wt-1'), { kind: 'house', i: 1 });
+});

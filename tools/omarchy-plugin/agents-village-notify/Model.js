@@ -168,7 +168,9 @@ function attention(base, v) {
   ;(v.houses || []).forEach(function(h) {
     if (h.status !== "blocked") return
     var name = houseName(v.project, h.id, h.role)
-    out.push({ key: "house:" + (h.id || name) + ":" + (h.issue || ""), kind: "needs", house: name, what: name,
+    // Two houses with one short name (worktrees in two folders): the link names the full id.
+    var twin = (v.houses || []).some(function(o) { return o !== h && houseName(v.project, o.id, o.role) === name })
+    out.push({ key: "house:" + (h.id || name) + ":" + (h.issue || ""), kind: "needs", house: twin && h.id ? h.id : name, what: name,
       title: h.issue ? "#" + h.issue + " " + (h.issue_title || "") : "is waiting on you",
       question: questionOf(h), url: absolute(base, sessionLink(h.links)) })
   })

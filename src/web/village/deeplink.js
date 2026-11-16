@@ -16,7 +16,8 @@ export function houseParam(hash) {
   return name || null;
 }
 
-/* A house's short name: its worktree's folder less the project prefix. */
+/* A house's short name: its worktree's folder less the project prefix, as
+ * the notifier names it (Model.js houseName in the Omarchy plugin). */
 function shortHouse(project, h) {
   const base = String(h.id || '').replace(/\/+$/, '').split('/').pop() || '';
   return base.startsWith(project + '-') ? base.slice(project.length + 1) : base;
@@ -28,7 +29,9 @@ export function houseTarget(v, name) {
   if (!v || !name) return null;
   if (name === 'manager' || name === 'hall') return { kind: 'hall' };
   const houses = v.houses || [];
-  let i = houses.findIndex(h => h.id === name || shortHouse(v.project, h) === name);
+  // The full id first: the notifier names a house by it when two share a short name.
+  let i = houses.findIndex(h => h.id === name);
+  if (i < 0) i = houses.findIndex(h => shortHouse(v.project, h) === name);
   if (i < 0) i = houses.findIndex(h => h.role === name);
   return i < 0 ? null : { kind: 'house', i };
 }

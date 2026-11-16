@@ -24,6 +24,10 @@ state is never announced twice: a house still waiting stays quiet, and it is
 news again only if it is answered and then waits again. Several changes seen
 in one poll come as one notification that lists them.
 
+What the server reads from GitHub (board notes, deploys) can vanish while
+GitHub is unreachable; it is remembered for ten minutes, and an environment
+keeps what it was last seen to run, so the end of an outage is not news.
+
 Nothing is announced during quiet hours, and what changed then is not saved
 up for the morning.
 

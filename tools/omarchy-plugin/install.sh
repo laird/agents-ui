@@ -52,6 +52,7 @@ NOTIFY=false
 QUIET=""
 NEVER_SLEEP=false
 SERVER="http://nuc-1:7890"
+SERVER_GIVEN=false
 CYCLE=30
 DIM=""
 need() { [ "$2" -ge 2 ] || { echo "install.sh: $1 needs a value" >&2; exit 1; }; }
@@ -65,7 +66,7 @@ while [ $# -gt 0 ]; do
     --notify) NOTIFY=true; shift ;;
     --quiet) need "$1" $#; QUIET="$2"; shift 2 ;;
     --never-sleep|--no-lock) NEVER_SLEEP=true; shift ;;
-    --server) need "$1" $#; SERVER="${2%/}"; shift 2 ;;
+    --server) need "$1" $#; SERVER="${2%/}"; SERVER_GIVEN=true; shift 2 ;;
     --cycle) need "$1" $#; CYCLE="$2"; shift 2 ;;
     --dim) need "$1" $#; DIM="$2"; shift 2 ;;
     -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
@@ -77,7 +78,9 @@ if [ "$SCREENSAVER" != true ] && { [ "$NEVER_SLEEP" = true ] || [ "$DIM" != "" ]
 fi
 [ "$SCREENSAVER" != true ] || [ "$NOTIFY" != true ] || { echo "install.sh: --screensaver and --notify install separately; run it once for each" >&2; exit 1; }
 [ "$NOTIFY" = true ] || [ "$QUIET" = "" ] || { echo "install.sh: --quiet goes with --notify" >&2; exit 1; }
-[ -z "$QUIET" ] || [[ $QUIET =~ ^([01]?[0-9]|2[0-3])-([01]?[0-9]|2[0-3])$ ]] || { echo "install.sh: --quiet takes hours like 23-7" >&2; exit 1; }
+# Two different hours: Notify.js reads 7-7 as no quiet hours at all.
+[ -z "$QUIET" ] || { [[ $QUIET =~ ^([01]?[0-9]|2[0-3])-([01]?[0-9]|2[0-3])$ ]] && [ $((10#${BASH_REMATCH[1]})) -ne $((10#${BASH_REMATCH[2]})) ]; } \
+  || { echo "install.sh: --quiet takes two different hours, like 23-7" >&2; exit 1; }
 [[ $CYCLE =~ ^[0-9]+$ ]] || { echo "install.sh: --cycle takes whole seconds" >&2; exit 1; }
 [ -z "$DIM" ] || [[ $DIM =~ ^([01]?[0-9]|2[0-3])-([01]?[0-9]|2[0-3])$ ]] || { echo "install.sh: --dim takes hours like 23-7" >&2; exit 1; }
 
@@ -196,14 +199,17 @@ if [ -f "$backup" ] && [ -f "$shell" ]; then
 fi
 rm -f "$backup" "$dir/screensaver.json"'
 
-# The notifier's settings: the server, and quiet hours when given. Anything
-# else already in notify.json (kinds, interval) stays.
+# The notifier's settings: the server when --server gave one (or none is set
+# yet), and quiet hours when given. Anything else already in notify.json
+# (kinds, interval, a server set before) stays. Without jq nothing is touched.
 NOTIFY_CONFIGURE='set -e
+command -v jq >/dev/null || { echo "install.sh: jq is needed to write notify.json" >&2; exit 1; }
 dir="$HOME/.config/agents-ui"; f="$dir/notify.json"
 mkdir -p "$dir"
 [ -s "$f" ] && jq -e "type == \"object\"" "$f" >/dev/null 2>&1 || echo "{}" > "$f"
 tmp=$(mktemp)
-jq --arg server "$1" --arg quiet "$2" ".server = \$server | if \$quiet != \"\" then .quiet = \$quiet else . end" "$f" > "$tmp"
+jq --arg server "$1" --argjson given "$2" --arg quiet "$3" \
+  "if \$given or (.server // \"\") == \"\" then .server = \$server else . end | if \$quiet != \"\" then .quiet = \$quiet else . end" "$f" > "$tmp"
 cat "$tmp" > "$f"; rm -f "$tmp"'
 
 DEST_REL=".config/omarchy/plugins/$NAME"
@@ -275,10 +281,10 @@ fi
 
 if [ "$NOTIFY" = true ]; then
   # A service has nowhere to be placed: enabling it is what starts it.
-  run_script "write the server ($SERVER)${QUIET:+ and quiet hours ($QUIET)} to ~/.config/agents-ui/notify.json" \
-    "$NOTIFY_CONFIGURE" sh "$SERVER" "$QUIET"
+  run_script "write the server ($SERVER$([ "$SERVER_GIVEN" = true ] || echo ', unless one is set'))${QUIET:+ and quiet hours ($QUIET)} to ~/.config/agents-ui/notify.json" \
+    "$NOTIFY_CONFIGURE" sh "$SERVER" "$SERVER_GIVEN" "$QUIET"
   enable_plugin || exit 1
-  echo "Installed $WHAT${HOST:+ on $HOST}: a notification when something in the village at $SERVER needs you, the build breaks or is fixed, or a deploy lands."
+  echo "Installed $WHAT${HOST:+ on $HOST}: a notification when something in the village needs you, the build breaks or is fixed, or a deploy lands."
   echo "Settings: ~/.config/agents-ui/notify.json${HOST:+ on $HOST}."
   exit 0
 fi

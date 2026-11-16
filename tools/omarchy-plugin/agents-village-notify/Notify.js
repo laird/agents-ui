@@ -3,9 +3,9 @@
 // under Quickshell for the service.
 //
 // It notifies on transitions only. Each poll is boiled down to a snapshot
-// (per village: the keys of what needs you, the build's state, the deploys
-// that landed or failed), and only a key the previous snapshot lacked, or a
-// build that changed colour, is news. A village seen for the first time sets
+// (per village: the keys of what needs you, the build's state, what each
+// environment runs), and only a key the previous snapshot lacked, a build
+// that changed colour, or an environment running a new commit is news. A village seen for the first time sets
 // its snapshot without a word, as the village page never sails on load.
 //
 // "Needs you" is the bar widget's rule: Model.attention(), keyed the same way,
@@ -73,38 +73,60 @@ function shortSha(sha) {
   return String(sha || "").slice(0, 7)
 }
 
-// Deploys that landed or failed: each environment stop's running commit, and
-// each voyage that docked or turned back. A docked voyage and the stop it
-// updated share a key, so one deploy is one piece of news.
-function deploysOf(v) {
+// Board notes and failed deploys come from GitHub, which the server can lose
+// for a while (it falls back to the branch, the board comes back empty). So
+// they are remembered for this long after they were last seen: coming back
+// after an outage is not news. Houses, the manager and the gate are read from
+// this machine and are compared poll to poll.
+var GRACE_MS = 10 * 60 * 1000
+
+// What each environment runs now: its stop's commit, or a voyage that docked
+// there. A stop that names no deployment (a branch, nothing) says nothing, so
+// the environment keeps what it was last seen to run.
+function envsOf(v, old) {
   var p = (v && v.pipeline) || {}, out = {}
+  Object.keys(old || {}).forEach(function(k) { out[k] = old[k] })
   ;(p.stops || []).forEach(function(s) {
     if (s.kind === "gate" || !s.sha || s.source === "branch") return
-    out["deploy:" + s.name + ":" + s.sha + ":docked"] = { env: s.name, sha: s.sha, tag: s.tag || "", state: "docked", url: s.url || "" }
+    out[s.name] = { sha: s.sha, tag: s.tag || "" }
   })
   ;(p.voyages || []).forEach(function(y) {
-    if ((y.state !== "docked" && y.state !== "failed") || !y.sha) return
-    out["deploy:" + y.to + ":" + y.sha + ":" + y.state] = { env: y.to, from: y.from, sha: y.sha, tag: y.tag || "", state: y.state, url: y.url || "" }
+    if (y.state === "docked" && y.sha) out[y.to] = { sha: y.sha, tag: y.tag || "", from: y.from || "" }
   })
   return out
 }
 
+function failedVoyages(v) {
+  return (((v && v.pipeline) || {}).voyages || []).filter(function(y) { return y.state === "failed" && y.sha })
+}
+
 // One village, boiled down: what is compared from one poll to the next.
 // `broken` holds from a red build until a green one, so red, running, green
-// is one break and one fix.
-function villageSnapshot(v, was, opts) {
-  var Model = modelOf(opts), build = Model.buildState(v)
+// is one break and one fix; `known` is whether any build colour was seen.
+// `seen` holds the GitHub-read keys (board notes, failed deploys) with when
+// each was last seen.
+function villageSnapshot(v, was, now, opts) {
+  var Model = modelOf(opts), build = Model.buildState(v), w = was || {}
+  var seen = {}
+  Object.keys(w.seen || {}).forEach(function(k) { if (now - w.seen[k] < GRACE_MS) seen[k] = w.seen[k] })
+  var needs = Model.attention("", v).map(function(a) { return a.key })
+  needs.forEach(function(k) { if (k.indexOf("board:") === 0) seen[k] = now })
+  failedVoyages(v).forEach(function(y) { seen["failed:" + y.to + ":" + y.sha] = now })
+  var envs = envsOf(v, w.envs)
+  Object.keys(envs).forEach(function(k) { envs[k] = { sha: envs[k].sha, tag: envs[k].tag } })
   return {
-    needs: Model.attention("", v).map(function(a) { return a.key }),
+    needs: needs,
+    seen: seen,
     build: build,
-    broken: build === "red" || (!!(was && was.broken) && build !== "green"),
-    deploys: Object.keys(deploysOf(v))
+    known: !!w.known || build !== "unknown",
+    broken: build === "red" || (!!w.broken && build !== "green"),
+    envs: envs
   }
 }
 
 function snapshotOf(villagesDoc, opts) {
-  var out = {}
-  ;((villagesDoc && villagesDoc.villages) || []).forEach(function(v) { out[v.project] = villageSnapshot(v, null, opts) })
+  var out = {}, now = (opts && opts.now) || Date.now()
+  ;((villagesDoc && villagesDoc.villages) || []).forEach(function(v) { out[v.project] = villageSnapshot(v, null, now, opts) })
   return out
 }
 
@@ -113,9 +135,9 @@ function snapshotOf(villagesDoc, opts) {
 function villageEvents(base, v, was, opts) {
   var Model = modelOf(opts), events = [], project = v.project
   var village = deepLink(base, project, "")
-  var oldNeeds = was.needs || [], oldDeploys = was.deploys || []
+  var oldNeeds = was.needs || [], oldSeen = was.seen || {}, oldEnvs = was.envs || {}
   Model.attention(base, v).forEach(function(a) {
-    if (oldNeeds.indexOf(a.key) >= 0) return
+    if (oldNeeds.indexOf(a.key) >= 0 || oldSeen[a.key]) return
     var e = { kind: a.kind, project: project, key: a.key, url: a.house ? deepLink(base, project, a.house) : village }
     if (a.kind === "gate") {
       e.title = project + ": " + a.what.toLowerCase() + " on " + a.title
@@ -129,19 +151,30 @@ function villageEvents(base, v, was, opts) {
     }
     events.push(e)
   })
-  var build = Model.buildState(v), wasBuild = was.build || "unknown"
-  if (build === "red" && !was.broken && wasBuild !== "unknown") {
+  var build = Model.buildState(v)
+  if (build === "red" && !was.broken && was.known) {
     events.push({ kind: "build", project: project, key: "build:red", title: project + ": build broken", body: Model.buildWords(v), url: village })
   } else if (build === "green" && was.broken) {
     events.push({ kind: "build", project: project, key: "build:green", title: project + ": build fixed", body: "The integration branch is green again.", url: village })
   }
-  var deploys = deploysOf(v)
-  Object.keys(deploys).forEach(function(key) {
-    if (oldDeploys.indexOf(key) >= 0) return
-    var d = deploys[key], what = d.tag || shortSha(d.sha)
-    events.push(d.state === "failed"
-      ? { kind: "deploy", project: project, key: key, title: project + ": deploy to " + d.env + " failed", body: what + " did not land; " + d.env + " keeps what it ran.", url: village }
-      : { kind: "deploy", project: project, key: key, title: project + ": " + what + " deployed to " + d.env, body: d.from && d.from !== "dev" ? "Promoted from " + d.from + "." : "", url: village })
+  // A deploy is an environment running a new commit. A stop is news only
+  // once its environment was known; a docked voyage is news by itself.
+  var docked = {}
+  ;(((v.pipeline || {}).voyages) || []).forEach(function(y) { if (y.state === "docked" && y.sha) docked[y.to] = y })
+  var envs = envsOf(v, null)
+  Object.keys(envs).forEach(function(env) {
+    var now = envs[env], before = oldEnvs[env]
+    if (before ? before.sha === now.sha : !docked[env]) return
+    var what = now.tag || shortSha(now.sha)
+    events.push({ kind: "deploy", project: project, key: "deploy:" + env + ":" + now.sha, url: village,
+      title: project + ": " + what + " deployed to " + env,
+      body: now.from && now.from !== "dev" ? "Promoted from " + now.from + "." : "" })
+  })
+  failedVoyages(v).forEach(function(y) {
+    var key = "failed:" + y.to + ":" + y.sha
+    if (oldSeen[key]) return
+    events.push({ kind: "deploy", project: project, key: key, url: village, title: project + ": deploy to " + y.to + " failed",
+      body: (y.tag || shortSha(y.sha)) + " did not land; " + y.to + " keeps what it ran." })
   })
   return events
 }
@@ -150,15 +183,22 @@ function villageEvents(base, v, was, opts) {
 // first poll ever); a village it does not know is only recorded. A village
 // missing from this poll keeps its old snapshot, so a server that briefly
 // drops it does not make everything news again when it comes back.
+// `opts.now` (ms) is the clock, for tests.
 function step(prev, villagesDoc, base, opts) {
-  var next = {}, events = []
+  var next = {}, events = [], now = (opts && opts.now) || Date.now()
   var old = prev && typeof prev === "object" ? prev : {}
   Object.keys(old).forEach(function(p) { next[p] = old[p] })
   ;((villagesDoc && villagesDoc.villages) || []).forEach(function(v) {
-    next[v.project] = villageSnapshot(v, old[v.project], opts)
+    next[v.project] = villageSnapshot(v, old[v.project], now, opts)
     if (old[v.project]) events = events.concat(villageEvents(base, v, old[v.project], opts))
   })
   return { snapshot: next, events: events }
+}
+
+// Notification daemons (mako, swaync) read the body as Pango markup: an
+// issue title with < or & would break it.
+function markup(text) {
+  return String(text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 
 // What to send: the events the settings want, outside quiet hours, a burst
@@ -184,6 +224,6 @@ function notifications(events, settings, date) {
 if (typeof module !== "undefined") {
   module.exports = {
     KINDS: KINDS, settingsOf: settingsOf, quietHours: quietHours, isQuiet: isQuiet, deepLink: deepLink,
-    deploysOf: deploysOf, snapshotOf: snapshotOf, villageEvents: villageEvents, step: step, notifications: notifications
+    envsOf: envsOf, markup: markup, GRACE_MS: GRACE_MS, snapshotOf: snapshotOf, villageEvents: villageEvents, step: step, notifications: notifications
   }
 }

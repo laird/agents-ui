@@ -78,7 +78,7 @@ Item {
       id: proc
       property var note: ({})
       command: ["notify-send", "--app-name=Agents village", "--icon=dialog-information",
-                "--action=default=Open village", String(note.title || ""), String(note.body || "")]
+                "--action=default=Open village", String(note.title || ""), Notify.markup(note.body)]
       running: true
       stdout: StdioCollector {
         onStreamFinished: if (this.text.trim() === "default") root.open(proc.note.url)

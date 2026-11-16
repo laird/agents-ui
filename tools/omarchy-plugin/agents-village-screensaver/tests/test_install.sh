@@ -239,8 +239,8 @@ n="$HOME/.config/agents-ui/notify.json"
 grep -q "omarchy plugin enable agents-ui.village-notify" "$T/calls" && ok "notify: service enabled" || fail "notify: not enabled: $(cat "$T/calls")"
 [ ! -e "$HOME/.config/agents-ui/screensaver.json" ] && ok "notify: the screensaver is left alone" || fail "notify wrote screensaver.json"
 bash "$INSTALL" --notify >/dev/null 2>&1 || fail "notify reinstall"
-[ "$(jq -r .quiet "$n")" = 22-6 ] && [ "$(jq -r .server "$n")" = http://nuc-1:7890 ] \
-  && ok "notify: reinstall without --quiet keeps the quiet hours" || fail "notify reinstall: $(cat "$n")"
+[ "$(jq -r .quiet "$n")" = 22-6 ] && [ "$(jq -r .server "$n")" = http://box:7890 ] \
+  && ok "notify: reinstall without --quiet or --server keeps both" || fail "notify reinstall: $(cat "$n")"
 out=$(bash "$INSTALL" --notify --uninstall 2>&1) || fail "notify uninstall exited: $out"
 [ ! -e "$HOME/.config/omarchy/plugins/agents-village-notify" ] && [ ! -e "$n" ] && ok "notify: uninstall removes it and its settings" || fail "notify uninstall left things"
 grep -q "omarchy plugin disable agents-ui.village-notify" "$T/calls" && ok "notify: uninstall disables it" || fail "notify: not disabled"
@@ -260,6 +260,8 @@ bash "$INSTALL" --never-sleep >/dev/null 2>&1 && fail "--never-sleep without --s
 bash "$INSTALL" --screensaver --dim 25-3 --dry-run >/dev/null 2>&1 && fail "bad --dim accepted" || ok "bad --dim refused"
 bash "$INSTALL" --screensaver --cycle x --dry-run >/dev/null 2>&1 && fail "bad --cycle accepted" || ok "bad --cycle refused"
 bash "$INSTALL" --notify --quiet 7 --dry-run >/dev/null 2>&1 && fail "bad --quiet accepted" || ok "bad --quiet refused"
+bash "$INSTALL" --notify --quiet 7-7 --dry-run >/dev/null 2>&1 && fail "--quiet 7-7 accepted" || ok "--quiet with one hour twice refused"
+bash "$INSTALL" --notify --quiet 08-09 --dry-run >/dev/null 2>&1 && ok "--quiet with leading zeros taken" || fail "--quiet 08-09 refused"
 bash "$INSTALL" --quiet 23-7 --dry-run >/dev/null 2>&1 && fail "--quiet without --notify accepted" || ok "--quiet needs --notify"
 bash "$INSTALL" --notify --screensaver --dry-run >/dev/null 2>&1 && fail "--notify with --screensaver accepted" || ok "--notify and --screensaver install separately"
 
