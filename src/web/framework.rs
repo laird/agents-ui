@@ -761,7 +761,7 @@ pub fn to_village(report: &Report) -> Reading {
             continue;
         }
         match t.state {
-            TaskState::Blocked | TaskState::Failed => board.push(Note { number: n, title: t.title.clone(), label: note_label(t), url: t.url.clone() }),
+            TaskState::Blocked | TaskState::Failed => board.push(Note { number: n, title: t.title.clone(), label: note_label(t), url: t.url.clone(), priority: priority(&t.priority) }),
             TaskState::Open => backlog.push(Crate { number: n, title: t.title.clone(), kind: house_kind(&t.labels), priority: priority(&t.priority), url: t.url.clone(), waits_on: waits_on(t), parent: t.parent.as_deref().filter(|p| !p.trim().is_empty()).map(task_number) }),
             TaskState::Claimed | TaskState::Done => {}
         }
@@ -1113,7 +1113,7 @@ impl ReportVillages {
     fn broken(&self, why: &str) -> Reading {
         let mut r = to_village(&Report { project: self.spec.label(), framework: "unknown".into(), ..Report::default() });
         r.village.manager.status = HouseStatus::Unknown;
-        r.village.board.push(Note { number: 0, title: format!("Can't read {}: {why}", self.spec.label()), label: "unreachable".to_string(), url: None });
+        r.village.board.push(Note { number: 0, title: format!("Can't read {}: {why}", self.spec.label()), label: "unreachable".to_string(), url: None, priority: None });
         r
     }
 }

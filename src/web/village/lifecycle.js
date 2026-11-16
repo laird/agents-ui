@@ -240,7 +240,9 @@ const docks = (o, sc, theme) => ({ title: theme.labels.docks, line: isRuntime(sc
 registerHit({ kind: 'river', key: false, dialog: docks });
 registerHit({ kind: 'docks', dialog: docks });
 registerHit({ kind: 'board', dialog: (o, sc, theme) =>
-  ({ title: theme.labels.board, line: isRuntime(sc.v) ? 'Failed in the last 24 hours' : 'Blocked issues and proposals waiting on you', items: sc.v.board }) });
+  ({ title: theme.labels.board, line: isRuntime(sc.v) ? 'Failed in the last 24 hours' : 'Blocked issues and proposals waiting on you', items: sc.v.board,
+    // Proposals get Approve / Reject / Ask for changes (proposals.js).
+    decide: isRuntime(sc.v) ? null : sc.v.project }) });
 registerHit({ kind: 'hall', dialog(o, sc, theme) {
   const v = sc.v, runtime = isRuntime(v);
   const m = v.manager, s = sessionOf(m), swarm = s && s.url.replace(/\/agent\/[^/]+$/, '');

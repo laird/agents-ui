@@ -195,6 +195,19 @@ impl ProjectManagementClient {
         ProjectCommand::new(self.program(), args)
     }
 
+    /// Close an issue, saying why in a comment.
+    pub fn close_issue(&self, issue_id: impl std::fmt::Display, comment: &str) -> ProjectCommand {
+        let mut args = vec![
+            "issue".to_string(),
+            "close".to_string(),
+            issue_id.to_string(),
+            "--comment".to_string(),
+            comment.to_string(),
+        ];
+        self.append_backend_auth_args(&mut args);
+        ProjectCommand::new(self.program(), args)
+    }
+
     /// Command text sent to manager sessions for issue creation.
     pub fn manager_create_issue_prompt(&self, labels_csv: &str, title: &str) -> String {
         let backend = match self.backend {
@@ -287,6 +300,13 @@ mod tests {
                 "enhancement,P3",
             ]
         );
+    }
+
+    #[test]
+    fn github_close_issue_says_why() {
+        let cmd = ProjectManagementClient::github().close_issue(483, "Rejected");
+        assert_eq!(cmd.program, "gh");
+        assert_eq!(cmd.args, vec!["issue", "close", "483", "--comment", "Rejected"]);
     }
 
     #[test]

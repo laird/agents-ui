@@ -398,6 +398,7 @@ fn unreachable(source: &TemporalSource) -> VillageSnapshot {
         title: format!("Can't reach Temporal's HTTP API at {}", source.http_url),
         label: "unreachable".to_string(),
         url: source.ui_url.clone(),
+        priority: None,
     });
     v
 }

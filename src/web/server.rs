@@ -1161,6 +1161,10 @@ pub async fn run(addrs: &[SocketAddr], read_only: bool, state: WebServerState) -
             post(api_answer_handler),
         )
         .route(
+            "/api/swarms/{project}/issues/{number}/decision",
+            post(super::proposals::api_decision_handler),
+        )
+        .route(
             "/api/swarms/{project}/agents/{role}/pane/stream",
             get(api_pane_stream_handler),
         )
@@ -1254,6 +1258,10 @@ mod tests {
                 "/api/swarms/{project}/agents/{role}/keys",
                 post(api_keys_batch_handler),
             )
+            .route(
+                "/api/swarms/{project}/issues/{number}/decision",
+                post(crate::web::proposals::api_decision_handler),
+            )
             .with_state(state)
     }
 
@@ -1330,6 +1338,37 @@ mod tests {
         assert_eq!(app.clone().oneshot(post).await.unwrap().status(), StatusCode::FORBIDDEN);
         let get = Request::builder().uri("/api/village").body(Body::empty()).unwrap();
         assert_eq!(app.oneshot(get).await.unwrap().status(), StatusCode::OK);
+    }
+
+    fn decision(project: &str, body: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/swarms/{project}/issues/7/decision"))
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_read_only_server_refuses_board_decisions() {
+        // The board's buttons read the 403 and say so (proposals.js).
+        let shared = std::sync::Arc::new(std::sync::RwLock::new(vec![sample_swarm("p")]));
+        let app = make_app(make_web_state(shared)).layer(axum::middleware::from_fn(reject_writes));
+        let resp = app.oneshot(decision("p", r#"{"action":"approve"}"#)).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn a_board_decision_needs_a_swarm_and_words_for_changes() {
+        let shared = std::sync::Arc::new(std::sync::RwLock::new(vec![sample_swarm("p")]));
+        let app = make_app(make_web_state(shared));
+        let ghost = app.clone().oneshot(decision("ghost", r#"{"action":"approve"}"#)).await.unwrap();
+        assert_eq!(ghost.status(), StatusCode::NOT_FOUND);
+        // Refused before any tracker is asked.
+        let wordless = app.clone().oneshot(decision("p", r#"{"action":"changes","comment":" "}"#)).await.unwrap();
+        assert_eq!(wordless.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let unknown = app.oneshot(decision("p", r#"{"action":"delete"}"#)).await.unwrap();
+        assert!(unknown.status().is_client_error());
     }
 
     #[tokio::test]

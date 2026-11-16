@@ -6,7 +6,7 @@
  * `url`s); the repo's own pages (commits, deployments, releases) only when a
  * real issue URL shows which GitHub repo this is, never a guess. */
 import { state } from './state.js';
-import { HITS, hitAt, registerOverlay } from './registry.js';
+import { DIALOG_PARTS, HITS, hitAt, registerOverlay } from './registry.js';
 import { cv, shownScale, shownScenes, themeAt } from './layout.js';
 import { toScene } from './detail.js';
 import { esc } from './panels.js';
@@ -90,10 +90,11 @@ export function openInfo(info) {
   // ("Runs: no Deployment and no branchNothing here.").
   const meta = (info.meta || []).filter(Boolean).map(m => `<span class="fact">${esc(m)}</span>`).join('');
   const items = info.items && (info.items.length
-    ? `<ul>${info.items.map(i => `<li>${i.url ? `<a href="${esc(i.url)}" target="_blank" rel="noopener">#${i.number}</a>` : '#' + i.number} ${esc(i.title || '')}${i.label ? ' · ' + esc(i.label) : ''}${i.priority ? ' · ' + esc(i.priority) : ''}${(i.waits_on || []).length ? ' · waits on ' + i.waits_on.map(d => '#' + d).join(', ') : ''}</li>`).join('')}</ul>`
+    ? `<ul>${info.items.map(i => `<li data-n="${esc(i.number)}">${i.url ? `<a href="${esc(i.url)}" target="_blank" rel="noopener">#${i.number}</a>` : '#' + i.number} ${esc(i.title || '')}${i.label ? ' · ' + esc(i.label) : ''}${i.priority ? ' · ' + esc(i.priority) : ''}${(i.waits_on || []).length ? ' · waits on ' + i.waits_on.map(d => '#' + d).join(', ') : ''}</li>`).join('')}</ul>`
     : '<span class="fact">Nothing here.</span>');
   document.getElementById('d-meta').innerHTML = [meta, items].filter(Boolean).join('');
   ask(info.house || {});
+  DIALOG_PARTS.forEach(part => part(info));
   links((info.links || []).filter(Boolean));
   dialog.hidden = false;
 }

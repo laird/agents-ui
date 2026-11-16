@@ -51,6 +51,10 @@ pub trait VillageSource: Send + Sync {
     /// `swarms` are the ones discovery found; sources that don't build on
     /// swarms ignore them.
     fn read<'a>(&'a self, transport: &'a ServerTransport, swarms: &'a [SwarmSnapshot]) -> BoxFuture<'a, Vec<Reading>>;
+    /// Drop what it has cached for `repo`, so the next read asks again: an
+    /// issue the village just changed (a proposal approved from the board)
+    /// moves on the next poll, not a TTL later.
+    fn forget(&self, _repo: &Path) {}
 }
 
 /// Who is working: the swarms running under some agent host.
@@ -238,6 +242,13 @@ impl<K: Eq + Hash, V: Clone> TtlCache<K, V> {
             m.insert(key, (Instant::now(), v.clone()));
         }
         v
+    }
+
+    /// Drop `key`'s value, so the next `get_or` fetches it again.
+    pub fn forget(&self, key: &K) {
+        if let Ok(mut m) = self.entries.lock() {
+            m.remove(key);
+        }
     }
 }
 
@@ -502,6 +513,13 @@ impl Villages {
         Self::new(sources, worlds)
     }
 
+    /// Every source forgets what it cached for `repo` (`VillageSource::forget`).
+    pub fn forget(&self, repo: &Path) {
+        for source in self.sources.iter() {
+            source.forget(repo);
+        }
+    }
+
     pub fn source_names(&self) -> Vec<String> {
         self.sources.iter().map(|s| s.name()).collect()
     }
@@ -533,6 +551,15 @@ impl Villages {
 
 #[cfg(test)]
 mod tests {
+
+    #[tokio::test]
+    async fn a_forgotten_entry_is_fetched_again() {
+        let cache: TtlCache<u32, u32> = TtlCache::new(Duration::from_secs(3600));
+        assert_eq!(cache.get_or(1, || async { 10 }).await, 10);
+        assert_eq!(cache.get_or(1, || async { 20 }).await, 10, "cached");
+        cache.forget(&1);
+        assert_eq!(cache.get_or(1, || async { 30 }).await, 30, "asked again");
+    }
     use super::*;
     use crate::web::village::{House, HouseKind, HouseStatus};
 

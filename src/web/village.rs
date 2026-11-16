@@ -217,6 +217,10 @@ pub struct Note {
     pub label: String,
     #[serde(default)]
     pub url: Option<String>,
+    /// `P0`..`P3`, when the issue has one: the board's "approve all P3 and
+    /// below" picks proposals by it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<String>,
 }
 
 /// Where a stop's idea of "what runs here" comes from.
@@ -1235,6 +1239,9 @@ impl VillageSource for SwarmVillages {
     fn name(&self) -> String {
         format!("swarms ({}, {}, {})", self.issues.name(), self.pipeline.name(), self.activity.name())
     }
+    fn forget(&self, repo: &std::path::Path) {
+        self.extras.forget(&repo.to_path_buf());
+    }
     fn read<'a>(&'a self, transport: &'a ServerTransport, swarms: &'a [SwarmSnapshot]) -> BoxFuture<'a, Vec<Reading>> {
         Box::pin(async move {
             let mut out = Vec::with_capacity(swarms.len());
@@ -1456,7 +1463,7 @@ mod tests {
             issue(2, &["bug", "P2"]),
             issue(3, &["enhancement", "P0"]),
             issue(4, &["needs-design"]),
-            issue(5, &["proposal"]),
+            issue(5, &["proposal", "P3"]),
             issue(6, &["working"]),
             issue(7, &["bug", "P3"]),
         ];
@@ -1466,6 +1473,9 @@ mod tests {
         assert_eq!(backlog, vec![3, 2], "P0 first, claimed and in-transit excluded");
         let board: Vec<(u32, &str)> = v.board.iter().map(|n| (n.number, n.label.as_str())).collect();
         assert_eq!(board, vec![(4, "needs-design"), (5, "proposal")]);
+        // The board's "approve all P3 and below" picks by it (#483).
+        let priorities: Vec<Option<&str>> = v.board.iter().map(|n| n.priority.as_deref()).collect();
+        assert_eq!(priorities, vec![None, Some("P3")]);
     }
 
     #[test]

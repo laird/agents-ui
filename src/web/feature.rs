@@ -375,7 +375,7 @@ mod tests {
 
     #[test]
     fn blocked_subtasks_make_the_feature_stuck() {
-        let board = vec![Note { number: 463, title: "Sub 463".into(), label: "needs-design".into(), url: None }];
+        let board = vec![Note { number: 463, title: "Sub 463".into(), label: "needs-design".into(), url: None, priority: None }];
         let v = village(&[461], [&[], &[], &[], &[]], vec![house(Some(462), HouseStatus::Blocked)], board);
         let f = &follow(&v, &[four()])[0];
         assert_eq!(f.stuck, vec![462, 463]);
@@ -452,7 +452,7 @@ mod tests {
     fn specified_or_worked_on_subtasks_keep_the_flag() {
         let none = village(&[], [&[], &[], &[], &[]], vec![], vec![]);
         assert!(flagged(&none, four()), "backlog");
-        let board = vec![Note { number: 461, title: "Sub 461".into(), label: "needs-design".into(), url: None }];
+        let board = vec![Note { number: 461, title: "Sub 461".into(), label: "needs-design".into(), url: None, priority: None }];
         let pinned = village(&[], [&[], &[], &[], &[462, 463, 464]], vec![], board);
         assert!(flagged(&pinned, four()), "board");
         let worked = village(&[], [&[], &[], &[], &[462, 463, 464]], vec![house(Some(461), HouseStatus::Working)], vec![]);
