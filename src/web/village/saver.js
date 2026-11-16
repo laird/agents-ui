@@ -66,7 +66,19 @@ export function saverSummary(v) {
     quay: (p.quay || []).length,
     stops: (p.stops || []).map(s => ({ name: s.name, count: (s.issues || []).length })),
     build: (v && v.build) || null,
+    landed: landedWords(v && v.github),
   };
+}
+
+/* "7 landed today (avg 9)" (#500): today's landed issues and the mean over the
+ * days #498's GitHub summary carries (14, today last), rounded. null when the
+ * village has no summary (no gh, or not signed in): the strip shows nothing. */
+export function landedWords(github) {
+  const days = github && Array.isArray(github.days) ? github.days : [];
+  if (!days.length) return null;
+  const n = d => Number(d && d.landed) || 0;
+  const avg = Math.round(days.reduce((sum, d) => sum + n(d), 0) / days.length);
+  return `${n(days[days.length - 1])} landed today (avg ${avg})`;
 }
 
 /* The strip's build entry (#413's `build`, #415): a red build is "BUILD

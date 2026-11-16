@@ -45,6 +45,7 @@ function renderSaverStrip(box, lastOk) {
       <span class="ss-item${s.gate.failed ? ' ss-red' : ''}">Gate <b>${esc(gateWords(s.gate))}</b></span>
       <span class="ss-item"><b>${s.quay}</b> at the quay</span>
       ${stops}
+      ${s.landed ? `<span class="ss-item ss-landed">${esc(s.landed)}</span>` : ''}
       <span class="ss-wait${s.waiting ? ' ss-red' : ''}">${s.waiting ? `<b>${s.waiting}</b> waiting on you` : 'Nothing waiting on you'}</span>
     </div>`;
 }

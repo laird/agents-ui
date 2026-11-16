@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  buildEntry, staleWords, cycleOrder, dimmedAt, dismisses, driftAt, gateWords, hashName, nextName, saverOptions, saverSummary,
+  buildEntry, staleWords, cycleOrder, dimmedAt, dismisses, driftAt, gateWords, hashName, landedWords, nextName, saverOptions, saverSummary,
 } from '../../../../src/web/village/saver.js';
 
 const fixture = JSON.parse(readFileSync(new URL('../../agents-village/tests/fixtures/village.json', import.meta.url)));
@@ -64,7 +64,27 @@ test('the strip counts houses, the gate, the quay, each stop and what waits on y
     quay: 3,
     stops: [{ name: 'nuc-1', count: 1 }, { name: 'release', count: 0 }],
     build: null,
+    landed: null,
   });
+});
+
+test('"N landed today (avg M)" from the GitHub summary (#500)', () => {
+  const days = landed => landed.map((n, i) => ({ date: `2026-11-${String(i + 1).padStart(2, '0')}`, landed: n, opened: 0, bounced: 0 }));
+  // 14 days, today last: the mean of 126 over 14 is 9.
+  const github = { as_of: '2026-11-14T12:00:00Z', days: days([9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 11, 7]) };
+  assert.equal(landedWords(github), '7 landed today (avg 9)');
+  assert.equal(landedWords({ days: days([0, 0, 1, 2]) }), '2 landed today (avg 1)', 'rounded: 0.75 is 1');
+  assert.equal(landedWords({ days: days([1, 2]) }), '2 landed today (avg 2)', 'rounded: 1.5 is 2');
+  assert.equal(landedWords({ days: days([5, 0]) }), '0 landed today (avg 3)', 'nothing yet today still says so');
+  assert.equal(saverSummary({ project: 'x', houses: [], github, pipeline: { quay: [], stops: [] } }).landed, '7 landed today (avg 9)');
+});
+
+test('no GitHub summary: nothing to say', () => {
+  assert.equal(landedWords(undefined), null);
+  assert.equal(landedWords(null), null);
+  assert.equal(landedWords({ as_of: 'x', days: [] }), null);
+  assert.equal(landedWords({ reason: 'gh is not signed in' }), null);
+  assert.equal(saverSummary({ project: 'x', houses: [], pipeline: { quay: [], stops: [] } }).landed, null);
 });
 
 test('the strip copes with a recorded village and with an empty one', () => {
