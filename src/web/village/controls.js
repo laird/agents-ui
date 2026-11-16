@@ -11,10 +11,12 @@ import { registerDialogPart } from './registry.js';
 import { esc } from './panels.js';
 import { confirmWords, controlAnswer, controlChoices, controlUrl, previewUrl, CONTROLS } from './controlwords.js';
 
-/* Whether this server takes control requests: asked once. */
+/* Whether this server takes control requests: asked once it answers (a
+ * failed ask is asked again next time, not remembered as read-only). */
 let writable = null;
 function canWrite() {
-  if (!writable) writable = fetch('/api/config').then(r => (r.ok ? r.json() : {})).then(c => !c.read_only).catch(() => false);
+  if (!writable) writable = fetch('/api/config').then(r => (r.ok ? r.json() : Promise.reject(r.status))).then(c => !c.read_only)
+    .catch(() => { writable = null; return false; });
   return writable;
 }
 
