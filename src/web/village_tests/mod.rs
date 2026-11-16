@@ -9,6 +9,7 @@ mod envrow;
 mod fit;
 mod gatehouse;
 mod ghlinks;
+mod ghpanel;
 mod labels_key;
 mod lifecycle;
 mod newissue;

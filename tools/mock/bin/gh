@@ -70,6 +70,14 @@ if demo:
         if args[:2] == ["issue", "list"]:
             sys.stdout.write(json.dumps(state(demo, "issues", name, [])))
             sys.exit(0)
+        if args[:2] == ["pr", "list"]:
+            # Two open pull requests, one asking for your review (the GitHub panel, #492).
+            import datetime
+            now = datetime.datetime.now(datetime.timezone.utc)
+            ago = lambda h: (now - datetime.timedelta(hours=h)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            prs = [{"number": 7, "createdAt": ago(5)}, {"number": 4, "createdAt": ago(70)}]
+            print(json.dumps(prs[:1] if "review-requested:@me" in args else prs))
+            sys.exit(0)
         if args[:2] == ["repo", "view"]:
             print(json.dumps({"name": name}))
             sys.exit(0)

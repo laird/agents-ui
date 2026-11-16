@@ -3,23 +3,30 @@
 //!
 //! The almanac (#485) and the GitHub panel (#492) both read it, so a wall
 //! display makes one set of GitHub calls per refresh, however many features
-//! or browsers want it. A refresh is three reads:
+//! or browsers want it. A refresh is six reads, all at once:
 //!
 //! - one `gh issue list --state all` of the issues updated in the window,
 //!   with their comments: what was opened, what landed and when it was
 //!   claimed, and where the merge gate handed work back (its comments, as
 //!   `gate::comment_bounce` reads them, #431);
 //! - one `gh api .../deployments`: what was deployed each day;
-//! - the integration branch's `git log`, locally: what was reverted.
+//! - the integration branch's `git log`, locally: what was reverted, and
+//!   what landed in the last 24 h (#492);
+//! - for the GitHub panel (#492): one `gh pr list` of the open pull requests,
+//!   one `gh pr list --search review-requested:@me` of those waiting on you,
+//!   and one `gh issue list --state open` with labels. The issue read above
+//!   can't serve the labels: it only has issues updated in the window, and an
+//!   old proposal still waiting is open all the same.
 //!
 //! Each is cached per repo for [`refresh_ttl`] (90 s), and nothing is ever
 //! written, so it works on a `--read-only` server. When `gh` is missing or not
 //! signed in there is no summary: the village leaves `github` out and draws as
 //! before.
 //!
-//! #492 adds its fields (open PRs, review requests, issues by label, recent
-//! merges) to [`Summary`] and to [`fetch`], under the same cache.
+//! Each of the panel's reads that fails leaves its fields out, so the panel
+//! says it couldn't read them rather than showing zeros.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -54,6 +61,29 @@ pub struct Summary {
     /// the issues landed in the window whose claim is on record.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub median_claim_to_land_secs: Option<u64>,
+    /// Issues closed today, for any reason (#492).
+    #[serde(default)]
+    pub closed_today: u32,
+    /// Open pull requests (#492); absent when `gh pr list` couldn't be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open_prs: Option<u32>,
+    /// When the oldest open pull request was opened (RFC 3339).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oldest_pr_at: Option<String>,
+    /// Open pull requests asking for a review from the account this server's
+    /// `gh` is signed in as, or its teams (#492): `review-requested:@me`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_requests: Option<u32>,
+    /// Open issues (#492); absent when they couldn't be listed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open_issues: Option<u32>,
+    /// Open issues per label: `proposal`, `needs-*`, `P0`–`P3` and the rest.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub open_by_label: BTreeMap<String, u32>,
+    /// Commits that reached the integration branch in the last 24 h (#492);
+    /// absent when its log can't be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commits_24h: Option<u32>,
 }
 
 /// One day's throughput.
@@ -125,9 +155,13 @@ pub fn summarize(issues: &[u8], deployments: Option<&str>, log: Option<&str>, to
         .collect();
     let slot = |at: &str| local_date(at, &offset).filter(|d| *d >= first && *d <= today).map(|d| (d - first).num_days() as usize);
     let mut waits = Vec::new();
+    let mut closed_today = 0;
     for issue in &issues {
         if let Some(k) = slot(&issue.created_at) {
             days[k].opened += 1;
+        }
+        if issue.state.eq_ignore_ascii_case("closed") && issue.closed_at.as_deref().and_then(|at| local_date(at, &offset)) == Some(today) {
+            closed_today += 1;
         }
         let landed = issue.state.eq_ignore_ascii_case("closed")
             && !matches!(issue.state_reason.as_deref().map(str::to_ascii_uppercase).as_deref(), Some("NOT_PLANNED") | Some("DUPLICATE"));
@@ -172,7 +206,69 @@ pub fn summarize(issues: &[u8], deployments: Option<&str>, log: Option<&str>, to
             }
         }
     }
-    Some(Summary { as_of, days, median_claim_to_land_secs: median(&mut waits) })
+    Some(Summary { as_of, days, median_claim_to_land_secs: median(&mut waits), closed_today, ..Summary::default() })
+}
+
+/// An open pull request as `gh pr list --json number,createdAt` gives it.
+#[derive(Debug, Deserialize)]
+struct Pr {
+    #[serde(default, rename = "createdAt")]
+    created_at: String,
+}
+
+/// `gh pr list --json number,createdAt` → how many, and when the oldest was
+/// opened; `None` when it isn't a listing.
+pub fn parse_prs(json: &[u8]) -> Option<(u32, Option<String>)> {
+    let prs: Vec<Pr> = serde_json::from_slice(json).ok()?;
+    let oldest = prs.iter().filter_map(|p| DateTime::parse_from_rfc3339(&p.created_at).ok().map(|t| (t, &p.created_at))).min_by_key(|(t, _)| *t);
+    Some((prs.len() as u32, oldest.map(|(_, at)| at.clone())))
+}
+
+#[derive(Debug, Deserialize)]
+struct Labelled {
+    #[serde(default)]
+    labels: Vec<Label>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Label {
+    #[serde(default)]
+    name: String,
+}
+
+/// `gh issue list --state open --json number,labels` → how many are open,
+/// and how many carry each label; `None` when it isn't a listing.
+pub fn parse_open_issues(json: &[u8]) -> Option<(u32, BTreeMap<String, u32>)> {
+    let issues: Vec<Labelled> = serde_json::from_slice(json).ok()?;
+    let mut by = BTreeMap::new();
+    for l in issues.iter().flat_map(|i| &i.labels).filter(|l| !l.name.is_empty()) {
+        *by.entry(l.name.clone()).or_insert(0) += 1;
+    }
+    Some((issues.len() as u32, by))
+}
+
+/// Commits in `log` (`git log --format=%cI%x09%s`) committed at or after
+/// `since`: what reached the integration branch since then.
+pub fn commits_since(log: &str, since: DateTime<FixedOffset>) -> u32 {
+    log.lines()
+        .filter_map(|l| l.split_once('\t'))
+        .filter(|(at, _)| DateTime::parse_from_rfc3339(at.trim()).is_ok_and(|t| t >= since))
+        .count() as u32
+}
+
+/// What the GitHub panel (#492) reads besides the issues: `prs` (`gh pr
+/// list`), `reviews` (the same, searched for review requests), `open`
+/// (`gh issue list --state open` with labels), each if it could be read, and
+/// the integration branch's `log` up to `now`. What wasn't read stays absent.
+pub fn add_panel(s: &mut Summary, prs: Option<&[u8]>, reviews: Option<&[u8]>, open: Option<&[u8]>, log: Option<&str>, now: DateTime<FixedOffset>) {
+    if let Some((n, oldest)) = prs.and_then(parse_prs) {
+        (s.open_prs, s.oldest_pr_at) = (Some(n), oldest);
+    }
+    s.review_requests = reviews.and_then(parse_prs).map(|(n, _)| n);
+    if let Some((n, by)) = open.and_then(parse_open_issues) {
+        (s.open_issues, s.open_by_label) = (Some(n), by);
+    }
+    s.commits_24h = log.map(|l| commits_since(l, now - chrono::Duration::hours(24)));
 }
 
 fn median(xs: &mut [u64]) -> Option<u64> {
@@ -186,8 +282,9 @@ fn median(xs: &mut [u64]) -> Option<u64> {
 
 /// Read GitHub and git for `repo`, whose work lands on `integration`. `None`
 /// when `gh` can't list its issues (missing, signed out, rate limited). The
-/// three reads run together. The issue list stops at 500, about three times
-/// what this repo updates in 14 days.
+/// six reads run together. The issue list stops at 500, about three times
+/// what this repo updates in 14 days; the panel's at 500 pull requests and
+/// 1000 open issues.
 pub async fn fetch(transport: &ServerTransport, repo: &Path, integration: &str) -> Option<Summary> {
     let now = chrono::Local::now();
     let (today, offset) = (now.date_naive(), *now.offset());
@@ -200,10 +297,14 @@ pub async fn fetch(transport: &ServerTransport, repo: &Path, integration: &str) 
     .iter()
     .map(|s| s.to_string())
     .collect();
-    let issues = async {
+    let gh = |args: Vec<String>| async move {
         let out = crate::github::gh_repo_output(transport, repo, &args).await.ok()?;
         out.status.success().then_some(out.stdout)
     };
+    let issues = gh(args);
+    let prs = gh(PR_LIST.iter().map(|s| s.to_string()).collect());
+    let reviews = gh(PR_LIST.iter().map(|s| s.to_string()).chain(["--search".into(), "review-requested:@me".into()]).collect());
+    let open = gh(OPEN_ISSUES.iter().map(|s| s.to_string()).collect());
     let deployments = super::deployments::gh_api(transport, repo, "repos/{owner}/{repo}/deployments?per_page=100");
     let log = async {
         if integration.is_empty() {
@@ -213,9 +314,16 @@ pub async fn fetch(transport: &ServerTransport, repo: &Path, integration: &str) 
         let out = transport.output("git", &args, Some(repo)).await.ok()?;
         out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
     };
-    let (issues, deployments, log) = futures::join!(issues, deployments, log);
-    summarize(&issues?, deployments.as_deref(), log.as_deref(), today, offset, now.to_rfc3339_opts(chrono::SecondsFormat::Secs, false))
+    let (issues, deployments, log, prs, reviews, open) = futures::join!(issues, deployments, log, prs, reviews, open);
+    let mut s = summarize(&issues?, deployments.as_deref(), log.as_deref(), today, offset, now.to_rfc3339_opts(chrono::SecondsFormat::Secs, false))?;
+    add_panel(&mut s, prs.as_deref(), reviews.as_deref(), open.as_deref(), log.as_deref(), now.fixed_offset());
+    Some(s)
 }
+
+/// The panel's pull request read (#492): the open ones, when each was opened.
+const PR_LIST: [&str; 8] = ["pr", "list", "--state", "open", "--limit", "500", "--json", "number,createdAt"];
+/// The panel's open issues, with their labels.
+const OPEN_ISSUES: [&str; 8] = ["issue", "list", "--state", "open", "--limit", "1000", "--json", "number,labels"];
 
 /// Summaries per repo and integration branch, each reused for
 /// [`refresh_ttl`]: polls inside it make no `gh` calls. A failed read is
@@ -366,6 +474,81 @@ mod tests {
         assert_eq!(cache.get_with(other, "master", fail).await, None);
         assert_eq!(cache.get_with(other, "master", fail).await, None);
         assert_eq!(fails.load(Ordering::SeqCst), 1);
+    }
+
+    /// `gh pr list --state open --json number,createdAt`, as GitHub answers it.
+    const PRS: &str = r#"[
+      {"number": 12, "createdAt": "2026-11-15T09:00:00Z"},
+      {"number": 9, "createdAt": "2026-11-02T18:30:00Z"},
+      {"number": 14, "createdAt": "2026-11-16T05:00:00Z"}
+    ]"#;
+    /// The same, searched `review-requested:@me`.
+    const REVIEWS: &str = r#"[{"number": 12, "createdAt": "2026-11-15T09:00:00Z"}]"#;
+    /// `gh issue list --state open --json number,labels`.
+    const OPEN: &str = r#"[
+      {"number": 501, "labels": [{"id": "a", "name": "proposal", "color": "ededed"}, {"name": "P2"}]},
+      {"number": 502, "labels": [{"name": "proposal"}, {"name": "P3"}]},
+      {"number": 503, "labels": [{"name": "needs-clarification"}, {"name": "P1"}]},
+      {"number": 504, "labels": [{"name": "P3"}, {"name": "working"}]},
+      {"number": 505, "labels": []}
+    ]"#;
+
+    fn now() -> DateTime<FixedOffset> {
+        DateTime::parse_from_rfc3339("2026-11-16T06:00:00Z").unwrap()
+    }
+
+    #[test]
+    fn the_panel_reads_open_prs_reviews_labels_and_the_last_day() {
+        let mut s = summarize(ISSUES.as_bytes(), None, Some(LOG), today(), utc(), "2026-11-16T06:00:00Z".into()).unwrap();
+        add_panel(&mut s, Some(PRS.as_bytes()), Some(REVIEWS.as_bytes()), Some(OPEN.as_bytes()), Some(LOG), now());
+        assert_eq!(s.open_prs, Some(3));
+        assert_eq!(s.oldest_pr_at.as_deref(), Some("2026-11-02T18:30:00Z"), "the oldest, whatever the listing's order");
+        assert_eq!(s.review_requests, Some(1));
+        assert_eq!(s.open_issues, Some(5));
+        let by = |l: &str| s.open_by_label.get(l).copied();
+        assert_eq!((by("proposal"), by("needs-clarification"), by("P3"), by("P1"), by("P0")), (Some(2), Some(1), Some(2), Some(1), None));
+        assert_eq!(s.commits_24h, Some(3), "the revert at 09:00 yesterday is 21 h old");
+        assert_eq!(commits_since(LOG, now() - chrono::Duration::hours(12)), 2, "it is older than 12 h");
+        assert_eq!(s.closed_today, 3, "every issue closed today, not planned included; the old close is not today");
+        let json = serde_json::to_value(&s).unwrap();
+        assert_eq!(json["open_by_label"]["proposal"], 2);
+        assert_eq!(json["oldest_pr_at"], "2026-11-02T18:30:00Z");
+    }
+
+    #[test]
+    fn what_the_panel_could_not_read_is_left_out_not_zero() {
+        let mut s = summarize(ISSUES.as_bytes(), None, None, today(), utc(), String::new()).unwrap();
+        add_panel(&mut s, None, Some(b"rate limited"), None, None, now());
+        assert_eq!((s.open_prs, s.oldest_pr_at.clone(), s.review_requests, s.open_issues, s.commits_24h), (None, None, None, None, None));
+        let json = serde_json::to_value(&s).unwrap();
+        for k in ["open_prs", "oldest_pr_at", "review_requests", "open_issues", "open_by_label", "commits_24h"] {
+            assert!(json.get(k).is_none(), "{k} left out");
+        }
+        // Nothing open is zero, though: it was read.
+        add_panel(&mut s, Some(b"[]"), Some(b"[]"), Some(b"[]"), Some(""), now());
+        assert_eq!((s.open_prs, s.oldest_pr_at.clone(), s.review_requests, s.open_issues, s.commits_24h), (Some(0), None, Some(0), Some(0), Some(0)));
+    }
+
+    #[tokio::test]
+    async fn the_panels_fields_ride_the_same_cache() {
+        let reads = AtomicUsize::new(0);
+        let read = || async {
+            reads.fetch_add(1, Ordering::SeqCst);
+            let mut s = summarize(ISSUES.as_bytes(), None, Some(LOG), today(), utc(), "2026-11-16T06:00:00Z".into())?;
+            add_panel(&mut s, Some(PRS.as_bytes()), Some(REVIEWS.as_bytes()), Some(OPEN.as_bytes()), Some(LOG), now());
+            Some(s)
+        };
+        let cache = Summaries::new(Duration::from_secs(90));
+        let first = cache.get_with(Path::new("/src/shop"), "master", read).await.unwrap();
+        let again = cache.get_with(Path::new("/src/shop"), "master", read).await.unwrap();
+        assert_eq!((first.open_prs, again.review_requests, again.as_of.as_str()), (Some(3), Some(1), "2026-11-16T06:00:00Z"));
+        assert_eq!(reads.load(Ordering::SeqCst), 1, "one read for the almanac's days and the panel's counts together");
+    }
+
+    #[test]
+    fn the_panel_asks_gh_for_little() {
+        assert_eq!(PR_LIST.join(" "), "pr list --state open --limit 500 --json number,createdAt");
+        assert_eq!(OPEN_ISSUES.join(" "), "issue list --state open --limit 1000 --json number,labels");
     }
 
     #[test]
