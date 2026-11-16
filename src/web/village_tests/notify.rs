@@ -22,10 +22,6 @@ fn village_opens_the_house_a_link_names() {
 fn notify_and_widget_model_tests_pass() {
     let root = env!("CARGO_MANIFEST_DIR");
     for dir in ["agents-village-notify/tests", "agents-village/tests"] {
-        let dir = format!("{root}/tools/omarchy-plugin/{dir}");
-        match std::process::Command::new("node").args(["--test", &dir]).output() {
-            Ok(out) => assert!(out.status.success(), "{dir} failed:\n{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)),
-            Err(e) => eprintln!("node is not installed ({e}); skipping {dir}"),
-        }
+        node_tests_in(&format!("{root}/tools/omarchy-plugin/{dir}"));
     }
 }

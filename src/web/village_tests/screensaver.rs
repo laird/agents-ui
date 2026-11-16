@@ -71,8 +71,6 @@ fn screensaver_install_and_page_tests_pass() {
     let dir = format!("{root}/tools/omarchy-plugin/agents-village-screensaver/tests");
     let out = std::process::Command::new("bash").arg(format!("{dir}/test_install.sh")).output().expect("run test_install.sh");
     assert!(out.status.success(), "test_install.sh failed:\n{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
-    match std::process::Command::new("node").args(["--test", &format!("{dir}/saver.test.mjs")]).output() {
-        Ok(out) => assert!(out.status.success(), "saver.test.mjs failed:\n{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)),
-        Err(e) => eprintln!("node is not installed ({e}); skipping saver.test.mjs"),
-    }
+    // saver.test.mjs and recap.test.mjs (#479): every node test there.
+    node_tests_in(&dir);
 }

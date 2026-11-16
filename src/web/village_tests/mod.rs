@@ -24,6 +24,24 @@ mod travel;
 
 pub(super) use super::server::{VILLAGE_FILES as VILLAGE_ASSETS, village_asset};
 
+/// Run node's test runner on every `*.test.js` / `*.test.mjs` in `dir`,
+/// passed as files: Node 26 expands a directory argument, but Node 22 and 24
+/// load it as a module and fail (#524). Skipped, with a note, when node isn't
+/// installed. Every file there runs, so a new one can't be left out.
+pub(super) fn node_tests_in(dir: &str) {
+    let mut files: Vec<String> = std::fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("{dir}: {e}"))
+        .filter_map(|e| e.ok().map(|e| e.path().to_string_lossy().into_owned()))
+        .filter(|p| p.ends_with(".test.js") || p.ends_with(".test.mjs"))
+        .collect();
+    files.sort();
+    assert!(!files.is_empty(), "no node tests in {dir}");
+    match std::process::Command::new("node").arg("--test").args(&files).output() {
+        Ok(out) => assert!(out.status.success(), "{dir} failed:\n{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)),
+        Err(e) => eprintln!("node is not installed ({e}); skipping {dir}"),
+    }
+}
+
 /// Everything the village page is made of, for tests that look for a
 /// line wherever it lives.
 pub(super) fn village_source() -> String {
