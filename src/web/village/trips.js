@@ -196,6 +196,13 @@ export function diff(old, now, lay, t, sc) {
   }));
   return said;
 }
+/* Released (#507): the worker carries its crate from the house back to the
+ * docks, to `slot` of `count`, and walks home; started at once by a control
+ * (controlplay.js), before the poll that moves the crate. */
+export function carryBack(sc, lay, lot, h, slot, count, t) {
+  const s = slotPos(Math.min(slot, 39), count), there = [...houseToRoad(lot, lay), ...slotFromRoad(s)];
+  return enqueue(sc, t, trip(h.id, h.issue, { kind: h.kind, priority: h.priority }, 'backlog', [{ pts: there, carry: true }, { pts: back(there) }]));
+}
 /* Where a trip is: { x, y, carry } on its route, `waiting` before it starts
  * (at the route's first point), or null once it is over. */
 export function tripAt(p, t) {

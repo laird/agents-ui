@@ -12,6 +12,7 @@ import { detail } from './detail.js';
 import { registerKey, registerLayer, tap } from './registry.js';
 import { MODERN, M } from './themes/modern.js';
 import { FUTURE } from './themes/future.js';
+import { fxContext, fxOn } from './controlfx.js';
 
 export const CTX_WARN = 70, CTX_FULL = 90, CTX_WEDGE = 95;
 /* The fill's colour at `pct`, and whether it flashes. */
@@ -72,7 +73,8 @@ registerLayer({ z: 74, draw(c, { v, lay }, t) {
   v.houses.forEach((h, i) => {
     const lot = lay.lots[i];
     if (!lot || h.context_pct == null) return;
-    barrel(c, lot.x + 16, lot.y + 8, h.context_pct, t + i * 97);
+    // A restart just sent empties it at once (#507, controlfx.js).
+    barrel(c, lot.x + 16, lot.y + 8, fxContext(fxOn(v.project, h, t), h.context_pct), t + i * 97);
     tap(lot.x + 16, lot.y + 7, 4, 9, { kind: 'house', i });
   });
   const m = v.manager;

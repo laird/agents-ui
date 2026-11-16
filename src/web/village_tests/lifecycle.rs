@@ -85,7 +85,7 @@ fn village_html_shows_working_agents_and_every_subagent() {
 #[test]
 fn village_idle_workers_sleep_instead_of_a_lingering_tick() {
     let body = &village_source();
-    assert!(body.contains("const st = h.status, tt = t + i * 311, rest = restOf(h, wall);"));
+    assert!(body.contains("const st = h.status, tt = t + i * 311, rest = fxRest(fxOn(v.project, h, t), restOf(h, wall));"));
     assert!(body.contains("if (rest === 'asleep') { person(c, lot.x + 4, lot.y + 9, h.id, 'sit', { status: 'asleep' }); sleepers.push("));
     assert!(body.contains("if (ICONS[st] && rest !== 'asleep' && rest !== 'limited') bubbles.push(["), "no ✓ over a sleeper, or one at the well");
     assert!(body.contains("(sleepers || []).forEach(([x, y, dt]) => zzz(c, x, y, t + dt));"));
@@ -184,7 +184,7 @@ fn village_html_shows_context_barrels() {
     assert!(body.contains("return pct >= CTX_FULL ? P.p0 : pct >= CTX_WARN ? '#f0a020' : '#38c848';"));
     assert!(body.contains("const flash = pct >= CTX_WEDGE && !state.reduce && blink(t, 300);"));
     assert!(body.contains("if (theme === FUTURE) {") && body.contains("} else if (theme === MODERN) {"));
-    assert!(body.contains("barrel(c, lot.x + 16, lot.y + 8, h.context_pct, t + i * 97);"));
+    assert!(body.contains("barrel(c, lot.x + 16, lot.y + 8, fxContext(fxOn(v.project, h, t), h.context_pct), t + i * 97);"));
     assert!(body.contains("barrel(c, lay.hallX + 34, 30, m.context_pct, t);"));
     // The house and hall dialogs say how full it is.
     assert!(body.contains("return `Context ${h.context_pct}%${of}${note}`;"));
