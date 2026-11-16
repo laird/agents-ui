@@ -5,7 +5,7 @@
 # last unlock in ${XDG_STATE_HOME:-~/.local/state}/agents-village-screensaver/last-unlock.
 # With no unlock recorded yet, or on a forced run (someone is at the
 # keyboard), there is no card.
-saver_option recap --recap 30 number '^[0-9]+$' M \
+saver_option recap --recap 30 number '^(0|[1-9][0-9]*)$' M \
   "a \"since you last looked\" card after M minutes away (default 30, 0: never)" \
   "--recap takes whole minutes"
 
