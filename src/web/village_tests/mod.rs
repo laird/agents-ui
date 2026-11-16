@@ -24,8 +24,6 @@ mod travel;
 
 pub(super) use super::server::{VILLAGE_FILES as VILLAGE_ASSETS, village_asset};
 
-/// Everything the village page is made of, for tests that look for a
-/// line wherever it lives.
 /// Run node's test runner on every `*.test.js` / `*.test.mjs` in `dir`,
 /// passed as files: Node 26 expands a directory argument, but Node 22 and 24
 /// load it as a module and fail (#524). Skipped, with a note, when node isn't
@@ -44,6 +42,8 @@ pub(super) fn node_tests_in(dir: &str) {
     }
 }
 
+/// Everything the village page is made of, for tests that look for a
+/// line wherever it lives.
 pub(super) fn village_source() -> String {
     VILLAGE_ASSETS.iter().map(|(_, _, body)| *body).collect::<Vec<_>>().join("\n")
 }
