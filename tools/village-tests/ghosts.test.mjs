@@ -57,12 +57,17 @@ test('a ghost leaves once its Flaky: issue lands, at the quay or at a stop', () 
 test('a ghost whose Flaky: issue the page saw is gone from it has had it closed', () => {
   const seen = new Map();
   noteFlakyIssues(village([flaky('a::t', 1, { issue: 341 }), flaky('a::u', 1)]), seen);
-  assert.deepEqual([...seen], [['a::t', 341]]);
+  assert.deepEqual([...seen], [['a::t', { issue: 341, last: ago(1) }]]);
   // The next poll: the open issue no longer names it, so it was closed.
   const later = village([flaky('a::t', 1), flaky('a::u', 1)]);
   assert.deepEqual(ghostsOf(later, NOW, seen).map(g => g.f.test), ['a::u']);
   // A test that never had an issue stays.
   assert.deepEqual(ghostsOf(later, NOW, new Map()).map(g => g.f.test), ['a::t', 'a::u']);
+  // A test that fails again after its issue closed comes back, with no issue yet.
+  const again = village([flaky('a::t', 0.5)]);
+  assert.deepEqual(ghostsOf(again, NOW, seen).map(g => g.f.test), ['a::t']);
+  // A poll that missed the issue hides it for that poll only: back once it is named again.
+  assert.deepEqual(ghostsOf(village([flaky('a::t', 1, { issue: 341 })]), NOW, seen).map(g => g.f.test), ['a::t']);
 });
 
 test('ghosts hover over the gatehouse roof from its east end, as many as it has room for', () => {

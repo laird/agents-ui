@@ -37,22 +37,31 @@ export function landedIssues(v) {
   return new Set([...(p.quay || []), ...(p.stops || []).flatMap(s => [...(s.issues || []), ...(s.cargo || [])])]);
 }
 
-/* Each `Flaky:` issue this page has seen a test carry, by test: a test that
- * carried one and no longer does had it closed. Call once per poll. */
+/* Each `Flaky:` issue this page has seen a test carry, by test, with the
+ * test's last failure then: { issue, last }. A test that carried one and no
+ * longer does had it closed. Call once per poll. */
 export function noteFlakyIssues(v, seen) {
-  for (const f of (v && v.flaky) || []) if (f.issue) seen.set(f.test, f.issue);
+  for (const f of (v && v.flaky) || []) if (f.issue) seen.set(f.test, { issue: f.issue, last: f.last_seen });
   return seen;
 }
 
+/* Did this test's `Flaky:` issue close: it landed, or the test had one on an
+ * earlier poll, has none now, and has not failed since (a failure after the
+ * close brings the ghost back until a new issue is filed and closed). */
+function issueClosed(f, landed, seen) {
+  if (f.issue) return landed.has(f.issue);
+  const was = seen.get(f.test);
+  return !!was && !(Date.parse(f.last_seen || '') > Date.parse(was.last || ''));
+}
+
 /* The ghosts at the gatehouse, newest first: { f, alpha }. A test leaves
- * when it has been clean a week, or once its `Flaky:` issue has closed:
- * landed, or gone from a test that had it on an earlier poll (`seen`). */
+ * when it has been clean a week, or once its `Flaky:` issue has closed
+ * (issueClosed). */
 export function ghostsOf(v, now, seen = new Map()) {
   const landed = landedIssues(v);
   return ((v && v.flaky) || []).flatMap(f => {
     const alpha = ghostFade(f.last_seen, now);
-    const closed = f.issue ? landed.has(f.issue) : seen.has(f.test);
-    return alpha > 0 && !closed ? [{ f, alpha }] : [];
+    return alpha > 0 && !issueClosed(f, landed, seen) ? [{ f, alpha }] : [];
   });
 }
 

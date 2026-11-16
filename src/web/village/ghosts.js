@@ -73,7 +73,7 @@ registerLayer({ z: 78, draw(c, { v, lay }, t) {
   shown(v).slice(0, ghostRoom(g)).forEach(({ f, alpha }, k) => {
     const { x, y } = ghostSpot(g, k, t, state.reduce);
     ghost(c, x, y, alpha, t);
-    tap(x, y, 6, 7, { kind: 'ghost', test: f.test });
+    tap(x, y, 6, 8, { kind: 'ghost', test: f.test });
   });
 } });
 

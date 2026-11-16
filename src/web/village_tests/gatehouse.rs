@@ -141,7 +141,7 @@ fn flaky_tests_haunt_the_gatehouse() {
     assert!(ghosts.contains("const g = lay.gate; if (!g) return;"));
     assert!(ghosts.contains("if (theme === MODERN) {") && ghosts.contains("} else if (theme === FUTURE) {"));
     assert!(ghosts.contains("c.globalAlpha *= alpha;"), "a ghost fades");
-    assert!(ghosts.contains("tap(x, y, 6, 7, { kind: 'ghost', test: f.test });"));
+    assert!(ghosts.contains("tap(x, y, 6, 8, { kind: 'ghost', test: f.test });"));
     // The dialog lists the failures and links the Flaky: issue.
     assert!(ghosts.contains("registerHit({ kind: 'ghost', dialog(o, sc) {"));
     assert!(ghosts.contains("meta: failureLines(f, when),"));
