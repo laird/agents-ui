@@ -157,3 +157,12 @@ for (const [name, theme] of Object.entries(THEMES)) {
     assert.notEqual(c.at(T.ALMANAC_BAR_X + r.bar + 1, ry), look.bar);
   });
 }
+
+test("the gate's UTC tally joins today's row only on the same date", () => {
+  const gh = summary();
+  const on = gh.as_of.slice(0, 10), ms = { landed_today: 99, bounced_today: 0 };
+  assert.equal(T.almanacRows(gh, ms, on)[13].landed, 99);
+  // Just after local midnight west of UTC, the tally's day is not the row's.
+  const other = new Date(Date.parse(on + 'T00:00:00Z') + 86400000).toISOString().slice(0, 10);
+  assert.notEqual(T.almanacRows(gh, ms, other)[13].landed, 99);
+});

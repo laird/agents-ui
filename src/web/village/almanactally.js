@@ -40,14 +40,16 @@ export function almanacBar(landed, most, room = ALMANAC_BAR_W) {
 /* One row per day, oldest first, today last: what the row shows.
  *   { date, landed, opened, bounced, reverted, deploys, bar, pips, more, revert, today }
  * Today's row grows with the gate's own tally (`pipeline.merge_stats`, #431)
- * between GitHub reads, as crates leave the quay. */
-export function almanacRows(gh, ms = null) {
+ * between GitHub reads, as crates leave the quay. That tally counts the UTC
+ * day and the rows the server's own, so it is used only while the two are
+ * the same date: otherwise it would count yesterday's landings again. */
+export function almanacRows(gh, ms = null, utcDay = new Date().toISOString().slice(0, 10)) {
   const days = almanacDays(gh);
   if (!days) return [];
   const shown = days.slice(-ALMANAC_DAYS), on = almanacOn(gh);
   const rows = shown.map((d, k) => {
     const today = k === shown.length - 1 && d.date === on;
-    const live = today && ms ? ms : {};
+    const live = today && ms && utcDay === on ? ms : {};
     return {
       date: d.date, today,
       landed: Math.max(d.landed || 0, live.landed_today || 0),
