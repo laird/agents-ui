@@ -13,7 +13,14 @@
 # The agents-village-screensaver shell service runs this when the session goes
 # idle; `force` runs it by hand. Settings come from
 # ~/.config/agents-ui/screensaver.json (written by install.sh --screensaver):
-#   { "server": "http://nuc-1:7890", "cycle": 30, "dim": "23-7", "timeout": 150 }
+#   { "server": "http://nuc-1:7890", "cycle": 30, "dim": "23-7", "timeout": 150, "recap": 30 }
+#
+# "Since you last looked" (#479): when the screensaver last closed at least
+# `recap` minutes ago (default 30; 0 turns it off), the page opens with a
+# summary of what happened since then (since=<unix seconds>). Closing it, by
+# any input or by locking, is "looking": that time is kept in
+# ${XDG_STATE_HOME:-~/.local/state}/agents-village-screensaver/last-closed.
+# With no record yet, the spell is counted from when the session went idle.
 #
 # It does nothing while the session is locked or the screensaver is already
 # up, nor (unless forced) while Omarchy's stay-awake indicator is on or its
@@ -49,11 +56,34 @@ SERVER=$(setting server "http://nuc-1:7890")
 SERVER=${SERVER%/}
 CYCLE=$(setting cycle 30)
 DIM=$(setting dim "")
+TIMEOUT=$(setting timeout 150)
+RECAP=$(setting recap 30)
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/agents-village-screensaver"
+LAST_CLOSED="$STATE_DIR/last-closed"
+NOW=${AGENTS_VILLAGE_SCREENSAVER_NOW:-$(date +%s)}
+
+# When the quiet spell began: the screensaver's last close, or failing that
+# when the session went idle. Empty when the spell is shorter than `recap`
+# minutes, or on a forced run (someone is at the keyboard).
+recap_since() {
+  local since=""
+  [ "$FORCE" = true ] && return
+  [[ $RECAP =~ ^[0-9]+$ ]] && [ "$RECAP" -gt 0 ] || return
+  [ -f "$LAST_CLOSED" ] && since=$(tr -dc '0-9' < "$LAST_CLOSED")
+  if [ -z "$since" ]; then
+    [[ $TIMEOUT =~ ^[0-9]+$ ]] || TIMEOUT=150
+    since=$((NOW - TIMEOUT))
+  fi
+  ((since <= NOW && NOW - since >= RECAP * 60)) && echo "$since"
+}
 
 # The page: screensaver mode, closing on input, cycling and dimming as set.
 village_url() {
   local q="screensaver=1&dismiss=1&cycle=${CYCLE}"
   [ -n "$DIM" ] && q="$q&dim=${DIM}"
+  local since
+  since=$(recap_since)
+  [ -n "$since" ] && q="$q&since=${since}"
   echo "$SERVER/village?$q"
 }
 
@@ -102,6 +132,7 @@ cursor() {  # cursor <true|false>: hide or show the pointer
 
 stop_all() {
   cursor false
+  mkdir -p "$STATE_DIR" && date +%s > "$LAST_CLOSED"
   pkill -f "[a]gents-village-screensaver-profile" 2>/dev/null
   exit 0
 }

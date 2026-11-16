@@ -241,6 +241,29 @@ out=$(bash "$LAUNCHER" --dry-run 2>&1) || fail "launcher dry run exited: $out"
 grep -q "opens:   file://.*/offline.html#http%3A%2F%2F127.0.0.1%3A9%2Fvillage%3Fscreensaver%3D1%26dismiss%3D1%26cycle%3D45%26dim%3D22-6" <<<"$out" \
   && ok "launcher opens the offline page for a server that does not answer" || fail "launcher: $out"
 grep -q "class:   org.omarchy.screensaver" <<<"$out" && ok "launcher window is Omarchy's screensaver class" || fail "class: $out"
+
+# "Since you last looked" (#479): since= is when the screensaver last closed,
+# only after a spell of at least `recap` minutes, and never on a forced run.
+export XDG_STATE_HOME="$T/state"
+mkdir -p "$XDG_STATE_HOME/agents-village-screensaver"
+NOW=1794800000
+echo $((NOW - 7200)) > "$XDG_STATE_HOME/agents-village-screensaver/last-closed"
+out=$(AGENTS_VILLAGE_SCREENSAVER_NOW=$NOW bash "$LAUNCHER" --dry-run 2>&1)
+grep -q "%26since%3D$((NOW - 7200))" <<<"$out" && ok "since= is the last close, two hours ago" || fail "since: $out"
+out=$(AGENTS_VILLAGE_SCREENSAVER_NOW=$NOW bash "$LAUNCHER" force --dry-run 2>&1)
+grep -q "since" <<<"$out" && fail "forced run asked for a recap: $out" || ok "a forced run has no recap"
+echo $((NOW - 300)) > "$XDG_STATE_HOME/agents-village-screensaver/last-closed"
+out=$(AGENTS_VILLAGE_SCREENSAVER_NOW=$NOW bash "$LAUNCHER" --dry-run 2>&1)
+grep -q "since" <<<"$out" && fail "five minutes asked for a recap: $out" || ok "a short spell has no recap"
+echo $((NOW - 7200)) > "$XDG_STATE_HOME/agents-village-screensaver/last-closed"
+echo '{ "server": "http://127.0.0.1:9", "recap": 0 }' > "$HOME/.config/agents-ui/screensaver.json"
+out=$(AGENTS_VILLAGE_SCREENSAVER_NOW=$NOW bash "$LAUNCHER" --dry-run 2>&1)
+grep -q "since" <<<"$out" && fail "recap 0 still asked: $out" || ok "recap 0 turns it off"
+echo '{ "server": "http://127.0.0.1:9", "recap": 1, "timeout": 3600 }' > "$HOME/.config/agents-ui/screensaver.json"
+rm "$XDG_STATE_HOME/agents-village-screensaver/last-closed"
+out=$(AGENTS_VILLAGE_SCREENSAVER_NOW=$NOW bash "$LAUNCHER" --dry-run 2>&1)
+grep -q "%26since%3D$((NOW - 3600))" <<<"$out" && ok "with no record, the spell starts when the session went idle" || fail "since: $out"
+unset XDG_STATE_HOME
 rm -rf "$T"
 export HOME=$ORIG_HOME
 
