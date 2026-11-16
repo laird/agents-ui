@@ -55,6 +55,8 @@ test('one coin up to two million tokens, then one per doubling, capped', () => {
 
 test('token counts read short', () => {
   assert.deepEqual([262, 262271, 1701089, 90390636, 1.25e9].map(tokenCount), ['262', '262k', '1.7M', '90.4M', '1.3B']);
+  // Just under a unit, the next unit up: never 1000k or 1000M.
+  assert.deepEqual([999, 999960, 999.96e6, 99.95e6].map(tokenCount), ['999', '1M', '1B', '100M']);
 });
 
 test("the house dialog: today's use and the current issue's, with the breakdown", () => {

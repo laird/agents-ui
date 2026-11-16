@@ -29,8 +29,14 @@ export function coinCount(total) {
 /* 262, 262k, 90.4M, 1.2B. */
 export function tokenCount(n) {
   if (!Number.isFinite(n)) return '?';
-  const unit = (d, s) => { const x = n / d; return `${x >= 100 ? Math.round(x) : Math.round(x * 10) / 10}${s}`; };
-  return n >= 1e9 ? unit(1e9, 'B') : n >= 1e6 ? unit(1e6, 'M') : n >= 1e3 ? unit(1e3, 'k') : String(n);
+  if (n < 1e3) return String(n);
+  const UNITS = ['k', 'M', 'B'];
+  let k = Math.min(UNITS.length - 1, Math.floor(Math.log10(n) / 3) - 1);
+  const round = x => (x >= 100 ? Math.round(x) : Math.round(x * 10) / 10);
+  let x = round(n / 10 ** (3 * (k + 1)));
+  // 999,960 rounds to 1000k: say it in the next unit up, 1M.
+  if (x >= 1000 && k < UNITS.length - 1) { k += 1; x = round(n / 10 ** (3 * (k + 1))); }
+  return `${x}${UNITS[k]}`;
 }
 
 const breakdown = t => `${tokenCount(t.output)} out, ${tokenCount(t.input)} in, ${tokenCount(t.cache_write)} cache write, ${tokenCount(t.cache_read)} cache read`;
@@ -83,10 +89,12 @@ registerLayer({ z: 74.5, draw(c, { v, lay }) {
   v.houses.forEach((h, i) => {
     const lot = lay.lots[i], n = coinCount(h.tokens && h.tokens.today && h.tokens.today.total);
     if (!lot || !n) return;
-    // At the house's front left corner, inside its lot: the house to the
-    // left's barrel stands just past the lot's edge (barrels.js).
-    coins(c, lot.x, lot.y + 13, n);
-    tap(lot.x, lot.y + 13 + COIN_MAX - n, 3, n, { kind: 'house', i });
+    // Against the house's front left corner, standing on its front edge
+    // (lot.y + 16): the house's name label starts just below (lot.y + 17),
+    // and the house to the left's barrel ends at the lot's edge (barrels.js).
+    coins(c, lot.x, lot.y + 16 - COIN_MAX, n);
+    // The whole column, so the meter downtown (always full height) is clickable too.
+    tap(lot.x, lot.y + 16 - COIN_MAX, 3, COIN_MAX, { kind: 'house', i });
   });
 } });
 
