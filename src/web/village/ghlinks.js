@@ -27,11 +27,12 @@ export function branchLinks(repo, branch, links, integration) {
 }
 
 /* A gate entry's pull request: the branch's, when a house on its issue says
- * which branch it is, else any pull request that names the issue. */
+ * which branch it is, else a search for pull requests that name the issue. */
 export function gatePrLink(repo, n, branch) {
   if (!repo || !n) return null;
   if (branch) return ghLink(`#${n} pull request`, prSearchUrl(repo, branch));
-  return ghLink(`#${n} pull request`, `${repo}/pulls?q=${encodeURIComponent(`is:pr ${n}`)}`);
+  // No branch known: a search, which can also match pull requests that only mention the number.
+  return ghLink(`Pull requests mentioning #${n}`, `${repo}/pulls?q=${encodeURIComponent(`is:pr ${n}`)}`);
 }
 
 /* The integration branch's commit history. */

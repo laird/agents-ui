@@ -39,7 +39,7 @@ test('a gate entry links its pull request by branch when known, else by issue nu
   const e = v.pipeline.gates[0];
   assert.deepEqual(gatePrLink(repo, e.issue, 'feature/issue-370'),
     { label: '#370 pull request', url: 'https://github.com/laird/agents-ui/pulls?q=is%3Apr%20head%3Afeature%2Fissue-370' });
-  assert.deepEqual(gatePrLink(repo, e.issue), { label: '#370 pull request', url: 'https://github.com/laird/agents-ui/pulls?q=is%3Apr%20370' });
+  assert.deepEqual(gatePrLink(repo, e.issue), { label: 'Pull requests mentioning #370', url: 'https://github.com/laird/agents-ui/pulls?q=is%3Apr%20370' });
   assert.equal(gatePrLink(null, e.issue), null, 'never a guessed repo');
 });
 
