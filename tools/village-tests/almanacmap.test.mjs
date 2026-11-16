@@ -8,6 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { loadPage } from './modules.mjs';
 import zlib from 'node:zlib';
 
 const stub = () => new Proxy(function () {}, {
@@ -28,8 +29,7 @@ globalThis.requestAnimationFrame = () => 0;
 performance.now = () => 0; // pinned: the drawing must not depend on the frame (#450)
 
 const V = new URL('../../src/web/village/', import.meta.url);
-const mainJs = fs.readFileSync(new URL('main.js', V), 'utf8');
-for (const [, m] of mainJs.matchAll(/^import '\.\/(.+)';$/gm)) await import(new URL(m, V));
+await loadPage(); // every module main.js loads (modules.mjs)
 const { state } = await import(new URL('state.js', V));
 const { THEMES } = await import(new URL('themes/registry.js', V));
 const { layout } = await import(new URL('layout.js', V));

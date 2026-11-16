@@ -73,8 +73,8 @@ fn village_html_has_a_key_drawn_from_the_renderer() {
     // group the key has or a new one, so a new feature needs no edit to key.js.
     assert!(body.contains("export function registerKey(entry) {"));
     assert!(body.contains("KEYS.forEach(k => {"));
-    assert!(body.contains("registerKey({ group: 'Weather: the build', rows: theme => {"));
-    assert!(body.contains("registerKey({ group: 'other', rows: theme => [\n  [c => { theme.crate(c, 3, 4, 'feature', null); reworked(c, 3, 4, 0); },"));
+    assert!(body.contains("registerKey({ group: 'Weather: the build', order: 20, rows: theme => {"));
+    assert!(body.contains("registerKey({ group: 'other', order: 30, rows: theme => [\n  [c => { theme.crate(c, 3, 4, 'feature', null); reworked(c, 3, 4, 0); },"));
     assert!(body.contains("fogArt(c, 0, 0, 14, 14, 0, theme);"));
     assert!(body.contains("fogArt(c, x, lay.canalY - 28, w, lay.devH - lay.canalY + 28, t);"));
     // Redrawn in the theme being shown.

@@ -7,7 +7,7 @@ use super::*;
 
 #[test]
 fn village_draws_the_almanac_from_the_github_summary() {
-    let main = village_asset("main.js").unwrap().1;
+    let main = village_asset("modules.js").unwrap().1;
     assert!(main.contains("import './almanac.js';"));
     let tally = village_asset("almanactally.js").unwrap().1;
     assert!(!tally.contains("document"), "almanactally.js stays DOM-free, so node can test it");
@@ -28,7 +28,7 @@ fn village_draws_the_almanac_from_the_github_summary() {
         assert!(alm.contains(&format!("name: '{name}'")), "no {name}");
     }
     assert!(alm.contains("registerLabels((sc, theme) => {"));
-    assert!(alm.contains("registerKey({ group: 'other', rows: theme => ["));
+    assert!(alm.contains("registerKey({ group: 'other', order: 60, rows: theme => ["));
 }
 
 /// The numbers dialog says where its numbers come from and when: `as_of`.

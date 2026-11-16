@@ -12,7 +12,7 @@ fn village_opens_the_house_a_link_names() {
     assert!(link.contains("linkOpened === location.hash"), "once per link: a closed dialog stays closed");
     assert!(link.contains("state.screensaver"), "never on the screensaver");
     assert!(link.contains("act(o, sc, state.T);"), "the same dialog a click opens");
-    let main = village_asset("main.js").unwrap().1;
+    let main = village_asset("modules.js").unwrap().1;
     assert!(main.contains("import './houselink.js';"));
 }
 

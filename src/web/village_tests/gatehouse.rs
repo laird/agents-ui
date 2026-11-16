@@ -106,7 +106,7 @@ fn village_html_shows_the_gate_scoreboard_and_hotspots() {
     assert!(body.contains("return { title: 'Conflict hotspots', line: 'The files that conflict most today: work that touches them bounces back from the gate.', meta: lines };"));
     assert!(body.contains(".sort((a, b) => b.count - a.count || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0))"));
     // The Key names the slate and the sign (bounces.js names the rework crate).
-    assert!(body.contains("registerKey({ group: 'other', rows: () => ["));
+    assert!(body.contains("registerKey({ group: 'other', order: 50, rows: () => ["));
     assert!(body.contains("[c => slate(c, 1, 1, 14, 6), 'Slate by the gatehouse: work the merge gate merged (green) and bounced (red) today', 26],"));
 }
 
@@ -161,9 +161,9 @@ fn flaky_tests_haunt_the_gatehouse() {
     assert!(ghosts.contains("meta: failureLines(f, when),"));
     // One label, fixed over the ghosts, and a Key row.
     assert!(ghosts.contains("anchor: 'bottom', fixed: true, cls: 'ghost'"));
-    assert!(ghosts.contains("registerKey({ group: 'other', rows: theme => ["));
+    assert!(ghosts.contains("registerKey({ group: 'other', order: 40, rows: theme => ["));
     let css = village_asset("village.css").unwrap().1;
     assert!(css.contains(".al.ghost {"));
-    let main = village_asset("main.js").unwrap().1;
+    let main = village_asset("modules.js").unwrap().1;
     assert!(main.contains("import './ghosts.js';"));
 }

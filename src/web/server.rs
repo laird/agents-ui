@@ -1600,15 +1600,19 @@ mod tests {
         let mut files = Vec::new();
         walk(&root, &root, &mut files);
         files.sort();
+        // And the module list build.rs writes (#520), which is not on disk.
+        files.push("modules.js".to_string());
+        files.sort();
         let embedded: Vec<&str> = VILLAGE_ASSETS.iter().map(|(p, _, _)| *p).collect();
-        assert_eq!(embedded, files, "VILLAGE_ASSETS is every file under src/web/village/, sorted");
+        assert_eq!(embedded, files, "VILLAGE_ASSETS is every file under src/web/village/ and modules.js, sorted");
         assert!(files.len() >= 35 && files.iter().any(|f| f.contains('/')), "subdirectories included: {files:?}");
         for path in files.iter().filter(|p| *p != "index.html") {
             let app = make_app(make_web_state(new_shared_state()));
             let resp = app.oneshot(Request::builder().uri(format!("/village/{path}")).body(Body::empty()).unwrap()).await.unwrap();
             assert_eq!(resp.status(), StatusCode::OK, "{path}");
             let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
-            assert_eq!(body, std::fs::read(root.join(path)).unwrap(), "{path} is served as it is on disk");
+            let disk = if path == "modules.js" { village_asset(path).unwrap().1.as_bytes().to_vec() } else { std::fs::read(root.join(path)).unwrap() };
+            assert_eq!(body, disk, "{path} is served as it is on disk (modules.js as generated)");
         }
         // The page itself is /village.
         let app = make_app(make_web_state(new_shared_state()));
@@ -1657,6 +1661,8 @@ mod tests {
                 }
             }
         }
+        // main.js loads the generated list (build.rs, #520), which lists every script but itself.
+        assert!(seen.iter().any(|s| s == "modules.js"), "main.js never loads modules.js");
         // The features and the modules they lean on, two imports or more away included.
         for module in [
             "registry.js", "layout.js", "detail.js", "lifecycle.js", "docks.js", "barrels.js", "trips.js", "ship.js", "gatehouse.js", "weather.js", "buildweather.js", "bounces.js", "bouncemarks.js", "features.js", "envrow.js", "envlabels.js", "voyages.js", "worlds.js", "panels.js", "dialogs.js",

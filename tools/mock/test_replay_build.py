@@ -20,6 +20,10 @@ ROOT = HERE.parents[1]
 VILLAGE = ROOT / "src/web/village"
 IMPORT = re.compile(r"^import\s+(?:\{[^}]*\}\s+from\s+)?'([^']+)';", re.M)
 
+def module_list():
+    """modules.js as build.rs writes it (#520): every script but main.js, sorted."""
+    return "".join(f"import './{f}';\n" for f in sorted(p.relative_to(VILLAGE).as_posix() for p in VILLAGE.rglob("*.js")) if f != "main.js")
+
 
 class ReplayBuildTest(unittest.TestCase):
     @classmethod
@@ -53,13 +57,15 @@ class ReplayBuildTest(unittest.TestCase):
     def test_every_module_once_after_what_it_imports(self):
         bundle = next(body for attrs, body in self.scripts if 'type="module"' in attrs)
         order = re.findall(r"(?m)^// ---- (\S+)$", bundle)
-        files = sorted(p.relative_to(VILLAGE).as_posix() for p in VILLAGE.rglob("*.js"))
+        # modules.js is generated (build.rs, #520): it imports every module.
+        files = sorted([p.relative_to(VILLAGE).as_posix() for p in VILLAGE.rglob("*.js")] + ["modules.js"])
         self.assertEqual(sorted(order), files, "every module, each once")
         self.assertEqual(order[-1], "main.js")
         at = {rel: i for i, rel in enumerate(order)}
         for rel in order:
             path = VILLAGE / rel
-            for spec in IMPORT.findall(path.read_text()):
+            src = module_list() if rel == "modules.js" else path.read_text()
+            for spec in IMPORT.findall(src):
                 dep = (path.parent / spec).resolve().relative_to(VILLAGE).as_posix()
                 # A cycle runs the module that was reached first before its import, as the browser does.
                 if at[dep] > at[rel]:

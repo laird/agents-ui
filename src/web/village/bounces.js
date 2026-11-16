@@ -50,7 +50,7 @@ registerLabels(sc => {
 }, 30);
 
 /* The Key's row: the crate as this theme dresses it for rework. */
-registerKey({ group: 'other', rows: theme => [
+registerKey({ group: 'other', order: 30, rows: theme => [
   [c => { theme.crate(c, 3, 4, 'feature', null); reworked(c, 3, 4, 0); },
     'Crate dressed for rework at a house, a red ↺ tag over it: the merge gate handed it back (↺2: the second time; broken boards from then on)', 13]] });
 

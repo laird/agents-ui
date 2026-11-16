@@ -117,6 +117,25 @@ def top_names(src):
         out.update(re.findall(r"\w+", re.sub(r":\s*\w+", "", name)) if name[0] in "{[" else [name])
     return out
 
+MODULES = "modules.js"
+
+def village_scripts():
+    """Every script under the village, sorted by path; dotfiles skipped, as build.rs does."""
+    return sorted(p.relative_to(VILLAGE).as_posix() for p in VILLAGE.rglob("*.js")
+                  if not any(part.startswith(".") for part in p.relative_to(VILLAGE).parts))
+
+def module_list():
+    """modules.js as build.rs writes it (#520): an import of every script but main.js."""
+    return "".join(f"import './{f}';\n" for f in village_scripts() if f != "main.js")
+
+def read_module(rel, path):
+    """A module's source; modules.js is generated, not on disk."""
+    if rel == MODULES:
+        if path.exists():
+            raise SystemExit(f"{rel}: build.rs generates this name; rename the file")
+        return module_list()
+    return path.read_text()
+
 def bundle(entry, patch=lambda rel, src: src):
     """main.js and everything it imports, as one script in the order the browser
     runs them: depth-first, each module after its imports, each module once
@@ -129,7 +148,7 @@ def bundle(entry, patch=lambda rel, src: src):
         if rel in seen:
             return
         seen.add(rel)
-        src = patch(rel, path.read_text())
+        src = patch(rel, read_module(rel, path))
         for m in IMPORT.finditer(src):
             if " as " in (m.group(1) or ""):
                 raise SystemExit(f"{rel}: renamed import ({m.group(0).strip()}); the bundle cannot rename")

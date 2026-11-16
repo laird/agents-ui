@@ -128,5 +128,5 @@ registerLabels(sc => {
 }, 32);
 
 /* The Key's row: this theme's ghost. */
-registerKey({ group: 'other', rows: theme => [
+registerKey({ group: 'other', order: 40, rows: theme => [
   [c => ghost(c, 3, 2, 1, 0, theme), 'Ghost by the merge gate: a flaky test (failed, then passed on the same tree), with how often this week; it fades as the test stays clean', 10]] });

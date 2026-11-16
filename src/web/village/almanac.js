@@ -106,7 +106,7 @@ const ALMANAC_SAMPLE = [
   { landed: 6, bar: 6 * ALMANAC_UNIT, pips: 2 },
   { landed: 4, bar: 4 * ALMANAC_UNIT, pips: 1, revert: true, today: true },
 ];
-registerKey({ group: 'other', rows: theme => [
+registerKey({ group: 'other', order: 60, rows: theme => [
   [c => almanacArt(c, 1, 1, ALMANAC_SAMPLE, theme, 0),
     `${almanacLook(theme).name} at the east edge: a row per day for the last two weeks, today's last; landed work grows along it, red pips are bounces, a purple cross a revert (click it for the numbers)`, 46],
 ] });

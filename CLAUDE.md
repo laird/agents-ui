@@ -123,16 +123,20 @@ modules register (`registry.js`). To add something to the village:
    - There is no row of counters under the map (#405): a count worth
      showing goes in the area's label (`sub`) or its dialog.
    - A theme registers with `registerTheme` (`themes/registry.js`).
-3. **Import it in `main.js`.** That is all `main.js` does: import the
-   modules, then `start()`.
+3. **Nothing to import by hand**: `build.rs` writes `modules.js`, which
+   imports every module (sorted by path) after `main.js` has loaded the
+   themes and `layout.js` (#520). Import what the module itself uses; where
+   it registers into a shared list (`registerKey`, `registerLabels`,
+   `registerOverlay`), give it an `order` no other module uses, since load
+   order decides nothing (`tools/village-tests/loadorder.test.mjs`).
 4. **Tests next to the work**: page tests in `src/web/village_tests/` (the
    feature area's file, or a new one), and a DOM-free module's in
    `tools/village-tests/<module>.test.mjs`. No list to add them to.
 5. **Nothing to embed by hand**: `build.rs` embeds every file under
    `src/web/village/` (`.html`, `.css`, `.js`; another extension stops the
    build until `content_type()` there names it) as `VILLAGE_ASSETS`.
-   `cargo test every_module_main_js_loads` fails for a module that is
-   there but never imported, and `cargo test replay_build` fails if two
+   `cargo test every_module_main_js_loads` fails for a module whose
+   imports aren't embedded, and `cargo test replay_build` fails if two
    modules declare the same top-level name: the replay page bundles them
    into one script.
 

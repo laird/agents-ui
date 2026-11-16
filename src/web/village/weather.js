@@ -112,7 +112,7 @@ registerHit({ kind: 'blame', dialog(o, sc) {
 
 /* ---------- The Key's rows, in the theme's own weather ---------- */
 const STORM_WORDS = { storm: 'Storm over the village', smog: 'Smog and alarm lights over the town', alert: 'Red alert over the base' };
-registerKey({ group: 'Weather: the build', rows: theme => {
+registerKey({ group: 'Weather: the build', order: 20, rows: theme => {
   const wx = (theme && theme.weather) || STORM;
   return [
     [c => { R(c, 0, 0, 14, 14, wx.tint); puff(c, 0, 2, wx); rain(c, 2, 8, 10, 4, 3, wx.rain, 0, 2); },

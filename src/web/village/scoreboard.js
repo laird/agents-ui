@@ -92,10 +92,10 @@ registerLabels(sc => {
   const { x, y } = tallyAt(g), w = slateW(ms), signed = (ms.hotspots || []).length;
   return [{ avoid: { x, y: y - 1, w: w + (signed ? 12 : 0), h: 17 } },
     { x: x + (w >> 1), y: y + 16, anchor: 'top', text: words }];
-}, 32);
+}, 33);
 
 /* In the Key, beside the bounce marks. */
-registerKey({ group: 'other', rows: () => [
+registerKey({ group: 'other', order: 50, rows: () => [
   [c => slate(c, 1, 1, 14, 6), 'Slate by the gatehouse: work the merge gate merged (green) and bounced (red) today', 26],
   [c => hotspotSign(c, 3, 0, 0), 'Sign with a red flame by the gatehouse: the files that conflict most (click it)', 16]] });
 

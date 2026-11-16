@@ -6,7 +6,7 @@ use super::*;
 
 #[test]
 fn the_github_sign_is_drawn_from_the_shared_summary_only() {
-    let main = village_asset("main.js").unwrap().1;
+    let main = village_asset("modules.js").unwrap().1;
     assert!(main.contains("import './ghpanel.js';"));
     let panel = village_asset("ghpanel.js").unwrap().1;
     // Nothing drawn, and no label, without the summary: the village draws as before.

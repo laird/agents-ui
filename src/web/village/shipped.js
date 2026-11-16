@@ -87,5 +87,5 @@ cv.addEventListener('mousemove', e => {
   if (words || cv.title.startsWith('Shipped today')) cv.title = words;
 });
 
-registerKey({ group: 'other', rows: () => [
+registerKey({ group: 'other', order: 88, rows: () => [
   [c => detail(c, 0, 4, g => shipCloth(g, 4, 0, P.gold)), 'A flag on the hall: an epic reached production today (fireworks when it arrives)']] });

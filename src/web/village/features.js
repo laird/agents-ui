@@ -71,7 +71,7 @@ function drawBarge(c, b, t) {
   b.issues.slice(0, 4).forEach((n, k) => state.T.crate(c, x + 2 + k * 5, y + 1, 'workshop', null, true, n));
   tap(b.x, b.y - 6, 28, 18, { kind: 'barge', f: b.f ? b.f.number : null, issues: b.issues });
 }
-registerKey({ group: 'other', rows: theme => [
+registerKey({ group: 'other', order: 85, rows: theme => [
   [c => { fogArt(c, 0, 0, 14, 14, 0, theme); bubble(c, 2, 1, 'unknown'); }, 'Grey fog over a stage: nothing says what runs there (no Deployment, no branch)']] });
 /* Fog over a stop with neither a Deployment nor a branch: "?", never "not live". */
 function fogStop(c, v, i, lay, t) {
@@ -83,7 +83,7 @@ function fogStop(c, v, i, lay, t) {
 registerLabels(sc => (sc.L.banners || []).map(g => {
   const f = g.f, b = f.build || { landed: 0, total: counted(f).length };
   return { x: g.x + 8, y: g.y + 27, anchor: 'top', text: flagLabel(f.number, f.title, b), cls: 'flag', edge: g.col, width: 29 };
-}), 15);
+}), 16);
 function drawTrail(c, x0, y0, x1, y1, col, t) {
   const off = state.reduce ? 0 : Math.floor(t / 110) % 4, pts = [];
   x1 = Math.round(x1); y1 = Math.round(y1);

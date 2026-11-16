@@ -10,7 +10,7 @@ fn a_workers_house_dialog_offers_its_controls() {
     // A development village's house passes who it is; a runtime's has none.
     assert!(lifecycle.contains("controls: runtime ? null : { project: v.project, role: h.role, name: houseName(v, h), issue: h.issue || null, house: h.id } };"));
     assert!(village_asset("index.html").unwrap().1.contains("<div id=\"d-ctl\"></div>"));
-    assert!(village_asset("main.js").unwrap().1.contains("import './controls.js';"));
+    assert!(village_asset("modules.js").unwrap().1.contains("import './controls.js';"));
     let controls = village_asset("controls.js").unwrap().1;
     // A fresh box per dialog; a slow answer for an earlier dialog is dropped.
     assert!(controls.contains("const token = ++ctlToken;"));
@@ -33,7 +33,7 @@ fn a_controls_result_shows_on_the_house_at_once() {
     let controls = village_asset("controls.js").unwrap().1;
     assert!(controls.contains("import { controlDone } from './controlplay.js';"));
     assert!(controls.contains("if (r && r.status >= 200 && r.status < 300) controlDone(c, d.go);"));
-    assert!(village_asset("main.js").unwrap().1.contains("import './controlplay.js';"));
+    assert!(village_asset("modules.js").unwrap().1.contains("import './controlplay.js';"));
     let play = village_asset("controlplay.js").unwrap().1;
     // Reduced motion: a toast, no override.
     assert!(play.contains("if (state.reduce) {") && play.contains("toast(`${c.project}: ${words}`);"));

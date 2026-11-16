@@ -85,7 +85,7 @@ registerLayer({ z: 74, draw(c, { v, lay }, t) {
 } });
 
 /* The Key: what a barrel's level and colour mean (registerKey, so key.js needs no edit). */
-registerKey({ group: "Beside a house: its agent's context", rows: theme => [
+registerKey({ group: "Beside a house: its agent's context", order: 10, rows: theme => [
   [c => barrel(c, 5, 3, 40, 0, theme), `Under ${CTX_WARN}% used: plenty left, a third full and green`],
   [c => barrel(c, 5, 3, 80, 0, theme), `${CTX_WARN}% to ${CTX_FULL}%: getting full, amber`],
   [c => barrel(c, 5, 3, 97, 0, theme), `${CTX_FULL}% or more, red; flashing from ${CTX_WEDGE}%: about to wedge`],

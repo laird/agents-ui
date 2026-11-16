@@ -97,10 +97,10 @@ registerLabels(sc => {
   const s = villageLimit(sc.v);
   if (!s) return [];
   return [{ x: sc.L.hallX - 6, y: 29, anchor: 'bottom', text: signWords(s), sub: `${s.n} of ${s.of} limited`, cls: 'limitsign' }];
-}, 20);
+}, 21);
 
 /* The Key: the dry well and the hourglass. */
-registerKey({ group: 'Beside a house: a usage limit', rows: theme => [
+registerKey({ group: 'Beside a house: a usage limit', order: 70, rows: theme => [
   [c => { well(c, 9, 4, theme); person(c, 1, 4, 'key:limited', 'stand', { status: 'idle' }); }, 'At a dry well: its runtime hit a usage or rate limit, and waits for it to reset', 18],
   [c => limitBubble(c, 3, 1), 'The hourglass: rate limited; its label says when it resets'],
   [c => limitSign(c, 4, 2), 'A sign at the hall: most of the village is limited, and when it resumes', 18]

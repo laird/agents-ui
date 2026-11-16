@@ -35,5 +35,5 @@ registerLabels(sc => {
     { x: x + (GH_SIGN.w >> 1), y: y + GH_SIGN.h + 1, anchor: 'top', text: 'GitHub', sub: panelSub(g) }];
 }, 12);
 
-registerKey({ group: 'other', rows: () => [
+registerKey({ group: 'other', order: 80, rows: () => [
   [c => envSign(c, 2, 0, null, 'GITHUB'), 'Sign lettered GITHUB by the hall: open pull requests, review requests, issues by label, what landed (click it)', 21]] });

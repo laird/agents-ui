@@ -191,7 +191,7 @@ fn village_html_shows_context_barrels() {
     assert!(body.contains("contextWords(h),"));
     assert!(body.contains("meta: [`Status: ${m.status}`, limitWords(m), contextWords(m),"));
     // And the Key explains it, through registerKey.
-    assert!(body.contains("registerKey({ group: \"Beside a house: its agent's context\", rows: theme => ["));
+    assert!(body.contains("registerKey({ group: \"Beside a house: its agent's context\", order: 10, rows: theme => ["));
     assert!(body.contains("`${CTX_FULL}% or more, red; flashing from ${CTX_WEDGE}%: about to wedge`"));
     assert!(!body.contains("retryTag(") && !body.contains("brokenCrate("), "the gate markers are #433's bounces");
 }
@@ -218,5 +218,5 @@ fn village_limited_workers_wait_at_a_dry_well() {
     assert!(body.contains("if (limited(house)) return { parts: n ? [name, `· #${n}`] : [name], sub: limitSub(house) };"));
     assert!(body.contains(".al.house.limited { border-color: #3890e0; }"));
     // The Key explains it.
-    assert!(body.contains("registerKey({ group: 'Beside a house: a usage limit', rows: theme => ["));
+    assert!(body.contains("registerKey({ group: 'Beside a house: a usage limit', order: 70, rows: theme => ["));
 }
