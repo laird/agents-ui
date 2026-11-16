@@ -187,6 +187,88 @@ pub fn go_mod(text: &str, name: &str) -> Option<String> {
     })
 }
 
+/// The release version in a tag or label: `v2.4.0`, `staging-v2.2.0`,
+/// `2.3`. A version has a dot, so a short commit (`abc1234`) is none.
+pub fn release_version(tag: &str) -> Option<String> {
+    let b = tag.as_bytes();
+    (0..b.len()).find_map(|i| {
+        let starts = b[i].is_ascii_digit() && (i == 0 || !b[i - 1].is_ascii_alphanumeric() || (b[i - 1] == b'v' || b[i - 1] == b'V') && (i == 1 || !b[i - 2].is_ascii_alphanumeric()));
+        if !starts {
+            return None;
+        }
+        let run: String = tag[i..].chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+        let run = run.trim_end_matches('.');
+        (run.contains('.') && run.split('.').all(|p| !p.is_empty())).then(|| run.to_string())
+    })
+}
+
+/// Whether `version` satisfies `range` (#512): comparators joined by `,` or
+/// spaces all hold (`>=2.3`, `>=1.2, <2`, `<3`, `=2.3.1`, `^2.3`, `~2.3`,
+/// `2.x`, a bare version as a caret, `*`); `||` joins alternatives. None
+/// when either can't be read.
+pub fn satisfies(range: &str, version: &str) -> Option<bool> {
+    let version = &release_version(version)?;
+    let alternatives: Vec<&str> = range.split("||").map(str::trim).filter(|a| !a.is_empty()).collect();
+    if alternatives.is_empty() {
+        return None;
+    }
+    let mut any = false;
+    for alt in alternatives {
+        if alt == "*" || alt.eq_ignore_ascii_case("x") {
+            any = true;
+            continue;
+        }
+        // `>= 2.3` is one comparator: glue an operator to the version after it.
+        let mut parts: Vec<String> = Vec::new();
+        for w in alt.split(|c: char| c == ',' || c.is_whitespace()).filter(|w| !w.is_empty()) {
+            match parts.last_mut() {
+                Some(last) if last.chars().all(|c| "<>=^~".contains(c)) => last.push_str(w),
+                _ => parts.push(w.to_string()),
+            }
+        }
+        let mut all = true;
+        for c in &parts {
+            all &= comparator(c, version)?;
+        }
+        any |= all;
+    }
+    Some(any)
+}
+
+/// One comparator (`>=2.3`, `^2.3`, `2.x`) against a version.
+fn comparator(c: &str, version: &str) -> Option<bool> {
+    let ord = |b: &str| compare(version, b);
+    if let Some(b) = c.strip_prefix(">=") {
+        return ord(b).map(|o| o != Ordering::Less);
+    }
+    if let Some(b) = c.strip_prefix("<=") {
+        return ord(b).map(|o| o != Ordering::Greater);
+    }
+    if let Some(b) = c.strip_prefix('>') {
+        return ord(b).map(|o| o == Ordering::Greater);
+    }
+    if let Some(b) = c.strip_prefix('<') {
+        return ord(b).map(|o| o == Ordering::Less);
+    }
+    if let Some(b) = c.strip_prefix('=') {
+        return ord(b).map(|o| o == Ordering::Equal);
+    }
+    // ^, ~, a wildcard or a bare version: the parts it holds fixed must
+    // match, and the version must be at least it.
+    let want = version_numbers(c)?;
+    let have = version_numbers(version)?;
+    let wild = c.contains(['x', 'X', '*']);
+    let hold = if wild {
+        c.trim_start_matches(|ch: char| !ch.is_ascii_digit()).split('.').take_while(|s| s.parse::<u64>().is_ok()).count()
+    } else if c.starts_with('~') {
+        if want.len() >= 2 { 2 } else { 1 }
+    } else {
+        want.iter().position(|n| *n != 0).map_or(want.len(), |k| k + 1).min(want.len().max(1))
+    };
+    let at = |v: &[u64], k: usize| v.get(k).copied().unwrap_or(0);
+    Some((0..hold).all(|k| at(&want, k) == at(&have, k)) && ord(c)? != Ordering::Less)
+}
+
 /// The version of a library (known by any of `names`) the repo at `dir`
 /// pins, and how to read it: its lockfiles first, then its manifests. None
 /// when no reader finds it.
@@ -294,6 +376,35 @@ mod tests {
         // A range never runs ahead of the release it is compared with.
         assert_eq!(b("^1.4.0", Pin::Npm, "v1.3.0"), Some(false));
         assert_eq!(b("main", Pin::Npm, "v1.0.0"), None);
+    }
+
+    #[test]
+    fn a_version_satisfies_a_range_or_not() {
+        let ok = |r: &str, v: &str| satisfies(r, v);
+        assert_eq!(ok(">=2.3", "v2.4.0"), Some(true));
+        assert_eq!(ok(">=2.3", "v2.2.9"), Some(false));
+        assert_eq!(ok(">= 2.3", "2.3.0"), Some(true), "an operator apart from its version");
+        assert_eq!(ok(">=1.2, <2", "1.9.0"), Some(true));
+        assert_eq!(ok(">=1.2, <2", "2.0.0"), Some(false));
+        assert_eq!(ok(">=1.2 <2", "2.0.0"), Some(false));
+        assert_eq!(ok("^2.3", "2.9.1"), Some(true));
+        assert_eq!(ok("^2.3", "3.0.0"), Some(false));
+        assert_eq!(ok("^2.3", "2.2.0"), Some(false));
+        assert_eq!(ok("~2.3", "2.3.7"), Some(true));
+        assert_eq!(ok("~2.3", "2.4.0"), Some(false));
+        assert_eq!(ok("2.x", "2.8.0"), Some(true));
+        assert_eq!(ok("=2.3.1", "2.3.1"), Some(true));
+        assert_eq!(ok("<2 || >=3", "3.1.0"), Some(true));
+        assert_eq!(ok("<2 || >=3", "2.5.0"), Some(false));
+        assert_eq!(ok("*", "9.9.9"), Some(true));
+        assert_eq!(ok(">=2.3", "abc1234"), None, "a short commit is no version");
+        assert_eq!(ok("whatever", "2.3.0"), None);
+        assert_eq!(ok(">=2.3", "staging-v2.2.0"), Some(false), "a tag with its environment's prefix");
+        assert_eq!(release_version("staging-v2.2.0").as_deref(), Some("2.2.0"));
+        assert_eq!(release_version("v2.4.0").as_deref(), Some("2.4.0"));
+        assert_eq!(release_version("1234567"), None);
+        assert_eq!(release_version("abc1234"), None);
+        assert_eq!(release_version("v2026.11.16.1").as_deref(), Some("2026.11.16.1"));
     }
 
     #[test]

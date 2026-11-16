@@ -48,8 +48,22 @@ fn the_valley_sails_releases_down_its_rivers() {
     // A click on a ship says which versions, before a repo takes the click.
     assert!(body.contains("if (ship) { openInfo(shipWords(ship)); return; }"));
     // A waiting ship is labelled with its version and has a keyboard target.
-    assert!(body.contains("}).join('') + shipLabels(ships, ox0, oy0, s);"));
+    assert!(body.contains("}).join('') + shipLabels(ships, ox0, oy0, s)"));
     assert!(body.contains("shipKeys(vkeys, ships, ox0, oy0, s, sh => openInfo(shipWords(sh))).forEach(b => keep.add(b));"));
     let main = village_asset("valley.js").unwrap().1;
     assert!(main.contains("import { drawShip, shipKeys, shipLabels } from './valleyships.js';"));
+}
+
+/// The environment grid (#512): the api-joined repos by environment below
+/// the valley, prod a city, marked cells with dialogs (decided in
+/// valleymodel.js, tested under node).
+#[test]
+fn the_valley_draws_its_environment_grid() {
+    let body = &village_source();
+    assert!(body.contains("drawGrid(ctx, lay, state);"));
+    assert!(body.contains("if (cell) { openInfo(gridWords(cell.cell)); return; }"));
+    assert!(body.contains("+ gridLabels(lay, ox0, oy0, s);"));
+    assert!(body.contains("gridKeys(vkeys, lay, ox0, oy0, s, c => openInfo(gridWords(c))).forEach(b => keep.add(b));"));
+    let grid = village_asset("valleygrid.js").unwrap().1;
+    assert!(grid.contains("if (g.city) {"), "the prod column is a city");
 }

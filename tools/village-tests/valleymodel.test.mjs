@@ -179,3 +179,36 @@ test('a consumer behind on two libraries has a berth for each ship', () => {
   assert.equal(Math.abs(ships[0].y - ships[1].y), SHIP_BERTH, 'apart, so each can be seen and clicked');
   assert.equal(valleyShipAt(ships, ships[1].x, ships[1].y), ships[1]);
 });
+
+// The environment grid (#512).
+const { gridLayout, gridAt, gridWords, isCity, GRID_CELL } = await import('../../src/web/village/valleymodel.js');
+
+test('the grid sits below the valley, a row per repo, a column per environment, prod a city', () => {
+  const grid = { envs: ['staging', 'prod'], repos: ['shop', 'billing'], cells: [
+    { repo: 'billing', env: 'staging', version: 'v2.2.0', mismatches: [{ neighbour: 'shop', env: 'staging', expects: '>=2.3', version: 'v2.2.0' }] },
+    { repo: 'billing', env: 'prod', version: 'v2.4.0' },
+    { repo: 'shop', env: 'staging', version: 'v5.0.0' },
+  ] };
+  const g = { ...SHOP, grid };
+  const plain = valleyLayout(SHOP), lay = valleyLayout(g);
+  assert.equal(plain.grid, null, 'no grid: the valley as before');
+  assert.ok(lay.H > plain.H, 'the grid adds its rows below');
+  assert.ok(lay.grid.y >= plain.H - VALLEY_MARGIN, 'below the roads');
+  assert.deepEqual(lay.grid.cols.map(c => [c.env, c.city]), [['staging', false], ['prod', true]]);
+  assert.equal(lay.grid.cells.length, 3, 'shop runs nothing in prod: no cell there');
+  const c = lay.grid.cells.find(x => x.cell.repo === 'billing' && x.cell.env === 'staging');
+  assert.equal(gridAt(lay, c.x + 1, c.y + 1), c);
+  assert.equal(gridAt(lay, 0, 0), null);
+  assert.ok(isCity('production') && isCity('Prod') && !isCity('preprod'));
+  assert.equal(c.w, GRID_CELL.w);
+});
+
+test("a marked cell's dialog says which neighbour, which versions and which environment", () => {
+  const w = gridWords({ repo: 'billing', env: 'staging', version: 'v2.2.0', mismatches: [{ neighbour: 'shop', env: 'staging', expects: '>=2.3', version: 'v2.2.0' }] });
+  assert.equal(w.title, 'billing in staging');
+  assert.equal(w.line, 'Runs v2.2.0, outside what shop in staging expects.');
+  assert.deepEqual(w.meta, ['shop in staging expects billing >=2.3; it runs v2.2.0']);
+  const c = gridWords({ repo: 'b', env: 'prod', version: 'abc1234', mismatches: [{ neighbour: 's', env: 'prod', expects: '^2', version: '1.9.0', contract: 'openapi.yaml' }] });
+  assert.equal(c.meta[0], 's in prod expects b ^2; its contract (openapi.yaml) says 1.9.0');
+  assert.equal(gridWords({ repo: 'b', env: 'dev' }).line, 'What it runs is not known.');
+});

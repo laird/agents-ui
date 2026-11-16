@@ -44,6 +44,13 @@ pub enum Via {
 struct DependsOn {
     repo: String,
     via: Via,
+    /// For an `api` edge: the provider's version range this repo expects (#512).
+    #[serde(default)]
+    expects: Option<String>,
+    /// For an `api` edge: a contract file in the provider's repo whose
+    /// `info.version` is compared instead of its release (#512).
+    #[serde(default)]
+    contract: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -78,6 +85,12 @@ pub struct Edge {
     pub latest_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub behind: Option<bool>,
+    /// For an `api` edge (#512): what `to` expects of `from`, and the
+    /// contract file compared, as the manifest says.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expects: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contract: Option<String>,
 }
 
 /// What the valley says about one repo, from its village.
@@ -117,6 +130,9 @@ pub struct ValleyGroup {
     /// Upstream to downstream.
     pub repos: Vec<ValleyRepo>,
     pub edges: Vec<Edge>,
+    /// The repos joined by `api` edges, by environment (`grid.rs`, #512).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grid: Option<super::grid::Grid>,
     /// What is wrong with this group's part of the manifest.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub errors: Vec<String>,
@@ -211,6 +227,24 @@ fn lib_versions(dir: Option<&Path>, name: &str) -> LibVersions {
     })
 }
 
+/// The newest version tag on commit `sha` in the repo at `dir`, kept
+/// [`VERSIONS_FRESH`].
+fn tag_at(dir: &Path, sha: &str) -> Option<String> {
+    if !sha.chars().all(|c| c.is_ascii_hexdigit()) || sha.is_empty() {
+        return None;
+    }
+    static CACHE: OnceLock<Kept<Option<String>>> = OnceLock::new();
+    kept(&CACHE, format!("{}\0{sha}", dir.to_string_lossy()), || {
+        let out = std::process::Command::new("git").arg("-C").arg(dir).args(["tag", "--points-at", sha]).output().ok().filter(|o| o.status.success())?;
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(str::trim)
+            .filter(|t| super::pins::release_version(t).is_some() && !super::pins::is_prerelease(t))
+            .max_by(|a, b| super::pins::compare(a, b).unwrap_or(std::cmp::Ordering::Equal))
+            .map(str::to_string)
+    })
+}
+
 /// What the repo at `dir` pins of a library known by `names`.
 fn pin_of(dir: &Path, names: &[String]) -> Option<(String, super::pins::Pin)> {
     static CACHE: OnceLock<Kept<Option<(String, super::pins::Pin)>>> = OnceLock::new();
@@ -272,7 +306,7 @@ fn is_dormant(v: &VillageSnapshot) -> bool {
 
 /// One group laid out: its repos ordered upstream to downstream along the
 /// `package` edges, with what is wrong said in `errors`.
-fn build_group(def: &GroupDef, villages: &[VillageSnapshot]) -> ValleyGroup {
+fn build_group(def: &GroupDef, villages: &[VillageSnapshot], dormant: &HashMap<String, Vec<super::village::Stop>>) -> ValleyGroup {
     let mut errors = Vec::new();
     // The repos, first mention wins.
     let mut defs: Vec<&RepoDef> = Vec::new();
@@ -297,7 +331,7 @@ fn build_group(def: &GroupDef, villages: &[VillageSnapshot]) -> ValleyGroup {
             } else if &from == to {
                 errors.push(format!("{}: {to} depends on itself", def.name));
             } else if !edges.iter().any(|e: &Edge| e.from == from && e.to == *to && e.via == dep.via) {
-                edges.push(Edge { from, to: to.clone(), via: dep.via, ..Default::default() });
+                edges.push(Edge { from, to: to.clone(), via: dep.via, expects: dep.expects.clone(), contract: dep.contract.clone(), ..Default::default() });
             }
         }
     }
@@ -330,7 +364,30 @@ fn build_group(def: &GroupDef, villages: &[VillageSnapshot]) -> ValleyGroup {
         .collect();
     // Upstream first; within a depth, as the manifest lists them.
     repos.sort_by_key(|r| r.depth);
-    ValleyGroup { name: def.name.clone(), repos, edges, errors }
+    // Each repo's environments: its village's stops, or those read from its repo.
+    let stops: Vec<(String, Vec<super::village::Stop>)> = repos
+        .iter()
+        .map(|r| {
+            let mut s = village_for(&r.repo, villages).map(|v| v.pipeline.stops.clone()).or_else(|| dormant.get(&r.name).cloned()).unwrap_or_default();
+            // A stop known only by its commit (an environment branch) takes
+            // the version tag on that commit, when its repo is here.
+            if let Some(dir) = repo_dir(&r.repo, villages) {
+                for stop in s.iter_mut().filter(|st| st.tag.is_none()) {
+                    if let Some(sha) = stop.sha.clone() {
+                        stop.tag = tag_at(&dir, &sha);
+                    }
+                }
+            }
+            (r.name.clone(), s)
+        })
+        .collect();
+    let contract = |provider: &str, file: &str, sha: &str| -> Option<String> {
+        let dir = repo_dir(&def_of(provider)?.repo, villages)?;
+        static CACHE: OnceLock<Kept<Option<String>>> = OnceLock::new();
+        kept(&CACHE, format!("{}\0{file}\0{sha}", dir.to_string_lossy()), || super::grid::contract_at(&dir, file, sha))
+    };
+    let grid = super::grid::build(&stops, &edges, &contract);
+    ValleyGroup { name: def.name.clone(), repos, edges, grid, errors }
 }
 
 /// Each repo's depth: the longest run of `package` edges above it. Repos on
@@ -384,6 +441,12 @@ fn order(names: &[String], edges: &[Edge], group: &str, errors: &mut Vec<String>
 
 /// The valley from a manifest's text and the villages running now.
 pub fn valley(text: &str, villages: &[VillageSnapshot]) -> (Vec<ValleyGroup>, Vec<String>) {
+    valley_with(text, villages, &HashMap::new())
+}
+
+/// [`valley`], with the environment stops of repos that have no village,
+/// read from their repos (`dormant_stops`), by repo name.
+pub fn valley_with(text: &str, villages: &[VillageSnapshot], dormant: &HashMap<String, Vec<super::village::Stop>>) -> (Vec<ValleyGroup>, Vec<String>) {
     match serde_json::from_str::<Vec<GroupDef>>(text) {
         Ok(defs) => {
             let mut errors = Vec::new();
@@ -397,7 +460,7 @@ pub fn valley(text: &str, villages: &[VillageSnapshot]) -> (Vec<ValleyGroup>, Ve
                     }
                     fresh
                 })
-                .map(|g| build_group(g, villages))
+                .map(|g| build_group(g, villages, dormant))
                 .collect();
             (groups, errors)
         }
@@ -407,15 +470,64 @@ pub fn valley(text: &str, villages: &[VillageSnapshot]) -> (Vec<ValleyGroup>, Ve
 
 /// The valley for the manifest at `path`.
 pub fn read(path: &Path, villages: &[VillageSnapshot]) -> ValleyResponse {
+    read_with(path, villages, &HashMap::new())
+}
+
+/// [`read`], with the stops of repos that have no village.
+pub fn read_with(path: &Path, villages: &[VillageSnapshot], dormant: &HashMap<String, Vec<super::village::Stop>>) -> ValleyResponse {
     let manifest = path.to_string_lossy().into_owned();
     match std::fs::read_to_string(path) {
         Ok(text) => {
-            let (groups, errors) = valley(&text, villages);
+            let (groups, errors) = valley_with(&text, villages, dormant);
             ValleyResponse { manifest, found: true, groups, errors }
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => ValleyResponse { manifest, found: false, groups: Vec::new(), errors: Vec::new() },
         Err(e) => ValleyResponse { manifest, found: true, groups: Vec::new(), errors: vec![format!("can't read the manifest: {e}")] },
     }
+}
+
+/// The environment stops of each manifest repo that has no village but is
+/// on this machine (#512): its pipeline, read from its `.autocoder.json` and
+/// git, kept [`VERSIONS_FRESH`]. By repo name.
+async fn dormant_stops(transport: &super::super::transport::ServerTransport, villages: &[VillageSnapshot]) -> HashMap<String, Vec<super::village::Stop>> {
+    type Pipelines = std::sync::Mutex<HashMap<PathBuf, (std::time::Instant, Vec<super::village::Stop>)>>;
+    static CACHE: OnceLock<Pipelines> = OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    let Ok(text) = std::fs::read_to_string(manifest_path()) else { return HashMap::new() };
+    let Ok(defs) = serde_json::from_str::<Vec<GroupDef>>(&text) else { return HashMap::new() };
+    let mut out = HashMap::new();
+    for r in defs.iter().flat_map(|g| &g.repos) {
+        if village_for(&r.repo, villages).is_some() {
+            continue;
+        }
+        let Some(dir) = repo_dir(&r.repo, villages) else { continue };
+        let fresh = cache.lock().unwrap_or_else(|e| e.into_inner()).get(&dir).filter(|(at, _)| at.elapsed() < VERSIONS_FRESH).map(|(_, s)| s.clone());
+        let stops = match fresh {
+            Some(s) => s,
+            None => {
+                let mut s = super::village::read_pipeline(transport, &dir).await.stops;
+                // An environment read from its branch names no commit: its
+                // branch's head is what runs there.
+                let config = std::fs::read_to_string(dir.join(".autocoder.json")).unwrap_or_default();
+                for env in super::village::parse_environments(&config) {
+                    let Some(stop) = s.iter_mut().find(|st| st.name == env.name && st.sha.is_none()) else { continue };
+                    let rev = format!("origin/{}", env.branch);
+                    let args: Vec<String> = ["-C", &dir.to_string_lossy(), "rev-parse", "--verify", "-q", &rev].iter().map(|a| a.to_string()).collect();
+                    stop.sha = transport
+                        .output("git", &args, None)
+                        .await
+                        .ok()
+                        .filter(|o| o.status.success())
+                        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                        .filter(|sha| !sha.is_empty() && sha.chars().all(|c| c.is_ascii_hexdigit()));
+                }
+                cache.lock().unwrap_or_else(|e| e.into_inner()).insert(dir.clone(), (std::time::Instant::now(), s.clone()));
+                s
+            }
+        };
+        out.insert(repo_name(&r.repo), stops);
+    }
+    out
 }
 
 /// `GET /api/valley`: every group in the manifest, from the villages now.
@@ -424,9 +536,10 @@ pub async fn api_valley_handler(
 ) -> axum::Json<serde_json::Value> {
     let swarms = state.swarms.read().map(|s| s.clone()).unwrap_or_default();
     let snapshot = state.village.snapshot(&state.transport, &swarms).await;
+    let dormant = dormant_stops(&state.transport, &snapshot.villages).await;
     // Reading repos on disk (tags, lockfiles) is blocking work (#511).
     let villages = snapshot.villages;
-    let answer = tokio::task::spawn_blocking(move || read(&manifest_path(), &villages)).await;
+    let answer = tokio::task::spawn_blocking(move || read_with(&manifest_path(), &villages, &dormant)).await;
     axum::Json(match answer {
         Ok(valley) => serde_json::json!(valley),
         Err(e) => serde_json::json!({ "manifest": manifest_path().to_string_lossy(), "found": true, "groups": [], "errors": [format!("can't read the valley: {e}")] }),
@@ -501,6 +614,29 @@ mod tests {
         let e = edge("shop", "web");
         assert_eq!((e.pinned, e.latest), (None, None), "an api edge has no versions");
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn the_grid_marks_a_provider_outside_what_its_consumer_in_the_same_environment_expects() {
+        use crate::web::village::StopKind;
+        let env = |name: &str, tag: Option<&str>| Stop { name: name.into(), tag: tag.map(Into::into), sha: Some("abc1234".into()), kind: StopKind::Environment, ..Default::default() };
+        let mut shop = village("shop", &[HouseStatus::Working]);
+        shop.pipeline.stops = vec![env("staging", None), env("prod", None)];
+        let dormant = HashMap::from([("billing".to_string(), vec![env("staging", Some("v2.2.0")), env("prod", Some("v2.4.0"))])]);
+        let text = r#"[{ "name": "g", "repos": [ { "repo": "billing" },
+            { "repo": "shop", "depends_on": [{ "repo": "billing", "via": "api", "expects": ">=2.3" }] } ] }]"#;
+        let (groups, errors) = valley_with(text, &[shop], &dormant);
+        assert!(errors.is_empty() && groups[0].errors.is_empty());
+        let grid = groups[0].grid.as_ref().expect("an api edge: a grid");
+        assert_eq!(grid.envs, vec!["staging", "prod"]);
+        let cell = |r: &str, e: &str| grid.cells.iter().find(|c| c.repo == r && c.env == e).unwrap();
+        assert_eq!(cell("billing", "staging").mismatches.len(), 1);
+        assert_eq!(cell("billing", "staging").mismatches[0].neighbour, "shop");
+        assert!(cell("billing", "prod").mismatches.is_empty());
+        assert_eq!(groups[0].edges[0].expects.as_deref(), Some(">=2.3"), "what the manifest said is on the edge");
+        // No api edges: no grid.
+        let (plain, _) = valley(SHOP.replace(r#", { "repo": "api", "via": "api" }"#, "").as_str(), &[]);
+        assert!(plain[0].grid.is_none());
     }
 
     #[test]

@@ -19,7 +19,8 @@ import { numberTag, numberTagSize } from './scenery.js';
 import { registerOverlay } from './registry.js';
 import { esc, fit } from './panels.js';
 import { SHORE, ovHouse } from './overview.js';
-import { repoWords, valleyShipAt, shipWords, valleyAt, valleyLayout, valleyMissing, valleyName, valleyShips, valleyWords } from './valleymodel.js';
+import { gridAt, gridWords, repoWords, valleyShipAt, shipWords, valleyAt, valleyLayout, valleyMissing, valleyName, valleyShips, valleyWords } from './valleymodel.js';
+import { drawGrid, gridKeys, gridLabels } from './valleygrid.js';
 import { drawShip, shipKeys, shipLabels } from './valleyships.js';
 import { openInfo } from './dialogs.js';
 
@@ -100,6 +101,7 @@ export function drawValley(t) {
   lay.rivers.forEach(p => p.slice(1).forEach(([x, y], k) => leg(p[k][0], p[k][1], x, y, 8, (lx, ly, lw, lh) => state.T.channel(ctx, lx, ly, lw, lh, t, 1))));
   valleyShips(lay, state.reduce ? 0 : t).forEach(sh => drawShip(ctx, sh)); // releases flowing downstream (#511)
   g.repos.forEach((r, k) => drawRepo(ctx, r, lay.cells[k]));
+  drawGrid(ctx, lay, state); // the api-joined repos by environment (#512)
 }
 
 /* Open a repo's own village; a repo with no village has nothing to open. */
@@ -117,6 +119,8 @@ cv.addEventListener('click', e => {
   const x = toScene((e.clientX - rect.left) / rect.width * cv.width), y = toScene((e.clientY - rect.top) / rect.height * cv.height);
   const lay = valleyLayout(g), ship = valleyShipAt(valleyShips(lay, state.reduce ? 0 : performance.now()), x, y);
   if (ship) { openInfo(shipWords(ship)); return; }
+  const cell = gridAt(lay, x, y);
+  if (cell) { openInfo(gridWords(cell.cell)); return; }
   const k = valleyAt(lay.cells, x, y);
   if (k !== null) openRepo(g.repos[k]);
 });
@@ -141,7 +145,7 @@ export function placeValley() {
     const c = cells[k], words = repoWords(repo), health = (repo.summary || {}).health;
     return `<div class="al ov ov-${esc(health || 'dormant')}" aria-hidden="true" style="left:${ox0 + (c.x + c.w / 2) * s}px;top:${oy0 + (c.y + 2) * s}px;max-width:${(c.w + 8) * s}px;border-color:${VALLEY_SHORE[health] || VALLEY_SHORE.dormant}">` +
       `${esc(words.text)}<small>${esc(words.sub)}</small></div>`;
-  }).join('') + shipLabels(ships, ox0, oy0, s);
+  }).join('') + shipLabels(ships, ox0, oy0, s) + gridLabels(lay, ox0, oy0, s);
   const keep = new Set();
   g.repos.forEach((repo, k) => {
     const c = cells[k], words = repoWords(repo);
@@ -158,6 +162,7 @@ export function placeValley() {
     Object.assign(b.style, { left: ox0 + c.x * s + 'px', top: oy0 + c.y * s + 'px', width: c.w * s + 'px', height: c.h * s + 'px' });
   });
   shipKeys(vkeys, ships, ox0, oy0, s, sh => openInfo(shipWords(sh))).forEach(b => keep.add(b));
+  gridKeys(vkeys, lay, ox0, oy0, s, c => openInfo(gridWords(c))).forEach(b => keep.add(b));
   [...vkeys.children].forEach(b => { if (!keep.has(b)) b.remove(); });
 }
 registerOverlay(placeValley, 26);

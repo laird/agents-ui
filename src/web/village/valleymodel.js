@@ -49,7 +49,51 @@ export function valleyLayout(group) {
       roads.push([[a.x, ya], [xa, ya], [xa, lane], [xb, lane], [xb, yb], [b.x, yb]]);
     }
   });
-  return { W, H, cells, rivers, riverEdges, roads };
+  const grid = gridLayout(group && group.grid, lane + 24);
+  return { W: Math.max(W, grid ? grid.W : 0), H: grid ? grid.bottom + m : H, cells, rivers, riverEdges, roads, grid };
+}
+
+/* ---------- The environment grid (#512) ----------
+ * Below the valley, the repos joined by `api` edges by environment: a row
+ * per repo, a column per environment, the prod column drawn as a city.
+ * Each cell is what that repo runs there; a cell outside what a neighbour
+ * in the same environment expects is marked. */
+export const GRID_CELL = { w: 56, h: 30 }, GRID_HEAD = 14, GRID_LABEL = 64, GRID_GAP = 6;
+
+/* Whether an environment's column is the city: prod (or production). */
+export const isCity = env => /^prod(uction)?$/i.test(String(env || ''));
+
+/* Where the grid's cells sit, from `top` down: { x, y, W, bottom, cols, rows, cells }.
+ * Null with no grid. */
+export function gridLayout(grid, top) {
+  if (!grid || !(grid.envs || []).length || !(grid.repos || []).length) return null;
+  const { w, h } = GRID_CELL, x0 = VALLEY_MARGIN + GRID_LABEL, y0 = top + GRID_HEAD;
+  const cols = grid.envs.map((env, k) => ({ env, x: x0 + k * (w + GRID_GAP), city: isCity(env) }));
+  const rows = grid.repos.map((repo, k) => ({ repo, y: y0 + k * (h + GRID_GAP) }));
+  const cells = (grid.cells || []).map(cell => {
+    const c = cols.find(o => o.env === cell.env), r = rows.find(o => o.repo === cell.repo);
+    return c && r ? { x: c.x, y: r.y, w, h, city: c.city, cell } : null;
+  }).filter(Boolean);
+  const W = x0 + cols.length * (w + GRID_GAP) - GRID_GAP + VALLEY_MARGIN;
+  return { x: x0, y: top, W, bottom: y0 + rows.length * (h + GRID_GAP) - GRID_GAP, cols, rows, cells };
+}
+
+/* The grid cell under (x, y), or null. */
+export function gridAt(lay, x, y) {
+  const g = lay && lay.grid;
+  return (g && g.cells.find(c => x >= c.x && x < c.x + c.w && y >= c.y && y < c.y + c.h)) || null;
+}
+
+/* What a click on a cell says: what runs there, and whom it doesn't suit. */
+export function gridWords(cell) {
+  const marks = cell.mismatches || [];
+  return {
+    title: `${cell.repo} in ${cell.env}`,
+    line: marks.length
+      ? `Runs ${cell.version}, outside what ${marks.map(m => m.neighbour).join(' and ')} in ${cell.env} expect${marks.length === 1 ? 's' : ''}.`
+      : (cell.version ? `Runs ${cell.version}.` : 'What it runs is not known.'),
+    meta: marks.map(m => `${m.neighbour} in ${m.env} expects ${cell.repo} ${m.expects}; ${m.contract ? `its contract (${m.contract}) says` : 'it runs'} ${m.version}`),
+  };
 }
 
 /* ---------- Ships: releases flowing downstream (#511) ----------

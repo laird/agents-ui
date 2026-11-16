@@ -84,7 +84,9 @@ sleep 1
 # and billing have no swarm, so they are dormant. Each is a small repo under
 # the demo's HOME, so the valley can read versions (#511): lib-core has
 # released v1.4.0; shop and billing have taken it, larkspur still pins 1.3.0,
-# so a ship waits at its dock.
+# so a ship waits at its dock. billing deploys v2.2.0 to staging and v2.4.0
+# to prod (its environments' tags), and shop expects >=2.3 of it, so its
+# staging cell in the environment grid is marked (#512).
 mkdir -p "$DEMO/home/.agents-ui"
 demo_repo() {  # demo_repo <name> <file> <contents>: a repo under ~/repos
   mkdir -p "$DEMO/home/repos/$1" && printf '%s\n' "$3" > "$DEMO/home/repos/$1/$2"
@@ -97,10 +99,24 @@ demo_repo lib-core Cargo.toml $'[package]\nname = "lib-core"\nversion = "1.4.0"'
 demo_repo shop Cargo.lock $'[[package]]\nname = "lib-core"\nversion = "1.4.0"'
 demo_repo larkspur package-lock.json '{"packages":{"node_modules/lib-core":{"version":"1.3.0"}}}'
 demo_repo billing Cargo.toml $'[dependencies]\nlib-core = "1.4"'
+demo_repo billing .autocoder.json '{"environments":[{"name":"staging","ref":"env/staging"},{"name":"prod","ref":"env/prod"}]}'
+# billing's environments are branches on its own origin (a bare repo here):
+# staging runs v2.2.0, prod v2.4.0.
+rm -rf "$DEMO/home/repos/billing-origin.git"
+(set -e; cd "$DEMO/home/repos/billing"
+  g() { git -c user.name=demo -c user.email=demo@localhost -c commit.gpgsign=false -c tag.gpgsign=false "$@"; }
+  git init -q; git add -A; git diff --cached --quiet || g commit -qm "billing 2.2.0"
+  g tag -f v2.2.0 >/dev/null; g commit -q --allow-empty -m "billing 2.4.0"; g tag -f v2.4.0 >/dev/null
+  git init -q --bare "$DEMO/home/repos/billing-origin.git"
+  git remote remove origin 2>/dev/null || true
+  git remote add origin "$DEMO/home/repos/billing-origin.git"
+  git push -q -f origin v2.2.0^{commit}:refs/heads/env/staging v2.4.0^{commit}:refs/heads/env/prod HEAD:refs/heads/master
+  git fetch -q origin) \
+  || echo "demo: could not set up billing's environments; the valley's grid shows none for it" >&2
 cat > "$DEMO/home/.agents-ui/group.json" <<'GROUP'
 [{ "name": "demo", "repos": [
   { "repo": "~/repos/lib-core" },
-  { "repo": "~/repos/shop", "depends_on": [{ "repo": "~/repos/lib-core", "via": "package" }, { "repo": "~/repos/billing", "via": "api" }] },
+  { "repo": "~/repos/shop", "depends_on": [{ "repo": "~/repos/lib-core", "via": "package" }, { "repo": "~/repos/billing", "via": "api", "expects": ">=2.3" }] },
   { "repo": "~/repos/larkspur", "depends_on": [{ "repo": "~/repos/lib-core", "via": "package" }] },
   { "repo": "~/repos/billing", "depends_on": [{ "repo": "~/repos/lib-core", "via": "package" }] } ] }]
 GROUP
