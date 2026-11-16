@@ -26,7 +26,8 @@ import { lamp } from './alarms.js';
 import { detail } from './detail.js';
 import { disc, px } from './art2x.js';
 import { quaySpot } from './ship.js';
-import { issueLabel, issueOf, link } from './dialogs.js';
+import { issueLabel, issueOf, link, repoUrl } from './dialogs.js';
+import { gatePrLink } from './ghlinks.js';
 
 export const IN_GATE = new Set(['queued', 'merging', 'gating']);
 export const gateEntries = v => v.pipeline.gates || [];
@@ -229,31 +230,39 @@ registerLayer({ z: 85, draw(c, { v, lay, atQuay }, t) {
 
 /* ---------- Dialogs ---------- */
 const ORDER = { gating: 0, merging: 1, queued: 2, 'red-base': 3, failed: 4, conflict: 5, 'landed-unproven': 6, passed: 7 };
-const entryItem = (v, e) => ({ ...issueOf(v, e.issue), number: e.issue, label: gateEntryWords(e, v), url: e.failure_url || issueOf(v, e.issue).url });
+const entryItem = (v, e) => ({ ...issueOf(v, e.issue), number: e.issue, label: gateEntryWords(e, v) });
+/* An entry's pull request (by its house's branch, when a house is on it) and
+ * where its failure is written, beside the issue its row links (#491). */
+const branchOf = (v, n) => (v.houses.find(h => h.issue === n) || {}).branch;
+function entryLinks(v, e) {
+  const failed = e.failure_url && e.failure_url !== issueOf(v, e.issue).url ? link(`#${e.issue}: what went wrong`, e.failure_url) : null;
+  return [gatePrLink(repoUrl(v), e.issue, branchOf(v, e.issue)), failed];
+}
 /* The queue, what is on each table, and recent outcomes. */
 registerHit({ kind: 'gatehouse', dialog(o, sc, theme) {
   const v = sc.v, gs = gateSpots(v, sc.L), merge = v.pipeline.merge;
+  const entries = [...gateEntries(v)].sort((a, b) => (ORDER[a.state] ?? 9) - (ORDER[b.state] ?? 9));
   return { title: `${theme.labels.gate} · merge gate`, line: `${gs.queued} queued · ${gs.gating} gating`,
     meta: [merge ? `Gate slots: ${(merge.busy || []).length} of ${merge.slots} busy` : null,
       ...((merge && merge.trains) || []).map(tr => `Train ${tr.id}: ${tr.members.map(m => '#' + m).join(' ')} · ${tr.state}`)],
-    items: [...gateEntries(v)].sort((a, b) => (ORDER[a.state] ?? 9) - (ORDER[b.state] ?? 9)).map(e => entryItem(v, e)), links: [] };
+    items: entries.map(e => entryItem(v, e)), links: entries.flatMap(e => entryLinks(v, e)) };
 } });
 registerHit({ kind: 'train', dialog(o, sc) {
   const v = sc.v, tr = ((v.pipeline.merge || {}).trains || []).find(x => x.id === o.id), members = gateEntries(v).filter(e => e.train === o.id);
   return { title: `Merge train ${o.id || ''}`.trim(), line: `${members.length} branches gated together as one tree${tr ? ' · ' + tr.state : ''}`,
-    items: members.map(e => entryItem(v, e)), links: [] };
+    items: members.map(e => entryItem(v, e)), links: members.flatMap(e => entryLinks(v, e)) };
 } });
 registerHit({ kind: 'redbase', dialog(o, sc) {
   const v = sc.v, red = gateEntries(v).filter(e => e.state === 'red-base');
   return { title: 'Storm over the quay', line: `${v.pipeline.integration || 'The integration branch'} fails without these changes: not their fault`,
-    items: red.map(e => entryItem(v, e)), links: [] };
+    items: red.map(e => entryItem(v, e)), links: red.flatMap(e => entryLinks(v, e)) };
 } });
 /* A crate in line, on a table, tagged at the quay or handed back to its house. */
 registerHit({ kind: 'gatecrate', dialog(o, sc, theme) {
   const v = sc.v, it = issueOf(v, o.n), e = gateOf(v, o.n);
   return { title: `#${o.n} ${it.title}`.trim(), line: e ? gateEntryWords(e, v) : `at the ${theme.labels.gate.toLowerCase()}`,
     meta: [it.priority ? `Priority: ${it.priority}` : null, e && e.attempt ? `Gate attempt ${e.attempt}` : null],
-    links: [link(issueLabel(o.n), it.url), e && e.failure_url && e.failure_url !== it.url ? link('What went wrong', e.failure_url) : null] };
+    links: [link(issueLabel(o.n), it.url), e ? gatePrLink(repoUrl(v), o.n, branchOf(v, o.n)) : null, e && e.failure_url && e.failure_url !== it.url ? link('What went wrong', e.failure_url) : null] };
 } });
 
 /* ---------- Label ---------- */

@@ -17,6 +17,7 @@ import { P, R, blink, shadow } from './palette.js';
 import { alarmLamp, alarms, blameCrate, bolt, brokenSign, clouds, puff, rain, SIGN_W, SIGN_H } from './weatherart.js';
 import { registerHit, registerKey, registerLabels, registerLayer, tap } from './registry.js';
 import { link, repoUrl } from './dialogs.js';
+import { actionsLink } from './ghlinks.js';
 import { buildSign, buildWords, failingJobs, shortSha, weatherOf } from './buildweather.js';
 
 /* A theme without its own weather gets the village's. */
@@ -90,7 +91,9 @@ registerLabels(sc => {
 /* ---------- Dialogs ---------- */
 const buildLinks = (v, b) => [link('Open the run', b.url),
   ...(b.jobs || []).filter(j => j.url).map(j => link(`${j.name} · ${j.state}`, j.url)),
-  repoUrl(v) && b.sha ? link(`Commit ${shortSha(b.sha)}`, `${repoUrl(v)}/commit/${b.sha}`) : null];
+  repoUrl(v) && b.sha ? link(`Commit ${shortSha(b.sha)}`, `${repoUrl(v)}/commit/${b.sha}`) : null,
+  // No run to open (green, or not known): the repo's workflow runs instead.
+  b.url ? null : actionsLink(repoUrl(v))];
 
 registerHit({ kind: 'build', dialog(o, sc) {
   const v = sc.v, b = v.build || {}, branch = v.pipeline.integration || 'The integration branch';

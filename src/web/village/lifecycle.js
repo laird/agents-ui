@@ -20,6 +20,7 @@ import { crateState, whereWaitedOn } from './docks.js';
 import { contextWords } from './barrels.js';
 import { houseName, issueItems, issueLabel, issueOf, link, repoUrl, sessionOf } from './dialogs.js';
 import { houseLabel, managerSub } from './houselabel.js';
+import { branchLinks, commitsLink } from './ghlinks.js';
 import { ALARM, alarm, boardAlert, boardFrame, failed, ring } from './alarms.js';
 
 /* Where a house's sub-agents stand: two beside the door, then a row on the
@@ -240,7 +241,8 @@ const docks = (o, sc, theme) => ({ title: theme.labels.docks, line: isRuntime(sc
 registerHit({ kind: 'river', key: false, dialog: docks });
 registerHit({ kind: 'docks', dialog: docks });
 registerHit({ kind: 'board', dialog: (o, sc, theme) =>
-  ({ title: theme.labels.board, line: isRuntime(sc.v) ? 'Failed in the last 24 hours' : 'Blocked issues and proposals waiting on you', items: sc.v.board,
+  ({ title: theme.labels.board, line: isRuntime(sc.v) ? 'Failed in the last 24 hours' : 'Blocked issues and proposals waiting on you', // Every note links to its issue, from wherever the village knows its URL.
+    items: sc.v.board.map(n => (n.url ? n : { ...n, url: issueOf(sc.v, n.number).url })),
     // Proposals get Approve / Reject / Ask for changes (proposals.js).
     decide: isRuntime(sc.v) ? null : sc.v.project }) });
 registerHit({ kind: 'hall', dialog(o, sc, theme) {
@@ -248,7 +250,7 @@ registerHit({ kind: 'hall', dialog(o, sc, theme) {
   const m = v.manager, s = sessionOf(m), swarm = s && s.url.replace(/\/agent\/[^/]+$/, '');
   return { title: `${theme.labels.hall} · manager`, line: m.issue ? `#${m.issue} ${m.issue_title || ''}` : (m.issue_title || 'The manager of this swarm'),
     meta: [`Status: ${m.status}`, contextWords(m), `Crew: ${m.crew.join(', ') || '—'}`, ...(m.subagents || []).map(sa => `${runtime ? 'Worker' : 'Sub-agent'}: ${subWords(sa, v)}`), m.action ? `Now: ${m.action}` : null],
-    links: [...(m.links || []), link('Swarm view', swarm)], house: m };
+    links: [...(m.links || []), link('Swarm view', swarm), runtime ? null : commitsLink(repoUrl(v), v.pipeline.integration)], house: m };
 } });
 registerHit({ kind: 'house', dialog(o, sc) {
   const v = sc.v, runtime = isRuntime(v), work = workOf(v);
@@ -263,7 +265,7 @@ registerHit({ kind: 'house', dialog(o, sc) {
       `Status: ${h.status}${h.action && h.action !== h.status ? ' · ' + h.action : ''}${h.priority ? ' · ' + h.priority : ''}`,
       since ? `${h.status.charAt(0).toUpperCase() + h.status.slice(1)} since ${since}` : null, contextWords(h),
       `Crew: ${h.crew.join(', ') || '—'}`, ...(h.subagents || []).map(sa => `${runtime ? 'Agent' : 'Sub-agent'}: ${subWords(sa, v)}`)],
-    links: [...(h.links || []), issue, compare], house: h };
+    links: [...(h.links || []), issue, ...(runtime ? [] : branchLinks(repo, h.branch, h.links, br)), compare], house: h };
 } });
 registerHit({ kind: 'person', dialog(o, sc) {
   const v = sc.v, h = v.houses[o.i]; if (!h) return null;
