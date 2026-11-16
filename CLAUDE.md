@@ -55,7 +55,8 @@ file.
   area.
 - **The village's DOM-free decisions** (modules with no DOM, such as the Fit
   scale, the dock order, house labels, build weather and bounce marks) run
-  under node: `node --test tools/village-tests/`, every `*.test.mjs` there,
+  under node: `node --test tools/village-tests/*.test.mjs` (files, not the
+  directory: Node 22 and 24 reject a directory, #524),
   also run by `cargo test village_node_tests`.
   They need Node 22 or later.
   A test that draws people or anything else animated must pin the clock
@@ -63,14 +64,11 @@ file.
   different animation frames, which passes on a fast machine and fails on CI
   (#450).
 
-For the village UI, `tools/mock/demo.sh` runs agents-tui against simulated herdr and Temporal swarms.
-`VOYAGES=1 tools/mock/demo.sh` scripts Deployments for this repo's own environments (`nuc-1`, then `release`): a deploy, a promotion and a failed deploy on a 120 s loop, so the environment row's voyages can be seen without real ones (`tools/mock/voyages.py`; tests: `python3 -m unittest discover -s tools/mock -p 'test_voyages.py'`).
-`CONFLICTS=1 tools/mock/demo.sh` scripts the merge gate's bounces for #430: each issue at the gate takes the next story (a conflict fixed on the second attempt, a failed gate, a push rejected and re-synced twice, a hotspot file that conflicts three times), as autocoder's merge-job files (`tools/mock/conflicts.py`; tests: `python3 -m unittest discover -s tools/mock -p 'test_conflicts.py'`, and `cargo test conflicts_demo` reads its files as `gate.rs` does).
-The village screensaver (`/village?screensaver=1`, `src/web/village/saver.js` + `screensaver.js`; the Omarchy service, launcher and installer in `tools/omarchy-plugin/agents-village-screensaver/`): `node --test tools/omarchy-plugin/agents-village-screensaver/tests/` and `bash tools/omarchy-plugin/agents-village-screensaver/tests/test_install.sh` (both run by `cargo test screensaver`), and `python3 tools/omarchy-plugin/agents-village-screensaver/tests/qml_check.py` (the real `Service.qml` in Quickshell, offscreen). Install with `tools/omarchy-plugin/install.sh --screensaver [--never-sleep] [--host <ssh host>]`.
-Desktop notifications from the village (`tools/omarchy-plugin/agents-village-notify/`, #480; the page's `#<project>&house=<name>` deep link is `src/web/village/deeplink.js` + `houselink.js`): `node --test tools/omarchy-plugin/agents-village-notify/tests/` (also run by `cargo test notify`) and `python3 tools/omarchy-plugin/agents-village-notify/tests/qml_check.py` (the real `Service.qml` in Quickshell, offscreen). Its `Model.js` is a copy of the bar widget's, kept equal by that node test. Install with `tools/omarchy-plugin/install.sh --notify [--quiet 23-7] [--host <ssh host>]`.
-The Omarchy bar widget (`tools/omarchy-plugin/agents-village/`): `node --test tools/omarchy-plugin/agents-village/tests/` (its model, against recorded `/api/swarms` and `/api/village`) and `python3 tools/omarchy-plugin/agents-village/tests/qml_check.py` (the real `Panel.qml` in Quickshell, offscreen). Install with `tools/omarchy-plugin/install.sh [--host <ssh host>] [--enable]`.
-`tools/mock/replay-build.py` bundles the village's modules into one self-contained replay page (each module after its imports; two modules declaring the same top-level name stop the build); its tests: `python3 -m unittest discover -s tools/mock -p 'test_replay_build.py'` (also run by `cargo test replay_build`).
-`tools/mock/history.py` rebuilds a replay of a repo's real development from git and GitHub history (`--no-github` for git only); its tests: `python3 -m unittest discover -s tools/mock -p 'test_history.py'`.
+- **Each tool and area's own tests** (the mock demo and its `VOYAGES` and
+  `CONFLICTS` stories, the screensaver, notifications, the bar widget,
+  replay pages, history replays) are in `docs/testing/`, one file per tool:
+  `ls docs/testing/`. A new tool's test instructions go in a new file there,
+  not here, so two branches adding tools never edit the same lines (#521).
 
 Filesystem tests use unique paths under `std::env::temp_dir()` (there is no `tempfile` crate). No mocking of tmux — integration-level tmux testing is done manually via `tmux new-session -d` + `cargo run`.
 
