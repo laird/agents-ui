@@ -17,6 +17,7 @@ mod newissue;
 mod notify;
 mod proposals;
 mod screensaver;
+mod shipped;
 mod themes;
 mod travel;
 

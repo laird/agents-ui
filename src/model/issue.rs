@@ -449,6 +449,9 @@ pub struct FeatureLink {
     pub linked_by: LinkedBy,
     /// Sorted by number.
     pub children: Vec<Child>,
+    /// The parent is closed: it flies no flag, but may still have shipped
+    /// today (#482).
+    pub closed: bool,
 }
 
 /// The GraphQL query `crate::github::fetch_feature_link` sends: the parent
@@ -460,18 +463,32 @@ subIssues(first:100){nodes{number title url state stateReason}}}}\
 search(query:$q,type:ISSUE,first:100){nodes{... on Issue{number title url state stateReason body}}}}";
 
 /// The GraphQL query `crate::github::fetch_feature_parents` sends: the
-/// repository's open issues with their sub-issue counts and labels.
+/// repository's open issues with their sub-issue counts and labels, and the
+/// recently closed ones (an epic is often closed before it reaches
+/// production, and may still ship today, #482).
 pub const FEATURE_PARENTS_QUERY: &str = "query($owner:String!,$name:String!){\
 repository(owner:$owner,name:$name){issues(states:OPEN,first:100,orderBy:{field:UPDATED_AT,direction:DESC}){\
+nodes{number subIssuesSummary{total} labels(first:30){nodes{name}}}}\
+closed:issues(states:CLOSED,first:20,orderBy:{field:UPDATED_AT,direction:DESC}){\
 nodes{number subIssuesSummary{total} labels(first:30){nodes{name}}}}}}";
 
 /// Open issues that are feature parents: they have sub-issues, or carry
 /// autocoder's `decomposed` label. Sorted; empty when the JSON can't be read.
 pub fn feature_parents_from_json(bytes: &[u8]) -> Vec<u32> {
+    parents_at(bytes, "/data/repository/issues/nodes")
+}
+
+/// The recently closed issues that are feature parents, as
+/// [`feature_parents_from_json`] reads the open ones.
+pub fn closed_feature_parents_from_json(bytes: &[u8]) -> Vec<u32> {
+    parents_at(bytes, "/data/repository/closed/nodes")
+}
+
+fn parents_at(bytes: &[u8], pointer: &str) -> Vec<u32> {
     let Ok(v) = serde_json::from_slice::<serde_json::Value>(bytes) else {
         return Vec::new();
     };
-    let nodes = v.pointer("/data/repository/issues/nodes").and_then(|n| n.as_array());
+    let nodes = v.pointer(pointer).and_then(|n| n.as_array());
     let mut parents: Vec<u32> = nodes
         .into_iter()
         .flatten()
@@ -630,6 +647,7 @@ pub fn feature_link_from_json(bytes: &[u8]) -> Option<FeatureLink> {
         spec_url,
         linked_by,
         children,
+        closed: false,
     })
 }
 
@@ -999,6 +1017,19 @@ mod tests {
         assert_eq!(feature_parents_from_json(json), vec![12, 346]);
         assert!(feature_parents_from_json(b"oops").is_empty());
         assert!(feature_parents_from_json(br#"{"errors":[]}"#).is_empty());
+    }
+
+    #[test]
+    fn closed_feature_parents_are_read_apart_from_the_open_ones() {
+        let json = br#"{"data":{"repository":{
+            "issues":{"nodes":[{"number":346,"subIssuesSummary":{"total":6}}]},
+            "closed":{"nodes":[
+                {"number":401,"subIssuesSummary":{"total":3}},
+                {"number":7,"subIssuesSummary":{"total":0},"labels":{"nodes":[{"name":"bug"}]}}
+            ]}}}}"#;
+        assert_eq!(feature_parents_from_json(json), vec![346]);
+        assert_eq!(closed_feature_parents_from_json(json), vec![401]);
+        assert!(FEATURE_PARENTS_QUERY.contains("closed:issues(states:CLOSED"));
     }
 
     #[test]

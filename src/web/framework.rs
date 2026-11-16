@@ -806,6 +806,7 @@ pub fn to_village(report: &Report) -> Reading {
         pipeline,
         builds: report.builds.clone(),
         features: Vec::new(),
+        shipped: Vec::new(),
         build: report.build.clone(),
         flaky: Vec::new(),
         github: None,

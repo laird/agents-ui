@@ -17,6 +17,7 @@ import './barrels.js';
 import './well.js';
 import './ghpanel.js';
 import './features.js';
+import './shipped.js';
 import './envrow.js';
 import './voyages.js';
 import './worlds.js';
