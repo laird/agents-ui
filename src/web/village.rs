@@ -52,10 +52,11 @@ const SUBAGENT_STALE: Duration = Duration::from_secs(10 * 60);
 const SESSION_STALE: Duration = Duration::from_secs(2 * 60 * 60);
 
 /// What a house is built as, from the labels on the issue its crew is working.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum HouseKind {
     /// No issue: the crew is between tasks.
+    #[default]
     Cottage,
     Security,
     Tests,
@@ -71,7 +72,7 @@ pub enum HouseKind {
 }
 
 /// What the house shows on top of its kind.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum HouseStatus {
     /// Scaffolding: the session is still starting.
@@ -84,6 +85,7 @@ pub enum HouseStatus {
     /// Working, but the pane hasn't moved for a while.
     Stalled,
     Stopped,
+    #[default]
     Unknown,
 }
 
@@ -134,7 +136,7 @@ pub fn name_action(name: &str) -> Action {
         .unwrap_or(Action::Running)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct House {
     /// Stable key: the worktree path, or the role when the path is unknown.
     pub id: String,
@@ -194,7 +196,7 @@ pub struct Subagent {
     pub action: Option<Action>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Crate {
     pub number: u32,
     pub title: String,
@@ -213,7 +215,7 @@ pub struct Crate {
     pub parent: Option<u32>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Note {
     pub number: u32,
     pub title: String,
@@ -481,7 +483,7 @@ pub struct GateEntry {
     pub gate: super::gate::TaskGate,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct VillageSnapshot {
     pub project: String,
     /// The swarm that writes the system, or the platform that runs it.
@@ -1304,21 +1306,9 @@ mod tests {
             role: role.to_string(),
             state: state.to_string(),
             is_manager: role == "manager",
-            waiting_for_input: false,
-            current_issue: None,
-            current_issue_title: None,
-            pane_content: String::new(),
-            tmux_target: String::new(),
             health: "Healthy".to_string(),
-            completed_issue_count: 0,
-            resurrection_attempts: 0,
-            status_timestamp: None,
             worktree_path: worktree.to_string(),
-            branch: None,
-            mux: Default::default(),
-            context_pct: None,
-            context_window: None,
-            limit: None,
+            ..Default::default()
         }
     }
 
@@ -1337,9 +1327,7 @@ mod tests {
             is_blocked: labels.iter().any(|l| crate::model::issue::BLOCKING_LABELS.contains(&l.as_str())),
             is_working: labels.iter().any(|l| l == "working"),
             labels,
-            assigned_worker: None,
-            url: String::new(),
-            depends_on: Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -1474,18 +1462,11 @@ mod tests {
         SwarmSnapshot {
             project_name: "proj".to_string(),
             repo_path: "/repos/proj".to_string(),
-            repo_key: String::new(),
-            manager_by: None,
             agent_type: "Claude".to_string(),
-            workflow: None,
             tmux_session: "claude-proj".to_string(),
-            stopped: false,
-            busy_count: 0,
-            idle_count: 0,
-            attention_count: 0,
             manager: agent("manager", "Working", "/repos/proj"),
             workers,
-            issues: Vec::new(),
+            ..Default::default()
         }
     }
 

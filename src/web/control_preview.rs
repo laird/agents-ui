@@ -78,21 +78,9 @@ mod tests {
             role: role.into(),
             state: state.into(),
             is_manager,
-            waiting_for_input: false,
-            current_issue: None,
-            current_issue_title: None,
-            pane_content: String::new(),
             tmux_target: "claude-p:0.1".into(),
             health: "Healthy".into(),
-            completed_issue_count: 0,
-            resurrection_attempts: 0,
-            status_timestamp: None,
-            worktree_path: String::new(),
-            branch: None,
-            mux: Default::default(),
-            limit: None,
-            context_pct: None,
-            context_window: None,
+            ..Default::default()
         }
     }
 
@@ -100,33 +88,24 @@ mod tests {
         SwarmSnapshot {
             project_name: "p".into(),
             repo_path: "/repos/p".into(),
-            repo_key: String::new(),
-            manager_by: None,
             agent_type: "Claude".into(),
-            workflow: None,
             tmux_session: "claude-p".into(),
-            stopped: false,
-            busy_count: 0,
             idle_count: 1,
-            attention_count: 0,
             manager: agent("manager", "Idle", true),
             workers: vec![agent("worker-1", "Idle", false)],
             issues,
+            ..Default::default()
         }
     }
 
     fn working(number: u32, worker: &str) -> IssueSnapshot {
         IssueSnapshot {
             number,
-            title: String::new(),
             state: "open".into(),
-            priority: String::new(),
             labels: vec!["working".into()],
-            is_blocked: false,
             is_working: true,
             assigned_worker: Some(worker.into()),
-            url: String::new(),
-            depends_on: vec![],
+            ..Default::default()
         }
     }
 

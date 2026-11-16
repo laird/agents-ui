@@ -472,7 +472,7 @@ mod tests {
         format!("/tmp/autocoder-merge-r-{issue}.log")
     }
     fn open(number: u32, title: &str) -> IssueSnapshot {
-        IssueSnapshot { number, title: title.into(), state: "open".into(), priority: String::new(), labels: vec![], is_blocked: false, is_working: false, assigned_worker: None, url: String::new(), depends_on: vec![] }
+        IssueSnapshot { number, title: title.into(), state: "open".into(), ..Default::default() }
     }
 
     // Recorded cargo test output, trimmed.

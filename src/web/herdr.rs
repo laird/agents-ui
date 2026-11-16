@@ -145,19 +145,15 @@ fn snapshot(agent: &HerdrAgent, project: &str, role: &str, is_manager: bool, bra
         is_manager,
         waiting_for_input: waiting,
         current_issue: if is_manager { None } else { issue },
-        current_issue_title: None,
-        pane_content: String::new(),
         tmux_target: agent.pane_id.clone(),
         health: "Healthy".to_string(),
-        completed_issue_count: 0,
-        resurrection_attempts: 0,
-        status_timestamp: None,
         worktree_path: agent.cwd.trim_end_matches('/').to_string(),
         branch: branch.cloned(),
         mux: super::Mux::Herdr,
         context_pct: agent.context.as_ref().map(|c| c.pct),
         context_window: agent.context.as_ref().and_then(|c| c.window.clone()),
         limit: agent.limit.clone(),
+        ..Default::default()
     }
 }
 
@@ -272,15 +268,13 @@ pub fn swarms_from_agents(
                 repo_path: swarm.root.to_string_lossy().into_owned(),
                 repo_key: swarm.key.to_string_lossy().into_owned(),
                 manager_by: choice.map(ManagerPick::from),
-                workflow: None,
                 tmux_session: "herdr".to_string(),
-                stopped: false,
                 busy_count: busy,
                 idle_count: workers.len() - busy,
                 attention_count: attention,
                 manager,
                 workers,
-                issues: Vec::new(),
+                ..Default::default()
             }
         })
         .collect()

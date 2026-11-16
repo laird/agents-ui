@@ -37,40 +37,21 @@ pub fn dormant_swarm(root: &Path, manifests: &[SwarmManifest]) -> Option<SwarmSn
         role: "manager".to_string(),
         state,
         is_manager: true,
-        waiting_for_input: false,
-        current_issue: None,
-        current_issue_title: None,
         pane_content: format!(
             "Dormant: the swarm manifest for {} is here, but none of its agents is running.",
             first.session
         ),
-        tmux_target: String::new(),
         health: "Unknown".to_string(),
-        completed_issue_count: 0,
-        resurrection_attempts: 0,
-        status_timestamp: None,
         worktree_path: root.to_string_lossy().into_owned(),
-        branch: None,
-        mux: Default::default(),
-        context_pct: None,
-        context_window: None,
-        limit: None,
+        ..Default::default()
     };
     Some(SwarmSnapshot {
         project_name: project,
         repo_path: root.to_string_lossy().into_owned(),
-        repo_key: String::new(),
-        manager_by: None,
         agent_type: "Claude".to_string(),
-        workflow: None,
         tmux_session: first.session.clone(),
-        stopped: false,
-        busy_count: 0,
-        idle_count: 0,
-        attention_count: 0,
         manager,
-        workers: Vec::new(),
-        issues: Vec::new(),
+        ..Default::default()
     })
 }
 

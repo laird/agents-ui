@@ -139,6 +139,7 @@ modules register (`registry.js`). To add something to the village:
 ## Key conventions
 
 - Agent sessions run in tmux. The TUI proxies pane content via `tmux capture-pane -e` and sends input via `tmux send-keys`.
+- Build the web model's shared structs (`AgentSnapshot`, `SwarmSnapshot`, `IssueSnapshot`, `VillageSnapshot`, `House`, `Crate`, `Note`) with `..Default::default()` outside their own module, tests included, so adding a field doesn't break other branches (#519). `cargo test shared_model_structs` checks it.
 - Session naming: `claude-<project>` with window 0 "agents" (workers) and window 1 "review" (manager).
 - Worktree naming: `<repo>-wt-<N>` in the repo's parent directory.
 - Status is inferred from pane content when no `.codex/loops/fix-loop.status` file exists.
