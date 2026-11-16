@@ -10,6 +10,7 @@ mod gatehouse;
 mod ghlinks;
 mod labels_key;
 mod lifecycle;
+mod newissue;
 mod notify;
 mod proposals;
 mod screensaver;
