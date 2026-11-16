@@ -74,7 +74,8 @@ pub fn build(repos: &[(String, Vec<Stop>)], edges: &[Edge], contract: &dyn Fn(&s
         return None;
     }
     let stops_of = |name: &str| repos.iter().find(|(n, _)| n == name).map(|(_, s)| s.as_slice()).unwrap_or(&[]);
-    let envs_of = |name: &str| stops_of(name).iter().filter(|s| s.kind == StopKind::Environment).cloned().collect::<Vec<_>>();
+    // An environment a repo runs something in: listed but never deployed to is not there.
+    let envs_of = |name: &str| stops_of(name).iter().filter(|s| s.kind == StopKind::Environment && deployed(s).is_some()).cloned().collect::<Vec<_>>();
     let mut envs: Vec<String> = Vec::new();
     for n in &joined {
         for s in envs_of(n) {
@@ -175,6 +176,14 @@ mod tests {
         assert_eq!(cell("billing", "prod").unwrap().version.as_deref(), Some("v2.4.0"));
         assert_eq!(cell("shop", "dev").unwrap().version.as_deref(), Some("ccccccc"), "no tag: a short commit");
         assert!(cell("shop", "prod").is_none(), "not deployed there: no cell");
+        // Listed in its config but nothing running there: not there either.
+        let listed = vec![
+            ("billing".to_string(), vec![env("dev", Some("v1.0.0"), "b0")]),
+            ("shop".to_string(), vec![Stop { name: "dev".into(), kind: StopKind::Environment, ..Default::default() }]),
+        ];
+        let g2 = build(&listed, &[api("billing", "shop", Some(">=2"), None)], &none).unwrap();
+        assert!(g2.cells.iter().all(|c| c.mismatches.is_empty()), "a consumer never deployed to dev expects nothing there");
+        assert!(!g2.cells.iter().any(|c| c.repo == "shop"));
         assert!(build(&repos, &[], &none).is_none(), "no api edges: no grid");
     }
 

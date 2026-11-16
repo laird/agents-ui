@@ -227,6 +227,20 @@ fn lib_versions(dir: Option<&Path>, name: &str) -> LibVersions {
     })
 }
 
+/// The commit `origin/<branch>` names in the repo at `dir`, kept [`VERSIONS_FRESH`].
+fn branch_head(dir: &Path, branch: &str) -> Option<String> {
+    if branch.starts_with('-') || branch.contains("..") {
+        return None;
+    }
+    static CACHE: OnceLock<Kept<Option<String>>> = OnceLock::new();
+    kept(&CACHE, format!("{}\0{branch}", dir.to_string_lossy()), || {
+        let rev = format!("origin/{branch}^{{commit}}");
+        let out = std::process::Command::new("git").arg("-C").arg(dir).args(["rev-parse", "--verify", "-q", &rev]).output().ok().filter(|o| o.status.success())?;
+        let sha = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        (!sha.is_empty() && sha.chars().all(|c| c.is_ascii_hexdigit())).then_some(sha)
+    })
+}
+
 /// The newest version tag on commit `sha` in the repo at `dir`, kept
 /// [`VERSIONS_FRESH`].
 fn tag_at(dir: &Path, sha: &str) -> Option<String> {
@@ -372,6 +386,14 @@ fn build_group(def: &GroupDef, villages: &[VillageSnapshot], dormant: &HashMap<S
             // A stop known only by its commit (an environment branch) takes
             // the version tag on that commit, when its repo is here.
             if let Some(dir) = repo_dir(&r.repo, villages) {
+                // An environment read from its branch names no commit: its
+                // branch's head is what runs there.
+                let config = std::fs::read_to_string(dir.join(".autocoder.json")).unwrap_or_default();
+                let branches = super::village::parse_environments(&config);
+                for stop in s.iter_mut().filter(|st| st.sha.is_none() && st.kind == super::village::StopKind::Environment) {
+                    let branch = branches.iter().find(|e| e.name == stop.name).map_or_else(|| format!("env/{}", stop.name), |e| e.branch.clone());
+                    stop.sha = branch_head(&dir, &branch);
+                }
                 for stop in s.iter_mut().filter(|st| st.tag.is_none()) {
                     if let Some(sha) = stop.sha.clone() {
                         stop.tag = tag_at(&dir, &sha);
@@ -486,46 +508,45 @@ pub fn read_with(path: &Path, villages: &[VillageSnapshot], dormant: &HashMap<St
     }
 }
 
+/// How long a repo-without-a-village's pipeline is reused: reading it asks
+/// origin and GitHub, so no oftener than a village refreshes its own.
+const DORMANT_FRESH: std::time::Duration = std::time::Duration::from_secs(120);
+
 /// The environment stops of each manifest repo that has no village but is
-/// on this machine (#512): its pipeline, read from its `.autocoder.json` and
-/// git, kept [`VERSIONS_FRESH`]. By repo name.
+/// on this machine and is joined to another by an `api` edge, so is in an
+/// environment grid (#512): its pipeline, read from its `.autocoder.json`
+/// and git, kept [`DORMANT_FRESH`]. One request refreshes at a time; the
+/// others wait for it and use what it read. By repo name.
 async fn dormant_stops(transport: &super::super::transport::ServerTransport, villages: &[VillageSnapshot]) -> HashMap<String, Vec<super::village::Stop>> {
-    type Pipelines = std::sync::Mutex<HashMap<PathBuf, (std::time::Instant, Vec<super::village::Stop>)>>;
+    type Pipelines = tokio::sync::Mutex<HashMap<PathBuf, (std::time::Instant, Vec<super::village::Stop>)>>;
     static CACHE: OnceLock<Pipelines> = OnceLock::new();
-    let cache = CACHE.get_or_init(Default::default);
     let Ok(text) = std::fs::read_to_string(manifest_path()) else { return HashMap::new() };
     let Ok(defs) = serde_json::from_str::<Vec<GroupDef>>(&text) else { return HashMap::new() };
+    // The repos an api edge joins: only they are in a grid.
+    let mut joined: HashSet<String> = HashSet::new();
+    for r in defs.iter().flat_map(|g| &g.repos) {
+        for d in r.depends_on.iter().filter(|d| d.via == Via::Api) {
+            joined.insert(repo_name(&r.repo));
+            joined.insert(repo_name(&d.repo));
+        }
+    }
+    let mut cache = CACHE.get_or_init(Default::default).lock().await;
     let mut out = HashMap::new();
     for r in defs.iter().flat_map(|g| &g.repos) {
-        if village_for(&r.repo, villages).is_some() {
+        let name = repo_name(&r.repo);
+        if !joined.contains(&name) || village_for(&r.repo, villages).is_some() {
             continue;
         }
         let Some(dir) = repo_dir(&r.repo, villages) else { continue };
-        let fresh = cache.lock().unwrap_or_else(|e| e.into_inner()).get(&dir).filter(|(at, _)| at.elapsed() < VERSIONS_FRESH).map(|(_, s)| s.clone());
-        let stops = match fresh {
-            Some(s) => s,
+        let stops = match cache.get(&dir).filter(|(at, _)| at.elapsed() < DORMANT_FRESH) {
+            Some((_, s)) => s.clone(),
             None => {
-                let mut s = super::village::read_pipeline(transport, &dir).await.stops;
-                // An environment read from its branch names no commit: its
-                // branch's head is what runs there.
-                let config = std::fs::read_to_string(dir.join(".autocoder.json")).unwrap_or_default();
-                for env in super::village::parse_environments(&config) {
-                    let Some(stop) = s.iter_mut().find(|st| st.name == env.name && st.sha.is_none()) else { continue };
-                    let rev = format!("origin/{}", env.branch);
-                    let args: Vec<String> = ["-C", &dir.to_string_lossy(), "rev-parse", "--verify", "-q", &rev].iter().map(|a| a.to_string()).collect();
-                    stop.sha = transport
-                        .output("git", &args, None)
-                        .await
-                        .ok()
-                        .filter(|o| o.status.success())
-                        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-                        .filter(|sha| !sha.is_empty() && sha.chars().all(|c| c.is_ascii_hexdigit()));
-                }
-                cache.lock().unwrap_or_else(|e| e.into_inner()).insert(dir.clone(), (std::time::Instant::now(), s.clone()));
+                let s = super::village::read_pipeline(transport, &dir).await.stops;
+                cache.insert(dir.clone(), (std::time::Instant::now(), s.clone()));
                 s
             }
         };
-        out.insert(repo_name(&r.repo), stops);
+        out.insert(name, stops);
     }
     out
 }

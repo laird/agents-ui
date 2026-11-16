@@ -207,7 +207,9 @@ pub fn release_version(tag: &str) -> Option<String> {
 /// `2.x`, a bare version as a caret, `*`); `||` joins alternatives. None
 /// when either can't be read.
 pub fn satisfies(range: &str, version: &str) -> Option<bool> {
-    let version = &release_version(version)?;
+    // A version needs a dot (a short commit is none); its pre-release, if
+    // any, stays, so `2.3.0-rc.1` is below `>=2.3`.
+    release_version(version)?;
     let alternatives: Vec<&str> = range.split("||").map(str::trim).filter(|a| !a.is_empty()).collect();
     if alternatives.is_empty() {
         return None;
@@ -400,6 +402,8 @@ mod tests {
         assert_eq!(ok(">=2.3", "abc1234"), None, "a short commit is no version");
         assert_eq!(ok("whatever", "2.3.0"), None);
         assert_eq!(ok(">=2.3", "staging-v2.2.0"), Some(false), "a tag with its environment's prefix");
+        assert_eq!(ok(">=2.3", "v2.3.0-rc.1"), Some(false), "a pre-release is below its release");
+        assert_eq!(ok(">=2.3", "staging-v2.4.0"), Some(true));
         assert_eq!(release_version("staging-v2.2.0").as_deref(), Some("2.2.0"));
         assert_eq!(release_version("v2.4.0").as_deref(), Some("2.4.0"));
         assert_eq!(release_version("1234567"), None);

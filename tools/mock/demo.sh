@@ -103,15 +103,15 @@ demo_repo billing .autocoder.json '{"environments":[{"name":"staging","ref":"env
 # billing's environments are branches on its own origin (a bare repo here):
 # staging runs v2.2.0, prod v2.4.0.
 rm -rf "$DEMO/home/repos/billing-origin.git"
-(set -e; cd "$DEMO/home/repos/billing"
-  g() { git -c user.name=demo -c user.email=demo@localhost -c commit.gpgsign=false -c tag.gpgsign=false "$@"; }
-  git init -q; git add -A; git diff --cached --quiet || g commit -qm "billing 2.2.0"
-  g tag -f v2.2.0 >/dev/null; g commit -q --allow-empty -m "billing 2.4.0"; g tag -f v2.4.0 >/dev/null
-  git init -q --bare "$DEMO/home/repos/billing-origin.git"
-  git remote remove origin 2>/dev/null || true
-  git remote add origin "$DEMO/home/repos/billing-origin.git"
-  git push -q -f origin v2.2.0^{commit}:refs/heads/env/staging v2.4.0^{commit}:refs/heads/env/prod HEAD:refs/heads/master
-  git fetch -q origin) \
+billing_git() { git -c user.name=demo -c user.email=demo@localhost -c commit.gpgsign=false -c tag.gpgsign=false -C "$DEMO/home/repos/billing" "$@"; }
+{ billing_git init -q && billing_git add -A \
+  && { billing_git diff --cached --quiet || billing_git commit -qm "billing 2.2.0"; } \
+  && billing_git tag -f v2.2.0 >/dev/null && billing_git commit -q --allow-empty -m "billing 2.4.0" \
+  && billing_git tag -f v2.4.0 >/dev/null \
+  && git init -q --bare "$DEMO/home/repos/billing-origin.git" \
+  && { billing_git remote remove origin 2>/dev/null; billing_git remote add origin "$DEMO/home/repos/billing-origin.git"; } \
+  && billing_git push -q -f origin 'v2.2.0^{commit}:refs/heads/env/staging' 'v2.4.0^{commit}:refs/heads/env/prod' HEAD:refs/heads/master \
+  && billing_git fetch -q origin; } \
   || echo "demo: could not set up billing's environments; the valley's grid shows none for it" >&2
 cat > "$DEMO/home/.agents-ui/group.json" <<'GROUP'
 [{ "name": "demo", "repos": [

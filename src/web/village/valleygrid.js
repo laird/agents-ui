@@ -47,7 +47,7 @@ export function gridLabels(lay, ox, oy, s) {
   return [
     ...g.cols.map(col => at(col.x + 28, g.y, 'ov-grid', col.city ? `${col.env} (city)` : col.env)),
     ...g.rows.map(row => at(g.x - 60, row.y + 8, 'ov-grid', row.repo, false)),
-    ...g.cells.map(cell => at(cell.x + 28, cell.y + cell.h - 2, (cell.cell.mismatches || []).length ? 'ov-ship' : 'ov-grid', cell.cell.version || '?')),
+    ...g.cells.map(cell => at(cell.x + 28, cell.y + 1, (cell.cell.mismatches || []).length ? 'ov-ship' : 'ov-grid', cell.cell.version || '?')),
   ].join('');
 }
 
