@@ -14,14 +14,18 @@
 //!   `working`, is a 409.
 //! - **stop** shuts the worker down, as the TUI's `d` key: the stopped
 //!   tombstone (`.codex/stopped` in its worktree) first, so heal and revive
-//!   won't respawn it, then its pane is closed. A tmux pane gets Ctrl+C and
-//!   `exit` (`proxy::kill_pane`); a herdr pane `herdr pane close`. Its issue
-//!   is left claimed: release it first to hand it back.
-//! - **restart** interrupts the worker and starts its runtime again in the
-//!   same pane and worktree, as the supervisor's restart does: Ctrl+C, then
-//!   the runtime's launch command. Its claimed issue stays claimed, and any
-//!   tombstone is cleared. Only tmux panes: the server has no way to launch a
-//!   runtime in a herdr pane yet, so a herdr worker is a 501.
+//!   won't respawn it, then its pane is closed: Ctrl+C and `exit` for tmux
+//!   (`proxy::kill_pane`'s keys), `herdr pane close` for herdr. A pane that
+//!   is already gone is still a stopped worker, as for the `d` key. Its issue
+//!   stays claimed, and the response says so: release it to hand it back.
+//! - **restart** quits the worker's runtime and starts it again in the same
+//!   pane and worktree, then tells it to work its claimed issue (or start its
+//!   loop), as revive does. Ctrl+C until the pane is back at a shell; if it
+//!   isn't within 10 s nothing is typed (504), so the launch command never
+//!   lands in a live agent's prompt. The pane must still be the worker's own
+//!   (its current path is its worktree): tmux renumbers panes when one
+//!   closes. Only tmux panes, and only a known runtime: the server has no way
+//!   to launch one in a herdr pane yet, so a herdr worker is a 501.
 //!
 //! Only workers have controls: the manager is a 409. An unknown swarm or role
 //! is a 404 and an unknown action a 422. A `--read-only` server refuses it
@@ -175,23 +179,35 @@ pub fn stop_steps(agent: &AgentSnapshot) -> Result<Vec<Step>, Refusal> {
     Ok(steps)
 }
 
-/// What a restart runs, in order: the tombstone cleared, Ctrl+C, then
-/// `launch` (the runtime's launch command) typed into the same pane.
-pub fn restart_steps(agent: &AgentSnapshot, launch: &str) -> Result<Vec<Step>, Refusal> {
+/// Why a worker can't be restarted from here, or its runtime.
+pub fn restart_check(agent: &AgentSnapshot, agent_type: &str) -> Result<AgentType, Refusal> {
     if agent.is_manager {
         return Err((StatusCode::CONFLICT, "only workers can be restarted here"));
     }
     if agent.mux == super::Mux::Herdr {
         return Err((StatusCode::NOT_IMPLEMENTED, "restart isn't supported for herdr panes yet: stop it and start it from herdr"));
     }
-    let (_, file) = tombstone(agent)?;
-    let target = agent.tmux_target.as_str();
-    Ok(vec![
-        run("rm", &["-f", &file]),
-        run("tmux", &["send-keys", "-t", target, "C-c"]),
-        Step::Wait(250),
-        run("tmux", &["send-keys", "-t", target, launch, "Enter"]),
-    ])
+    tombstone(agent)?;
+    AgentType::from_name(agent_type).ok_or((StatusCode::CONFLICT, "unknown runtime: restart it from the terminal"))
+}
+
+/// What tmux says the pane is: `#{pane_current_path}\t#{pane_current_command}`.
+pub const PANE_FORMAT: &str = "#{pane_current_path}\t#{pane_current_command}";
+
+/// Whether the pane is in the worker's worktree (from [`PANE_FORMAT`]), so a
+/// renumbered pane isn't someone else's.
+pub fn is_its_pane(shown: &str, worktree: &str) -> bool {
+    let path = shown.trim().split('\t').next().unwrap_or("").trim_end_matches('/');
+    !path.is_empty() && path == worktree.trim().trim_end_matches('/')
+}
+
+/// Whether the pane is back at a shell, its runtime gone (from
+/// [`PANE_FORMAT`]): only then is the launch command typed, never into a live
+/// agent. The program tmux sees, not the screen: the runtime's last output
+/// is still on it, and a shell prompt can look like an agent's.
+pub fn back_at_shell(shown: &str) -> bool {
+    let command = shown.trim().split('\t').nth(1).unwrap_or("").trim().trim_start_matches('-');
+    matches!(command, "bash" | "zsh" | "fish" | "sh" | "dash" | "ksh" | "nu" | "tcsh")
 }
 
 /// Run `steps` in order through the transport, stopping at the first that fails.
@@ -209,6 +225,67 @@ async fn run_steps(transport: &crate::transport::ServerTransport, steps: &[Step]
         }
     }
     Ok(())
+}
+
+/// The steps' commands, one a line, for the page to show.
+fn described(steps: &[Step]) -> String {
+    steps
+        .iter()
+        .filter_map(|s| match s {
+            Step::Run(p, a) => Some(format!("{p} {}", a.join(" ")).trim_end().to_string()),
+            Step::Wait(_) => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Restart a tmux worker that `restart_check` passed: quit its runtime, and
+/// only once its pane is a shell again launch it and tell it what to work.
+/// What was typed, or why it stopped and what status that is.
+async fn restart(state: &WebServerState, swarm: &SwarmSnapshot, agent: &AgentSnapshot, runtime: &AgentType) -> Result<Vec<String>, (StatusCode, String)> {
+    let t = &state.transport;
+    let target = agent.tmux_target.clone();
+    let tmux = |args: &[&str]| -> Vec<String> { args.iter().map(|s| s.to_string()).collect() };
+    let gateway = |e: String| (StatusCode::BAD_GATEWAY, e);
+    let shown = || async { t.output("tmux", &tmux(&["display-message", "-p", "-t", &target, PANE_FORMAT]), None).await.ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).into_owned()) };
+    // Still its pane? tmux renumbers panes when one closes.
+    if !shown().await.is_some_and(|s| is_its_pane(&s, &agent.worktree_path)) {
+        return Err((StatusCode::CONFLICT, "its pane is gone or is another worker's now: nothing was sent".into()));
+    }
+    let pane = Pane { target: target.clone(), mux: agent.mux };
+    let mut sent = Vec::new();
+    // Ctrl+C until the runtime has quit: a busy agent takes one to stop its
+    // turn and another to exit. Nothing is typed until the pane is a shell.
+    let started = std::time::Instant::now();
+    let mut presses = 0;
+    loop {
+        if shown().await.is_some_and(|s| back_at_shell(&s)) {
+            break;
+        }
+        if started.elapsed() > std::time::Duration::from_secs(10) {
+            return Err((StatusCode::GATEWAY_TIMEOUT, "its runtime didn't exit within 10 s: nothing was typed".into()));
+        }
+        if presses < 4 {
+            super::pane::send_key(t, &pane, "C-c").await.map_err(|e| gateway(e.to_string()))?;
+            presses += 1;
+            sent.push("Ctrl+C".to_string());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    let adapter = crate::adapter::claude::ClaudeAdapter::new(runtime.clone(), t.clone());
+    let launch = adapter.pane_launch_command(runtime, &swarm.tmux_session, false);
+    super::pane::send_line(t, &pane, &launch).await.map_err(|e| gateway(e.to_string()))?;
+    sent.push(launch);
+    // Started again: it is no longer stopped.
+    let (_, file) = tombstone(agent).map_err(|(c, m)| (c, m.to_string()))?;
+    let _ = t.output("rm", &tmux(&["-f", &file]), None).await;
+    if let Some(cmd) = crate::adapter::claude::ClaudeAdapter::pane_bootstrap_command(runtime, claimed_issue(swarm, agent)) {
+        // As revive does: give the runtime a moment to come up first.
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        super::pane::send_line(t, &pane, &cmd).await.map_err(|e| gateway(e.to_string()))?;
+        sent.push(cmd);
+    }
+    Ok(sent)
 }
 
 /// The swarm and the agent the path names, cloned out of the shared state.
@@ -242,27 +319,34 @@ pub async fn api_control_handler(
             })?;
             Ok(Json(json!({ "ok": true, "action": "nudge", "sent": command })))
         }
-        Action::Stop | Action::Restart => {
-            let (steps, word) = if body.action == Action::Stop {
-                (stop_steps(&agent).map_err(fail)?, "stop")
-            } else {
-                let runtime = AgentType::from_name(&swarm.agent_type).unwrap_or(AgentType::Claude);
-                let adapter = crate::adapter::claude::ClaudeAdapter::new(runtime.clone(), state.transport.clone());
-                let launch = adapter.pane_launch_command(&runtime, &swarm.tmux_session, false);
-                (restart_steps(&agent, &launch).map_err(fail)?, "restart")
-            };
-            run_steps(&state.transport, &steps).await.map_err(|err| {
-                tracing::warn!("{word} of {project}/{role} failed: {err}");
-                (StatusCode::BAD_GATEWAY, Json(json!({ "error": format!("could not {word} it: {err}") })))
+        Action::Stop => {
+            let steps = stop_steps(&agent).map_err(fail)?;
+            // The tombstone must be written; closing a pane that is already gone is not a failure.
+            let (mark, close) = steps.split_at(2);
+            run_steps(&state.transport, mark).await.map_err(|err| {
+                tracing::warn!("stopping {project}/{role}: no tombstone: {err}");
+                (StatusCode::BAD_GATEWAY, Json(json!({ "error": format!("could not mark it stopped: {err}") })))
             })?;
-            let sent: Vec<String> = steps
-                .iter()
-                .filter_map(|s| match s {
-                    Step::Run(p, a) => Some(format!("{p} {}", a.join(" ")).trim_end().to_string()),
-                    Step::Wait(_) => None,
-                })
-                .collect();
-            Ok(Json(json!({ "ok": true, "action": word, "sent": sent.join("\n") })))
+            let closed = run_steps(&state.transport, close).await;
+            if let Err(err) = &closed {
+                tracing::info!("stopping {project}/{role}: its pane didn't close ({err}); it is marked stopped");
+            }
+            let claimed = claimed_issue(&swarm, &agent);
+            Ok(Json(json!({
+                "ok": true,
+                "action": "stop",
+                "sent": described(&steps),
+                "closed": closed.is_ok(),
+                "note": claimed.map(|n| format!("#{n} stays claimed: release it to hand it back")),
+            })))
+        }
+        Action::Restart => {
+            let runtime = restart_check(&agent, &swarm.agent_type).map_err(fail)?;
+            let sent = restart(&state, &swarm, &agent, &runtime).await.map_err(|(code, err)| {
+                tracing::warn!("restarting {project}/{role}: {err}");
+                (code, Json(json!({ "error": err })))
+            })?;
+            Ok(Json(json!({ "ok": true, "action": "restart", "sent": sent.join("\n") })))
         }
         Action::Release => {
             if agent.is_manager {
@@ -475,19 +559,32 @@ mod tests {
     }
 
     #[test]
-    fn restart_relaunches_in_the_same_tmux_pane_and_refuses_herdr() {
-        let steps = restart_steps(&with_worktree(worker("Working #5"), crate::web::Mux::Tmux), "claude --flags").unwrap();
-        assert_eq!(
-            runs(&steps),
-            [
-                "rm -f|/repos/p-wt-1/.codex/stopped",
-                "tmux send-keys|-t|claude-p:0.1|C-c",
-                "wait 250",
-                "tmux send-keys|-t|claude-p:0.1|claude --flags|Enter",
-            ]
-        );
-        let herdr = restart_steps(&with_worktree(worker("Idle"), crate::web::Mux::Herdr), "claude");
-        assert_eq!(herdr.unwrap_err().0, StatusCode::NOT_IMPLEMENTED);
+    fn restart_is_for_a_tmux_worker_on_a_known_runtime() {
+        let tmux = with_worktree(worker("Working #5"), crate::web::Mux::Tmux);
+        assert_eq!(restart_check(&tmux, "Claude").unwrap(), AgentType::Claude);
+        assert_eq!(restart_check(&tmux, "a-new-runtime").unwrap_err().0, StatusCode::CONFLICT, "never launches Claude in its place");
+        let herdr = with_worktree(worker("Idle"), crate::web::Mux::Herdr);
+        assert_eq!(restart_check(&herdr, "Claude").unwrap_err().0, StatusCode::NOT_IMPLEMENTED);
+    }
+
+    #[test]
+    fn restart_only_types_into_its_own_pane_once_it_is_a_shell() {
+        assert!(is_its_pane("/repos/p-wt-1\tclaude\n", "/repos/p-wt-1/"));
+        assert!(!is_its_pane("/repos/p-wt-2\tclaude\n", "/repos/p-wt-1"), "renumbered: another worker's pane");
+        assert!(!is_its_pane("", "/repos/p-wt-1"));
+        assert!(back_at_shell("/repos/p-wt-1\tbash\n"), "the runtime quit: a shell");
+        assert!(back_at_shell("/repos/p-wt-1\t-zsh\n"), "a login shell");
+        assert!(!back_at_shell("/repos/p-wt-1\tclaude\n"), "a live agent: nothing is typed into it");
+        assert!(!back_at_shell("/repos/p-wt-1\tnode\n"));
+        assert!(!back_at_shell(""));
+    }
+
+    #[test]
+    fn a_restarted_worker_is_told_to_work_its_issue() {
+        use crate::adapter::claude::ClaudeAdapter;
+        let with_issue = ClaudeAdapter::pane_bootstrap_command(&AgentType::Claude, Some(12)).unwrap();
+        assert!(with_issue.contains("12"), "{with_issue}");
+        assert!(ClaudeAdapter::pane_bootstrap_command(&AgentType::Claude, None).is_some(), "no issue: its loop");
     }
 
     #[test]
@@ -495,7 +592,7 @@ mod tests {
         let mut manager = with_worktree(worker("Idle"), crate::web::Mux::Tmux);
         manager.is_manager = true;
         assert_eq!(stop_steps(&manager).unwrap_err().0, StatusCode::CONFLICT);
-        assert_eq!(restart_steps(&manager, "claude").unwrap_err().0, StatusCode::CONFLICT);
+        assert_eq!(restart_check(&manager, "Claude").unwrap_err().0, StatusCode::CONFLICT);
         assert_eq!(stop_steps(&worker("Idle")).unwrap_err().0, StatusCode::CONFLICT, "no worktree: nowhere for the tombstone");
         assert_eq!(serde_json::from_str::<ControlBody>(r#"{"action":"stop"}"#).unwrap().action, Action::Stop);
         assert_eq!(serde_json::from_str::<ControlBody>(r#"{"action":"restart"}"#).unwrap().action, Action::Restart);
