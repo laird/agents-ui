@@ -28,7 +28,11 @@ fn village_html_has_a_screensaver_mode() {
     assert!(body.contains("document.title = 'agents-village-screensaver-exit';"));
     let launcher = include_str!("../../../tools/omarchy-plugin/agents-village-screensaver/village-screensaver");
     assert!(launcher.contains("EXIT_TITLE=agents-village-screensaver-exit"));
-    assert!(launcher.contains("screensaver=1&dismiss=1&cycle=${CYCLE}"));
+    assert!(launcher.contains("local q=\"screensaver=1&dismiss=1\""));
+    // Each page option is a file of its own (#522), read by the launcher and the installer.
+    assert!(launcher.contains(". \"$HERE/options.sh\""));
+    let cycle = include_str!("../../../tools/omarchy-plugin/agents-village-screensaver/options/cycle.sh");
+    assert!(cycle.contains("saver_option cycle --cycle 30 number"));
     // Burn-in care: drift, and dim at night; never blank.
     assert!(body.contains("document.body.style.translate = `${d.x}px ${d.y}px`;"));
     assert!(body.contains("html.ss-dim { filter: brightness(.4); }"));
@@ -55,10 +59,11 @@ fn screensaver_opens_with_a_since_you_last_looked_card() {
     assert!(!body.contains("const window =") && !body.contains("let window ="));
     assert!(body.contains("html.ss-recap-on .stage, html.ss-recap-on .ss-strip { filter: brightness(.3);"));
     assert!(body.contains("Nothing happened${m.waiting ? '' : ', and nothing is waiting on you'}."));
-    let launcher = include_str!("../../../tools/omarchy-plugin/agents-village-screensaver/village-screensaver");
-    assert!(launcher.contains("[ -n \"$since\" ] && q=\"$q&since=${since}\""));
+    // The launcher's since= comes from the recap option's file (#522).
+    let recap = include_str!("../../../tools/omarchy-plugin/agents-village-screensaver/options/recap.sh");
+    assert!(recap.contains("echo \"since=$since\""));
     // The spell starts at the last unlock, which the service records (#479).
-    assert!(launcher.contains("LAST_UNLOCK=\"$STATE_DIR/last-unlock\""));
+    assert!(recap.contains("agents-village-screensaver/last-unlock\""));
     let service = include_str!("../../../tools/omarchy-plugin/agents-village-screensaver/Service.qml");
     assert!(service.contains("if (root.locked && !now) recordUnlock()"));
 }
