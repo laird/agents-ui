@@ -20,6 +20,7 @@ pub mod since;
 pub mod source;
 pub mod temporal;
 pub mod travel;
+pub mod usage;
 pub mod village;
 #[cfg(test)]
 mod village_tests;
