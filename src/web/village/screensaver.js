@@ -65,17 +65,12 @@ function renderSaverOffline(box, lastOk) {
  * over the dimmed map, then the live village. Input takes it away at once. */
 async function showRecap(card, since) {
   let changes = null;
-  // The server asks GitHub at most every 20 s; told "too soon" (429), wait once and ask again.
-  for (let attempt = 0; attempt < 2 && !changes; attempt++) {
-    try {
-      const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 8000);
-      const res = await fetch(`/api/village/since?t=${Math.floor(since / 1000)}`, { signal: ctl.signal });
-      clearTimeout(timer);
-      if (res.ok) changes = await res.json();
-      else if (res.status === 429 && !attempt) { await new Promise(r => setTimeout(r, 21000)); continue; }
-    } catch { /* unchecked: the card says so */ }
-    break;
-  }
+  try {
+    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 8000);
+    const res = await fetch(`/api/village/since?t=${Math.floor(since / 1000)}`, { signal: ctl.signal });
+    clearTimeout(timer);
+    if (res.ok) changes = await res.json();
+  } catch { /* unchecked: the card says so */ }
   const m = recapModel(state.villages, changes, since);
   const several = m.villages.length > 1;
   const body = m.villages.map(r => {
@@ -86,7 +81,9 @@ async function showRecap(card, since) {
   }).join('');
   const quiet = m.quiet ? `<div class="ss-recap-line">Nothing happened${m.waiting ? '' : ', and nothing is waiting on you'}.</div>` : '';
   const unchecked = m.unchecked.length ? `<div class="ss-recap-note">Couldn't ask GitHub about ${esc(m.unchecked.join(', '))}</div>` : '';
-  card.innerHTML = `<div class="ss-recap-head">${esc(recapHeading(since))}</div>${quiet}${body}${unchecked}`;
+  // GitHub is asked about the last few days only: a longer spell says so.
+  const windowNote = changes && changes.from * 1000 > since ? `<div class="ss-recap-note">Closed and merged: since ${esc(new Date(changes.from * 1000).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }))}</div>` : '';
+  card.innerHTML = `<div class="ss-recap-head">${esc(recapHeading(since))}</div>${quiet}${body}${unchecked}${windowNote}`;
   card.hidden = false;
   document.documentElement.classList.add('ss-recap-on');
   const close = () => {

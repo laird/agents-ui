@@ -48,10 +48,11 @@ fn screensaver_opens_with_a_since_you_last_looked_card() {
     let body = &village_source();
     assert!(body.contains("const since = recapSince(location.search)"));
     assert!(body.contains("fetch(`/api/village/since?t=${Math.floor(since / 1000)}`"));
-    assert!(body.contains("else if (res.status === 429 && !attempt) { await new Promise(r => setTimeout(r, 21000)); continue; }"));
     assert!(body.contains("if (reachable && !recapped) { recapped = true; showRecap(card, since); }"));
     assert!(body.contains("setTimeout(close, RECAP_MS);"));
     assert!(body.contains("export const RECAP_MS = 20000;"));
+    // Nothing in a module may shadow the global window (its listeners would break).
+    assert!(!body.contains("const window =") && !body.contains("let window ="));
     assert!(body.contains("html.ss-recap-on .stage, html.ss-recap-on .ss-strip { filter: brightness(.3);"));
     assert!(body.contains("Nothing happened${m.waiting ? '' : ', and nothing is waiting on you'}."));
     let launcher = include_str!("../../../tools/omarchy-plugin/agents-village-screensaver/village-screensaver");
