@@ -181,6 +181,10 @@ pub struct House {
     /// a dry well instead of sleeping. None while it works.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<crate::model::status::UsageLimit>,
+    /// Its tokens today and on its issue, from Claude Code's transcripts
+    /// (`usage.rs`, #514). None when they can't be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokens: Option<super::usage::HouseTokens>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -523,6 +527,10 @@ pub struct VillageSnapshot {
     /// be asked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github: Option<super::github::Summary>,
+    /// Token use from Claude Code's transcripts (`usage.rs`, #514): the
+    /// counting house. Absent when they can't be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<super::usage::Usage>,
 }
 
 /// Labels checked in order; the first that matches decides the house.
@@ -1174,6 +1182,9 @@ impl ActivitySource for ClaudeActivity {
             && let Some(home) = dirs::home_dir()
         {
             attach_subagents(village, &home, SystemTime::now());
+            if let Ok(mut cache) = super::usage::shared().lock() {
+                super::usage::attach(&mut cache, village, &home.join(".claude").join("projects"), SystemTime::now(), &super::usage::local_day);
+            }
         }
     }
 }
