@@ -131,7 +131,7 @@ fn village_html_shows_each_crates_priority_epic_state_and_number() {
     assert!(body.contains("if (spot.has(d)) tether(c, s, spot.get(d));"));
     // The dialog names the priority, the epic and the state; hovering opens it.
     assert!(body.contains("registerHit({ kind: 'crate', hover: true, dialog(o, sc, theme) {"));
-    assert!(body.contains("meta: [`Priority: ${it.priority || 'none'}`, epic ? `Epic: ${epic.words}` : null, cr ? stateWords(v, cr) : null],"));
+    assert!(body.contains("meta: [`Priority: ${it.priority || 'none'}`, epic ? `Epic: ${epic.words}` : null, cr ? stateWords(v, cr) : null,"));
     assert!(body.contains("if (crateState(cr) === 'ready') return 'Ready to pick up';"));
     assert!(body.contains("hoverTo(h && (HITS[h.o.kind] || {}).hover ? h : null);"));
     assert!(body.contains("cv.addEventListener('pointerleave', () => hoverTo(null));"));

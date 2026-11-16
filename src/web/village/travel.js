@@ -4,7 +4,8 @@
  * ship, the castle: landed work) a small "log" one. A click asks the server
  * for the log (travel.rs) and shows it in the dialog: each stage, how long
  * it took against its 14-day median, the slowest marked, the gate's
- * hand-backs, and a footer saying where the swarm's time goes. The words
+ * hand-backs, its tokens from claim to land (#517), and a footer saying
+ * where the swarm's time goes. The words
  * are in travelwords.js. A runtime village (a platform's workloads) has no
  * issues to follow, so it gets no buttons. */
 import { state } from './state.js';
@@ -12,6 +13,7 @@ import { registerDialogPart } from './registry.js';
 import { esc } from './panels.js';
 import { houseName } from './dialogs.js';
 import { bounceWords, medianWords, rowWords, travelRows, travelUrl } from './travelwords.js';
+import { landedTokenWords } from './landedtokens.js';
 
 /* The dialog this part last filled: a slow answer for an earlier one is dropped. */
 let travelToken = 0;
@@ -36,9 +38,11 @@ async function showTravel(box, project, n) {
   const h = (v.houses || []).find(h => h.issue === n);
   const rows = travelRows(log, medians, Date.now(), h ? houseName(v, h) : null);
   const foot = medianWords(medians), gate = bounceWords(log.bounces);
+  const cost = landedTokenWords(v, n); // what it cost (#517)
   box.innerHTML = `<h3>Travel log · #${n}</h3><ol class="travel">${rows.map(r =>
     `<li class="${r.slow ? 'slow' : ''}${r.key === 'now' ? ' now' : ''}"${r.at ? ` title="${esc(new Date(r.at).toLocaleString())}"` : ''}>${esc(rowWords(r))}</li>`).join('')}</ol>` +
     (gate ? `<p class="fact">${esc(gate)}</p>` : '') +
+    (cost ? `<p class="fact">${esc(cost.line)} <span class="dim">(${esc(cost.detail)})</span></p>` : '') +
     (foot ? `<p class="dim">${esc(foot.line)}. ${esc(foot.most)}.</p>` : '');
 }
 
