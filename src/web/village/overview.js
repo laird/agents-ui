@@ -117,18 +117,24 @@ export function placeOverview() {
   obox.style.setProperty('--lf', Math.round(Math.max(10, Math.min(18, 3 + 2.5 * s))) + 'px');
   obox.innerHTML = islands.map((isl, k) => {
     const c = grid.cells[k];
-    return `<div class="al ov ov-${isl.health}" style="left:${ox0 + (c.x + c.w / 2) * s}px;top:${oy0 + (c.y + 4) * s}px;max-width:${(c.w + 8) * s}px;border-color:${SHORE[isl.health]}">` +
+    return `<div class="al ov ov-${isl.health}" aria-hidden="true" style="left:${ox0 + (c.x + c.w / 2) * s}px;top:${oy0 + (c.y + 4) * s}px;max-width:${(c.w + 8) * s}px;border-color:${SHORE[isl.health]}">` +
       `${esc(isl.title)}<small>${esc(isl.why.join(' · ') || HEALTH_WORDS.green)}</small></div>`;
   }).join('');
-  const focused = document.activeElement && okeys.contains(document.activeElement) ? document.activeElement.dataset.name : null;
-  okeys.innerHTML = islands.map((isl, k) => {
+  // One target per island, kept across polls by name, so focus survives a refresh.
+  const keep = new Set();
+  islands.forEach((isl, k) => {
     const c = grid.cells[k];
-    const words = [isl.title, HEALTH_WORDS[isl.health], ...isl.why, `${isl.working} working, ${isl.idle} idle, ${isl.blocked} blocked or stalled`].join(': ');
-    return `<button class="hk" data-name="${esc(isl.name)}" aria-label="${esc(words)}" style="left:${ox0 + c.x * s}px;top:${oy0 + c.y * s}px;width:${c.w * s}px;height:${c.h * s}px"></button>`;
-  }).join('');
-  [...okeys.children].forEach(b => {
-    b.addEventListener('click', () => openSwarm(b.dataset.name));
-    if (b.dataset.name === focused) b.focus({ preventScroll: true });
+    let b = [...okeys.children].find(x => x.dataset.name === isl.name);
+    if (!b) {
+      b = document.createElement('button'); b.className = 'hk'; b.dataset.name = isl.name;
+      b.addEventListener('click', () => openSwarm(b.dataset.name));
+    }
+    // In island order; moved only when out of it (a moved button loses focus).
+    if (okeys.children[k] !== b) okeys.insertBefore(b, okeys.children[k] || null);
+    keep.add(b);
+    b.setAttribute('aria-label', [isl.title, HEALTH_WORDS[isl.health], ...isl.why, `${isl.working} working, ${isl.idle} idle, ${isl.blocked} blocked or stalled`].join(': '));
+    Object.assign(b.style, { left: ox0 + c.x * s + 'px', top: oy0 + c.y * s + 'px', width: c.w * s + 'px', height: c.h * s + 'px' });
   });
+  [...okeys.children].forEach(b => { if (!keep.has(b)) b.remove(); });
 }
 registerOverlay(placeOverview, 25);
