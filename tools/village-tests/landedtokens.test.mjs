@@ -11,11 +11,15 @@ const v = { usage: { issues: [
 ] } };
 
 test('a landed issue with usage shows its total; without, nothing', () => {
-  assert.deepEqual(landedTokenWords(v, 12), { line: 'Tokens from claim to land: 3.4M', detail: '120k in · 45k out · 3.2M cache' });
+  assert.deepEqual(landedTokenWords(v, 12), { line: 'Tokens from claim to land: 3.4M', detail: '120k in · 45k out · 3M cache read · 235k cache written' });
   assert.equal(landedTokenWords(v, 99), null, 'no usage on record');
   assert.equal(landedTokenWords(v, 13), null, 'nothing spent is nothing to say');
   assert.equal(landedTokenWords({}, 12), null, 'no usage at all (not served, or not read)');
   assert.equal(landedTokens({ usage: { issues: [{ issue: 12 }] } }, 12), null, 'a malformed entry');
+  assert.equal(landedTokenWords({ ...v, houses: [{ issue: 12 }] }, 12), null, 'still at a house: not landed');
+  assert.equal(landedTokenWords({ ...v, backlog: [{ number: 12 }] }, 12), null, 'back at the docks: not landed');
+  assert.equal(landedTokenWords({ ...v, pipeline: { gates: [{ issue: 12, state: 'gating' }] } }, 12), null, 'at the gate: not landed yet');
+  assert.ok(landedTokenWords({ ...v, pipeline: { gates: [{ issue: 12, state: 'red-base', landed: true }] } }, 12), 'the gate says it landed');
 });
 
 test('counts are short', () => {
@@ -25,4 +29,6 @@ test('counts are short', () => {
   assert.equal(shortTokens(12_345), '12k');
   assert.equal(shortTokens(3_400_000), '3.4M');
   assert.equal(shortTokens(12_600_000), '13M');
+  assert.equal(shortTokens(999_999), '1M');
+  assert.equal(shortTokens(9_960_000), '10M');
 });
