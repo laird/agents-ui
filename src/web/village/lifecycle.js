@@ -18,6 +18,7 @@ import { ARRIVE_IN, SAIL_OUT, UNLOAD, pickup, tripAt } from './trips.js';
 import { workOf } from './ship.js';
 import { crateState, whereWaitedOn } from './docks.js';
 import { contextWords } from './barrels.js';
+import { fxOn, fxRest } from './controlfx.js';
 import { limitWords, limited } from './limits.js';
 import { houseName, issueItems, issueLabel, issueOf, link, repoUrl, sessionOf } from './dialogs.js';
 import { houseLabel, managerSub } from './houselabel.js';
@@ -104,7 +105,8 @@ registerLayer({ z: 70, draw(c, scene, t) {
   else if (['done', 'unknown', 'stalled'].includes(v.manager.status)) bubbles.push([hallX + 26, 18, v.manager.status]);
   v.houses.forEach((h, i) => {
     const lot = lots[i]; if (!lot) return;
-    const st = h.status, tt = t + i * 311, rest = restOf(h, wall);
+    // A control just sent (#507, controlfx.js) can get the worker up before the poll does.
+    const st = h.status, tt = t + i * 311, rest = fxRest(fxOn(v.project, h, t), restOf(h, wall));
     // Its shadow, at 2× (#461): soft at the far ends.
     detail(c, lot.x + 2, lot.y + 4, g => {
       px(g, 1, 24, 30, 4, SHADE); px(g, 0, 25, 1, 2, SHADE); px(g, 28, 1, 4, 23, SHADE); px(g, 29, 0, 2, 1, SHADE);
@@ -269,7 +271,7 @@ registerHit({ kind: 'house', dialog(o, sc) {
       `Crew: ${h.crew.join(', ') || '—'}`, ...(h.subagents || []).map(sa => `${runtime ? 'Agent' : 'Sub-agent'}: ${subWords(sa, v)}`)],
     links: [...(h.links || []), issue, ...(runtime ? [] : branchLinks(repo, h.branch, h.links, br)), compare], house: h,
     // Worker controls (#506, controls.js): the server says which it can run.
-    controls: runtime ? null : { project: v.project, role: h.role, name: houseName(v, h), issue: h.issue || null } };
+    controls: runtime ? null : { project: v.project, role: h.role, name: houseName(v, h), issue: h.issue || null, house: h.id } };
 } });
 registerHit({ kind: 'person', dialog(o, sc) {
   const v = sc.v, h = v.houses[o.i]; if (!h) return null;

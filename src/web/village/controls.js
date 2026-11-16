@@ -10,6 +10,7 @@
 import { registerDialogPart } from './registry.js';
 import { esc } from './panels.js';
 import { confirmWords, controlAnswer, controlChoices, controlUrl, previewUrl, CONTROLS } from './controlwords.js';
+import { controlDone } from './controlplay.js';
 
 /* Whether this server takes control requests: asked once it answers (a
  * failed ask is asked again next time, not remembered as read-only). */
@@ -61,6 +62,8 @@ async function fillControls(box, c, token) {
       const r = await askServer(controlUrl(c.project, c.role), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: d.go }) });
       if (token !== ctlToken) return;
       msg.textContent = r ? controlAnswer(r.status, r.body, d.go, c.issue) : "Can't reach agents-tui.";
+      // The house shows it at once (#507, controlplay.js).
+      if (r && r.status >= 200 && r.status < 300) controlDone(c, d.go);
       box.querySelector('.opts')?.remove();
     }
   });
