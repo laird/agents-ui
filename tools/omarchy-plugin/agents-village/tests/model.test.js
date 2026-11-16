@@ -202,3 +202,74 @@ test("the worst build of all the villages decides the icon", () => {
   assert.strictEqual(M.badge(two, "", true).build, "red")
   assert.strictEqual(M.badge(two, "a", true).build, "green", "one picked: only that one")
 })
+
+// ---- #493: Join swarm, notifying from the bar, keyboard navigation ----------
+
+test("join swarm: a plain machine name only, since omarchy-launch-or-focus evals the command", () => {
+  for (const ok of ["nuc", "nuc-1", "box.local", "A9_b-c.d"]) assert.ok(M.validMachine(ok), ok)
+  for (const bad of ["nuc; rm -rf ~", "$(id)", "-rf", "", " nuc", "nuc box", "`id`", "a/b", "x".repeat(65), null, undefined])
+    assert.ok(!M.validMachine(bad), String(bad))
+  assert.deepStrictEqual(M.joinCommand("nuc"), ["omarchy-launch-or-focus-tui", "--app-id=org.omarchy.swarm-nuc", "swarm", "nuc"])
+  assert.strictEqual(M.joinCommand("nuc; rm -rf ~"), null)
+  assert.strictEqual(M.joinCommand("$(id)"), null)
+  assert.strictEqual(M.joinCommand("-rf"), null)
+})
+
+test("join swarm: hidden without a machine or without swarm here, disabled for a bad name", () => {
+  assert.strictEqual(M.joinState("", true), "hidden")
+  assert.strictEqual(M.joinState("nuc", false), "hidden")
+  assert.strictEqual(M.joinState("nuc", true), "ready")
+  assert.strictEqual(M.joinState("nuc; rm -rf ~", true), "disabled")
+})
+
+const waitingDoc = blocked => ({ villages: [{ project: "shop", manager: { status: "idle", links: [] }, board: [], backlog: [], pipeline: { gates: [] },
+  houses: [{ id: "/src/shop-wt-1", role: "worker-1", status: blocked ? "blocked" : "working", issue: 4, issue_title: "Checkout", links: [] }] }] })
+
+test("notify: on the rising edge only, never on the first poll, never twice", () => {
+  let r = M.freshNeeds(null, M.needsNow(BASE, waitingDoc(true)))
+  assert.deepStrictEqual(r.fresh, [], "the first poll records what already needs you")
+  r = M.freshNeeds(M.freshNeeds(null, M.needsNow(BASE, waitingDoc(false))).keys, M.needsNow(BASE, waitingDoc(true)))
+  assert.deepStrictEqual(r.fresh.map(i => i.id), ["shop|house:/src/shop-wt-1:4"])
+  assert.deepStrictEqual(M.freshNeeds(r.keys, M.needsNow(BASE, waitingDoc(true))).fresh, [], "still waiting is not news")
+})
+
+test("notify: the same keys as the desktop notifier, per village", () => {
+  const items = M.needsNow(BASE, villages)
+  const v = M.villageFor(villages, "agents-ui")
+  assert.deepStrictEqual(items.map(i => i.id), M.attention(BASE, v).map(a => "agents-ui|" + a.key))
+})
+
+test("notify: one replaceable notification saying how many, what is new and where to go", () => {
+  const all = M.needsNow(BASE, waitingDoc(true))
+  const n = M.notice(BASE, all, all)
+  assert.deepStrictEqual(n, { title: "1 needs you", body: "wt-1: #4 Checkout", url: BASE + "/village#shop&house=wt-1" })
+  const cmd = M.noticeCommand(n)
+  assert.deepStrictEqual(cmd.slice(0, 9), ["omarchy-notification-send", "--app-name", "Agents village", "-u", "critical", "-r", String(M.NOTICE_ID), "1 needs you", "wt-1: #4 Checkout"])
+  assert.strictEqual(cmd[9], "--exec", "--exec comes last: the rest is the click's argv")
+  assert.strictEqual(cmd[cmd.length - 1], n.url)
+  assert.strictEqual(M.notice(BASE, all, []), null)
+  const many = Array.from({ length: 6 }, (_, i) => ({ project: "p", what: "w" + i, title: "t", key: String(i) }))
+  assert.deepStrictEqual(M.notice(BASE, many, many).body.split("\n").slice(-1), ["and 2 more"])
+  assert.strictEqual(M.notice(BASE, many, many).title, "6 need you")
+})
+
+test("notify: the widget stays quiet while the desktop notifier is installed", () => {
+  assert.strictEqual(M.widgetNotifies(true, null), true)
+  assert.strictEqual(M.widgetNotifies(false, null), false)
+  assert.strictEqual(M.widgetNotifies(true, '{"server":"http://nuc-1:7890"}'), false)
+  assert.strictEqual(M.widgetNotifies(true, '{"enabled":false}'), true, "a notifier turned off hands it back")
+  assert.strictEqual(M.widgetNotifies(true, "{not json"), false, "a notifier whose settings don't parse still runs")
+})
+
+test("keyboard: the rows in panel order, and a cursor held at the ends", () => {
+  const rows = [{ project: "a" }, { project: "b" }]
+  assert.deepStrictEqual(M.navRows(rows, [], [], ""), [{ section: "swarms", pick: "a" }, { section: "swarms", pick: "b" }])
+  assert.deepStrictEqual(M.navRows(rows, [{ url: "n" }], [{ url: "h1" }, { url: "h2" }], "a").map(r => r.section + ":" + r.url),
+    ["needs:n", "houses:h1", "houses:h2"])
+  assert.strictEqual(M.moveCursor(-1, 1, 3), 0)
+  assert.strictEqual(M.moveCursor(-1, -1, 3), 2)
+  assert.strictEqual(M.moveCursor(0, -1, 3), 0)
+  assert.strictEqual(M.moveCursor(2, 1, 3), 2)
+  assert.strictEqual(M.moveCursor(1, 1, 3), 2)
+  assert.strictEqual(M.moveCursor(5, 1, 0), -1)
+})

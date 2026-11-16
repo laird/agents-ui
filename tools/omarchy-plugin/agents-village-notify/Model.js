@@ -294,12 +294,106 @@ function repoUrl(v) {
   return ""
 }
 
+// ---- Joining the swarm (#493) ------------------------------------------------
+// The Join swarm button runs `swarm <machine>` (remote-swarm-setup.sh installs
+// it) in a terminal, focusing it if it is already open. omarchy-launch-or-focus
+// runs its launch command through `eval`, so a machine name is a plain host
+// name or nothing: anything else (`nuc; rm -rf ~`, `$(id)`, `-rf`) disables it.
+var MACHINE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
+function validMachine(m) {
+  return MACHINE.test(String(m === undefined || m === null ? "" : m))
+}
+
+// The command for the button, or null when the machine name can't be used.
+function joinCommand(m) {
+  if (!validMachine(m)) return null
+  return ["omarchy-launch-or-focus-tui", "--app-id=org.omarchy.swarm-" + m, "swarm", m]
+}
+
+// What the button shows: hidden with no machine set or no `swarm` here,
+// disabled for a name that can't be used.
+function joinState(m, swarmOnPath) {
+  var name = String(m || "").trim()
+  if (name === "" || !swarmOnPath) return "hidden"
+  return validMachine(name) ? "ready" : "disabled"
+}
+
+// ---- Notifying from the bar (#493) -----------------------------------------
+// The same rule as the desktop notifier (agents-village-notify, #480): what
+// needs you is attention(), and news is a key the last poll did not have. The
+// first poll after the widget starts, or after the server could not be
+// reached, only records. Keys carry their project, so every village counts.
+function needsNow(base, villagesDoc) {
+  var out = []
+  villagesOf(villagesDoc).forEach(function(v) {
+    attention(base, v).forEach(function(a) { out.push(Object.assign({ project: v.project, id: v.project + "|" + a.key }, a)) })
+  })
+  return out
+}
+
+// { keys, fresh }: this poll's keys, and the items that are news since `prevKeys`
+// (null: nothing seen yet, so nothing is news).
+function freshNeeds(prevKeys, items) {
+  var keys = items.map(function(i) { return i.id })
+  var fresh = prevKeys ? items.filter(function(i) { return prevKeys.indexOf(i.id) < 0 }) : []
+  return { keys: keys, fresh: fresh }
+}
+
+// Whether the widget sends its own notification: its `notify` setting is on
+// and the desktop notifier is not installed here (its notify.json, unless that
+// says enabled: false). One sender, so nothing is notified twice.
+function widgetNotifies(setting, notifyJsonText) {
+  if (setting === false) return false
+  if (notifyJsonText === null || notifyJsonText === undefined) return true
+  var n = parse(notifyJsonText)
+  return !!n && n.enabled === false
+}
+
+// The one notification: "<n> need you", what is new, and the village to open.
+// Sent with a fixed id, so a new one replaces the last instead of stacking.
+var NOTICE_ID = 4930
+function notice(base, all, fresh) {
+  if (!fresh.length) return null
+  var lines = fresh.slice(0, 4).map(function(i) { return i.what + ": " + i.title })
+  if (fresh.length > 4) lines.push("and " + (fresh.length - 4) + " more")
+  var first = fresh[0]
+  return {
+    title: all.length + (all.length === 1 ? " needs you" : " need you"),
+    body: lines.join("\n"),
+    url: villageUrl(base, first.project) + (first.house ? "&house=" + encodeURIComponent(first.house) : "")
+  }
+}
+
+function noticeCommand(n) {
+  return ["omarchy-notification-send", "--app-name", "Agents village", "-u", "critical", "-r", String(NOTICE_ID),
+    n.title, n.body, "--exec", "sh", "-c",
+    'command -v omarchy-launch-webapp >/dev/null && exec omarchy-launch-webapp "$1" || exec omarchy-launch-browser "$1"', "sh", n.url]
+}
+
+// ---- Keyboard navigation (#493) ----------------------------------------------
+// The rows j/k and the arrows move over, in the order the panel shows them:
+// the swarm list, or a village's Needs you then Houses. Each says what Enter does.
+function navRows(rows, attentionItems, houseItems, project) {
+  if (project === "") return rows.map(function(r) { return { section: "swarms", pick: r.project } })
+  return attentionItems.map(function(a) { return { section: "needs", url: a.url } })
+    .concat(houseItems.map(function(h) { return { section: "houses", url: h.url } }))
+}
+
+// Where the highlight goes: -1 (none) to the first row, then along, held at the ends.
+function moveCursor(cursor, dy, count) {
+  if (count <= 0) return -1
+  if (cursor < 0 || cursor >= count) return dy < 0 ? count - 1 : 0
+  return Math.max(0, Math.min(count - 1, cursor + dy))
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     parse: parse, baseUrl: baseUrl, absolute: absolute, villageUrl: villageUrl,
     villageFor: villageFor, swarmFor: swarmFor, needsYou: needsYou, swarmRows: swarmRows,
     chooseProject: chooseProject, canGoBack: canGoBack, houseName: houseName, houseRows: houseRows,
     flow: flow, attention: attention, features: features, badge: badge, ago: ago, repoUrl: repoUrl,
-    releaseKey: releaseKey, questionOf: questionOf, releases: releases, buildState: buildState, buildWords: buildWords, clock: clock
+    releaseKey: releaseKey, questionOf: questionOf,
+    validMachine: validMachine, joinCommand: joinCommand, joinState: joinState, needsNow: needsNow, freshNeeds: freshNeeds,
+    widgetNotifies: widgetNotifies, notice: notice, noticeCommand: noticeCommand, NOTICE_ID: NOTICE_ID, navRows: navRows, moveCursor: moveCursor, releases: releases, buildState: buildState, buildWords: buildWords, clock: clock
   }
 }

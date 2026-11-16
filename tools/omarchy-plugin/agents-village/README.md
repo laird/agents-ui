@@ -17,14 +17,26 @@ A house glyph, with:
 - **dimmed:** the server can't be reached. The tooltip says so.
 
 The red dot is lit while `Model.attention()` lists anything, the same list as
-the panel's **Needs you**. That is the one rule for "needs you": the desktop
-notifier (`../agents-village-notify`, `install.sh --notify`) notifies when an
-item first appears in it. The widget itself sends no notifications, so a
-machine running both is notified once.
+the panel's **Needs you**. That is the one rule for "needs you", shared with the
+desktop notifier (`../agents-village-notify`, `install.sh --notify`).
+
+## Notifications
+
+When something starts waiting on you (an item first appears in that list),
+the widget sends one notification: "2 need you", what is new, and a click that
+opens the village on that house's dialog. It carries a fixed id, so the next
+one replaces it instead of stacking. The first poll after the widget starts,
+or after the server could not be reached, only records what it sees.
+
+While the desktop notifier is installed (`~/.config/agents-ui/notify.json`
+exists and does not say `"enabled": false`), the widget sends nothing: the
+notifier says the same things and more (the build, deploys), and a machine
+running both is notified once. Turn the widget's own off with **Notify** in its
+settings.
 
 With a village open in the panel, the icon counts that village; otherwise it
 counts every village on the server. Left-click opens the panel. Right-click opens
-the full village.
+the full village. Middle-click joins the swarm (below).
 
 ## The panel
 
@@ -44,9 +56,35 @@ A village shows:
   once the server reports it. A row opens the agent's session page;
 - **Features:** each epic with its Build N/M progress;
 - **Open village** (as an Omarchy web app when `omarchy-launch-webapp` is there,
-  else in the browser) and **Dashboard**.
+  else in the browser), **Join swarm** and **Dashboard**.
 
-Keys while it is open: `r` refreshes, `o` opens the village, `b` goes back.
+**Join swarm** runs `swarm <machine>` (`~/.local/bin/swarm`, from
+`remote-swarm-setup.sh`) in a terminal, or focuses that terminal if it is
+already open (`omarchy-launch-or-focus-tui --app-id=org.omarchy.swarm-<machine>`).
+It shows once **Machine** is set and `swarm` is on `PATH`. Omarchy runs that
+command through `eval`, so the machine must be a plain host name (letters,
+digits, `.`, `_`, `-`, starting with a letter or digit); for anything else the
+button says "bad machine name" and does nothing.
+
+Keys while it is open:
+
+| Key | |
+|---|---|
+| `j` / `k`, `↓` / `↑` | move the highlight over the rows: the swarms, or Needs you then Houses |
+| `Enter` / `Space` | open the highlighted row |
+| `b` | back to the list of swarms |
+| `o` | open the village |
+| `s` | join the swarm |
+| `r` | refresh |
+| `Esc` | close |
+| `Tab` / `Shift+Tab` | the next or previous panel on the bar |
+
+To open it from the keyboard, bind its plugin id in
+`~/.config/hypr/bindings.lua`:
+
+```lua
+o.bind("SUPER + ALT + A", "Agents village", { panel = "agents-ui.village" })
+```
 
 The widget is display only. It reads `/api/swarms` and `/api/village` and sends
 nothing to agents, so a `--read-only` server is enough.
@@ -59,6 +97,8 @@ nothing to agents, so a `--read-only` server is enough.
 | Village | empty | a project to always show; empty starts at the list |
 | Refresh interval | 5 s | how often it reads the server |
 | Show how many are working / red dot / ship | on | which badges to draw |
+| Machine | empty | the swarm's machine for **Join swarm** (e.g. `nuc`); empty hides it |
+| Notify | on | a notification when something starts waiting on you (not while the desktop notifier is installed) |
 
 `allowMultiple` is on, so two instances can watch two servers or two villages.
 
