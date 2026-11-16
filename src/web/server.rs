@@ -1317,25 +1317,16 @@ mod tests {
             role: role.to_string(),
             state: if is_manager { "Working #1".to_string() } else { "Idle".to_string() },
             is_manager,
-            waiting_for_input: false,
-            current_issue: None,
-            current_issue_title: None,
             pane_content: format!("Pane output for {role}"),
             tmux_target: format!("claude-test:0.{}", if is_manager { 0 } else { 1 }),
             health: "Healthy".to_string(),
-            completed_issue_count: 0,
-            resurrection_attempts: 0,
-            status_timestamp: None,
             worktree_path: if is_manager {
                 "/repos/test".to_string()
             } else {
                 format!("/repos/test-wt-1")
             },
             branch: Some(if is_manager { "master".to_string() } else { role.to_string() }),
-            mux: Default::default(),
-            context_pct: None,
-            context_window: None,
-            limit: None,
+            ..Default::default()
         }
     }
 
@@ -1343,18 +1334,13 @@ mod tests {
         SwarmSnapshot {
             project_name: name.to_string(),
             repo_path: format!("/repos/{name}"),
-            repo_key: String::new(),
-            manager_by: None,
             agent_type: "Claude".to_string(),
-            workflow: None,
             tmux_session: format!("claude-{name}"),
-            stopped: false,
             busy_count: 2,
             idle_count: 1,
-            attention_count: 0,
             manager: sample_agent("manager", true),
             workers: vec![sample_agent("worker-1", false)],
-            issues: Vec::new(),
+            ..Default::default()
         }
     }
 

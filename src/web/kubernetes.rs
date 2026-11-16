@@ -366,7 +366,7 @@ impl KubeVillages {
             Err(why) => {
                 let mut r = to_village(&report(&self.source, &Value::Null, &Value::Null));
                 r.village.manager.status = HouseStatus::Unknown;
-                r.village.board.push(Note { number: 0, title: format!("Can't read namespace {}: {why}", self.source.label()), label: "unreachable".into(), url: None, priority: None });
+                r.village.board.push(Note { title: format!("Can't read namespace {}: {why}", self.source.label()), label: "unreachable".into(), ..Default::default() });
                 r
             }
         }

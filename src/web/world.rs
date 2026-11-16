@@ -171,40 +171,17 @@ mod tests {
             kind: HouseKind::Workshop,
             status: HouseStatus::Working,
             issue,
-            issue_title: None,
-            priority: None,
             crew: vec![role.into()],
-            subagents: Vec::new(),
-            action: None,
-            links: Vec::new(),
-                question: None,
-                answer_url: None,
-                branch: None,
-                since: None,
-                context_pct: None,
-                context_window: None,
-                limit: None,
+            ..Default::default()
         }
     }
 
     fn village(project: &str, houses: Vec<House>) -> VillageSnapshot {
         VillageSnapshot {
             project: project.into(),
-            plane: Default::default(),
-            framework: String::new(),
-            workflow: None,
-            repo_path: String::new(),
             manager: house("manager", "manager", None),
             houses,
-            backlog: Vec::new(),
-            board: Vec::new(),
-            pipeline: Pipeline::default(),
-            builds: Vec::new(),
-            build: None,
-            flaky: Vec::new(),
-            github: None,
-            features: Vec::new(),
-            shipped: Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -215,11 +192,7 @@ mod tests {
             state: "open".into(),
             priority: "P1".into(),
             labels: labels.iter().map(|l| l.to_string()).collect(),
-            is_blocked: false,
-            is_working: false,
-            assigned_worker: None,
-            url: String::new(),
-            depends_on: Vec::new(),
+            ..Default::default()
         }
     }
 
