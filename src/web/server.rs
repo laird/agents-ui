@@ -1458,7 +1458,7 @@ mod tests {
     async fn a_read_only_server_refuses_worker_controls() {
         let shared = std::sync::Arc::new(std::sync::RwLock::new(vec![sample_swarm("p")]));
         let app = make_app(make_web_state(shared)).layer(axum::middleware::from_fn(reject_writes));
-        for action in ["nudge", "release"] {
+        for action in ["nudge", "release", "stop", "restart"] {
             let resp = app.clone().oneshot(control("p", "worker-1", &format!(r#"{{"action":"{action}"}}"#))).await.unwrap();
             assert_eq!(resp.status(), StatusCode::FORBIDDEN, "{action}");
         }
@@ -1468,6 +1468,9 @@ mod tests {
     async fn worker_controls_refuse_before_touching_a_pane_or_the_tracker() {
         let mut s = sample_swarm("p");
         s.workers.push(AgentSnapshot { role: "worker-2".into(), state: "Working #5".into(), ..sample_agent("worker-2", false) });
+        s.workers.push(AgentSnapshot { worktree_path: "/repos/p-wt-3".into(), mux: crate::web::Mux::Herdr, ..sample_agent("worker-3", false) });
+        // No worktree: refused before anything runs (a test must never reach a real pane or file).
+        s.workers.push(AgentSnapshot { worktree_path: String::new(), ..sample_agent("worker-4", false) });
         let shared = std::sync::Arc::new(std::sync::RwLock::new(vec![s]));
         let app = make_app(make_web_state(shared));
         let status = |project: &'static str, role: &'static str, body: &'static str| {
@@ -1476,12 +1479,19 @@ mod tests {
         };
         assert_eq!(status("ghost", "worker-1", r#"{"action":"nudge"}"#).await, StatusCode::NOT_FOUND);
         assert_eq!(status("p", "worker-9", r#"{"action":"nudge"}"#).await, StatusCode::NOT_FOUND);
-        assert_eq!(status("p", "worker-1", r#"{"action":"restart"}"#).await, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(status("p", "worker-1", r#"{"action":"explode"}"#).await, StatusCode::UNPROCESSABLE_ENTITY);
         // Busy: nothing is typed into its work.
         assert_eq!(status("p", "worker-2", r#"{"action":"nudge"}"#).await, StatusCode::CONFLICT);
         // Holds no issue: nothing to release.
         assert_eq!(status("p", "worker-1", r#"{"action":"release"}"#).await, StatusCode::CONFLICT);
         assert_eq!(status("p", "manager", r#"{"action":"release"}"#).await, StatusCode::CONFLICT);
+        // Stop and restart (#505): only workers; a worker with no worktree can't be marked stopped.
+        assert_eq!(status("p", "manager", r#"{"action":"stop"}"#).await, StatusCode::CONFLICT);
+        assert_eq!(status("p", "manager", r#"{"action":"restart"}"#).await, StatusCode::CONFLICT);
+        assert_eq!(status("p", "worker-4", r#"{"action":"stop"}"#).await, StatusCode::CONFLICT);
+        assert_eq!(status("p", "worker-4", r#"{"action":"restart"}"#).await, StatusCode::CONFLICT);
+        // A herdr pane can't be restarted from the server yet: said so, not attempted.
+        assert_eq!(status("p", "worker-3", r#"{"action":"restart"}"#).await, StatusCode::NOT_IMPLEMENTED);
     }
 
     /// #506: `GET .../control?action=` says what the POST would send, or the
