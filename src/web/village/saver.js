@@ -71,15 +71,19 @@ export function saverSummary(v) {
 }
 
 /* "7 landed today (avg 9)" (#500): today's landed issues and the mean over the
- * days #498's GitHub summary carries (14, today last), rounded. null when the
- * village has no summary (no gh, or not signed in): the strip shows nothing. */
-export function landedWords(github) {
+ * days #498's GitHub summary carries (14, today last), rounded, as
+ * { today, avg }. null, and the strip shows nothing, when there is no summary
+ * (no gh, or not signed in), when a day's count is not a number, or when the
+ * newest day is not `today` (the viewer's date, YYYY-MM-DD): just after
+ * midnight the cached summary still ends at yesterday. */
+export function landedWords(github, today = localDate(new Date())) {
   const days = github && Array.isArray(github.days) ? github.days : [];
-  if (!days.length) return null;
-  const n = d => Number(d && d.landed) || 0;
-  const avg = Math.round(days.reduce((sum, d) => sum + n(d), 0) / days.length);
-  return `${n(days[days.length - 1])} landed today (avg ${avg})`;
+  if (!days.length || !days.every(d => d && Number.isFinite(d.landed))) return null;
+  const last = days[days.length - 1];
+  if (last.date !== today) return null;
+  return { today: last.landed, avg: Math.round(days.reduce((sum, d) => sum + d.landed, 0) / days.length) };
 }
+export const localDate = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 /* The strip's build entry (#413's `build`, #415): a red build is "BUILD
  * BROKEN", readable across the room, with what and since when; a running one

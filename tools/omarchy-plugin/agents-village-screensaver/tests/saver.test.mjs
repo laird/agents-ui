@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  buildEntry, staleWords, cycleOrder, dimmedAt, dismisses, driftAt, gateWords, hashName, landedWords, nextName, saverOptions, saverSummary,
+  buildEntry, staleWords, cycleOrder, dimmedAt, dismisses, driftAt, gateWords, hashName, landedWords, localDate, nextName, saverOptions, saverSummary,
 } from '../../../../src/web/village/saver.js';
 
 const fixture = JSON.parse(readFileSync(new URL('../../agents-village/tests/fixtures/village.json', import.meta.url)));
@@ -69,21 +69,26 @@ test('the strip counts houses, the gate, the quay, each stop and what waits on y
 });
 
 test('"N landed today (avg M)" from the GitHub summary (#500)', () => {
-  const days = landed => landed.map((n, i) => ({ date: `2026-11-${String(i + 1).padStart(2, '0')}`, landed: n, opened: 0, bounced: 0 }));
-  // 14 days, today last: the mean of 126 over 14 is 9.
+  // 14 days ending on 2026-11-14, today last.
+  const days = landed => landed.map((n, i) => ({ date: `2026-11-${String(14 - landed.length + 1 + i).padStart(2, '0')}`, landed: n, opened: 0, bounced: 0 }));
+  const today = '2026-11-14';
+  // The mean of 126 over 14 is 9.
   const github = { as_of: '2026-11-14T12:00:00Z', days: days([9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 11, 7]) };
-  assert.equal(landedWords(github), '7 landed today (avg 9)');
-  assert.equal(landedWords({ days: days([0, 0, 1, 2]) }), '2 landed today (avg 1)', 'rounded: 0.75 is 1');
-  assert.equal(landedWords({ days: days([1, 2]) }), '2 landed today (avg 2)', 'rounded: 1.5 is 2');
-  assert.equal(landedWords({ days: days([5, 0]) }), '0 landed today (avg 3)', 'nothing yet today still says so');
-  assert.equal(saverSummary({ project: 'x', houses: [], github, pipeline: { quay: [], stops: [] } }).landed, '7 landed today (avg 9)');
+  assert.deepEqual(landedWords(github, today), { today: 7, avg: 9 });
+  assert.deepEqual(landedWords({ days: days([0, 0, 1, 2]) }, today), { today: 2, avg: 1 }, 'rounded: 0.75 is 1');
+  assert.deepEqual(landedWords({ days: days([1, 2]) }, today), { today: 2, avg: 2 }, 'rounded: 1.5 is 2');
+  assert.deepEqual(landedWords({ days: days([5, 0]) }, today), { today: 0, avg: 3 }, 'nothing yet today still says so');
+  assert.equal(landedWords(github, '2026-11-15'), null, 'just after midnight the summary still ends at yesterday: not "today"');
+  assert.equal(localDate(new Date(2026, 0, 5, 23, 59)), '2026-01-05');
 });
 
-test('no GitHub summary: nothing to say', () => {
+test('no GitHub summary, or one that cannot be read: nothing to say', () => {
   assert.equal(landedWords(undefined), null);
   assert.equal(landedWords(null), null);
   assert.equal(landedWords({ as_of: 'x', days: [] }), null);
   assert.equal(landedWords({ reason: 'gh is not signed in' }), null);
+  assert.equal(landedWords({ days: [{ date: '2026-11-14', landed: 'n/a' }] }, '2026-11-14'), null, 'not a number: no false "0 landed"');
+  assert.equal(landedWords({ days: [null] }, '2026-11-14'), null);
   assert.equal(saverSummary({ project: 'x', houses: [], pipeline: { quay: [], stops: [] } }).landed, null);
 });
 

@@ -34,7 +34,7 @@ fn village_html_has_a_screensaver_mode() {
     assert!(body.contains("html.ss-dim { filter: brightness(.4); }"));
     // Today's landed count beside the 14-day mean (#500), only when the village has a GitHub summary.
     assert!(body.contains("landed: landedWords(v && v.github),"));
-    assert!(body.contains("${s.landed ? `<span class=\"ss-item ss-landed\">${esc(s.landed)}</span>` : ''}"));
+    assert!(body.contains("${s.landed ? `<span class=\"ss-item\"><b>${s.landed.today}</b> landed today (avg <b>${s.landed.avg}</b>)</span>` : ''}"));
 }
 
 /// The installer and launcher (bash, in a throwaway HOME) and the page's
