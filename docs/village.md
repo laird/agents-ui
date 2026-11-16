@@ -251,6 +251,34 @@ what it missed. With reduced motion no one walks: a notice says what changed.
 Click a crate in transit for the same dialog as at rest, plus where it is
 going. `LIFECYCLE=1 tools/mock/demo.sh` plays every transition on a 90 s loop.
 
+#### Its travel log
+
+**Travel log** in a crate's or a house's dialog, or **log** beside any issue
+a dialog lists (the quay, the stops, the ship and the castle list landed
+work), shows where that issue's time went:
+
+opened → approved → claimed → first commit → landed → each environment
+
+Each stage says how long it took since the one before it and that stage's
+median over the last 14 days, and the slowest is marked. An open issue ends
+with the wait it is in now. Any time the merge gate handed the work back is
+listed, and the footer names where the swarm's time goes across all issues:
+waiting for approval, waiting for a worker, coding, or at the gate.
+
+The stages are inferred from what the server already reads:
+
+- **approved** is the first "Approved by …" comment, so an issue nobody had
+  to approve has no such stage;
+- **claimed** is the last claim comment before the issue landed;
+- **first commit** is the earliest commit on the integration branch whose
+  subject names the issue (`#N` or `issue-N`);
+- **each environment** is reached at the first Deployment to it created after
+  the landing, whether or not that deploy succeeded.
+
+The log is read when you ask for it (`GET
+/api/swarms/<project>/issues/<n>/travel`, kept for a minute), and the
+medians come with the GitHub summary.
+
 ### The ship
 
 A ship is moored in the harbour (a rocket stands on the launch pad). Work

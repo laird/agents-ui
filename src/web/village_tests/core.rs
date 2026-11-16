@@ -94,7 +94,7 @@ fn village_html_hit_tests_what_it_draws() {
     assert!(body.contains("registerHit({ kind: 'banner', key: false, act(o, sc) { toggleFollow(sc.v.project, o.f); return true; } });"));
     assert!(body.contains("registerHit({ kind: 'barge', act(o, sc) { const v = sc.v, f = (v.features || []).find(f => f.number === o.f); if (f) showFeature(f, v); return !!f; } });"));
     // explain() and act() only dispatch on the kind.
-    assert!(body.contains("return hit && hit.dialog ? hit.dialog(o, sc, theme) : null;"));
+    assert!(body.contains("const info = hit && hit.dialog ? hit.dialog(o, sc, theme) : null;"));
     assert!(body.contains("if (hit && hit.act) return hit.act(o, sc, theme);"));
 }
 

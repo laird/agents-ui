@@ -1196,6 +1196,7 @@ pub async fn run(addrs: &[SocketAddr], read_only: bool, state: WebServerState) -
             post(super::proposals::api_decision_handler),
         )
         .route("/api/swarms/{project}/flaky", post(super::flaky::api_file_handler))
+        .route("/api/swarms/{project}/issues/{number}/travel", get(super::travel::api_travel_handler))
         .route(
             "/api/swarms/{project}/agents/{role}/control",
             post(super::controls::api_control_handler).get(super::control_preview::api_control_preview_handler),
@@ -1302,6 +1303,7 @@ mod tests {
                 post(crate::web::proposals::api_decision_handler),
             )
             .route("/api/swarms/{project}/flaky", post(crate::web::flaky::api_file_handler))
+            .route("/api/swarms/{project}/issues/{number}/travel", get(crate::web::travel::api_travel_handler))
             .route(
                 "/api/swarms/{project}/agents/{role}/control",
                 post(crate::web::controls::api_control_handler).get(crate::web::control_preview::api_control_preview_handler),
@@ -1551,6 +1553,15 @@ mod tests {
         assert_eq!(get("/api/swarms/p/agents/worker-1/control?action=release").await.0, StatusCode::CONFLICT);
         assert_eq!(get("/api/swarms/p/agents/worker-1/control?action=restart").await.0, StatusCode::NOT_IMPLEMENTED);
         assert_eq!(get("/api/swarms/ghost/agents/worker-1/control?action=nudge").await.0, StatusCode::NOT_FOUND);
+    }
+
+    /// #495: the travel log is a read, so a read-only server serves it; an
+    /// unknown swarm is a 404, not a GitHub call.
+    #[tokio::test]
+    async fn the_travel_log_is_read_only_and_needs_a_swarm() {
+        let app = make_app(make_web_state(new_shared_state())).layer(axum::middleware::from_fn(reject_writes));
+        let resp = app.oneshot(Request::builder().uri("/api/swarms/ghost/issues/7/travel").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

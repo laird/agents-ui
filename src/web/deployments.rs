@@ -25,6 +25,9 @@ pub struct Deployment {
     pub sha: String,
     #[serde(default)]
     pub created_at: String,
+    /// The environment it went to (`nuc-1`, `release`).
+    #[serde(default)]
+    pub environment: String,
     /// `tools/release.sh` writes "Release vX.Y.Z" here.
     #[serde(default)]
     pub description: Option<String>,
@@ -487,7 +490,7 @@ mod tests {
     fn parses_deployments_and_statuses_from_the_api() {
         let d = parse_deployments(DEPLOYMENTS);
         assert_eq!(d.len(), 4);
-        assert_eq!(d[0], Deployment { id: 30, sha: "ccc333".into(), created_at: "2026-11-03T10:00:00Z".into(), description: None, creator: None });
+        assert_eq!(d[0], Deployment { id: 30, sha: "ccc333".into(), created_at: "2026-11-03T10:00:00Z".into(), environment: "prod".into(), description: None, creator: None });
         let s = parse_statuses(r#"[{"id": 1, "state": "success", "created_at": "2026-11-01T10:05:00Z", "environment": "prod"}]"#);
         assert_eq!(s, vec![DeploymentStatus { state: "success".into(), created_at: "2026-11-01T10:05:00Z".into(), log_url: None }]);
         assert!(parse_deployments("not json").is_empty());
@@ -569,6 +572,7 @@ mod tests {
                 id: *id,
                 sha: sha.to_string(),
                 created_at: format!("2026-11-0{id}T10:00:00Z"),
+                environment: String::new(),
                 description: (*id == 4).then(|| "Release v0.7.0".into()),
                 creator: Some(Login { login: "laird".into() }),
             })

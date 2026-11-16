@@ -314,7 +314,8 @@ registerHit({ kind: 'crate', hover: true, dialog(o, sc, theme) {
   const epic = cr && cr.parent ? epicOf(v, cr.parent) : null;
   return { title: `#${o.n} ${it.title}`.trim(), line: crateWhere(o, v, theme),
     meta: [`Priority: ${it.priority || 'none'}`, epic ? `Epic: ${epic.words}` : null, cr ? stateWords(v, cr) : null],
-    links: [link(issueLabel(o.n), it.url), epic ? link(`Epic #${cr.parent}`, epic.url) : null] };
+    links: [link(issueLabel(o.n), it.url), epic ? link(`Epic #${cr.parent}`, epic.url) : null],
+    travel: o.n }; // its travel log (#495, travel.js)
 } });
 
 /* ---------- Labels ----------

@@ -946,7 +946,7 @@ async fn git_lines(transport: &ServerTransport, repo: &Path, args: &[&str]) -> O
 
 /// The integration branch: origin's default, or whichever of `main` and
 /// `master` exists when the clone has no `origin/HEAD`.
-async fn integration_branch(transport: &ServerTransport, repo: &Path) -> String {
+pub(crate) async fn integration_branch(transport: &ServerTransport, repo: &Path) -> String {
     if let Some(branch) = git_lines(transport, repo, &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
         .await
         .and_then(|l| l.first().cloned())

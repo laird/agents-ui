@@ -77,10 +77,13 @@ export function houseName(v, h) {
   return short || h.role;
 }
 
-/* What an object on the map is: { title, line, meta (list items), items (issues), links, house }. */
+/* What an object on the map is: { title, line, meta (list items), items (issues), links, house, project }. */
 export function explain(o, sc, theme) {
   const hit = HITS[o.kind];
-  return hit && hit.dialog ? hit.dialog(o, sc, theme) : null;
+  const info = hit && hit.dialog ? hit.dialog(o, sc, theme) : null;
+  // Which village it is in, for the parts that ask the server about it.
+  if (info && !info.project && sc && sc.v) info.project = sc.v.project;
+  return info;
 }
 /* The dialog for one object, or a list such as the board. */
 export function openInfo(info) {

@@ -3,7 +3,7 @@
 //!
 //! The almanac (#485) and the GitHub panel (#492) both read it, so a wall
 //! display makes one set of GitHub calls per refresh, however many features
-//! or browsers want it. A refresh is six reads, all at once:
+//! or browsers want it. A refresh is seven reads, all at once:
 //!
 //! - one `gh issue list --state all` of the issues updated in the window,
 //!   with their comments: what was opened, what landed and when it was
@@ -12,7 +12,8 @@
 //! - one `gh api .../deployments`: what was deployed each day;
 //! - the integration branch's `git log`, locally: what was reverted, and
 //!   what landed in the last 24 h (#492); and its root commits' author
-//!   dates, for how young the repo is (#508);
+//!   dates, for how young the repo is (#508); and its commits by author
+//!   date, for the travel log's median time per stage (#495, `travel.rs`);
 //! - for the GitHub panel (#492): one `gh pr list` of the open pull requests,
 //!   one `gh pr list --search review-requested:@me` of those waiting on you,
 //!   and one `gh issue list --state open` with labels. The issue read above
@@ -90,6 +91,11 @@ pub struct Summary {
     /// out the days before it existed. Absent when the log can't be read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_commit: Option<String>,
+    /// The median seconds each stage of an issue's travel log took (#495,
+    /// `travel.rs`), over the issues landed in the window: `approved`,
+    /// `claimed`, `first_commit`, `landed`, `deployed:<environment>`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub stage_medians: BTreeMap<String, u64>,
 }
 
 /// The oldest of the root commits' author dates (`git log --max-parents=0
@@ -120,31 +126,45 @@ pub struct Day {
 }
 
 /// An issue as `gh issue list --json number,state,createdAt,closedAt,stateReason,comments` gives it.
+/// The travel log (#495, `travel.rs`) reads the same shape, one issue at a time.
 #[derive(Debug, Clone, Default, Deserialize)]
-struct Issue {
+pub(crate) struct Issue {
     #[serde(default)]
-    state: String,
+    pub(crate) number: u32,
+    #[serde(default)]
+    pub(crate) title: String,
+    #[serde(default)]
+    pub(crate) state: String,
     #[serde(default, rename = "createdAt")]
-    created_at: String,
+    pub(crate) created_at: String,
     #[serde(default, rename = "closedAt")]
-    closed_at: Option<String>,
+    pub(crate) closed_at: Option<String>,
     #[serde(default, rename = "stateReason")]
-    state_reason: Option<String>,
+    pub(crate) state_reason: Option<String>,
     #[serde(default)]
-    comments: Vec<Comment>,
+    pub(crate) comments: Vec<Comment>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
-struct Comment {
+pub(crate) struct Comment {
     #[serde(default)]
-    body: String,
+    pub(crate) body: String,
     #[serde(default, rename = "createdAt")]
-    created_at: String,
+    pub(crate) created_at: String,
+}
+
+impl Issue {
+    /// Closed as completed: work that landed, not one closed as not planned
+    /// or a duplicate.
+    pub(crate) fn landed(&self) -> bool {
+        self.state.eq_ignore_ascii_case("closed")
+            && !matches!(self.state_reason.as_deref().map(str::to_ascii_uppercase).as_deref(), Some("NOT_PLANNED") | Some("DUPLICATE"))
+    }
 }
 
 /// A comment that claims the issue: the gate's `🔒 claim`, `/fix`'s lock or
 /// its "Automated Fix Started".
-fn is_claim(body: &str) -> bool {
+pub(crate) fn is_claim(body: &str) -> bool {
     let first = body.trim_start();
     first.starts_with("🔒") || first.contains("Automated Fix Started") || first.contains("Implementation Started")
 }
@@ -175,8 +195,7 @@ pub fn summarize(issues: &[u8], deployments: Option<&str>, log: Option<&str>, to
         if issue.state.eq_ignore_ascii_case("closed") && issue.closed_at.as_deref().and_then(|at| local_date(at, &offset)) == Some(today) {
             closed_today += 1;
         }
-        let landed = issue.state.eq_ignore_ascii_case("closed")
-            && !matches!(issue.state_reason.as_deref().map(str::to_ascii_uppercase).as_deref(), Some("NOT_PLANNED") | Some("DUPLICATE"));
+        let landed = issue.landed();
         if let (true, Some(closed)) = (landed, issue.closed_at.as_deref()) {
             if let Some(k) = slot(closed) {
                 days[k].landed += 1;
@@ -294,7 +313,7 @@ fn median(xs: &mut [u64]) -> Option<u64> {
 
 /// Read GitHub and git for `repo`, whose work lands on `integration`. `None`
 /// when `gh` can't list its issues (missing, signed out, rate limited). The
-/// six reads run together. The issue list stops at 500, about three times
+/// seven reads run together. The issue list stops at 500, about three times
 /// what this repo updates in 14 days; the panel's at 500 pull requests and
 /// 1000 open issues.
 pub async fn fetch(transport: &ServerTransport, repo: &Path, integration: &str) -> Option<Summary> {
@@ -304,7 +323,7 @@ pub async fn fetch(transport: &ServerTransport, repo: &Path, integration: &str) 
     let args: Vec<String> = [
         "issue", "list", "--state", "all", "--limit", "500",
         "--search", &format!("updated:>={since}"),
-        "--json", "number,state,createdAt,closedAt,stateReason,comments",
+        "--json", "number,title,state,createdAt,closedAt,stateReason,comments",
     ]
     .iter()
     .map(|s| s.to_string())
@@ -335,8 +354,20 @@ pub async fn fetch(transport: &ServerTransport, repo: &Path, integration: &str) 
         let out = transport.output("git", &args, Some(repo)).await.ok()?;
         out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
     };
-    let (issues, deployments, log, prs, reviews, open, roots) = futures::join!(issues, deployments, log, prs, reviews, open, roots);
-    let mut s = summarize(&issues?, deployments.as_deref(), log.as_deref(), today, offset, now.to_rfc3339_opts(chrono::SecondsFormat::Secs, false))?;
+    // The travel log's medians (#495) date first commits by author, which a rebase keeps.
+    let authored = async {
+        if integration.is_empty() {
+            return None;
+        }
+        let args: Vec<String> = vec!["log".into(), format!("origin/{integration}"), format!("--since={since}"), "--format=%aI%x09%s".into()];
+        let out = transport.output("git", &args, Some(repo)).await.ok()?;
+        out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+    };
+    let (issues, deployments, log, prs, reviews, open, roots, authored) = futures::join!(issues, deployments, log, prs, reviews, open, roots, authored);
+    let issues = issues?;
+    let mut s = summarize(&issues, deployments.as_deref(), log.as_deref(), today, offset, now.to_rfc3339_opts(chrono::SecondsFormat::Secs, false))?;
+    let deployed = deployments.as_deref().map(super::deployments::parse_deployments).unwrap_or_default();
+    s.stage_medians = super::travel::medians_of(&issues, authored.as_deref().unwrap_or(""), &deployed);
     add_panel(&mut s, prs.as_deref(), reviews.as_deref(), open.as_deref(), log.as_deref(), now.fixed_offset());
     s.first_commit = roots.as_deref().and_then(|r| first_commit_date(r, &offset));
     Some(s)
