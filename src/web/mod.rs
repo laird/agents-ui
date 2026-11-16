@@ -14,6 +14,7 @@ pub mod kubernetes;
 pub mod newissue;
 pub mod pane;
 pub mod proposals;
+pub mod returned;
 pub mod server;
 pub mod since;
 pub mod source;
