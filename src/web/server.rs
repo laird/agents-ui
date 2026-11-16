@@ -95,10 +95,12 @@ struct SinceQuery {
 
 /// What closed and merged in each village since `t` (unix seconds), for the
 /// screensaver's "since you last looked" card (#479, `since.rs`). Without a
-/// usable `t`, a 400; an earlier `t` than a minute-old answer covers, a 429.
+/// usable `t` (or one in the future), a 400; asked again too soon, a 429.
 /// `GET /api/village/since?t=<unix seconds>`
 async fn api_village_since_handler(State(state): State<WebServerState>, Query(q): Query<SinceQuery>) -> Result<Json<Value>, StatusCode> {
-    let t = q.t.filter(|t| super::since::search_time(*t).is_some()).ok_or(StatusCode::BAD_REQUEST)?;
+    // A moment in the future is a mistake (or an attempt to hold the cache).
+    let now = chrono::Utc::now().timestamp();
+    let t = q.t.filter(|t| super::since::search_time(*t).is_some() && *t <= now).ok_or(StatusCode::BAD_REQUEST)?;
     let fetch = || async {
         let swarms = state.swarms.read().map(|s| s.clone()).unwrap_or_default();
         let snapshot = state.village.snapshot(&state.transport, &swarms).await;
@@ -106,7 +108,7 @@ async fn api_village_since_handler(State(state): State<WebServerState>, Query(q)
         let asks = snapshot.villages.iter().map(|v| super::since::village_since(&state.transport, &v.project, &v.repo_path, t));
         futures::future::join_all(asks).await
     };
-    let villages = state.since.answer(t, std::time::Instant::now(), fetch).await.ok_or(StatusCode::TOO_MANY_REQUESTS)?;
+    let villages = state.since.answer(t, std::time::Instant::now, fetch).await.ok_or(StatusCode::TOO_MANY_REQUESTS)?;
     Ok(Json(json!({ "t": t, "villages": villages })))
 }
 
@@ -1788,7 +1790,7 @@ mod tests {
         assert_eq!(v["project"], "my-project");
         assert_eq!(v["checked"], false, "/repos/my-project is not a repository here");
         assert_eq!(v["closed"], json!([]));
-        for uri in ["/api/village/since", "/api/village/since?t=x", "/api/village/since?t=-1"] {
+        for uri in ["/api/village/since", "/api/village/since?t=x", "/api/village/since?t=-1", "/api/village/since?t=4102444800"] {
             let resp = make_app(state.clone()).oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap()).await.unwrap();
             assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{uri}");
         }

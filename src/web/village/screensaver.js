@@ -65,12 +65,17 @@ function renderSaverOffline(box, lastOk) {
  * over the dimmed map, then the live village. Input takes it away at once. */
 async function showRecap(card, since) {
   let changes = null;
-  try {
-    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 8000);
-    const res = await fetch(`/api/village/since?t=${Math.floor(since / 1000)}`, { signal: ctl.signal });
-    clearTimeout(timer);
-    if (res.ok) changes = await res.json();
-  } catch { /* unchecked: the card says so */ }
+  // The server asks GitHub at most every 20 s; told "too soon" (429), wait once and ask again.
+  for (let attempt = 0; attempt < 2 && !changes; attempt++) {
+    try {
+      const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 8000);
+      const res = await fetch(`/api/village/since?t=${Math.floor(since / 1000)}`, { signal: ctl.signal });
+      clearTimeout(timer);
+      if (res.ok) changes = await res.json();
+      else if (res.status === 429 && !attempt) { await new Promise(r => setTimeout(r, 21000)); continue; }
+    } catch { /* unchecked: the card says so */ }
+    break;
+  }
   const m = recapModel(state.villages, changes, since);
   const several = m.villages.length > 1;
   const body = m.villages.map(r => {
