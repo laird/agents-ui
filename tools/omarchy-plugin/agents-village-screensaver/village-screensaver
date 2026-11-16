@@ -13,7 +13,7 @@
 # The agents-village-screensaver shell service runs this when the session goes
 # idle; `force` runs it by hand. Settings come from
 # ~/.config/agents-ui/screensaver.json (written by install.sh --screensaver):
-#   { "server": "http://nuc-1:7890", "timeout": 150, "cycle": 30, "dim": "23-7", "recap": 30 }
+#   { "server": "http://nuc-1:7890", "timeout": 150, "cycle": 30, "dim": "23-7", "recap": 30, "sound": false }
 # `server` and `timeout` are the launcher's and the service's own. Every other
 # key is a page option, one file each in options/ (options.sh says how they
 # become the page's query).
@@ -67,6 +67,26 @@ village_url() {
   echo "$SERVER/village?$q"
 }
 
+# Each page option as set, for --dry-run: "cycle=30 dim= ...".
+option_words() {
+  local i=0 out=""
+  while [ "$i" -lt "${#SAVER_KEYS[@]}" ]; do
+    out="$out ${SAVER_KEYS[$i]}=$(setting "${SAVER_KEYS[$i]}" "${SAVER_DEFAULTS[$i]}")"
+    i=$((i + 1))
+  done
+  echo "${out# }"
+}
+
+# What the page options add to the browser's command line, one per line
+# (sound's autoplay policy).
+browser_args() {
+  local i=0
+  while [ "$i" -lt "${#SAVER_KEYS[@]}" ]; do
+    saver_browser "${SAVER_KEYS[$i]}" "$(setting "${SAVER_KEYS[$i]}" "${SAVER_DEFAULTS[$i]}")"
+    i=$((i + 1))
+  done
+}
+
 # The page to open: the village, or, when the server does not answer, a local
 # page that says so and opens the village once it does (a browser error page
 # would sit there frozen).
@@ -93,6 +113,8 @@ if [ "$DRY_RUN" = true ]; then
   echo "opens:   $(start_url)"
   echo "browser: $(browser || echo 'none found')"
   echo "class:   $CLASS"
+  echo "options: $(option_words)"
+  echo "args:    $(browser_args | tr '\n' ' ')"
   exit 0
 fi
 
@@ -105,6 +127,7 @@ fi
 [[ $(omarchy-shell lock isLocked 2>/dev/null) == "true" ]] && exit 0
 BROWSER=$(browser) || { echo "village-screensaver: no Chromium-family browser found" >&2; exit 1; }
 URL=$(start_url)
+mapfile -t EXTRA < <(browser_args)
 
 cursor() {  # cursor <true|false>: hide or show the pointer
   hyprctl eval "hl.config({ cursor = { invisible = $1 } })" &>/dev/null || hyprctl keyword cursor:invisible "$1" &>/dev/null || true
@@ -147,7 +170,7 @@ while read -r m special; do
     "--user-data-dir=$PROFILES/$MARK-$m" "--class=$CLASS" \
     --kiosk --no-first-run --no-default-browser-check --disable-session-crashed-bubble \
     --disable-extensions --disable-sync --disable-background-networking \
-    --disable-features=Translate --noerrdialogs --password-store=basic "$URL"
+    --disable-features=Translate --noerrdialogs --password-store=basic ${EXTRA[@]+"${EXTRA[@]}"} "$URL"
   deadline=$((SECONDS + 8))
   while ((SECONDS < deadline)) && IFS= read -r -t $((deadline - SECONDS)) -u "$events" line; do
     if [[ $line == openwindow\>\>*,$CLASS,* ]]; then ours[$(window_of "$line")]=1; break; fi

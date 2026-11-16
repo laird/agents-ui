@@ -83,7 +83,9 @@ while [ $# -gt 0 ]; do
       exit 0 ;;
     *)
       if i=$(saver_option_index "$1"); then
-        need "$1" $#; SAVER_VALUES[$i]="$2"; SAVER_GIVEN="$SAVER_GIVEN $1"; shift 2
+        if [ "${SAVER_TYPES[$i]}" = flag ]; then SAVER_VALUES[$i]=true; shift
+        else need "$1" $#; SAVER_VALUES[$i]="$2"; shift 2; fi
+        SAVER_GIVEN="$SAVER_GIVEN ${SAVER_FLAGS[$i]}"
       else
         echo "install.sh: unknown argument: $1" >&2; exit 1
       fi ;;
@@ -110,7 +112,11 @@ SAVER_ARGS=() SAVER_WORDS=""
 i=0
 while [ "$i" -lt "${#SAVER_KEYS[@]}" ]; do
   SAVER_ARGS+=("${SAVER_KEYS[$i]}" "${SAVER_TYPES[$i]}" "${SAVER_VALUES[$i]}")
-  [ -z "${SAVER_VALUES[$i]}" ] || SAVER_WORDS="$SAVER_WORDS, ${SAVER_KEYS[$i]} ${SAVER_VALUES[$i]}"
+  case "${SAVER_TYPES[$i]}:${SAVER_VALUES[$i]}" in
+    flag:true) SAVER_WORDS="$SAVER_WORDS, ${SAVER_KEYS[$i]} on" ;;
+    flag:*|*:) ;;
+    *) SAVER_WORDS="$SAVER_WORDS, ${SAVER_KEYS[$i]} ${SAVER_VALUES[$i]}" ;;
+  esac
   i=$((i + 1))
 done
 
@@ -216,10 +222,10 @@ mkdir -p "$dir" "$(dirname "$shell")"
 timeout=$(jq -r ".idle.screensaver // 150" "$backup")
 [ "$timeout" -gt 0 ] 2>/dev/null || timeout=150
 server=$1; never=$2; shift 2
-# Then each page option: key, type (number or string), value.
+# Then each page option: key, type (number, string or flag), value.
 settings=$(jq -n --arg server "$server" --argjson timeout "$timeout" "{server: \$server, timeout: \$timeout}")
 while [ $# -ge 3 ]; do
-  if [ "$2" = number ]; then settings=$(printf "%s" "$settings" | jq --arg k "$1" --argjson v "$3" ".[\$k] = \$v")
+  if [ "$2" != string ]; then settings=$(printf "%s" "$settings" | jq --arg k "$1" --argjson v "$3" ".[\$k] = \$v")
   else settings=$(printf "%s" "$settings" | jq --arg k "$1" --arg v "$3" ".[\$k] = \$v"); fi
   shift 3
 done

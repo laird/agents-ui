@@ -69,7 +69,7 @@ because the shell's `PATH` starts with `/usr/share/omarchy/bin`. So:
 Settings (`~/.config/agents-ui/screensaver.json`, written by the installer):
 
 ```json
-{ "server": "http://nuc-1:7890", "timeout": 150, "cycle": 30, "dim": "23-7", "recap": 30 }
+{ "server": "http://nuc-1:7890", "timeout": 150, "cycle": 30, "dim": "23-7", "recap": 30, "sound": false }
 ```
 
 `server` and `timeout` are the launcher's and the service's. Every other key

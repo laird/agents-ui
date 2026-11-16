@@ -18,7 +18,8 @@ while [ "$i" -lt "${#SAVER_KEYS[@]}" ]; do
   k=${SAVER_KEYS[$i]} flag=${SAVER_FLAGS[$i]} def=${SAVER_DEFAULTS[$i]}
   grep -qe "^  $flag " <<<"$help" && ok "$flag in --help" || fail "$flag missing from --help"
   [ "$(jq -r --arg k "$k" '.[$k] | tostring' "$cfg")" = "$def" ] && ok "$k written with its default ($def)" || fail "$k: $(cat "$cfg")"
-  [ "${SAVER_TYPES[$i]}" != number ] || [ "$(jq -r --arg k "$k" '.[$k] | type' "$cfg")" = number ] && ok "$k is a ${SAVER_TYPES[$i]}" || fail "$k type: $(cat "$cfg")"
+  want=${SAVER_TYPES[$i]}; [ "$want" != flag ] || want=boolean
+  [ "$(jq -r --arg k "$k" '.[$k] | type' "$cfg")" = "$want" ] && ok "$k is a $want" || fail "$k type: $(cat "$cfg")"
   [[ $def =~ ${SAVER_CHECKS[$i]} ]] && ok "$k's default passes its own check" || fail "$k default $def fails ${SAVER_CHECKS[$i]}"
   i=$((i + 1))
 done

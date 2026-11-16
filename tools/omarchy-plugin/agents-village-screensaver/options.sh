@@ -8,7 +8,8 @@
 #   key      its name in screensaver.json, and in the page's query
 #   flag     install.sh's flag for it (--cycle)
 #   default  its value when the flag is not given
-#   type     number or string, as screensaver.json holds it
+#   type     number, string or flag, as screensaver.json holds it. A flag
+#            takes no value: given, it is true; its default is false
 #   check    an extended regex the value must match ([[ =~ ]])
 #   hint     what the flag takes, for --help (S, H-H)
 #   help     one line for install.sh --help
@@ -16,7 +17,9 @@
 #
 # The launcher puts `key=value` in the page's query when the value is not
 # empty. An option file that wants something else defines
-# `saver_query_<key> <value>`, which prints the query part (or nothing).
+# `saver_query_<key> <value>`, which prints the query part (or nothing). One
+# that needs the kiosk browser started differently defines
+# `saver_browser_<key> <value>`, which prints its arguments, one per line.
 #
 # So a new option is one new file in options/, and its tests one new file in
 # tests/install/. Nothing here, in install.sh or in the launcher changes.
@@ -48,6 +51,12 @@ saver_option_index() {  # saver_option_index <flag>
     i=$((i + 1))
   done
   return 1
+}
+
+# The extra browser arguments for one option's value, one per line.
+saver_browser() {  # saver_browser <key> <value>
+  if declare -F "saver_browser_$1" >/dev/null; then "saver_browser_$1" "$2"; fi
+  return 0
 }
 
 # The page's query part for one option's value.
