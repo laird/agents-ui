@@ -69,6 +69,6 @@ registerLabels(sc => {
   return [{ avoid: { x: x - left, y: y - 3, w: 12 + left, h: 9 } }];
 }, 31);
 
-registerKey({ group: 'other', rows: theme => [
+registerKey({ group: 'other', order: 35, rows: theme => [
   [c => { theme.crate(c, 3, 6, 'workshop', null, true, 12); redTag(c, 3, 6); },
     'Crate on the quay with a red tag: landed work that came back (reopened, reverted, or named in a regression report)', 13]] });
