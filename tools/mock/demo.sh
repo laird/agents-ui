@@ -91,8 +91,9 @@ demo_repo() {  # demo_repo <name> <file> <contents>: a repo under ~/repos
 }
 demo_repo lib-core Cargo.toml $'[package]\nname = "lib-core"\nversion = "1.4.0"'
 (cd "$DEMO/home/repos/lib-core" && git init -q && git add -A \
-  && git -c user.name=demo -c user.email=demo@localhost -c commit.gpgsign=false commit -qm "lib-core" \
-  && git -c tag.gpgsign=false tag v1.3.0 && git -c tag.gpgsign=false tag v1.4.0) || echo "demo: could not tag lib-core; the valley shows no ships" >&2
+  && { git diff --cached --quiet || git -c user.name=demo -c user.email=demo@localhost -c commit.gpgsign=false commit -qm "lib-core"; } \
+  && git -c tag.gpgsign=false tag -f v1.3.0 >/dev/null && git -c tag.gpgsign=false tag -f v1.4.0 >/dev/null) \
+  || echo "demo: could not tag lib-core; the valley shows no ships" >&2
 demo_repo shop Cargo.lock $'[[package]]\nname = "lib-core"\nversion = "1.4.0"'
 demo_repo larkspur package-lock.json '{"packages":{"node_modules/lib-core":{"version":"1.3.0"}}}'
 demo_repo billing Cargo.toml $'[dependencies]\nlib-core = "1.4"'

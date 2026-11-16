@@ -121,7 +121,7 @@ test('why nothing is drawn: no manifest, or no such group', () => {
 });
 
 // Ships (#511): releases flowing downstream along the package edges.
-const { along, valleyShips, valleyShipAt, shipWords, SHIP_DOCK, SHIP_SAIL_MS, SHIP_TRIP_MS } = await import('../../src/web/village/valleymodel.js');
+const { along, valleyShips, valleyShipAt, shipWords, SHIP_DOCK, SHIP_BERTH, SHIP_SAIL_MS, SHIP_TRIP_MS } = await import('../../src/web/village/valleymodel.js');
 
 test('a point along a river is measured along its legs', () => {
   const poly = [[0, 0], [10, 0], [10, 10]];
@@ -166,4 +166,16 @@ test("a ship's dialog says which versions, and since when", () => {
   const s = shipWords({ edge: { ...e, pinned: '1.4.0', behind: false, latest_at: undefined }, waiting: false });
   assert.equal(s.title, 'lib-core v1.4.0 sails to web');
   assert.equal(s.line, 'A new release; web pins 1.4.0, so it has it.');
+});
+
+test('a consumer behind on two libraries has a berth for each ship', () => {
+  const g = { name: 'g', repos: [repo('a', 0), repo('b', 0), repo('web', 1)], edges: [
+    { from: 'a', to: 'web', via: 'package', pinned: '1', latest: 'v2', behind: true },
+    { from: 'b', to: 'web', via: 'package', pinned: '3', latest: 'v4', behind: true },
+  ] };
+  const ships = valleyShips(valleyLayout(g), 0);
+  assert.equal(ships.length, 2);
+  assert.equal(ships[0].x, ships[1].x);
+  assert.equal(Math.abs(ships[0].y - ships[1].y), SHIP_BERTH, 'apart, so each can be seen and clicked');
+  assert.equal(valleyShipAt(ships, ships[1].x, ships[1].y), ships[1]);
 });

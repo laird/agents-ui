@@ -29,13 +29,75 @@ pub fn version_numbers(v: &str) -> Option<Vec<u64>> {
     (!nums.is_empty()).then_some(nums)
 }
 
+/// Whether a version is a pre-release: `1.4.0-rc.1`, `v2.0.0-beta`.
+pub fn is_prerelease(v: &str) -> bool {
+    let rest = v.trim().trim_start_matches(|c: char| !c.is_ascii_digit());
+    rest.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.').starts_with('-')
+}
+
 /// Compare two versions by their numbers, a missing part counting as 0
-/// (`1.4` is `1.4.0`). None when either has no numbers.
+/// (`1.4` is `1.4.0`), a pre-release below its release (`1.4.0-rc.1` <
+/// `1.4.0`). None when either has no numbers.
 pub fn compare(a: &str, b: &str) -> Option<Ordering> {
-    let (a, b) = (version_numbers(a)?, version_numbers(b)?);
-    let n = a.len().max(b.len());
+    let (na, nb) = (version_numbers(a)?, version_numbers(b)?);
+    let n = na.len().max(nb.len());
     let at = |v: &[u64], k: usize| v.get(k).copied().unwrap_or(0);
-    Some((0..n).map(|k| at(&a, k).cmp(&at(&b, k))).find(|o| *o != Ordering::Equal).unwrap_or(Ordering::Equal))
+    let by_numbers = (0..n).map(|k| at(&na, k).cmp(&at(&nb, k))).find(|o| *o != Ordering::Equal).unwrap_or(Ordering::Equal);
+    Some(by_numbers.then_with(|| is_prerelease(b).cmp(&is_prerelease(a))))
+}
+
+/// What a pin is: the exact version built (a lockfile, `go.mod`), or a
+/// range asked for in a manifest, read the way its ecosystem reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pin {
+    Exact,
+    /// `Cargo.toml`: a bare version is a caret range.
+    Cargo,
+    /// `package.json`: a bare version is exact.
+    Npm,
+}
+
+/// Whether a consumer pinning `pinned` (read as `pin`) is behind `latest`:
+/// an exact pin older than it, or a range that doesn't take it. None when
+/// either can't be read.
+pub fn behind(pinned: &str, pin: Pin, latest: &str) -> Option<bool> {
+    let p = pinned.trim();
+    let older = || compare(p, latest).map(|o| o == Ordering::Less);
+    if pin == Pin::Exact {
+        return older();
+    }
+    // `>=1.2`, `*`, `x`, `latest`: anything newer is taken.
+    if p.starts_with(">=") || p.starts_with('>') || p == "*" || p.eq_ignore_ascii_case("x") || p == "latest" || p.contains("||") {
+        return version_numbers(latest).map(|_| false);
+    }
+    let want = version_numbers(p)?;
+    let have = version_numbers(latest)?;
+    if is_prerelease(latest) {
+        return older();
+    }
+    // Wildcards (`1.x`, `1.4.*`) fix only the parts before them.
+    let fixed = p.trim_start_matches(|c: char| !c.is_ascii_digit()).split('.').take_while(|s| s.parse::<u64>().is_ok()).count();
+    let wild = p.contains('x') || p.contains('*') || p.contains('X');
+    let exact = p.starts_with('=') || (pin == Pin::Npm && p.chars().next().is_some_and(|c| c.is_ascii_digit()) && !wild);
+    if exact {
+        return older();
+    }
+    let at = |v: &[u64], k: usize| v.get(k).copied().unwrap_or(0);
+    // How many leading parts the range holds fixed.
+    let hold = if wild {
+        fixed
+    } else if p.starts_with('~') {
+        // `~1.4` / `~1.4.2`: the minor; `~1`: the major.
+        if want.len() >= 2 { 2 } else { 1 }
+    } else {
+        // Caret (npm `^`, Cargo's default): up to the first non-zero part.
+        want.iter().position(|n| *n != 0).map_or(want.len(), |k| k + 1).min(want.len().max(1))
+    };
+    if (0..hold).any(|k| at(&want, k) != at(&have, k)) {
+        // Outside the range: behind if the release is newer.
+        return older();
+    }
+    Some(false)
 }
 
 fn read(dir: &Path, file: &str) -> Option<String> {
@@ -114,13 +176,20 @@ pub fn go_mod(text: &str, name: &str) -> Option<String> {
 }
 
 /// The version of a library (known by any of `names`) the repo at `dir`
-/// pins: its lockfiles first, then its manifests. None when no reader finds it.
-pub fn pinned(dir: &Path, names: &[String]) -> Option<String> {
-    let readers: [(&str, fn(&str, &str) -> Option<String>); 5] =
-        [("Cargo.lock", cargo_lock), ("package-lock.json", npm_lock), ("go.mod", go_mod), ("Cargo.toml", cargo_toml), ("package.json", npm_manifest)];
-    readers.iter().find_map(|(file, reader)| {
+/// pins, and how to read it: its lockfiles first, then its manifests. None
+/// when no reader finds it.
+pub fn pinned(dir: &Path, names: &[String]) -> Option<(String, Pin)> {
+    type Reader = fn(&str, &str) -> Option<String>;
+    let readers: [(&str, Reader, Pin); 5] = [
+        ("Cargo.lock", cargo_lock, Pin::Exact),
+        ("package-lock.json", npm_lock, Pin::Exact),
+        ("go.mod", go_mod, Pin::Exact),
+        ("Cargo.toml", cargo_toml, Pin::Cargo),
+        ("package.json", npm_manifest, Pin::Npm),
+    ];
+    readers.iter().find_map(|(file, reader, pin)| {
         let text = read(dir, file)?;
-        names.iter().find_map(|n| reader(&text, n))
+        names.iter().find_map(|n| reader(&text, n)).map(|v| (v, *pin))
     })
 }
 
@@ -140,7 +209,10 @@ pub fn latest_tag(dir: &Path) -> Option<(String, Option<String>)> {
         .filter_map(|l| {
             let mut parts = l.splitn(2, ' ');
             let tag = parts.next()?.to_string();
-            version_numbers(&tag)?;
+            // A pre-release isn't the latest release.
+            if version_numbers(&tag).is_none() || is_prerelease(&tag) {
+                return None;
+            }
             Some((tag, parts.next().map(str::to_string).filter(|d| !d.is_empty())))
         })
         .max_by(|a, b| compare(&a.0, &b.0).unwrap_or(Ordering::Equal))
@@ -169,6 +241,40 @@ mod tests {
         assert_eq!(compare("1.3.9", "1.4.0"), Some(Ordering::Less));
         assert_eq!(compare("1.10.0", "1.9.0"), Some(Ordering::Greater), "numbers, not text");
         assert_eq!(compare("latest", "1.0"), None);
+        assert_eq!(compare("1.4.0-rc.1", "1.4.0"), Some(Ordering::Less), "a pre-release comes before its release");
+        assert_eq!(compare("v2.0.0", "v2.0.0-rc.1"), Some(Ordering::Greater));
+        assert!(is_prerelease("v2.0.0-rc.1") && !is_prerelease("v2.0.0") && !is_prerelease("^1.4"));
+    }
+
+    #[test]
+    fn a_range_is_behind_only_when_it_does_not_take_the_release() {
+        let b = |p: &str, pin: Pin, l: &str| behind(p, pin, l);
+        // Exact pins: older is behind.
+        assert_eq!(b("1.3.0", Pin::Exact, "v1.4.0"), Some(true));
+        assert_eq!(b("1.4.0", Pin::Exact, "v1.4.0"), Some(false));
+        assert_eq!(b("1.4.0-rc.1", Pin::Exact, "v1.4.0"), Some(true));
+        // Cargo: a bare version is a caret range.
+        assert_eq!(b("1", Pin::Cargo, "v1.4.0"), Some(false));
+        assert_eq!(b("1.2", Pin::Cargo, "v1.4.0"), Some(false));
+        assert_eq!(b("1.4", Pin::Cargo, "v2.0.0"), Some(true));
+        assert_eq!(b("0.3", Pin::Cargo, "v0.4.0"), Some(true), "0.x: the minor is the major");
+        assert_eq!(b("0.3.1", Pin::Cargo, "v0.3.9"), Some(false));
+        assert_eq!(b("=1.3.0", Pin::Cargo, "v1.4.0"), Some(true));
+        assert_eq!(b("~1.3", Pin::Cargo, "v1.4.0"), Some(true));
+        assert_eq!(b("~1.4", Pin::Cargo, "v1.4.7"), Some(false));
+        assert_eq!(b(">=1.2", Pin::Cargo, "v9.0.0"), Some(false));
+        // npm: a bare version is exact; ^ ~ x * as npm reads them.
+        assert_eq!(b("^1.2.0", Pin::Npm, "v1.4.0"), Some(false));
+        assert_eq!(b("^1.9.0", Pin::Npm, "v2.0.0"), Some(true));
+        assert_eq!(b("~1.3.0", Pin::Npm, "v1.4.0"), Some(true));
+        assert_eq!(b("1.x", Pin::Npm, "v1.4.0"), Some(false));
+        assert_eq!(b("1.3.x", Pin::Npm, "v1.4.0"), Some(true));
+        assert_eq!(b("*", Pin::Npm, "v3.0.0"), Some(false));
+        assert_eq!(b("1.3.0", Pin::Npm, "v1.4.0"), Some(true), "exact in package.json");
+        assert_eq!(b("1.4.0", Pin::Npm, "v1.4.0"), Some(false));
+        // A range never runs ahead of the release it is compared with.
+        assert_eq!(b("^1.4.0", Pin::Npm, "v1.3.0"), Some(false));
+        assert_eq!(b("main", Pin::Npm, "v1.0.0"), None);
     }
 
     #[test]
@@ -210,9 +316,9 @@ mod tests {
         let names = vec!["lib-core".to_string()];
         assert_eq!(pinned(&d, &names), None, "no files: skipped");
         std::fs::write(d.join("Cargo.toml"), "[dependencies]\nlib-core = \"1.4\"\n").unwrap();
-        assert_eq!(pinned(&d, &names).as_deref(), Some("1.4"));
+        assert_eq!(pinned(&d, &names), Some(("1.4".into(), Pin::Cargo)));
         std::fs::write(d.join("Cargo.lock"), "[[package]]\nname = \"lib-core\"\nversion = \"1.3.2\"\n").unwrap();
-        assert_eq!(pinned(&d, &names).as_deref(), Some("1.3.2"), "what was built, not what was asked");
+        assert_eq!(pinned(&d, &names), Some(("1.3.2".into(), Pin::Exact)), "what was built, not what was asked");
         std::fs::remove_dir_all(&d).ok();
     }
 
@@ -236,11 +342,11 @@ mod tests {
         git(&["init", "-q"]);
         assert_eq!(latest_tag(&d), None, "no tags");
         git(&["commit", "-q", "--allow-empty", "-m", "a"]);
-        for t in ["v1.9.0", "v1.10.0", "nightly", "v1.2.0"] {
+        for t in ["v1.9.0", "v1.10.0", "v1.11.0-rc.1", "nightly", "v1.2.0"] {
             git(&["tag", t]);
         }
         let (tag, at) = latest_tag(&d).unwrap();
-        assert_eq!(tag, "v1.10.0");
+        assert_eq!(tag, "v1.10.0", "the newest release, not a pre-release");
         assert!(at.is_some_and(|a| a.len() >= 19));
         assert_eq!(latest_tag(&d.join("missing")), None);
         std::fs::remove_dir_all(&d).ok();

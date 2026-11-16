@@ -58,7 +58,7 @@ export function valleyLayout(group) {
  * a ship waiting at its dock, labelled with the version it is waiting to
  * take. A release made within SHIP_SAIL_MS sails down the river to each
  * consumer that has taken it. */
-export const SHIP_SAIL_MS = 24 * 3600 * 1000, SHIP_TRIP_MS = 12000, SHIP_DOCK = 10;
+export const SHIP_SAIL_MS = 24 * 3600 * 1000, SHIP_TRIP_MS = 12000, SHIP_DOCK = 10, SHIP_BERTH = 12;
 
 /* The point `f` (0–1) of the way along a polyline. */
 export function along(poly, f) {
@@ -76,13 +76,20 @@ export function along(poly, f) {
 
 /* The ships on the valley's rivers at time `t` (ms of animation), `now` the
  * wall clock: { x, y, edge, waiting }. A waiting ship sits SHIP_DOCK pixels
- * short of its consumer; a sailing one loops down the river every SHIP_TRIP_MS. */
+ * short of its consumer; a consumer behind on several libraries has a berth
+ * for each, SHIP_BERTH apart, alternately above and below the river's mouth
+ * (every river into it ends at the same point). A sailing one loops down the
+ * river every SHIP_TRIP_MS. */
 export function valleyShips(lay, t, now = Date.now()) {
-  const ships = [];
+  const ships = [], berths = {};
   (lay.riverEdges || []).forEach((e, k) => {
     if (!e.latest) return;
     const poly = lay.rivers[k], [ex, ey] = poly[poly.length - 1];
-    if (e.behind) { ships.push({ x: ex - SHIP_DOCK, y: ey, edge: e, waiting: true }); return; }
+    if (e.behind) {
+      const n = berths[e.to] = (berths[e.to] ?? -1) + 1, off = n === 0 ? 0 : (n % 2 ? -1 : 1) * Math.ceil(n / 2) * SHIP_BERTH;
+      ships.push({ x: ex - SHIP_DOCK, y: ey + off, edge: e, waiting: true });
+      return;
+    }
     const made = Date.parse(e.latest_at || '');
     if (e.behind === false && made && now - made >= 0 && now - made < SHIP_SAIL_MS) {
       const [x, y] = along(poly, (t % SHIP_TRIP_MS) / SHIP_TRIP_MS);

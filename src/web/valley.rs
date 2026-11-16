@@ -180,22 +180,61 @@ fn repo_dir(repo: &str, villages: &[VillageSnapshot]) -> Option<PathBuf> {
     village_for(repo, villages).map(|v| PathBuf::from(&v.repo_path)).filter(|p| !p.as_os_str().is_empty() && p.is_dir())
 }
 
+/// How long what was read from repos on disk (tags, manifests, lockfiles)
+/// is reused: the page polls every few seconds, and they change rarely.
+const VERSIONS_FRESH: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// A library's latest release (its tag, when it was made) and the names it
+/// is known by; a consumer's pin of it. Kept for [`VERSIONS_FRESH`].
+type LibVersions = (Option<(String, Option<String>)>, Vec<String>);
+type Kept<T> = std::sync::Mutex<HashMap<String, (std::time::Instant, T)>>;
+
+fn kept<T: Clone>(cache: &'static OnceLock<Kept<T>>, key: String, read: impl FnOnce() -> T) -> T {
+    let map = cache.get_or_init(Default::default);
+    if let Some((at, v)) = map.lock().unwrap_or_else(|e| e.into_inner()).get(&key)
+        && at.elapsed() < VERSIONS_FRESH
+    {
+        return v.clone();
+    }
+    let v = read();
+    map.lock().unwrap_or_else(|e| e.into_inner()).insert(key, (std::time::Instant::now(), v.clone()));
+    v
+}
+
+/// A library's newest version tag and its names, from its repo on disk.
+fn lib_versions(dir: Option<&Path>, name: &str) -> LibVersions {
+    static CACHE: OnceLock<Kept<LibVersions>> = OnceLock::new();
+    let key = format!("{}\0{name}", dir.map(|d| d.to_string_lossy().into_owned()).unwrap_or_default());
+    kept(&CACHE, key, || {
+        let tag = dir.and_then(super::pins::latest_tag);
+        (tag, super::pins::package_names(dir.unwrap_or(Path::new("/nonexistent")), name))
+    })
+}
+
+/// What the repo at `dir` pins of a library known by `names`.
+fn pin_of(dir: &Path, names: &[String]) -> Option<(String, super::pins::Pin)> {
+    static CACHE: OnceLock<Kept<Option<(String, super::pins::Pin)>>> = OnceLock::new();
+    kept(&CACHE, format!("{}\0{}", dir.to_string_lossy(), names.join("\0")), || super::pins::pinned(dir, names))
+}
+
 /// A `package` edge's versions (#511): what the consumer pins, the
 /// library's latest release (its `release` stop's tag, else its newest
-/// version tag), and whether the pin is behind it.
+/// version tag), and whether the pin is behind it: an exact pin older than
+/// the release, or a range that doesn't take it (`pins::behind`).
 fn versions(e: &mut Edge, lib: &str, user: &str, villages: &[VillageSnapshot]) {
     let lib_dir = repo_dir(lib, villages);
+    let (tag, names) = lib_versions(lib_dir.as_deref(), &repo_name(lib));
     let stop = village_for(lib, villages).and_then(|v| v.pipeline.stops.iter().find(|s| s.name == "release" && s.tag.is_some()));
     let (latest, latest_at) = match stop {
         Some(s) => (s.tag.clone(), s.deployed_at.clone()),
-        None => lib_dir.as_deref().and_then(super::pins::latest_tag).map_or((None, None), |(t, at)| (Some(t), at)),
+        None => tag.map_or((None, None), |(t, at)| (Some(t), at)),
     };
-    let names = super::pins::package_names(lib_dir.as_deref().unwrap_or(Path::new("/nonexistent")), &repo_name(lib));
-    e.pinned = repo_dir(user, villages).and_then(|d| super::pins::pinned(&d, &names));
-    e.behind = match (&e.pinned, &latest) {
-        (Some(p), Some(l)) => super::pins::compare(p, l).map(|o| o == std::cmp::Ordering::Less),
+    let pin = repo_dir(user, villages).and_then(|d| pin_of(&d, &names));
+    e.behind = match (&pin, &latest) {
+        (Some((p, kind)), Some(l)) => super::pins::behind(p, *kind, l),
         _ => None,
     };
+    e.pinned = pin.map(|(p, _)| p);
     e.latest = latest;
     e.latest_at = latest_at;
 }
@@ -385,7 +424,13 @@ pub async fn api_valley_handler(
 ) -> axum::Json<serde_json::Value> {
     let swarms = state.swarms.read().map(|s| s.clone()).unwrap_or_default();
     let snapshot = state.village.snapshot(&state.transport, &swarms).await;
-    axum::Json(serde_json::json!(read(&manifest_path(), &snapshot.villages)))
+    // Reading repos on disk (tags, lockfiles) is blocking work (#511).
+    let villages = snapshot.villages;
+    let answer = tokio::task::spawn_blocking(move || read(&manifest_path(), &villages)).await;
+    axum::Json(match answer {
+        Ok(valley) => serde_json::json!(valley),
+        Err(e) => serde_json::json!({ "manifest": manifest_path().to_string_lossy(), "found": true, "groups": [], "errors": [format!("can't read the valley: {e}")] }),
+    })
 }
 
 #[cfg(test)]
