@@ -86,7 +86,7 @@
   .dialog .opts button:disabled { opacity: .5; cursor: default; }
   /* A proposal's decision under it on the board (proposals.js). */
   .dialog .decide { margin: 2px 0 8px; }
-  .dialog .decide .opts button, #d-act .opts button, #d-ctl .opts button { font-size: 12px; padding: 3px 8px; }
+  .dialog .decide .opts button, #d-act .opts button, #d-ctl .opts button, #d-flaky button { font-size: 12px; padding: 3px 8px; }
   .dialog .decide .ask { display: flex; gap: 6px; margin-top: 4px; }
   .dialog .decide textarea { flex: 1; font: 13px var(--mono); color: var(--ink); background: var(--win-bot); border: 2px solid var(--gold); border-radius: 4px; }
   .dialog .decide .ask button { position: static; font: 700 12px var(--mono); color: var(--ink); background: var(--win-bot); border: 2px solid var(--gold); border-radius: 4px; padding: 3px 8px; cursor: pointer; }
