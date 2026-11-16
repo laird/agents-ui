@@ -223,6 +223,7 @@ mod tests {
             worktree_path: String::new(),
             branch: None,
             mux: Default::default(),
+            limit: None,
             context_pct: None,
             context_window: None,
         }
