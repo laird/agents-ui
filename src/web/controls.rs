@@ -15,8 +15,9 @@
 //! - **stop** shuts the worker down, as the TUI's `d` key: the stopped
 //!   tombstone (`.codex/stopped` in its worktree) first, so heal and revive
 //!   won't respawn it, then its pane is closed: Ctrl+C and `exit` for tmux
-//!   (`proxy::kill_pane`'s keys), `herdr pane close` for herdr. A pane that
-//!   is already gone is still a stopped worker, as for the `d` key. Its issue
+//!   (`proxy::kill_pane`'s keys), `herdr pane close` for herdr. A tmux pane
+//!   is closed only while it is still the worker's own (see restart). A pane
+//!   that is already gone is still a stopped worker, as for the `d` key. Its issue
 //!   stays claimed, and the response says so: release it to hand it back.
 //! - **restart** quits the worker's runtime and starts it again in the same
 //!   pane and worktree, then tells it to work its claimed issue (or start its
@@ -239,6 +240,13 @@ fn described(steps: &[Step]) -> String {
         .join("\n")
 }
 
+/// What tmux says the pane is ([`PANE_FORMAT`]), or `None` when there is no such pane.
+async fn tmux_pane_shown(t: &crate::transport::ServerTransport, target: &str) -> Option<String> {
+    let args: Vec<String> = ["display-message", "-p", "-t", target, PANE_FORMAT].iter().map(|s| s.to_string()).collect();
+    let out = t.output("tmux", &args, None).await.ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
 /// Restart a tmux worker that `restart_check` passed: quit its runtime, and
 /// only once its pane is a shell again launch it and tell it what to work.
 /// What was typed, or why it stopped and what status that is.
@@ -247,7 +255,7 @@ async fn restart(state: &WebServerState, swarm: &SwarmSnapshot, agent: &AgentSna
     let target = agent.tmux_target.clone();
     let tmux = |args: &[&str]| -> Vec<String> { args.iter().map(|s| s.to_string()).collect() };
     let gateway = |e: String| (StatusCode::BAD_GATEWAY, e);
-    let shown = || async { t.output("tmux", &tmux(&["display-message", "-p", "-t", &target, PANE_FORMAT]), None).await.ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).into_owned()) };
+    let shown = || tmux_pane_shown(t, &target);
     // Still its pane? tmux renumbers panes when one closes.
     if !shown().await.is_some_and(|s| is_its_pane(&s, &agent.worktree_path)) {
         return Err((StatusCode::CONFLICT, "its pane is gone or is another worker's now: nothing was sent".into()));
@@ -259,8 +267,11 @@ async fn restart(state: &WebServerState, swarm: &SwarmSnapshot, agent: &AgentSna
     let started = std::time::Instant::now();
     let mut presses = 0;
     loop {
-        if shown().await.is_some_and(|s| back_at_shell(&s)) {
-            break;
+        match shown().await {
+            Some(s) if back_at_shell(&s) => break,
+            // The runtime was the pane's own program: quitting it closed the pane.
+            None => return Err((StatusCode::CONFLICT, "its pane closed when the runtime quit: start it again from the terminal".into())),
+            Some(_) => {}
         }
         if started.elapsed() > std::time::Duration::from_secs(10) {
             return Err((StatusCode::GATEWAY_TIMEOUT, "its runtime didn't exit within 10 s: nothing was typed".into()));
@@ -327,7 +338,11 @@ pub async fn api_control_handler(
                 tracing::warn!("stopping {project}/{role}: no tombstone: {err}");
                 (StatusCode::BAD_GATEWAY, Json(json!({ "error": format!("could not mark it stopped: {err}") })))
             })?;
-            let closed = run_steps(&state.transport, close).await;
+            // A tmux pane is closed only if it is still the worker's own: an
+            // earlier stop renumbers the panes, and a stale page would close a peer's.
+            let its_own = agent.mux != super::Mux::Tmux
+                || tmux_pane_shown(&state.transport, &agent.tmux_target).await.is_some_and(|s| is_its_pane(&s, &agent.worktree_path));
+            let closed = if its_own { run_steps(&state.transport, close).await } else { Err("its pane is gone or is another worker's now: left alone".into()) };
             if let Err(err) = &closed {
                 tracing::info!("stopping {project}/{role}: its pane didn't close ({err}); it is marked stopped");
             }
