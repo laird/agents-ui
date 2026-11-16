@@ -7,6 +7,7 @@ mod almanac;
 mod controls;
 mod coins;
 mod core;
+mod counting;
 mod envrow;
 mod fit;
 mod gatehouse;

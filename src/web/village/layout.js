@@ -9,6 +9,7 @@ import { THEMES } from './themes/registry.js';
 import { registerLayer } from './registry.js';
 import { inRow } from './envlabels.js';
 import { ALMANAC_SIZE, almanacDays } from './almanactally.js';
+import { COUNTING_SIZE, countingUsage } from './countingtally.js';
 
 export const cv = document.getElementById('map'), ctx = cv.getContext('2d');
 /* On-screen pixels per scene pixel on the map (its canvas is DETAIL times finer). */
@@ -84,7 +85,10 @@ function place(v, slot, per) {
   // The almanac (#499, almanac.js): a field at the village's east edge, in a
   // clearing past everything else, when GitHub's summary came with the village.
   const almanac = almanacDays(v.github) ? { x: eastW + 2, y: 18, ...ALMANAC_SIZE } : null;
-  const devW = almanac ? almanac.x + almanac.w + 8 : eastW;
+  // The counting house (#516, countinghouse.js): past the almanac, when the
+  // village's token use (#514) came with it.
+  const counting = countingUsage(v) ? { x: (almanac ? almanac.x + almanac.w + 10 : eastW + 2), y: 22, ...COUNTING_SIZE } : null;
+  const devW = counting ? counting.x + counting.w + 8 : almanac ? almanac.x + almanac.w + 8 : eastW;
   // The environment row (#445): under the dev village, a village per
   // environment on a river of its own along the bottom, left to right,
   // production right-most (docs/environment-row.md). Each stands just over the
@@ -111,7 +115,8 @@ function place(v, slot, per) {
     ...(gate ? [[4, gate.y - 2, gate.x0 + gate.w, GATE_H + 2]] : []),
     [forestX - 2, 12, devW, canalY - 46], ...(envs.length ? [[0, rowTop - 2, W, H]] : []),
     ...(v.github ? [[ghSignAt(hallX).x - 1, 18, GH_SIGN.w + 2, 30]] : []),
-    ...(almanac ? [[almanac.x - 4, almanac.y - 4, almanac.w + 8, almanac.h + 14]] : [])
+    ...(almanac ? [[almanac.x - 4, almanac.y - 4, almanac.w + 8, almanac.h + 14]] : []),
+    ...(counting ? [[counting.x - 4, counting.y - 4, counting.w + 8, counting.h + 14]] : [])
   ];
   for (let r = 0; r < rows; r++) {
     const left = roadX - per * LW, right = roadX + RD + per * LW;
@@ -132,7 +137,7 @@ function place(v, slot, per) {
     const zone = Math.floor(hash(x >> 5, y >> 5) * 6), k = hash(x + 11, y + 7) < 0.7 ? zone : Math.floor(hash(y, x + 3) * 6);
     decor.push({ x: x + Math.floor(hash(y, x) * 4), y: y + Math.floor(hash(x, y + 1) * 3), k });
   }
-  return { per, rows, almanac, cx0, vw, roadX, hallX, top, lots, quayY, canalY, lockStart, castleX, W, H, decor, banners, devW, devH, envs, envCy, gate, slot };
+  return { per, rows, almanac, counting, cx0, vw, roadX, hallX, top, lots, quayY, canalY, lockStart, castleX, W, H, decor, banners, devW, devH, envs, envCy, gate, slot };
 }
 /* The GitHub panel's sign (ghpanel.js, #492): between the docks and the
  * hall, in scene pixels. */
@@ -160,10 +165,10 @@ export function inBannerStrip(lay, x, y) {
   return b.length > 0 && y < 48 && x >= b[0].x - 14 && x <= b[b.length - 1].x + 22;
 }
 
-/* The clearing the almanac stands in: no forest tree there, nor over its label. */
+/* The clearings at the east edge, the almanac's and the counting house's
+ * (#516): no forest tree there, nor over their labels. */
 export function inAlmanacClearing(lay, x, y) {
-  const a = lay.almanac;
-  return !!a && x > a.x - 16 && x < a.x + a.w + 2 && y > a.y - 16 && y < a.y + a.h + 10;
+  return [lay.almanac, lay.counting].some(a => !!a && x > a.x - 16 && x < a.x + a.w + 2 && y > a.y - 16 && y < a.y + a.h + 10);
 }
 
 /* Where a walk along `pts` is `t - p.t0` after it set off at `p.speed`, or null once over. */
