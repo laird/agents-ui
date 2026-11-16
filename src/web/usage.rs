@@ -471,37 +471,16 @@ mod tests {
             role: role.into(),
             state: "Working".into(),
             is_manager: role == "manager",
-            waiting_for_input: false,
             current_issue: issue,
-            current_issue_title: None,
-            pane_content: String::new(),
-            tmux_target: String::new(),
-            health: "Healthy".into(),
-            completed_issue_count: 0,
-            resurrection_attempts: 0,
-            status_timestamp: None,
             worktree_path: path.into(),
-            branch: None,
-            mux: Default::default(),
-            context_pct: None,
-            context_window: None,
-            limit: None,
+            ..Default::default()
         };
         let swarm = SwarmSnapshot {
             project_name: "shop".into(),
             repo_path: "/repos/shop".into(),
-            repo_key: String::new(),
-            manager_by: None,
-            agent_type: "Claude".into(),
-            workflow: None,
-            tmux_session: "claude-shop".into(),
-            stopped: false,
-            busy_count: 0,
-            idle_count: 0,
-            attention_count: 0,
             manager: agent("manager", "/repos/shop", None),
             workers: vec![agent("worker-1", "/wt1", Some(7)), agent("worker-2", "/wt2", None)],
-            issues: Vec::new(),
+            ..Default::default()
         };
         let mut v = build(&swarm, &[], Pipeline::default());
         let now = SystemTime::from(DateTime::parse_from_rfc3339("2026-11-16T12:00:00Z").unwrap().with_timezone(&Utc));
