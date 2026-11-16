@@ -267,7 +267,9 @@ registerHit({ kind: 'house', dialog(o, sc) {
       `Status: ${h.status}${h.action && h.action !== h.status ? ' · ' + h.action : ''}${h.priority ? ' · ' + h.priority : ''}`,
       since ? `${h.status.charAt(0).toUpperCase() + h.status.slice(1)} since ${since}` : null, limitWords(h), contextWords(h),
       `Crew: ${h.crew.join(', ') || '—'}`, ...(h.subagents || []).map(sa => `${runtime ? 'Agent' : 'Sub-agent'}: ${subWords(sa, v)}`)],
-    links: [...(h.links || []), issue, ...(runtime ? [] : branchLinks(repo, h.branch, h.links, br)), compare], house: h };
+    links: [...(h.links || []), issue, ...(runtime ? [] : branchLinks(repo, h.branch, h.links, br)), compare], house: h,
+    // Worker controls (#506, controls.js): the server says which it can run.
+    controls: runtime ? null : { project: v.project, role: h.role, name: houseName(v, h), issue: h.issue || null } };
 } });
 registerHit({ kind: 'person', dialog(o, sc) {
   const v = sc.v, h = v.houses[o.i]; if (!h) return null;

@@ -1,0 +1,159 @@
+//! What a worker control would send, before it is sent (#506, for #488):
+//! `GET /api/swarms/{project}/agents/{role}/control?action=nudge|release`.
+//!
+//! The village's house dialog asks this when it opens, so its confirmation
+//! can show the exact command a nudge types or the comment a release posts,
+//! and so it can leave out controls the server can't run for that house.
+//! The answer is `{ ok, action, sent }`, or the refusal the POST (#504,
+//! `controls.rs`) would give: 404 for an unknown swarm or role, 409 when the
+//! action can't run now (a busy worker, a worker holding no issue, the
+//! manager). An action the server doesn't support is a 501. Nothing is sent
+//! and the tracker is not asked, so a GET is cheap and changes nothing.
+
+use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
+use axum::Json;
+use serde::Deserialize;
+use serde_json::{json, Value};
+
+use super::controls::{claimed_issue, nudge_command, release_comment, Refusal};
+use super::server::WebServerState;
+use super::{AgentSnapshot, SwarmSnapshot};
+use crate::model::swarm::AgentType;
+
+#[derive(Debug, Default, Deserialize)]
+pub struct PreviewQuery {
+    pub action: Option<String>,
+}
+
+/// What `action` would send for this agent, or why it can't run now.
+pub fn preview(swarm: &SwarmSnapshot, agent: &AgentSnapshot, action: &str) -> Result<String, Refusal> {
+    match action {
+        "nudge" => {
+            let runtime = AgentType::from_name(&swarm.agent_type).unwrap_or(AgentType::Claude);
+            nudge_command(agent, &runtime)
+        }
+        "release" => {
+            if agent.is_manager {
+                return Err((StatusCode::CONFLICT, "only workers hold issues"));
+            }
+            let number = claimed_issue(swarm, agent).ok_or((StatusCode::CONFLICT, "that worker holds no issue"))?;
+            Ok(format!("{}\n\n(then removes the `working` label from #{number})", release_comment(number, &agent.role)))
+        }
+        _ => Err((StatusCode::NOT_IMPLEMENTED, "this server can't do that to a worker")),
+    }
+}
+
+/// The swarm and the agent the path names (as `controls.rs` finds them).
+fn find(state: &WebServerState, project: &str, role: &str) -> Result<(SwarmSnapshot, AgentSnapshot), Refusal> {
+    let guard = state.swarms.read().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "state unavailable"))?;
+    let swarm = guard.iter().find(|s| s.project_name == project).ok_or((StatusCode::NOT_FOUND, "no such swarm"))?;
+    let agent = std::iter::once(&swarm.manager)
+        .chain(swarm.workers.iter())
+        .find(|a| a.role == role)
+        .ok_or((StatusCode::NOT_FOUND, "no such agent"))?;
+    Ok((swarm.clone(), agent.clone()))
+}
+
+pub async fn api_control_preview_handler(
+    Path((project, role)): Path<(String, String)>,
+    State(state): State<WebServerState>,
+    Query(q): Query<PreviewQuery>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let fail = |(code, msg): Refusal| (code, Json(json!({ "error": msg })));
+    let (swarm, agent) = find(&state, &project, &role).map_err(fail)?;
+    let action = q.action.unwrap_or_default();
+    let sent = preview(&swarm, &agent, &action).map_err(fail)?;
+    Ok(Json(json!({ "ok": true, "action": action, "sent": sent })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::web::IssueSnapshot;
+
+    fn agent(role: &str, state: &str, is_manager: bool) -> AgentSnapshot {
+        AgentSnapshot {
+            id: format!("p/{role}"),
+            role: role.into(),
+            state: state.into(),
+            is_manager,
+            waiting_for_input: false,
+            current_issue: None,
+            current_issue_title: None,
+            pane_content: String::new(),
+            tmux_target: "claude-p:0.1".into(),
+            health: "Healthy".into(),
+            completed_issue_count: 0,
+            resurrection_attempts: 0,
+            status_timestamp: None,
+            worktree_path: String::new(),
+            branch: None,
+            mux: Default::default(),
+            limit: None,
+            context_pct: None,
+            context_window: None,
+        }
+    }
+
+    fn swarm(issues: Vec<IssueSnapshot>) -> SwarmSnapshot {
+        SwarmSnapshot {
+            project_name: "p".into(),
+            repo_path: "/repos/p".into(),
+            repo_key: String::new(),
+            manager_by: None,
+            agent_type: "Claude".into(),
+            workflow: None,
+            tmux_session: "claude-p".into(),
+            stopped: false,
+            busy_count: 0,
+            idle_count: 1,
+            attention_count: 0,
+            manager: agent("manager", "Idle", true),
+            workers: vec![agent("worker-1", "Idle", false)],
+            issues,
+        }
+    }
+
+    fn working(number: u32, worker: &str) -> IssueSnapshot {
+        IssueSnapshot {
+            number,
+            title: String::new(),
+            state: "open".into(),
+            priority: String::new(),
+            labels: vec!["working".into()],
+            is_blocked: false,
+            is_working: true,
+            assigned_worker: Some(worker.into()),
+            url: String::new(),
+            depends_on: vec![],
+        }
+    }
+
+    #[test]
+    fn a_nudge_previews_the_command_the_post_would_type() {
+        let s = swarm(vec![]);
+        let idle = agent("worker-1", "Idle", false);
+        assert_eq!(preview(&s, &idle, "nudge"), nudge_command(&idle, &AgentType::Claude));
+        assert!(preview(&s, &idle, "nudge").unwrap().contains("fix-loop"), "{:?}", preview(&s, &idle, "nudge"));
+        assert_eq!(preview(&s, &agent("worker-1", "Working: #7", false), "nudge").unwrap_err().0, StatusCode::CONFLICT);
+    }
+
+    #[test]
+    fn a_release_previews_the_comment_and_the_label() {
+        let s = swarm(vec![working(42, "worker-2")]);
+        let sent = preview(&s, &agent("worker-2", "Working: #42", false), "release").unwrap();
+        assert!(sent.starts_with(&release_comment(42, "worker-2")));
+        assert!(sent.ends_with("(then removes the `working` label from #42)"));
+        assert_eq!(preview(&s, &agent("worker-3", "Idle", false), "release").unwrap_err().0, StatusCode::CONFLICT);
+        assert_eq!(preview(&s, &agent("manager", "Idle", true), "release").unwrap_err().0, StatusCode::CONFLICT);
+    }
+
+    #[test]
+    fn an_action_the_server_does_not_have_is_501() {
+        let s = swarm(vec![]);
+        for action in ["restart", "stop", ""] {
+            assert_eq!(preview(&s, &agent("worker-1", "Idle", false), action).unwrap_err().0, StatusCode::NOT_IMPLEMENTED, "{action}");
+        }
+    }
+}

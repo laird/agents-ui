@@ -1,4 +1,5 @@
 pub mod build;
+pub mod control_preview;
 pub mod controls;
 pub mod deployments;
 pub mod discovery;
