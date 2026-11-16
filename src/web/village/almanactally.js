@@ -4,6 +4,7 @@
  * each { date, landed, opened, bounced, reverted?, deploys }, and as_of.
  * Its size, which marks each day's row gets, and the dialog's words. No DOM,
  * so node tests it (tools/village-tests/almanac.test.mjs). */
+import { returnedShare } from './returnwords.js';
 
 /* Days shown: one row each, today's last. */
 export const ALMANAC_DAYS = 14;
@@ -118,6 +119,7 @@ export function almanacFacts(gh, ms = null, utcDay) {
     `Bounced: ${almanacSum(rows, 'bounced')} times the merge gate handed work back`,
     reverts ? `Reverted: ${almanacSum(rows, 'reverted')} on the integration branch` : 'Reverted: unknown (the integration branch’s log could not be read)',
     `Deploys: ${almanacSum(rows, 'deploys')} commits deployed`,
+    ...(returnedShare(gh) ? [`Came back: ${returnedShare(gh).words}, reopened, reverted or named in a regression`] : []),
     median ? `Median from claimed to landed: ${median}` : 'Median from claimed to landed: no claims on record',
     `As of ${almanacAsOf(gh.as_of)}`,
     ...rows.map(r => `${almanacDate(r.date)}${r.today ? ' (today)' : ''}: landed ${r.landed} · bounced ${r.bounced}${r.reverted ? ` · reverted ${r.reverted}` : ''} · opened ${r.opened} · deploys ${r.deploys}`),
