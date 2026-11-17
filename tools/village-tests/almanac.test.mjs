@@ -68,11 +68,11 @@ test('the marks per day: a bar per landed issue, pips per bounce, a cross per re
 
 test("today's row grows with the gate's tally between GitHub reads", () => {
   const ms = { landed_today: 9, bounced_today: 0 };
-  const rows = T.almanacRows(summary(), ms);
+  const rows = T.almanacRows(summary(), ms, '2026-11-16');
   assert.equal(rows[13].landed, 9);
   assert.equal(rows[13].bar, T.almanacBar(9, 9));
   assert.equal(rows[12].landed, summary().days[12].landed, 'only today grows');
-  assert.equal(T.almanacRows(summary(), { landed_today: 1 })[13].landed, 3, 'never shrinks below GitHub');
+  assert.equal(T.almanacRows(summary(), { landed_today: 1 }, '2026-11-16')[13].landed, 3, 'never shrinks below GitHub');
 });
 
 test('row heights and the footprint', () => {
