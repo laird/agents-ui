@@ -152,7 +152,8 @@ async function poll() {
     const build = shown ? buildWords(shown.build) : '';
     const status = document.getElementById('status');
     // Its first read of GitHub is still running (#534): the backlog and build are to come.
-    const reading = shown && shown.reading ? ' · reading GitHub…' : '';
+    // The valley shows every village: any one still being read is said.
+    const reading = (shown ? [shown] : valleyWanted() ? villages : []).some(v => v.reading) ? ' · reading GitHub…' : '';
     status.textContent = 'Live · updated ' + new Date().toLocaleTimeString() + (build ? ' · ' + build : '') + reading;
     status.classList.toggle('red', !!(shown && shown.build && shown.build.state === 'red'));
     polled(true);

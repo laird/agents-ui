@@ -1203,15 +1203,16 @@ struct Remote {
     closed: Vec<IssueSnapshot>,
     merge_comments: Vec<(u32, String, String)>,
     github: Option<super::github::Summary>,
-    /// The integration branch's commit when CI was asked, and its answer.
-    tip: String,
-    ci: Option<super::build::Build>,
 }
 
 /// How long a request waits for a repo's first network read before the
 /// village is served without it (#534): the deploy check and the page's
 /// first poll aren't kept waiting on GitHub.
 pub(crate) const COLD_WAIT: Duration = Duration::from_secs(1);
+
+/// How often CI is asked again about the same tip: `CiCache` answers a
+/// settled build itself, so only a running one goes back to GitHub.
+const CI_REFRESH: Duration = Duration::from_secs(30);
 
 /// A village per discovered swarm, with its issues, pipeline and activity
 /// from whichever sources are plugged in.
@@ -1228,6 +1229,9 @@ pub struct SwarmVillages {
     shipped: std::sync::Mutex<HashMap<String, super::feature::ShipMemory>>,
     /// CI answers per repo, re-asked when the tip moves (`build.rs`).
     ci: Arc<super::build::CiCache>,
+    /// CI's answer per repo and tip, asked in the background (#534). A moved
+    /// tip is a new key: only its CI is asked, not the whole `Remote`.
+    ci_reads: super::source::Background<(PathBuf, String), Option<super::build::Build>>,
 }
 
 impl SwarmVillages {
@@ -1242,6 +1246,7 @@ impl SwarmVillages {
             pipeline: pipeline.into(),
             activity,
             remote: super::source::Background::new(extras_ttl(), cold_wait),
+            ci_reads: super::source::Background::new(CI_REFRESH, cold_wait),
             since: Default::default(),
             conflicts: Default::default(),
             shipped: Default::default(),
@@ -1251,7 +1256,7 @@ impl SwarmVillages {
 
     /// Everything the village of `swarm` reads over the network, in one pass.
     fn read_remote(&self, transport: &ServerTransport, swarm: &SwarmSnapshot) -> impl Future<Output = Remote> + Send + 'static {
-        let (tracker, pipeline, ci) = (self.issues.clone(), self.pipeline.clone(), self.ci.clone());
+        let (tracker, pipeline) = (self.issues.clone(), self.pipeline.clone());
         let (transport, repo, project) = (transport.clone(), PathBuf::from(&swarm.repo_path), swarm.project_name.clone());
         // Swarms that bring their own issues (the TUI's) aren't refetched.
         let own_issues = !swarm.issues.is_empty();
@@ -1267,12 +1272,7 @@ impl SwarmVillages {
             let closed = timed(format!("{project}: closed issues"), tracker.closed(t, &repo)).await;
             let integration = pipeline.integration.clone();
             let github = timed(format!("{project}: github summary"), tracker.summary(t, &repo, &integration)).await;
-            let tip = super::build::tip(t, &repo, &integration).await;
-            let ci = match tip.is_empty() {
-                true => None,
-                false => timed(format!("{project}: ci"), ci.get(t, &repo, &integration, &tip)).await,
-            };
-            Remote { issues, pipeline, links, closed, merge_comments, github, tip, ci }
+            Remote { issues, pipeline, links, closed, merge_comments, github }
         }
     }
 
@@ -1281,20 +1281,25 @@ impl SwarmVillages {
         let (remote, reading) = if swarm.repo_path.is_empty() {
             (Remote::default(), false)
         } else {
-            // A tip that moved since CI was asked is asked again now, not after the TTL.
-            let integration = self.remote.peek(&repo).map(|r| r.pipeline.integration).unwrap_or_default();
-            let tip = super::build::tip(transport, &repo, &integration).await;
-            let got = self.remote.get(repo.clone(), |r| r.tip == tip, || self.read_remote(transport, swarm)).await;
-            let mut remote = got.clone().unwrap_or_default();
-            // CI's answer is for the commit it was asked about: an older tip's
-            // isn't shown for this one (the sentinel and gate still are).
-            if remote.tip != tip {
-                remote.ci = None;
-            }
-            remote.tip = tip;
-            (remote, got.is_none())
+            let got = self.remote.get(repo.clone(), |_| true, || self.read_remote(transport, swarm)).await;
+            (got.clone().unwrap_or_default(), got.is_none())
         };
-        let Remote { issues: fetched, pipeline, links, closed, merge_comments, github, tip, ci } = remote;
+        let Remote { issues: fetched, pipeline, links, closed, merge_comments, github } = remote;
+        // CI is asked about the tip the clone has now (a local rev-parse): a
+        // moved tip is asked about at once, and an older tip's answer is never
+        // shown for it. Older tips are let go.
+        let tip = super::build::tip(transport, &repo, &pipeline.integration).await;
+        let ci = if tip.is_empty() {
+            None
+        } else {
+            let (cache, t, r, integration, project) = (self.ci.clone(), transport.clone(), repo.clone(), pipeline.integration.clone(), swarm.project_name.clone());
+            let at = tip.clone();
+            self.ci_reads.drop_where(|(r, t)| *r == repo && *t != tip);
+            self.ci_reads
+                .get((repo.clone(), tip.clone()), |_| true, move || async move { timed(format!("{project}: ci"), cache.get(&t, &r, &integration, &at)).await })
+                .await
+                .flatten()
+        };
         let issues = if swarm.issues.is_empty() { fetched } else { swarm.issues.clone() };
         // The merge gate's files are on the host that runs the merges: read
         // them only for a local village, and fresh each time (they change by
@@ -1475,22 +1480,28 @@ mod tests {
             }
             fn issues<'a>(&'a self, _: &'a ServerTransport, _: &'a Path, _: &'a str) -> BoxFuture<'a, Vec<IssueSnapshot>> {
                 Box::pin(async {
-                    tokio::time::sleep(Duration::from_millis(400)).await;
+                    tokio::time::sleep(Duration::from_secs(2)).await;
                     vec![issue(7, &["P2"])]
                 })
             }
         }
         let transport = ServerTransport::new(None);
-        let villages = SwarmVillages::waiting(Box::new(Slow), Box::new(super::super::source::Nothing), Box::new(super::super::source::Nothing), Duration::from_millis(20));
+        let villages = SwarmVillages::waiting(Box::new(Slow), Box::new(super::super::source::Nothing), Box::new(super::super::source::Nothing), Duration::from_millis(100));
         let mut s = swarm(vec![]);
         s.repo_path = std::env::temp_dir().join(format!("agents-ui-534-{}", std::process::id())).to_string_lossy().into_owned();
         let start = std::time::Instant::now();
         let first = villages.village(&transport, &s).await;
-        assert!(start.elapsed() < Duration::from_millis(300), "served before the tracker answered");
+        assert!(start.elapsed() < Duration::from_millis(1500), "served before the tracker answered");
         assert!(first.village.reading && first.issues.is_empty());
         assert_eq!(serde_json::to_value(&first.village).unwrap()["reading"], true);
-        tokio::time::sleep(Duration::from_millis(600)).await;
-        let later = villages.village(&transport, &s).await;
+        let deadline = std::time::Instant::now() + Duration::from_secs(15);
+        let later = loop {
+            let r = villages.village(&transport, &s).await;
+            if !r.village.reading || std::time::Instant::now() > deadline {
+                break r;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        };
         assert!(!later.village.reading);
         assert_eq!(later.issues.iter().map(|i| i.number).collect::<Vec<_>>(), vec![7]);
         assert!(serde_json::to_value(&later.village).unwrap().get("reading").is_none());
