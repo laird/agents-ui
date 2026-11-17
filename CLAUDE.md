@@ -64,9 +64,9 @@ file.
   different animation frames, which passes on a fast machine and fails on CI
   (#450).
 - **A test with a fixed date must not read the real clock** (`Local::now`,
-  `Utc::now`, `SystemTime::now`, `Date.now()`, `new Date()`): pass `today`
-  and `now` in. A fixture's day against the real one passes until midnight UTC
-  and then fails, on CI first (#535, #536). Check with `TZ=Pacific/Kiritimati
+  `Utc::now`, `SystemTime::now`, `Date.now()`, `new Date()` with no argument):
+  pass `today` and `now` in. A fixture's day against the real one passes
+  until midnight UTC and then fails, on CI first (#535, #536). Check with `TZ=Pacific/Kiritimati
   cargo test` and `TZ=Etc/GMT+12 cargo test`.
 
 - **Each tool's own tests** (the mock demos, the Omarchy plugins, the

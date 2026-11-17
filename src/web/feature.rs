@@ -692,8 +692,9 @@ mod tests {
         assert!(memory.is_empty());
     }
 
-    /// Noon on the fixtures' day (2026-11-16) in local time: a voyage's time
-    /// on the `today` these tests pass in, whatever the real clock says (#536).
+    /// Noon on the fixtures' day (2026-11-16) in local time, the zone
+    /// `remember_shipped` compares in: a voyage's time on the `today` these
+    /// tests pass in, whatever the real date or time zone (#536).
     fn fixture_noon() -> String {
         use chrono::TimeZone;
         chrono::Local.with_ymd_and_hms(2026, 11, 16, 12, 0, 0).unwrap().to_rfc3339()
