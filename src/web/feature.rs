@@ -692,10 +692,17 @@ mod tests {
         assert!(memory.is_empty());
     }
 
+    /// Noon on the fixtures' day (2026-11-16) in local time: a voyage's time
+    /// on the `today` these tests pass in, whatever the real clock says (#536).
+    fn fixture_noon() -> String {
+        use chrono::TimeZone;
+        chrono::Local.with_ymd_and_hms(2026, 11, 16, 12, 0, 0).unwrap().to_rfc3339()
+    }
+
     #[test]
     fn only_an_epic_seen_short_of_prod_ships_and_a_later_deploy_does_not_ship_it_again() {
         let today = chrono::NaiveDate::from_ymd_opt(2026, 11, 16).unwrap();
-        let now = chrono::Local::now().to_rfc3339();
+        let now = fixture_noon();
         let mut memory = ShipMemory::default();
         // Already live when first seen, its subtasks in a deploy's whole-history cargo: not new.
         let mut v = village(&[], [&[], &[], &[], &[461, 462, 463, 464]], vec![], vec![]);
@@ -722,7 +729,7 @@ mod tests {
         assert!(memory.read(&v, &[four()], today).is_empty());
         v.pipeline.stops[2].issues.clear();
         v.pipeline.stops[3].issues.extend([461, 462, 463, 464]);
-        v.pipeline.voyages = vec![docked("prod", &[464], &chrono::Local::now().to_rfc3339())];
+        v.pipeline.voyages = vec![docked("prod", &[464], &fixture_noon())];
         assert_eq!(memory.read(&v, &[], today).iter().map(|s| s.number).collect::<Vec<_>>(), vec![460]);
     }
 
@@ -731,7 +738,7 @@ mod tests {
         let today = chrono::NaiveDate::from_ymd_opt(2026, 11, 16).unwrap();
         let mut memory = ShipMemory::default();
         let mut v = village(&[], [&[], &[], &[], &[461, 462, 463, 464]], vec![], vec![]);
-        v.pipeline.voyages = vec![docked("prod", &[461, 462, 463, 464], &chrono::Local::now().to_rfc3339())];
+        v.pipeline.voyages = vec![docked("prod", &[461, 462, 463, 464], &fixture_noon())];
         assert!(memory.read(&v, &[four()], today).is_empty());
         // The deployments can't be read: prod is unknown, and the epic looks short of it.
         let mut blind = v.clone();
