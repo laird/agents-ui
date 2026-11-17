@@ -237,6 +237,108 @@ impl IssueTracker for GitHubIssues {
 /// Values reused until they're `ttl` old, so slow sources (`gh`, `git
 /// ls-remote`, Temporal's API) run at most once per TTL per key however many
 /// browsers are watching.
+/// Values read in the background (#534): a request is answered at once from
+/// what was last read, however old, and a value older than `ttl` (or one
+/// `get`'s caller no longer trusts) is read again in a spawned task. So no
+/// request waits on `gh` or `git ls-remote`: only a key never read waits,
+/// and at most `cold_wait`, for its first read. One read per key at a time.
+pub struct Background<K, V> {
+    ttl: Duration,
+    cold_wait: Duration,
+    entries: Arc<Mutex<HashMap<K, Slot<V>>>>,
+}
+
+struct Slot<V> {
+    value: Option<(Instant, V)>,
+    /// A read in flight; its sender is dropped when it ends.
+    reading: Option<tokio::sync::watch::Receiver<()>>,
+}
+
+impl<V> Default for Slot<V> {
+    fn default() -> Self {
+        Self { value: None, reading: None }
+    }
+}
+
+impl<K, V> Background<K, V>
+where
+    K: Eq + Hash + Clone + Send + 'static,
+    V: Clone + Send + 'static,
+{
+    pub fn new(ttl: Duration, cold_wait: Duration) -> Self {
+        Self { ttl, cold_wait, entries: Arc::new(Mutex::new(HashMap::new())) }
+    }
+
+    /// The last value read for `key`, starting a read when it is older than
+    /// the TTL or `trusted` says it no longer holds. None until the first
+    /// read finishes: the call that starts it waits up to `cold_wait` for it,
+    /// and calls while it runs don't wait at all.
+    pub async fn get<F>(&self, key: K, trusted: impl FnOnce(&V) -> bool, fetch: impl FnOnce() -> F) -> Option<V>
+    where
+        F: Future<Output = V> + Send + 'static,
+    {
+        let first = {
+            let mut m = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+            let slot = m.entry(key.clone()).or_default();
+            let fresh = slot.value.as_ref().is_some_and(|(at, v)| at.elapsed() < self.ttl && trusted(v));
+            let start = !fresh && slot.reading.is_none();
+            if start {
+                let (done, rx) = tokio::sync::watch::channel(());
+                slot.reading = Some(rx);
+                let (entries, key, work) = (self.entries.clone(), key.clone(), fetch());
+                tokio::spawn(async move {
+                    use futures::FutureExt;
+                    // A read that panics is retried next time, not stuck "in flight".
+                    let read = std::panic::AssertUnwindSafe(work).catch_unwind().await;
+                    let mut m = entries.lock().unwrap_or_else(|e| e.into_inner());
+                    let slot = m.entry(key).or_default();
+                    if let Ok(v) = read {
+                        slot.value = Some((Instant::now(), v));
+                    }
+                    slot.reading = None;
+                    drop(done);
+                });
+            }
+            match slot.value {
+                None if start => slot.reading.clone(),
+                _ => None,
+            }
+        };
+        if let Some(mut first) = first {
+            let _ = tokio::time::timeout(self.cold_wait, first.changed()).await;
+        }
+        let m = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+        m.get(&key).and_then(|s| s.value.as_ref()).map(|(_, v)| v.clone())
+    }
+
+    /// The last value read for `key`, if any, without starting a read.
+    pub fn peek(&self, key: &K) -> Option<V> {
+        let m = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+        m.get(key).and_then(|s| s.value.as_ref()).map(|(_, v)| v.clone())
+    }
+
+    /// Drop `key`'s value, so the next `get` reads it again.
+    pub fn forget(&self, key: &K) {
+        self.entries.lock().unwrap_or_else(|e| e.into_inner()).remove(key);
+    }
+}
+
+/// Runs `work`, and logs it (at debug) when it took longer than [`SLOW`]
+/// (#534): which `gh` or `git` read is slow, now that none of them keeps a
+/// request waiting.
+pub async fn timed<T>(what: impl std::fmt::Display, work: impl Future<Output = T>) -> T {
+    let start = Instant::now();
+    let v = work.await;
+    let took = start.elapsed();
+    if took > SLOW {
+        tracing::debug!("village: {what} took {:.1}s", took.as_secs_f64());
+    }
+    v
+}
+
+/// A village step slower than this is logged ([`timed`]).
+pub const SLOW: Duration = Duration::from_secs(1);
+
 pub struct TtlCache<K, V> {
     ttl: Duration,
     entries: Mutex<HashMap<K, (Instant, V)>>,
@@ -553,7 +655,12 @@ impl Villages {
     pub async fn snapshot(&self, transport: &ServerTransport, swarms: &[SwarmSnapshot]) -> VillageResponse {
         let mut readings = Vec::new();
         for source in self.sources.iter() {
+            // A source that keeps a request waiting is a bug (#534): say which.
+            let start = Instant::now();
             readings.extend(source.read(transport, swarms).await);
+            if start.elapsed() > SLOW {
+                tracing::warn!("village: source {} kept the request waiting {:.1}s", source.name(), start.elapsed().as_secs_f64());
+            }
         }
         let built: Vec<_> = self
             .worlds
@@ -577,6 +684,61 @@ impl Villages {
 
 #[cfg(test)]
 mod tests {
+
+    /// #534: a value past its TTL is served as it was while it is read
+    /// again in the background, and only one read runs at a time.
+    #[tokio::test]
+    async fn a_stale_value_is_served_while_it_is_read_again() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let reads = Arc::new(AtomicUsize::new(0));
+        let cache: Background<u32, u32> = Background::new(Duration::from_millis(20), Duration::from_secs(5));
+        assert_eq!(cache.get(1, |_| true, || async { 10 }).await, Some(10), "the first read is waited for");
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        let slow = |v: u32| {
+            let reads = reads.clone();
+            move || async move {
+                reads.fetch_add(1, Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                v
+            }
+        };
+        let start = Instant::now();
+        assert_eq!(cache.get(1, |_| true, slow(20)).await, Some(10), "stale, not waited for");
+        assert_eq!(cache.get(1, |_| true, slow(30)).await, Some(10));
+        assert!(start.elapsed() < Duration::from_millis(200), "no request waited on the read");
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert_eq!(reads.load(Ordering::SeqCst), 1, "one read at a time");
+        assert_eq!(cache.peek(&1), Some(20));
+        // A value its caller no longer trusts is read again before the TTL.
+        let fresh: Background<u32, u32> = Background::new(Duration::from_secs(3600), Duration::from_secs(5));
+        assert_eq!(fresh.get(1, |_| true, || async { 1 }).await, Some(1));
+        assert_eq!(fresh.get(1, |_| true, || async { 2 }).await, Some(1), "trusted and fresh");
+        assert_eq!(fresh.get(1, |v| *v != 1, || async { 3 }).await, Some(1), "served while read again");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(fresh.peek(&1), Some(3));
+    }
+
+    /// #534: a first read slower than the cold wait isn't waited for past
+    /// it, later calls don't wait at all, and a read that panics is retried.
+    #[tokio::test]
+    async fn a_slow_first_read_waits_only_the_cold_wait() {
+        let cache: Background<u32, u32> = Background::new(Duration::from_secs(3600), Duration::from_millis(50));
+        let start = Instant::now();
+        let slow = || async {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            1
+        };
+        assert_eq!(cache.get(1, |_| true, slow).await, None);
+        assert!(start.elapsed() < Duration::from_secs(1));
+        let again = Instant::now();
+        assert_eq!(cache.get(1, |_| true, slow).await, None);
+        assert!(again.elapsed() < Duration::from_millis(40), "only the call that started the read waits");
+
+        assert_eq!(cache.get(2, |_| true, || async { panic!("gh crashed") }).await, None);
+        assert_eq!(cache.get(2, |_| true, || async { 7 }).await, Some(7), "not stuck after a panic");
+        cache.forget(&2);
+        assert_eq!(cache.peek(&2), None);
+    }
 
     #[tokio::test]
     async fn a_forgotten_entry_is_fetched_again() {

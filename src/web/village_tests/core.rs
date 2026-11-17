@@ -203,3 +203,12 @@ fn village_html_orders_and_moves_keyboard_targets() {
     let saver = village_asset("screensaver.js").unwrap().1;
     assert!(saver.contains("window.addEventListener(type, onInput, { passive: true, capture: true })"));
 }
+
+/// #534: until a village's first read of GitHub ends, the status line says
+/// so, rather than the backlog and build looking empty.
+#[test]
+fn the_status_line_says_while_github_is_still_read() {
+    let data = VILLAGE_ASSETS.iter().find(|(p, _, _)| *p == "data.js").map(|(_, _, b)| *b).expect("data.js");
+    let poll = js_fn(data, "poll");
+    assert!(poll.contains("shown.reading") && poll.contains("reading GitHub"), "poll() shows `reading`");
+}

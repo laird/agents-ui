@@ -365,18 +365,27 @@ impl CiCache {
     }
 }
 
+/// The commit `origin/<integration>` names in the local clone, or "".
+pub async fn tip(transport: &ServerTransport, repo: &Path, integration: &str) -> String {
+    if integration.is_empty() {
+        return String::new();
+    }
+    let rev = ["rev-parse".to_string(), format!("origin/{integration}")];
+    match transport.output("git", &rev, Some(repo)).await {
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_string(),
+        _ => String::new(),
+    }
+}
+
 /// The build of a local swarm's integration branch: CI, then the sentinel,
-/// then the merge gate. `gate` is what the merge gate's files already said.
-pub async fn read(cache: &CiCache, transport: &ServerTransport, repo: &Path, integration: &str, gate: &super::gate::GateReading) -> Build {
+/// then the merge gate. `tip` is the branch's commit ([`tip`]), `ci` what
+/// GitHub said about it (read in the background, #534: None until it has),
+/// and `gate` what the merge gate's files already said.
+pub async fn read(ci: Option<Build>, transport: &ServerTransport, repo: &Path, integration: &str, tip: &str, gate: &super::gate::GateReading) -> Build {
     if integration.is_empty() {
         return Build::default();
     }
-    let rev = ["rev-parse".to_string(), format!("origin/{integration}")];
-    let tip = match transport.output("git", &rev, Some(repo)).await {
-        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_string(),
-        _ => String::new(),
-    };
-    let ci = if tip.is_empty() { None } else { cache.get(transport, repo, integration, &tip).await };
+    let tip = tip.to_string();
     let sentinel = if transport.server().is_none() {
         let repo = repo.to_path_buf();
         let (integration, tip) = (integration.to_string(), tip.clone());

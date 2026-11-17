@@ -151,7 +151,9 @@ async function poll() {
     const shown = valleyWanted() ? null : villages.find(v => v.project === (world ? world.dev : pick.value));
     const build = shown ? buildWords(shown.build) : '';
     const status = document.getElementById('status');
-    status.textContent = 'Live · updated ' + new Date().toLocaleTimeString() + (build ? ' · ' + build : '');
+    // Its first read of GitHub is still running (#534): the backlog and build are to come.
+    const reading = shown && shown.reading ? ' · reading GitHub…' : '';
+    status.textContent = 'Live · updated ' + new Date().toLocaleTimeString() + (build ? ' · ' + build : '') + reading;
     status.classList.toggle('red', !!(shown && shown.build && shown.build.state === 'red'));
     polled(true);
   } catch (e) {
