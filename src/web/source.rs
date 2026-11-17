@@ -294,10 +294,12 @@ where
                     // A read that panics is retried next time, not stuck "in flight".
                     let read = std::panic::AssertUnwindSafe(work).catch_unwind().await;
                     let mut m = entries.lock().unwrap_or_else(|e| e.into_inner());
-                    let slot = m.entry(key).or_default();
+                    // Dropped meanwhile (`drop_where`): nothing to write back.
                     // Forgotten meanwhile: what it read is from before, and a
                     // newer read may already be running.
-                    if slot.generation == generation {
+                    if let Some(slot) = m.get_mut(&key)
+                        && slot.generation == generation
+                    {
                         if let Ok(v) = read {
                             slot.value = Some((Instant::now(), v));
                             slot.stale = false;

@@ -1205,9 +1205,10 @@ struct Remote {
     github: Option<super::github::Summary>,
 }
 
-/// How long a request waits for a repo's first network read before the
-/// village is served without it (#534): the deploy check and the page's
-/// first poll aren't kept waiting on GitHub.
+/// How long a request waits for a network read nothing can stand in for (a
+/// repo's first, the first after a user's action, CI for a tip that just
+/// moved) before the village is served without it (#534): the deploy check
+/// and the page's polls aren't kept waiting on GitHub.
 pub(crate) const COLD_WAIT: Duration = Duration::from_secs(1);
 
 /// How often CI is asked again about the same tip: `CiCache` answers a
