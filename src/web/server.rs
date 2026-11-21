@@ -320,7 +320,7 @@ async fn api_key_handler(
 
     let pane = lookup_pane(&state, &project, &role)?;
 
-    super::pane::send_key(&crate::transport::ServerTransport::new(None), &pane, &tmux_key)
+    super::pane::send_key(&state.transport, &pane, &tmux_key)
         .await
         .map_err(|e| {
             tracing::warn!("send-keys failed for {}: {e:#}", pane.target);
@@ -2466,6 +2466,18 @@ mod tests {
     #[test]
     fn resolve_batch_rejects_empty_text() {
         assert!(super::resolve_batch(&[InputItem::Text { text: String::new() }]).is_none());
+    }
+
+    /// #548: a single key goes to the host the pane lives on (`--server`),
+    /// like `/keys` and `/answer`, not to the machine running agents-tui.
+    #[test]
+    fn key_endpoint_sends_through_the_configured_transport() {
+        let src = include_str!("server.rs");
+        let start = src.find("async fn api_key_handler(").expect("api_key_handler");
+        let end = start + src[start..].find("\n}\n").expect("end of api_key_handler");
+        let body = &src[start..end];
+        assert!(body.contains("send_key(&state.transport,"), "/key must use state.transport:\n{body}");
+        assert!(!body.contains("ServerTransport::new("), "/key must not build its own transport:\n{body}");
     }
 
     #[tokio::test]
