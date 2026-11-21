@@ -1320,8 +1320,8 @@ impl SwarmVillages {
             let remembered = memory.entry(swarm.repo_path.clone()).or_default();
             super::gate::bounces(&gate, &merge_comments, &retries, remembered, std::time::SystemTime::now())
         };
-        // Flaky tests (#501): each finished gate run is recorded as it is seen,
-        // since the logs are overwritten when a merge is relaunched.
+        // Flaky tests: the gate's sightings in merge-events.jsonl (#538), or,
+        // from an autocoder too old to record them, the gate's logs (#501).
         let flaky = if gate.local {
             // Only this week's jobs: older runs would be dropped anyway.
             let week = std::time::SystemTime::now() - std::time::Duration::from_secs(super::flaky::WINDOW_SECS as u64);
@@ -1419,7 +1419,7 @@ mod tests {
             test: "web::a".into(),
             count: 2,
             last_seen: "2026-11-15T10:00:00+00:00".into(),
-            runs: vec![FlakyRun { issue: 9, when: "2026-11-15T10:00:00+00:00".into(), log: "/tmp/x.log".into() }],
+            runs: vec![FlakyRun { issue: 9, when: "2026-11-15T10:00:00+00:00".into(), log: "/tmp/x.log".into(), ..Default::default() }],
             issue: Some(341),
         }];
         let j = serde_json::to_value(&v).unwrap();

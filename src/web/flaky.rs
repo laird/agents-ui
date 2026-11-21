@@ -1,17 +1,25 @@
-//! Flaky tests, from the merge gate's runs (#501, part of #486).
+//! Flaky tests, as the merge gate records them (#538, laird/agents#191).
 //!
-//! Each merge job's log (`gate.rs`) holds one or more gate runs, each starting
-//! "🧪 Gating the integrated tree <sha>" and holding the suite's output. A
-//! test that fails in one run and is followed by a run of the **same tree**
-//! that passes has failed with nothing changed in between: that is a flaky
-//! sighting. A pass on a different tree proves nothing, since the code changed.
+//! When the gate runs a tree it has seen fail and a test that failed then now
+//! passes, autocoder appends a `flaky` line to `merge-events.jsonl`
+//! (`merge_events.rs` finds the file): `{ts, repo, issue, tree, test,
+//! first_failure_excerpt}`. The village shows those sightings for this repo's
+//! id from the last week ([`from_events`]). The file is shared by every repo
+//! the user merges in, and by laird/agents' own test suite (laird/agents#282),
+//! so only this repo's lines count. Once that file is in use, the village's own
+//! history (`~/.agents-ui/flaky-<repo id>.json`, below) is deleted.
 //!
-//! Logs live in `/tmp` and are overwritten when an issue's merge is
-//! relaunched, which is when the same tree is usually gated again, so every
-//! finished run is recorded as it is seen, in `~/.agents-ui/flaky-<repo id>.json`.
-//! Runs older than a week are dropped, so a test clean for 7 days drops out.
-//! Recording is idempotent: a run is keyed by its issue, its job's start time
-//! and its place in the log, which also order the runs.
+//! **Fallback** (#501), for an autocoder too old to write the events file, or
+//! a repo with no merge recorded in it yet: every autocoder that writes the
+//! file writes the sightings too, so the file's absence is the test. The
+//! village then works them out itself from each merge job's log (`gate.rs`),
+//! which holds one or more gate runs, each starting "🧪 Gating the integrated
+//! tree <sha>". A test that fails in one run and is followed by a passing run
+//! of the **same tree** is a sighting. Those logs are overwritten when a merge
+//! is relaunched, so each finished run is recorded as it is seen, in
+//! `~/.agents-ui/flaky-<repo id>.json`, for a week. Recording is idempotent: a
+//! run is keyed by its issue, its job's start time and its place in the log,
+//! which also order the runs.
 //!
 //! `/api/village` carries the result as `flaky`, newest first, each with the
 //! open `Flaky: <test>` issue when there is one (looked up in the open issues
@@ -72,12 +80,18 @@ pub struct Flaky {
     pub issue: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct FlakyRun {
     /// The issue whose merge was being gated.
     pub issue: u32,
     pub when: String,
+    /// The gate's log, when the village found the failure there (the
+    /// fallback); empty for a sighting the gate recorded.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub log: String,
+    /// The start of the failure, as the gate recorded it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub excerpt: String,
 }
 
 /// The finished runs in one log: (place in the log, tree sha, outcome). A run
@@ -164,20 +178,111 @@ pub fn flaky(runs: &[Run], open: &[IssueSnapshot]) -> Vec<Flaky> {
             }
         }
     }
-    let when = |s: i64| chrono::DateTime::from_timestamp(s, 0).map(|d| d.to_rfc3339()).unwrap_or_default();
+    let by_test = by_test
+        .into_iter()
+        .map(|(test, fails)| {
+            let fails = fails.iter().map(|r| (r.when, FlakyRun { issue: r.issue, when: rfc3339(r.when), log: r.log.clone(), ..Default::default() })).collect();
+            (test, fails)
+        })
+        .collect();
+    assemble(by_test, open)
+}
+
+fn rfc3339(s: i64) -> String {
+    chrono::DateTime::from_timestamp(s, 0).map(|d| d.to_rfc3339()).unwrap_or_default()
+}
+
+/// Each test's failures (when, in Unix seconds, and what to show) as the
+/// village's `flaky`: the test seen most recently first, each test's
+/// failures newest first, with its open `Flaky: <test>` issue from `open`.
+fn assemble(by_test: std::collections::BTreeMap<String, Vec<(i64, FlakyRun)>>, open: &[IssueSnapshot]) -> Vec<Flaky> {
     let mut out: Vec<(i64, Flaky)> = by_test
         .into_iter()
+        .filter(|(_, fails)| !fails.is_empty())
         .map(|(test, mut fails)| {
-            fails.sort_by_key(|r| std::cmp::Reverse(r.when));
-            let newest = fails[0].when;
+            fails.sort_by_key(|(when, _)| std::cmp::Reverse(*when));
+            let newest = fails[0].0;
             let title = issue_title(&test);
             let issue = open.iter().find(|i| i.state == "open" && i.title.trim() == title).map(|i| i.number);
-            let runs = fails.iter().map(|r| FlakyRun { issue: r.issue, when: when(r.when), log: r.log.clone() }).collect();
-            (newest, Flaky { test, count: fails.len() as u32, last_seen: when(newest), runs, issue })
+            let count = fails.len() as u32;
+            let runs = fails.into_iter().map(|(_, r)| r).collect();
+            (newest, Flaky { test, count, last_seen: rfc3339(newest), runs, issue })
         })
         .collect();
     out.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.test.cmp(&b.1.test)));
     out.into_iter().map(|(_, f)| f).collect()
+}
+
+// ---- The gate's own sightings (#538, laird/agents#191) -------------------
+
+/// What a sighting whose earlier failure named no test is shown as: the
+/// gate as a whole failed, then passed (`flaky-report.sh` says the same).
+pub const WHOLE_GATE: &str = "(whole gate)";
+
+/// The longest failure excerpt kept: the start of a failure is what tells.
+const EXCERPT_MAX: usize = 1500;
+
+/// One line of `merge-events.jsonl`, the fields a sighting has.
+#[derive(Debug, Default, Deserialize)]
+struct Line {
+    #[serde(default)]
+    ts: String,
+    #[serde(default)]
+    event: String,
+    #[serde(default)]
+    repo: String,
+    #[serde(default)]
+    issue: Option<u32>,
+    #[serde(default)]
+    test: Option<String>,
+    #[serde(default)]
+    first_failure_excerpt: Option<String>,
+}
+
+/// The flaky tests the gate recorded for `repo_id` in the week before `now`,
+/// from the text of `merge-events.jsonl`. `None` when no line is this repo's:
+/// an autocoder too old to record them, or no merge here yet, so the caller
+/// falls back to reading the gate's logs. A repo id is matched whole.
+pub fn from_events(text: &str, repo_id: &str, now: i64, open: &[IssueSnapshot]) -> Option<Vec<Flaky>> {
+    let mut ours = false;
+    let mut by_test: std::collections::BTreeMap<String, Vec<(i64, FlakyRun)>> = Default::default();
+    for line in text.lines().filter(|l| l.contains(repo_id)) {
+        let Ok(e) = serde_json::from_str::<Line>(line) else { continue };
+        if e.repo != repo_id {
+            continue;
+        }
+        ours = true;
+        if e.event != "flaky" {
+            continue;
+        }
+        let Some(when) = chrono::DateTime::parse_from_rfc3339(&e.ts).ok().map(|d| d.timestamp()) else { continue };
+        if now - when >= WINDOW_SECS || when > now + 300 {
+            continue;
+        }
+        let test = e.test.map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).unwrap_or_else(|| WHOLE_GATE.to_string());
+        let mut excerpt: String = e.first_failure_excerpt.unwrap_or_default().trim_end().to_string();
+        if excerpt.len() > EXCERPT_MAX {
+            let mut cut = EXCERPT_MAX;
+            while !excerpt.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            excerpt.truncate(cut);
+            excerpt.push('…');
+        }
+        let run = FlakyRun { issue: e.issue.unwrap_or(0), when: rfc3339(when), excerpt, ..Default::default() };
+        by_test.entry(test).or_default().push((when, run));
+    }
+    ours.then(|| assemble(by_test, open))
+}
+
+/// [`from_events`] on the file autocoder writes on this host. `None` without
+/// the file, or without a line for this repo in it.
+pub fn from_events_file(file: Option<&Path>, repo_id: &str, now: i64, open: &[IssueSnapshot]) -> Option<Vec<Flaky>> {
+    from_events(&std::fs::read_to_string(file?).ok()?, repo_id, now, open)
+}
+
+fn events_file() -> Option<PathBuf> {
+    super::merge_events::path(&|k| std::env::var(k).ok())
 }
 
 /// Where a repo's runs are kept: `~/.agents-ui/flaky-<repo id>.json`.
@@ -211,12 +316,25 @@ pub fn save(path: &Path, runs: &[Run]) {
 /// Record what `jobs` show for `repo`, and say which tests are flaky. Local
 /// only, like the gate's files; a repo with no id has none.
 pub fn read_local(repo: &Path, jobs: &[Job], open: &[IssueSnapshot]) -> Vec<Flaky> {
+    let Some(id) = super::gate::local_repo_id(repo) else { return Vec::new() };
+    read_for(&id, events_file().as_deref(), jobs, open, chrono::Utc::now().timestamp())
+}
+
+/// The gate's sightings for `id` when `events` has any line of this repo's
+/// (deleting the village's own history, now unused), else the fallback.
+fn read_for(id: &str, events: Option<&Path>, jobs: &[Job], open: &[IssueSnapshot], now: i64) -> Vec<Flaky> {
     // One at a time: every browser's poll lands here, and two that load, add
     // and save together would each drop what the other added.
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _held = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let Some(id) = super::gate::local_repo_id(repo) else { return Vec::new() };
-    let path = store_path(&id);
+    let path = store_path(id);
+    if let Some(found) = from_events_file(events, id, now, open) {
+        if path.exists() {
+            let _ = std::fs::remove_file(&path);
+        }
+        return found;
+    }
+    let id = id.to_string();
     let mut runs = load(&path);
     let before = runs.clone();
     let tmp = std::env::var("AUTOCODER_TMP").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/tmp".to_string());
@@ -233,7 +351,7 @@ pub fn read_local(repo: &Path, jobs: &[Job], open: &[IssueSnapshot]) -> Vec<Flak
             read.insert((id.clone(), j.issue, j.started), size) != Some(size)
         })
         .collect();
-    record(&mut runs, changed, &log_path, chrono::Utc::now().timestamp());
+    record(&mut runs, changed, &log_path, now);
     if runs != before {
         save(&path, &runs);
     }
@@ -253,10 +371,22 @@ fn failure_head(r: &FlakyRun) -> String {
     format!("- {} — while gating #{}'s merge", r.when, r.issue)
 }
 
-/// Failures one line each: when, whose merge was gated, the log.
+/// Failures one line each: when, whose merge was gated, then the log the
+/// village found it in, or the start of the failure as the gate recorded it.
 fn failure_lines<'a>(runs: impl IntoIterator<Item = &'a FlakyRun>) -> String {
     runs.into_iter()
-        .map(|r| format!("{}; log: `{}`", failure_head(r), r.log))
+        .map(|r| {
+            let mut line = failure_head(r);
+            if !r.log.is_empty() {
+                line.push_str(&format!("; log: `{}`", r.log));
+            }
+            if !r.excerpt.is_empty() {
+                // Indented under its item; a fence the excerpt can't close.
+                let body: String = r.excerpt.lines().map(|l| format!("  {}\n", l.replace("~~~~", "~ ~ ~ ~"))).collect();
+                line.push_str(&format!("\n\n  ~~~~\n{body}  ~~~~\n"));
+            }
+            line
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -278,11 +408,16 @@ pub fn report_body(f: &Flaky) -> String {
     format!(
         "`{test}` failed and then passed on the same tree {n} this week, so the failure was not caused by the change being gated.\n\n\
          Failures (newest first):\n{lines}\n\n\
-         The logs are the merge gate's (`/tmp/autocoder-merge-*.log`) and are overwritten when a merge is relaunched.\n\n\
+         {source}\n\n\
          🤖 Filed from the village's ghost at the merge gate",
         test = f.test,
         n = times(f.count),
         lines = failure_lines(&f.runs),
+        source = if f.runs.iter().any(|r| !r.log.is_empty()) {
+            "The logs are the merge gate's (`/tmp/autocoder-merge-*.log`) and are overwritten when a merge is relaunched."
+        } else {
+            "The merge gate recorded these sightings (`merge-events.jsonl`; `flaky-report.sh` lists them)."
+        },
     )
 }
 
@@ -346,11 +481,14 @@ pub async fn api_file_handler(
     let found = {
         let test = test.clone();
         tokio::task::spawn_blocking(move || {
-            // Only this week's runs: the store is pruned when a village is
-            // polled, which may not have happened since a run aged out.
-            let week = chrono::Utc::now().timestamp() - WINDOW_SECS;
-            let runs: Vec<Run> = load(&store_path(&id)).into_iter().filter(|r| r.when >= week).collect();
-            flaky(&runs, &[]).into_iter().find(|f| f.test == test)
+            let now = chrono::Utc::now().timestamp();
+            let found = from_events_file(events_file().as_deref(), &id, now, &[]).unwrap_or_else(|| {
+                // Only this week's runs: the store is pruned when a village is
+                // polled, which may not have happened since a run aged out.
+                let runs: Vec<Run> = load(&store_path(&id)).into_iter().filter(|r| r.when >= now - WINDOW_SECS).collect();
+                flaky(&runs, &[])
+            });
+            found.into_iter().find(|f| f.test == test)
         })
         .await
         .map_err(|_| fail(StatusCode::INTERNAL_SERVER_ERROR, "could not read the gate's record"))?
@@ -405,8 +543,8 @@ mod tests {
             count: 2,
             last_seen: "2026-11-15T10:00:00Z".into(),
             runs: vec![
-                FlakyRun { issue: 480, when: "2026-11-15T10:00:00Z".into(), log: "/tmp/autocoder-merge-x-480.log".into() },
-                FlakyRun { issue: 470, when: "2026-11-14T09:00:00Z".into(), log: "/tmp/autocoder-merge-x-470.log".into() },
+                FlakyRun { issue: 480, when: "2026-11-15T10:00:00Z".into(), log: "/tmp/autocoder-merge-x-480.log".into(), ..Default::default() },
+                FlakyRun { issue: 470, when: "2026-11-14T09:00:00Z".into(), log: "/tmp/autocoder-merge-x-470.log".into(), ..Default::default() },
             ],
             issue: None,
         }
@@ -589,5 +727,102 @@ mod tests {
         assert_eq!(f[1].issue, None);
         let j = serde_json::to_value(&f[1]).unwrap();
         assert!(j.get("issue").is_none());
+    }
+
+    // ---- The gate's own sightings (#538) ----
+
+    const REPO: &str = "agents-ui-33dc9185";
+    fn ts(secs: i64) -> String {
+        chrono::DateTime::from_timestamp(NOW + secs, 0).unwrap().format("%Y-%m-%dT%H:%M:%SZ").to_string()
+    }
+    /// Lines as autocoder 4.44 writes them, with another repo's, the test
+    /// suite's and a repo whose id merely starts the same.
+    fn events() -> String {
+        [
+            format!(r#"{{"ts":"{}","event":"attempt","outcome":"gate-failed","repo":"{REPO}","issue":9,"branch":"feature/issue-9","attempt":1,"escalated":false,"files":[],"gate_tests_failed":["web::a"]}}"#, ts(-50)),
+            format!(r#"{{"ts":"{}","event":"flaky","outcome":"flaky","repo":"{REPO}","issue":9,"branch":"feature/issue-9","tree":"aaaa","test":"web::a","first_failure_excerpt":"thread 'web::a' panicked\nleft: 1"}}"#, ts(-40)),
+            format!(r#"{{"ts":"{}","event":"flaky","outcome":"flaky","repo":"{REPO}","issue":12,"branch":"feature/issue-12","tree":"bbbb","test":"web::a","first_failure_excerpt":null}}"#, ts(-10)),
+            format!(r#"{{"ts":"{}","event":"flaky","outcome":"flaky","repo":"{REPO}","issue":13,"branch":"feature/issue-13","tree":"cccc","test":null,"first_failure_excerpt":"FAIL"}}"#, ts(-20)),
+            format!(r#"{{"ts":"{}","event":"flaky","outcome":"flaky","repo":"{REPO}","issue":3,"branch":"feature/issue-3","tree":"dddd","test":"web::old","first_failure_excerpt":""}}"#, ts(-WINDOW_SECS - 1)),
+            format!(r#"{{"ts":"{}","event":"flaky","outcome":"flaky","repo":"agents-5ea0ca80","issue":9,"tree":"eeee","test":"test_x.sh"}}"#, ts(-5)),
+            format!(r#"{{"ts":"{}","event":"flaky","outcome":"flaky","repo":"{REPO}0","issue":9,"tree":"ffff","test":"web::other"}}"#, ts(-5)),
+            "not json".to_string(),
+        ]
+        .join("\n")
+    }
+
+    #[test]
+    fn the_gates_sightings_for_this_repo_are_the_flaky_tests() {
+        let f = from_events(&events(), REPO, NOW, &[open(341, "Flaky: web::a")]).expect("this repo is in the file");
+        assert_eq!(f.iter().map(|f| f.test.as_str()).collect::<Vec<_>>(), vec!["web::a", WHOLE_GATE], "newest first; other repos and last week's dropped");
+        assert_eq!(f[0].count, 2);
+        assert_eq!(f[0].issue, Some(341));
+        assert_eq!(f[0].last_seen, rfc3339(NOW - 10));
+        assert_eq!(f[0].runs.iter().map(|r| r.issue).collect::<Vec<_>>(), vec![12, 9]);
+        assert_eq!(f[0].runs[1].excerpt, "thread 'web::a' panicked\nleft: 1");
+        assert!(f[0].runs.iter().all(|r| r.log.is_empty()), "no log: the gate recorded it");
+        assert_eq!(f[1].issue, None);
+    }
+
+    #[test]
+    fn no_line_for_this_repo_means_fall_back() {
+        assert_eq!(from_events(&events(), "elsewhere-00000000", NOW, &[]), None);
+        assert_eq!(from_events(&events(), "agents-ui-33dc918", NOW, &[]), None, "a repo id is matched whole");
+        assert_eq!(from_events("", REPO, NOW, &[]), None);
+        // This repo merges, but nothing flaked: no flaky tests, and no fallback.
+        let quiet = events().lines().take(1).collect::<String>();
+        assert_eq!(from_events(&quiet, REPO, NOW, &[]), Some(Vec::new()));
+        assert_eq!(from_events_file(None, REPO, NOW, &[]), None);
+        assert_eq!(from_events_file(Some(Path::new("/nonexistent/agents-ui/merge-events.jsonl")), REPO, NOW, &[]), None);
+    }
+
+    #[test]
+    fn a_long_excerpt_is_cut_on_a_character() {
+        let long = "é".repeat(EXCERPT_MAX);
+        let line = format!(r#"{{"ts":"{}","event":"flaky","repo":"{REPO}","issue":1,"test":"t","first_failure_excerpt":"{long}"}}"#, ts(-1));
+        let f = from_events(&line, REPO, NOW, &[]).unwrap();
+        let ex = &f[0].runs[0].excerpt;
+        assert!(ex.len() <= EXCERPT_MAX + '…'.len_utf8() && ex.ends_with('…'), "{}", ex.len());
+    }
+
+    #[test]
+    fn a_sighting_files_with_its_excerpt_not_a_log() {
+        let f = from_events(&events(), REPO, NOW, &[]).unwrap().remove(0);
+        let body = report_body(&f);
+        assert!(body.contains(&format!("- {} — while gating #9's merge\n\n  ~~~~\n  thread 'web::a' panicked\n  left: 1\n  ~~~~", rfc3339(NOW - 40))), "{body}");
+        assert!(!body.contains("log: `"), "{body}");
+        assert!(body.contains("merge-events.jsonl") && !body.contains("/tmp/autocoder-merge"), "{body}");
+        // Filed once, nothing more to add.
+        let filed = serde_json::to_vec(&serde_json::json!({ "body": body, "comments": [] })).unwrap();
+        assert!(unreported(&f, &filed).is_empty());
+    }
+
+    /// The events file in use: its sightings, and the old history deleted.
+    /// Without it: the logs, kept in the history as before.
+    #[test]
+    fn the_events_file_replaces_the_local_history_and_its_absence_keeps_it() {
+        let id = format!("flaky-read-{}", std::process::id());
+        let dir = std::env::temp_dir().join(format!("agents-ui-flaky-events-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("merge-events.jsonl");
+        let jobs = [job(9, 100, FAIL_A, true), job(10, 150, PASS_A, true)];
+
+        // No file: the fallback reads the logs and keeps them.
+        let old = read_for(&id, Some(&file), &jobs, &[], NOW + 200);
+        assert_eq!(old.len(), 1);
+        assert!(old[0].runs[0].log.ends_with(&format!("/autocoder-merge-{id}-9.log")), "{}", old[0].runs[0].log);
+        assert!(store_path(&id).exists(), "the fallback keeps its history");
+
+        // A file with no line of this repo's: still the fallback.
+        std::fs::write(&file, events()).unwrap();
+        assert_eq!(read_for(&id, Some(&file), &jobs, &[], NOW + 200).len(), 1);
+        assert!(store_path(&id).exists());
+
+        // The gate records this repo: its sightings, and the history is gone.
+        std::fs::write(&file, events().replace(REPO, &id)).unwrap();
+        let new = read_for(&id, Some(&file), &jobs, &[], NOW);
+        assert_eq!(new.iter().map(|f| f.test.as_str()).collect::<Vec<_>>(), vec!["web::a", WHOLE_GATE]);
+        assert!(!store_path(&id).exists(), "the local history is deleted once unused");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
