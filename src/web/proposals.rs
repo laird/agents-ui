@@ -12,9 +12,9 @@
 //! Each goes through autocoder's `autocoder-ctl approve | reject |
 //! request-changes` (#541, `autocoder_ctl.rs`), so it works with any issue
 //! backend autocoder is set up for; autocoder writes the comment, naming who
-//! decided. `approve` there takes no comment, so an approval with one is
-//! refused (422; the board never sends one). An autocoder without the verbs
-//! gets the `gh` commands of `decision_commands` instead.
+//! decided. `approve` there takes no comment, so an approval with one (the
+//! board never sends one) and an autocoder without the verbs get the `gh`
+//! commands of `decision_commands` instead.
 //!
 //! Only an open issue labelled `proposal` can be decided here: anything else
 //! is a 409, so the endpoint can't close or relabel an arbitrary issue. A
@@ -133,10 +133,9 @@ pub async fn api_decision_handler(
         return Err(fail(StatusCode::CONFLICT, "that issue is no longer an open proposal"));
     }
 
+    // An approval with a comment has no autocoder-ctl verb: gh below.
     let ctl = autocoder_ctl::find();
-    let args = ctl_args(number, body.action, body.comment.as_deref());
-    if ctl.is_some() {
-        let args = args.map_err(|why| fail(StatusCode::UNPROCESSABLE_ENTITY, why))?;
+    if let (Some(_), Ok(args)) = (&ctl, ctl_args(number, body.action, body.comment.as_deref())) {
         match autocoder_ctl::run(&state.transport, &repo, ctl.as_deref(), &args).await {
             CtlOutcome::Done { .. } => {
                 state.village.forget(&repo);
