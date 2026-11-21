@@ -269,7 +269,8 @@ pub fn assess(reading: &GateReading, issues: &[IssueSnapshot], now: SystemTime) 
         // except that only its log tells a red base.
         let from_event = match job {
             Some(j) if j.alive || (j.exit.is_some() && red_base(&j.log)) => None,
-            _ => latest.get(&i.number).and_then(|e| merge_events::event_gate(e, &i.labels, url)),
+            // An event from before these files is an earlier attempt's: the files are newer news.
+            _ => latest.get(&i.number).filter(|e| job.is_none_or(|j| ended_after(e, j))).and_then(|e| merge_events::event_gate(e, &i.labels, url)),
         };
         if let Some(g) = from_event.or_else(|| job_gate(job, &i.labels, url, now)) {
             gates.insert(i.number, g);
@@ -476,11 +477,35 @@ pub fn bounces(
     comments: &[(u32, String, String)],
     retries_log: &str,
     remembered: &mut HashMap<u32, Vec<String>>,
+    now: SystemTime,
 ) -> std::collections::BTreeMap<u32, Vec<Bounce>> {
     remember_conflicts(&reading.jobs, remembered);
-    match &reading.events {
-        Some(events) => merge_events::bounces(events),
-        None => bounce_history(comments, retries_log, &reading.jobs, remembered),
+    let Some(events) = &reading.events else {
+        return bounce_history(comments, retries_log, &reading.jobs, remembered);
+    };
+    // The same two days the comments and the push-retry commits are read for.
+    let mut out = merge_events::bounces(events, &rfc3339(now - std::time::Duration::from_secs(BOUNCE_WINDOW_SECS)));
+    // A refusal on a red base is the integration branch's fault, not a bounce
+    // (as `job_bounce` has it). Only a job's log says so; the events don't.
+    for job in reading.jobs.iter().filter(|j| !j.alive && j.exit.is_some_and(|c| c != 0) && red_base(&j.log)) {
+        let started = job.started.map(rfc3339);
+        if let Some(bs) = out.get_mut(&job.issue) {
+            bs.retain(|b| b.kind != BounceKind::GateFailed || started.as_ref().zip(b.at.as_ref()).is_some_and(|(s, a)| a < s));
+        }
+    }
+    out.retain(|_, bs| !bs.is_empty());
+    out
+}
+
+/// How far back the bounces go: two days, as `read_push_retries` reads.
+const BOUNCE_WINDOW_SECS: u64 = 2 * 24 * 3600;
+
+/// The event ended at or after the job's files were made: it is that job's.
+fn ended_after(e: &MergeEvent, job: &Job) -> bool {
+    let ended = chrono::DateTime::parse_from_rfc3339(&e.ts).ok().map(|t| SystemTime::from(t.with_timezone(&chrono::Utc)));
+    match (ended, job.started) {
+        (Some(end), Some(start)) => end >= start,
+        _ => true,
     }
 }
 
@@ -1043,6 +1068,7 @@ mod tests {
     #[test]
     fn bounces_and_tally_come_from_events_when_there_are_any() {
         let today = "2026-11-21";
+        let now = SystemTime::from(chrono::DateTime::parse_from_rfc3339("2026-11-21T12:00:00Z").unwrap());
         let comments = vec![(9, "2026-11-21T00:30:00Z".to_string(), C_CONFLICT.to_string())];
         let retries = "2026-11-21T00:40:00Z\tRe-sync origin/master into feature/issue-9 (push retry 1)\n";
         let jobs = vec![job(9, false, Some(1), TWO_FILES)];
@@ -1053,15 +1079,38 @@ mod tests {
         ];
         let with = GateReading { local: true, jobs: jobs.clone(), events: Some(events), ..GateReading::default() };
         let mut memory = HashMap::new();
-        let b = bounces(&with, &comments, retries, &mut memory);
+        let b = bounces(&with, &comments, retries, &mut memory, now);
         assert_eq!(b[&9].iter().map(|b| (b.kind, b.files.clone())).collect::<Vec<_>>(), [(BounceKind::Conflict, vec!["a.rs".to_string()]), (BounceKind::PushRetry, vec![])]);
         assert_eq!(merge_stats(&b, &with, today).landed_today, 1);
         // Without events: the comment (the job's own bounce, with its log's files) and the commit.
         let without = GateReading { local: true, jobs, ..GateReading::default() };
-        let b = bounces(&without, &comments, retries, &mut HashMap::new());
+        let b = bounces(&without, &comments, retries, &mut HashMap::new(), now);
         assert_eq!(b[&9].iter().map(|b| b.kind).collect::<Vec<_>>(), [BounceKind::Conflict, BounceKind::PushRetry]);
         assert_eq!(b[&9][0].files, ["src/web/server.rs", "src/web/village/main.js"]);
         assert_eq!(merge_stats(&b, &without, today).landed_today, 0);
+        // Two days on, the events' bounces are out of the window.
+        let later = now + std::time::Duration::from_secs(3 * 24 * 3600);
+        assert!(bounces(&with, &comments, retries, &mut HashMap::new(), later).is_empty());
+    }
+
+    #[test]
+    fn a_red_base_refusal_is_no_bounce_and_an_older_event_does_not_beat_newer_files() {
+        let now = at(T0 + 3600);
+        let mut red = job(14, false, Some(1), RED_REFUSED);
+        red.started = Some(at(T0));
+        let mut ev = event(14, &rfc3339(at(T0 + 60)), "attempt", "escalated", &[]);
+        ev.repo = "r-1".into();
+        let earlier = event(14, &rfc3339(at(T0 - 600)), "attempt", "gate-failed", &[]);
+        let reading = GateReading { local: true, jobs: vec![red], events: Some(vec![earlier, ev]), ..GateReading::default() };
+        let b = bounces(&reading, &[], "", &mut HashMap::new(), now);
+        assert_eq!(b[&14].len(), 1, "the earlier failed gate stays; the red-base refusal goes");
+        assert_eq!(b[&14][0].at, Some(rfc3339(at(T0 - 600))));
+        // A job that died without an exit code, relaunched after its last event: no guess.
+        let issue = IssueSnapshot { number: 14, state: "open".into(), labels: labels(&["merging"]), ..IssueSnapshot::default() };
+        let mut dead = job(14, false, None, GATING);
+        dead.started = Some(at(T0 + 120));
+        let reading = GateReading { local: true, jobs: vec![dead], events: Some(vec![event(14, &rfc3339(at(T0 + 60)), "attempt", "gate-failed", &[])]), ..GateReading::default() };
+        assert_eq!(assess(&reading, &[issue], now).0.get(&14), None);
     }
 
     #[test]

@@ -1318,7 +1318,7 @@ impl SwarmVillages {
         let bounces = {
             let mut memory = self.conflicts.lock().unwrap_or_else(|e| e.into_inner());
             let remembered = memory.entry(swarm.repo_path.clone()).or_default();
-            super::gate::bounces(&gate, &merge_comments, &retries, remembered)
+            super::gate::bounces(&gate, &merge_comments, &retries, remembered, std::time::SystemTime::now())
         };
         // Flaky tests (#501): each finished gate run is recorded as it is seen,
         // since the logs are overwritten when a merge is relaunched.

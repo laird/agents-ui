@@ -72,7 +72,7 @@ pub fn parse(text: &str, repo_id: &str) -> Vec<MergeEvent> {
         .filter_map(|l| serde_json::from_str::<MergeEvent>(l).ok())
         .filter(|e| e.repo == repo_id && e.issue.is_some() && (e.event == "attempt" || e.event == "push-retry"))
         .collect();
-    out.sort_by(|a, b| a.ts.cmp(&b.ts));
+    out.sort_by_cached_key(|e| utc(&e.ts));
     out
 }
 
@@ -140,12 +140,17 @@ fn utc(ts: &str) -> Option<String> {
         .map(|t| t.with_timezone(&chrono::Utc).to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
 }
 
-/// Each issue's bounces, oldest first: every attempt that handed the work back
-/// (a conflict, with its files, or a failed gate) and every rejected push.
-pub fn bounces(events: &[MergeEvent]) -> BTreeMap<u32, Vec<Bounce>> {
+/// Each issue's bounces since `since` (RFC 3339, UTC), oldest first: every
+/// attempt that handed the work back (a conflict, with its files, or a failed
+/// gate) and every rejected push. The window keeps it to recent history, as
+/// the comments and commits it replaces are read.
+pub fn bounces(events: &[MergeEvent], since: &str) -> BTreeMap<u32, Vec<Bounce>> {
     let mut out: BTreeMap<u32, Vec<Bounce>> = BTreeMap::new();
     for e in events {
         let Some(n) = e.issue else { continue };
+        if utc(&e.ts).is_none_or(|t| t.as_str() < since) {
+            continue;
+        }
         let kind = match (e.event.as_str(), e.outcome.as_str()) {
             ("push-retry", _) => BounceKind::PushRetry,
             ("attempt", "conflict" | "gate-failed" | "escalated" | "failed") if conflicted(e) => BounceKind::Conflict,
@@ -249,13 +254,15 @@ mod tests {
     #[test]
     fn bounces_and_todays_landings_come_from_the_attempts() {
         let ev = parse(LOG, REPO);
-        let b = bounces(&ev);
+        let b = bounces(&ev, "2026-11-20T00:00:00Z");
         let nine: Vec<_> = b[&9].iter().map(|b| (b.kind, b.at.clone().unwrap(), b.files.len())).collect();
         assert_eq!(nine, [(BounceKind::Conflict, "2026-11-21T01:00:00Z".to_string(), 2), (BounceKind::PushRetry, "2026-11-21T01:50:00Z".to_string(), 0)]);
         assert_eq!(b[&12].iter().map(|b| b.kind).collect::<Vec<_>>(), [BounceKind::GateFailed]);
         assert_eq!(b[&20][0].files, ["src/web/gate.rs"]);
         assert_eq!(b[&21][0].kind, BounceKind::GateFailed);
         assert!(!b.contains_key(&15), "a parked landing is no bounce");
+        let late = bounces(&ev, "2026-11-21T01:30:00Z");
+        assert_eq!(late[&9].iter().map(|b| b.kind).collect::<Vec<_>>(), [BounceKind::PushRetry], "the conflict is older than the window");
         assert_eq!(landed_today(&ev, "2026-11-21"), 1);
         assert_eq!(landed_today(&ev, "2026-11-20"), 1, "the parked train");
     }
