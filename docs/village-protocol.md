@@ -249,6 +249,7 @@ autocoder's manager and workers do not message each other. They coordinate throu
 | `refs/autocoder/tips/<integration>/<sha>-<issue>` | where a landed fix is on the canal |
 | `<integration>-green` | the sentinel's lock |
 | `env/<name>` from `.autocoder.json` `environments`, or the newest successful GitHub Deployment to `<name>` | one lock per environment, the last being the castle |
+| `autocoder-ctl.sh approve`, `reject`, `request-changes` and `file` (laird/agents#192, `docs/autocoder-ctl.md`), found with autocoder's other scripts and run in the swarm's repo | how the board decides a proposal and files a new issue, in whichever issue backend autocoder uses; autocoder's comment names who decided, as `$USER (village board)`. Without it, or when it answers exit 3 (an older autocoder), the village runs `gh` itself, as before (#483, #490). |
 | GitHub sub-issues, or `Sub-task of #N` in a body under a `decomposed` parent | a feature's banner and its subtasks |
 | a pane waiting on a prompt, herdr `blocked` | a house with an open door and an orange "!" |
 | Task-tool sub-agents, modernize specialists | villagers working for the house |

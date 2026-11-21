@@ -1,3 +1,4 @@
+pub mod autocoder_ctl;
 pub mod breakage;
 pub mod build;
 pub mod control_preview;

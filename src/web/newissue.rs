@@ -1,9 +1,11 @@
 //! Filing a new issue from the village (#490):
 //! `POST /api/swarms/{project}/issues` with `{ "title", "body", "labels" }`.
 //!
-//! It runs `ProjectManagementClient::create_issue` in the swarm's repo, as
-//! the TUI's new-issue dialog does, with each value its own argument (no
-//! shell). The server checks what it is given: a title of 1–256 characters,
+//! It runs autocoder's `autocoder-ctl file` in the swarm's repo (#541,
+//! `autocoder_ctl.rs`), so the issue lands in whichever backend autocoder is
+//! set up for; an autocoder without the verb gets
+//! `ProjectManagementClient::create_issue`, as the TUI's new-issue dialog
+//! does. Either way each value is its own argument (no shell). The server checks what it is given: a title of 1–256 characters,
 //! a body of at most 64 KB, and labels only from `ALLOWED_LABELS`, at most
 //! one type and one priority. No `proposal` label, so the issue goes straight
 //! into the queue. A `--read-only` server refuses it before it gets here
@@ -16,6 +18,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use super::autocoder_ctl::{self, CtlOutcome};
 use super::server::WebServerState;
 use crate::project_management::{ProjectCommand, ProjectManagementClient};
 
@@ -33,8 +36,34 @@ pub struct NewIssueBody {
     pub labels: Vec<String>,
 }
 
+/// What is filed: the title, the body and the labels, checked.
+pub struct Checked<'a> {
+    pub title: &'a str,
+    pub body: Option<&'a str>,
+    pub labels: Vec<String>,
+}
+
 /// The `create` command for `new`, or why it can't be filed.
 pub fn create_command(client: &ProjectManagementClient, new: &NewIssueBody) -> Result<ProjectCommand, &'static str> {
+    let c = check(new)?;
+    Ok(client.create_issue(c.title, Some(c.body.unwrap_or("")), &c.labels))
+}
+
+/// The `autocoder-ctl file` arguments for `new`, or why it can't be filed.
+pub fn ctl_args(new: &NewIssueBody) -> Result<Vec<String>, &'static str> {
+    let c = check(new)?;
+    let mut args = vec!["file".to_string(), "--title".into(), c.title.into()];
+    if let Some(b) = c.body {
+        args.extend(["--body".into(), b.into()]);
+    }
+    for l in c.labels {
+        args.extend(["--label".into(), l]);
+    }
+    Ok(args)
+}
+
+/// Checks a new issue against the rules in the header.
+pub fn check(new: &NewIssueBody) -> Result<Checked<'_>, &'static str> {
     let title = new.title.trim();
     if title.is_empty() {
         return Err("give it a title");
@@ -59,7 +88,7 @@ pub fn create_command(client: &ProjectManagementClient, new: &NewIssueBody) -> R
     if count(TYPES) > 1 || count(PRIORITIES) > 1 {
         return Err("pick one type and one priority");
     }
-    Ok(client.create_issue(title, Some(body.unwrap_or("")), &labels))
+    Ok(Checked { title, body, labels })
 }
 
 /// The new issue's URL and number from what `gh issue create` prints.
@@ -84,6 +113,22 @@ pub async fn api_new_issue_handler(
         .ok_or_else(|| fail(StatusCode::NOT_FOUND, "no such swarm"))?;
     let repo = std::path::PathBuf::from(repo);
     let cmd = create_command(&ProjectManagementClient::from_env(), &new).map_err(|why| fail(StatusCode::UNPROCESSABLE_ENTITY, why))?;
+    let args = ctl_args(&new).map_err(|why| fail(StatusCode::UNPROCESSABLE_ENTITY, why))?;
+    match autocoder_ctl::run(&state.transport, &repo, autocoder_ctl::find().as_deref(), &args).await {
+        CtlOutcome::Done { target, detail } => {
+            state.village.forget(&repo);
+            let number = detail["number"].as_u64().or_else(|| target.and_then(|t| t.parse().ok()));
+            return Ok(Json(match number {
+                Some(n) => json!({ "ok": true, "number": n }),
+                None => json!({ "ok": true }),
+            }));
+        }
+        CtlOutcome::Failed(why) => {
+            tracing::warn!("filing an issue in {project} failed: {why}");
+            return Err(fail(StatusCode::BAD_GATEWAY, &why));
+        }
+        CtlOutcome::Unavailable => {} // too old: create_command's gh below
+    }
     let out = state
         .transport
         .output(cmd.program, &cmd.args, Some(&repo))
@@ -149,6 +194,17 @@ mod tests {
         assert!(create_command(&gh(), &new("T", None, &["P0", "P3"])).is_err());
         let cmd = create_command(&gh(), &new("T", None, &["P3", "P3", "enhancement"])).unwrap();
         assert_eq!(cmd.args.last().unwrap(), "P3,enhancement");
+    }
+
+    #[test]
+    fn autocoder_ctl_files_with_the_same_checks() {
+        assert_eq!(
+            ctl_args(&new(" Fix the ship ", Some("it sinks"), &["bug", "P2"])).unwrap(),
+            vec!["file", "--title", "Fix the ship", "--body", "it sinks", "--label", "bug", "--label", "P2"]
+        );
+        assert_eq!(ctl_args(&new("T", Some("  "), &[])).unwrap(), vec!["file", "--title", "T"]);
+        assert!(ctl_args(&new("T", None, &["proposal"])).is_err());
+        assert!(ctl_args(&new("a\nb", None, &[])).is_err());
     }
 
     #[test]

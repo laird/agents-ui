@@ -9,6 +9,13 @@
 //! - **changes** posts the comment (required) and leaves it a proposal, for
 //!   `/refine-proposal` to answer.
 //!
+//! Each goes through autocoder's `autocoder-ctl approve | reject |
+//! request-changes` (#541, `autocoder_ctl.rs`), so it works with any issue
+//! backend autocoder is set up for; autocoder writes the comment, naming who
+//! decided. `approve` there takes no comment, so an approval with one is
+//! refused (422; the board never sends one). An autocoder without the verbs
+//! gets the `gh` commands of `decision_commands` instead.
+//!
 //! Only an open issue labelled `proposal` can be decided here: anything else
 //! is a 409, so the endpoint can't close or relabel an arbitrary issue. A
 //! `--read-only` server refuses it before it gets here (403), as it does
@@ -21,6 +28,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use super::autocoder_ctl::{self, CtlOutcome};
 use super::server::WebServerState;
 use crate::project_management::{ProjectCommand, ProjectManagementClient};
 
@@ -72,6 +80,21 @@ pub fn decision_commands(
     })
 }
 
+/// The `autocoder-ctl` verb and arguments for a decision (#541). Run after
+/// `decision_commands` has checked the comment.
+pub fn ctl_args(number: u32, action: Action, comment: Option<&str>) -> Result<Vec<String>, &'static str> {
+    let comment = comment.map(str::trim).filter(|c| !c.is_empty());
+    let n = number.to_string();
+    Ok(match (action, comment) {
+        (Action::Approve, None) => vec!["approve".into(), n],
+        (Action::Approve, Some(_)) => return Err("an approval takes no comment"),
+        (Action::Reject, None) => vec!["reject".into(), n],
+        (Action::Reject, Some(c)) => vec!["reject".into(), n, c.into()],
+        (Action::Changes, Some(c)) => vec!["request-changes".into(), n, c.into()],
+        (Action::Changes, None) => return Err("say what should change"),
+    })
+}
+
 /// Whether `gh issue view --json state,labels` shows an open proposal.
 pub fn is_open_proposal(view: &Value) -> bool {
     let open = view["state"].as_str().is_some_and(|s| s.eq_ignore_ascii_case("open"));
@@ -108,6 +131,23 @@ pub async fn api_decision_handler(
     let seen: Value = serde_json::from_slice(&out.stdout).unwrap_or(Value::Null);
     if !out.status.success() || !is_open_proposal(&seen) {
         return Err(fail(StatusCode::CONFLICT, "that issue is no longer an open proposal"));
+    }
+
+    let ctl = autocoder_ctl::find();
+    let args = ctl_args(number, body.action, body.comment.as_deref());
+    if ctl.is_some() {
+        let args = args.map_err(|why| fail(StatusCode::UNPROCESSABLE_ENTITY, why))?;
+        match autocoder_ctl::run(&state.transport, &repo, ctl.as_deref(), &args).await {
+            CtlOutcome::Done { .. } => {
+                state.village.forget(&repo);
+                return Ok(Json(json!({ "ok": true, "number": number, "action": body.action_word() })));
+            }
+            CtlOutcome::Failed(why) => {
+                state.village.forget(&repo);
+                return Err(fail(StatusCode::BAD_GATEWAY, &why));
+            }
+            CtlOutcome::Unavailable => {} // too old: the gh commands below
+        }
     }
 
     for cmd in &commands {
@@ -175,6 +215,17 @@ mod tests {
     fn a_long_comment_is_refused() {
         let long = "x".repeat(MAX_COMMENT_BYTES + 1);
         assert!(decision_commands(&gh(), 7, Action::Approve, Some(&long)).is_err());
+    }
+
+    #[test]
+    fn autocoder_ctl_gets_one_verb_per_decision() {
+        assert_eq!(ctl_args(7, Action::Approve, None).unwrap(), vec!["approve", "7"]);
+        assert_eq!(ctl_args(7, Action::Approve, Some("  ")).unwrap(), vec!["approve", "7"]);
+        assert!(ctl_args(7, Action::Approve, Some("ship it")).is_err());
+        assert_eq!(ctl_args(7, Action::Reject, None).unwrap(), vec!["reject", "7"]);
+        assert_eq!(ctl_args(7, Action::Reject, Some(" out of scope ")).unwrap(), vec!["reject", "7", "out of scope"]);
+        assert_eq!(ctl_args(7, Action::Changes, Some("smaller")).unwrap(), vec!["request-changes", "7", "smaller"]);
+        assert!(ctl_args(7, Action::Changes, None).is_err());
     }
 
     #[test]

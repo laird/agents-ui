@@ -5,7 +5,8 @@
  * approve. Each posts to the server (proposals.rs), which removes the
  * `proposal` label as the TUI's approve key does, closes the issue, or
  * comments. An approved crate leaves the board for the docks on the next
- * poll. A read-only server answers 403, and the dialog says so. */
+ * poll (through autocoder-ctl when installed, #541). A read-only server
+ * answers 403, and the dialog says so. */
 import { registerDialogPart } from './registry.js';
 import { esc } from './panels.js';
 import { answerWords, bulkPicks, bulkWords, decisionUrl, isProposal, pickWords } from './decide.js';
