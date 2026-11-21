@@ -1131,6 +1131,7 @@ impl App {
             Event::Error(msg) => {
                 tracing::error!("Background error: {msg}");
             }
+            Event::Status(msg) => self.set_status(msg),
         }
         Ok(())
     }
@@ -1806,7 +1807,6 @@ impl App {
         let adapter = ClaudeAdapter::new(agent_type, self.transport.clone());
         let transport = self.transport.clone();
         let agents_dir = self.agents_dir.clone();
-        let remote = self.transport.is_remote();
 
         tokio::spawn(async move {
             let tx2 = tx.clone();
@@ -1854,7 +1854,7 @@ impl App {
                     tracing::warn!("Failed to send swarm discovered event: {e}");
                 }
             };
-            if swarm_ctl::launch_via_ctl(&config, plugin_installed, remote, &progress, discovered).await {
+            if swarm_ctl::launch_via_ctl(&config, plugin_installed, &transport, &progress, discovered).await {
                 return;
             }
 
@@ -2639,8 +2639,9 @@ impl App {
                         // Add a new worker
                         if self.swarms.get(swarm_idx).is_some() {
                             self.set_status("Adding worker...".to_string());
-                            let line = self.add_worker_to(swarm_idx).await;
-                            self.set_status(line);
+                            if let Some(line) = self.add_worker_to(swarm_idx).await {
+                                self.set_status(line);
+                            }
                         }
                     }
                     KeyCode::Char('f') => {
@@ -3872,7 +3873,9 @@ impl App {
                     // Add a new worker to this swarm
                     if self.swarms.get(swarm_idx).is_some() {
                         self.set_status("Adding worker...".to_string());
-                        self.status_message = Some(self.add_worker_to(swarm_idx).await);
+                        if let Some(line) = self.add_worker_to(swarm_idx).await {
+                            self.status_message = Some(line);
+                        }
                     }
                 }
                 KeyCode::Char('f') => {

@@ -45,6 +45,8 @@ pub enum Event {
     },
     /// Error from a background task
     Error(String),
+    /// A line for the status bar from a background task
+    Status(String),
     /// A tmux pane watcher stopped due to repeated failures (pane is dead)
     PaneDead { agent_id: String },
 }

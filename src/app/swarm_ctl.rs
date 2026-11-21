@@ -1,30 +1,41 @@
 //! The TUI's swarm launch, add-worker and stop through `autocoder-ctl.sh`
 //! (#544, `crate::adapter::ctl`), with the TUI's own launcher in `claude.rs`
 //! as the fallback: on a remote host, when this autocoder lacks the verb
-//! (no script, exit 3), and, for add-worker and stop, for a swarm autocoder
-//! has no manifest for (one the TUI launched itself).
+//! (no script, exit 3), when the swarm's session is already up (the TUI
+//! reconnects to it, as before), and, for add-worker and stop, for a swarm
+//! autocoder has no manifest for (one the TUI launched itself).
+
+use std::path::PathBuf;
 
 use anyhow::{anyhow, Result};
 
 use super::App;
+use crate::adapter::claude::ClaudeAdapter;
 use crate::adapter::ctl::{self, CtlResult, CtlRun};
 use crate::adapter::traits::{AgentRuntime, SwarmConfig};
 use crate::event::Event;
 use crate::model::swarm::Swarm;
+use crate::transport::ServerTransport;
 
 /// Start the swarm with `autocoder-ctl start`, reporting into the launch
-/// dialog. `false` when autocoder cannot (the caller then launches it
-/// itself); `true` when it answered, whether the start worked or not.
+/// dialog. `false` when the TUI should launch it itself; `true` when
+/// autocoder answered, whether the start worked or not.
 /// `plugin_installed`: the TUI already installed the plugin for the chosen
 /// scope, so `start` must not install it again.
 pub(super) async fn launch_via_ctl(
     config: &SwarmConfig,
     plugin_installed: bool,
-    remote: bool,
+    transport: &ServerTransport,
     progress: &impl Fn(&str),
     discovered: impl FnOnce(),
 ) -> bool {
-    if remote {
+    if transport.is_remote() {
+        return false;
+    }
+    // `start` refuses a session that is already up; the TUI reconnects to it.
+    let project = config.repo_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let session = format!("{}-{project}", config.agent_type.session_prefix());
+    if crate::tmux::session::has_session(transport, &session).await {
         return false;
     }
     progress("⏳ Starting the swarm with autocoder-ctl start...\n");
@@ -37,6 +48,8 @@ pub(super) async fn launch_via_ctl(
         CtlRun::Done(result) => {
             progress(&ctl::report(&result));
             if result.ok {
+                // A stop mark from an earlier stop would keep it from healing.
+                crate::config::persistence::clear_swarm_stopped(&project);
                 progress("✅ Triggering swarm discovery...\n");
                 discovered();
             } else {
@@ -48,44 +61,53 @@ pub(super) async fn launch_via_ctl(
 }
 
 impl App {
-    /// Run a verb for a swarm autocoder knows, or `None` to use the TUI's own path.
-    async fn ctl_for(&self, swarm: &Swarm, args: Vec<String>) -> Option<CtlResult> {
+    /// The script to drive this swarm with, or `None` for the TUI's own path.
+    fn ctl_script(&self, swarm: &Swarm) -> Option<PathBuf> {
         if self.transport.is_remote() || !ctl::has_manifest(&swarm.repo_path, &swarm.tmux_session) {
             return None;
         }
-        match ctl::run(ctl::script().as_deref(), &args, &swarm.repo_path).await {
-            CtlRun::Done(result) => Some(result),
-            CtlRun::Unsupported => None,
-        }
+        ctl::script()
     }
 
     /// Stop a swarm: `autocoder-ctl stop-swarm`, else the TUI's teardown.
     pub(super) async fn stop_swarm(&self, swarm: &Swarm) -> Result<()> {
         // Before anything closes, so heal_workers does not respawn it.
         crate::config::persistence::mark_swarm_stopped(&swarm.project_name);
-        match self.ctl_for(swarm, ctl::stop_swarm_args(&swarm.repo_path)).await {
-            Some(result) if result.ok => Ok(()),
-            Some(result) => Err(anyhow!(ctl::status_line(&result, ""))),
-            None => self.adapter.teardown(swarm).await,
+        if let Some(script) = self.ctl_script(swarm) {
+            match ctl::run(Some(&script), &ctl::stop_swarm_args(&swarm.repo_path), &swarm.repo_path).await {
+                CtlRun::Done(result) if result.ok => return Ok(()),
+                CtlRun::Done(result) => return Err(anyhow!(ctl::status_line(&result, ""))),
+                CtlRun::Unsupported => {}
+            }
         }
+        self.adapter.teardown(swarm).await
     }
 
-    /// Add one worker to the swarm at `swarm_idx`; the status line to show.
-    pub(super) async fn add_worker_to(&mut self, swarm_idx: usize) -> String {
-        let Some(swarm) = self.swarms.get(swarm_idx).cloned() else {
-            return "No such swarm".to_string();
-        };
-        let args = ctl::add_worker_args(&swarm.repo_path, &swarm.tmux_session);
-        if let Some(result) = self.ctl_for(&swarm, args).await {
-            if result.ok {
-                // The new pane is autocoder's; discovery picks it up.
-                if let Err(e) = self.events.tx().send(Event::SwarmDiscovered) {
-                    tracing::debug!("Failed to send swarm discovered event: {e}");
-                }
-            }
-            return ctl::status_line(&result, &added_line(&result));
+    /// Add one worker to the swarm at `swarm_idx`. The status line to show
+    /// now, or `None` when it runs in the background: `add-worker` waits a
+    /// few seconds to read the new pane for prompts, and the TUI must not
+    /// freeze meanwhile. Its outcome arrives as an [`Event::Status`].
+    pub(super) async fn add_worker_to(&mut self, swarm_idx: usize) -> Option<String> {
+        let swarm = self.swarms.get(swarm_idx).cloned()?;
+        if let Some(script) = self.ctl_script(&swarm) {
+            let (tx, transport) = (self.events.tx(), self.transport.clone());
+            tokio::spawn(async move {
+                let args = ctl::add_worker_args(&swarm.repo_path, &swarm.tmux_session);
+                let line = match ctl::run(Some(&script), &args, &swarm.repo_path).await {
+                    CtlRun::Done(result) => ctl::status_line(&result, &added_line(&result)),
+                    // This autocoder lacks the verb: the TUI adds it itself.
+                    CtlRun::Unsupported => match ClaudeAdapter::new(swarm.agent_type.clone(), transport).add_worker(&swarm).await {
+                        Ok(worker) => format!("Added {} (starting worker loop)", worker.role),
+                        Err(e) => format!("Failed to add worker: {e}"),
+                    },
+                };
+                // Discovery picks up the new pane either way.
+                let _ = tx.send(Event::SwarmDiscovered);
+                let _ = tx.send(Event::Status(line));
+            });
+            return None;
         }
-        match self.adapter.add_worker(&swarm).await {
+        Some(match self.adapter.add_worker(&swarm).await {
             Ok(worker) => {
                 let id = worker.role.clone();
                 if let Some(swarm) = self.swarms.get_mut(swarm_idx) {
@@ -95,7 +117,7 @@ impl App {
                 format!("Added {id} (starting worker loop)")
             }
             Err(e) => format!("Failed to add worker: {e}"),
-        }
+        })
     }
 }
 
@@ -149,7 +171,8 @@ mod tests {
             resume_seeds: None,
         };
         let said = std::cell::RefCell::new(String::new());
-        let handled = launch_via_ctl(&config, false, true, &|m: &str| said.borrow_mut().push_str(m), || panic!("no discovery")).await;
+        let remote = ServerTransport::new(Some("buildbox".to_string()));
+        let handled = launch_via_ctl(&config, false, &remote, &|m: &str| said.borrow_mut().push_str(m), || panic!("no discovery")).await;
         assert!(!handled);
         assert!(said.borrow().is_empty());
     }

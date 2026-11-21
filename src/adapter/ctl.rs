@@ -13,6 +13,12 @@ use std::path::{Path, PathBuf};
 
 use crate::model::swarm::AgentType;
 
+/// A verb that has not answered by then is killed (a `start` that installs
+/// the plugin and lays out a swarm takes well under this).
+const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
+/// How much of the JSON result the launch dialog shows.
+const RESULT_SHOWN: usize = 4000;
+
 /// A prompt an agent is waiting on, as `detail.prompts` reports it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Prompt {
@@ -119,14 +125,19 @@ pub async fn run(script: Option<&Path>, args: &[String], cwd: &Path) -> CtlRun {
         return CtlRun::Unsupported;
     };
     let action = args.first().map(String::as_str).unwrap_or("");
-    let out = tokio::process::Command::new("bash")
-        .arg(script)
-        .args(args)
-        .current_dir(cwd)
-        .env("AUTOCODER_CTL_ACTOR", "agents-tui")
-        .stdin(std::process::Stdio::null())
-        .output()
-        .await;
+    let out = tokio::time::timeout(
+        TIMEOUT,
+        tokio::process::Command::new("bash")
+            .arg(script)
+            .args(args)
+            .current_dir(cwd)
+            .env("AUTOCODER_CTL_ACTOR", "agents-tui")
+            .stdin(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .unwrap_or_else(|_| Err(std::io::Error::other(format!("no answer in {}s", TIMEOUT.as_secs()))));
     match out {
         Ok(out) => parse_result(action, &out.stdout, &out.stderr, out.status.code()),
         Err(e) => CtlRun::Done(CtlResult {
@@ -191,7 +202,12 @@ pub fn report(result: &CtlResult) -> String {
         out.push('\n');
     }
     let json = serde_json::to_string_pretty(&result.detail).unwrap_or_default();
-    out.push_str(&format!("\nResult:\n{}\n", shown_block(&json)));
+    let mut json = shown_block(&json);
+    if let Some((i, _)) = json.char_indices().nth(RESULT_SHOWN) {
+        json.truncate(i);
+        json.push_str("\n…");
+    }
+    out.push_str(&format!("\nResult:\n{json}\n"));
     out
 }
 
