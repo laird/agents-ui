@@ -5,11 +5,20 @@ use tokio::process::Command;
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ServerTransport {
     server: Option<String>,
+    /// The program run in place of `ssh`, so a test can record what a remote
+    /// command would have sent (#550). `None` runs `ssh`.
+    ssh_program: Option<std::path::PathBuf>,
 }
 
 impl ServerTransport {
     pub fn new(server: Option<String>) -> Self {
-        Self { server }
+        Self { server, ssh_program: None }
+    }
+
+    /// A remote transport whose commands run `program` instead of `ssh`.
+    #[cfg(test)]
+    pub fn with_ssh_program(server: &str, program: std::path::PathBuf) -> Self {
+        Self { server: Some(server.to_string()), ssh_program: Some(program) }
     }
 
     pub fn server(&self) -> Option<&str> {
@@ -28,7 +37,8 @@ impl ServerTransport {
     ) -> Result<std::process::Output> {
         if let Some(server) = &self.server {
             let command = build_shell_command(program, args, current_dir);
-            Command::new("ssh")
+            let ssh = self.ssh_program.as_deref().unwrap_or(Path::new("ssh"));
+            Command::new(ssh)
                 .arg(server)
                 .arg(&command)
                 .output()

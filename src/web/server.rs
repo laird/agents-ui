@@ -2468,16 +2468,59 @@ mod tests {
         assert!(super::resolve_batch(&[InputItem::Text { text: String::new() }]).is_none());
     }
 
-    /// #548: a single key goes to the host the pane lives on (`--server`),
-    /// like `/keys` and `/answer`, not to the machine running agents-tui.
-    #[test]
-    fn key_endpoint_sends_through_the_configured_transport() {
-        let src = include_str!("server.rs");
-        let start = src.find("async fn api_key_handler(").expect("api_key_handler");
-        let end = start + src[start..].find("\n}\n").expect("end of api_key_handler");
-        let body = &src[start..end];
-        assert!(body.contains("send_key(&state.transport,"), "/key must use state.transport:\n{body}");
-        assert!(!body.contains("ServerTransport::new("), "/key must not build its own transport:\n{body}");
+    /// A remote transport whose `ssh` is a script that records each call's
+    /// arguments, one line per call, and succeeds (#550).
+    fn recording_remote(host: &str) -> (ServerTransport, PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!(
+            "agents-ui-ssh-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("calls.log");
+        let script = dir.join("ssh");
+        std::fs::write(&script, format!("#!/bin/sh\necho \"$*\" >> '{}'\n", log.display())).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (ServerTransport::with_ssh_program(host, script), log)
+    }
+
+    async fn post_to_remote(uri: &str, body: &str) -> (StatusCode, String) {
+        let shared = new_shared_state();
+        shared.write().unwrap().push(sample_swarm("test-proj"));
+        let (transport, log) = recording_remote("pane-host");
+        let state = WebServerState { transport, ..make_web_state(shared) };
+        let req = Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let status = make_app(state).oneshot(req).await.unwrap().status();
+        (status, std::fs::read_to_string(&log).unwrap_or_default())
+    }
+
+    /// #548: a single key goes to the `--server` host the pane lives on, not
+    /// to the machine running agents-tui.
+    #[tokio::test]
+    async fn key_endpoint_sends_through_the_configured_transport() {
+        let (status, calls) =
+            post_to_remote("/api/swarms/test-proj/agents/manager/key", r#"{"key":"Escape"}"#).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(calls.starts_with("pane-host "), "/key must go over ssh to the server: {calls:?}");
+        assert!(calls.contains("'send-keys'") && calls.contains("'Escape'"), "{calls:?}");
+    }
+
+    #[tokio::test]
+    async fn keys_endpoint_sends_through_the_configured_transport() {
+        let (status, calls) = post_to_remote(
+            "/api/swarms/test-proj/agents/manager/keys",
+            r#"{"items":[{"type":"key","key":"Up"}]}"#,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(calls.starts_with("pane-host "), "/keys must go over ssh to the server: {calls:?}");
+        assert!(calls.contains("'send-keys'") && calls.contains("'Up'"), "{calls:?}");
     }
 
     #[tokio::test]
