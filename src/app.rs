@@ -5450,8 +5450,10 @@ impl App {
         let remote = self.transport.is_remote();
         for swarm in &mut self.swarms {
             // What autocoder says each worker is on, and whether it is busy
-            // (#542). Without an answer (an older autocoder, a remote host),
-            // the pane inference below decides alone.
+            // (#542). The issue is kept; the state is a first guess that the
+            // pane inference below still overrides when the pane shows
+            // something (a prompt, a spinner). Without an answer (an older
+            // autocoder, a remote host), the pane inference decides alone.
             let reports = if remote { None } else { self.autocoder.reports(&swarm.repo_path) };
             for worker in swarm.workers.iter_mut() {
                 let Some(report) = reports.as_ref().and_then(|r| {
