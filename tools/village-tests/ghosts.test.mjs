@@ -89,6 +89,8 @@ test('the dialog lists each failure: when, whose merge, and the log', () => {
   const f = { runs: [{ issue: 498, when: '2026-11-16T08:10:00Z', log: '/tmp/autocoder-merge-r-498.log' }, { issue: 0, when: '', log: '' }] };
   assert.deepEqual(failureLines(f, () => '16 Nov 08:10'), ['16 Nov 08:10 · gating #498 · /tmp/autocoder-merge-r-498.log']);
   assert.deepEqual(failureLines({}, () => ''), []);
+  // #538: a sighting the gate recorded has no log, but the start of its failure.
+  assert.deepEqual(failureLines({ runs: [{ when: 'x', issue: 9, excerpt: '\n  thread panicked\nleft: 1' }] }, () => 'T'), ['T · gating #9 · thread panicked']);
 });
 
 test('"File flaky issue" (#503): its words, where it posts, what the answer says', async () => {

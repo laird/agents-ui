@@ -368,7 +368,10 @@ pub fn issue_title(test: &str) -> String {
 /// How a failure starts its line in an issue: what tells, in a comment
 /// already posted, that this failure was reported.
 fn failure_head(r: &FlakyRun) -> String {
-    format!("- {} — while gating #{}'s merge", r.when, r.issue)
+    match r.issue {
+        0 => format!("- {} — at the merge gate", r.when),
+        n => format!("- {} — while gating #{n}'s merge", r.when),
+    }
 }
 
 /// Failures one line each: when, whose merge was gated, then the log the

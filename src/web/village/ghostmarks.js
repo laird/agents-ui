@@ -78,9 +78,11 @@ export function ghostSpot(g, k, t = 0, still = true) {
 }
 
 /* The failures in a ghost's dialog, newest first:
- * "16 Nov 08:10 · gating #498 · /tmp/autocoder-merge-…-498.log". */
+ * "16 Nov 08:10 · gating #498 · /tmp/autocoder-merge-…-498.log", or, for a
+ * sighting the gate recorded (#538), the first line of its failure. */
 export function failureLines(f, clock) {
-  return ((f && f.runs) || []).map(r => [r.when ? clock(r.when) : '', r.issue ? `gating #${r.issue}` : '', r.log || ''].filter(Boolean).join(' · ')).filter(Boolean);
+  const said = r => r.log || (r.excerpt || '').split('\n').map(l => l.trim()).find(Boolean) || '';
+  return ((f && f.runs) || []).map(r => [r.when ? clock(r.when) : '', r.issue ? `gating #${r.issue}` : '', said(r)].filter(Boolean).join(' · ')).filter(Boolean);
 }
 
 /* "File flaky issue" in the ghost's dialog (#503): where it posts, and what
