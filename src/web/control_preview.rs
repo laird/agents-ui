@@ -16,7 +16,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::controls::{claimed_issue, nudge_command, release_comment, Refusal};
+use super::controls::{claimed_issue, nudge_command, release_comment, Action, Refusal};
 use super::server::WebServerState;
 use super::{AgentSnapshot, SwarmSnapshot};
 use crate::model::swarm::AgentType;
@@ -26,18 +26,23 @@ pub struct PreviewQuery {
     pub action: Option<String>,
 }
 
-/// What `action` would send for this agent, or why it can't run now.
-pub fn preview(swarm: &SwarmSnapshot, agent: &AgentSnapshot, action: &str) -> Result<String, Refusal> {
+/// What `action` would send for this agent, or why it can't run now. With
+/// `ctl` (this host has `autocoder-ctl`, #540), the call it would make.
+pub fn preview(swarm: &SwarmSnapshot, agent: &AgentSnapshot, action: &str, ctl: bool) -> Result<String, Refusal> {
     match action {
         "nudge" => {
             let runtime = AgentType::from_name(&swarm.agent_type).unwrap_or(AgentType::Claude);
-            nudge_command(agent, &runtime)
+            let command = nudge_command(agent, &runtime)?;
+            Ok(if ctl { super::ctl::shown(&super::ctl::args(Action::Nudge, &agent.worktree_path, None, &agent.role)) } else { command })
         }
         "release" => {
             if agent.is_manager {
                 return Err((StatusCode::CONFLICT, "only workers hold issues"));
             }
             let number = claimed_issue(swarm, agent).ok_or((StatusCode::CONFLICT, "that worker holds no issue"))?;
+            if ctl {
+                return Ok(super::ctl::shown(&super::ctl::args(Action::Release, &agent.worktree_path, Some(number), &agent.role)));
+            }
             Ok(format!("{}\n\n(then removes the `working` label from #{number})", release_comment(number, &agent.role)))
         }
         _ => Err((StatusCode::NOT_IMPLEMENTED, "this server can't do that to a worker")),
@@ -63,8 +68,10 @@ pub async fn api_control_preview_handler(
     let fail = |(code, msg): Refusal| (code, Json(json!({ "error": msg })));
     let (swarm, agent) = find(&state, &project, &role).map_err(fail)?;
     let action = q.action.unwrap_or_default();
-    let sent = preview(&swarm, &agent, &action).map_err(fail)?;
-    Ok(Json(json!({ "ok": true, "action": action, "sent": sent })))
+    let ctl = super::ctl::script(&state.transport).is_some();
+    let sent = preview(&swarm, &agent, &action, ctl).map_err(fail)?;
+    let via = if ctl { "autocoder-ctl" } else { "village" };
+    Ok(Json(json!({ "ok": true, "action": action, "sent": sent, "via": via })))
 }
 
 #[cfg(test)]
@@ -113,26 +120,39 @@ mod tests {
     fn a_nudge_previews_the_command_the_post_would_type() {
         let s = swarm(vec![]);
         let idle = agent("worker-1", "Idle", false);
-        assert_eq!(preview(&s, &idle, "nudge"), nudge_command(&idle, &AgentType::Claude));
-        assert!(preview(&s, &idle, "nudge").unwrap().contains("fix-loop"), "{:?}", preview(&s, &idle, "nudge"));
-        assert_eq!(preview(&s, &agent("worker-1", "Working: #7", false), "nudge").unwrap_err().0, StatusCode::CONFLICT);
+        assert_eq!(preview(&s, &idle, "nudge", false), nudge_command(&idle, &AgentType::Claude));
+        assert!(preview(&s, &idle, "nudge", false).unwrap().contains("fix-loop"), "{:?}", preview(&s, &idle, "nudge", false));
+        assert_eq!(preview(&s, &agent("worker-1", "Working: #7", false), "nudge", false).unwrap_err().0, StatusCode::CONFLICT);
     }
 
     #[test]
     fn a_release_previews_the_comment_and_the_label() {
         let s = swarm(vec![working(42, "worker-2")]);
-        let sent = preview(&s, &agent("worker-2", "Working: #42", false), "release").unwrap();
+        let sent = preview(&s, &agent("worker-2", "Working: #42", false), "release", false).unwrap();
         assert!(sent.starts_with(&release_comment(42, "worker-2")));
         assert!(sent.ends_with("(then removes the `working` label from #42)"));
-        assert_eq!(preview(&s, &agent("worker-3", "Idle", false), "release").unwrap_err().0, StatusCode::CONFLICT);
-        assert_eq!(preview(&s, &agent("manager", "Idle", true), "release").unwrap_err().0, StatusCode::CONFLICT);
+        assert_eq!(preview(&s, &agent("worker-3", "Idle", false), "release", false).unwrap_err().0, StatusCode::CONFLICT);
+        assert_eq!(preview(&s, &agent("manager", "Idle", true), "release", false).unwrap_err().0, StatusCode::CONFLICT);
     }
 
     #[test]
     fn an_action_the_server_does_not_have_is_501() {
         let s = swarm(vec![]);
         for action in ["restart", "stop", ""] {
-            assert_eq!(preview(&s, &agent("worker-1", "Idle", false), action).unwrap_err().0, StatusCode::NOT_IMPLEMENTED, "{action}");
+            assert_eq!(preview(&s, &agent("worker-1", "Idle", false), action, false).unwrap_err().0, StatusCode::NOT_IMPLEMENTED, "{action}");
         }
+    }
+
+    /// #540: with autocoder-ctl, the confirmation shows the call; the
+    /// village's own checks still refuse first.
+    #[test]
+    fn with_autocoder_ctl_the_preview_is_the_call() {
+        let s = swarm(vec![working(42, "worker-2")]);
+        let idle = AgentSnapshot { worktree_path: "/repos/p-wt-1".into(), ..agent("worker-1", "Idle", false) };
+        assert_eq!(preview(&s, &idle, "nudge", true).unwrap(), "autocoder-ctl nudge /repos/p-wt-1");
+        let w2 = agent("worker-2", "Working: #42", false);
+        assert_eq!(preview(&s, &w2, "release", true).unwrap(), "autocoder-ctl release 42 --reason 'released by hand from the village (worker `worker-2`)'");
+        assert_eq!(preview(&s, &agent("worker-1", "Working: #7", false), "nudge", true).unwrap_err().0, StatusCode::CONFLICT, "busy: refused");
+        assert_eq!(preview(&s, &agent("worker-3", "Idle", false), "release", true).unwrap_err().0, StatusCode::CONFLICT);
     }
 }

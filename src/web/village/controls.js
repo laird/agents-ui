@@ -51,7 +51,7 @@ async function fillControls(box, c, token) {
     if (d.c) {
       const ch = choices.find(x => x.action === d.c);
       if (!ch || !ch.ready) return;
-      box.innerHTML = `<p class="q">${esc(confirmWords(ch.action, c.name, c.issue))}</p><pre class="sent">${esc(ch.sent)}</pre>` +
+      box.innerHTML = `<p class="q">${esc(confirmWords(ch.action, c.name, c.issue, ch.via))}</p><pre class="sent">${esc(ch.sent)}</pre>` +
         `<div class="opts"><button data-go="${esc(ch.action)}">Send</button><button data-no="1">Cancel</button></div><p class="dim" role="status"></p>`;
     } else if (d.no) {
       offer();

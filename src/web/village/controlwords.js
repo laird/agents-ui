@@ -23,25 +23,34 @@ export function controlChoices(previews) {
   return CONTROLS.flatMap(({ action, label }) => {
     const p = previews && previews[action];
     if (!p) return [];
-    if (p.status >= 200 && p.status < 300) return [{ action, label, ready: true, sent: (p.body && p.body.sent) || '' }];
+    if (p.status >= 200 && p.status < 300) {
+      const ch = { action, label, ready: true, sent: (p.body && p.body.sent) || '' };
+      // autocoder-ctl does it (#540): the confirmation shows the call.
+      if (p.body && p.body.via === 'autocoder-ctl') ch.via = 'autocoder-ctl';
+      return [ch];
+    }
     if (p.status === 409) return [{ action, label, ready: false, why: (p.body && p.body.error) || 'Not now' }];
     return [];
   });
 }
 
-/* The confirmation's question, over what will be sent. */
-export function confirmWords(action, house, issue) {
-  if (action === 'nudge') return `Nudge ${house}? This is typed into its session:`;
-  if (action === 'release') return `Release ${issue ? '#' + issue : 'its issue'} from ${house}? This is posted on the issue:`;
+/* The confirmation's question, over what will be sent: what the village
+ * types or posts itself, or the autocoder-ctl call that does it (#540). */
+export function confirmWords(action, house, issue, via) {
+  const ctl = via === 'autocoder-ctl';
+  if (action === 'nudge') return `Nudge ${house}? ${ctl ? 'autocoder runs:' : 'This is typed into its session:'}`;
+  if (action === 'release') return `Release ${issue ? '#' + issue : 'its issue'} from ${house}? ${ctl ? 'autocoder runs:' : 'This is posted on the issue:'}`;
   return `${action} ${house}?`;
 }
 
 /* What the dialog says after the server answers the POST. */
 export function controlAnswer(status, body, action, issue) {
   if (status >= 200 && status < 300) {
-    if (action === 'nudge') return 'Nudged: its loop is starting.';
-    if (action === 'release') return `Released ${issue || (body && body.number) ? '#' + (issue || body.number) : 'its issue'}: the crate goes back to the docks.`;
-    return 'Done.';
+    // What autocoder-ctl said it did (#540), after the village's own words.
+    const said = body && body.via === 'autocoder-ctl' && body.said ? ` autocoder-ctl: ${body.said}` : '';
+    if (action === 'nudge') return 'Nudged: its loop is starting.' + said;
+    if (action === 'release') return `Released ${issue || (body && body.number) ? '#' + (issue || body.number) : 'its issue'}: the crate goes back to the docks.` + said;
+    return 'Done.' + said;
   }
   if (status === 403) return 'This dashboard is read-only: use the TUI.';
   if (status === 404) return 'That worker is gone.';

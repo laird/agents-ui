@@ -2,6 +2,7 @@ pub mod breakage;
 pub mod build;
 pub mod control_preview;
 pub mod controls;
+pub mod ctl;
 pub mod crossrepo;
 pub mod deployments;
 pub mod discovery;

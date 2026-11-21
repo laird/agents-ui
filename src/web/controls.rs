@@ -28,6 +28,12 @@
 //!   closes. Only tmux panes, and only a known runtime: the server has no way
 //!   to launch one in a herdr pane yet, so a herdr worker is a 501.
 //!
+//! **autocoder-ctl** (#540): when this host has `autocoder-ctl.sh`, each
+//! action is its `nudge|release|stop|restart` verb instead (`ctl.rs`), after
+//! the same checks (an idle worker, a claimed issue, a worktree to mark
+//! stopped), and its answer is passed on. What follows is the fallback, for an
+//! autocoder without it.
+//!
 //! Only workers have controls: the manager is a 409. An unknown swarm or role
 //! is a 404 and an unknown action a 422. A `--read-only` server refuses it
 //! before it gets here (403). The response says what was sent (`{ ok, sent }`)
@@ -299,6 +305,91 @@ async fn restart(state: &WebServerState, swarm: &SwarmSnapshot, agent: &AgentSna
     Ok(sent)
 }
 
+/// The swarm's repo, once the tracker shows `number` still open and
+/// `working`: a release never touches an issue that has moved on.
+async fn still_claimed(state: &WebServerState, swarm: &SwarmSnapshot, number: u32) -> Result<std::path::PathBuf, Refusal> {
+    if swarm.repo_path.is_empty() {
+        return Err((StatusCode::NOT_FOUND, "no repo for that swarm"));
+    }
+    let repo = std::path::PathBuf::from(&swarm.repo_path);
+    let view = ProjectManagementClient::from_env().view_issue_json(number, "state,labels");
+    let out = state.transport.output(view.program, &view.args, Some(&repo)).await.map_err(|_| (StatusCode::BAD_GATEWAY, "could not ask the tracker"))?;
+    let seen: Value = serde_json::from_slice(&out.stdout).unwrap_or(Value::Null);
+    if !out.status.success() || !is_open_and_working(&seen) {
+        return Err((StatusCode::CONFLICT, "that issue is no longer claimed"));
+    }
+    Ok(repo)
+}
+
+/// Do `action` through `autocoder-ctl` (#540): the village's own checks
+/// first, as for the fallback, then the verb, its answer passed on. `None`
+/// when this autocoder doesn't have the verb (exit 3): the caller does it.
+async fn via_ctl(
+    state: &WebServerState,
+    script: &std::path::Path,
+    swarm: &SwarmSnapshot,
+    agent: &AgentSnapshot,
+    action: Action,
+) -> Option<Result<Json<Value>, (StatusCode, Json<Value>)>> {
+    let fail = |(code, msg): Refusal| Some(Err((code, Json(json!({ "error": msg })))));
+    if agent.is_manager {
+        return fail((StatusCode::CONFLICT, "only workers have controls"));
+    }
+    let mut issue = None;
+    let mut cwd = std::path::PathBuf::from(if swarm.repo_path.is_empty() { &agent.worktree_path } else { &swarm.repo_path });
+    match action {
+        Action::Nudge => {
+            // Only an idle worker: the text would land in its work or answer its question.
+            if let Err(r) = nudge_command(agent, &AgentType::from_name(&swarm.agent_type).unwrap_or(AgentType::Claude)) {
+                return fail(r);
+            }
+        }
+        Action::Release => {
+            let Some(number) = claimed_issue(swarm, agent) else { return fail((StatusCode::CONFLICT, "that worker holds no issue")) };
+            match still_claimed(state, swarm, number).await {
+                Ok(repo) => cwd = repo,
+                Err(r) => return fail(r),
+            }
+            issue = Some(number);
+        }
+        Action::Stop | Action::Restart => {
+            if let Err(r) = tombstone(agent) {
+                return fail(r);
+            }
+        }
+    }
+    if action == Action::Stop {
+        // The village's own mark, so its heal and revive leave the worker stopped.
+        let steps = stop_steps(agent).ok()?;
+        if let Err(err) = run_steps(&state.transport, &steps[..2]).await {
+            return Some(Err((StatusCode::BAD_GATEWAY, Json(json!({ "error": format!("could not mark it stopped: {err}") })))));
+        }
+    }
+    let args = super::ctl::args(action, &agent.worktree_path, issue, &agent.role);
+    let (ok, exit, detail) = match super::ctl::call(&state.transport, script, &cwd, &args).await {
+        super::ctl::Answer::NotInstalled => return None,
+        super::ctl::Answer::Broken(err) => {
+            tracing::warn!("{} via autocoder-ctl for {}: {err}", args[0], agent.role);
+            return Some(Err((StatusCode::BAD_GATEWAY, Json(json!({ "error": format!("autocoder-ctl: {err}") })))));
+        }
+        super::ctl::Answer::Result { ok, exit, detail } => (ok, exit, detail),
+    };
+    if ok && action == Action::Restart {
+        // Started again: it is no longer stopped.
+        if let Ok((_, file)) = tombstone(agent) {
+            let _ = state.transport.output("rm", &["-f".to_string(), file], None).await;
+        }
+    }
+    if action == Action::Release {
+        state.village.forget(std::path::Path::new(&swarm.repo_path));
+    }
+    let mut answer = super::ctl::response(action, ok, exit, &detail).map(Json).map_err(|(c, b)| (c, Json(b)));
+    if let (Ok(Json(body)), Some(n)) = (&mut answer, issue) {
+        body["number"] = json!(n);
+    }
+    Some(answer)
+}
+
 /// The swarm and the agent the path names, cloned out of the shared state.
 fn find(state: &WebServerState, project: &str, role: &str) -> Result<(SwarmSnapshot, AgentSnapshot), Refusal> {
     let guard = state.swarms.read().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "state unavailable"))?;
@@ -318,6 +409,14 @@ pub async fn api_control_handler(
     let fail = |(code, msg): (StatusCode, &str)| (code, Json(json!({ "error": msg })));
     let (swarm, agent) = find(&state, &project, &role).map_err(fail)?;
     let Json(body) = body.map_err(|_| fail((StatusCode::UNPROCESSABLE_ENTITY, "the action is nudge, release, stop or restart")))?;
+
+    // autocoder-ctl when this host has it (#540); else, or when it says this
+    // autocoder can't (exit 3), the village does it itself below.
+    if let Some(script) = super::ctl::script(&state.transport) {
+        if let Some(done) = via_ctl(&state, &script, &swarm, &agent, body.action).await {
+            return done;
+        }
+    }
 
     match body.action {
         Action::Nudge => {
@@ -369,22 +468,8 @@ pub async fn api_control_handler(
             }
             let number = claimed_issue(&swarm, &agent)
                 .ok_or_else(|| fail((StatusCode::CONFLICT, "that worker holds no issue")))?;
-            if swarm.repo_path.is_empty() {
-                return Err(fail((StatusCode::NOT_FOUND, "no repo for that swarm")));
-            }
-            let repo = std::path::PathBuf::from(&swarm.repo_path);
+            let repo = still_claimed(&state, &swarm, number).await.map_err(fail)?;
             let client = ProjectManagementClient::from_env();
-
-            let view = client.view_issue_json(number, "state,labels");
-            let out = state
-                .transport
-                .output(view.program, &view.args, Some(&repo))
-                .await
-                .map_err(|_| fail((StatusCode::BAD_GATEWAY, "could not ask the tracker")))?;
-            let seen: Value = serde_json::from_slice(&out.stdout).unwrap_or(Value::Null);
-            if !out.status.success() || !is_open_and_working(&seen) {
-                return Err(fail((StatusCode::CONFLICT, "that issue is no longer claimed")));
-            }
 
             let comment = release_comment(number, &role);
             for cmd in release_commands(&client, number, &role) {

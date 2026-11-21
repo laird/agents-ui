@@ -47,3 +47,14 @@ test('what the dialog says after the server answers', () => {
   assert.equal(controlAnswer(409, { error: 'that worker is busy: wait until it is idle' }, 'nudge'), 'that worker is busy: wait until it is idle');
   assert.equal(controlAnswer(502, {}, 'release'), 'Could not release it (502)');
 });
+
+test('#540: autocoder-ctl does it: the call is confirmed and its answer shown', () => {
+  const [ch] = controlChoices({ release: { status: 200, body: { ok: true, via: 'autocoder-ctl', sent: 'autocoder-ctl release 42' } } });
+  assert.deepEqual(ch, { action: 'release', label: 'Release issue', ready: true, sent: 'autocoder-ctl release 42', via: 'autocoder-ctl' });
+  assert.equal(confirmWords('release', 'wt-2', 42, ch.via), 'Release #42 from wt-2? autocoder runs:');
+  assert.equal(confirmWords('nudge', 'wt-2', null, 'autocoder-ctl'), 'Nudge wt-2? autocoder runs:');
+  assert.equal(controlAnswer(200, { ok: true, via: 'autocoder-ctl', said: 'released #42', number: 42 }, 'release', 42),
+    'Released #42: the crate goes back to the docks. autocoder-ctl: released #42');
+  assert.equal(controlAnswer(200, { ok: true, via: 'autocoder-ctl', said: '' }, 'nudge'), 'Nudged: its loop is starting.');
+  assert.equal(controlAnswer(409, { error: 'autocoder-ctl: the pane is in /x, not /w', via: 'autocoder-ctl' }, 'nudge'), 'autocoder-ctl: the pane is in /x, not /w');
+});
