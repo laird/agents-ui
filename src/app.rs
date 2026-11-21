@@ -26,6 +26,8 @@ use crate::ui::repos_list::ReposListView;
 use crate::ui::swarm_view::{SwarmPanel, SwarmView};
 use crate::ui::text_input::TextInput;
 
+mod swarm_ctl;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ParsedGhCommand {
     NotGh,
@@ -1804,6 +1806,7 @@ impl App {
         let adapter = ClaudeAdapter::new(agent_type, self.transport.clone());
         let transport = self.transport.clone();
         let agents_dir = self.agents_dir.clone();
+        let remote = self.transport.is_remote();
 
         tokio::spawn(async move {
             let tx2 = tx.clone();
@@ -1821,6 +1824,7 @@ impl App {
                 "Background launch starting for {}",
                 config.repo_path.display()
             );
+            let plugin_installed = install_scope.is_some();
             if let Some(scope) = install_scope {
                 match install_agents_for_scope_with_progress(
                     &transport,
@@ -1841,6 +1845,17 @@ impl App {
                         return;
                     }
                 }
+            }
+
+            // autocoder-ctl start first (#544); the TUI's own launcher if it cannot.
+            let tx3 = tx.clone();
+            let discovered = move || {
+                if let Err(e) = tx3.send(Event::SwarmDiscovered) {
+                    tracing::warn!("Failed to send swarm discovered event: {e}");
+                }
+            };
+            if swarm_ctl::launch_via_ctl(&config, plugin_installed, remote, &progress, discovered).await {
+                return;
             }
 
             match adapter.launch_with_progress(&config, &progress).await {
@@ -1957,7 +1972,7 @@ impl App {
                         let project = swarm.project_name.clone();
                         self.intentionally_stopped.insert(project.clone());
                         self.set_status(format!("Tearing down {project}..."));
-                        if let Err(e) = self.adapter.teardown(&swarm).await {
+                        if let Err(e) = self.stop_swarm(&swarm).await {
                             self.set_status(format!("Teardown error: {e}"));
                         } else {
                             self.swarms.remove(idx);
@@ -2268,7 +2283,7 @@ impl App {
                         let project = swarm.project_name.clone();
                         self.intentionally_stopped.insert(project.clone());
                         self.set_status(format!("Tearing down {project}..."));
-                        if let Err(e) = self.adapter.teardown(&swarm).await {
+                        if let Err(e) = self.stop_swarm(&swarm).await {
                             self.set_status(format!("Teardown error: {e}"));
                         } else {
                             self.swarms.remove(idx);
@@ -2342,7 +2357,7 @@ impl App {
                         // turn rather than exiting it, never touches the
                         // manager, and leaves the tmux session running. The
                         // swarm stayed up and the user was told it had stopped.
-                        if let Err(e) = self.adapter.teardown(&swarm).await {
+                        if let Err(e) = self.stop_swarm(&swarm).await {
                             self.set_status(format!("Stop error: {e}"));
                         } else {
                             self.swarms[idx].stopped = true;
@@ -2622,22 +2637,10 @@ impl App {
                     }
                     KeyCode::Char('a') => {
                         // Add a new worker
-                        if let Some(swarm) = self.swarms.get(swarm_idx) {
-                            let swarm_clone = swarm.clone();
+                        if self.swarms.get(swarm_idx).is_some() {
                             self.set_status("Adding worker...".to_string());
-                            match self.adapter.add_worker(&swarm_clone).await {
-                                Ok(worker) => {
-                                    let id = worker.role.clone();
-                                    if let Some(swarm) = self.swarms.get_mut(swarm_idx) {
-                                        swarm.workers.push(worker);
-                                    }
-                                    self.start_all_pane_watchers();
-                                    self.set_status(format!("Added {id}"));
-                                }
-                                Err(e) => {
-                                    self.set_status(format!("Failed: {e}"));
-                                }
-                            }
+                            let line = self.add_worker_to(swarm_idx).await;
+                            self.set_status(line);
                         }
                     }
                     KeyCode::Char('f') => {
@@ -3867,23 +3870,9 @@ impl App {
                 }
                 KeyCode::Char('a') => {
                     // Add a new worker to this swarm
-                    if let Some(swarm) = self.swarms.get(swarm_idx) {
-                        let swarm_clone = swarm.clone();
+                    if self.swarms.get(swarm_idx).is_some() {
                         self.set_status("Adding worker...".to_string());
-                        match self.adapter.add_worker(&swarm_clone).await {
-                            Ok(worker) => {
-                                let id = worker.role.clone();
-                                if let Some(swarm) = self.swarms.get_mut(swarm_idx) {
-                                    swarm.workers.push(worker);
-                                }
-                                self.start_all_pane_watchers();
-                                self.status_message =
-                                    Some(format!("Added {id} (starting worker loop)"));
-                            }
-                            Err(e) => {
-                                self.status_message = Some(format!("Failed to add worker: {e}"));
-                            }
-                        }
+                        self.status_message = Some(self.add_worker_to(swarm_idx).await);
                     }
                 }
                 KeyCode::Char('f') => {
