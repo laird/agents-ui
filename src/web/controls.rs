@@ -361,7 +361,13 @@ async fn via_ctl(
             }
         }
     }
+    // Whether it was already marked stopped (the TUI's `d` key, an earlier
+    // stop): a mark this call didn't write is never taken off.
+    let mut marked_before = true;
     if action == Action::Stop {
+        if let Ok((_, file)) = tombstone(agent) {
+            marked_before = state.transport.output("test", &["-e".to_string(), file], None).await.map(|o| o.status.success()).unwrap_or(true);
+        }
         // The village's own mark, so its heal and revive leave the worker stopped.
         let steps = stop_steps(agent).ok()?;
         if let Err(err) = run_steps(&state.transport, &steps[..2]).await {
@@ -371,9 +377,10 @@ async fn via_ctl(
     let args = super::ctl::args(action, &agent.worktree_path, issue, &agent.role, text.as_deref());
     let answer = super::ctl::call(&state.transport, script, &cwd, &args).await;
     let done = matches!(answer, super::ctl::Answer::Result { ok: true, .. });
-    // Started again, or a stop that didn't happen: either way not stopped.
-    // (Exit 3 leaves the mark: the village's own stop writes it again.)
-    let unmark = (action == Action::Restart && done) || (action == Action::Stop && !done && answer != super::ctl::Answer::NotInstalled);
+    // Started again, or a stop that didn't happen and whose mark this call
+    // wrote: either way not stopped. (Exit 3 leaves the mark: the village's
+    // own stop writes it again.)
+    let unmark = (action == Action::Restart && done) || (action == Action::Stop && !done && !marked_before && answer != super::ctl::Answer::NotInstalled);
     if unmark {
         if let Ok((_, file)) = tombstone(agent) {
             let _ = state.transport.output("rm", &["-f".to_string(), file], None).await;

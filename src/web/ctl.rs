@@ -49,6 +49,8 @@ pub fn listed(text: &str, worktree: &str) -> bool {
         .into_iter::<Value>()
         .map_while(Result::ok)
         .flat_map(|m| m["workers"].as_array().cloned().unwrap_or_default())
+        // An entry with no pane is one autocoder-ctl can't nudge or stop.
+        .filter(|w| ["tmuxTarget", "herdrPane", "cmuxWorkspace"].iter().any(|k| w[*k].as_str().is_some_and(|p| !p.is_empty())))
         .filter_map(|w| w["worktree"].as_str().map(crate::model::recognize::canonical))
         .any(|p| p == want)
 }
@@ -207,8 +209,9 @@ mod tests {
     /// its workers, so the village drives them itself.
     #[test]
     fn only_a_worker_in_a_manifest_is_autocoders_to_drive() {
-        let manifests = r#"{"session":"claude-p","workers":[{"worktree":"/src/p-wt-1","number":1},{"worktree":"/src/p-wt-2/","number":2}]}
+        let manifests = r#"{"session":"claude-p","workers":[{"worktree":"/src/p-wt-1","number":1,"tmuxTarget":"claude-p:1.1"},{"worktree":"/src/p-wt-2/","number":2,"herdrPane":"w1:p2"},{"worktree":"/src/p-wt-4","number":4,"tmuxTarget":null}]}
 {"session":"other","workers":[{"number":5}]}"#;
+        assert!(!listed(manifests, "/src/p-wt-4"), "no pane: autocoder-ctl can't act on it");
         assert!(listed(manifests, "/src/p-wt-1"));
         assert!(listed(manifests, "/src/p-wt-2"), "a trailing slash is the same worktree");
         assert!(!listed(manifests, "/src/p-wt-3"));
