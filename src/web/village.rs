@@ -1313,12 +1313,12 @@ impl SwarmVillages {
         } else {
             (super::gate::GateReading::default(), String::new())
         };
-        // Bounces (#431): the job's comments and the push retries outlive its files.
+        // Bounces (#431): autocoder's merge events (#537), else the job's comments
+        // and the push retries, which outlive its files.
         let bounces = {
             let mut memory = self.conflicts.lock().unwrap_or_else(|e| e.into_inner());
             let remembered = memory.entry(swarm.repo_path.clone()).or_default();
-            super::gate::remember_conflicts(&gate.jobs, remembered);
-            super::gate::bounce_history(&merge_comments, &retries, &gate.jobs, remembered)
+            super::gate::bounces(&gate, &merge_comments, &retries, remembered)
         };
         // Flaky tests (#501): each finished gate run is recorded as it is seen,
         // since the logs are overwritten when a merge is relaunched.
@@ -1332,7 +1332,7 @@ impl SwarmVillages {
             Vec::new()
         };
         let merge_stats = (gate.local || !bounces.is_empty())
-            .then(|| super::gate::merge_stats(&bounces, &gate.jobs, &chrono::Utc::now().format("%Y-%m-%d").to_string()));
+            .then(|| super::gate::merge_stats(&bounces, &gate, &chrono::Utc::now().format("%Y-%m-%d").to_string()));
         let integration = pipeline.integration.clone();
         let mut village = build_gated(swarm, &issues, pipeline, &gate);
         if !swarm.repo_path.is_empty() {

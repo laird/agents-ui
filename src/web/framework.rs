@@ -1396,6 +1396,7 @@ mod tests {
                 job(4, false, Some(1), "❌ Merge conflict integrating 'master' into feature/issue-4.\n"),
                 job(5, false, Some(0), "✅ Issue #5 merged into 'master' (disjoint re-sync; ...)\n"),
             ],
+            ..GateReading::default()
         };
         let issues = vec![
             issue(1, &["merging"]),

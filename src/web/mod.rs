@@ -14,6 +14,7 @@ pub mod github;
 pub mod grid;
 pub mod herdr;
 pub mod kubernetes;
+pub mod merge_events;
 pub mod newissue;
 pub mod pane;
 pub mod pins;

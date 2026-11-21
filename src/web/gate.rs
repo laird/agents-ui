@@ -17,8 +17,16 @@
 //!   is a `train/<UTC>` branch);
 //! - `autocoder-gate-slot-<k>.lock`: flock-held by whichever job is in slot k.
 //!
-//! Everything here reads those files. It only works on the host serving the
-//! village; a remote host reports nothing rather than guess.
+//! Since laird/agents#272 those files are under autocoder's state directory
+//! (`${XDG_STATE_HOME:-~/.local/state}/autocoder/merge/`) rather than `/tmp`;
+//! both are read.
+//!
+//! How each finished job ended, and the history of bounces, come from
+//! autocoder's merge events (`merge_events.rs`, laird/agents#184) when it writes
+//! them. A running job's phase, slot and progress, and everything for an
+//! autocoder too old to write the events, come from the files.
+//! It only works on the host serving the village; a remote host reports
+//! nothing rather than guess.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -27,6 +35,7 @@ use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
 
 use super::IssueSnapshot;
+use super::merge_events::{self, MergeEvent};
 
 /// Where a task is in the merge gate.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -251,10 +260,18 @@ pub fn assess(reading: &GateReading, issues: &[IssueSnapshot], now: SystemTime) 
         return (HashMap::new(), None);
     }
     let jobs: HashMap<u32, &Job> = reading.jobs.iter().map(|j| (j.issue, j)).collect();
+    let latest = reading.events.as_deref().map(merge_events::latest_attempts).unwrap_or_default();
     let mut gates = HashMap::new();
     for i in issues.iter().filter(|i| i.state == "open") {
         let url = Some(i.url.as_str()).filter(|u| !u.is_empty());
-        if let Some(g) = job_gate(jobs.get(&i.number).copied(), &i.labels, url, now) {
+        let job = jobs.get(&i.number).copied();
+        // A running job is the news; a finished one ended as its event says,
+        // except that only its log tells a red base.
+        let from_event = match job {
+            Some(j) if j.alive || (j.exit.is_some() && red_base(&j.log)) => None,
+            _ => latest.get(&i.number).and_then(|e| merge_events::event_gate(e, &i.labels, url)),
+        };
+        if let Some(g) = from_event.or_else(|| job_gate(job, &i.labels, url, now)) {
             gates.insert(i.number, g);
         }
     }
@@ -451,13 +468,34 @@ pub fn bounce_history(
     out
 }
 
+/// Each issue's bounces: from autocoder's merge events when the reading has
+/// them, else from the jobs' comments, the push-retry commits and the job
+/// files ([`bounce_history`]). Conflicted logs are remembered either way.
+pub fn bounces(
+    reading: &GateReading,
+    comments: &[(u32, String, String)],
+    retries_log: &str,
+    remembered: &mut HashMap<u32, Vec<String>>,
+) -> std::collections::BTreeMap<u32, Vec<Bounce>> {
+    remember_conflicts(&reading.jobs, remembered);
+    match &reading.events {
+        Some(events) => merge_events::bounces(events),
+        None => bounce_history(comments, retries_log, &reading.jobs, remembered),
+    }
+}
+
 /// Today's tally (`today` is `YYYY-MM-DD`, UTC, as the bounce times are):
-/// jobs that landed today, bounces today, and the files that conflict most.
-pub fn merge_stats(bounces: &std::collections::BTreeMap<u32, Vec<Bounce>>, jobs: &[Job], today: &str) -> MergeStats {
-    let landed_today = jobs
-        .iter()
-        .filter(|j| !j.alive && j.exit == Some(0) && j.started.is_some_and(|t| rfc3339(t).starts_with(today)))
-        .count() as u32;
+/// what landed today (by the merge events, else the jobs that landed),
+/// bounces today, and the files that conflict most.
+pub fn merge_stats(bounces: &std::collections::BTreeMap<u32, Vec<Bounce>>, reading: &GateReading, today: &str) -> MergeStats {
+    let landed_today = match &reading.events {
+        Some(events) => merge_events::landed_today(events, today),
+        None => reading
+            .jobs
+            .iter()
+            .filter(|j| !j.alive && j.exit == Some(0) && j.started.is_some_and(|t| rfc3339(t).starts_with(today)))
+            .count() as u32,
+    };
     let bounced_today = bounces.values().flatten().filter(|b| b.at.as_deref().is_some_and(|a| a.starts_with(today))).count() as u32;
     let mut counts: HashMap<&str, u32> = HashMap::new();
     for f in bounces.values().flatten().flat_map(|b| &b.files) {
@@ -565,6 +603,8 @@ pub struct GateReading {
     pub jobs: Vec<Job>,
     pub slots: u32,
     pub busy: Vec<u32>,
+    /// This repo's merge events, when autocoder writes them (`merge_events::read`).
+    pub events: Option<Vec<MergeEvent>>,
 }
 
 /// autocoder's repo id: the main checkout's name and the first 8 hex of the
@@ -635,15 +675,28 @@ pub fn read_push_retries(repo: &Path, integration: &str) -> String {
     command("git", &["log", &branch, "--since=2.days", "--fixed-strings", "--grep=(push retry ", "--format=%cI%x09%s"], repo, None).unwrap_or_default()
 }
 
+/// Where merge jobs leave their files: `AUTOCODER_TMP` when set; else
+/// autocoder's state directory (laird/agents#272), then `/tmp` for an older
+/// autocoder. The first that holds gate slot locks is the one whose slots count.
+pub fn merge_dirs(env: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {
+    let set = |k: &str| env(k).filter(|v| !v.is_empty());
+    if let Some(t) = set("AUTOCODER_TMP") {
+        return vec![PathBuf::from(t)];
+    }
+    let state = set("XDG_STATE_HOME").filter(|s| s.starts_with('/')).map(PathBuf::from).or_else(|| set("HOME").map(|h| PathBuf::from(h).join(".local/state")));
+    state.map(|s| s.join("autocoder/merge")).into_iter().chain([PathBuf::from("/tmp")]).collect()
+}
+
 pub fn read_local(repo: &Path) -> GateReading {
-    let tmp = PathBuf::from(std::env::var("AUTOCODER_TMP").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/tmp".to_string()));
+    let dirs = merge_dirs(&|k| std::env::var(k).ok());
     let slots = max_gates(std::env::var("AUTOCODER_MAX_GATES").ok().as_deref(), std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4));
     let mut reading = GateReading { local: true, slots, ..GateReading::default() };
     let Some(id) = local_repo_id(repo) else { return reading };
+    reading.events = merge_events::read(&id);
     let prefix = format!("autocoder-merge-{id}-");
 
-    let mut jobs = Vec::new();
-    for entry in std::fs::read_dir(&tmp).into_iter().flatten().flatten() {
+    let mut jobs: Vec<(Option<u32>, Job)> = Vec::new();
+    for (tmp, entry) in dirs.iter().flat_map(|d| std::fs::read_dir(d).into_iter().flatten().flatten().map(move |e| (d, e))) {
         let name = entry.file_name().to_string_lossy().into_owned();
         let Some(issue) = name.strip_prefix(&prefix).and_then(|r| r.strip_suffix(".pid")).and_then(|n| n.parse::<u32>().ok()) else { continue };
         let base = tmp.join(format!("{prefix}{issue}"));
@@ -672,6 +725,11 @@ pub fn read_local(repo: &Path) -> GateReading {
             },
         ));
     }
+    // A job left in both places (autocoder upgraded mid-swarm): the newer one.
+    jobs.sort_by(|a, b| b.1.started.cmp(&a.1.started));
+    let mut seen = HashSet::new();
+    jobs.retain(|(_, j)| seen.insert(j.issue));
+    let tmp = dirs.iter().find(|d| d.join("autocoder-gate-slot-1.lock").exists()).unwrap_or(&dirs[0]).clone();
 
     // Which job holds which slot: /proc/locks names the holder's pid, and the
     // holder is a subshell several levels under the job's wrapper.
@@ -908,7 +966,7 @@ mod tests {
         train.feature = Some("train/20261109T1700Z".into());
         train.members = vec![412, 415];
         train.slot = Some(1);
-        let reading = GateReading { local: true, jobs: vec![train, job(9, false, Some(1), CONFLICT)], slots: 3, busy: vec![1] };
+        let reading = GateReading { local: true, jobs: vec![train, job(9, false, Some(1), CONFLICT)], slots: 3, busy: vec![1], ..GateReading::default() };
         let (gates, merge) = assess(&reading, &[issue(400, &["merging"]), issue(412, &["merging"]), issue(415, &[]), issue(9, &["needs-clarification"])], at(T0 + 60));
         let merge = merge.unwrap();
         assert_eq!((merge.slots, merge.busy.clone()), (3, vec![1]));
@@ -936,6 +994,83 @@ mod tests {
         assert_eq!(words, vec!["\"queued\"", "\"landed-unproven\"", "\"red-base\""]);
         let g: TaskGate = serde_json::from_str(r#"{"state": "gating", "slot": 2, "attempt": 1}"#).unwrap();
         assert_eq!((g.state, g.slot, g.attempt), (GateState::Gating, Some(2), 1));
+    }
+
+    // ---- merge events (#537) ----
+
+    fn event(issue: u32, ts: &str, event: &str, outcome: &str, files: &[&str]) -> MergeEvent {
+        MergeEvent {
+            ts: ts.into(),
+            event: event.into(),
+            outcome: outcome.into(),
+            repo: "r-1".into(),
+            issue: Some(issue),
+            files: files.iter().map(|f| f.to_string()).collect(),
+            duration_s: Some(60),
+            ..MergeEvent::default()
+        }
+    }
+
+    #[test]
+    fn finished_jobs_end_as_their_events_say_and_running_ones_as_their_files() {
+        let issue = |n: u32, l: &[&str]| IssueSnapshot { number: n, state: "open".into(), labels: labels(l), ..IssueSnapshot::default() };
+        let events = vec![
+            event(9, "2026-11-21T01:00:00Z", "attempt", "conflict", &["a.rs"]),
+            event(12, "2026-11-21T01:00:00Z", "attempt", "gate-failed", &[]),
+            event(13, "2026-11-21T01:00:00Z", "attempt", "landed", &[]),
+            event(14, "2026-11-21T01:00:00Z", "attempt", "conflict", &["b.rs"]),
+        ];
+        // 9's files are gone; 12's say it passed (an older attempt); 13 is relaunched
+        // and gating; 14's finished log shows a red base, which only a log tells.
+        let jobs = vec![job(12, false, Some(0), PASSED), job(13, true, None, GATING), job(14, false, Some(1), RED_REFUSED)];
+        let open = [issue(9, &["needs-clarification"]), issue(12, &[]), issue(13, &["merging"]), issue(14, &[]), issue(15, &["awaiting-integration"])];
+        let with = GateReading { local: true, jobs: jobs.clone(), events: Some(events), ..GateReading::default() };
+        let (gates, _) = assess(&with, &open, at(T0));
+        let state = |g: &HashMap<u32, TaskGate>, n: u32| g.get(&n).map(|g| g.state);
+        assert_eq!(state(&gates, 9), Some(GateState::Conflict), "from the event alone");
+        assert_eq!(state(&gates, 12), Some(GateState::Failed), "the event, not the stale exit code");
+        assert_eq!(state(&gates, 13), Some(GateState::Gating));
+        assert_eq!(state(&gates, 14), Some(GateState::RedBase));
+        assert_eq!(state(&gates, 15), Some(GateState::LandedUnproven), "no event: the label still says");
+        // An autocoder too old to write events: the files decide, as before.
+        let without = GateReading { local: true, jobs, ..GateReading::default() };
+        let (gates, _) = assess(&without, &open, at(T0));
+        assert_eq!(state(&gates, 9), None);
+        assert_eq!(state(&gates, 12), Some(GateState::Passed));
+        assert_eq!(state(&gates, 13), Some(GateState::Gating));
+    }
+
+    #[test]
+    fn bounces_and_tally_come_from_events_when_there_are_any() {
+        let today = "2026-11-21";
+        let comments = vec![(9, "2026-11-21T00:30:00Z".to_string(), C_CONFLICT.to_string())];
+        let retries = "2026-11-21T00:40:00Z\tRe-sync origin/master into feature/issue-9 (push retry 1)\n";
+        let jobs = vec![job(9, false, Some(1), TWO_FILES)];
+        let events = vec![
+            event(9, "2026-11-21T01:00:00Z", "attempt", "conflict", &["a.rs"]),
+            event(9, "2026-11-21T01:10:00Z", "push-retry", "push-retry", &[]),
+            event(9, "2026-11-21T01:20:00Z", "attempt", "landed", &[]),
+        ];
+        let with = GateReading { local: true, jobs: jobs.clone(), events: Some(events), ..GateReading::default() };
+        let mut memory = HashMap::new();
+        let b = bounces(&with, &comments, retries, &mut memory);
+        assert_eq!(b[&9].iter().map(|b| (b.kind, b.files.clone())).collect::<Vec<_>>(), [(BounceKind::Conflict, vec!["a.rs".to_string()]), (BounceKind::PushRetry, vec![])]);
+        assert_eq!(merge_stats(&b, &with, today).landed_today, 1);
+        // Without events: the comment (the job's own bounce, with its log's files) and the commit.
+        let without = GateReading { local: true, jobs, ..GateReading::default() };
+        let b = bounces(&without, &comments, retries, &mut HashMap::new());
+        assert_eq!(b[&9].iter().map(|b| b.kind).collect::<Vec<_>>(), [BounceKind::Conflict, BounceKind::PushRetry]);
+        assert_eq!(b[&9][0].files, ["src/web/server.rs", "src/web/village/main.js"]);
+        assert_eq!(merge_stats(&b, &without, today).landed_today, 0);
+    }
+
+    #[test]
+    fn job_files_are_looked_for_where_autocoder_puts_them() {
+        let env = |vars: &'static [(&'static str, &'static str)]| move |k: &str| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
+        assert_eq!(merge_dirs(&env(&[("AUTOCODER_TMP", "/t"), ("HOME", "/h")])), [PathBuf::from("/t")]);
+        assert_eq!(merge_dirs(&env(&[("HOME", "/h")])), [PathBuf::from("/h/.local/state/autocoder/merge"), PathBuf::from("/tmp")]);
+        assert_eq!(merge_dirs(&env(&[("XDG_STATE_HOME", "/s"), ("HOME", "/h")])), [PathBuf::from("/s/autocoder/merge"), PathBuf::from("/tmp")]);
+        assert_eq!(merge_dirs(&env(&[])), [PathBuf::from("/tmp")]);
     }
 
     // ---- bounces (#431) ----
@@ -1024,7 +1159,8 @@ mod tests {
         bounces.insert(1, vec![b(&t(1), &["server.rs", "main.js"]), b("2000-01-01T00:00:00Z", &["server.rs"])]);
         bounces.insert(2, vec![b(&t(2), &["server.rs"]), Bounce { at: Some(t(3)), kind: BounceKind::PushRetry, files: vec![] }]);
         let jobs = [job(1, false, Some(0), PASSED), job(2, false, Some(0), PASSED), job(3, true, None, RESYNC), job(4, false, Some(1), CONFLICT)];
-        let s = merge_stats(&bounces, &jobs, today);
+        let reading = GateReading { local: true, jobs: jobs.to_vec(), ..GateReading::default() };
+        let s = merge_stats(&bounces, &reading, today);
         assert_eq!((s.landed_today, s.bounced_today), (2, 3));
         assert_eq!(s.hotspots, vec![Hotspot { file: "server.rs".into(), count: 3 }, Hotspot { file: "main.js".into(), count: 1 }]);
         let json = serde_json::to_string(&bounces[&2]).unwrap();
