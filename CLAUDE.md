@@ -233,7 +233,7 @@ Note this repository's default branch is `master`, not `main`.
 
 Landed work waits at the village quay until it is deployed. `.autocoder.json`
 lists two environments, and both are recorded as GitHub Deployments, which is
-what `src/web/deployments.rs` reads to place each stop:
+what `src/web/deployments.rs` reads to place each stop.
 
 Deploying and releasing are autocoder's (laird/agents#200): its
 `scripts/deploy.sh` and `scripts/release.sh`, in the installed plugin
@@ -261,7 +261,9 @@ test nuc_1_deploys_through_autocoder` checks:
   releases it. `--no-release` skips it for one deploy.
   **Pushes of master from the main checkout release too**, once autocoder's
   pre-push hook is installed (`<autocoder scripts>/install-release-hook.sh`,
-  once per clone; it replaces the hook agents-ui used to install). Pushes from
+  once per clone; it replaces the hook agents-ui used to install, which now
+  only runs `tools/hooks/pre-push`, a stub that lets pushes through without
+  releasing. Delete that stub once every clone has autocoder's hook). Pushes from
   the swarm's worktrees and merge jobs never do. `AUTOCODER_NO_RELEASE=1 git
   push` skips it; the log is `~/.local/state/autocoder/release.log`.
   `release.sh [vX.Y.Z]` releases by hand.

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Kept only so a clone still on the old agents-ui pre-push hook (which runs this
+# file) can push (#533). Releasing on push is autocoder's now: run its
+# install-release-hook.sh once per clone, then this file can go.
+echo "pre-push: not releasing; install autocoder's hook (install-release-hook.sh, see CLAUDE.md)" >&2
+exit 0
