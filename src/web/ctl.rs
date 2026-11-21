@@ -36,16 +36,54 @@ pub fn script(transport: &ServerTransport) -> Option<PathBuf> {
     crate::scripts::launcher::find_script("autocoder-ctl.sh")
 }
 
+/// Whether a swarm manifest in `text` (the `.autocoder/swarm/*.json` files,
+/// one after another) lists `worktree` as a worker. autocoder-ctl's worker
+/// verbs find a worker only there; a swarm the TUI launched itself has no
+/// manifest, so its workers are the village's to drive (the fallback).
+pub fn listed(text: &str, worktree: &str) -> bool {
+    if worktree.trim().is_empty() {
+        return false;
+    }
+    let want = crate::model::recognize::canonical(worktree);
+    serde_json::Deserializer::from_str(text)
+        .into_iter::<Value>()
+        .map_while(Result::ok)
+        .flat_map(|m| m["workers"].as_array().cloned().unwrap_or_default())
+        .filter_map(|w| w["worktree"].as_str().map(crate::model::recognize::canonical))
+        .any(|p| p == want)
+}
+
+/// The script, when autocoder-ctl can do `action` for this worker: a release
+/// needs only the script; nudge, stop and restart need the worker in one of
+/// the repo's swarm manifests.
+pub async fn applies(transport: &ServerTransport, repo: &str, worktree: &str, action: Action) -> Option<PathBuf> {
+    let script = script(transport)?;
+    if action == Action::Release {
+        return Some(script);
+    }
+    if repo.is_empty() {
+        return None;
+    }
+    let cat = ["-c".to_string(), "cat .autocoder/swarm/*.json 2>/dev/null".to_string()];
+    let out = transport.output("sh", &cat, Some(Path::new(repo))).await.ok()?;
+    listed(&String::from_utf8_lossy(&out.stdout), worktree).then_some(script)
+}
+
 /// The reason a release from the village gives.
 pub fn release_reason(role: &str) -> String {
     format!("released by hand from the village (worker `{role}`)")
 }
 
-/// The verb and its arguments: the worker by its worktree, a release by its issue.
-pub fn args(action: Action, worktree: &str, issue: Option<u32>, role: &str) -> Vec<String> {
+/// The verb and its arguments: the worker by its worktree, a release by its
+/// issue. A nudge types `text`, the runtime's start-loop command, as the
+/// village's own nudge does, rather than autocoder's default prose.
+pub fn args(action: Action, worktree: &str, issue: Option<u32>, role: &str, text: Option<&str>) -> Vec<String> {
     let v = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
     match action {
-        Action::Nudge => v(&["nudge", worktree]),
+        Action::Nudge => match text {
+            Some(t) => v(&["nudge", worktree, "--", t]),
+            None => v(&["nudge", worktree]),
+        },
         Action::Stop => v(&["stop", worktree]),
         Action::Restart => v(&["restart", worktree]),
         Action::Release => v(&["release", &issue.map(|n| n.to_string()).unwrap_or_default(), "--reason", &release_reason(role)]),
@@ -156,12 +194,28 @@ mod tests {
 
     #[test]
     fn each_control_is_its_verb_on_the_worktree_or_the_issue() {
-        assert_eq!(args(Action::Nudge, "/src/p-wt-2", None, "worker-2"), ["nudge", "/src/p-wt-2"]);
-        assert_eq!(args(Action::Stop, "/src/p-wt-2", Some(7), "worker-2"), ["stop", "/src/p-wt-2"]);
-        assert_eq!(args(Action::Restart, "/src/p-wt-2", Some(7), "worker-2"), ["restart", "/src/p-wt-2"]);
-        assert_eq!(args(Action::Release, "/src/p-wt-2", Some(42), "worker-2"), ["release", "42", "--reason", "released by hand from the village (worker `worker-2`)"]);
-        assert_eq!(shown(&args(Action::Release, "", Some(42), "w")), "autocoder-ctl release 42 --reason 'released by hand from the village (worker `w`)'");
+        assert_eq!(args(Action::Nudge, "/src/p-wt-2", None, "worker-2", None), ["nudge", "/src/p-wt-2"]);
+        assert_eq!(args(Action::Nudge, "/src/p-wt-2", None, "worker-2", Some("/autocoder:fix-loop")), ["nudge", "/src/p-wt-2", "--", "/autocoder:fix-loop"]);
+        assert_eq!(args(Action::Stop, "/src/p-wt-2", Some(7), "worker-2", None), ["stop", "/src/p-wt-2"]);
+        assert_eq!(args(Action::Restart, "/src/p-wt-2", Some(7), "worker-2", None), ["restart", "/src/p-wt-2"]);
+        assert_eq!(args(Action::Release, "/src/p-wt-2", Some(42), "worker-2", None), ["release", "42", "--reason", "released by hand from the village (worker `worker-2`)"]);
+        assert_eq!(shown(&args(Action::Release, "", Some(42), "w", None)), "autocoder-ctl release 42 --reason 'released by hand from the village (worker `w`)'");
         assert_eq!(shown(&["nudge".into(), "/src/it's".into()]), "autocoder-ctl nudge '/src/it'\\''s'");
+    }
+
+    /// A swarm the TUI launched has no manifest: autocoder-ctl can't find
+    /// its workers, so the village drives them itself.
+    #[test]
+    fn only_a_worker_in_a_manifest_is_autocoders_to_drive() {
+        let manifests = r#"{"session":"claude-p","workers":[{"worktree":"/src/p-wt-1","number":1},{"worktree":"/src/p-wt-2/","number":2}]}
+{"session":"other","workers":[{"number":5}]}"#;
+        assert!(listed(manifests, "/src/p-wt-1"));
+        assert!(listed(manifests, "/src/p-wt-2"), "a trailing slash is the same worktree");
+        assert!(!listed(manifests, "/src/p-wt-3"));
+        assert!(!listed(manifests, "/src/p-wt"), "matched whole");
+        assert!(!listed(manifests, ""), "no worktree: nothing to name the worker by");
+        assert!(!listed("", "/src/p-wt-1"), "no manifest");
+        assert!(!listed("not json", "/src/p-wt-1"));
     }
 
     #[test]
@@ -205,7 +259,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let fake = dir.join("autocoder-ctl.sh");
         std::fs::write(&fake, "printf '{\"ok\":true,\"action\":\"%s\",\"target\":\"%s\",\"detail\":{\"actor\":\"%s\",\"cwd\":\"%s\"}}' \"$1\" \"$2\" \"$AUTOCODER_CTL_ACTOR\" \"$PWD\"\n").unwrap();
-        let answer = call(&ServerTransport::default(), &fake, &dir, &args(Action::Stop, "/src/p-wt-2", None, "w")).await;
+        let answer = call(&ServerTransport::default(), &fake, &dir, &args(Action::Stop, "/src/p-wt-2", None, "w", None)).await;
         let Answer::Result { ok, exit, detail } = answer else { panic!("{answer:?}") };
         assert!(ok && exit == 0);
         assert_eq!(detail["actor"], ACTOR);

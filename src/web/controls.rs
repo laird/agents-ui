@@ -28,7 +28,8 @@
 //!   closes. Only tmux panes, and only a known runtime: the server has no way
 //!   to launch one in a herdr pane yet, so a herdr worker is a 501.
 //!
-//! **autocoder-ctl** (#540): when this host has `autocoder-ctl.sh`, each
+//! **autocoder-ctl** (#540): when this host has `autocoder-ctl.sh` (and, for
+//! nudge, stop and restart, the repo's swarm manifest lists the worker), each
 //! action is its `nudge|release|stop|restart` verb instead (`ctl.rs`), after
 //! the same checks (an idle worker, a claimed issue, a worktree to mark
 //! stopped), and its answer is passed on. What follows is the fallback, for an
@@ -336,12 +337,14 @@ async fn via_ctl(
         return fail((StatusCode::CONFLICT, "only workers have controls"));
     }
     let mut issue = None;
+    let mut text = None;
     let mut cwd = std::path::PathBuf::from(if swarm.repo_path.is_empty() { &agent.worktree_path } else { &swarm.repo_path });
     match action {
         Action::Nudge => {
             // Only an idle worker: the text would land in its work or answer its question.
-            if let Err(r) = nudge_command(agent, &AgentType::from_name(&swarm.agent_type).unwrap_or(AgentType::Claude)) {
-                return fail(r);
+            match nudge_command(agent, &AgentType::from_name(&swarm.agent_type).unwrap_or(AgentType::Claude)) {
+                Ok(command) => text = Some(command),
+                Err(r) => return fail(r),
             }
         }
         Action::Release => {
@@ -365,8 +368,18 @@ async fn via_ctl(
             return Some(Err((StatusCode::BAD_GATEWAY, Json(json!({ "error": format!("could not mark it stopped: {err}") })))));
         }
     }
-    let args = super::ctl::args(action, &agent.worktree_path, issue, &agent.role);
-    let (ok, exit, detail) = match super::ctl::call(&state.transport, script, &cwd, &args).await {
+    let args = super::ctl::args(action, &agent.worktree_path, issue, &agent.role, text.as_deref());
+    let answer = super::ctl::call(&state.transport, script, &cwd, &args).await;
+    let done = matches!(answer, super::ctl::Answer::Result { ok: true, .. });
+    // Started again, or a stop that didn't happen: either way not stopped.
+    // (Exit 3 leaves the mark: the village's own stop writes it again.)
+    let unmark = (action == Action::Restart && done) || (action == Action::Stop && !done && answer != super::ctl::Answer::NotInstalled);
+    if unmark {
+        if let Ok((_, file)) = tombstone(agent) {
+            let _ = state.transport.output("rm", &["-f".to_string(), file], None).await;
+        }
+    }
+    let (ok, exit, detail) = match answer {
         super::ctl::Answer::NotInstalled => return None,
         super::ctl::Answer::Broken(err) => {
             tracing::warn!("{} via autocoder-ctl for {}: {err}", args[0], agent.role);
@@ -374,12 +387,6 @@ async fn via_ctl(
         }
         super::ctl::Answer::Result { ok, exit, detail } => (ok, exit, detail),
     };
-    if ok && action == Action::Restart {
-        // Started again: it is no longer stopped.
-        if let Ok((_, file)) = tombstone(agent) {
-            let _ = state.transport.output("rm", &["-f".to_string(), file], None).await;
-        }
-    }
     if action == Action::Release {
         state.village.forget(std::path::Path::new(&swarm.repo_path));
     }
@@ -412,7 +419,7 @@ pub async fn api_control_handler(
 
     // autocoder-ctl when this host has it (#540); else, or when it says this
     // autocoder can't (exit 3), the village does it itself below.
-    if let Some(script) = super::ctl::script(&state.transport) {
+    if let Some(script) = super::ctl::applies(&state.transport, &swarm.repo_path, &agent.worktree_path, body.action).await {
         if let Some(done) = via_ctl(&state, &script, &swarm, &agent, body.action).await {
             return done;
         }
