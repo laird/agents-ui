@@ -200,9 +200,9 @@ issue and writes the fix a second time, because the issue is still open and the
 work is invisible on the integration branch. That has already happened: #329
 was fixed twice, on two branches, by two workers.
 
-Before merging, the full suite must pass (`source "$HOME/.cargo/env" && cargo test`).
-How a branch reaches master (rebasing, conflicts, rejected pushes, merge
-trains) is autocoder's merge job's to enforce, not this file's. One fact about
+Before merging, the full suite must pass (the Regression Test Suite command
+above). How a branch reaches master (rebasing, conflicts, rejected pushes) is
+autocoder's merge job's to enforce, not this file's. One fact about
 this repo for resolving conflicts: most work here edits the village page
 (`src/web/village/`), so other workers' changes land there constantly; read
 what they added rather than taking "ours".
