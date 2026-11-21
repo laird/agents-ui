@@ -264,6 +264,12 @@ pub fn tmux_key_name(requested: &str) -> Option<String> {
         ("pageup", "PageUp"),
         ("pagedown", "PageDown"),
         ("delete", "DC"),
+        // tmux's own spellings, which is what the session page sends
+        // (`browserKeyToTmux` in ui.html). Lowercased they match nothing
+        // above, so Backspace and Shift+Tab were refused (#547).
+        ("bspace", "BSpace"),
+        ("btab", "BTab"),
+        ("dc", "DC"),
     ];
 
     let lower = requested.trim().to_ascii_lowercase();
@@ -2266,6 +2272,48 @@ mod tests {
                 "key {input}"
             );
         }
+    }
+
+    /// The key names `browserKeyToTmux` in ui.html can return.
+    fn session_page_key_names() -> Vec<String> {
+        let start = INDEX_HTML.find("function browserKeyToTmux(").expect("browserKeyToTmux in ui.html");
+        let body = &INDEX_HTML[start..];
+        let body = &body[..body.find("\n    }\n").expect("end of browserKeyToTmux")];
+        let mut names = Vec::new();
+        for line in body.lines().filter(|l| l.contains("return ") && l.contains('\'')) {
+            let after = &line[line.find("return ").unwrap()..];
+            for (i, quoted) in after.split('\'').enumerate() {
+                // Odd pieces are inside quotes; 'C-' + letter is the chord prefix.
+                if i % 2 == 1 && !quoted.ends_with('-') {
+                    names.push(quoted.to_string());
+                }
+            }
+        }
+        names
+    }
+
+    #[test]
+    fn every_key_the_session_page_sends_is_accepted() {
+        // #547: the page sent "BSpace" and the allowlist only knew "backspace",
+        // so Backspace in the web session view did nothing.
+        let names = session_page_key_names();
+        for expected in ["BSpace", "BTab", "Tab", "Up", "DC"] {
+            assert!(names.iter().any(|n| n == expected), "browserKeyToTmux should send {expected}: {names:?}");
+        }
+        for name in &names {
+            assert_eq!(super::tmux_key_name(name).as_deref(), Some(name.as_str()), "key {name}");
+        }
+    }
+
+    #[test]
+    fn a_batch_with_backspace_between_text_is_accepted() {
+        let items = vec![
+            InputItem::Text { text: "ab".into() },
+            InputItem::Key { key: "BSpace".into() },
+            InputItem::Text { text: "c".into() },
+        ];
+        let resolved = resolve_batch(&items).expect("batch with BSpace");
+        assert_eq!(resolved[1], InputItem::Key { key: "BSpace".into() });
     }
 
     #[test]
