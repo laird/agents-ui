@@ -490,7 +490,9 @@ pub fn bounces(
     for job in reading.jobs.iter().filter(|j| !j.alive && j.exit.is_some_and(|c| c != 0) && red_base(&j.log)) {
         let started = job.started.map(rfc3339);
         if let Some(bs) = out.get_mut(&job.issue) {
-            bs.retain(|b| b.kind != BounceKind::GateFailed || started.as_ref().zip(b.at.as_ref()).is_some_and(|(s, a)| a < s));
+            // With no start time, which bounce was the refusal is unknown: keep them all.
+            let Some(started) = &started else { continue };
+            bs.retain(|b| b.kind != BounceKind::GateFailed || b.at.as_ref().is_some_and(|a| a < started));
         }
     }
     out.retain(|_, bs| !bs.is_empty());
