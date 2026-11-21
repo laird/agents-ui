@@ -18,6 +18,18 @@
 //!   branch's tip, so the first one after the landing carries the work. It
 //!   counts when the deploy started, whatever its outcome.
 //!
+//! **From autocoder's events first (#539).** autocoder records each issue's
+//! claim, first commit, gate attempts, landing and each deploy as it happens
+//! (`issue-events.jsonl`, laird/agents#190; `issue_events.rs`). Where they
+//! cover a stage, they date it: `claimed` is the start of the last claim
+//! before the landing (a `released` ends a claim), `first_commit` is its
+//! event unless a commit naming the issue was authored earlier (the event has
+//! the committer date, which a rebase resets), `landed` is its event, the
+//! bounces are the `gate-end`s that handed the work back (a red base's
+//! refusal is none), and a `deployed` event counts as a deployment. A stage the events
+//! don't cover (an issue from before them, an autocoder too old to write them,
+//! a village not on the host that runs the swarm) is worked out as above.
+//!
 //! Each stage records how long it took since the stage before it, and the
 //! slowest is named. [`stage_medians`] gives the median of each stage over
 //! the issues landed in the GitHub summary's window, for the dialog's footer.
@@ -40,8 +52,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::deployments::Deployment;
-use super::gate::{Bounce, comment_bounce, push_retry_bounces};
+use super::gate::{Bounce, BounceKind, comment_bounce, push_retry_bounces};
 use super::github::{Issue, is_claim};
+use super::issue_events::IssueEvent;
 use super::server::WebServerState;
 use super::source::TtlCache;
 
@@ -77,6 +90,78 @@ pub struct TravelLog {
     /// The key of the stage that took longest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slowest: Option<String>,
+    /// Whether autocoder's issue events dated any stage (#539); otherwise
+    /// every stage was worked out from comments and git.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub from_events: bool,
+}
+
+/// What an issue's events in `issue-events.jsonl` say (#539). Each is `None`
+/// when the events don't cover it.
+#[derive(Debug, Default)]
+struct Recorded {
+    claimed: Option<DateTime<FixedOffset>>,
+    first_commit: Option<DateTime<FixedOffset>>,
+    landed: Option<DateTime<FixedOffset>>,
+    /// The gate attempts that handed the work back; `None` when no attempt
+    /// ended in the events.
+    bounces: Option<Vec<Bounce>>,
+    /// The repo's deploys: (environment, when).
+    deployed: Vec<(String, DateTime<FixedOffset>)>,
+}
+
+impl Recorded {
+    /// From `events` (one repo's, oldest first) for issue `n`.
+    fn of(n: u32, events: &[IssueEvent]) -> Self {
+        let mut r = Recorded::default();
+        let mut open: Option<DateTime<FixedOffset>> = None;
+        let mut bounces: Option<Vec<Bounce>> = None;
+        for e in events {
+            let Some(t) = parse(&e.ts) else { continue };
+            if e.event == "deployed" {
+                if let Some(env) = e.detail_str("environment").filter(|s| !s.is_empty()) {
+                    r.deployed.push((env.to_string(), t));
+                }
+                continue;
+            }
+            if e.issue != Some(n) || r.landed.is_some() {
+                continue;
+            }
+            match e.event.as_str() {
+                // A claim is recorded more than once; it starts at the first.
+                "claimed" => {
+                    let start = *open.get_or_insert(t);
+                    r.claimed = Some(start);
+                }
+                "released" | "escalated" | "decomposed" => open = None,
+                "first-commit" => r.first_commit = Some(r.first_commit.map_or(t, |f| f.min(t))),
+                "gate-end" => {
+                    let list = bounces.get_or_insert_with(Vec::new);
+                    // A red base refused the work (its `reason` says the
+                    // integration branch fails alone): not this change's
+                    // bounce, as the village's bounce marks agree (#537).
+                    if e.detail_str("reason").is_some_and(|r| r.contains("alone")) {
+                        continue;
+                    }
+                    let kind = match e.detail_str("outcome") {
+                        Some("conflict") => BounceKind::Conflict,
+                        Some("gate-failed" | "failed" | "escalated") => BounceKind::GateFailed,
+                        _ => continue,
+                    };
+                    let at = t.with_timezone(&chrono::Utc).to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+                    list.push(Bounce { at: Some(at), kind, files: Vec::new() });
+                }
+                "landed" => r.landed = Some(t),
+                _ => {}
+            }
+        }
+        r.bounces = bounces;
+        r
+    }
+
+    fn any(&self) -> bool {
+        self.claimed.is_some() || self.first_commit.is_some() || self.landed.is_some() || self.bounces.is_some()
+    }
 }
 
 fn parse(at: &str) -> Option<DateTime<FixedOffset>> {
@@ -99,21 +184,31 @@ pub fn names_issue(subject: &str, n: u32) -> bool {
 }
 
 /// The travel log of `issue` (as `gh issue view --json` or `gh issue list
-/// --json` gives it), from `log` (`git log --format=%aI%x09%s` of the
-/// integration branch) and `deployments` (the repo's, any environment).
-pub fn travel(issue: &Issue, log: &str, deployments: &[Deployment]) -> TravelLog {
+/// --json` gives it), from `events` (this repo's `issue-events.jsonl`, empty
+/// when there is none) where they cover a stage, else from `log` (`git log
+/// --format=%aI%x09%s` of the integration branch) and the comments; and from
+/// `deployments` (the repo's, any environment).
+pub fn travel(issue: &Issue, log: &str, deployments: &[Deployment], events: &[IssueEvent]) -> TravelLog {
     let n = issue.number;
-    let landed = issue.landed().then(|| issue.closed_at.as_deref().and_then(parse)).flatten();
+    let rec = Recorded::of(n, events);
+    let landed = rec.landed.or_else(|| issue.landed().then(|| issue.closed_at.as_deref().and_then(parse)).flatten());
     let state = if landed.is_some() { "landed" } else if issue.state.eq_ignore_ascii_case("closed") { "closed" } else { "open" };
     // Comments up to the landing: after it, a claim or approval is noise.
     let before = |at: &DateTime<FixedOffset>| landed.is_none_or(|l| *at <= l);
     let comments: Vec<(DateTime<FixedOffset>, &str)> =
         issue.comments.iter().filter_map(|c| parse(&c.created_at).map(|t| (t, c.body.as_str()))).filter(|(t, _)| before(t)).collect();
     let approved = comments.iter().filter(|(_, b)| is_approval(b)).map(|(t, _)| *t).min();
-    let claimed = comments.iter().filter(|(_, b)| is_claim(b)).map(|(t, _)| *t).max();
+    let claimed = rec.claimed.or_else(|| comments.iter().filter(|(_, b)| is_claim(b)).map(|(t, _)| *t).max());
     let commits: Vec<(DateTime<FixedOffset>, &str)> =
         log.lines().filter_map(|l| l.split_once('\t')).filter_map(|(at, s)| parse(at).map(|t| (t, s))).collect();
-    let first_commit = commits.iter().filter(|(t, s)| names_issue(s, n) && before(t)).map(|(t, _)| *t).min();
+    // The event is stamped with the commit's committer date, which the rebase
+    // before every merge launch resets; a commit's author date survives it.
+    // The earlier of the two is when the work began.
+    let authored = commits.iter().filter(|(t, s)| names_issue(s, n) && before(t)).map(|(t, _)| *t).min();
+    let first_commit = match (rec.first_commit.filter(|t| before(t)), authored) {
+        (Some(e), Some(a)) => Some(e.min(a)),
+        (e, a) => e.or(a),
+    };
 
     let mut points: Vec<(String, DateTime<FixedOffset>)> = Vec::new();
     if let Some(t) = parse(&issue.created_at) {
@@ -126,11 +221,11 @@ pub fn travel(issue: &Issue, log: &str, deployments: &[Deployment]) -> TravelLog
     }
     if let Some(l) = landed {
         let mut firsts: BTreeMap<&str, DateTime<FixedOffset>> = BTreeMap::new();
-        for d in deployments.iter().filter(|d| !d.environment.is_empty()) {
-            if let Some(t) = parse(&d.created_at).filter(|t| *t >= l) {
-                let e = firsts.entry(d.environment.as_str()).or_insert(t);
-                *e = (*e).min(t);
-            }
+        let github = deployments.iter().filter(|d| !d.environment.is_empty()).filter_map(|d| parse(&d.created_at).map(|t| (d.environment.as_str(), t)));
+        let recorded = rec.deployed.iter().map(|(e, t)| (e.as_str(), *t));
+        for (env, t) in github.chain(recorded).filter(|(_, t)| *t >= l) {
+            let e = firsts.entry(env).or_insert(t);
+            *e = (*e).min(t);
         }
         let mut envs: Vec<_> = firsts.into_iter().collect();
         envs.sort_by_key(|(_, t)| *t);
@@ -150,15 +245,19 @@ pub fn travel(issue: &Issue, log: &str, deployments: &[Deployment]) -> TravelLog
     let slowest = stages.iter().filter_map(|s| s.secs.map(|x| (x, &s.key))).max_by_key(|(x, _)| *x).filter(|(x, _)| *x > 0).map(|(_, k)| k.clone());
 
     let since = parse(&issue.created_at);
-    let mut bounces: Vec<Bounce> = issue
-        .comments
-        .iter()
-        .filter_map(|c| comment_bounce(&c.body, &c.created_at))
+    // The gate's attempts from the events, else from the job's comments. A
+    // rejected push is not an issue event, so its commit still tells.
+    let gated: Vec<Bounce> = match &rec.bounces {
+        Some(b) => b.clone(),
+        None => issue.comments.iter().filter_map(|c| comment_bounce(&c.body, &c.created_at)).collect(),
+    };
+    let mut bounces: Vec<Bounce> = gated
+        .into_iter()
         .chain(push_retry_bounces(log).into_iter().filter(|(m, _)| *m == n).map(|(_, b)| b))
         .filter(|b| b.at.as_deref().and_then(parse).is_none_or(|t| since.is_none_or(|s| t >= s) && before(&t)))
         .collect();
     bounces.sort_by(|a, b| a.at.cmp(&b.at));
-    TravelLog { number: n, title: issue.title.clone(), state: state.into(), stages, bounces, slowest }
+    TravelLog { number: n, title: issue.title.clone(), state: state.into(), stages, bounces, slowest, from_events: rec.any() }
 }
 
 /// Whether a stage measured from `from` is the wait its median is of. A
@@ -197,10 +296,10 @@ pub fn stage_medians<'a>(logs: impl IntoIterator<Item = &'a TravelLog>) -> BTree
 }
 
 /// The stage medians over the issues in `issues` (`gh issue list --json`)
-/// that landed, from the same `log` and `deployments` as [`travel`].
-pub fn medians_of(issues: &[u8], log: &str, deployments: &[Deployment]) -> BTreeMap<String, u64> {
+/// that landed, from the same `log`, `deployments` and `events` as [`travel`].
+pub fn medians_of(issues: &[u8], log: &str, deployments: &[Deployment], events: &[IssueEvent]) -> BTreeMap<String, u64> {
     let issues: Vec<Issue> = serde_json::from_slice(issues).unwrap_or_default();
-    let logs: Vec<TravelLog> = issues.iter().filter(|i| i.landed()).map(|i| travel(i, log, deployments)).collect();
+    let logs: Vec<TravelLog> = issues.iter().filter(|i| i.landed()).map(|i| travel(i, log, deployments, events)).collect();
     stage_medians(&logs)
 }
 
@@ -229,7 +328,19 @@ async fn read(transport: &crate::transport::ServerTransport, repo: &Path, n: u32
     );
     let log = log.ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
     let deployments = deployments.map(|j| super::deployments::parse_deployments(&j)).unwrap_or_default();
-    Some(travel(&issue, &log, &deployments))
+    let events = local_events(transport, repo).await;
+    Some(travel(&issue, &log, &deployments, &events))
+}
+
+/// This repo's issue events (#539), when the village runs on the host that
+/// runs the swarm: autocoder writes them locally. Empty otherwise, or with an
+/// autocoder too old to write them.
+pub async fn local_events(transport: &crate::transport::ServerTransport, repo: &Path) -> Vec<IssueEvent> {
+    if transport.server().is_some() {
+        return Vec::new();
+    }
+    let repo = repo.to_path_buf();
+    tokio::task::spawn_blocking(move || super::issue_events::read_local(&repo)).await.unwrap_or_default()
 }
 
 /// `GET /api/swarms/{project}/issues/{number}/travel`: the issue's travel log.
@@ -284,7 +395,7 @@ mod tests {
     #[test]
     fn a_landed_issue_travels_from_opened_to_released() {
         let deps = [dep("release", "2026-11-12T12:20:00Z"), dep("nuc-1", "2026-11-12T12:10:00Z"), dep("nuc-1", "2026-11-12T12:40:00Z"), dep("nuc-1", "2026-11-12T11:00:00Z")];
-        let log = travel(&issue(LANDED), LOG, &deps);
+        let log = travel(&issue(LANDED), LOG, &deps, &[]);
         assert_eq!(log.state, "landed");
         let keys: Vec<_> = log.stages.iter().map(|s| (s.key.as_str(), s.secs)).collect();
         assert_eq!(
@@ -306,11 +417,103 @@ mod tests {
         assert_eq!(kinds, vec![super::super::gate::BounceKind::Conflict, super::super::gate::BounceKind::PushRetry]);
     }
 
+    fn ev(ts: &str, issue: Option<u32>, event: &str, detail: Value) -> IssueEvent {
+        IssueEvent { v: 1, ts: ts.into(), repo: "r".into(), issue, event: event.into(), detail }
+    }
+
+    /// #539: autocoder's events date the claim, first commit, landing, gate
+    /// attempts and deploys; the comments and git only fill what they don't.
+    #[test]
+    fn events_date_the_stages_they_cover() {
+        let events = [
+            // An abandoned claim, recorded twice and released.
+            ev("2026-11-11T09:00:00Z", Some(495), "claimed", json!({})),
+            ev("2026-11-11T09:00:02Z", Some(495), "claimed", json!({})),
+            ev("2026-11-11T09:30:00Z", Some(495), "released", json!({})),
+            // The claim that landed starts at its first record.
+            ev("2026-11-12T07:00:00Z", Some(495), "claimed", json!({})),
+            ev("2026-11-12T07:00:02Z", Some(495), "claimed", json!({})),
+            ev("2026-11-12T08:00:00Z", Some(495), "first-commit", json!({"sha": "a"})),
+            ev("2026-11-12T10:00:00Z", Some(495), "gate-end", json!({"outcome": "conflict", "attempt": 1})),
+            ev("2026-11-12T11:00:00Z", Some(495), "gate-end", json!({"outcome": "landed", "attempt": 2})),
+            ev("2026-11-12T11:00:00Z", Some(495), "landed", json!({"sha": "b"})),
+            ev("2026-11-12T11:05:00Z", None, "deployed", json!({"environment": "nuc-1", "sha": "c"})),
+            // Another issue's, and one after the landing: neither counts.
+            ev("2026-11-12T07:30:00Z", Some(4950), "first-commit", json!({})),
+            ev("2026-11-12T12:00:00Z", Some(495), "claimed", json!({})),
+        ];
+        let log = travel(&issue(LANDED), LOG, &[dep("nuc-1", "2026-11-12T12:10:00Z")], &events);
+        assert!(log.from_events);
+        assert_eq!(log.state, "landed");
+        let at: Vec<_> = log.stages.iter().map(|s| (s.key.as_str(), s.at.as_str())).collect();
+        assert_eq!(
+            at,
+            vec![
+                ("opened", "2026-11-10T10:00:00+00:00"),
+                // No event approves: still from the comment.
+                ("approved", "2026-11-11T10:00:00+00:00"),
+                ("claimed", "2026-11-12T07:00:00+00:00"),
+                ("first_commit", "2026-11-12T08:00:00+00:00"),
+                ("landed", "2026-11-12T11:00:00+00:00"),
+                // The deploy event, earlier than GitHub's Deployment.
+                ("deployed:nuc-1", "2026-11-12T11:05:00+00:00"),
+            ]
+        );
+        // The gate's attempts replace the job's comments (LANDED has a
+        // conflict comment at 11:00, which isn't counted twice); a push retry,
+        // which no issue event records, still comes from its commit.
+        let retry = "2026-11-12T10:30:00+00:00\tRe-sync origin/master into feature/issue-495 (push retry 1)";
+        let log = travel(&issue(LANDED), retry, &[], &events);
+        use super::super::gate::BounceKind::*;
+        let kinds: Vec<_> = log.bounces.iter().map(|b| b.kind).collect();
+        assert_eq!(kinds, vec![Conflict, PushRetry]);
+    }
+
+    /// A rebase before the merge launch moves the committer date the event is
+    /// stamped with; the author date in the log keeps when the work began.
+    #[test]
+    fn a_rebased_first_commit_keeps_its_author_date() {
+        let events = [ev("2026-11-12T10:50:00Z", Some(495), "first-commit", json!({}))];
+        let log = travel(&issue(LANDED), "2026-11-12T09:00:00+00:00\tImplement #495", &[], &events);
+        let at = log.stages.iter().find(|s| s.key == "first_commit").map(|s| s.at.as_str());
+        assert_eq!(at, Some("2026-11-12T09:00:00+00:00"));
+    }
+
+    /// A red base's refusal is the integration branch's fault, not a bounce.
+    #[test]
+    fn a_red_base_refusal_is_no_bounce() {
+        let events = [ev("2026-11-12T10:00:00Z", Some(495), "gate-end", json!({"outcome": "escalated", "reason": "tests fail on the integrated tree and on origin/master alone"}))];
+        let log = travel(&issue(LANDED), "", &[], &events);
+        assert!(log.bounces.is_empty(), "{:?}", log.bounces);
+    }
+
+    /// An issue with no events of its own (from before them, or an autocoder
+    /// too old to write them) is worked out from comments and git, as before.
+    #[test]
+    fn without_its_events_an_issue_is_inferred() {
+        let others = [ev("2026-11-12T08:00:00Z", Some(7), "claimed", json!({}))];
+        let with = travel(&issue(LANDED), LOG, &[], &others);
+        let without = travel(&issue(LANDED), LOG, &[], &[]);
+        assert!(!with.from_events);
+        assert_eq!(with, without);
+        assert_eq!(with.stages.iter().find(|s| s.key == "claimed").map(|s| s.at.as_str()), Some("2026-11-12T08:00:00+00:00"));
+    }
+
+    /// An issue whose claim predates the events still gets its claim from the
+    /// comments, and the rest from the events.
+    #[test]
+    fn events_and_inference_mix_per_stage() {
+        let events = [ev("2026-11-12T08:30:00Z", Some(495), "first-commit", json!({}))];
+        let log = travel(&issue(LANDED), "", &[], &events);
+        let at: Vec<_> = log.stages.iter().map(|s| (s.key.as_str(), s.secs)).collect();
+        assert_eq!(at[2..], [("claimed", Some(22 * 3600)), ("first_commit", Some(1800)), ("landed", Some(3 * 3600 + 1800))]);
+    }
+
     #[test]
     fn an_open_issue_has_only_the_stages_it_reached() {
         let open = issue(r#"{"number": 7, "state": "OPEN", "createdAt": "2026-11-10T10:00:00Z",
             "comments": [{"body": "🤖 **Automated Fix Started**", "createdAt": "2026-11-10T10:05:00Z"}]}"#);
-        let log = travel(&open, "", &[dep("nuc-1", "2026-11-11T00:00:00Z")]);
+        let log = travel(&open, "", &[dep("nuc-1", "2026-11-11T00:00:00Z")], &[]);
         assert_eq!(log.state, "open");
         let keys: Vec<_> = log.stages.iter().map(|s| s.key.as_str()).collect();
         assert_eq!(keys, vec!["opened", "claimed"]);
@@ -320,7 +523,7 @@ mod tests {
     #[test]
     fn closed_without_landing_is_not_landed() {
         let gone = issue(r#"{"number": 8, "state": "CLOSED", "stateReason": "NOT_PLANNED", "createdAt": "2026-11-10T10:00:00Z", "closedAt": "2026-11-10T11:00:00Z"}"#);
-        let log = travel(&gone, "", &[]);
+        let log = travel(&gone, "", &[], &[]);
         assert_eq!(log.state, "closed");
         assert_eq!(log.stages.len(), 1);
         assert_eq!(log.slowest, None);
@@ -330,7 +533,7 @@ mod tests {
     fn a_commit_before_the_claim_takes_no_time() {
         let i = issue(r#"{"number": 9, "state": "OPEN", "createdAt": "2026-11-10T10:00:00Z",
             "comments": [{"body": "🔒 claim w 1", "createdAt": "2026-11-10T12:00:00Z"}]}"#);
-        let log = travel(&i, "2026-11-10T11:00:00+00:00\tFix #9", &[]);
+        let log = travel(&i, "2026-11-10T11:00:00+00:00\tFix #9", &[], &[]);
         let secs: Vec<_> = log.stages.iter().map(|s| (s.key.as_str(), s.secs)).collect();
         assert_eq!(secs, vec![("opened", None), ("claimed", Some(7200)), ("first_commit", Some(0))]);
     }
@@ -355,7 +558,7 @@ mod tests {
 
     #[test]
     fn medians_cover_landed_issues_only() {
-        let a = travel(&issue(LANDED), LOG, &[]);
+        let a = travel(&issue(LANDED), LOG, &[], &[]);
         let mut b = a.clone();
         b.stages.iter_mut().filter(|s| s.key == "approved").for_each(|s| s.secs = Some(2 * 3600));
         let open = TravelLog { state: "open".into(), stages: vec![Stage { key: "approved".into(), at: String::new(), secs: Some(1), from: Some("opened".into()) }], ..Default::default() };
@@ -369,7 +572,7 @@ mod tests {
     /// own log but not in the medians.
     #[test]
     fn medians_leave_out_stages_after_a_missing_one() {
-        let no_commit = travel(&issue(LANDED), "", &[]);
+        let no_commit = travel(&issue(LANDED), "", &[], &[]);
         let landed = no_commit.stages.iter().find(|s| s.key == "landed").unwrap();
         assert_eq!((landed.from.as_deref(), landed.secs), (Some("claimed"), Some(4 * 3600)));
         let m = stage_medians([&no_commit]);
@@ -383,8 +586,8 @@ mod tests {
     #[test]
     fn medians_from_an_issue_listing() {
         let listing = format!("[{LANDED}, {{\"number\": 1, \"state\": \"OPEN\", \"createdAt\": \"2026-11-10T10:00:00Z\"}}]");
-        let m = medians_of(listing.as_bytes(), LOG, &[]);
+        let m = medians_of(listing.as_bytes(), LOG, &[], &[]);
         assert_eq!(m.get("approved"), Some(&(24 * 3600)));
-        assert!(medians_of(b"not json", LOG, &[]).is_empty());
+        assert!(medians_of(b"not json", LOG, &[], &[]).is_empty());
     }
 }

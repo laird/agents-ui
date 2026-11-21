@@ -385,7 +385,8 @@ pub async fn fetch(transport: &ServerTransport, repo: &Path, integration: &str) 
     let issues = issues?;
     let mut s = summarize(&issues, deployments.as_deref(), log.as_deref(), today, offset, now.to_rfc3339_opts(chrono::SecondsFormat::Secs, false))?;
     let deployed = deployments.as_deref().map(super::deployments::parse_deployments).unwrap_or_default();
-    s.stage_medians = super::travel::medians_of(&issues, authored.as_deref().unwrap_or(""), &deployed);
+    let events = super::travel::local_events(transport, repo).await;
+    s.stage_medians = super::travel::medians_of(&issues, authored.as_deref().unwrap_or(""), &deployed, &events);
     add_panel(&mut s, prs.as_deref(), reviews.as_deref(), open.as_deref(), log.as_deref(), now.fixed_offset());
     s.first_commit = roots.as_deref().and_then(|r| first_commit_date(r, &offset));
     Some(s)

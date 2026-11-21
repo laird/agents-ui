@@ -13,6 +13,7 @@ pub mod gate;
 pub mod github;
 pub mod grid;
 pub mod herdr;
+pub mod issue_events;
 pub mod kubernetes;
 pub mod merge_events;
 pub mod newissue;
