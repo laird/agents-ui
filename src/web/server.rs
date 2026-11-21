@@ -588,15 +588,14 @@ async fn api_input_handler(
         return Err(StatusCode::UNPROCESSABLE_ENTITY);
     }
 
-    let local = crate::transport::ServerTransport::new(None);
-    match (body.enter, pane.mux) {
-        (true, _) => super::pane::send_line(&local, &pane, &body.text).await,
-        // -l, so the text is taken literally. Without it tmux resolves an
-        // argument that happens to match a key name -- a lone "Up", "Space"
-        // or "Enter" typed by the user -- as that key instead of those
-        // characters.
-        (false, super::Mux::Tmux) => crate::tmux::proxy::send_literal(&pane.target, &body.text).await,
-        (false, super::Mux::Herdr) => super::pane::send_text(&local, &pane, &body.text).await,
+    // Through the configured transport, so text reaches the `--server` host
+    // the pane lives on (#551). send_text types tmux text with -l, literally:
+    // without it tmux resolves an argument that happens to match a key name
+    // -- a lone "Up", "Space" or "Enter" typed by the user -- as that key.
+    if body.enter {
+        super::pane::send_line(&state.transport, &pane, &body.text).await
+    } else {
+        super::pane::send_text(&state.transport, &pane, &body.text).await
     }
     .map_err(|e| {
         tracing::warn!("send-keys failed for {}: {e:#}", pane.target);
@@ -2509,6 +2508,28 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert!(calls.starts_with("pane-host "), "/key must go over ssh to the server: {calls:?}");
         assert!(calls.contains("'send-keys'") && calls.contains("'Escape'"), "{calls:?}");
+    }
+
+    /// #551: typed text goes to the `--server` host, literally (`-l`) when
+    /// it has no Enter, so a lone "Up" is typed rather than pressed.
+    #[tokio::test]
+    async fn input_endpoint_sends_through_the_configured_transport() {
+        let (status, calls) = post_to_remote(
+            "/api/swarms/test-proj/agents/manager/input",
+            r#"{"text":"Up","enter":false}"#,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(calls.starts_with("pane-host "), "/input must go over ssh to the server: {calls:?}");
+        assert!(calls.contains("'send-keys'") && calls.contains("'-l'") && calls.contains("'Up'"), "{calls:?}");
+
+        let (status, calls) = post_to_remote(
+            "/api/swarms/test-proj/agents/manager/input",
+            r#"{"text":"hello","enter":true}"#,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(calls.starts_with("pane-host ") && calls.contains("'hello'"), "{calls:?}");
     }
 
     #[tokio::test]
