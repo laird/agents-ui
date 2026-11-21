@@ -105,7 +105,8 @@ logged out. Without it, `install` tells you, but never turns it on by itself.
 Re-run `install` to change options (it shows what changed and restarts).
 `agents-tui service status` shows its state, URL and binary;
 `agents-tui service restart` restarts it; `agents-tui service uninstall`
-stops and removes it. `tools/deploy.sh` deploys to this unit.
+stops and removes it. Deploying to nuc-1 (autocoder's `deploy.sh --env nuc-1`, see CLAUDE.md)
+restarts this unit.
 
 The binary is written to `target/debug/agents-tui` or `target/release/agents-tui`.
 

@@ -1,7 +1,12 @@
 {
   "issueSource": "github",
   "environments": [
-    {"name": "nuc-1", "requires": "integration"},
+    {"name": "nuc-1", "requires": "integration",
+     "label": "agents-tui",
+     "preflight": "systemctl --user cat agents-tui.service >/dev/null",
+     "deploy": "source \"$HOME/.cargo/env\" && cargo install --path . --locked",
+     "restart": "\"$HOME/.cargo/bin/agents-tui\" service restart",
+     "release": true},
     {"name": "release", "requires": "nuc-1"}
   ]
 }

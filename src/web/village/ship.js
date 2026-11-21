@@ -185,7 +185,7 @@ function unknownWords(v, i) {
   const st = v.pipeline.stops[i], br = v.pipeline.integration || 'the integration branch';
   if (i === 0 && v.pipeline.sentinel === 'unknown')
     return `No ${st.name} ref yet, so nothing has been verified green. Run autocoder's sentinel (main-sentinel.sh), or, with no sentinel, mark the first environment "requires": "integration" in .autocoder.json.`;
-  return `Nothing says what ${st.name} runs: there is no successful GitHub Deployment to it and no env/${st.name} branch. Record a deployment (tools/deploy.sh records nuc-1), or configure the environment in .autocoder.json.`;
+  return `Nothing says what ${st.name} runs: there is no successful GitHub Deployment to it and no env/${st.name} branch. Record a deployment (autocoder's deploy.sh records one), or configure the environment in .autocoder.json.`;
 }
 function docsLink(v) {
   const repo = repoUrl(v), br = v.pipeline.integration;

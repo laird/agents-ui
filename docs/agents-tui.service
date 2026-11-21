@@ -1,8 +1,9 @@
 # Reference systemd user unit for the served agents-tui (village and dashboard).
-# tools/deploy.sh installs the new binary and restarts this unit, then checks
-# that the village answers at this ExecStart's --web-port and --web-bind. It
-# refuses to deploy when the unit is not installed, and never starts a server
-# of its own.
+# Deploying to nuc-1 (autocoder's deploy.sh, with the steps in .autocoder.json)
+# installs the new binary and runs `agents-tui service restart`, which restarts
+# this unit and waits until the village answers at this ExecStart's --web-port
+# and --web-bind. It refuses to deploy when the unit is not installed, and
+# never starts a server of its own.
 #
 # This is the reference: every section below is what the installed
 # binary (~/.cargo/bin/agents-tui) generates with nuc-1's options,

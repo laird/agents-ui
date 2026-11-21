@@ -154,7 +154,7 @@ sources, tried in order. The first that names a commit wins:
 
 | Source | What it reads |
 |---|---|
-| `deployment` | The newest GitHub Deployment to an environment with that `name` whose latest status is `success`, checking up to 10. A deployment later marked `inactive`, failed or still pending doesn't count. `tools/deploy.sh`, Actions `environment:` jobs, Vercel, Netlify and Heroku all record these. |
+| `deployment` | The newest GitHub Deployment to an environment with that `name` whose latest status is `success`, checking up to 10. A deployment later marked `inactive`, failed or still pending doesn't count. autocoder's `deploy.sh`, Actions `environment:` jobs, Vercel, Netlify and Heroku all record these. |
 | `release` | The latest published GitHub Release (drafts and prereleases are skipped), at its tag's commit. A Release made on GitHub's website counts. |
 | `tag:<glob>` | The newest tag matching the glob (`v*`, `prod-*`), in version order, so `v1.10.0` beats `v1.9.2`. |
 | `branch` | `origin/<ref>`, where `ref` defaults to `env/<name>`. |
@@ -305,7 +305,7 @@ into its slot.
 
 Click the ship for its cargo and "next release: N issues since vX.Y.Z"; click
 the harbour (or a departing ship's wake) for the last release and its GitHub
-Release. The tag and link come from the deployment `tools/release.sh` records
+Release. The tag and link come from the deployment autocoder's `release.sh` records
 (description `Release vX.Y.Z`, status `log_url`). In the demo,
 `touch "$AGENTS_UI_DEMO_DIR/state/release-now"` cuts a release at once.
 

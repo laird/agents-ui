@@ -235,36 +235,36 @@ Landed work waits at the village quay until it is deployed. `.autocoder.json`
 lists two environments, and both are recorded as GitHub Deployments, which is
 what `src/web/deployments.rs` reads to place each stop:
 
+Deploying and releasing are autocoder's (laird/agents#200): its
+`scripts/deploy.sh` and `scripts/release.sh`, in the installed plugin
+(`~/.claude/plugins/cache/<marketplace>/autocoder/<version>/scripts/`). What is
+agents-ui's own is the `nuc-1` entry in `.autocoder.json` (#533), which `cargo
+test nuc_1_deploys_through_autocoder` checks:
+
 - **`nuc-1`**: what is installed and served on nuc-1. From a clean checkout of
-  a commit already on `origin/master`, run `tools/deploy.sh` (add `--dry-run`
-  to check without changing anything). It runs `cargo install`, restarts the
-  systemd user unit `agents-tui.service`, waits until the village answers at
-  the unit's own `--web-port`/`--web-bind`, and records the Deployment as
-  `success`. If the install, the restart or that check fails, it records
-  `failure`. The served instance is that unit and nothing else: when it is
-  not installed, `deploy.sh` exits 1 before recording anything, and it never
-  starts a server of its own. The reference unit, with install steps, is
-  `docs/agents-tui.service`. Its tests: `bash tools/test_deploy.sh` (also run
-  by `cargo test deploy_script`).
-  CI runs these on macOS too, so the scripts and their tests stay portable:
-  bash 3.2 (an empty array is `${a[@]+"${a[@]}"}` under `set -u`), BSD
-  `sort`/`date`/`sed` (no `sort -V`, no `date -I`, no `sed -i`). `cargo test
-  deploy_and_release_scripts_avoid_linux_only_shell` catches the known traps.
+  a commit already on `origin/master`, run `<autocoder scripts>/deploy.sh --env
+  nuc-1` (add `--dry-run` to check without changing anything). Its steps come
+  from `.autocoder.json`: the preflight refuses, before recording anything,
+  when the systemd user unit `agents-tui.service` is not installed (the served
+  instance is that unit and nothing else; install it with `agents-tui service
+  install`, or from the reference unit `docs/agents-tui.service`); `deploy`
+  runs `cargo install`; `restart` runs `agents-tui service restart`, which
+  restarts the unit and fails unless the village answers at its own
+  `--web-port`/`--web-bind` within 30s. The Deployment is recorded as
+  `success`, or `failure` if the install or the restart fails.
 - **`release`**: a GitHub Release, recorded as a Deployment of its commit.
-  **Every deploy releases**: once `deploy.sh` has recorded `nuc-1` as
-  `success`, it runs `tools/release.sh` for the same commit, so the village's
-  ship sails on each deploy. Tags are automatic, `vYYYY.MM.DD.N` (N counts up
-  within the day, from origin's tags), and a commit that already is the newest
-  release is not released again. A failed release leaves the deploy standing:
-  `deploy.sh` exits 3 and the next deploy releases it. `--no-release` skips it
-  for one deploy, and `--dry-run` shows the tag and commit it would release.
-  **Pushes of master from the main checkout release too**, once its pre-push
-  hook is installed (`tools/install-hooks.sh`, once per clone). Pushes from the
-  swarm's worktrees and merge jobs never do: they share the hooks but not the
-  main checkout. `AGENTS_UI_NO_RELEASE=1 git push` skips it; the log is
-  `~/.agents-ui/release.log`. `tools/release.sh [vX.Y.Z]` still releases by
-  hand, and for a release made on GitHub it only records the Deployment. Its
-  tests: `bash tools/test_release.sh` (also run by `cargo test release_script`).
+  **Every deploy releases** (`"release": true` on `nuc-1`): once the deploy is
+  `success`, autocoder's `release.sh` releases the same commit, so the
+  village's ship sails on each deploy. Tags are automatic, `vYYYY.MM.DD.N`, and
+  a commit that already is the newest release is not released again. A failed
+  release leaves the deploy standing: `deploy.sh` exits 3 and the next deploy
+  releases it. `--no-release` skips it for one deploy.
+  **Pushes of master from the main checkout release too**, once autocoder's
+  pre-push hook is installed (`<autocoder scripts>/install-release-hook.sh`,
+  once per clone; it replaces the hook agents-ui used to install). Pushes from
+  the swarm's worktrees and merge jobs never do. `AUTOCODER_NO_RELEASE=1 git
+  push` skips it; the log is `~/.local/state/autocoder/release.log`.
+  `release.sh [vX.Y.Z]` releases by hand.
 
 There is no sentinel here, so no `master-green` ref exists. `nuc-1` is marked
 `"requires": "integration"`, which drops the green stop, and the village shows

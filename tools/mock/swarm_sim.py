@@ -18,7 +18,7 @@ workers) against them:
 The state agents-tui can't read from git goes to <dir>/state, where the
 `herdr` and `gh` shims in tools/mock/bin serve it.
 
-Every prod release of "shop" is recorded the way tools/release.sh records
+Every prod release of "shop" is recorded the way autocoder's release.sh records
 one: a successful GitHub Deployment of the commit to prod, described as
 "Release v0.N.0" and linking its GitHub Release, so the village's ship
 sails with a tag. To cut a release now instead of waiting for the next one:
@@ -333,7 +333,7 @@ class Swarm:
                 self.record_release(git(self.repo, "rev-parse", "refs/remotes/origin/env/prod"), time.time())
 
     def release_deployment(self, deploys, sha, t):
-        """Record a release of sha as tools/release.sh does: a new successful
+        """Record a release of sha as autocoder's release.sh does: a new successful
         deployment described "Release <tag>", the previous one made inactive."""
         if deploys and deploys[0]["sha"] == sha:
             return False

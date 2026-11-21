@@ -24,8 +24,8 @@ or a deployment that is still running or has failed.
 
 A row of villages, left to right. The dev village comes first, then one
 village per environment in `.autocoder.json` order, with production
-right-most. Here that is `nuc-1` (what `tools/deploy.sh` installs and serves
-on nuc-1), then `release` (the latest GitHub Release, `tools/release.sh`).
+right-most. Here that is `nuc-1` (what autocoder's `deploy.sh --env nuc-1` installs and
+serves on nuc-1), then `release` (the latest GitHub Release, autocoder's `release.sh`).
 The user decided there is no staging. A ship sails between neighbouring
 villages for each deployment.
 

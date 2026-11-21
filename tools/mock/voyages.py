@@ -6,7 +6,7 @@ without real deployments:
 
   * a deploy to `nuc-1` of the integration tip: pending, then in_progress,
     then success (loading, sailing, docked);
-  * a promotion of what `nuc-1` runs to `release`, as `tools/release.sh`
+  * a promotion of what `nuc-1` runs to `release`, as autocoder's `release.sh`
     records one ("Release v0.N.0", linking its GitHub Release);
   * a deploy to `nuc-1` that fails (a failed voyage; `nuc-1` keeps running
     what it ran).

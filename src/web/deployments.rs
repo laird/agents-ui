@@ -28,7 +28,7 @@ pub struct Deployment {
     /// The environment it went to (`nuc-1`, `release`).
     #[serde(default)]
     pub environment: String,
-    /// `tools/release.sh` writes "Release vX.Y.Z" here.
+    /// autocoder's `release.sh` writes "Release vX.Y.Z" here.
     #[serde(default)]
     pub description: Option<String>,
     /// Who created the deployment.
@@ -49,7 +49,7 @@ pub struct DeploymentStatus {
     pub state: String,
     #[serde(default)]
     pub created_at: String,
-    /// Where the deployment's output is: `tools/release.sh` links the GitHub Release.
+    /// Where the deployment's output is: autocoder's `release.sh` links the GitHub Release.
     #[serde(default)]
     pub log_url: Option<String>,
 }
@@ -636,78 +636,23 @@ mod tests {
         assert_eq!(encode("Production EU/1"), "Production%20EU%2F1");
     }
 
-    /// tools/deploy.sh makes the Deployments read here. Its shell tests run it
-    /// against stub systemctl/gh/cargo/curl: a missing unit refuses before
-    /// recording anything, and success waits for the village to answer.
+    /// autocoder's deploy.sh makes the Deployments read here (laird/agents#200),
+    /// running nuc-1's own steps from .autocoder.json (#533): install, restart
+    /// the served unit and wait for the village (`agents-tui service restart`
+    /// fails when it does not answer), then release the same commit.
     #[test]
-    fn deploy_script_tests_pass() {
-        let root = env!("CARGO_MANIFEST_DIR");
-        let out = std::process::Command::new("bash")
-            .arg(format!("{root}/tools/test_deploy.sh"))
-            .output()
-            .expect("run tools/test_deploy.sh");
-        assert!(
-            out.status.success(),
-            "tools/test_deploy.sh failed:\n{}{}",
-            String::from_utf8_lossy(&out.stdout),
-            String::from_utf8_lossy(&out.stderr)
-        );
-    }
-
-    /// tools/release.sh makes the `release` Deployments read here. Its shell
-    /// tests cover date tags (first and next of a day), not releasing a commit
-    /// twice, and the pre-push hook releasing only pushes from the main checkout.
-    #[test]
-    fn release_script_tests_pass() {
-        let root = env!("CARGO_MANIFEST_DIR");
-        let out = std::process::Command::new("bash")
-            .arg(format!("{root}/tools/test_release.sh"))
-            .output()
-            .expect("run tools/test_release.sh");
-        assert!(
-            out.status.success(),
-            "tools/test_release.sh failed:\n{}{}",
-            String::from_utf8_lossy(&out.stdout),
-            String::from_utf8_lossy(&out.stderr)
-        );
-    }
-
-    /// CI runs these scripts' tests on macOS too (#409), where `bash` is 3.2
-    /// and sort, date and sed are BSD's. What broke there, kept out: an empty
-    /// array as "${a[@]}" under `set -u` (unbound in bash 3.2), `sort -V`,
-    /// `date -I`, and GNU-only flags. The tests' own run on macOS is the proof;
-    /// this catches the known traps on Linux, before CI does.
-    #[test]
-    fn deploy_and_release_scripts_avoid_linux_only_shell() {
-        let scripts = [
-            ("tools/deploy.sh", include_str!("../../tools/deploy.sh")),
-            ("tools/release.sh", include_str!("../../tools/release.sh")),
-            ("tools/install-hooks.sh", include_str!("../../tools/install-hooks.sh")),
-            ("tools/hooks/pre-push", include_str!("../../tools/hooks/pre-push")),
-            ("tools/test_deploy.sh", include_str!("../../tools/test_deploy.sh")),
-            ("tools/test_release.sh", include_str!("../../tools/test_release.sh")),
-        ];
-        for (name, src) in scripts {
-            // Code only, with the safe form of an empty-able array taken out first.
-            let code = src.lines().filter(|l| !l.trim_start().starts_with('#')).collect::<Vec<_>>().join("\n");
-            let code = code.replace("${envs[@]+\"${envs[@]}\"}", "");
-            for trap in ["sort -V", "date -I", "readlink -f", "sed -i", "declare -A", "mapfile", "readarray", "grep -P", "stat -c", "\"${envs[@]}\""] {
-                assert!(!code.contains(trap), "{name} uses `{trap}`, which macOS's bash 3.2 or BSD tools do not have");
-            }
-        }
-    }
-
-    /// The served instance is the systemd unit only: no detached-server fallback.
-    #[test]
-    fn deploy_script_never_starts_a_server_of_its_own() {
-        let script = include_str!("../../tools/deploy.sh");
-        for gone in ["setsid", "nohup", "serve.pid", "serve.log", "7877", "AGENTS_TUI_SERVE_ARGS", "AGENTS_TUI_PORT"] {
-            assert!(!script.contains(gone), "deploy.sh still has {gone}");
-        }
-        assert!(script.contains("systemctl --user cat \"$UNIT\""));
-        // The way to get the unit is `agents-tui service install`; the manual steps stay as a fallback.
-        assert!(script.contains("agents-tui service install"));
-        assert!(script.contains("cp docs/agents-tui.service ~/.config/systemd/user/"));
+    fn nuc_1_deploys_through_autocoder_with_its_own_steps() {
+        let config: serde_json::Value = serde_json::from_str(include_str!("../../.autocoder.json")).unwrap();
+        let envs = config["environments"].as_array().unwrap();
+        let nuc = envs.iter().find(|e| e["name"] == "nuc-1").expect("nuc-1 is configured");
+        let step = |k: &str| nuc[k].as_str().unwrap_or_default();
+        // The served instance is the unit and nothing else: no unit, no deploy.
+        assert!(step("preflight").contains("systemctl --user cat agents-tui.service"));
+        // Merge jobs and deploys run without ~/.cargo/bin on PATH.
+        assert!(step("deploy").contains("source \"$HOME/.cargo/env\"") && step("deploy").contains("cargo install --path . --locked"));
+        assert!(step("restart").contains("agents-tui\" service restart"));
+        assert_eq!(nuc["release"], true, "every deploy releases");
+        assert!(envs.iter().any(|e| e["name"] == "release" && e["requires"] == "nuc-1"));
         let unit = include_str!("../../docs/agents-tui.service");
         assert!(unit.contains("ExecStart=%h/.cargo/bin/agents-tui --headless --web-port 7890 --web-bind 127.0.0.1,tailscale"));
     }
