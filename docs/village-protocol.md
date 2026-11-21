@@ -224,7 +224,7 @@ agents-tui --headless --read-only --source swarms=none \
 
 | Framework | Plane | Reads |
 |---|---|---|
-| autocoder, modernize (tmux) | development | tmux panes, status files, the issue tracker, autocoder's git refs, Claude Code transcripts |
+| autocoder, modernize (tmux) | development | tmux panes, status files, `autocoder-ctl.sh status`, the issue tracker, autocoder's git refs, Claude Code transcripts |
 | herdr | development | `herdr agent list`; the issue comes from the branch name |
 | Kubernetes | runtime | `kubectl get <workloads>,pods -o json` and `get nodes` (`--runtime k8s:[<context>/]<namespace>`): workloads are houses, pods the people, nodes the hall; stuck pods need you; image tags are the builds |
 | Temporal | runtime | the frontend HTTP API: running and closed workflows, pending activities, task-queue pollers and their build IDs; with `--temporal-ui <url>`, each workflow links to its page in Temporal's web UI |
@@ -238,6 +238,7 @@ autocoder's manager and workers do not message each other. They coordinate throu
 | autocoder | Village |
 |---|---|
 | label `working`, the `feature/issue-N` branch | the worker's house is on that issue |
+| `autocoder-ctl.sh status --json` (laird/agents#192), and the `claimed`, `released`, `escalated`, `decomposed`, `gate-queued` and `landed` lines of `issue-events.jsonl` in `${XDG_STATE_HOME:-~/.local/state}/autocoder/` (laird/agents#190), only this repo's id | in the TUI, each worker's issue and whether it is busy or idle, asked every 15 s in the background: the issue its branch names while the log says it still holds it (not once it went to the gate), else the one the log says it claimed. autocoder no longer writes `/tmp/agents-ui/*.json` (laird/agents#193), and the TUI no longer reads it. Without an answer (no `autocoder-ctl.sh`, exit 3 from an older autocoder, or a remote host), the TUI infers each worker's state from its pane. |
 | labels `needs-design`, `needs-clarification`, `needs-feedback`, `needs-approval`, `too-complex`, `future`, `proposal`, `blocked` | a note on the board |
 | label `decomposed` | taken: its sub-issues are what gets worked |
 | labels `merging`, `awaiting-integration` | the fix has left the worker and waits at the quay |

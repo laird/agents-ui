@@ -422,6 +422,8 @@ pub struct App {
     pub events: EventHandler,
     pub adapter: ClaudeAdapter,
     transport: ServerTransport,
+    /// What autocoder says each worker is doing (#542), asked in the background.
+    autocoder: crate::model::autocoder_status::Poller,
     pub agents_dir: std::path::PathBuf,
     /// Active pane watcher handles (so we can cancel them).
     pane_watchers: Vec<tokio::task::JoinHandle<()>>,
@@ -555,6 +557,7 @@ impl App {
             events,
             adapter,
             transport,
+            autocoder: Default::default(),
             agents_dir,
             pane_watchers: Vec::new(),
             issue_watchers: Vec::new(),
@@ -5444,31 +5447,35 @@ impl App {
     }
 
     fn refresh_statuses(&mut self) {
-        // Read JSON status files from /tmp/agents-ui/
-        let json_statuses = crate::model::status::read_json_status_files();
-
+        let remote = self.transport.is_remote();
         for swarm in &mut self.swarms {
-            // Update workers with JSON status info
-            for worker in &mut swarm.workers {
-                if let Some(json_status) = json_statuses.get(&worker.tmux_target) {
-                    worker.current_issue = json_status.issue;
-                    worker.current_issue_title = json_status.title.clone();
-                    // Update AgentState if the JSON reports working with an issue
-                    if json_status.status == "working" {
-                        if let Some(issue_num) = json_status.issue {
-                            worker.status.state = crate::model::status::AgentState::Working {
-                                issue: Some(issue_num),
-                            };
-                        }
-                    } else if json_status.status == "idle" {
+            // What autocoder says each worker is on, and whether it is busy
+            // (#542). Without an answer (an older autocoder, a remote host),
+            // the pane inference below decides alone.
+            let reports = if remote { None } else { self.autocoder.reports(&swarm.repo_path) };
+            for worker in swarm.workers.iter_mut() {
+                let Some(report) = reports.as_ref().and_then(|r| {
+                    r.get(&worker.worktree_path).or_else(|| {
+                        let canonical = std::fs::canonicalize(&worker.worktree_path).ok()?;
+                        r.get(&canonical)
+                    })
+                }) else {
+                    continue;
+                };
+                worker.current_issue = report.issue;
+                worker.current_issue_title = report.issue.and_then(|n| {
+                    swarm.issue_cache.issues.iter().find(|i| i.number == n).map(|i| i.title.clone())
+                });
+                match (report.activity, report.issue) {
+                    (crate::model::autocoder_status::Activity::Busy, Some(n)) => {
+                        worker.status.state =
+                            crate::model::status::AgentState::Working { issue: Some(n) };
+                    }
+                    (crate::model::autocoder_status::Activity::Idle, _) => {
                         worker.status.state = crate::model::status::AgentState::Idle;
                     }
+                    _ => {}
                 }
-            }
-            // Also check the manager
-            if let Some(json_status) = json_statuses.get(&swarm.manager.tmux_target) {
-                swarm.manager.current_issue = json_status.issue;
-                swarm.manager.current_issue_title = json_status.title.clone();
             }
             // Refresh all agents (manager + workers)
             let agents = std::iter::once(&mut swarm.manager).chain(swarm.workers.iter_mut());
