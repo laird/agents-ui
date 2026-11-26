@@ -188,9 +188,9 @@ Web API reports empty repo_path for discovered swarms
 ```
 $ curl -s http://127.0.0.1:7878/api/swarms | jq '.swarms[0] | {project_name, repo_path, tmux_session}'
 {
-  "project_name": "kink-party",
+  "project_name": "example-app",
   "repo_path": "",
-  "tmux_session": "claude-kink-party"
+  "tmux_session": "claude-example-app"
 }
 ```
 

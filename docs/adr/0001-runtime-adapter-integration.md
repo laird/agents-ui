@@ -28,7 +28,7 @@ The source of truth for runtime behavior is the local shared `../agents` reposit
 
 ### 1. Model the runtime explicitly
 
-Add the runtime to [`src/model/swarm.rs`](/Users/Laird.Popkin/src/agents-ui/src/model/swarm.rs):
+Add the runtime to [`src/model/swarm.rs`](../../src/model/swarm.rs):
 
 - `AgentType`
 - display name
@@ -50,7 +50,7 @@ Examples:
 
 ### 2. Keep the tmux adapter generic but runtime-aware
 
-Use the shared tmux adapter in [`src/adapter/claude.rs`](/Users/Laird.Popkin/src/agents-ui/src/adapter/claude.rs) as the current runtime adapter implementation.
+Use the shared tmux adapter in [`src/adapter/claude.rs`](../../src/adapter/claude.rs) as the current runtime adapter implementation.
 
 Requirements:
 
@@ -62,7 +62,7 @@ This keeps session creation shared while allowing runtime-specific behavior to d
 
 ### 3. Resolve runtime-specific orchestration commands in the app layer
 
-Runtime-specific dispatch, review, and monitor actions belong in [`src/app.rs`](/Users/Laird.Popkin/src/agents-ui/src/app.rs), because the UI decides when to trigger them.
+Runtime-specific dispatch, review, and monitor actions belong in [`src/app.rs`](../../src/app.rs), because the UI decides when to trigger them.
 
 Current mapping:
 

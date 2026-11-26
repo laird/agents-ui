@@ -110,8 +110,9 @@ Each run writes only the options it is given, so name every one you want to
 keep.
 `agents-tui service status` shows its state, URL and binary;
 `agents-tui service restart` restarts it; `agents-tui service uninstall`
-stops and removes it. Deploying to nuc-1 (autocoder's `deploy.sh --env nuc-1`, see CLAUDE.md)
-restarts this unit.
+stops and removes it. autocoder's `deploy.sh --env deploy` (see CLAUDE.md)
+restarts this unit. That environment's name is the first entry in
+`.autocoder.json`; rename it to match the host you install on.
 
 The binary is written to `target/debug/agents-tui` or `target/release/agents-tui`.
 

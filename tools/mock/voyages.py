@@ -1,14 +1,14 @@
 """Scripted GitHub Deployments for the environment row (#376, #386).
 
-`VoyageScript` plays this repo's own pipeline, `nuc-1` then `release`, as
+`VoyageScript` plays this repo's own pipeline, `deploy` then `release`, as
 GitHub Deployments over a loop, so the village shows every voyage state
 without real deployments:
 
-  * a deploy to `nuc-1` of the integration tip: pending, then in_progress,
+  * a deploy to `deploy` of the integration tip: pending, then in_progress,
     then success (loading, sailing, docked);
-  * a promotion of what `nuc-1` runs to `release`, as autocoder's `release.sh`
+  * a promotion of what `deploy` runs to `release`, as autocoder's `release.sh`
     records one ("Release v0.N.0", linking its GitHub Release);
-  * a deploy to `nuc-1` that fails (a failed voyage; `nuc-1` keeps running
+  * a deploy to `deploy` that fails (a failed voyage; `deploy` keeps running
     what it ran).
 
 A deployment that succeeds marks the one it replaces `inactive`, as GitHub
@@ -17,7 +17,7 @@ does. `state()` is what the mock `gh` serves for
 shape `tools/mock/bin/gh` reads from `<demo>/state/deployments/<name>.json`.
 
 The clock and the shas are passed in, so the timeline is testable without git:
-`tip()` names the commit a deploy to `nuc-1` ships, and `released(sha)` is
+`tip()` names the commit a deploy to `deploy` ships, and `released(sha)` is
 told when a promotion to `release` succeeds.
 """
 
@@ -25,7 +25,7 @@ import datetime
 
 PERIOD = 120
 # (seconds into the loop, environment, how it ends)
-STEPS = [(0, "nuc-1", "success"), (40, "release", "success"), (80, "nuc-1", "failure")]
+STEPS = [(0, "deploy", "success"), (40, "release", "success"), (80, "deploy", "failure")]
 # Status times after a deployment is created.
 IN_PROGRESS, FINISHED = 8, 18
 REPO_URL = "https://github.com/sim/shop"
@@ -38,7 +38,7 @@ def iso(t):
 class VoyageScript:
     def __init__(self, tip, t0, released=None, creator="deploy-bot"):
         self.tip, self.t0, self.released, self.creator = tip, t0, released or (lambda sha: None), creator
-        self.deploys = {"nuc-1": [], "release": []}  # newest first
+        self.deploys = {"deploy": [], "release": []}  # newest first
         self.next_id, self.next_tag = 1, 1
         self.started = set()  # (cycle, step) already started
 
@@ -86,8 +86,8 @@ class VoyageScript:
         for k, (when, env, outcome) in enumerate(STEPS):
             if at < when or (cycle, k) in self.started:
                 continue
-            # A promotion ships what nuc-1 runs; with nothing there yet it waits a loop.
-            sha = self.tip() if env == "nuc-1" else self.current("nuc-1")
+            # A promotion ships what deploy runs; with nothing there yet it waits a loop.
+            sha = self.tip() if env == "deploy" else self.current("deploy")
             self.started.add((cycle, k))
             if sha:
                 self.start(env, sha, self.t0 + cycle * PERIOD + when, outcome)
@@ -96,8 +96,8 @@ class VoyageScript:
                 self.advance(d, t)
 
     def promote_now(self, t):
-        """Promote what nuc-1 runs to release at once (the demo's release-now)."""
-        sha = self.current("nuc-1")
+        """Promote what deploy runs to release at once (the demo's release-now)."""
+        sha = self.current("deploy")
         if sha:
             self.start("release", sha, t, "success")
         return sha
@@ -109,5 +109,5 @@ class VoyageScript:
 
 def config():
     """`.autocoder.json` for "shop" in this mode: this repo's own environments."""
-    return {"environments": [{"name": "nuc-1", "requires": "integration", "source": "deployment"},
-                             {"name": "release", "requires": "nuc-1", "source": "deployment"}]}
+    return {"environments": [{"name": "deploy", "requires": "integration", "source": "deployment"},
+                             {"name": "release", "requires": "deploy", "source": "deployment"}]}

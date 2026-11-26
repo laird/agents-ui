@@ -14,10 +14,11 @@ function parse(raw) {
   }
 }
 
-// "http://nuc-1:7890/" → "http://nuc-1:7890". A bare host gets http://.
+// "http://127.0.0.1:7890/" → "http://127.0.0.1:7890". A bare host gets http://.
+// Empty means agents-tui's default bind. Set Server, or pass --server, for another host.
 function baseUrl(server) {
   var s = String(server || "").trim().replace(/\/+$/, "")
-  if (s === "") return "http://nuc-1:7890"
+  if (s === "") return "http://127.0.0.1:7890"
   return /^[a-z]+:\/\//i.test(s) ? s : "http://" + s
 }
 
@@ -319,15 +320,15 @@ function repoUrl(v) {
 // The Join swarm button runs `swarm <machine>` (remote-swarm-setup.sh installs
 // it) in a terminal, focusing it if it is already open. omarchy-launch-or-focus
 // runs its launch command through `eval`, so a machine name is a plain host
-// name or nothing: anything else (`nuc; rm -rf ~`, `$(id)`, `-rf`) disables it.
+// name or nothing: anything else (`box; rm -rf ~`, `$(id)`, `-rf`) disables it.
 var MACHINE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
 function validMachine(m) {
   return MACHINE.test(String(m === undefined || m === null ? "" : m))
 }
 
 // The terminal's window class for a machine. omarchy-launch-or-focus finds an
-// open one by regex, \b<class>\b, so the class ends in "-join" (else `nuc`
-// would focus nuc-1's terminal: `-` is a word boundary) and a `.` in the name,
+// open one by regex, \b<class>\b, so the class ends in "-join" (else `box`
+// would focus box-1's terminal: `-` is a word boundary) and a `.` in the name,
 // a regex wildcard, becomes `_`.
 function joinAppId(m) {
   return "org.omarchy.swarm-" + String(m).replace(/\./g, "_") + "-join"

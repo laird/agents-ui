@@ -7,7 +7,7 @@ const fs = require("node:fs")
 const N = require("../Notify.js")
 const M = require("../Model.js")
 
-const BASE = "http://nuc-1:7890"
+const BASE = "http://127.0.0.1:7890"
 const FIXTURE = path.join(__dirname, "../../agents-village/tests/fixtures/village.json")
 const recorded = JSON.parse(fs.readFileSync(FIXTURE, "utf8"))
 
@@ -92,26 +92,26 @@ test("green, a poll that cannot say, then red: the break is news, so its fix has
 })
 
 const env = (sha, tag, voyages, source) => doc(village({ pipeline: { gates: [], quay: [], voyages: voyages || [],
-  stops: [{ name: "nuc-1", source: source || "deployment", kind: "environment", sha, tag, issues: [] }] } }))
+  stops: [{ name: "deploy", source: source || "deployment", kind: "environment", sha, tag, issues: [] }] } }))
 
 test("a deploy lands with its version, a promotion says where from, a failure says so", () => {
   let s = N.step(null, env("aaaaaaa1", "v1"), BASE).snapshot
-  let r = N.step(s, env("bbbbbbb2", "v2", [{ from: "dev", to: "nuc-1", state: "docked", sha: "bbbbbbb2", tag: "v2" }]), BASE)
-  assert.deepStrictEqual(r.events.map(e => [e.title, e.body]), [["shop: v2 deployed to nuc-1", ""]], "the voyage and its stop are one deploy")
-  r = N.step(r.snapshot, env("bbbbbbb2", "v2", [{ from: "nuc-1", to: "release", state: "failed", sha: "bbbbbbb2" }]), BASE)
+  let r = N.step(s, env("bbbbbbb2", "v2", [{ from: "dev", to: "deploy", state: "docked", sha: "bbbbbbb2", tag: "v2" }]), BASE)
+  assert.deepStrictEqual(r.events.map(e => [e.title, e.body]), [["shop: v2 deployed to deploy", ""]], "the voyage and its stop are one deploy")
+  r = N.step(r.snapshot, env("bbbbbbb2", "v2", [{ from: "deploy", to: "release", state: "failed", sha: "bbbbbbb2" }]), BASE)
   assert.deepStrictEqual(r.events.map(e => e.title), ["shop: deploy to release failed"])
   assert.match(r.events[0].body, /^bbbbbbb did not land/)
-  r = N.step(r.snapshot, env("bbbbbbb2", "v2", [{ from: "nuc-1", to: "release", state: "docked", sha: "bbbbbbb2" }]), BASE)
-  assert.deepStrictEqual(r.events.map(e => [e.title, e.body]), [["shop: bbbbbbb deployed to release", "Promoted from nuc-1."]])
-  r = N.step(r.snapshot, env("bbbbbbb2", "v2", [{ from: "nuc-1", to: "release", state: "docked", sha: "bbbbbbb2" }]), BASE)
+  r = N.step(r.snapshot, env("bbbbbbb2", "v2", [{ from: "deploy", to: "release", state: "docked", sha: "bbbbbbb2" }]), BASE)
+  assert.deepStrictEqual(r.events.map(e => [e.title, e.body]), [["shop: bbbbbbb deployed to release", "Promoted from deploy."]])
+  r = N.step(r.snapshot, env("bbbbbbb2", "v2", [{ from: "deploy", to: "release", state: "docked", sha: "bbbbbbb2" }]), BASE)
   assert.deepStrictEqual(r.events, [], "a docked voyage still reported is not news twice")
 })
 
 test("a GitHub outage and its end are not news: stops fall back to the branch, the board empties, then all come back", () => {
   const note = { number: 12, label: "needs-design", title: "Pick a queue", url: "https://github.com/o/shop/issues/12" }
   const up = () => doc(village({ board: [note], pipeline: { gates: [], quay: [],
-    voyages: [{ from: "nuc-1", to: "release", state: "failed", sha: "c3" }],
-    stops: [{ name: "nuc-1", source: "deployment", kind: "environment", sha: "b2", tag: "v2", issues: [] }] } }))
+    voyages: [{ from: "deploy", to: "release", state: "failed", sha: "c3" }],
+    stops: [{ name: "deploy", source: "deployment", kind: "environment", sha: "b2", tag: "v2", issues: [] }] } }))
   const down = env("deadbee", "", [], "branch")
   let t = 1e12
   let r = N.step(null, up(), BASE, { now: t })
@@ -123,7 +123,7 @@ test("a GitHub outage and its end are not news: stops fall back to the branch, t
   r = N.step(r.snapshot, down, BASE, { now: t += 1000 })
   r = N.step(r.snapshot, down, BASE, { now: t += N.GRACE_MS + 1000 })
   r = N.step(r.snapshot, up(), BASE, { now: t += 1000 })
-  assert.deepStrictEqual(r.events.map(e => e.kind), ["needs", "deploy"], "the note and the failure again; nuc-1 still runs b2")
+  assert.deepStrictEqual(r.events.map(e => e.kind), ["needs", "deploy"], "the note and the failure again; deploy still runs b2")
 })
 
 test("a stop that starts naming a deployment for an environment never seen is not a deploy", () => {
@@ -139,11 +139,11 @@ test("a village that drops out of a poll keeps its snapshot", () => {
 })
 
 test("settings: defaults, kinds, quiet hours from the screensaver's dim", () => {
-  assert.deepStrictEqual(N.settingsOf("", ""), { enabled: true, server: "http://nuc-1:7890", interval: 15, kinds: ["needs", "gate", "build", "deploy"], quiet: "" })
+  assert.deepStrictEqual(N.settingsOf("", ""), { enabled: true, server: "http://127.0.0.1:7890", interval: 15, kinds: ["needs", "gate", "build", "deploy"], quiet: "" })
   const s = N.settingsOf('{"server":"http://box:1/","interval":2,"kinds":["build","bogus"]}', '{"dim":"23-7"}')
   assert.deepStrictEqual(s, { enabled: true, server: "http://box:1", interval: 15, kinds: ["build"], quiet: "23-7" })
   assert.strictEqual(N.settingsOf('{"quiet":""}', '{"dim":"23-7"}').quiet, "", "notify.json can turn quiet hours off")
-  assert.strictEqual(N.settingsOf("{not json", "").server, "http://nuc-1:7890")
+  assert.strictEqual(N.settingsOf("{not json", "").server, "http://127.0.0.1:7890")
   assert.strictEqual(N.settingsOf('{"enabled":false}', "").enabled, false)
 })
 
@@ -190,7 +190,7 @@ test("the body is escaped for the daemon's markup", () => {
 
 test("a branch or the green lock moving is not a deploy", () => {
   const stops = sha => doc(village({ pipeline: { gates: [], quay: [], stops: [
-    { name: "green", kind: "gate", source: "deployment", sha, issues: [] }, { name: "nuc-1", source: "branch", sha, issues: [] }] } }))
+    { name: "green", kind: "gate", source: "deployment", sha, issues: [] }, { name: "deploy", source: "branch", sha, issues: [] }] } }))
   const s = N.step(null, stops("a1"), BASE).snapshot
   assert.deepStrictEqual(N.step(s, stops("b2"), BASE).events, [])
 })

@@ -1532,7 +1532,7 @@ mod tests {
         let titled = |n: u32, t: &str| IssueSnapshot { number: n, title: t.into(), ..IssueSnapshot::default() };
         let p = Pipeline {
             quay: vec![1, 2, 3],
-            stops: vec![Stop { name: "nuc-1".into(), issues: vec![4], ..Stop::default() }],
+            stops: vec![Stop { name: "deploy".into(), issues: vec![4], ..Stop::default() }],
             ..Pipeline::default()
         };
         let titles = pipeline_titles(&p, &[titled(1, "Still open"), titled(9, "Not landed")], &[titled(2, "Closed when it landed"), titled(4, "Deployed"), titled(3, "")]);
@@ -1734,9 +1734,9 @@ mod tests {
 
     #[test]
     fn an_environment_carries_everything_it_runs() {
-        // nuc-1 runs c, b, a; release runs a. Cargo is cumulative, unlike `issues`.
+        // deploy runs c, b, a; release runs a. Cargo is cumulative, unlike `issues`.
         let tips = vec![("d".to_string(), 4), ("c".to_string(), 3), ("b".to_string(), 2), ("a".to_string(), 1)];
-        let names = vec!["nuc-1".to_string(), "release".to_string()];
+        let names = vec!["deploy".to_string(), "release".to_string()];
         let p = place_tips(&tips, &names, &[set(&["c", "b", "a"]), set(&["a"])]);
         let cargo = cargo_of(&tips, &p.reached, 2);
         assert_eq!(cargo, vec![(vec![3, 2, 1], 0), (vec![1], 0)]);
@@ -1750,7 +1750,7 @@ mod tests {
 
     #[test]
     fn a_promotion_carries_what_is_new_to_the_target() {
-        // release ran a; the promotion deploys what nuc-1 runs (c, b, a): it carries 3 and 2.
+        // release ran a; the promotion deploys what the install runs (c, b, a): it carries 3 and 2.
         let tips = vec![("d".to_string(), 4), ("c".to_string(), 3), ("b".to_string(), 2), ("a".to_string(), 1)];
         assert_eq!(voyage_issues(&tips, &shas(&["c", "b", "a"]), Some(&shas(&["a"]))), vec![3, 2]);
         // A first deployment carries everything in it.
@@ -1762,9 +1762,9 @@ mod tests {
 
     #[test]
     fn a_voyage_sails_from_the_environment_it_requires() {
-        let envs = vec![env("nuc-1", Some("integration")), env("release", Some("nuc-1")), env("canary", None), env("odd", Some("green"))];
+        let envs = vec![env("deploy", Some("integration")), env("release", Some("deploy")), env("canary", None), env("odd", Some("green"))];
         let from: Vec<String> = envs.iter().map(|e| voyage_from(e, &envs)).collect();
-        assert_eq!(from, vec!["dev", "nuc-1", "dev", "dev"]);
+        assert_eq!(from, vec!["dev", "deploy", "dev", "dev"]);
         // A requires naming nothing configured (or itself) sails from the dev village.
         assert_eq!(voyage_from(&env("x", Some("x")), &[env("x", Some("x"))]), "dev");
     }
@@ -1808,7 +1808,7 @@ mod tests {
                     ..Stop::default()
                 },
             ],
-            voyages: vec![Voyage { from: "nuc-1".into(), to: "release".into(), state: VoyageState::Sailing, sha: "c0ffee1".into(), issues: vec![363], ..Voyage::default() }],
+            voyages: vec![Voyage { from: "deploy".into(), to: "release".into(), state: VoyageState::Sailing, sha: "c0ffee1".into(), issues: vec![363], ..Voyage::default() }],
             ..Pipeline::default()
         };
         let json = serde_json::to_value(&p).unwrap();
@@ -1818,7 +1818,7 @@ mod tests {
         assert_eq!(json["stops"][1]["cargo_more"], 41);
         assert_eq!(json["stops"][1]["health"], serde_json::json!({"state": "ok"}));
         assert_eq!(json["stops"][1]["deployed_by"], "laird");
-        assert_eq!(json["voyages"][0], serde_json::json!({"from": "nuc-1", "to": "release", "state": "sailing", "sha": "c0ffee1", "started_at": "", "issues": [363]}));
+        assert_eq!(json["voyages"][0], serde_json::json!({"from": "deploy", "to": "release", "state": "sailing", "sha": "c0ffee1", "started_at": "", "issues": [363]}));
         assert!(json["stops"][0].get("cargo").is_none() && json["stops"][0].get("health").is_none(), "empty fields stay out");
         let back: Pipeline = serde_json::from_value(json).unwrap();
         assert_eq!(back.voyages, p.voyages);
@@ -2039,18 +2039,18 @@ mod tests {
         assert!(placed.iter().all(|s| s.issues.is_empty()));
     }
 
-    /// This repo's own `.autocoder.json`: no sentinel, an install on nuc-1,
-    /// then GitHub Releases.
+    /// This repo's own `.autocoder.json`: no sentinel, an install environment
+    /// named `deploy` (rename that entry to match your host), then GitHub Releases.
     const NO_SENTINEL: &str = r#"{"issueSource":"github","environments":[
-        {"name":"nuc-1","requires":"integration"},
-        {"name":"release","requires":"nuc-1"}]}"#;
+        {"name":"deploy","requires":"integration"},
+        {"name":"release","requires":"deploy"}]}"#;
 
     #[test]
     fn the_repo_config_has_no_sentinel_and_two_environments() {
         let config = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(".autocoder.json")).unwrap();
         let envs = parse_environments(&config);
         let names: Vec<_> = envs.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(names, vec!["nuc-1", "release"]);
+        assert_eq!(names, vec!["deploy", "release"]);
         assert!(gate_absent(&envs));
         assert_eq!(envs, parse_environments(NO_SENTINEL));
     }
@@ -2082,7 +2082,7 @@ mod tests {
 
     #[test]
     fn without_a_sentinel_deployed_work_moves_past_the_quay() {
-        // Newest first: #9 landed after the nuc-1 install, #8 and #7 before it,
+        // Newest first: #9 landed after the install, #8 and #7 before it,
         // and the release was cut before #8.
         let tips = vec![("c".to_string(), 9), ("b".to_string(), 8), ("a".to_string(), 7)];
         let envs = parse_environments(NO_SENTINEL);
@@ -2090,12 +2090,12 @@ mod tests {
         assert_eq!(sentinel, "absent");
         assert!(gate.is_none());
         let names: Vec<String> = envs.iter().map(|e| e.name.clone()).collect();
-        let (nuc, _) = dep("b", &["b", "a"]);
+        let (installed, _) = dep("b", &["b", "a"]);
         let (release, head) = dep("a", &["a"]);
         assert_eq!(head.as_deref(), Some("a"));
-        let p = place_tips(&tips, &names, &[nuc, release]);
+        let p = place_tips(&tips, &names, &[installed, release]);
         assert_eq!(p.quay, vec![9], "landed after the last deploy: still at the quay");
-        assert_eq!(p.stops[0].name, "nuc-1");
+        assert_eq!(p.stops[0].name, "deploy");
         assert_eq!(p.stops[0].issues, vec![8]);
         assert_eq!(p.stops[0].source, StopSource::Deployment);
         assert_eq!(p.stops[1].name, "release");
@@ -2106,10 +2106,10 @@ mod tests {
     fn with_a_sentinel_but_no_green_ref_deployments_still_wait() {
         // The same deployments behind a sentinel that never ran hold everything.
         let tips = vec![("b".to_string(), 8), ("a".to_string(), 7)];
-        let envs = parse_environments(r#"{"environments":[{"name":"nuc-1"}]}"#);
+        let envs = parse_environments(r#"{"environments":[{"name":"deploy"}]}"#);
         let (_, gate) = sentinel_gate(&envs, None, Some(&"b".to_string()));
-        let (nuc, _) = dep("b", &["b", "a"]);
-        let p = place_tips(&tips, &["master-green".into(), "nuc-1".into()], &[gate.unwrap(), nuc]);
+        let (installed, _) = dep("b", &["b", "a"]);
+        let p = place_tips(&tips, &["master-green".into(), "deploy".into()], &[gate.unwrap(), installed]);
         assert_eq!(p.quay, vec![8, 7]);
     }
 

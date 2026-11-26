@@ -8,7 +8,7 @@ const village = (o = {}) => ({
   project: 'shop',
   houses: o.blocked ? [{ status: 'blocked' }] : [{ status: 'working' }],
   build: o.build ? { state: o.build } : null,
-  pipeline: { stops: [{ name: 'nuc-1' }, { name: 'release' }], voyages: o.voyages || [] },
+  pipeline: { stops: [{ name: 'deploy' }, { name: 'release' }], voyages: o.voyages || [] },
 });
 const step = (a, b) => {
   const s1 = cueSnapshot([a]);
@@ -42,7 +42,7 @@ test('a horn when a deploy docks at production, not elsewhere or when it fails',
   assert.deepEqual(step(village(), docked('release', 'abc')), ['horn']);
   assert.deepEqual(step(docked('release', 'abc', 'sailing'), docked('release', 'abc')), ['horn']);
   assert.deepEqual(step(docked('release', 'abc'), docked('release', 'abc')), []);
-  assert.deepEqual(step(village(), docked('nuc-1', 'abc')), []);
+  assert.deepEqual(step(village(), docked('deploy', 'abc')), []);
   assert.deepEqual(step(village(), docked('release', 'abc', 'failed')), []);
 });
 

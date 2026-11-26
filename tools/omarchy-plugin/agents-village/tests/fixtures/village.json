@@ -52,7 +52,7 @@
           "promotion": "subtask",
           "stages": [
             {
-              "name": "nuc-1",
+              "name": "deploy",
               "reached": 0,
               "total": 4,
               "unknown": false
@@ -206,7 +206,7 @@
               348,
               347
             ],
-            "name": "nuc-1",
+            "name": "deploy",
             "sha": "da3d41852451c9ca0d41d47a6a5638e5a7973050",
             "source": "deployment"
           },

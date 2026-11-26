@@ -14,25 +14,25 @@ test('one label per environment: its name and version, deployed when under it', 
 });
 
 test('without a tag the commit names the version', () => {
-  assert.equal(envLabel({ name: 'nuc-1', sha: 'abcdef1234567' }, NOW).text, 'nuc-1 · abcdef1');
+  assert.equal(envLabel({ name: 'deploy', sha: 'abcdef1234567' }, NOW).text, 'deploy · abcdef1');
   assert.equal(versionOf({ sha: 'abcdef1234567' }), 'abcdef1');
 });
 
 test('nothing known says unknown, with no time under it', () => {
-  const l = envLabel({ name: 'nuc-1', source: 'unknown', deployed_at: '2026-11-09T09:00:00Z' }, NOW);
-  assert.equal(l.text, 'nuc-1 · unknown');
+  const l = envLabel({ name: 'deploy', source: 'unknown', deployed_at: '2026-11-09T09:00:00Z' }, NOW);
+  assert.equal(l.text, 'deploy · unknown');
   assert.equal(l.sub, null);
 });
 
 test('an environment with a village is not named again at its lock or the castle', () => {
-  // nuc-1 then release: both villages in the row, so the canal names neither.
-  const n = canalNames(dev([{ name: 'nuc-1', issues: [] }, { name: 'release', issues: [] }]));
+  // deploy then release: both villages in the row, so the canal names neither.
+  const n = canalNames(dev([{ name: 'deploy', issues: [] }, { name: 'release', issues: [] }]));
   assert.deepEqual(n.locks, [null]);
   assert.equal(n.castle, null);
 });
 
 test('a gate keeps its name at its lock', () => {
-  const n = canalNames(dev([{ name: 'green', kind: 'gate', issues: [] }, { name: 'nuc-1', issues: [] }, { name: 'release', issues: [] }]));
+  const n = canalNames(dev([{ name: 'green', kind: 'gate', issues: [] }, { name: 'deploy', issues: [] }, { name: 'release', issues: [] }]));
   assert.deepEqual(n.locks, ['green', null]);
   assert.equal(n.castle, null);
 });

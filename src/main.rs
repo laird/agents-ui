@@ -664,8 +664,8 @@ mod tests {
 
     #[test]
     fn web_bind_takes_a_list_of_addresses() {
-        let cli = parse_cli_options(["agents-tui", "--headless", "--web-bind", "127.0.0.1,100.98.138.89"]).unwrap();
-        let want: Vec<std::net::SocketAddr> = vec!["127.0.0.1:7890".parse().unwrap(), "100.98.138.89:7890".parse().unwrap()];
+        let cli = parse_cli_options(["agents-tui", "--headless", "--web-bind", "127.0.0.1,100.64.0.1"]).unwrap();
+        let want: Vec<std::net::SocketAddr> = vec!["127.0.0.1:7890".parse().unwrap(), "100.64.0.1:7890".parse().unwrap()];
         assert_eq!(web_addrs(&cli, 7890), want);
         let eq = parse_cli_options(["agents-tui", "--web-bind=127.0.0.1, ::1"]).unwrap();
         assert_eq!(web_addrs(&eq, 1), ["127.0.0.1:1".parse().unwrap(), "[::1]:1".parse().unwrap()] as [std::net::SocketAddr; 2]);
@@ -684,9 +684,9 @@ mod tests {
 
     #[test]
     fn web_bind_tailscale_expands_to_the_tailnet_addresses() {
-        let ts = || Ok(vec!["100.98.138.89".parse().unwrap(), "fd7a::5".parse().unwrap()]);
+        let ts = || Ok(vec!["100.64.0.1".parse().unwrap(), "fd7a::5".parse().unwrap()]);
         let ips = parse_web_bind("127.0.0.1,tailscale", ts).unwrap();
-        assert_eq!(ips, ["127.0.0.1", "100.98.138.89", "fd7a::5"].map(|s| s.parse::<std::net::IpAddr>().unwrap()));
+        assert_eq!(ips, ["127.0.0.1", "100.64.0.1", "fd7a::5"].map(|s| s.parse::<std::net::IpAddr>().unwrap()));
     }
 
     #[test]

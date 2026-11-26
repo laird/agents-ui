@@ -44,7 +44,7 @@ test('the marks and the debris go once the issue lands', () => {
   assert.equal(bounceMarks(village(bounces)).length, 1);
   assert.equal(landed(village(bounces, { quay: [412] }), 412), true);
   assert.deepEqual(bounceMarks(village(bounces, { quay: [412] })), [], 'at the quay');
-  assert.deepEqual(bounceMarks(village(bounces, { stops: [{ name: 'nuc-1', issues: [412] }] })), [], 'past it');
+  assert.deepEqual(bounceMarks(village(bounces, { stops: [{ name: 'deploy', issues: [412] }] })), [], 'past it');
 });
 
 test('the dialog lists each attempt, newest first: why, when, and which files', () => {

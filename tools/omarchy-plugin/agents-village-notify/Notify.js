@@ -30,7 +30,8 @@ function settingsOf(notifyRaw, saverRaw) {
   var kinds = Array.isArray(n.kinds) ? n.kinds.filter(function(k) { return KINDS.indexOf(k) >= 0 }) : KINDS.slice()
   return {
     enabled: n.enabled !== false,
-    server: String(n.server || s.server || "http://nuc-1:7890").replace(/\/+$/, ""),
+    // notify.json `server`, else the screensaver's, else agents-tui's default bind.
+    server: String(n.server || s.server || "http://127.0.0.1:7890").replace(/\/+$/, ""),
     interval: isFinite(interval) && interval >= 5 ? Math.floor(interval) : 15,
     kinds: kinds,
     quiet: n.quiet !== undefined ? String(n.quiet || "") : String(s.dim || "")

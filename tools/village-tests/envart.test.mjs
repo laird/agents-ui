@@ -75,13 +75,13 @@ test('the flags flutter, and hold still when motion is reduced', () => {
 });
 
 test("the sign letters its environment's name, seven letters at most", () => {
-  assert.equal(signText('nuc-1'), 'NUC-1');
+  assert.equal(signText('deploy'), 'DEPLOY');
   assert.equal(signText('production'), 'PRODUCT');
   assert.equal(signText(undefined), '');
   state.T = THEMES.medieval;
   const ink = name => { const c = canvas(); envSign(c, 5, 30, null, name); return c.rects.filter(r => r.fine && r.col === '#683818' && r.y < 2 * 30 + 9).length; };
-  assert.ok(ink('nuc-1') > 10, 'NUC-1 is on the board');
-  assert.notEqual(ink('nuc-1'), ink('release'), 'a different name, different letters');
+  assert.ok(ink('deploy') > 10, 'DEPLOY is on the board');
+  assert.notEqual(ink('deploy'), ink('release'), 'a different name, different letters');
 });
 
 test('each theme draws the row its own way', () => {

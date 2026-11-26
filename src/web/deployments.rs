@@ -25,7 +25,7 @@ pub struct Deployment {
     pub sha: String,
     #[serde(default)]
     pub created_at: String,
-    /// The environment it went to (`nuc-1`, `release`).
+    /// The environment it went to (`deploy`, `release`).
     #[serde(default)]
     pub environment: String,
     /// autocoder's `release.sh` writes "Release vX.Y.Z" here.
@@ -544,7 +544,7 @@ mod tests {
     fn a_release_deployment_names_its_tag_and_page() {
         let d = parse_deployments(
             r#"[{"id": 40, "sha": "ddd444", "created_at": "2026-11-04T10:00:00Z", "description": "Release v0.5.0"},
-                {"id": 30, "sha": "ccc333", "created_at": "2026-11-03T10:00:00Z", "description": "agents-tui installed on nuc-1"}]"#,
+                {"id": 30, "sha": "ccc333", "created_at": "2026-11-03T10:00:00Z", "description": "agents-tui installed on deploy"}]"#,
         );
         let s = statuses(&[
             (40, r#"[{"state": "success", "created_at": "2026-11-04T10:05:00Z", "log_url": "https://github.com/o/r/releases/tag/v0.5.0"}]"#),
@@ -625,7 +625,7 @@ mod tests {
         assert_eq!(release_tag(Some("  Release v1.2.3 ")), Some("v1.2.3".into()));
         assert_eq!(release_tag(Some("Release ")), None);
         assert_eq!(release_tag(Some("Release two words")), None);
-        assert_eq!(release_tag(Some("agents-tui installed on nuc-1")), None);
+        assert_eq!(release_tag(Some("agents-tui installed on deploy")), None);
         assert_eq!(release_tag(None), None);
     }
 
@@ -637,22 +637,22 @@ mod tests {
     }
 
     /// autocoder's deploy.sh makes the Deployments read here (laird/agents#200),
-    /// running nuc-1's own steps from .autocoder.json (#533): install, restart
+    /// running the install environment's steps from .autocoder.json (#533): install, restart
     /// the served unit and wait for the village (`agents-tui service restart`
     /// fails when it does not answer), then release the same commit.
     #[test]
-    fn nuc_1_deploys_through_autocoder_with_its_own_steps() {
+    fn deploy_environment_deploys_through_autocoder() {
         let config: serde_json::Value = serde_json::from_str(include_str!("../../.autocoder.json")).unwrap();
         let envs = config["environments"].as_array().unwrap();
-        let nuc = envs.iter().find(|e| e["name"] == "nuc-1").expect("nuc-1 is configured");
-        let step = |k: &str| nuc[k].as_str().unwrap_or_default();
+        let installed = envs.iter().find(|e| e["name"] == "deploy").expect("deploy is configured");
+        let step = |k: &str| installed[k].as_str().unwrap_or_default();
         // The served instance is the unit and nothing else: no unit, no deploy.
         assert!(step("preflight").contains("systemctl --user cat agents-tui.service"));
         // Merge jobs and deploys run without ~/.cargo/bin on PATH.
         assert!(step("deploy").contains("source \"$HOME/.cargo/env\"") && step("deploy").contains("cargo install --path . --locked"));
         assert!(step("restart").contains("agents-tui\" service restart"));
-        assert_eq!(nuc["release"], true, "every deploy releases");
-        assert!(envs.iter().any(|e| e["name"] == "release" && e["requires"] == "nuc-1"));
+        assert_eq!(installed["release"], true, "every deploy releases");
+        assert!(envs.iter().any(|e| e["name"] == "release" && e["requires"] == "deploy"));
         let unit = include_str!("../../docs/agents-tui.service");
         assert!(unit.contains("ExecStart=%h/.cargo/bin/agents-tui --headless --web-port 7890 --web-bind 127.0.0.1,tailscale"));
     }

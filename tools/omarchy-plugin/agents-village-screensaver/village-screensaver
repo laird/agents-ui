@@ -13,10 +13,11 @@
 # The agents-village-screensaver shell service runs this when the session goes
 # idle; `force` runs it by hand. Settings come from
 # ~/.config/agents-ui/screensaver.json (written by install.sh --screensaver):
-#   { "server": "http://nuc-1:7890", "timeout": 150, "cycle": 30, "dim": "23-7", "recap": 30, "sound": false }
-# `server` and `timeout` are the launcher's and the service's own. Every other
-# key is a page option, one file each in options/ (options.sh says how they
-# become the page's query).
+#   { "server": "http://127.0.0.1:7890", "timeout": 150, "cycle": 30, "dim": "23-7", "recap": 30, "sound": false }
+# `server` defaults to where agents-tui listens. install.sh --server, or
+# `server` in this file, points at another host. `server` and `timeout` are
+# the launcher's and the service's own. Every other key is a page option,
+# one file each in options/ (options.sh says how they become the page's query).
 #
 # It does nothing while the session is locked or the screensaver is already
 # up, nor (unless forced) while Omarchy's stay-awake indicator is on or its
@@ -48,7 +49,8 @@ setting() {  # setting <key> <default>
   echo "${v:-$2}"
 }
 
-SERVER=$(setting server "http://nuc-1:7890")
+# Fallback when screensaver.json names no server: agents-tui's default bind.
+SERVER=$(setting server "http://127.0.0.1:7890")
 SERVER=${SERVER%/}
 NOW=${AGENTS_VILLAGE_SCREENSAVER_NOW:-$(date +%s)}
 # shellcheck source=options.sh

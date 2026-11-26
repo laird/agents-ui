@@ -48,7 +48,7 @@ ORIG_HOME=$HOME
 # The fake host never sees this machine's own omarchy (#408): its system
 # commands come from $T/sysbin, every command in /usr/bin and /bin except
 # omarchy*. Otherwise the result would depend on whether the machine running
-# the tests has Omarchy (nuc-1 does, CI does not).
+# the tests has Omarchy (a developer machine might; CI does not).
 remote_sandbox() {
   sandbox
   REMOTE="$T/remote"; mkdir -p "$REMOTE/home/.config/omarchy" "$T/rbin" "$T/omarchy-bin" "$T/sysbin"

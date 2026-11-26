@@ -45,7 +45,7 @@ test('landed, merged, closed unfinished, deploys and bounces since the moment', 
   const v = village({ pipeline: {
     titles: { 7: 'Hotspot' },
     stops: [
-      { kind: 'environment', name: 'nuc-1', sha: 'abcdef1234567', deployed_at: '2026-11-16T01:00:00Z' },
+      { kind: 'environment', name: 'deploy', sha: 'abcdef1234567', deployed_at: '2026-11-16T01:00:00Z' },
       { kind: 'environment', name: 'release', sha: 'abcdef1234567', tag: 'v2026.11.16.1', deployed_at: '2026-11-16T01:00:05Z' },
       { kind: 'environment', name: 'old', sha: 'aaa', deployed_at: '2026-11-14T01:00:00Z' },
     ],
@@ -60,7 +60,7 @@ test('landed, merged, closed unfinished, deploys and bounces since the moment', 
   assert.deepEqual(r.landed.map(i => i.number), [5]);
   assert.deepEqual(r.closed.map(i => i.number), [6]);
   assert.deepEqual(r.deploys, [
-    { name: 'nuc-1', version: 'abcdef1', at: '2026-11-16T01:00:00Z' },
+    { name: 'deploy', version: 'abcdef1', at: '2026-11-16T01:00:00Z' },
     { name: 'release', version: 'v2026.11.16.1', at: '2026-11-16T01:00:05Z' },
   ]);
   assert.deepEqual(r.bounces, [{ issue: 7, kind: 'conflict', title: 'Hotspot' }, { issue: 8, kind: 'push-retry', title: '' }]);
@@ -68,7 +68,7 @@ test('landed, merged, closed unfinished, deploys and bounces since the moment', 
     { text: '1 issue landed (#5)', red: false },
     { text: '1 pull request merged (#9)', red: false },
     { text: '1 issue closed unfinished (#6)', red: false },
-    { text: 'Deployed to nuc-1 · abcdef1', red: false },
+    { text: 'Deployed to deploy · abcdef1', red: false },
     { text: 'Deployed to release · v2026.11.16.1', red: false },
     { text: '#7 conflicted: Hotspot', red: true },
     { text: '#8 was re-synced', red: false },

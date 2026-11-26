@@ -14,7 +14,7 @@
 # The fake host never sees this machine's own omarchy (#408): its system
 # commands come from $T/sysbin, every command in /usr/bin and /bin except
 # omarchy*. Otherwise the result would depend on whether the machine running
-# the tests has Omarchy (nuc-1 does, CI does not).
+# the tests has Omarchy (a developer machine might; CI does not).
 
 remote_sandbox
 out=$(bash "$INSTALL" --screensaver --host box --dry-run 2>&1) || fail "remote dry run exited: $out"

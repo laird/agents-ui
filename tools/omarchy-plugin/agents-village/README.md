@@ -1,7 +1,7 @@
 # Agents village for the Omarchy bar
 
 A bar widget for the agents-tui village, so the swarm is a glance and a click
-away on any Omarchy machine on the tailnet (nuc-1, omarchy-1, the uConsole),
+away on any Omarchy machine that can reach the agents-tui server,
 without a browser tab open.
 
 ## The bar icon
@@ -31,7 +31,7 @@ so what starts waiting while the server is unreachable is news when it answers.
 
 While the desktop notifier covers it, the widget sends nothing: that is, its
 `~/.config/agents-ui/notify.json` exists, is not `"enabled": false`, watches
-the same server (nuc-1 when it names none) and notifies `needs`. The notifier
+the same server (`http://127.0.0.1:7890` when it names none) and notifies `needs`. The notifier
 says the same things and more (the build, deploys), and a machine running both
 is notified once. Turn the widget's own off with **Notify** in its settings.
 
@@ -62,7 +62,7 @@ A village shows:
 **Join swarm** runs `swarm <machine>` (`~/.local/bin/swarm`, from
 `remote-swarm-setup.sh`) in a terminal, or focuses that terminal if it is
 already open (`omarchy-launch-or-focus-tui --app-id=org.omarchy.swarm-<machine>-join`;
-the `-join` keeps `nuc` from finding nuc-1's terminal).
+the `-join` keeps `box` from finding box-1's terminal).
 It shows once **Machine** is set and `swarm` is on `PATH`. Omarchy runs that
 command through `eval`, so the machine must be a plain host name (letters,
 digits, `.`, `_`, `-`, starting with a letter or digit); for anything else the
@@ -95,11 +95,11 @@ nothing to agents, so a `--read-only` server is enough.
 
 | Setting | Default | |
 |---|---|---|
-| Server | `http://nuc-1:7890` | the agents-tui web server |
+| Server | `http://127.0.0.1:7890` | where `agents-tui` listens by default. Set Server, `install.sh --server`, or `server` in `~/.config/agents-ui/notify.json` to use another host. |
 | Village | empty | a project to always show; empty starts at the list |
 | Refresh interval | 5 s | how often it reads the server |
 | Show how many are working / red dot / ship | on | which badges to draw |
-| Machine | empty | the swarm's machine for **Join swarm** (e.g. `nuc`); empty hides it |
+| Machine | empty | the swarm's machine for **Join swarm** (e.g. `box`); empty hides it |
 | Notify | on | a notification when something starts waiting on you (not while the desktop notifier is installed) |
 
 `allowMultiple` is on, so two instances can watch two servers or two villages.
@@ -110,7 +110,7 @@ From a checkout of agents-ui:
 
 ```bash
 tools/omarchy-plugin/install.sh --enable                  # this machine: links the checkout, adds the widget
-tools/omarchy-plugin/install.sh --host omarchy-1 --enable # another Omarchy machine, over ssh
+tools/omarchy-plugin/install.sh --host example-host --enable # another Omarchy machine, over ssh
 tools/omarchy-plugin/install.sh --uninstall               # take it out again
 ```
 

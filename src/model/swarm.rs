@@ -387,7 +387,7 @@ impl AgentInfo {
 /// Stanzas are separated by blank lines:
 ///
 /// ```text
-/// worktree /home/laird/src/kink-party
+/// worktree /home/user/src/example-app
 /// HEAD 9f2c...
 /// branch refs/heads/master
 /// ```
@@ -1135,11 +1135,11 @@ mod tests {
         // Paths that do not exist stay as written: canonicalize falls back to
         // the original, which is what keeps this test hermetic.
         let out = "\
-worktree /nonexistent/kink-party
+worktree /nonexistent/example-app
 HEAD 9f2c1a
 branch refs/heads/master
 
-worktree /nonexistent/kink-party-wt-1
+worktree /nonexistent/example-app-wt-1
 HEAD 3b4d2e
 branch refs/heads/worker-1
 ";
@@ -1147,11 +1147,11 @@ branch refs/heads/worker-1
 
         assert_eq!(map.len(), 2);
         assert_eq!(
-            map.get(&PathBuf::from("/nonexistent/kink-party")).map(String::as_str),
+            map.get(&PathBuf::from("/nonexistent/example-app")).map(String::as_str),
             Some("master")
         );
         assert_eq!(
-            map.get(&PathBuf::from("/nonexistent/kink-party-wt-1")).map(String::as_str),
+            map.get(&PathBuf::from("/nonexistent/example-app-wt-1")).map(String::as_str),
             Some("worker-1")
         );
     }

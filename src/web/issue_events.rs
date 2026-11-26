@@ -106,7 +106,7 @@ mod tests {
 {"v":1,"ts":"2026-11-21T14:16:00Z","repo":"agents-5ea0ca80","issue":537,"worker":"w","branch":"feature/issue-537","event":"claimed","detail":{}}
 {"v":1,"ts":"2026-11-17T08:06:02Z","repo":"worker-3dfbb44d","issue":18401,"worker":"worker","branch":"feature/code","event":"first-commit","detail":{"sha":"dbd2115"}}
 {"v":2,"ts":"2026-11-21T14:20:00Z","repo":"agents-ui-33dc9185","issue":537,"event":"claimed","detail":{}}
-{"v":1,"ts":"2026-11-21T15:00:00Z","repo":"agents-ui-33dc9185","issue":null,"event":"deployed","detail":{"environment":"nuc-1","sha":"abc","deployment":7}}
+{"v":1,"ts":"2026-11-21T15:00:00Z","repo":"agents-ui-33dc9185","issue":null,"event":"deployed","detail":{"environment":"deploy","sha":"abc","deployment":7}}
 {"v":1,"ts":"2026-11-21T15:00:01Z","repo":"agents-ui-33dc91"#;
 
     #[test]
@@ -114,7 +114,7 @@ mod tests {
         let events = parse(LOG, REPO);
         let got: Vec<_> = events.iter().map(|e| (e.event.as_str(), e.issue)).collect();
         assert_eq!(got, vec![("claimed", Some(537)), ("first-commit", Some(537)), ("deployed", None)]);
-        assert_eq!(events[2].detail_str("environment"), Some("nuc-1"));
+        assert_eq!(events[2].detail_str("environment"), Some("deploy"));
     }
 
     #[test]

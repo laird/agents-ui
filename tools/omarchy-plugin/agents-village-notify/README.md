@@ -51,9 +51,9 @@ is notified once.
 ## Install
 
 ```bash
-tools/omarchy-plugin/install.sh --notify                            # here, reading http://nuc-1:7890
-tools/omarchy-plugin/install.sh --notify --server http://nuc-1:7890 --quiet 23-7
-tools/omarchy-plugin/install.sh --notify --host omarchy-1           # another Omarchy machine
+tools/omarchy-plugin/install.sh --notify                            # here, reading http://127.0.0.1:7890
+tools/omarchy-plugin/install.sh --notify --server http://127.0.0.1:7890 --quiet 23-7
+tools/omarchy-plugin/install.sh --notify --host example-host        # another Omarchy machine
 tools/omarchy-plugin/install.sh --notify --uninstall
 ```
 
@@ -64,12 +64,12 @@ tools/omarchy-plugin/install.sh --notify --uninstall
 `~/.config/agents-ui/notify.json`, re-read when it changes:
 
 ```json
-{ "server": "http://nuc-1:7890", "interval": 15, "kinds": ["needs", "gate", "build", "deploy"], "quiet": "23-7" }
+{ "server": "http://127.0.0.1:7890", "interval": 15, "kinds": ["needs", "gate", "build", "deploy"], "quiet": "23-7" }
 ```
 
 | Setting | Default | |
 |---|---|---|
-| `server` | the screensaver's, else `http://nuc-1:7890` | the agents-tui web server |
+| `server` | the screensaver's, else `http://127.0.0.1:7890` | the agents-tui web server. Set this, or `install.sh --server`, to use another host. |
 | `interval` | 15 | seconds between polls (at least 5) |
 | `kinds` | all four | `needs` (houses, the manager, the board), `gate`, `build`, `deploy` |
 | `quiet` | the screensaver's `dim` | hours with no notifications, e.g. `23-7`; `""` for none |

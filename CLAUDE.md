@@ -226,12 +226,15 @@ what `src/web/deployments.rs` reads to place each stop.
 Deploying and releasing are autocoder's (laird/agents#200): its
 `scripts/deploy.sh` and `scripts/release.sh`, in the installed plugin
 (`~/.claude/plugins/cache/<marketplace>/autocoder/<version>/scripts/`). What is
-agents-ui's own is the `nuc-1` entry in `.autocoder.json` (#533), which `cargo
-test nuc_1_deploys_through_autocoder` checks:
+agents-ui's own is the `deploy` entry in `.autocoder.json` (#533), which `cargo
+test deploy_environment_deploys_through_autocoder` checks. `deploy` is a
+generic name for the machine where agents-tui is installed and served. Rename
+that entry, and the `release` entry's `requires`, to whatever you call that
+host, and pass the same name to `deploy.sh --env`.
 
-- **`nuc-1`**: what is installed and served on nuc-1. From a clean checkout of
+- **`deploy`**: what is installed and served. From a clean checkout of
   a commit already on `origin/master`, run `<autocoder scripts>/deploy.sh --env
-  nuc-1` (add `--dry-run` to check without changing anything). Its steps come
+  deploy` (add `--dry-run` to check without changing anything). Its steps come
   from `.autocoder.json`: the preflight refuses, before recording anything,
   when the systemd user unit `agents-tui.service` is not installed (the served
   instance is that unit and nothing else; install it with `agents-tui service
@@ -241,7 +244,7 @@ test nuc_1_deploys_through_autocoder` checks:
   `--web-port`/`--web-bind` within 30s. The Deployment is recorded as
   `success`, or `failure` if the install or the restart fails.
 - **`release`**: a GitHub Release, recorded as a Deployment of its commit.
-  **Every deploy releases** (`"release": true` on `nuc-1`): once the deploy is
+  **Every deploy releases** (`"release": true` on `deploy`): once the deploy is
   `success`, autocoder's `release.sh` releases the same commit, so the
   village's ship sails on each deploy. Tags are automatic, `vYYYY.MM.DD.N`, and
   a commit that already is the newest release is not released again. A failed
@@ -256,7 +259,7 @@ test nuc_1_deploys_through_autocoder` checks:
   push` skips it; the log is `~/.local/state/autocoder/release.log`.
   `release.sh [vX.Y.Z]` releases by hand.
 
-There is no sentinel here, so no `master-green` ref exists. `nuc-1` is marked
+There is no sentinel here, so no `master-green` ref exists. `deploy` is marked
 `"requires": "integration"`, which drops the green stop, and the village shows
 the gate as `absent`. The environments are moved by deployments, not by
 autocoder's `promote.sh`, which only accepts `green` or an earlier environment.

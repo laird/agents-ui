@@ -1050,8 +1050,8 @@ mod tests {
     #[test]
     fn detail_line_shows_worktree_basename_not_full_path() {
         let mut agent = make_agent("worker-3", false, "", AgentState::Idle);
-        agent.worktree_path = PathBuf::from("/home/user/repos/kink-party-wt-3");
-        assert_eq!(build_detail_line(&agent, 40), "Idle · kink-party-wt-3");
+        agent.worktree_path = PathBuf::from("/home/user/repos/example-app-wt-3");
+        assert_eq!(build_detail_line(&agent, 40), "Idle · example-app-wt-3");
     }
 
     #[test]
@@ -1111,14 +1111,14 @@ mod tests {
         );
         agent.current_issue = Some(2948);
         agent.current_issue_title = Some("Fix the flaky pane test".to_string());
-        agent.worktree_path = PathBuf::from("/repos/kink-party-wt-2");
+        agent.worktree_path = PathBuf::from("/repos/example-app-wt-2");
         agent.waiting_for_input = true;
         agent.completed_issue_count = 2;
         agent.resurrection_attempts = 1;
         assert_eq!(
             build_detail_line(&agent, 40),
             format!(
-                "Working #2948 · #2948 Fix the flaky pane test · kink-party-wt-2 · {} Needs input · {}2 · {}1",
+                "Working #2948 · #2948 Fix the flaky pane test · example-app-wt-2 · {} Needs input · {}2 · {}1",
                 theme::ATTENTION_SYMBOL,
                 theme::COMPLETED_SYMBOL,
                 theme::RESTART_SYMBOL

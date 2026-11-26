@@ -26,11 +26,11 @@ ShellRoot {
     }
     BarPanel {
       id: joiner
-      settings: ({ serverUrl: "http://127.0.0.1:9", machine: "nuc" })
+      settings: ({ serverUrl: "http://127.0.0.1:9", machine: "box" })
     }
     BarPanel {
       id: evil
-      settings: ({ serverUrl: "http://127.0.0.1:9", machine: "nuc; rm -rf ~" })
+      settings: ({ serverUrl: "http://127.0.0.1:9", machine: "box; rm -rf ~" })
     }
     BarPanel {
       id: quiet

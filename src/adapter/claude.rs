@@ -2552,7 +2552,7 @@ mod tests {
             PaneActivity::NeedsLaunch
         );
         assert_eq!(
-            classify_pane_activity("laird@mac src $"),
+            classify_pane_activity("dev@workstation src $"),
             PaneActivity::NeedsLaunch
         );
         // Legacy wrapper still works
