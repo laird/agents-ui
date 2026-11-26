@@ -93,6 +93,9 @@ supported yet.) Options mirror the server's flags:
   also serves your tailnet devices.
 - `--source LAYER=NAME`, repeatable (default `swarms=herdr` when herdr is on
   `PATH`), and `--read-only`.
+- `--base-path PREFIX` and `--frame-ancestors SOURCES`, for serving behind a
+  reverse proxy (see CLI Options). With a base path, `install`, `status` and
+  `restart` check the village at `<prefix>/api/village`.
 - `--dry-run` prints the unit and the commands and changes nothing.
 
 **Linger:** systemd stops user services when you log out. Pass `--linger` (it
@@ -103,6 +106,8 @@ logged out. Without it, `install` tells you, but never turns it on by itself.
 `0.0.0.0` or `::` unless you pass `--allow-lan`. Prefer `127.0.0.1,tailscale`.
 
 Re-run `install` to change options (it shows what changed and restarts).
+Each run writes only the options it is given, so name every one you want to
+keep.
 `agents-tui service status` shows its state, URL and binary;
 `agents-tui service restart` restarts it; `agents-tui service uninstall`
 stops and removes it. Deploying to nuc-1 (autocoder's `deploy.sh --env nuc-1`, see CLAUDE.md)

@@ -21,6 +21,10 @@ pub struct ServiceOptions {
     pub read_only: bool,
     /// Serve on every interface (0.0.0.0, ::), which has no authentication.
     pub allow_lan: bool,
+    /// `--base-path`, normalised by [`crate::web::mount::base_path`]: `/ops/village`, or empty for the root.
+    pub base_path: String,
+    /// `--frame-ancestors`, the CSP sources as given: `'self' https://example.test`.
+    pub frame_ancestors: Option<String>,
     /// The agents-tui binary: `std::env::current_exe()` at the call site.
     pub exe: PathBuf,
     pub home: PathBuf,
@@ -45,6 +49,8 @@ pub fn defaults(home: &Path, exe: &Path, probes: Probes, exists: impl Fn(&Path) 
         sources: if probes.herdr_on_path { vec!["swarms=herdr".into()] } else { vec![] },
         read_only: false,
         allow_lan: false,
+        base_path: String::new(),
+        frame_ancestors: None,
         exe: exe.to_path_buf(),
         home: home.to_path_buf(),
         path: default_path(home, exists),
@@ -98,6 +104,14 @@ pub fn exec_args(opts: &ServiceOptions) -> Vec<String> {
     }
     if opts.read_only {
         args.push("--read-only".into());
+    }
+    if !opts.base_path.is_empty() {
+        args.push("--base-path".into());
+        args.push(opts.base_path.clone());
+    }
+    if let Some(f) = &opts.frame_ancestors {
+        args.push("--frame-ancestors".into());
+        args.push(f.clone());
     }
     args
 }
@@ -273,6 +287,26 @@ mod tests {
         );
         assert!(systemd_unit(&o).unwrap().contains("--source swarms=herdr --source issues=none --read-only\n"));
         assert!(launchd_plist(&o).unwrap().contains("<string>--read-only</string>"));
+    }
+
+    #[test]
+    fn base_path_and_frame_ancestors_reach_the_command_line_as_one_argument_each() {
+        let o = ServiceOptions { base_path: "/x/y".into(), frame_ancestors: Some("'self' https://example.test".into()), ..opts() };
+        assert_eq!(
+            exec_args(&o)[5..],
+            ["--base-path", "/x/y", "--frame-ancestors", "'self' https://example.test"]
+        );
+        // systemd keeps a double-quoted word whole, single quotes and space included.
+        assert!(
+            systemd_unit(&o).unwrap().contains(
+                "\nExecStart=%h/.cargo/bin/agents-tui --headless --web-port 7890 --web-bind 127.0.0.1 --base-path /x/y --frame-ancestors \"'self' https://example.test\"\n"
+            ),
+            "{}",
+            systemd_unit(&o).unwrap()
+        );
+        assert!(launchd_plist(&o).unwrap().contains(
+            "\t\t<string>--base-path</string>\n\t\t<string>/x/y</string>\n\t\t<string>--frame-ancestors</string>\n\t\t<string>'self' https://example.test</string>\n\t</array>"
+        ));
     }
 
     #[test]

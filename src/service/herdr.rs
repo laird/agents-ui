@@ -208,7 +208,7 @@ mod tests {
                 _ => Output { ok: true, stdout: String::new() },
             }
         }
-        fn village_answers(&mut self, _: &str, _: u16) -> bool {
+        fn village_answers(&mut self, _: &str, _: u16, _: &str) -> bool {
             true
         }
         fn sleep(&mut self, _: Duration) {}
