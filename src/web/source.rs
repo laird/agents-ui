@@ -677,6 +677,17 @@ impl Villages {
     }
 
     pub async fn snapshot(&self, transport: &ServerTransport, swarms: &[SwarmSnapshot]) -> VillageResponse {
+        let (readings, worlds) = self.read(transport, swarms).await;
+        VillageResponse { villages: readings.into_iter().map(|r| r.village).collect(), worlds }
+    }
+
+    /// Every village with its issues, as `snapshot` draws them: what
+    /// `/api/report` exports.
+    pub async fn readings(&self, transport: &ServerTransport, swarms: &[SwarmSnapshot]) -> Vec<Reading> {
+        self.read(transport, swarms).await.0
+    }
+
+    async fn read(&self, transport: &ServerTransport, swarms: &[SwarmSnapshot]) -> (Vec<Reading>, Vec<WorldSnapshot>) {
         let mut readings = Vec::new();
         for source in self.sources.iter() {
             // A source that keeps a request waiting is a bug (#534): say which.
@@ -701,8 +712,7 @@ impl Villages {
                 super::world::mark_incidents(&mut dev.village, world);
             }
         }
-        let worlds = built.into_iter().map(|(_, w)| w).collect();
-        VillageResponse { villages: readings.into_iter().map(|r| r.village).collect(), worlds }
+        (readings, built.into_iter().map(|(_, w)| w).collect())
     }
 }
 

@@ -206,6 +206,27 @@ Each stage is a `pipeline.stops` entry with the fields above (`cargo` as issue n
 
 `/api/village` reports it per village as `build`.
 
+## Exporting reports
+
+Every agents-tui server also serves the villages it draws as reports: `GET /api/report` returns `{"reports": [...]}`, one `agents-village/v1` report per village, development and runtime alike. `?project=<name>` returns only that village, and a name the server doesn't draw is a 404. A `--read-only` server serves it too.
+
+This lets one village feed another. A swarm village must run on the host that runs the swarm, because it reads tmux, herdr, the gate's files and the transcripts there. A village anywhere else can draw it from that host's reports:
+
+```bash
+# On the swarm's host
+agents-tui --headless --read-only --web-port 7890 --web-bind 127.0.0.1,tailscale
+# Anywhere else
+agents-tui --headless --framework https://swarm-host/api/report
+```
+
+The export is built from the same model as `/api/village`, so the second village draws the same houses, crates, notes, merge gate and canal:
+
+- each house becomes a workstream with its state, building (`kind`) and action, its crew as `agents` and its sub-agents as `helpers`;
+- the open issues become `tasks` with their labels, priority, url, dependencies, feature (`parent`) and `gate`;
+- the pipeline keeps its stages, voyages and merge gate, and the report keeps `builds` and `build`.
+
+Relative links, such as a house's agent session and its answer endpoint, are made absolute at the exporting server. What a report has no field for (token use, flaky tests, bounces, the GitHub summary) is left out, and so is any field the village can't fill.
+
 ## Replaying history
 
 `tools/adapters/history-replay.py` plays a repository's past back in the live village. It reads recordings made by `tools/mock/history.py`. The village is fully interactive: houses, crates and notes open their GitHub issues, and features follow their subtasks down the canal.

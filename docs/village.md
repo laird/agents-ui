@@ -701,6 +701,7 @@ built on it (shop and larkspur), and billing, a service shop calls. Open
 ## Sources
 
 Every village is drawn from one neutral report. Any framework can provide one through an adapter (`--framework`); see [village-protocol.md](village-protocol.md).
+Each server serves its villages as reports on `GET /api/report` too, beside `/api/village`, so a village drawn on one host can be read by another with `--framework https://<host>/api/report` ([Exporting reports](village-protocol.md#exporting-reports)).
 
 The village reads its data in layers, and each layer's source can be swapped
 without touching the others (`src/web/source.rs`):
