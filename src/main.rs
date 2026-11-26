@@ -57,6 +57,8 @@ struct CliOptions {
     sources: web::source::SourceConfig,
     /// Outside adapters printing agents-village reports (`--framework exec:<cmd>|<url>|<file>`).
     frameworks: Vec<String>,
+    /// The path prefix and frame policy the web UI is served with (`--base-path`, `--frame-ancestors`).
+    mount: web::mount::Mount,
 }
 
 fn parse_cli_options<I, S>(args: I) -> Result<CliOptions>
@@ -82,6 +84,7 @@ where
     let mut incident_label = None;
     let mut sources = web::source::SourceConfig::default();
     let mut frameworks = Vec::new();
+    let mut mount = web::mount::Mount::default();
 
     let mut iter = args.into_iter().skip(1);
     while let Some(arg) = iter.next() {
@@ -215,6 +218,24 @@ where
             value if value.starts_with("--temporal-url=") => {
                 temporal_url = Some(value.trim_start_matches("--temporal-url=").to_string());
             }
+            "--base-path" => {
+                let Some(value) = iter.next() else {
+                    anyhow::bail!("--base-path requires a path prefix, e.g. /ops/village");
+                };
+                mount.base_path = web::mount::base_path(value.as_ref()).map_err(anyhow::Error::msg)?;
+            }
+            value if value.starts_with("--base-path=") => {
+                mount.base_path = web::mount::base_path(value.trim_start_matches("--base-path=")).map_err(anyhow::Error::msg)?;
+            }
+            "--frame-ancestors" => {
+                let Some(value) = iter.next() else {
+                    anyhow::bail!("--frame-ancestors requires CSP sources, e.g. \"'self' https://example.test\"");
+                };
+                mount.frame_ancestors = Some(web::mount::frame_ancestors(value.as_ref()).map_err(anyhow::Error::msg)?);
+            }
+            value if value.starts_with("--frame-ancestors=") => {
+                mount.frame_ancestors = Some(web::mount::frame_ancestors(value.trim_start_matches("--frame-ancestors=")).map_err(anyhow::Error::msg)?);
+            }
             _ => {}
         }
     }
@@ -260,7 +281,20 @@ where
         web_port = Some(web::server::DEFAULT_PORT);
     }
 
-    Ok(CliOptions { agent_type, server, web_port, headless, temporal, temporal_url, temporal_ui, kubernetes, web_bind, read_only, worlds, incident_label, sources, frameworks })
+    Ok(CliOptions { agent_type, server, web_port, headless, temporal, temporal_url, temporal_ui, kubernetes, web_bind, read_only, worlds, incident_label, sources, frameworks, mount })
+}
+
+/// `AGENTS_UI_BASE_PATH` and `AGENTS_UI_FRAME_ANCESTORS` as flags placed
+/// before the command line's own, so a flag given there wins. An empty
+/// variable counts as unset.
+fn with_env_flags(mut args: Vec<String>, env: impl Fn(&str) -> Option<String>) -> Vec<String> {
+    let at = args.len().min(1);
+    for (var, flag) in [("AGENTS_UI_FRAME_ANCESTORS", "--frame-ancestors"), ("AGENTS_UI_BASE_PATH", "--base-path")] {
+        if let Some(value) = env(var).filter(|v| !v.is_empty()) {
+            args.insert(at, format!("{flag}={value}"));
+        }
+    }
+    args
 }
 
 /// `--runtime temporal:<namespace>` or `--runtime k8s:[<context>/]<namespace>`:
@@ -367,7 +401,7 @@ async fn main() -> Result<()> {
         }
         _ => {}
     }
-    let cli = parse_cli_options(args)?;
+    let cli = parse_cli_options(with_env_flags(args, |var| std::env::var(var).ok()))?;
     let transport = ServerTransport::new(cli.server.clone());
 
     if cli.headless {
@@ -471,9 +505,9 @@ async fn main() -> Result<()> {
             swarm_sources: std::sync::Arc::new(cli.sources.swarm_sources()),
             since: Default::default(),
         };
-        let (addrs, read_only) = (web_addrs(&cli, port), cli.read_only);
+        let (addrs, read_only, mount) = (web_addrs(&cli, port), cli.read_only, cli.mount.clone());
         tokio::spawn(async move {
-            if let Err(e) = web::server::run(&addrs, read_only, web_server_state).await {
+            if let Err(e) = web::server::run(&addrs, read_only, &mount, web_server_state).await {
                 tracing::error!("Web server exited with error: {e:#}");
             }
         });
@@ -537,12 +571,12 @@ async fn run_headless(cli: &CliOptions) -> Result<()> {
 
     // Unlike the TUI path, this awaits the server instead of detaching it --
     // the process has nothing else to keep it alive.
-    web::server::run(&web_addrs(cli, port), cli.read_only, state).await
+    web::server::run(&web_addrs(cli, port), cli.read_only, &cli.mount, state).await
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{CliOptions, parse_cli_options, select_initial_agent_type, parse_web_bind, web_addrs};
+    use super::{CliOptions, parse_cli_options, select_initial_agent_type, parse_web_bind, web_addrs, with_env_flags};
     use crate::model::swarm::AgentType;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -578,8 +612,33 @@ mod tests {
                 incident_label: None,
                 sources: Default::default(),
                 frameworks: Vec::new(),
+                mount: Default::default(),
             }
         );
+    }
+
+    #[test]
+    fn base_path_and_frame_ancestors_from_flags_or_the_environment() {
+        let cli = parse_cli_options(["agents-tui", "--headless", "--base-path", "ops/village/", "--frame-ancestors='self' https://example.test"]).unwrap();
+        assert_eq!(cli.mount.base_path, "/ops/village");
+        assert_eq!(cli.mount.frame_ancestors.unwrap(), "frame-ancestors 'self' https://example.test");
+        assert!(parse_cli_options(["agents-tui", "--base-path", "/x/{y}"]).is_err());
+        assert!(parse_cli_options(["agents-tui", "--frame-ancestors", "'self'; script-src *"]).is_err());
+        assert!(parse_cli_options(["agents-tui", "--base-path"]).is_err());
+
+        let env = |var: &str| match var {
+            "AGENTS_UI_BASE_PATH" => Some("/from/env".to_string()),
+            "AGENTS_UI_FRAME_ANCESTORS" => Some("https://example.test".to_string()),
+            _ => None,
+        };
+        let args = |extra: &[&str]| ["agents-tui", "--headless"].iter().chain(extra).map(|s| s.to_string()).collect::<Vec<_>>();
+        let from_env = parse_cli_options(with_env_flags(args(&[]), env)).unwrap();
+        assert_eq!(from_env.mount.base_path, "/from/env");
+        assert_eq!(from_env.mount.frame_ancestors.unwrap(), "frame-ancestors https://example.test");
+        let flag_wins = parse_cli_options(with_env_flags(args(&["--base-path=/from/flag"]), env)).unwrap();
+        assert_eq!(flag_wins.mount.base_path, "/from/flag");
+        assert_eq!(parse_cli_options(with_env_flags(args(&[]), |_| None)).unwrap().mount, Default::default());
+        assert_eq!(parse_cli_options(with_env_flags(args(&[]), |_| Some(String::new()))).unwrap().mount, Default::default());
     }
 
     #[test]
@@ -727,6 +786,7 @@ mod tests {
                 incident_label: None,
                 sources: Default::default(),
                 frameworks: Vec::new(),
+                mount: Default::default(),
             }
         );
 
@@ -748,6 +808,7 @@ mod tests {
                 incident_label: None,
                 sources: Default::default(),
                 frameworks: Vec::new(),
+                mount: Default::default(),
             }
         );
     }

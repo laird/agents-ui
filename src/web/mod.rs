@@ -18,6 +18,7 @@ pub mod herdr;
 pub mod issue_events;
 pub mod kubernetes;
 pub mod merge_events;
+pub mod mount;
 pub mod newissue;
 pub mod pane;
 pub mod pins;
