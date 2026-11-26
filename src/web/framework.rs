@@ -572,17 +572,21 @@ pub fn crew_status(statuses: &[HouseStatus]) -> HouseStatus {
 pub fn specialist_kind(agent_type: &str) -> Option<HouseKind> {
     let t = agent_type.to_ascii_lowercase();
     let role = t.rsplit(':').next().unwrap_or(&t);
-    [
-        ("architect", HouseKind::Research),
-        ("security", HouseKind::Security),
-        ("test", HouseKind::Tests),
-        ("doc", HouseKind::Docs),
-        ("coder", HouseKind::Feature),
-    ]
-    .iter()
-    .find(|(name, _)| role.contains(name))
-    .map(|(_, kind)| *kind)
+    SPECIALISTS.iter().find(|(name, _)| role.contains(name)).map(|(_, kind)| *kind)
 }
+
+/// What each specialist's type contains, and its building. The page's
+/// `SPECIALTIES` (village/palette.js) gives the same names their figures.
+const SPECIALISTS: &[(&str, HouseKind)] = &[
+    ("architect", HouseKind::Research),
+    ("security", HouseKind::Security),
+    ("test", HouseKind::Tests),
+    ("doc", HouseKind::Docs),
+    ("coder", HouseKind::Feature),
+    ("researcher", HouseKind::Research),
+    ("analyst", HouseKind::Perf),
+    ("auditor", HouseKind::Security),
+];
 
 fn priority(p: &Option<String>) -> Option<String> {
     p.as_ref().filter(|p| p.starts_with('P')).cloned()
@@ -1306,6 +1310,45 @@ mod tests {
         assert_eq!(v.manager.limit.as_ref().and_then(|l| l.resets.as_deref()), Some("7pm"));
         let json = serde_json::to_value(&v.houses).unwrap();
         assert_eq!(json.as_array().unwrap().iter().filter(|h| h.get("limit").is_some()).count(), 1, "absent when there is none");
+    }
+
+    #[test]
+    fn researcher_analyst_and_auditor_helpers_pick_their_buildings() {
+        assert_eq!(specialist_kind("research:researcher"), Some(HouseKind::Research));
+        assert_eq!(specialist_kind("Research:ANALYST"), Some(HouseKind::Perf));
+        assert_eq!(specialist_kind("research:Auditor"), Some(HouseKind::Security));
+        assert_eq!(specialist_kind("research:summariser"), None, "an unknown kind is a plain villager");
+
+        let helper = |kind: &str| Agent { name: "h".into(), kind: Some(kind.into()), state: AgentState::Working, ..Agent::default() };
+        let ws = |id: &str, kind: &str| Workstream { id: id.into(), agents: vec![agent(id, "idle")], helpers: vec![helper(kind)], ..Workstream::default() };
+        let report = Report {
+            project: "lab".into(),
+            workstreams: vec![ws("a", "research:researcher"), ws("b", "research:Analyst"), ws("c", "research:auditor"), ws("d", "research:summariser")],
+            ..Report::default()
+        };
+        let v = to_village(&report).village;
+        let shapes: Vec<(HouseKind, &str)> = v.houses.iter().map(|h| (h.kind, h.subagents[0].agent_type.as_str())).collect();
+        assert_eq!(
+            shapes,
+            vec![
+                (HouseKind::Research, "research:researcher"),
+                (HouseKind::Perf, "research:Analyst"),
+                (HouseKind::Security, "research:auditor"),
+                (HouseKind::Workshop, "research:summariser"),
+            ],
+            "each helper's kind reaches the snapshot as sent, for the page to pick its figure"
+        );
+    }
+
+    #[test]
+    fn the_protocol_and_the_page_list_every_specialist_kind() {
+        let doc = include_str!("../../docs/village-protocol.md");
+        let page = include_str!("village/palette.js");
+        for (name, kind) in SPECIALISTS {
+            assert!(doc.contains(&format!("`*:{name}")), "docs/village-protocol.md names `*:{name}...`");
+            let kind = serde_json::to_value(kind).unwrap();
+            assert!(page.contains(&format!("['{name}', '{}']", kind.as_str().unwrap())), "palette.js SPECIALTIES gives {name} the same building");
+        }
     }
 
     #[test]

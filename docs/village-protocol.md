@@ -99,7 +99,11 @@ An adapter may print one report, a list of reports, or `{"reports": [...]}`. Onl
 **Agent**
 
 - `name` (required).
-- `kind`: the agent or workflow type, when it differs from the name. For helpers, `kind` picks a specialist building: `*:security`, `*:tester`, `*:architect`, `*:documentation`, `*:coder`.
+- `kind`: the agent or workflow type, when it differs from the name. For helpers, the part after the last colon, in any case, picks a specialist: its building, when no task labels decide it, and its accent colour. Any other kind is a plain villager.
+  - `*:security`, `*:tester`, `*:architect`, `*:documentation`, `*:coder`: an accent in their building's colour.
+  - `*:researcher` (research building): holds a map.
+  - `*:analyst` (perf building): holds a ledger, a bar chart or hologram bars, by theme.
+  - `*:auditor` (security building): holds a wax seal, a clipboard or a scanner pad, by theme.
 - `state`: see below.
 - `action`: see below.
 - `detail`: a few words on what it is doing, shown when you click the house.

@@ -107,7 +107,7 @@ export function renderLegend() {
       [c => { state.T.crate(c, 1, 1, 'feature', null); roped(c, 1, 1); }, 'Roped crate: waits on another issue ("Depends on")', 7], [c => cobwebs(c, -1, -6), 'Cobwebs on a house: stalled'],
       [c => { R(c, 4, 2, 1, 10, P.woodD); R(c, 5, 2, 6, 4, P.p0); }, 'Red flag on a warehouse or a ship: the newest deployment failed, and the ship turned back'],
       [c => { state.T.B.cottage(c, 3, 5, 'idle', 0); R(c, 5, 0, 1, 7, P.woodD); R(c, 6, 0, 4, 3, FEATURE_COLS[0]); }, "House in an environment village: a feature it runs, flying that feature's colour (+N: more features)", 22]]],
-    ['subagents', 'Sub-agent accents: their specialty', [...SPECIALTIES.map(([name, kind]) => [c => person(c, 3, 1, 'key:' + name, 'stand', { accent: KINDCOL[kind], sub: true }), name]),
+    ['subagents', 'Sub-agent accents and props: their specialty', [...SPECIALTIES.map(([name, kind]) => [c => person(c, 3, 1, 'key:' + name, 'stand', { accent: KINDCOL[kind], prop: name, sub: true }), name]),
       [c => person(c, 3, 1, 'key:other', 'stand', { accent: P.white, sub: true }), 'any other']]],
     ['notes', `Notes on the ${L.board}`, Object.keys(NOTECOL).map(k => [c => { R(c, 1, 1, 5, 5, P.o); note(c, 2, 2, k, P.white); }, `${GLYPH_WORDS[k] || ''} ${k.replace(/-/g, ' ')}`.trim(), 7])]
   ];
