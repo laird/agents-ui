@@ -8,7 +8,7 @@ import { answerWords, bulkPicks, bulkWords, decisionUrl, isProposal, pickWords }
 const note = (number, label, priority) => ({ number, title: `T${number}`, label, ...(priority ? { priority } : {}) });
 
 test('a decision is posted under its swarm and issue', () => {
-  assert.equal(decisionUrl('agents ui', 7), '/api/swarms/agents%20ui/issues/7/decision');
+  assert.equal(decisionUrl('agents ui', 7), 'api/swarms/agents%20ui/issues/7/decision');
 });
 
 test('only proposals are decided here, not blocked issues or an unreachable note', () => {

@@ -51,7 +51,7 @@ fn village_html_has_a_screensaver_mode() {
 fn screensaver_opens_with_a_since_you_last_looked_card() {
     let body = &village_source();
     assert!(body.contains("const since = recapSince(location.search)"));
-    assert!(body.contains("fetch(`/api/village/since?t=${Math.floor(since / 1000)}`"));
+    assert!(body.contains("fetch(`api/village/since?t=${Math.floor(since / 1000)}`"));
     assert!(body.contains("if (reachable && !recapped) { recapped = true; showRecap(card, since); }"));
     assert!(body.contains("setTimeout(close, RECAP_MS);"));
     assert!(body.contains("export const RECAP_MS = 20000;"));

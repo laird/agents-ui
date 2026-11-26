@@ -81,5 +81,5 @@ test('the footer: medians in travel order, the longest named', () => {
 });
 
 test('the log is asked for by project and number', () => {
-  assert.equal(travelUrl('agents ui', 495), '/api/swarms/agents%20ui/issues/495/travel');
+  assert.equal(travelUrl('agents ui', 495), 'api/swarms/agents%20ui/issues/495/travel');
 });

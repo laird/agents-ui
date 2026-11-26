@@ -170,8 +170,8 @@ def village_page(patch=lambda rel, src: src):
     """The village page as one self-contained file: its stylesheet and its modules inlined."""
     page = (VILLAGE / "index.html").read_text()
     for tag, inline in (
-        ('<link rel="stylesheet" href="/village/village.css">', "<style>\n" + (VILLAGE / "village.css").read_text() + "</style>"),
-        ('<script type="module" src="/village/main.js"></script>', '<script type="module">\n' + bundle("main.js", patch).replace("</script", "<\\/script") + "</script>"),
+        ('<link rel="stylesheet" href="village/village.css">', "<style>\n" + (VILLAGE / "village.css").read_text() + "</style>"),
+        ('<script type="module" src="village/main.js"></script>', '<script type="module">\n' + bundle("main.js", patch).replace("</script", "<\\/script") + "</script>"),
     ):
         assert tag in page, tag
         page = page.replace(tag, inline, 1)
@@ -273,7 +273,7 @@ player = """
 """
 player = player.replace("RUN_GROUP", "Promotion" if features else "Runtime")
 body = must('  <div class="win stage">', player + '  <div class="win stage">', body)
-body = must('<a href="/">Dashboard</a>', "", body)
+body = must('<a href="./">Dashboard</a>', "", body)
 
 replay_js = """<script type="application/json" id="recording">""" + json.dumps(frames, separators=(",", ":")).replace("</", "<\\/") + """</script>
 <script>

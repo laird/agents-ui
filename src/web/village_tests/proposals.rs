@@ -24,6 +24,6 @@ fn the_board_offers_decisions_on_its_proposals() {
 #[test]
 fn a_decision_posts_to_the_swarms_issue_and_a_403_says_read_only() {
     let body = &village_source();
-    assert!(body.contains("`/api/swarms/${encodeURIComponent(project)}/issues/${encodeURIComponent(n)}/decision`"));
+    assert!(body.contains("`api/swarms/${encodeURIComponent(project)}/issues/${encodeURIComponent(n)}/decision`"));
     assert!(body.contains("if (status === 403) return 'This dashboard is read-only: decide on GitHub.';"));
 }

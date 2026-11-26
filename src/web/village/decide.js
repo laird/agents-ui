@@ -4,7 +4,7 @@
 
 /* Where a decision on issue `n` of village `project` is posted. */
 export const decisionUrl = (project, n) =>
-  `/api/swarms/${encodeURIComponent(project)}/issues/${encodeURIComponent(n)}/decision`;
+  `api/swarms/${encodeURIComponent(project)}/issues/${encodeURIComponent(n)}/decision`;
 
 export const isProposal = note => !!note && note.label === 'proposal' && note.number > 0;
 

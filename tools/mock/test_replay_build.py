@@ -79,8 +79,8 @@ class ReplayBuildTest(unittest.TestCase):
         self.assertIn("setTimeout(poll, window.__pollMs || 3000)", self.page)
         self.assertIn("'Replay of the simulation'", self.page)
         self.assertIn("for (const k in state.scenes) delete state.scenes[k];", self.page)
-        self.assertNotIn('src="/village/', self.page)
-        self.assertNotIn('href="/village/', self.page)
+        self.assertNotIn('src="village/', self.page)
+        self.assertNotIn('href="village/', self.page)
 
 
 if __name__ == "__main__":

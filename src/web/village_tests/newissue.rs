@@ -21,7 +21,7 @@ fn the_form_files_through_the_server_and_a_403_links_to_github() {
     let body = &village_source();
     assert!(body.contains("<select name=\"type\">${options(ISSUE_TYPES, 'enhancement')}</select>"));
     assert!(body.contains("<select name=\"priority\">${options(ISSUE_PRIORITIES, 'P3')}</select>"));
-    assert!(body.contains("export const newIssueUrl = project => `/api/swarms/${encodeURIComponent(project)}/issues`;"));
+    assert!(body.contains("export const newIssueUrl = project => `api/swarms/${encodeURIComponent(project)}/issues`;"));
     assert!(body.contains("if (status === 403) return { words: 'This dashboard is read-only: file it on GitHub.', url: repo ? `${repo}/issues/new` : null };"));
     // Fields by name through `elements`, never `form.title` (the form's own attribute).
     assert!(body.contains("const field = n => form.elements.namedItem(n);"));

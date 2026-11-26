@@ -16,7 +16,7 @@ import { controlDone } from './controlplay.js';
  * failed ask is asked again next time, not remembered as read-only). */
 let writable = null;
 function canWrite() {
-  if (!writable) writable = fetch('/api/config').then(r => (r.ok ? r.json() : Promise.reject(r.status))).then(c => !c.read_only)
+  if (!writable) writable = fetch('api/config').then(r => (r.ok ? r.json() : Promise.reject(r.status))).then(c => !c.read_only)
     .catch(() => { writable = null; return false; });
   return writable;
 }

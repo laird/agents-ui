@@ -6,7 +6,7 @@
 
 /* Where a worker's controls are: GET previews, POST does. */
 export const controlUrl = (project, role) =>
-  `/api/swarms/${encodeURIComponent(project)}/agents/${encodeURIComponent(role)}/control`;
+  `api/swarms/${encodeURIComponent(project)}/agents/${encodeURIComponent(role)}/control`;
 export const previewUrl = (project, role, action) => `${controlUrl(project, role)}?action=${encodeURIComponent(action)}`;
 
 /* The actions the dialog offers, in order. Restart and Stop come with #505. */

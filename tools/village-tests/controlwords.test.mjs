@@ -5,9 +5,9 @@ import assert from 'node:assert/strict';
 import { CONTROLS, confirmWords, controlAnswer, controlChoices, controlUrl, previewUrl } from '../../src/web/village/controlwords.js';
 
 test('the controls live at the agent\'s control path, its parts escaped', () => {
-  assert.equal(controlUrl('shop', 'worker-2'), '/api/swarms/shop/agents/worker-2/control');
-  assert.equal(controlUrl('my shop', 'w/1'), '/api/swarms/my%20shop/agents/w%2F1/control');
-  assert.equal(previewUrl('shop', 'worker-2', 'nudge'), '/api/swarms/shop/agents/worker-2/control?action=nudge');
+  assert.equal(controlUrl('shop', 'worker-2'), 'api/swarms/shop/agents/worker-2/control');
+  assert.equal(controlUrl('my shop', 'w/1'), 'api/swarms/my%20shop/agents/w%2F1/control');
+  assert.equal(previewUrl('shop', 'worker-2', 'nudge'), 'api/swarms/shop/agents/worker-2/control?action=nudge');
   assert.deepEqual(CONTROLS.map(c => c.action), ['nudge', 'release']);
 });
 

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { BODY_MAX, filedWords, issueRequest, newIssueUrl } from '../../src/web/village/issueform.js';
 
 test('the form posts under its swarm', () => {
-  assert.equal(newIssueUrl('agents ui'), '/api/swarms/agents%20ui/issues');
+  assert.equal(newIssueUrl('agents ui'), 'api/swarms/agents%20ui/issues');
 });
 
 test('a title is required, one line, at most 256 characters', () => {

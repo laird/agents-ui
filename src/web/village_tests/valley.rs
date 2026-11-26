@@ -8,7 +8,7 @@ fn the_valley_page_draws_the_group_and_opens_a_repo_on_click() {
     let body = &village_source();
     // `?valley=<group>` wins over the hash, and fetches its own answer.
     assert!(body.contains("if (valleyWanted()) { nameBar(`Valley \\u00b7 ${valleyWanted()}`, null); selectValley(valleyWanted()); return; }"));
-    assert!(body.contains("const res = await fetch('/api/valley');"));
+    assert!(body.contains("const res = await fetch('api/valley');"));
     // draw() hands it its frame, like the overview's.
     assert!(body.contains("if (view.valley) { drawValley(t); return; }"));
     // Rivers along package edges, roads along api ones, from the layout.

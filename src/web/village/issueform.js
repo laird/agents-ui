@@ -9,7 +9,7 @@ export const TITLE_MAX = 256;
 export const BODY_MAX = 64 * 1024;
 
 /* Where the form posts, for village `project`. */
-export const newIssueUrl = project => `/api/swarms/${encodeURIComponent(project)}/issues`;
+export const newIssueUrl = project => `api/swarms/${encodeURIComponent(project)}/issues`;
 
 /* The request for what the form holds, or { error } saying what to fix. */
 export function issueRequest({ title, body, type, priority }) {
