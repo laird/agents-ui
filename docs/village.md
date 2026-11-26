@@ -745,3 +745,26 @@ no `github` field and the village is drawn as before.
 To add a source (an AgentEx platform, a Jira backlog, a different CI),
 implement the layer's trait and give it a name in the registry at the bottom
 of `source.rs`. The startup log lists the sources that are running.
+
+### Behind a reverse proxy
+
+The pages ask for every URL relative to their own address (`api/village`,
+`village/main.js`, `./#/swarm/...`), so a reverse proxy can serve the
+village at a path prefix without rewriting HTML or scripts. Pass the prefix
+the proxy forwards with `--base-path` (or `AGENTS_UI_BASE_PATH`). A proxy that
+strips the prefix before forwarding needs no flag. To let another
+application frame the village, name its origin with `--frame-ancestors`:
+
+```bash
+agents-tui --headless --read-only --web-bind 127.0.0.1 \
+  --base-path /ops/village --frame-ancestors "'self' https://example.test"
+```
+
+A proxy that forwards `https://example.test/ops/village/` to
+`http://127.0.0.1:7878/ops/village/` then serves the dashboard there, and
+the village at `/ops/village/village#<project>`. `/ops/village` redirects to
+`/ops/village/`, and `/healthz` answers at the root as well as under the
+prefix. `--frame-ancestors` takes CSP sources (`'self'`, an origin, a
+scheme) separated by spaces, and sends `Content-Security-Policy:
+frame-ancestors <sources>` on every response. Without it no policy is sent.
+`agents-tui service install` does not pass these flags on yet.

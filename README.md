@@ -129,6 +129,17 @@ agents-tui --headless --web-port 7890 --web-bind 127.0.0.1,tailscale --read-only
 
 An address that can't be bound fails startup and names the address.
 
+To serve the UI behind a reverse proxy at a path prefix, or inside another application's page:
+
+- `--base-path <prefix>` (or `AGENTS_UI_BASE_PATH`) mounts every route under the prefix: the dashboard at `<prefix>/`, the village at `<prefix>/village`, the API at `<prefix>/api/...`. `<prefix>` redirects to `<prefix>/`, and `/healthz` also answers at the root for probes. Nothing else is served at the root.
+- `--frame-ancestors <sources>` (or `AGENTS_UI_FRAME_ANCESTORS`) sends `Content-Security-Policy: frame-ancestors <sources>` on every response, so the named origins may frame the pages. Without it no policy is sent.
+
+```bash
+agents-tui --headless --read-only --base-path /ops/village --frame-ancestors "'self' https://example.test"
+```
+
+See "Behind a reverse proxy" in `docs/village.md`.
+
 Only one runtime flag may be passed at a time. If no runtime flag is provided, `agents-tui` uses the repo's saved default from `.agents-ui.toml` when available, otherwise it starts with `Claude`.
 
 ## Startup Checks
