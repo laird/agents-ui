@@ -7,8 +7,8 @@ closes it.
 
 ```bash
 tools/omarchy-plugin/install.sh --screensaver                 # here
-tools/omarchy-plugin/install.sh --screensaver --never-sleep   # a status display (nuc-1): never lock, never blank
-tools/omarchy-plugin/install.sh --screensaver --host omarchy-1 --server http://nuc-1:7890
+tools/omarchy-plugin/install.sh --screensaver --never-sleep   # a status display that should stay on: never lock, never blank
+tools/omarchy-plugin/install.sh --screensaver --host example-host --server http://127.0.0.1:7890
 tools/omarchy-plugin/install.sh --screensaver --uninstall     # Omarchy's own screensaver and idle settings back
 ```
 
@@ -69,7 +69,7 @@ because the shell's `PATH` starts with `/usr/share/omarchy/bin`. So:
 Settings (`~/.config/agents-ui/screensaver.json`, written by the installer):
 
 ```json
-{ "server": "http://nuc-1:7890", "timeout": 150, "cycle": 30, "dim": "23-7", "recap": 30, "sound": false }
+{ "server": "http://127.0.0.1:7890", "timeout": 150, "cycle": 30, "dim": "23-7", "recap": 30, "sound": false }
 ```
 
 `server` and `timeout` are the launcher's and the service's. Every other key

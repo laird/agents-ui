@@ -13,7 +13,7 @@
 //!   rebase keeps;
 //! - **landed**: closed as completed. On the way, each time the merge gate
 //!   handed the work back (its comments and push retries, `gate.rs`, #431);
-//! - one stage per environment (`nuc-1`, `release`): the first Deployment to
+//! - one stage per environment (`deploy`, `release`): the first Deployment to
 //!   it created at or after the landing. Deployments are of the integration
 //!   branch's tip, so the first one after the landing carries the work. It
 //!   counts when the deploy started, whatever its outcome.
@@ -377,13 +377,13 @@ mod tests {
     }
 
     /// A proposal that waited for approval, was claimed, bounced at the gate
-    /// once, landed, and went to nuc-1 and then out as a release.
+    /// once, landed, and went to deploy and then out as a release.
     const LANDED: &str = r#"{"number": 495, "title": "Travel log", "state": "CLOSED", "stateReason": "COMPLETED",
       "createdAt": "2026-11-10T10:00:00Z", "closedAt": "2026-11-12T12:00:00Z",
       "comments": [
         {"body": "Approved by @laird.", "createdAt": "2026-11-11T10:00:00Z"},
-        {"body": "🔒 claim nuc-1 1", "createdAt": "2026-11-11T11:00:00Z"},
-        {"body": "🔒 claim nuc-2 2", "createdAt": "2026-11-12T08:00:00Z"},
+        {"body": "🔒 claim worker-1 1", "createdAt": "2026-11-11T11:00:00Z"},
+        {"body": "🔒 claim worker-2 2", "createdAt": "2026-11-12T08:00:00Z"},
         {"body": "⚠️ **Auto-merge to master hit a conflict**\n\nsrc/web/server.rs", "createdAt": "2026-11-12T11:00:00Z"},
         {"body": "Approved by someone, much later", "createdAt": "2026-11-13T10:00:00Z"}
       ]}"#;
@@ -394,7 +394,7 @@ mod tests {
 
     #[test]
     fn a_landed_issue_travels_from_opened_to_released() {
-        let deps = [dep("release", "2026-11-12T12:20:00Z"), dep("nuc-1", "2026-11-12T12:10:00Z"), dep("nuc-1", "2026-11-12T12:40:00Z"), dep("nuc-1", "2026-11-12T11:00:00Z")];
+        let deps = [dep("release", "2026-11-12T12:20:00Z"), dep("deploy", "2026-11-12T12:10:00Z"), dep("deploy", "2026-11-12T12:40:00Z"), dep("deploy", "2026-11-12T11:00:00Z")];
         let log = travel(&issue(LANDED), LOG, &deps, &[]);
         assert_eq!(log.state, "landed");
         let keys: Vec<_> = log.stages.iter().map(|s| (s.key.as_str(), s.secs)).collect();
@@ -408,7 +408,7 @@ mod tests {
                 ("first_commit", Some(3600)),
                 ("landed", Some(3 * 3600)),
                 // The first deployment after the landing, not the one before it.
-                ("deployed:nuc-1", Some(600)),
+                ("deployed:deploy", Some(600)),
                 ("deployed:release", Some(600)),
             ]
         );
@@ -437,12 +437,12 @@ mod tests {
             ev("2026-11-12T10:00:00Z", Some(495), "gate-end", json!({"outcome": "conflict", "attempt": 1})),
             ev("2026-11-12T11:00:00Z", Some(495), "gate-end", json!({"outcome": "landed", "attempt": 2})),
             ev("2026-11-12T11:00:00Z", Some(495), "landed", json!({"sha": "b"})),
-            ev("2026-11-12T11:05:00Z", None, "deployed", json!({"environment": "nuc-1", "sha": "c"})),
+            ev("2026-11-12T11:05:00Z", None, "deployed", json!({"environment": "deploy", "sha": "c"})),
             // Another issue's, and one after the landing: neither counts.
             ev("2026-11-12T07:30:00Z", Some(4950), "first-commit", json!({})),
             ev("2026-11-12T12:00:00Z", Some(495), "claimed", json!({})),
         ];
-        let log = travel(&issue(LANDED), LOG, &[dep("nuc-1", "2026-11-12T12:10:00Z")], &events);
+        let log = travel(&issue(LANDED), LOG, &[dep("deploy", "2026-11-12T12:10:00Z")], &events);
         assert!(log.from_events);
         assert_eq!(log.state, "landed");
         let at: Vec<_> = log.stages.iter().map(|s| (s.key.as_str(), s.at.as_str())).collect();
@@ -456,7 +456,7 @@ mod tests {
                 ("first_commit", "2026-11-12T08:00:00+00:00"),
                 ("landed", "2026-11-12T11:00:00+00:00"),
                 // The deploy event, earlier than GitHub's Deployment.
-                ("deployed:nuc-1", "2026-11-12T11:05:00+00:00"),
+                ("deployed:deploy", "2026-11-12T11:05:00+00:00"),
             ]
         );
         // The gate's attempts replace the job's comments (LANDED has a
@@ -513,7 +513,7 @@ mod tests {
     fn an_open_issue_has_only_the_stages_it_reached() {
         let open = issue(r#"{"number": 7, "state": "OPEN", "createdAt": "2026-11-10T10:00:00Z",
             "comments": [{"body": "🤖 **Automated Fix Started**", "createdAt": "2026-11-10T10:05:00Z"}]}"#);
-        let log = travel(&open, "", &[dep("nuc-1", "2026-11-11T00:00:00Z")], &[]);
+        let log = travel(&open, "", &[dep("deploy", "2026-11-11T00:00:00Z")], &[]);
         assert_eq!(log.state, "open");
         let keys: Vec<_> = log.stages.iter().map(|s| s.key.as_str()).collect();
         assert_eq!(keys, vec!["opened", "claimed"]);
@@ -553,7 +553,7 @@ mod tests {
         assert!(is_approval("Approved by @laird."));
         assert!(is_approval("Approved by @laird: all four phases."));
         assert!(!is_approval("Not approved yet"));
-        assert!(!is_approval("🔒 claim nuc-1 1"));
+        assert!(!is_approval("🔒 claim worker-1 1"));
     }
 
     #[test]
@@ -579,8 +579,8 @@ mod tests {
         assert!(!m.contains_key("landed"));
         assert_eq!(m.get("claimed"), Some(&(22 * 3600)));
         assert!(comparable("claimed", Some("opened")));
-        assert!(comparable("deployed:release", Some("deployed:nuc-1")));
-        assert!(!comparable("deployed:nuc-1", Some("claimed")));
+        assert!(comparable("deployed:release", Some("deployed:deploy")));
+        assert!(!comparable("deployed:deploy", Some("claimed")));
     }
 
     #[test]

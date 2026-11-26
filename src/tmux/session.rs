@@ -311,18 +311,18 @@ mod tests {
     #[test]
     fn captures_pane_current_path_when_present() {
         let parsed = parse_list_panes_output(
-            "claude-kink-party",
-            "1\treview\t1\t/home/laird/src/kink-party\n\
-             2\tagents\t1\t/home/laird/src/kink-party-wt-1\n",
+            "claude-example-app",
+            "1\treview\t1\t/home/user/src/example-app\n\
+             2\tagents\t1\t/home/user/src/example-app-wt-1\n",
         );
 
         assert_eq!(
             parsed.windows[0].panes[0].current_path.as_deref(),
-            Some("/home/laird/src/kink-party")
+            Some("/home/user/src/example-app")
         );
         assert_eq!(
             parsed.windows[1].panes[0].current_path.as_deref(),
-            Some("/home/laird/src/kink-party-wt-1")
+            Some("/home/user/src/example-app-wt-1")
         );
     }
 

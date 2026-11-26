@@ -106,5 +106,5 @@ assert len(notes) == 2, "a notification per rising edge, no more:\n" + ran
 assert notes[0].startswith("omarchy-notification-send --app-name Agents village -u critical -p "), notes[0]
 assert " 1 needs you wt-1: #4 Checkout --exec " in notes[0], notes[0]
 joins = [l for l in ran.splitlines() if l.startswith("omarchy-launch-or-focus-tui ")]
-assert joins == ["omarchy-launch-or-focus-tui --app-id=org.omarchy.swarm-nuc-join swarm nuc"], "join runs for nuc only:\n" + ran
+assert joins == ["omarchy-launch-or-focus-tui --app-id=org.omarchy.swarm-box-join swarm box"], "join runs for box only:\n" + ran
 print(f'{{"qml_checks": {len(checks)}, "failed": 0}}')

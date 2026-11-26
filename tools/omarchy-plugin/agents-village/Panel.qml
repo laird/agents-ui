@@ -24,7 +24,8 @@ Panel {
   ipcTarget: "agents-village"
 
   // ---- Settings (manifest schema) -----------------------------------------
-  readonly property string base: Model.baseUrl(setting("serverUrl", "http://nuc-1:7890"))
+  // agents-tui's default bind. The Server setting points at another host.
+  readonly property string base: Model.baseUrl(setting("serverUrl", "http://127.0.0.1:7890"))
   readonly property string pinned: String(setting("village", "") || "")
   readonly property int intervalMs: Math.max(2, Number(setting("refreshIntervalSec", 5))) * 1000
   readonly property bool showWorking: setting("showWorking", true) !== false

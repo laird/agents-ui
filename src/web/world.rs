@@ -42,7 +42,7 @@ pub struct WorldConfig {
     /// Labels marking an issue the platform raised; one ending in `:` is a
     /// prefix (`channel:` matches `channel:billing`).
     pub incident_labels: Vec<String>,
-    /// The environment the platform runs (`shop=temporal:agents@nuc-1`):
+    /// The environment the platform runs (`shop=temporal:agents@deploy`):
     /// its village in the environment row. `None`: the last environment.
     pub environment: Option<String>,
 }
@@ -361,7 +361,7 @@ mod tests {
         let mut dev = village("shop", vec![]);
         dev.pipeline.stops = vec![
             Stop { name: "master-green".into(), kind: StopKind::Gate, ..Stop::default() },
-            Stop { name: "nuc-1".into(), ..Stop::default() },
+            Stop { name: "deploy".into(), ..Stop::default() },
             Stop { name: "release".into(), ..Stop::default() },
         ];
         let platform = village("temporal:agents", vec![house("procurement-118", "ProcurementWorkstream", None)]);
@@ -369,8 +369,8 @@ mod tests {
         let w = build_world(&config(), &dev, &[], &platform, &[], now());
         assert_eq!(w.environment.as_deref(), Some("release"));
         // `@env` attaches it to another, and the platform name is what comes before it.
-        let at = WorldConfig::parse("shop=temporal:agents@nuc-1", &labels(&[DEFAULT_INCIDENT_LABEL])).unwrap();
-        assert_eq!((at.platform.as_str(), at.environment.as_deref()), ("temporal:agents", Some("nuc-1")));
+        let at = WorldConfig::parse("shop=temporal:agents@deploy", &labels(&[DEFAULT_INCIDENT_LABEL])).unwrap();
+        assert_eq!((at.platform.as_str(), at.environment.as_deref()), ("temporal:agents", Some("deploy")));
         assert_eq!(WorldConfig::parse("shop=k8s:shop-prod@", &[]).unwrap().environment, None);
         // Open incidents are that environment's health; none leaves it alone.
         let issues = vec![issue(501, "procurement-118 failed", &["incident"]), issue(502, "BugFix timed out", &["incident"])];
@@ -384,7 +384,7 @@ mod tests {
         mark_incidents(&mut dev, &quiet);
         assert_eq!(dev, before);
         // The snapshot says so.
-        assert_eq!(serde_json::to_value(&w).unwrap()["environment"], "nuc-1");
+        assert_eq!(serde_json::to_value(&w).unwrap()["environment"], "deploy");
     }
 
     #[test]

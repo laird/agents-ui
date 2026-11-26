@@ -1556,9 +1556,9 @@ mod tests {
             url: Some("https://github.com/acme/shop/releases/tag/v0.5.0".into()),
             ..Stop::default()
         };
-        let voyage = Voyage { from: "nuc-1".into(), to: "release".into(), sha: "abc1234".into(), issues: vec![7], ..Voyage::default() };
+        let voyage = Voyage { from: "deploy".into(), to: "release".into(), sha: "abc1234".into(), issues: vec![7], ..Voyage::default() };
         let pipeline = Pipeline {
-            stops: vec![Stop { name: "nuc-1".into(), issues: vec![8], cargo: vec![8, 7], ..Stop::default() }, release.clone()],
+            stops: vec![Stop { name: "deploy".into(), issues: vec![8], cargo: vec![8, 7], ..Stop::default() }, release.clone()],
             voyages: vec![voyage.clone()],
             ..Pipeline::default()
         };

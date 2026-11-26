@@ -54,7 +54,7 @@ test('the strip counts houses, the gate, the quay, each stop and what waits on y
     board: [{ number: 1 }, { number: 2 }],
     pipeline: {
       quay: [5, 6, 7],
-      stops: [{ name: 'nuc-1', issues: [8] }, { name: 'release', issues: [] }],
+      stops: [{ name: 'deploy', issues: [8] }, { name: 'release', issues: [] }],
       gates: [{ state: 'gating' }, { state: 'merging' }, { state: 'queued' }, { state: 'failed' }, { state: 'red-base', landed: true }, { state: 'conflict' }],
     },
   };
@@ -64,7 +64,7 @@ test('the strip counts houses, the gate, the quay, each stop and what waits on y
     waiting: 6,
     gate: { queued: 1, gating: 2, failed: 2 },
     quay: 3,
-    stops: [{ name: 'nuc-1', count: 1 }, { name: 'release', count: 0 }],
+    stops: [{ name: 'deploy', count: 1 }, { name: 'release', count: 0 }],
     build: null,
     landed: null,
   });

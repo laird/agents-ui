@@ -2,7 +2,7 @@
 //! unit on Linux, a launchd agent on macOS. Pure functions of the options, so
 //! `agents-tui service install` (#426, #427) only writes what these return and
 //! the tests need no service manager. `docs/agents-tui.service` is what
-//! [`systemd_unit`] gives for nuc-1's options; a test keeps the two equal.
+//! [`systemd_unit`] gives for the reference install's options; a test keeps the two equal.
 
 use std::path::{Path, PathBuf};
 
@@ -243,10 +243,10 @@ mod tests {
         defaults(Path::new(HOME), Path::new("/home/u/.cargo/bin/agents-tui"), Probes::default(), all_home_dirs)
     }
 
-    /// docs/agents-tui.service is the unit for nuc-1's options, from `[Unit]`
+    /// docs/agents-tui.service is the reference install's unit, from `[Unit]`
     /// on (above it are the doc's install notes). They cannot drift apart.
     #[test]
-    fn the_reference_unit_is_what_the_generator_gives_for_nuc_1() {
+    fn the_reference_unit_matches_the_generator() {
         let o = ServiceOptions {
             web_binds: vec!["127.0.0.1".into(), "tailscale".into()],
             sources: vec!["swarms=herdr".into()],

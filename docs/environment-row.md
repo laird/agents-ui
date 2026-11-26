@@ -17,15 +17,16 @@ or a deployment that is still running or has failed.
 ## Goal
 
 ```
-[ dev village ] ──ship──▶ [ nuc-1 ] ──ship──▶ [ release ]
-  docks, houses,            what nuc-1          what the latest
-  gate, quay, harbour       runs                Release contains
+[ dev village ] ──ship──▶ [ deploy ] ──ship──▶ [ release ]
+  docks, houses,           what deploy runs     what the latest
+  gate, quay, harbour                           Release contains
 ```
 
 A row of villages, left to right. The dev village comes first, then one
 village per environment in `.autocoder.json` order, with production
-right-most. Here that is `nuc-1` (what autocoder's `deploy.sh --env nuc-1` installs and
-serves on nuc-1), then `release` (the latest GitHub Release, autocoder's `release.sh`).
+right-most. In this repo that is `deploy` (the installed agents-tui;
+`deploy.sh --env deploy`), then `release` (the latest GitHub Release,
+autocoder's `release.sh`). Rename the `deploy` entry to match your host.
 The user decided there is no staging. A ship sails between neighbouring
 villages for each deployment.
 
@@ -90,7 +91,7 @@ from its rank in the row:
 | middle environments | town: walled, a market warehouse | business district | orbital station |
 | production (last) | capital: castle keep, a big warehouse | skyline | capital ship dock |
 
-With two environments, `nuc-1` is a town and `release` is the capital. The
+With two environments, `deploy` is a town and `release` is the capital. The
 rank only changes the drawing, never what is shown. A theme without rank art
 draws every environment as a town.
 
@@ -148,7 +149,7 @@ in flight and one finished per environment:
 
 ```json
 {
-  "from": "nuc-1",
+  "from": "deploy",
   "to": "release",
   "state": "sailing",
   "sha": "c0ffee1…",
@@ -208,7 +209,7 @@ row (#407). A dev village with no environments still stacks it above. In the row
   (Temporal workstreams or Kubernetes pods), drawn in the other style as
   now. Its warehouse still shows the cargo, so the village shows both what
   was released and what runs. A platform can attach to another environment
-  with `--world shop=temporal:agents@nuc-1`. Without `@env` it attaches to
+  with `--world shop=temporal:agents@deploy`. Without `@env` it attaches to
   the last.
 - **Releases going up**: today's cart on the road becomes the voyage to
   that environment. "Landed" (a platform worker reports a build ID matching
@@ -266,7 +267,7 @@ voyages. The protocol gains, all optional:
   `drawWorld` in `worlds.js`); a dev village with no environments still
   stacks it above.
 - **#386, demo:** the `gh` shim and `swarm_sim.py` script a deploy to
-  `nuc-1` (pending → in_progress → success), a promotion `nuc-1` →
+  `deploy` (pending → in_progress → success), a promotion `deploy` →
   `release`, and a failed deployment.
 
 ## Open questions for later

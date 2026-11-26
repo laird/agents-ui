@@ -14,12 +14,12 @@ const landed = {
     { key: 'claimed', at: '2026-11-12T08:00:00+00:00', secs: 79200 },
     { key: 'first_commit', at: '2026-11-12T09:00:00+00:00', secs: 3600 },
     { key: 'landed', at: '2026-11-12T12:00:00+00:00', secs: 10800 },
-    { key: 'deployed:nuc-1', at: '2026-11-12T12:10:00+00:00', secs: 600 },
+    { key: 'deployed:deploy', at: '2026-11-12T12:10:00+00:00', secs: 600 },
     { key: 'deployed:release', at: '2026-11-12T12:20:00+00:00', secs: 600 },
   ],
   bounces: [{ at: '2026-11-12T11:00:00Z', kind: 'conflict', files: ['src/web/server.rs'] }, { at: '2026-11-12T11:30:00Z', kind: 'push-retry' }],
 };
-const medians = { approved: 7200, claimed: 1800, first_commit: 900, landed: 5400, 'deployed:nuc-1': 1200, 'deployed:release': 300 };
+const medians = { approved: 7200, claimed: 1800, first_commit: 900, landed: 5400, 'deployed:deploy': 1200, 'deployed:release': 300 };
 
 test('durations in whole units', () => {
   assert.equal(durWords(20), 'under a minute');
@@ -32,10 +32,10 @@ test('durations in whole units', () => {
 
 test('stages and waits are named, environments by name', () => {
   assert.equal(stageName('first_commit'), 'First commit');
-  assert.equal(stageName('deployed:nuc-1'), 'Deployed to nuc-1');
+  assert.equal(stageName('deployed:deploy'), 'Deployed to deploy');
   assert.equal(stageName('deployed:release'), 'Released');
   assert.equal(waitName('approved'), 'waiting for approval');
-  assert.equal(waitName('deployed:nuc-1'), 'waiting to deploy to nuc-1');
+  assert.equal(waitName('deployed:deploy'), 'waiting to deploy to deploy');
 });
 
 test('a landed issue: one row per stage, against its median, the slowest marked', () => {
@@ -46,7 +46,7 @@ test('a landed issue: one row per stage, against its median, the slowest marked'
     'Claimed by wt-5 · 22 h (median 30 min)',
     'First commit · 1 h (median 15 min)',
     'Landed · 3 h (median 2 h)',
-    'Deployed to nuc-1 · 10 min (median 20 min)',
+    'Deployed to deploy · 10 min (median 20 min)',
     'Released · 10 min (median 5 min)',
   ]);
   assert.deepEqual(rows.filter(r => r.slow).map(r => r.key), ['approved']);
@@ -74,7 +74,7 @@ test("the gate's hand-backs, with the files that conflicted", () => {
 
 test('the footer: medians in travel order, the longest named', () => {
   const f = medianWords(medians);
-  assert.equal(f.line, 'Median over the last 14 days: waiting for approval 2 h · waiting for a worker 30 min · to the first commit 15 min · coding and the gate 2 h · waiting to deploy to nuc-1 20 min · waiting for a release 5 min');
+  assert.equal(f.line, 'Median over the last 14 days: waiting for approval 2 h · waiting for a worker 30 min · to the first commit 15 min · coding and the gate 2 h · waiting to deploy to deploy 20 min · waiting for a release 5 min');
   assert.equal(f.most, 'Most time goes to waiting for approval');
   assert.equal(medianWords({}), null);
   assert.equal(medianWords(undefined), null);

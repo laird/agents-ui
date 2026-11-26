@@ -734,7 +734,7 @@ mod tests {
         "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\n",
         "\u{276f} \n",
         "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\n",
-        "  ctx 26% of 1M | Opus 5 (1M context) | repo kink-party | wt kink-party-wt-1\n",
+        "  ctx 26% of 1M | Opus 5 (1M context) | repo example-app | wt example-app-wt-1\n",
         "  \u{23f5}\u{23f5} bypass permissions on \u{00b7} 2 shells \u{00b7} \u{2190} for agents\n",
         "                                                                           /rc\n",
     );

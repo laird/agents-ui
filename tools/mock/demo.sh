@@ -19,7 +19,7 @@
 #   FEATURE=1 tools/mock/demo.sh       # two features followed from spec to prod (banners, strip, stuck, unknown, live)
 #   FEATURE=1 PROMOTION=feature tools/mock/demo.sh   # ... promoted as whole features (one barge)
 #   LIFECYCLE=1 tools/mock/demo.sh     # every issue transition on a loop: arrive, claim, work, block, land, close, ship
-#   VOYAGES=1 tools/mock/demo.sh       # nuc-1 and release Deployments on a 120 s loop: a deploy, a promotion, a failure
+#   VOYAGES=1 tools/mock/demo.sh       # deploy and release Deployments on a 120 s loop: a deploy, a promotion, a failure
 #   GATE=1 tools/mock/demo.sh          # finished work goes through a merge gate: queue, gate, pass, fail, conflict, a train
 #   CONFLICTS=1 tools/mock/demo.sh     # the merge gate's bounces, scripted: a conflict fixed, a failed gate, push retries, a hotspot
 #   VALLEY=1 tools/mock/demo.sh        # the valley's ropes, caravan and barge (#530): fixture GitHub issues, shop's CI red
@@ -55,7 +55,7 @@ story=(); [ -n "${STORY:-}" ] && story=(--story)
 feature=(); [ -n "${FEATURE:-}" ] && feature=(--feature --promotion "${PROMOTION:-subtask}")
 # LIFECYCLE=1: every transition of an issue's life on a 90 s loop (see swarm_sim.py).
 [ -n "${LIFECYCLE:-}" ] && feature+=(--lifecycle)
-# VOYAGES=1: shop deploys to nuc-1 and promotes to release through scripted Deployments (see voyages.py).
+# VOYAGES=1: shop deploys to deploy and promotes to release through scripted Deployments (see voyages.py).
 [ -n "${VOYAGES:-}" ] && feature+=(--voyages)
 # GATE=1: a simulated merge gate (see swarm_sim.py), in the demo's own tmp so
 # agents-tui reads its jobs and slots and nothing else's.

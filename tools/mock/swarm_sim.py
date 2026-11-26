@@ -32,12 +32,12 @@ and then unblocked (to the board and back), one is closed as not planned
 (carried off), workers claim, work on and land the rest, and a release
 ships what has landed.
 
-With --voyages, "shop" uses this repo's own environments, nuc-1 then release,
+With --voyages, "shop" uses this repo's own environments, deploy then release,
 both read from GitHub Deployments, and voyages.py scripts them on a 120 s
-loop: a deploy to nuc-1 that goes pending, in_progress, success; a
-promotion of what nuc-1 runs to release; and a deploy to nuc-1 that fails.
+loop: a deploy to deploy that goes pending, in_progress, success; a
+promotion of what deploy runs to release; and a deploy to deploy that fails.
 The village's environment row shows each voyage (loading, sailing, docked,
-failed). `touch DEMO/state/release-now` promotes nuc-1 to release at once.
+failed). `touch DEMO/state/release-now` promotes deploy to release at once.
 
 With --gate, "shop"'s finished work goes through a simulated merge gate
 (#375) instead of landing at once. Each hand-off is a merge job that writes
@@ -65,7 +65,7 @@ in "shop" naming the workstream that failed.
     swarm_sim.py --dir DEMO --feature run                       # two features, spec to prod
     swarm_sim.py --dir DEMO --feature --promotion feature run   # ... promoted as whole features
     swarm_sim.py --dir DEMO --lifecycle run                     # every issue transition, on a loop
-    swarm_sim.py --dir DEMO --voyages run                       # nuc-1 and release deployments, on a loop
+    swarm_sim.py --dir DEMO --voyages run                       # deploy and release deployments, on a loop
     swarm_sim.py --dir DEMO --gate run                          # finished work goes through a merge gate
     swarm_sim.py --dir DEMO --conflicts run                     # ... with scripted conflicts, failures and push retries
 
@@ -781,7 +781,7 @@ def main():
     ap.add_argument("--promotion", choices=["subtask", "feature"], default="subtask",
                     help="with --feature: promote each subtask on its own, or each feature as a whole")
     ap.add_argument("--lifecycle", action="store_true", help="play every transition of an issue's life on a loop (see the module docstring)")
-    ap.add_argument("--voyages", action="store_true", help="script nuc-1 and release deployments (see the module docstring)")
+    ap.add_argument("--voyages", action="store_true", help="script deploy and release deployments (see the module docstring)")
     ap.add_argument("--gate", action="store_true", help="send finished work through a simulated merge gate (see the module docstring)")
     ap.add_argument("--conflicts", action="store_true", help="the merge gate with scripted conflicts, failures and push retries (implies --gate)")
     ap.add_argument("command", choices=["setup", "run"])
@@ -812,7 +812,7 @@ def main():
     if FEATURE:
         shop.story = FeatureStory(shop, time.time())
     lifecycle = Lifecycle(shop, time.time() + 5) if LIFECYCLE else None
-    # --voyages: nuc-1 ships the integration tip; a release is what the platform runs.
+    # --voyages: deploy ships the integration tip; a release is what the platform runs.
     script = voyages.VoyageScript(lambda: git(shop.repo, "rev-parse", "refs/remotes/origin/master"), time.time() + 5,
                                   released=shop.write_release) if VOYAGES else None
     if GATE:
@@ -847,7 +847,7 @@ def main():
         if shop.gate:
             shop.gate.tick(t)
         if script:
-            # Deployments, not branches, say what nuc-1 and release run.
+            # Deployments, not branches, say what deploy and release run.
             script.tick(t)
             path = shop.state / "deployments" / f"{shop.name}.json"
             path.parent.mkdir(parents=True, exist_ok=True)

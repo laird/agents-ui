@@ -23,7 +23,7 @@ export function durWords(secs) {
 
 const envOf = key => (key.startsWith('deployed:') ? key.slice('deployed:'.length) : null);
 
-/* What reaching a stage is called: "Claimed", "Deployed to nuc-1", "Released". */
+/* What reaching a stage is called: "Claimed", "Deployed to deploy", "Released". */
 export function stageName(key) {
   const e = envOf(key);
   if (e) return e === 'release' ? 'Released' : `Deployed to ${e}`;

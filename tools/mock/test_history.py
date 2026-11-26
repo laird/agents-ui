@@ -109,7 +109,7 @@ class Claims(unittest.TestCase):
                      "🔒 [autocoder-claim] Starting fix for issue #350 — lock established",
                      "🚀 **Enhancement Implementation Started**"):
             self.assertTrue(hm.WORK_STARTED.search(body), body)
-        self.assertFalse(hm.WORK_STARTED.search("🔒 claim nuc-526287 1794150997174"), "the gate's claim alone")
+        self.assertFalse(hm.WORK_STARTED.search("🔒 claim worker-526287 1794150997174"), "the gate's claim alone")
 
     def test_commit_times_by_issue(self):
         log = ["a 200 190 Merge origin/master into feature/issue-7 (pre-integration sync)",

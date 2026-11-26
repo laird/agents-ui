@@ -523,7 +523,7 @@ that runs it). Pick `shop ⇄ temporal:agents` in the title bar, or open
 
 The platform is the village of the environment it runs: production, the
 right-most village of the [environment row](environment-row.md), unless the
-world names another (`--world shop=temporal:agents@nuc-1`). It stands in that
+world names another (`--world shop=temporal:agents@deploy`). It stands in that
 slot, widened to fit, in the other style: its live workloads (Temporal
 workstreams, Kubernetes pods) are the village's houses, over the
 environment's version sign, warehouse and docks. A dev village with no

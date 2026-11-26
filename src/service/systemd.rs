@@ -562,10 +562,10 @@ mod tests {
     #[test]
     fn reaches_the_service_where_it_binds() {
         let h = home("reach");
-        let mut fake = Fake { tailnet: Some("100.98.1.2\n".into()), ..Fake::default() };
+        let mut fake = Fake { tailnet: Some("100.64.0.2\n".into()), ..Fake::default() };
         let with = |binds: &[&str]| ServiceOptions { web_binds: binds.iter().map(|b| b.to_string()).collect(), ..opts(&h) };
         assert_eq!(reach_host(&with(&["127.0.0.1", "tailscale"]), &mut fake), "127.0.0.1");
-        assert_eq!(reach_host(&with(&["tailscale"]), &mut fake), "100.98.1.2");
+        assert_eq!(reach_host(&with(&["tailscale"]), &mut fake), "100.64.0.2");
         assert_eq!(reach_host(&with(&["192.168.1.5"]), &mut fake), "192.168.1.5");
         assert_eq!(reach_host(&with(&["::1"]), &mut fake), "::1");
     }

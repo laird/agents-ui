@@ -460,12 +460,12 @@ mod tests {
     const ISSUES: &str = r#"[
       {"number": 484, "state": "CLOSED", "createdAt": "2026-11-14T22:52:33Z", "closedAt": "2026-11-16T05:30:00Z", "stateReason": "COMPLETED",
        "comments": [
-         {"body": "🔒 claim nuc-2013134 1794804283840", "createdAt": "2026-11-16T04:44:44Z"},
+         {"body": "🔒 claim worker-2013134 1794804283840", "createdAt": "2026-11-16T04:44:44Z"},
          {"body": "🤖 **Automated Fix Started**\n\nBranch", "createdAt": "2026-11-16T04:46:00Z"},
          {"body": "⚠️ **Auto-merge to master hit a conflict**\n\nsrc/web/server.rs", "createdAt": "2026-11-16T05:10:00Z"}
        ]},
       {"number": 483, "state": "CLOSED", "createdAt": "2026-11-15T10:00:00Z", "closedAt": "2026-11-16T03:00:00Z", "stateReason": "COMPLETED",
-       "comments": [{"body": "🔒 claim nuc-1 1", "createdAt": "2026-11-16T02:00:00Z"},
+       "comments": [{"body": "🔒 claim worker-1 1", "createdAt": "2026-11-16T02:00:00Z"},
                     {"body": "❌ **Auto-merge to master failed** at the gate", "createdAt": "2026-11-16T02:30:00Z"}]},
       {"number": 470, "state": "CLOSED", "createdAt": "2026-10-01T10:00:00Z", "closedAt": "2026-11-16T01:00:00Z", "stateReason": "NOT_PLANNED", "comments": []},
       {"number": 498, "state": "OPEN", "createdAt": "2026-11-16T04:00:00Z", "closedAt": null, "stateReason": null, "comments": []},
@@ -474,8 +474,8 @@ mod tests {
 
     const DEPLOYMENTS: &str = r#"[
       {"id": 3, "sha": "c1155de", "created_at": "2026-11-16T05:41:00Z", "environment": "release", "description": "Release v2026.11.16.1"},
-      {"id": 2, "sha": "c1155de", "created_at": "2026-11-16T05:40:00Z", "environment": "nuc-1"},
-      {"id": 1, "sha": "a8064d0", "created_at": "2026-11-16T05:39:00Z", "environment": "nuc-1"},
+      {"id": 2, "sha": "c1155de", "created_at": "2026-11-16T05:40:00Z", "environment": "deploy"},
+      {"id": 1, "sha": "a8064d0", "created_at": "2026-11-16T05:39:00Z", "environment": "deploy"},
       {"id": 0, "sha": "1dce1fa", "created_at": "2026-11-12T08:00:00Z"}
     ]"#;
 
@@ -501,7 +501,7 @@ mod tests {
         assert_eq!(t.landed, 2, "not planned and an old close are not landings");
         assert_eq!(t.opened, 1);
         assert_eq!(t.bounced, 3, "a conflict, a failed gate, and a push re-synced");
-        assert_eq!(t.deploys, 2, "c1155de to nuc-1 and its release is one deploy; a8064d0 another");
+        assert_eq!(t.deploys, 2, "c1155de to deploy and its release is one deploy; a8064d0 another");
         assert_eq!(t.reverted, Some(0));
         assert_eq!(day("2026-11-15").reverted, Some(1));
         assert_eq!((day("2026-11-15").opened, day("2026-11-14").opened), (1, 1));
@@ -646,9 +646,9 @@ mod tests {
     #[test]
     fn an_abandoned_claim_is_not_counted_in_the_wait() {
         let issues = r#"[{"number": 9, "state": "CLOSED", "createdAt": "2026-11-01T00:00:00Z", "closedAt": "2026-11-16T05:00:00Z", "stateReason": "COMPLETED",
-          "comments": [{"body": "🔒 claim nuc-1 1", "createdAt": "2026-11-06T00:00:00Z"},
-                       {"body": "🔒 claim nuc-2 2", "createdAt": "2026-11-16T04:00:00Z"},
-                       {"body": "🔒 claim nuc-3 3", "createdAt": "2026-11-16T06:00:00Z"}]}]"#;
+          "comments": [{"body": "🔒 claim worker-1 1", "createdAt": "2026-11-06T00:00:00Z"},
+                       {"body": "🔒 claim worker-2 2", "createdAt": "2026-11-16T04:00:00Z"},
+                       {"body": "🔒 claim worker-3 3", "createdAt": "2026-11-16T06:00:00Z"}]}]"#;
         let s = summarize(issues.as_bytes(), None, None, today(), utc(), String::new()).unwrap();
         assert_eq!(s.median_claim_to_land_secs, Some(3600), "the last claim before it landed; one after it is not");
     }

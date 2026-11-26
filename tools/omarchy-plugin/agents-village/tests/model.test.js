@@ -10,7 +10,7 @@ const M = require("../Model.js")
 const fixture = name => JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", name), "utf8"))
 const swarms = fixture("swarms.json")
 const villages = fixture("village.json")
-const BASE = "http://nuc-1:7890"
+const BASE = "http://127.0.0.1:7890"
 
 // Two swarms, for the list.
 function twoSwarms() {
@@ -25,8 +25,8 @@ test("parse and server urls", () => {
   assert.strictEqual(M.parse("not json"), null)
   assert.strictEqual(M.parse(""), null)
   assert.deepStrictEqual(M.parse('{"swarms": []}'), { swarms: [] })
-  assert.strictEqual(M.baseUrl(""), "http://nuc-1:7890")
-  assert.strictEqual(M.baseUrl("omarchy-1:7890/"), "http://omarchy-1:7890")
+  assert.strictEqual(M.baseUrl(""), "http://127.0.0.1:7890")
+  assert.strictEqual(M.baseUrl("example-host:7890/"), "http://example-host:7890")
   assert.strictEqual(M.baseUrl("https://village.example/"), "https://village.example")
   assert.strictEqual(M.absolute(BASE, "/#/swarm/a/agent/b"), BASE + "/#/swarm/a/agent/b")
   assert.strictEqual(M.absolute(BASE, "https://github.com/o/r/issues/1"), "https://github.com/o/r/issues/1")
@@ -80,7 +80,7 @@ test("flow strip: backlog, board, houses, gate, quay, each stop", () => {
     { label: "Houses", count: 3, detail: "3 working" },
     { label: "Gate", count: 0, detail: "0 gating" },
     { label: "Quay", count: 5 },
-    { label: "nuc-1", count: 17 },
+    { label: "deploy", count: 17 },
     { label: "release", count: 0 }
   ])
   const noGate = { houses: [], backlog: [], board: [], pipeline: { quay: [], stops: [] } }
@@ -121,7 +121,7 @@ test("the bar badge: working, needs you, sailing, unreachable", () => {
 })
 
 test("a ship sails when the last stop's release changes, never on first sight", () => {
-  const at = (sha, source = "deployment") => ({ villages: [{ project: "x", houses: [], board: [], pipeline: { stops: [{ name: "nuc-1" }, { name: "release", source, sha }] } }] })
+  const at = (sha, source = "deployment") => ({ villages: [{ project: "x", houses: [], board: [], pipeline: { stops: [{ name: "deploy" }, { name: "release", source, sha }] } }] })
   assert.strictEqual(M.releaseKey(at("abc").villages[0]), "deployment:abc")
   assert.strictEqual(M.releaseKey(M.villageFor(villages, "agents-ui")), "", "no release yet")
   let r = M.releases(at("abc"), null)
@@ -219,29 +219,29 @@ test("the worst build of all the villages decides the icon", () => {
 // ---- #493: Join swarm, notifying from the bar, keyboard navigation ----------
 
 test("join swarm: a plain machine name only, since omarchy-launch-or-focus evals the command", () => {
-  for (const ok of ["nuc", "nuc-1", "box.local", "A9_b-c.d"]) assert.ok(M.validMachine(ok), ok)
-  for (const bad of ["nuc; rm -rf ~", "$(id)", "-rf", "", " nuc", "nuc box", "`id`", "a/b", "x".repeat(65), null, undefined])
+  for (const ok of ["box", "box-1", "box.local", "A9_b-c.d"]) assert.ok(M.validMachine(ok), ok)
+  for (const bad of ["box; rm -rf ~", "$(id)", "-rf", "", " box", "box box", "`id`", "a/b", "x".repeat(65), null, undefined])
     assert.ok(!M.validMachine(bad), String(bad))
-  assert.deepStrictEqual(M.joinCommand("nuc"), ["omarchy-launch-or-focus-tui", "--app-id=org.omarchy.swarm-nuc-join", "swarm", "nuc"])
-  assert.strictEqual(M.joinCommand("nuc; rm -rf ~"), null)
+  assert.deepStrictEqual(M.joinCommand("box"), ["omarchy-launch-or-focus-tui", "--app-id=org.omarchy.swarm-box-join", "swarm", "box"])
+  assert.strictEqual(M.joinCommand("box; rm -rf ~"), null)
   assert.strictEqual(M.joinCommand("$(id)"), null)
   assert.strictEqual(M.joinCommand("-rf"), null)
 })
 
 test("join swarm: one machine's terminal never matches another's (omarchy-launch-or-focus matches \\b<class>\\b)", () => {
   const finds = (m, cls) => new RegExp("\\b" + M.joinAppId(m) + "\\b", "i").test(cls)
-  assert.ok(finds("nuc", M.joinAppId("nuc")))
-  assert.ok(!finds("nuc", M.joinAppId("nuc-1")), "nuc is not nuc-1")
-  assert.ok(!finds("nuc", M.joinAppId("nuc.lan")))
+  assert.ok(finds("box", M.joinAppId("box")))
+  assert.ok(!finds("box", M.joinAppId("box-1")), "box is not box-1")
+  assert.ok(!finds("box", M.joinAppId("box.lan")))
   assert.ok(!finds("a.b", M.joinAppId("axb")), "a dot is not a wildcard")
   assert.ok(finds("box.lan", M.joinAppId("box.lan")))
 })
 
 test("join swarm: hidden without a machine or without swarm here, disabled for a bad name", () => {
   assert.strictEqual(M.joinState("", true), "hidden")
-  assert.strictEqual(M.joinState("nuc", false), "hidden")
-  assert.strictEqual(M.joinState("nuc", true), "ready")
-  assert.strictEqual(M.joinState("nuc; rm -rf ~", true), "disabled")
+  assert.strictEqual(M.joinState("box", false), "hidden")
+  assert.strictEqual(M.joinState("box", true), "ready")
+  assert.strictEqual(M.joinState("box; rm -rf ~", true), "disabled")
 })
 
 const waitingDoc = blocked => ({ villages: [{ project: "shop", manager: { status: "idle", links: [] }, board: [], backlog: [], pipeline: { gates: [] },
@@ -278,15 +278,15 @@ test("notify: one replaceable notification saying how many, what is new and wher
 })
 
 test("notify: the widget stays quiet only while the desktop notifier covers it", () => {
-  const nuc = "http://nuc-1:7890"
-  assert.strictEqual(M.widgetNotifies(true, null, nuc), true, "no notifier")
-  assert.strictEqual(M.widgetNotifies(false, null, nuc), false, "notify off")
-  assert.strictEqual(M.widgetNotifies(true, '{"server":"http://nuc-1:7890/"}', nuc), false, "the notifier watches this server")
-  assert.strictEqual(M.widgetNotifies(true, '{}', nuc), false, "the notifier's default server is nuc-1")
-  assert.strictEqual(M.widgetNotifies(true, '{"server":"http://other:7890"}', nuc), true, "it watches another server")
-  assert.strictEqual(M.widgetNotifies(true, '{"kinds":["build"]}', nuc), true, "it does not notify what needs you")
-  assert.strictEqual(M.widgetNotifies(true, '{"enabled":false}', nuc), true, "a notifier turned off hands it back")
-  assert.strictEqual(M.widgetNotifies(true, "{not json", nuc), false, "a notifier whose settings don't parse still runs")
+  const base = "http://127.0.0.1:7890"
+  assert.strictEqual(M.widgetNotifies(true, null, base), true, "no notifier")
+  assert.strictEqual(M.widgetNotifies(false, null, base), false, "notify off")
+  assert.strictEqual(M.widgetNotifies(true, '{"server":"http://127.0.0.1:7890/"}', base), false, "the notifier watches this server")
+  assert.strictEqual(M.widgetNotifies(true, '{}', base), false, "the notifier's default server is the widget's")
+  assert.strictEqual(M.widgetNotifies(true, '{"server":"http://other:7890"}', base), true, "it watches another server")
+  assert.strictEqual(M.widgetNotifies(true, '{"kinds":["build"]}', base), true, "it does not notify what needs you")
+  assert.strictEqual(M.widgetNotifies(true, '{"enabled":false}', base), true, "a notifier turned off hands it back")
+  assert.strictEqual(M.widgetNotifies(true, "{not json", base), false, "a notifier whose settings don't parse still runs")
 })
 
 test("keyboard: the rows in panel order, and a cursor held at the ends", () => {

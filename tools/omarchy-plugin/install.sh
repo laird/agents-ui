@@ -12,7 +12,7 @@
 #
 #   (no --host)  link this checkout's plugin into ~/.config/omarchy/plugins/, so
 #                edits here show up as you save them
-#   --host H     copy it to H over ssh (omarchy-1, the uConsole, ...), replacing
+#   --host H     copy it to H over ssh (another machine's ssh name), replacing
 #                any earlier copy; commands there run in a login shell, so
 #                `omarchy` has its environment (OMARCHY_PATH)
 #   --enable     also add the widget to the bar (`omarchy plugin enable`)
@@ -26,8 +26,8 @@
 # is set to 0, after a backup) and starts after the same idle time.
 #   --never-sleep  this machine never locks itself or turns the display off
 #                  when idle (idle.lock: 0), so the village stays up for good.
-#                  For a status display like nuc-1; leave it off elsewhere.
-#   --server URL   the agents-tui server (default http://nuc-1:7890)
+#                  For a status display that should stay up; leave it off on a machine you use.
+#   --server URL   the agents-tui server (default http://127.0.0.1:7890, where agents-tui listens)
 #   The page options (--cycle, --dim, ...) are one file each in
 #   agents-village-screensaver/options/; --help lists them.
 #
@@ -35,12 +35,12 @@
 # manager starts waiting on you, a merge bounces at the gate, the build breaks
 # or is fixed, or a deploy lands or fails. Settings go in
 # ~/.config/agents-ui/notify.json (see agents-village-notify/README.md).
-#   --server URL   the agents-tui server (default http://nuc-1:7890)
+#   --server URL   the agents-tui server (default http://127.0.0.1:7890, where agents-tui listens)
 #   --quiet H-H    no notifications between these hours, e.g. 23-7 (default:
 #                  the screensaver's --dim hours, if it has any)
 #
-# The widget reads http://nuc-1:7890 by default; set Server in its settings to
-# point it elsewhere.
+# The widget reads http://127.0.0.1:7890 by default (where agents-tui listens);
+# set Server in its settings, or pass --server, to point it at another host.
 set -euo pipefail
 
 HOST=""
@@ -51,7 +51,9 @@ SCREENSAVER=false
 NOTIFY=false
 QUIET=""
 NEVER_SLEEP=false
-SERVER="http://nuc-1:7890"
+# Where agents-tui listens by default. --server, the widget's Server setting,
+# notify.json `server`, and screensaver.json `server` point at another host.
+SERVER="http://127.0.0.1:7890"
 SERVER_GIVEN=false
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # The screensaver's page options, one file each (agents-village-screensaver/options/).
