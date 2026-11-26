@@ -703,7 +703,7 @@ impl Villages {
             .filter_map(|w| {
                 let dev = readings.iter().find(|r| r.village.project == w.dev)?;
                 let platform = readings.iter().find(|r| r.village.project == w.platform)?;
-                Some((w.dev.clone(), build_world(w, &dev.village, &dev.issues, &platform.village)))
+                Some((w.dev.clone(), build_world(w, &dev.village, &dev.issues, &platform.village, &platform.issues, chrono::Utc::now())))
             })
             .collect();
         // A platform's open incidents are the health of the environment it runs.
@@ -980,7 +980,7 @@ mod tests {
     async fn any_village_source_can_be_a_world_platform() {
         let villages = Villages::new(
             vec![Box::new(SourceConfig { issues: "none".into(), pipeline: "none".into(), activity: "none".into(), ..SourceConfig::default() }.swarm_villages()), Box::new(Platform)],
-            vec![WorldConfig::parse("shop=ops", "incident").unwrap()],
+            vec![WorldConfig::parse("shop=ops", &["incident".to_string()]).unwrap()],
         );
         assert_eq!(villages.source_names(), vec!["swarms (none, none, none)", "platform"]);
         let swarms = vec![empty_swarm("shop")];

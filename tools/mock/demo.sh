@@ -23,6 +23,7 @@
 #   GATE=1 tools/mock/demo.sh          # finished work goes through a merge gate: queue, gate, pass, fail, conflict, a train
 #   CONFLICTS=1 tools/mock/demo.sh     # the merge gate's bounces, scripted: a conflict fixed, a failed gate, push retries, a hotspot
 #   VALLEY=1 tools/mock/demo.sh        # the valley's ropes, caravan and barge (#530): fixture GitHub issues, shop's CI red
+#   CHANNELS=1 tools/mock/demo.sh      # world:relay: issues the runtime raises by channel go round, raised to verified (channels.py)
 #   PORT=8080 tools/mock/demo.sh
 #   touch "$AGENTS_UI_DEMO_DIR/state/release-now"   # cut a release of "shop" now: its ship sails
 #   tools/mock/demo.sh --source issues=none   # extra flags go to agents-tui
@@ -151,9 +152,16 @@ echo "Village:    http://127.0.0.1:$PORT/village"
 echo "Valley:     http://127.0.0.1:$PORT/village?valley=demo"
 echo "Platform:   http://127.0.0.1:$PORT/village#$platform"
 echo "World:      http://127.0.0.1:$PORT/village#world:shop"
+# CHANNELS=1 (#560): a second world whose runtime raises its own issues, each
+# badged with its channel, built, deployed and verified (channels.py).
+channels=()
+if [ -n "${CHANNELS:-}" ]; then
+  channels=(--framework "exec:python3 $HERE/channels.py" --world relay=agentex:relay --incident-label incident --incident-label channel:)
+  echo "Channels:   http://127.0.0.1:$PORT/village#world:relay"
+fi
 echo "Demo files: $DEMO"
 echo "Release:    touch $DEMO/state/release-now   (the ship sails)"
 HOME="$DEMO/home" PATH="$HERE/bin:$PATH" "$BIN" --headless --web-port "$PORT" "${runtime[@]}" \
   --framework "$ROOT/tools/adapters/example-report.json" \
-  --framework "exec:$ROOT/tools/adapters/adapter-template.py" "$@" & pids+=($!)
+  --framework "exec:$ROOT/tools/adapters/adapter-template.py" "${channels[@]}" "$@" & pids+=($!)
 wait

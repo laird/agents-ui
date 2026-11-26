@@ -104,6 +104,12 @@ pub struct IssueSnapshot {
     /// Issues this one depends on, from "Depends on" / "Blocked by" lines in its body.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub depends_on: Vec<u32>,
+    /// The platform workstream that raised it (a report task's `raised_by`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raised_by: Option<String>,
+    /// When the platform confirmed the fix, RFC 3339 (a report task's `verified_at`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified_at: Option<String>,
 }
 
 /// Snapshot of a full swarm suitable for JSON serialization.
@@ -258,6 +264,8 @@ impl IssueSnapshot {
             assigned_worker: issue.assigned_worker.clone(),
             url,
             depends_on: issue.depends_on.clone(),
+            raised_by: None,
+            verified_at: None,
         }
     }
 }

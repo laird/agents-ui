@@ -6,7 +6,9 @@
  * over the slot's version sign, warehouse and docks. Releases reach it as
  * the row's voyages; issues it raises leave the building they came from,
  * float down beside it to the row's river and along it, right to left, to
- * the dev village's docks. The platform is drawn in the other style, so the
+ * the dev village's docks, badged with the part of the platform that raised
+ * them; the house that raised one sparkles once the platform verifies its
+ * fix (#560). The platform is drawn in the other style, so the
  * two read apart at a glance. A dev village with no environments stacks the
  * platform over it, with a road up for releases on the right. */
 import { state } from './state.js';
@@ -23,6 +25,7 @@ import { SAIL } from './ship.js';
 import { fit } from './panels.js';
 import { drawOverview } from './overview.js';
 import { drawValley } from './valley.js';
+import { SPARKLE_MS, floatCrate, foldWorld, newWorldState, sparkling } from './worldloop.js';
 
 function offscreen(sc) {
   if (!sc.canvas) { sc.canvas = document.createElement('canvas'); sc.cx = sc.canvas.getContext('2d'); }
@@ -73,19 +76,12 @@ const FIRE_FLAMES = [['...#..', '..##..', '..###.', '.####.', '.#oo#.', '#oooo#'
 function fireFlame(g, x, y, k) {
   FIRE_FLAMES[k].forEach((row, j) => { for (let i = 0; i < 6; i++) if (row[i] !== '.') px(g, x + i, y + j, 1, 1, row[i] === 'o' ? P.gold : P.p0); });
 }
-/* Fold a new world into its state: new incidents set off downriver, and the
- * platform lights up when the release lands. */
+/* Fold a new world into its state (worldloop.js); the platform lights up
+ * when the release lands. */
 export function updateWorld(w, t) {
   const { worldState, scenes } = state;
-  const st = worldState[w.name] || (worldState[w.name] = { seen: null, floaters: [], landed: undefined, upgradedAt: -1e9 });
-  const now = new Set(w.incidents.map(i => i.number));
-  if (st.seen) w.incidents.forEach(i => { if (!st.seen.has(i.number)) st.floaters.push({ n: i.number, origin: i.origin, t0: t }); });
-  st.seen = now;
-  if (st.landed === false && w.landed === true) {
-    st.upgradedAt = t;
-    if (scenes[w.platform]) scenes[w.platform].fireworks = t;
-  }
-  st.landed = w.landed;
+  const st = worldState[w.name] || (worldState[w.name] = newWorldState());
+  if (foldWorld(st, w, t) && scenes[w.platform]) scenes[w.platform].fireworks = t;
 }
 /* Where an incident sets off: its building on the platform, else the platform's gate. */
 function originPoint(Ps, id, g) {
@@ -106,7 +102,7 @@ function sluice(x, y0, y1, t) {
 function drawWorld(t, w) {
   const both = worldScenes(w);
   if (!both) return;
-  const [Ps, Ds] = both, g = worldGeom(w, Ps, Ds), st = state.worldState[w.name] || { floaters: [], upgradedAt: -1e9 };
+  const [Ps, Ds] = both, g = worldGeom(w, Ps, Ds), st = state.worldState[w.name] || newWorldState();
   if (sizeCanvas(g.W, g.H)) fit();
   prepare(ctx);
   const devTheme = state.T;
@@ -132,9 +128,12 @@ function drawWorld(t, w) {
     const f = blink(t, 140) ? 1 : 0;
     detail(ctx, x, y, d => { fireFlame(d, 7, -2 - 2 * f, f); fireFlame(d, 19, 1 + 2 * f, 1 - f); });
   });
-  if (t - st.upgradedAt < 2400) Ps.v.houses.forEach((h, i) => {
+  // Sparkles: over every house when the release lands, over one when the
+  // platform verifies the fix it asked for.
+  const upgraded = t - st.upgradedAt < SPARKLE_MS, verified = sparkling(st, t);
+  Ps.v.houses.forEach((h, i) => {
     const lot = Ps.L.lots[i];
-    if (lot && blink(t + i * 90, 160)) detail(ctx, g.px + lot.x + 2 + (i * 5) % 12, g.py + lot.y - 2, d => { px(d, 0, -1, 2, 4, P.gold); px(d, -1, 0, 4, 2, P.gold); px(d, 0, 0, 2, 2, '#fff8d0'); });
+    if (lot && (upgraded || verified.includes(h.id)) && blink(t + i * 90, 160)) detail(ctx, g.px + lot.x + 2 + (i * 5) % 12, g.py + lot.y - 2, d => { px(d, 0, -1, 2, 4, P.gold); px(d, -1, 0, 4, 2, P.gold); px(d, 0, 0, 2, 2, '#fff8d0'); });
   });
   state.T = devTheme;
 
@@ -153,7 +152,7 @@ function drawWorld(t, w) {
       : [[ox, oy], [rx + 7, oy], [rx + 7, ry], [g.dx + 30, ry]];
     const at = porterPos({ t0: f.t0, speed: 0.04, pts }, t);
     if (!at) return false;
-    state.T.crate(ctx, at[0] - 2, at[1] - 2, 'bug', 'P0', false, f.n);
+    floatCrate(ctx, state.T, at[0] - 2, at[1] - 2, f);
     return true;
   });
 }
@@ -186,14 +185,4 @@ export function draw(t) {
   if (view.world) { const w = state.worlds.find(x => x.name === view.world); if (w) drawWorld(t, w); return; }
   const sc = state.scenes[view.village];
   if (sc && sc.v) drawVillage(ctx, sc, t);
-}
-
-/* The bar's line for a world. The map draws the incidents, the fixes, the
- * houses and what is shipping; what it can't draw is which release the
- * platform runs and the build IDs its workers report, so the line says so. */
-const short = s => (s ? s.slice(0, 7) : '—');
-export function worldWords(w) {
-  const release = w.landed === null ? 'platform reports no build IDs' : w.landed ? 'running on the platform' : 'rolling out';
-  const builds = (w.platform_builds || []).map(short).join(' ');
-  return `· ${w.dev} builds ${w.platform} · release ${short(w.release)} ${release}${builds ? ` · platform builds ${builds}` : ''}`;
 }

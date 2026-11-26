@@ -532,8 +532,9 @@ right. Work moves between the two in a loop:
 
 | What you see | Where it comes from |
 |---|---|
-| A burning platform building | An open issue with the incident label (`--incident-label`, default `incident`) whose title names that workflow's id or type |
-| A crate floating down the river | A new incident issue, on its way from the building that raised it, down beside the platform and right to left along the row's river, to the dev village's docks |
+| A burning platform building | An open issue with an incident label (`--incident-label`, default `incident`) whose task's `raised_by` names that workstream, or whose title names that workflow's id or type |
+| A crate floating down the river | A new incident issue, on its way from the building that raised it, down beside the platform and right to left along the row's river, to the dev village's docks. With a channel, the crate is tied in the channel's colour and wears a tag with its initials |
+| Sparkles over one platform building | The platform verified the fix for an incident that building raised (the task's `verified_at`, within the last 24 hours); its crate no longer floats |
 | A ship sailing into the platform's slot | A deployment to that environment (see [Environments](#environments)); with no environments, a cart climbing the road carries the issues at the last stop that no platform worker runs yet |
 | Sparkles and fireworks over the platform | A platform worker reporting a build ID that matches the release |
 
@@ -545,6 +546,33 @@ build ID, at least 7 characters long, so build workers with the git sha.
 Without build IDs the village can't tell, and says so in the bar, next to the
 world's name: `· release abc1234 running on the platform` (or `rolling out`,
 or `platform reports no build IDs`), then the build IDs its workers report.
+
+### Incident labels and channels
+
+`--incident-label` is repeatable and takes a comma-separated list. A value
+ending in `:` is a prefix: `--incident-label channel:` marks every issue with
+a label such as `channel:log-analyzer`. The world reads incidents from the
+dev village's issues and from the platform report's tasks (so an application
+can report the issues it raised about itself), merged by number.
+
+The matched label's part after its last `:` (all of it, with no colon) is the
+incident's **channel**: the part of the platform asking for the work. Each
+channel has its own colour, a stable hash of its name into the feature
+colours, and a tag with its initials (`log-analyzer` is `LA`). With a single
+label that is not a prefix (`incident`, the default), every incident is the
+same channel, so crates carry no tag, as before.
+
+The bar then counts the loop for the last 24 hours:
+`· raised 5 · landed 4 · deployed 2 · verified 1`. Raised is every incident
+still open plus those verified in the window; landed, those on the quay or at
+any stop; deployed, those at an environment stop; verified, those whose task
+carries a `verified_at` in the window. A verified incident counts as landed
+and deployed too. `/api/village` serves the same numbers in each world's
+`counts`, each open incident's `channel` and `raised_by`, and the verified
+ones in `verified`.
+
+`CHANNELS=1 tools/mock/demo.sh` shows it: `world:relay`, whose runtime raises
+an issue from each channel in turn and verifies its fix.
 
 
 ## A valley of related repos

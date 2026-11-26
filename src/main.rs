@@ -51,8 +51,9 @@ struct CliOptions {
     read_only: bool,
     /// Dev villages paired with the platform they build (`--world shop=temporal:agents`).
     worlds: Vec<String>,
-    /// Label marking issues the platform raised (`--incident-label`).
-    incident_label: Option<String>,
+    /// Labels marking issues the platform raised (`--incident-label`, repeatable
+    /// or comma-separated; one ending in `:` is a prefix). Empty: `incident`.
+    incident_labels: Vec<String>,
     /// Which source runs at each layer (`--source <layer>=<name>`).
     sources: web::source::SourceConfig,
     /// Outside adapters printing agents-village reports (`--framework exec:<cmd>|<url>|<file>`).
@@ -81,7 +82,8 @@ where
     let mut web_bind = Vec::new();
     let mut read_only = false;
     let mut worlds = Vec::new();
-    let mut incident_label = None;
+    let mut incident_labels: Vec<String> = Vec::new();
+    let mut add_labels = |value: &str| incident_labels.extend(value.split(',').map(str::trim).filter(|l| !l.is_empty()).map(String::from));
     let mut sources = web::source::SourceConfig::default();
     let mut frameworks = Vec::new();
     let mut mount = web::mount::Mount::default();
@@ -165,10 +167,10 @@ where
                 let Some(value) = iter.next() else {
                     anyhow::bail!("--incident-label requires a label");
                 };
-                incident_label = Some(value.as_ref().to_string());
+                add_labels(value.as_ref());
             }
             value if value.starts_with("--incident-label=") => {
-                incident_label = Some(value.trim_start_matches("--incident-label=").to_string());
+                add_labels(value.trim_start_matches("--incident-label="));
             }
             "--framework" => {
                 let Some(value) = iter.next() else {
@@ -265,7 +267,7 @@ where
     };
 
     for spec in &worlds {
-        if web::world::WorldConfig::parse(spec, "").is_none() {
+        if web::world::WorldConfig::parse(spec, &[]).is_none() {
             anyhow::bail!("--world value '{spec}' is not <dev>=<platform>, e.g. shop=temporal:agents");
         }
     }
@@ -281,7 +283,7 @@ where
         web_port = Some(web::server::DEFAULT_PORT);
     }
 
-    Ok(CliOptions { agent_type, server, web_port, headless, temporal, temporal_url, temporal_ui, kubernetes, web_bind, read_only, worlds, incident_label, sources, frameworks, mount })
+    Ok(CliOptions { agent_type, server, web_port, headless, temporal, temporal_url, temporal_ui, kubernetes, web_bind, read_only, worlds, incident_labels, sources, frameworks, mount })
 }
 
 /// `AGENTS_UI_BASE_PATH` and `AGENTS_UI_FRAME_ANCESTORS` as flags placed
@@ -359,7 +361,7 @@ fn village_cache(cli: &CliOptions) -> web::source::Villages {
         .temporal_url
         .clone()
         .unwrap_or_else(|| web::temporal::DEFAULT_HTTP_URL.to_string());
-    let label = cli.incident_label.as_deref().unwrap_or(web::world::DEFAULT_INCIDENT_LABEL);
+    let labels = if cli.incident_labels.is_empty() { vec![web::world::DEFAULT_INCIDENT_LABEL.to_string()] } else { cli.incident_labels.clone() };
     let villages = web::source::Villages::from_config(
         &cli.sources,
         cli.temporal
@@ -368,7 +370,7 @@ fn village_cache(cli: &CliOptions) -> web::source::Villages {
             .collect(),
         cli.kubernetes.iter().filter_map(|spec| web::kubernetes::KubeSource::parse(spec)).collect(),
         cli.frameworks.iter().filter_map(|spec| web::framework::ReportSpec::parse(spec)).collect(),
-        cli.worlds.iter().filter_map(|spec| web::world::WorldConfig::parse(spec, label)).collect(),
+        cli.worlds.iter().filter_map(|spec| web::world::WorldConfig::parse(spec, &labels)).collect(),
     );
     tracing::info!("Village sources: {}", villages.source_names().join("; "));
     villages
@@ -609,7 +611,7 @@ mod tests {
                 web_bind: Vec::new(),
                 read_only: false,
                 worlds: Vec::new(),
-                incident_label: None,
+                incident_labels: Vec::new(),
                 sources: Default::default(),
                 frameworks: Vec::new(),
                 mount: Default::default(),
@@ -691,9 +693,12 @@ mod tests {
     fn worlds_pair_a_dev_village_with_its_platform() {
         let cli = parse_cli_options(["agents-tui", "--world", "shop=temporal:agents", "--incident-label", "sre"]).unwrap();
         assert_eq!(cli.worlds, vec!["shop=temporal:agents"]);
-        assert_eq!(cli.incident_label.as_deref(), Some("sre"));
+        assert_eq!(cli.incident_labels, vec!["sre"]);
         assert_eq!(cli.web_port, Some(crate::web::server::DEFAULT_PORT));
         assert!(parse_cli_options(["agents-tui", "--world", "shop"]).is_err());
+        // Repeatable, comma-separated, and a value ending in `:` is kept as the prefix it is.
+        let cli = parse_cli_options(["agents-tui", "--world", "a=b", "--incident-label", "channel:", "--incident-label=sre, ops"]).unwrap();
+        assert_eq!(cli.incident_labels, vec!["channel:", "sre", "ops"]);
     }
 
     #[test]
@@ -783,7 +788,7 @@ mod tests {
                 web_bind: Vec::new(),
                 read_only: false,
                 worlds: Vec::new(),
-                incident_label: None,
+                incident_labels: Vec::new(),
                 sources: Default::default(),
                 frameworks: Vec::new(),
                 mount: Default::default(),
@@ -805,7 +810,7 @@ mod tests {
                 web_bind: Vec::new(),
                 read_only: false,
                 worlds: Vec::new(),
-                incident_label: None,
+                incident_labels: Vec::new(),
                 sources: Default::default(),
                 frameworks: Vec::new(),
                 mount: Default::default(),
