@@ -16,7 +16,7 @@ fn a_workers_house_dialog_offers_its_controls() {
     assert!(controls.contains("const token = ++ctlToken;"));
     assert!(controls.contains("if (token !== ctlToken) return;"));
     // Read-only: nothing shown.
-    assert!(controls.contains("fetch('/api/config')") && controls.contains("!c.read_only"));
+    assert!(controls.contains("fetch('api/config')") && controls.contains("!c.read_only"));
     assert!(controls.contains("if (!(await canWrite()) || token !== ctlToken) return;"));
     // Each action is previewed first (GET), confirmed showing what is sent, then posted.
     assert!(controls.contains("previews[action] = await askServer(previewUrl(c.project, c.role, action));"));

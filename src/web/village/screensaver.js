@@ -89,7 +89,7 @@ async function showRecap(card, since) {
   let changes = null;
   try {
     const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 8000);
-    const res = await fetch(`/api/village/since?t=${Math.floor(since / 1000)}`, { signal: ctl.signal });
+    const res = await fetch(`api/village/since?t=${Math.floor(since / 1000)}`, { signal: ctl.signal });
     clearTimeout(timer);
     if (res.ok) changes = await res.json();
   } catch { /* unchecked: the card says so */ }

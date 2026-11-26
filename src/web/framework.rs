@@ -902,7 +902,7 @@ fn swarm_issue(agent: &super::AgentSnapshot) -> Option<u32> {
 
 /// The dashboard's view of an agent's live session.
 pub fn session_link(project: &str, role: &str) -> Link {
-    Link { label: "Agent session".to_string(), url: format!("/#/swarm/{}/agent/{}", url_part(project), url_part(role)) }
+    Link { label: "Agent session".to_string(), url: format!("./#/swarm/{}/agent/{}", url_part(project), url_part(role)) }
 }
 
 fn url_part(s: &str) -> String {
@@ -914,7 +914,7 @@ fn swarm_workstream(id: String, crew: &[&super::AgentSnapshot], project: &str) -
     // carry no screen text, and tmux is what the answer endpoint types into.
     let asking = crew.iter().find(|a| a.waiting_for_input).and_then(|a| parse_question(&a.pane_content).map(|q| (a, q)));
     Workstream {
-        answer_url: asking.as_ref().map(|(a, _)| format!("/api/swarms/{}/agents/{}/answer", url_part(project), url_part(&a.role))),
+        answer_url: asking.as_ref().map(|(a, _)| format!("api/swarms/{}/agents/{}/answer", url_part(project), url_part(&a.role))),
         question: asking.map(|(_, q)| q),
         links: crew.first().map(|a| vec![session_link(project, &a.role)]).unwrap_or_default(),
         id,
@@ -1575,9 +1575,9 @@ mod tests {
         };
         let v = to_village(&report).village;
         let links: Vec<(&str, &str)> = v.houses[0].links.iter().map(|l| (l.label.as_str(), l.url.as_str())).collect();
-        assert_eq!(links, vec![("Agent session", "/#/swarm/shop/agent/worker-2"), ("GitHub issue #43", "https://github.com/acme/shop/issues/43")]);
+        assert_eq!(links, vec![("Agent session", "./#/swarm/shop/agent/worker-2"), ("GitHub issue #43", "https://github.com/acme/shop/issues/43")]);
         assert_eq!(v.board[0].url.as_deref(), Some("https://github.com/acme/shop/issues/45"));
-        assert_eq!(session_link("my repo", "worker-1").url, "/#/swarm/my%20repo/agent/worker-1");
+        assert_eq!(session_link("my repo", "worker-1").url, "./#/swarm/my%20repo/agent/worker-1");
     }
 
     const PERMISSION: &str = "\u{1b}[2m✓ 214 tests passed\u{1b}[0m\n╭──────────────────────────────╮\n│ Bash command                 │\n│   npm publish                │\n│ Do you want to proceed?      │\n│ \u{1b}[36m❯ 1. Yes\u{1b}[0m                    │\n│   2. Yes, and don't ask again │\n│   3. No, and tell Claude what to do differently (esc) │\n╰──────────────────────────────╯\n";

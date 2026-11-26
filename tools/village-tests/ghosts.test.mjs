@@ -97,7 +97,7 @@ test('"File flaky issue" (#503): its words, where it posts, what the answer says
   const { flakyButtonWords, flakyFileUrl, flakyFileWords } = await import('../../src/web/village/ghostmarks.js');
   assert.equal(flakyButtonWords({ test: 'a::b', issue: null }), 'File flaky issue');
   assert.equal(flakyButtonWords({ test: 'a::b', issue: 358 }), 'Add these failures to #358');
-  assert.equal(flakyFileUrl('my shop'), '/api/swarms/my%20shop/flaky');
+  assert.equal(flakyFileUrl('my shop'), 'api/swarms/my%20shop/flaky');
   assert.equal(flakyFileWords(200, { ok: true, action: 'created', number: 509 }), 'Filed as #509');
   assert.equal(flakyFileWords(200, { ok: true, action: 'commented', number: 358 }), 'Added the new failures to #358');
   assert.equal(flakyFileWords(200, { ok: true, action: 'unchanged', number: 358 }), '#358 already lists every failure');

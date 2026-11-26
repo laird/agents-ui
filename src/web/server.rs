@@ -1642,14 +1642,14 @@ mod tests {
         }
         // The page loads its own styles and script from the paths served above.
         let index = village_asset("index.html").unwrap().1;
-        assert!(index.contains(r#"<link rel="stylesheet" href="/village/village.css">"#));
-        assert!(index.contains(r#"<script type="module" src="/village/main.js"></script>"#));
+        assert!(index.contains(r#"<link rel="stylesheet" href="village/village.css">"#));
+        assert!(index.contains(r#"<script type="module" src="village/main.js"></script>"#));
         assert!(!index.contains("<style>") && !index.contains("<script>\n"), "no inline styles or script left");
         // Every embedded file other than the page is one the page loads,
         // itself or through an import.
         let imported: Vec<String> = VILLAGE_ASSETS.iter().flat_map(|(p, _, body)| village_imports(p, body)).collect();
         for (path, _, _) in VILLAGE_ASSETS.iter().filter(|(p, _, _)| *p != "index.html") {
-            assert!(index.contains(&format!("/village/{path}")) || imported.iter().any(|i| i == path), "{path} is embedded but not loaded");
+            assert!(index.contains(&format!("village/{path}")) || imported.iter().any(|i| i == path), "{path} is embedded but not loaded");
         }
     }
 
@@ -2023,7 +2023,7 @@ mod tests {
     async fn index_html_contains_expected_content() {
         let body = INDEX_HTML;
         assert!(body.contains("Agents UI"));
-        assert!(body.contains("/api/swarms"));
+        assert!(body.contains("api/swarms"));
         assert!(body.contains("viewport"));
     }
 
@@ -2050,7 +2050,7 @@ mod tests {
     #[test]
     fn ui_html_offers_no_input_on_a_read_only_server() {
         let body = INDEX_HTML;
-        assert!(body.contains("fetch('/api/config')"));
+        assert!(body.contains("fetch('api/config')"));
         assert!(body.contains("state.readOnly = !!c.read_only;"));
         assert!(body.contains("'read-only: viewing only'"));
         // The key buttons and composer are left out, and pane keystrokes are not sent.
@@ -2064,7 +2064,7 @@ mod tests {
         // link must carry its project name there, on the card and the detail view.
         let body = INDEX_HTML;
         assert!(body.contains("function villageUrl(project)"));
-        assert!(body.contains("'/village#' + esc(encodeURIComponent(project))"));
+        assert!(body.contains("'village#' + esc(encodeURIComponent(project))"));
         assert_eq!(body.matches("href=\"' + villageUrl(swarm.project_name)").count(), 2);
     }
 

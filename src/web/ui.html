@@ -873,7 +873,7 @@
       Agents UI
     </div>
     <div class="header-actions">
-      <a class="header-link" href="/village">Village view</a>
+      <a class="header-link" href="village">Village view</a>
       <span class="refresh-indicator" id="refresh-indicator" aria-live="polite">Connecting…</span>
     </div>
   </header>
@@ -1282,7 +1282,7 @@
     }
 
     async function fetchRepos() {
-      const r = await fetch('/api/repos');
+      const r = await fetch('api/repos');
       if (!r.ok) return [];
       const data = await r.json();
       return Array.isArray(data.repos) ? data.repos : [];
@@ -1312,7 +1312,7 @@
       refreshLaunchPanel();
 
       try {
-        const r = await fetch('/api/swarms', {
+        const r = await fetch('api/swarms', {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify({ repo_path: repoPath, agent_type: agentType, num_workers: numWorkers }),
@@ -1337,7 +1337,7 @@
     async function stopSwarm(project) {
       if (!confirm('Stop all workers in ' + project + '?')) return;
       try {
-        const r = await fetch('/api/swarms/' + encodeURIComponent(project), { method: 'DELETE' });
+        const r = await fetch('api/swarms/' + encodeURIComponent(project), { method: 'DELETE' });
         if (r.ok) {
           setTimeout(() => { refresh(); }, 1500);
         } else {
@@ -1351,7 +1351,7 @@
     async function resumeSwarm(project) {
       if (!confirm('Resume ' + project + '? Each agent will be seeded with its last handoff.')) return;
       try {
-        const r = await fetch('/api/swarms/' + encodeURIComponent(project) + '/resume', { method: 'POST' });
+        const r = await fetch('api/swarms/' + encodeURIComponent(project) + '/resume', { method: 'POST' });
         if (r.ok) {
           setTimeout(() => { refresh(); }, 4000);
         } else {
@@ -1371,7 +1371,7 @@
         const fetchOpts = override
           ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agent_type: override }) }
           : { method: 'POST' };
-        const r = await fetch('/api/swarms/' + encodeURIComponent(project) + '/workers', fetchOpts);
+        const r = await fetch('api/swarms/' + encodeURIComponent(project) + '/workers', fetchOpts);
         if (r.ok) {
           setTimeout(() => { refresh(); }, 4000);
         } else {
@@ -1389,7 +1389,7 @@
       if (swarm) render();
       // Also call the API to persist the change.
       try {
-        const r = await fetch('/api/swarms/' + encodeURIComponent(project), {
+        const r = await fetch('api/swarms/' + encodeURIComponent(project), {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ agent_type: type }),
@@ -1406,21 +1406,21 @@
 
     // ── API ────────────────────────────────────────────────────────────────────
     async function fetchSwarms() {
-      const r = await fetch('/api/swarms');
+      const r = await fetch('api/swarms');
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const data = await r.json();
       return Array.isArray(data.swarms) ? data.swarms : [];
     }
 
     async function fetchPane(project, role) {
-      const r = await fetch('/api/swarms/' + encodeURIComponent(project) + '/agents/' + encodeURIComponent(role) + '/pane');
+      const r = await fetch('api/swarms/' + encodeURIComponent(project) + '/agents/' + encodeURIComponent(role) + '/pane');
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     }
 
     async function sendInput(project, role, text, enter) {
       const r = await fetch(
-        '/api/swarms/' + encodeURIComponent(project) + '/agents/' + encodeURIComponent(role) + '/input',
+        'api/swarms/' + encodeURIComponent(project) + '/agents/' + encodeURIComponent(role) + '/input',
         {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1439,7 +1439,7 @@
     // batch endpoint sends the keys in the order given, awaiting each.
     async function sendKeysBatch(project, role, items) {
       const r = await fetch(
-        '/api/swarms/' + encodeURIComponent(project) + '/agents/' + encodeURIComponent(role) + '/keys',
+        'api/swarms/' + encodeURIComponent(project) + '/agents/' + encodeURIComponent(role) + '/keys',
         {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1900,7 +1900,7 @@
     // The village page selects a village by its URL hash, and villages are
     // named after their swarm's project, so this opens it on this swarm.
     function villageUrl(project) {
-      return '/village#' + esc(encodeURIComponent(project));
+      return 'village#' + esc(encodeURIComponent(project));
     }
 
     function renderSwarmCard(swarm) {
@@ -2141,7 +2141,7 @@
       if (!state.project || !state.agent) return false;
       if (typeof EventSource === 'undefined') return false;
 
-      const url = '/api/swarms/' + encodeURIComponent(state.project) +
+      const url = 'api/swarms/' + encodeURIComponent(state.project) +
                   '/agents/' + encodeURIComponent(state.agent) + '/pane/stream';
       let es;
       try {
@@ -2303,7 +2303,7 @@
 
       try {
         const r = await fetch(
-          '/api/swarms/' + encodeURIComponent(newIssueProject) + '/agents/manager/input',
+          'api/swarms/' + encodeURIComponent(newIssueProject) + '/agents/manager/input',
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -2341,7 +2341,7 @@
     // validating a deep link (swarm/agent still exists) needs state.swarms
     // populated, otherwise every target looks stale and falls back to '#/'.
     window.addEventListener('hashchange', applyRoute);
-    fetch('/api/config').then(r => r.ok ? r.json() : {}).then(c => { state.readOnly = !!c.read_only; }).catch(() => {})
+    fetch('api/config').then(r => r.ok ? r.json() : {}).then(c => { state.readOnly = !!c.read_only; }).catch(() => {})
       .finally(() => refresh().then(applyRoute));
     setInterval(refresh, 5000);
   </script>

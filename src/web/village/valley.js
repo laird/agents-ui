@@ -43,7 +43,7 @@ const shownGroup = () => {
 /* Fetch the valley now and then; the villages' own poll (data.js) goes on as ever. */
 async function pollValley() {
   try {
-    const res = await fetch('/api/valley');
+    const res = await fetch('api/valley');
     if (res.ok) {
       valleyResp = await res.json();
       if (state.view && state.view.valley) selectValley(state.view.valley);

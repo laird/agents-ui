@@ -119,7 +119,7 @@ const polled = ok => window.dispatchEvent(new CustomEvent('village:polled', { de
 
 async function poll() {
   try {
-    const res = await fetch('/api/village');
+    const res = await fetch('api/village');
     if (!res.ok) throw new Error(res.status);
     const data = await res.json();
     const villages = state.villages = data.villages || [];

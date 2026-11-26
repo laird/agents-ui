@@ -9,7 +9,7 @@
  * DOM: node tests it (tools/village-tests/travelwords.test.mjs); travel.js
  * draws it in the dialog. */
 
-export const travelUrl = (project, n) => `/api/swarms/${encodeURIComponent(project)}/issues/${n}/travel`;
+export const travelUrl = (project, n) => `api/swarms/${encodeURIComponent(project)}/issues/${n}/travel`;
 
 /* Seconds as whole units: "under a minute", "40 min", "5 h", "3 d". */
 export function durWords(secs) {

@@ -24,6 +24,7 @@ mod shipped;
 mod themes;
 mod valley;
 mod travel;
+mod urls;
 
 pub(super) use super::server::{VILLAGE_FILES as VILLAGE_ASSETS, village_asset};
 

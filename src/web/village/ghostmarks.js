@@ -87,7 +87,7 @@ export function failureLines(f, clock) {
 
 /* "File flaky issue" in the ghost's dialog (#503): where it posts, and what
  * the answer says. A read-only server answers 403 before anything is filed. */
-export const flakyFileUrl = project => `/api/swarms/${encodeURIComponent(project)}/flaky`;
+export const flakyFileUrl = project => `api/swarms/${encodeURIComponent(project)}/flaky`;
 export function flakyFileWords(status, body) {
   if (status >= 200 && status < 300) {
     const n = body && body.number ? `#${body.number}` : 'the issue';
