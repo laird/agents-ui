@@ -9,6 +9,7 @@ import { F, P, R, blink, shadow } from './palette.js';
 import { detail } from './detail.js';
 import { lift, runs } from './people2x.js';
 import { disc } from './art2x.js';
+import { subProp } from './subprops.js';
 
 /* A posed body at 2×, its top-left at scene (x, y). */
 function body2x(c, x, y, rows, map, opts) {
@@ -110,9 +111,11 @@ function pose(rows, kind) {
   return r;
 }
 /* Draw a person. `seed` names who they are; `accent` (a specialist's color)
- * overrides their tie, apron or belt; `mayor` dresses them for the hall. */
+ * overrides their tie, apron or belt; `prop` (a specialty in SUB_PROPS) is
+ * held at their left side; `mayor` dresses them for the hall. */
 export function person(c, x, y, seed, kind = 'stand', opts = {}) {
   const style = state.T.people, h = strHash(seed + '|' + style);
+  if (opts.prop) subProp(c, x, y, opts.prop, style);
   if (state.T.robots) return robot(c, x, y, seed, h, kind, opts);
   const bodies = BODY[style], dress = DRESS[style];
   const rows = pose(bodies[h % bodies.length], kind);

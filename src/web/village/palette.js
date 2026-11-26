@@ -60,11 +60,19 @@ export function featureColours(features) {
  * banner, strip, trail, barge and cargo. */
 export const featureColour = (f, visible) =>
   featureColours(visible).get(f.number) || FEATURE_COLS[((f.number % FEATURE_COLS.length) + FEATURE_COLS.length) % FEATURE_COLS.length];
-/* A sub-agent's accent (tie, apron, belt) matches the building its specialty would build. */
-export const SPECIALTIES = [['architect', 'research'], ['security', 'security'], ['test', 'tests'], ['doc', 'docs'], ['coder', 'feature']];
-export const subHat = s => {
+/* A sub-agent's accent (tie, apron, belt) matches the building its specialty
+ * would build (framework.rs specialist_kind). Researchers, analysts and
+ * auditors also carry a prop (subprops.js). */
+export const SPECIALTIES = [['architect', 'research'], ['security', 'security'], ['test', 'tests'], ['doc', 'docs'], ['coder', 'feature'],
+  ['researcher', 'research'], ['analyst', 'perf'], ['auditor', 'security']];
+const specialty = s => {
   const role = s.agent_type.toLowerCase().split(':').pop();
-  const hit = SPECIALTIES.find(([name]) => role.includes(name));
+  return SPECIALTIES.find(([name]) => role.includes(name));
+};
+/* The specialty a sub-agent's type names after its last colon, or null. */
+export const subRole = s => (specialty(s) || [null])[0];
+export const subHat = s => {
+  const hit = specialty(s);
   return hit ? KINDCOL[hit[1]] : P.white;
 };
 

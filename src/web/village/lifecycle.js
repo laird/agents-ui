@@ -4,7 +4,7 @@
  * The walks themselves, what each change between two polls sets
  * off, are the trips (trips.js). */
 import { state } from './state.js';
-import { P, SHADE, blink, subHat, waveFrame } from './palette.js';
+import { P, SHADE, blink, subHat, subRole, waveFrame } from './palette.js';
 import { detail } from './detail.js';
 import { px } from './art2x.js';
 import { cobwebs, pennant, puffs } from './sprites/houses.js';
@@ -76,7 +76,7 @@ registerLayer({ z: 50, draw(c, { v, lay, bound }, t) {
   (v.manager.subagents || []).slice(0, 4).forEach((sa, k) => {
     const bob = !state.reduce && blink(t + k * 170, 220) ? -1 : 0;
     const seed = `manager:${v.project}/${sa.description || k}`, px = hallX - 2 + k * 10 + (state.reduce ? 0 : wander(sa.action, t, seed));
-    person(c, px, 39 + bob, seed, 'stand', { accent: subHat(sa), sub: true, status: sa.status });
+    person(c, px, 39 + bob, seed, 'stand', { accent: subHat(sa), prop: subRole(sa), sub: true, status: sa.status });
     tap(px, 38, 8, 13, { kind: 'sub', house: -1, sa, id: sa.description || k });
     drawAction(c, px, 39 + bob, sa.action, t + k * 131);
   });
@@ -151,7 +151,7 @@ registerLayer({ z: 70, draw(c, scene, t) {
       const bob = !state.reduce && blink(t + k * 190, 210) ? -1 : 0;
       const waiting = sa.status === 'blocked', seed = `${h.id}/${sa.description || k}`, [sx, sy] = SUB_SLOTS[k];
       const px = lot.x + sx + (state.reduce ? 0 : wander(sa.action, t, seed)), py = lot.y + sy + bob;
-      person(c, px, waiting ? lot.y + sy : py, seed, waiting ? waveFrame(t + k * 110) : 'stand', { accent: subHat(sa), sub: true, status: sa.status });
+      person(c, px, waiting ? lot.y + sy : py, seed, waiting ? waveFrame(t + k * 110) : 'stand', { accent: subHat(sa), prop: subRole(sa), sub: true, status: sa.status });
       tap(px, lot.y + sy - 1, 8, 13, { kind: 'sub', house: i, sa, id: sa.description || k });
       if (!waiting) drawAction(c, px, py, sa.action, t + k * 97);
     });

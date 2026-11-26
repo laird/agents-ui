@@ -100,7 +100,12 @@
           "title": "task-8815",
           "kind": "research",
           "state": "running",
-          "action": "searching"
+          "action": "searching",
+          "helpers": [
+            { "name": "find-sources", "kind": "research:researcher", "state": "running", "detail": "search for evidence", "action": "searching" },
+            { "name": "synthesise", "kind": "research:analyst", "state": "running", "detail": "weigh the findings", "action": "thinking" },
+            { "name": "check-claims", "kind": "research:auditor", "state": "running", "detail": "audit the answer", "action": "reading" }
+          ]
         }
       ],
       "tasks": [
