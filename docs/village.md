@@ -767,4 +767,4 @@ the village at `/ops/village/village#<project>`. `/ops/village` redirects to
 prefix. `--frame-ancestors` takes CSP sources (`'self'`, an origin, a
 scheme) separated by spaces, and sends `Content-Security-Policy:
 frame-ancestors <sources>` on every response. Without it no policy is sent.
-`agents-tui service install` does not pass these flags on yet.
+`agents-tui service install` takes both flags and writes them into the unit.

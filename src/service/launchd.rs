@@ -59,7 +59,7 @@ pub fn install(opts: &ServiceOptions, flags: InstallFlags, uid: u32, runner: &mu
         if flags.linger {
             say(out, NO_LINGER.into())?;
         }
-        return Ok(());
+        return say(out, format!("Would wait for the village at {}/api/village", url(&reach_host(opts, runner), opts)));
     }
 
     match &old {
@@ -83,16 +83,16 @@ pub fn install(opts: &ServiceOptions, flags: InstallFlags, uid: u32, runner: &mu
     }
 
     let host = reach_host(opts, runner);
-    if !wait_for_village(runner, &host, opts.web_port) {
+    if !wait_for_village(runner, &host, opts) {
         return Err(format!(
             "the agent loaded, but the village didn't answer at {}/api/village within {}s. See {}",
-            url(&host, opts.web_port),
+            url(&host, opts),
             WAIT.as_secs(),
             logs_dir(&opts.home).join("agents-tui.err.log").display()
         ));
     }
-    say(out, format!("The village: {}/village", url(&host, opts.web_port)))?;
-    say(out, format!("The dashboard: {}/", url(&host, opts.web_port)))?;
+    say(out, format!("The village: {}/village", url(&host, opts)))?;
+    say(out, format!("The dashboard: {}/", url(&host, opts)))?;
     Ok(())
 }
 
@@ -153,11 +153,10 @@ pub fn status(home: &Path, uid: u32, runner: &mut dyn Runner, out: &mut dyn Writ
     let Some(exe) = args.first().map(PathBuf::from) else {
         return say(out, "The plist has no ProgramArguments agents-tui can read.".into());
     };
-    let (port, binds) = served(&args);
-    let opts = ServiceOptions { web_port: port, web_binds: binds, sources: vec![], read_only: false, allow_lan: false, exe: exe.clone(), home: home.to_path_buf(), path: vec![] };
+    let opts = served(exe.clone(), &args, home);
     let host = reach_host(&opts, runner);
-    let answers = runner.village_answers(&host, port);
-    say(out, format!("Village: {}/village ({})", url(&host, port), if answers { "answering" } else { "not answering" }))?;
+    let answers = runner.village_answers(&host, opts.web_port, &opts.base_path);
+    say(out, format!("Village: {}/village ({})", url(&host, &opts), if answers { "answering" } else { "not answering" }))?;
     let version = runner.run(&exe.to_string_lossy(), &["--version"]);
     let said = match (version.ok, exe.exists()) {
         (true, _) => version.stdout.trim().to_string(),
@@ -175,22 +174,12 @@ pub fn restart(home: &Path, uid: u32, runner: &mut dyn Runner, out: &mut dyn Wri
         return Err(format!("launchctl kickstart -k {} failed", target(uid)));
     }
     let args = program_arguments(&text);
-    let (port, binds) = served(&args);
-    let opts = ServiceOptions {
-        web_port: port,
-        web_binds: binds,
-        sources: vec![],
-        read_only: false,
-        allow_lan: false,
-        exe: args.first().map(PathBuf::from).unwrap_or_default(),
-        home: home.to_path_buf(),
-        path: vec![],
-    };
+    let opts = served(args.first().map(PathBuf::from).unwrap_or_default(), &args, home);
     let host = reach_host(&opts, runner);
-    if !wait_for_village(runner, &host, port) {
-        return Err(format!("restarted, but the village didn't answer at {}/api/village within {}s", url(&host, port), WAIT.as_secs()));
+    if !wait_for_village(runner, &host, &opts) {
+        return Err(format!("restarted, but the village didn't answer at {}/api/village within {}s", url(&host, &opts), WAIT.as_secs()));
     }
-    writeln!(out, "Restarted. The village: {}/village", url(&host, port)).map_err(|e| e.to_string())
+    writeln!(out, "Restarted. The village: {}/village", url(&host, &opts)).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -220,8 +209,8 @@ mod tests {
                 _ => Output { ok: true, stdout: String::new() },
             }
         }
-        fn village_answers(&mut self, host: &str, port: u16) -> bool {
-            self.ran.push(format!("probe {host}:{port}"));
+        fn village_answers(&mut self, host: &str, port: u16, base_path: &str) -> bool {
+            self.ran.push(format!("probe {host}:{port}{base_path}"));
             self.answers
         }
         fn sleep(&mut self, _: Duration) {}
@@ -245,6 +234,8 @@ mod tests {
             sources: vec![],
             read_only: false,
             allow_lan: false,
+            base_path: String::new(),
+            frame_ancestors: None,
             exe: home.join(".cargo/bin/agents-tui"),
             home: home.to_path_buf(),
             path: vec![PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/bin")],
@@ -357,13 +348,24 @@ mod tests {
     }
 
     #[test]
+    fn status_asks_for_the_village_under_the_base_path() {
+        let h = home("base-path");
+        install(&ServiceOptions { base_path: "/x/y".into(), ..opts(&h) }, InstallFlags::default(), 501, &mut up(), &mut Vec::new()).unwrap();
+        let (mut fake, mut out) = (up(), Vec::new());
+        status(&h, 501, &mut fake, &mut out).unwrap();
+        assert!(fake.ran.contains(&"probe 127.0.0.1:7890/x/y".to_string()), "{:?}", fake.ran);
+        assert!(printed(&out).contains("Village: http://127.0.0.1:7890/x/y/village (answering)"), "{}", printed(&out));
+    }
+
+    #[test]
     fn reads_the_plist_back() {
         let h = home("read");
         let text = launchd_plist(&ServiceOptions { web_port: 7111, sources: vec!["swarms=a&b".into()], ..opts(&h) }).unwrap();
         let args = program_arguments(&text);
         assert_eq!(args[0], h.join(".cargo/bin/agents-tui").to_string_lossy());
         assert!(args.contains(&"swarms=a&b".to_string()), "unescaped: {args:?}");
-        assert_eq!(served(&args), (7111, vec!["127.0.0.1".to_string(), "tailscale".to_string()]));
+        let o = served(PathBuf::from(&args[0]), &args, &h);
+        assert_eq!((o.web_port, o.web_binds), (7111, vec!["127.0.0.1".to_string(), "tailscale".to_string()]));
         assert_eq!(print_state("\tstate = waiting\n"), (Some("waiting".into()), None));
     }
 }

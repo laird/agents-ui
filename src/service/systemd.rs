@@ -29,8 +29,8 @@ pub struct Output {
 /// Runs commands and probes the village; the tests record instead.
 pub trait Runner {
     fn run(&mut self, program: &str, args: &[&str]) -> Output;
-    /// Whether `GET /api/village` at `host:port` answers 200.
-    fn village_answers(&mut self, host: &str, port: u16) -> bool;
+    /// Whether `GET <base_path>/api/village` at `host:port` answers 200.
+    fn village_answers(&mut self, host: &str, port: u16, base_path: &str) -> bool;
     fn sleep(&mut self, d: Duration);
 }
 
@@ -44,14 +44,14 @@ impl Runner for SystemRunner {
             Err(_) => Output::default(),
         }
     }
-    fn village_answers(&mut self, host: &str, port: u16) -> bool {
+    fn village_answers(&mut self, host: &str, port: u16, base_path: &str) -> bool {
         use std::io::Read;
         let addr = if host.contains(':') { format!("[{host}]:{port}") } else { format!("{host}:{port}") };
         let Ok(mut addrs) = std::net::ToSocketAddrs::to_socket_addrs(&addr) else { return false };
         let Some(addr) = addrs.next() else { return false };
         let Ok(mut s) = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(3)) else { return false };
         let _ = s.set_read_timeout(Some(Duration::from_secs(5)));
-        if s.write_all(format!("GET /api/village HTTP/1.0\r\nHost: {host}\r\n\r\n").as_bytes()).is_err() {
+        if s.write_all(format!("GET {base_path}/api/village HTTP/1.0\r\nHost: {host}\r\n\r\n").as_bytes()).is_err() {
             return false;
         }
         let mut head = [0u8; 12];
@@ -119,15 +119,17 @@ pub fn reach_host(opts: &ServiceOptions, runner: &mut dyn Runner) -> String {
     ip.stdout.lines().next().map(str::trim).filter(|s| !s.is_empty()).unwrap_or("127.0.0.1").to_string()
 }
 
-pub(crate) fn url(host: &str, port: u16) -> String {
-    if host.contains(':') { format!("http://[{host}]:{port}") } else { format!("http://{host}:{port}") }
+/// The service's root at `host`, base path included: `http://127.0.0.1:7890/ops/village`.
+pub(crate) fn url(host: &str, opts: &ServiceOptions) -> String {
+    let (port, base) = (opts.web_port, &opts.base_path);
+    if host.contains(':') { format!("http://[{host}]:{port}{base}") } else { format!("http://{host}:{port}{base}") }
 }
 
 /// Wait until the village answers, up to [`WAIT`].
-pub(crate) fn wait_for_village(runner: &mut dyn Runner, host: &str, port: u16) -> bool {
+pub(crate) fn wait_for_village(runner: &mut dyn Runner, host: &str, opts: &ServiceOptions) -> bool {
     let mut waited = Duration::ZERO;
     loop {
-        if runner.village_answers(host, port) {
+        if runner.village_answers(host, opts.web_port, &opts.base_path) {
             return true;
         }
         if waited >= WAIT {
@@ -177,7 +179,7 @@ pub fn install(opts: &ServiceOptions, flags: InstallFlags, user: &str, runner: &
         for c in &commands {
             say(out, format!("  {c}"))?;
         }
-        return Ok(());
+        return say(out, format!("Would wait for the village at {}/api/village", url(&reach_host(opts, runner), opts)));
     }
 
     match &old {
@@ -213,15 +215,15 @@ pub fn install(opts: &ServiceOptions, flags: InstallFlags, user: &str, runner: &
     }
 
     let host = reach_host(opts, runner);
-    if !wait_for_village(runner, &host, opts.web_port) {
+    if !wait_for_village(runner, &host, opts) {
         return Err(format!(
             "{UNIT} started, but the village didn't answer at {}/api/village within {}s. See: journalctl --user -u {UNIT}",
-            url(&host, opts.web_port),
+            url(&host, opts),
             WAIT.as_secs()
         ));
     }
-    say(out, format!("The village: {}/village", url(&host, opts.web_port)))?;
-    say(out, format!("The dashboard: {}/", url(&host, opts.web_port)))?;
+    say(out, format!("The village: {}/village", url(&host, opts)))?;
+    say(out, format!("The dashboard: {}/", url(&host, opts)))?;
     Ok(())
 }
 
@@ -239,8 +241,8 @@ pub fn uninstall(home: &Path, runner: &mut dyn Runner, out: &mut dyn Write) -> R
     systemctl(runner, &["daemon-reload"])
 }
 
-/// The installed unit's port, binds and binary, read back from its ExecStart.
-pub fn installed(text: &str, home: &Path) -> Option<(PathBuf, u16, Vec<String>)> {
+/// The installed unit's binary, port, binds and base path, read back from its ExecStart.
+pub fn installed(text: &str, home: &Path) -> Option<ServiceOptions> {
     let line = text.lines().find_map(|l| l.strip_prefix("ExecStart="))?;
     let words = shell_words(line);
     let exe = words.first()?;
@@ -248,16 +250,25 @@ pub fn installed(text: &str, home: &Path) -> Option<(PathBuf, u16, Vec<String>)>
         Some(rest) => home.join(rest),
         None => PathBuf::from(exe),
     };
-    let (port, binds) = served(&words);
-    Some((exe, port, binds))
+    Some(served(exe, &words, home))
 }
 
-/// The port and binds in the server's argument words (`--web-port`, `--web-bind`).
-pub(crate) fn served(words: &[String]) -> (u16, Vec<String>) {
+/// What `status` and `restart` need from the server's argument words:
+/// `--web-port`, `--web-bind` and `--base-path`.
+pub(crate) fn served(exe: PathBuf, words: &[String], home: &Path) -> ServiceOptions {
     let after = |flag: &str| words.iter().position(|w| w == flag).and_then(|i| words.get(i + 1)).cloned();
-    let port = after("--web-port").and_then(|p| p.parse().ok()).unwrap_or(super::unit::DEFAULT_PORT);
-    let binds = after("--web-bind").map(|b| b.split(',').map(str::to_string).collect()).unwrap_or_else(|| vec!["127.0.0.1".into()]);
-    (port, binds)
+    ServiceOptions {
+        web_port: after("--web-port").and_then(|p| p.parse().ok()).unwrap_or(super::unit::DEFAULT_PORT),
+        web_binds: after("--web-bind").map(|b| b.split(',').map(str::to_string).collect()).unwrap_or_else(|| vec!["127.0.0.1".into()]),
+        sources: vec![],
+        read_only: false,
+        allow_lan: false,
+        base_path: after("--base-path").unwrap_or_default(),
+        frame_ancestors: None,
+        exe,
+        home: home.to_path_buf(),
+        path: vec![],
+    }
 }
 
 /// Split an ExecStart line into words: double quotes group, `%%` is `%`.
@@ -302,13 +313,13 @@ pub fn status(home: &Path, runner: &mut dyn Runner, out: &mut dyn Write) -> Resu
     let enabled = runner.run("systemctl", &["--user", "is-enabled", UNIT]).stdout.trim().to_string();
     say(out, format!("{UNIT}: {} ({})", if state.is_empty() { "unknown" } else { &state }, if enabled.is_empty() { "unknown" } else { &enabled }))?;
     say(out, format!("Unit file: {}", path.display()))?;
-    let Some((exe, port, binds)) = installed(&text, home) else {
+    let Some(opts) = installed(&text, home) else {
         return say(out, "The unit has no ExecStart line agents-tui can read.".into());
     };
-    let opts = ServiceOptions { web_port: port, web_binds: binds, sources: vec![], read_only: false, allow_lan: false, exe: exe.clone(), home: home.to_path_buf(), path: vec![] };
     let host = reach_host(&opts, runner);
-    let answers = runner.village_answers(&host, port);
-    say(out, format!("Village: {}/village ({})", url(&host, port), if answers { "answering" } else { "not answering" }))?;
+    let answers = runner.village_answers(&host, opts.web_port, &opts.base_path);
+    say(out, format!("Village: {}/village ({})", url(&host, &opts), if answers { "answering" } else { "not answering" }))?;
+    let exe = opts.exe;
     let exe_str = exe.to_string_lossy().into_owned();
     let version = runner.run(&exe_str, &["--version"]);
     // A binary built before `--version` existed runs fine but can't say.
@@ -324,13 +335,12 @@ pub fn status(home: &Path, runner: &mut dyn Runner, out: &mut dyn Write) -> Resu
 pub fn restart(home: &Path, runner: &mut dyn Runner, out: &mut dyn Write) -> Result<(), String> {
     let text = std::fs::read_to_string(unit_path(home)).map_err(|_| format!("{UNIT} is not installed. Install it with: agents-tui service install"))?;
     systemctl(runner, &["restart", UNIT])?;
-    let (exe, port, binds) = installed(&text, home).unwrap_or((PathBuf::new(), super::unit::DEFAULT_PORT, vec!["127.0.0.1".into()]));
-    let opts = ServiceOptions { web_port: port, web_binds: binds, sources: vec![], read_only: false, allow_lan: false, exe, home: home.to_path_buf(), path: vec![] };
+    let opts = installed(&text, home).unwrap_or_else(|| served(PathBuf::new(), &[], home));
     let host = reach_host(&opts, runner);
-    if !wait_for_village(runner, &host, port) {
-        return Err(format!("restarted, but the village didn't answer at {}/api/village within {}s", url(&host, port), WAIT.as_secs()));
+    if !wait_for_village(runner, &host, &opts) {
+        return Err(format!("restarted, but the village didn't answer at {}/api/village within {}s", url(&host, &opts), WAIT.as_secs()));
     }
-    writeln!(out, "Restarted. The village: {}/village", url(&host, port)).map_err(|e| e.to_string())
+    writeln!(out, "Restarted. The village: {}/village", url(&host, &opts)).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -364,8 +374,8 @@ mod tests {
             };
             Output { ok: true, stdout }
         }
-        fn village_answers(&mut self, host: &str, port: u16) -> bool {
-            self.ran.push(format!("probe {host}:{port}"));
+        fn village_answers(&mut self, host: &str, port: u16, base_path: &str) -> bool {
+            self.ran.push(format!("probe {host}:{port}{base_path}"));
             self.probes += 1;
             self.answers_after.is_some_and(|n| self.probes > n)
         }
@@ -388,6 +398,8 @@ mod tests {
             sources: vec!["swarms=herdr".into()],
             read_only: false,
             allow_lan: false,
+            base_path: String::new(),
+            frame_ancestors: None,
             exe: home.join(".cargo/bin/agents-tui"),
             home: home.to_path_buf(),
             path: vec![home.join(".cargo/bin"), PathBuf::from("/usr/bin")],
@@ -562,9 +574,63 @@ mod tests {
     fn reads_the_installed_unit_back() {
         let h = home("read");
         let text = systemd_unit(&ServiceOptions { web_port: 7111, read_only: true, ..opts(&h) }).unwrap();
-        let (exe, port, binds) = installed(&text, &h).unwrap();
-        assert_eq!((exe, port, binds), (h.join(".cargo/bin/agents-tui"), 7111, vec!["127.0.0.1".to_string(), "tailscale".to_string()]));
+        let o = installed(&text, &h).unwrap();
+        assert_eq!((o.exe, o.web_port, o.web_binds, o.base_path), (h.join(".cargo/bin/agents-tui"), 7111, vec!["127.0.0.1".to_string(), "tailscale".to_string()], String::new()));
         assert_eq!(shell_words(r#""/opt/my apps/agents-tui" --source "a=b" 100%%"#), vec!["/opt/my apps/agents-tui", "--source", "a=b", "100%"]);
+    }
+
+    #[test]
+    fn under_a_base_path_install_status_and_restart_ask_for_the_village_under_it() {
+        let h = home("base-path");
+        let mounted = ServiceOptions { base_path: "/x/y".into(), frame_ancestors: Some("'self' https://example.test".into()), ..opts(&h) };
+        let mut out = Vec::new();
+        install(&mounted, InstallFlags { dry_run: true, linger: false }, "me", &mut up(), &mut out).unwrap();
+        assert!(printed(&out).contains("Would wait for the village at http://127.0.0.1:7890/x/y/api/village"), "{}", printed(&out));
+
+        let (mut fake, mut out) = (up(), Vec::new());
+        install(&mounted, InstallFlags::default(), "me", &mut fake, &mut out).unwrap();
+        assert_eq!(fake.ran.last().unwrap(), "probe 127.0.0.1:7890/x/y");
+        assert!(printed(&out).contains("The village: http://127.0.0.1:7890/x/y/village"));
+        assert!(printed(&out).contains("The dashboard: http://127.0.0.1:7890/x/y/"));
+
+        let (mut fake, mut out) = (Fake { active: "active".into(), ..up() }, Vec::new());
+        status(&h, &mut fake, &mut out).unwrap();
+        assert!(fake.ran.contains(&"probe 127.0.0.1:7890/x/y".to_string()), "{:?}", fake.ran);
+        assert!(printed(&out).contains("Village: http://127.0.0.1:7890/x/y/village (answering)"), "{}", printed(&out));
+
+        let (mut fake, mut out) = (up(), Vec::new());
+        restart(&h, &mut fake, &mut out).unwrap();
+        assert_eq!(fake.ran.last().unwrap(), "probe 127.0.0.1:7890/x/y");
+        assert!(printed(&out).contains("Restarted. The village: http://127.0.0.1:7890/x/y/village"));
+
+        // Each install writes the options it is given: without the flags, the prefix goes.
+        let (mut fake, mut out) = (up(), Vec::new());
+        install(&opts(&h), InstallFlags::default(), "me", &mut fake, &mut out).unwrap();
+        assert!(printed(&out).contains("--base-path /x/y --frame-ancestors"), "the diff shows them removed: {}", printed(&out));
+        assert_eq!(fake.ran.last().unwrap(), "probe 127.0.0.1:7890");
+    }
+
+    /// The real probe sends `GET <base path>/api/village` and wants a 200.
+    #[test]
+    fn the_probe_asks_for_the_api_under_the_base_path() {
+        use std::io::{BufRead, BufReader};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let mut asked = Vec::new();
+            for _ in 0..2 {
+                let (mut s, _) = listener.accept().unwrap();
+                let mut line = String::new();
+                BufReader::new(&s).read_line(&mut line).unwrap();
+                let ok = line.starts_with("GET /x/y/api/village ");
+                s.write_all(if ok { b"HTTP/1.0 200 OK\r\n\r\n" } else { b"HTTP/1.0 404 Not Found\r\n\r\n" }).unwrap();
+                asked.push(line.trim().to_string());
+            }
+            asked
+        });
+        assert!(SystemRunner.village_answers("127.0.0.1", port, "/x/y"));
+        assert!(!SystemRunner.village_answers("127.0.0.1", port, ""));
+        assert_eq!(server.join().unwrap(), ["GET /x/y/api/village HTTP/1.0", "GET /api/village HTTP/1.0"]);
     }
 
     #[test]

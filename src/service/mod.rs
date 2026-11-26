@@ -16,9 +16,11 @@ use unit::{Probes, ServiceOptions, defaults, suggested_bind};
 
 const USAGE: &str = "usage: agents-tui service <install|uninstall|status|restart>
   install [--web-port N] [--web-bind ADDR[,ADDR]] [--source LAYER=NAME]... [--read-only]
-          [--allow-lan] [--linger] [--with-herdr] [--dry-run]
+          [--allow-lan] [--base-path PREFIX] [--frame-ancestors SOURCES]
+          [--linger] [--with-herdr] [--dry-run]
     Write the user service, enable and start it, and wait until the village answers.
-    Run it again to change the options: it shows what changed and restarts.
+    Run it again to change the options: it shows what changed and restarts. Each run
+    writes the options it is given, so name every option you want to keep.
     --linger (Linux) keeps it running after you log out. macOS has no such thing:
     a LaunchAgent runs while you are logged in.
     --with-herdr (Linux) also installs herdr.service for the herdr server. A herdr
@@ -47,6 +49,9 @@ pub struct Overrides {
     pub sources: Vec<String>,
     pub read_only: bool,
     pub allow_lan: bool,
+    /// Normalised already: `/ops/village`, or empty for the root.
+    pub base_path: Option<String>,
+    pub frame_ancestors: Option<String>,
 }
 
 impl Overrides {
@@ -62,6 +67,12 @@ impl Overrides {
         }
         opts.read_only |= self.read_only;
         opts.allow_lan |= self.allow_lan;
+        if let Some(b) = &self.base_path {
+            opts.base_path = b.clone();
+        }
+        if let Some(f) = &self.frame_ancestors {
+            opts.frame_ancestors = Some(f.clone());
+        }
         opts
     }
 }
@@ -102,6 +113,12 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
                     "--source" => set.sources.push(value()?),
                     "--read-only" => set.read_only = true,
                     "--allow-lan" => set.allow_lan = true,
+                    "--base-path" => set.base_path = Some(crate::web::mount::base_path(&value()?)?),
+                    "--frame-ancestors" => {
+                        let sources = value()?;
+                        crate::web::mount::frame_ancestors(&sources)?;
+                        set.frame_ancestors = Some(sources.trim().to_string());
+                    }
                     "--linger" => flags.linger = true,
                     "--dry-run" => flags.dry_run = true,
                     "--with-herdr" => with_herdr = true,
@@ -236,6 +253,20 @@ mod tests {
     }
 
     #[test]
+    fn parses_base_path_and_frame_ancestors_with_the_servers_own_checks() {
+        let args = ["install", "--base-path", "x/y/", "--frame-ancestors", " 'self' https://example.test "].map(String::from);
+        let Command::Install { set, .. } = parse(&args).unwrap() else { panic!() };
+        assert_eq!(set.base_path.as_deref(), Some("/x/y"));
+        assert_eq!(set.frame_ancestors.as_deref(), Some("'self' https://example.test"));
+        let Command::Install { set, .. } = parse(&words("install --base-path=/")).unwrap() else { panic!() };
+        assert_eq!(set.base_path.as_deref(), Some(""), "/ is the root");
+        assert!(parse(&words("install --base-path /x/{y}")).unwrap_err().contains("not a path prefix"));
+        let refused = ["install", "--frame-ancestors", "'self'; script-src *"].map(String::from);
+        assert!(parse(&refused).unwrap_err().contains("not a list of sources"));
+        assert!(parse(&words("install --frame-ancestors")).unwrap_err().contains("needs a value"));
+    }
+
+    #[test]
     fn parses_the_other_commands_and_refuses_nonsense() {
         assert_eq!(parse(&words("status")).unwrap(), Command::Status);
         assert_eq!(parse(&words("restart")).unwrap(), Command::Restart);
@@ -266,5 +297,7 @@ mod tests {
         assert_eq!((o.web_port, o.web_binds.clone(), o.read_only), (7999, vec!["tailscale".to_string()], true));
         assert_eq!(o.sources, vec!["swarms=herdr"], "the herdr default stays unless --source is given");
         assert_eq!(Overrides::default().apply(base.clone()), base);
+        let mounted = Overrides { base_path: Some("/x/y".into()), frame_ancestors: Some("'self'".into()), ..Overrides::default() }.apply(base);
+        assert_eq!((mounted.base_path.as_str(), mounted.frame_ancestors.as_deref()), ("/x/y", Some("'self'")));
     }
 }
