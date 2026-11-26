@@ -1180,10 +1180,11 @@ async fn reject_writes(req: axum::extract::Request, next: axum::middleware::Next
     (StatusCode::FORBIDDEN, Json(json!({ "error": "this dashboard is read-only (--read-only)" }))).into_response()
 }
 
-/// Serve the dashboard on `addr`. With `read_only`, only GET and HEAD get
-/// through, so the dashboard can be shared without handing out control.
-pub async fn run(addrs: &[SocketAddr], read_only: bool, state: WebServerState) -> Result<()> {
-    let app = Router::new()
+/// Every route, placed by `mount` (`--base-path`, `--frame-ancestors`). With
+/// `read_only`, only GET and HEAD get through, so the dashboard can be shared
+/// without handing out control.
+pub(super) fn app(read_only: bool, mount: &super::mount::Mount, state: WebServerState) -> Router {
+    let routes = Router::new()
         .route("/healthz", get(|| async { "ok" }))
         // What the pages need to know about this server: a read-only one gets no input controls.
         .route("/api/config", get(move || async move { Json(json!({ "read_only": read_only })) }))
@@ -1245,11 +1246,17 @@ pub async fn run(addrs: &[SocketAddr], read_only: bool, state: WebServerState) -
             get(api_pane_stream_handler),
         )
         .with_state(state);
-    let app = if read_only {
+    let app = mount.apply(routes);
+    if read_only {
         app.layer(axum::middleware::from_fn(reject_writes))
     } else {
         app
-    };
+    }
+}
+
+/// Serve the dashboard on `addrs` (see [`app`]).
+pub async fn run(addrs: &[SocketAddr], read_only: bool, mount: &super::mount::Mount, state: WebServerState) -> Result<()> {
+    let app = app(read_only, mount, state);
 
     // Bind every address before serving any, so one that can't be bound fails
     // startup by name rather than leaving the UI up on only some of them.
@@ -1267,8 +1274,8 @@ pub async fn run(addrs: &[SocketAddr], read_only: bool, state: WebServerState) -
             );
             eprintln!("agents-tui: warning: {addr} is reachable from other machines and is not --read-only");
         }
-        tracing::info!("Web UI listening on http://{addr}");
-        eprintln!("agents-tui: web UI available at http://{addr}");
+        tracing::info!("Web UI listening on http://{addr}{}/", mount.base_path);
+        eprintln!("agents-tui: web UI available at http://{addr}{}/", mount.base_path);
     }
 
     // One app and one state behind every listener; the first to stop ends the server.
