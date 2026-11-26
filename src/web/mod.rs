@@ -22,6 +22,7 @@ pub mod newissue;
 pub mod pane;
 pub mod pins;
 pub mod proposals;
+pub mod report;
 pub mod returned;
 pub mod server;
 pub mod since;

@@ -89,6 +89,38 @@ async fn api_village_handler(State(state): State<WebServerState>) -> Json<Value>
 }
 
 #[derive(Deserialize, Default)]
+struct ReportQuery {
+    project: Option<String>,
+}
+
+/// Each village as an `agents-village/v1` report (#554), for another
+/// village's `--framework http(s)://<host>/api/report`. `?project=` picks
+/// one; a village by that name not drawn here is a 404, so the reader shows
+/// it as unreachable rather than silently empty.
+/// `GET /api/report[?project=<name>]`
+async fn api_report_handler(State(state): State<WebServerState>, headers: axum::http::HeaderMap, Query(q): Query<ReportQuery>) -> Result<Json<Value>, StatusCode> {
+    let swarms = state.swarms.read().map(|s| s.clone()).unwrap_or_default();
+    let readings = state.village.readings(&state.transport, &swarms).await;
+    let header = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
+    let origin = header("host").map(|host| format!("{}://{host}", header("x-forwarded-proto").unwrap_or("http")));
+    let reports: Vec<_> = readings
+        .iter()
+        .filter(|r| q.project.as_ref().is_none_or(|p| *p == r.village.project))
+        .map(|r| {
+            let mut report = super::report::to_report(r);
+            if let Some(origin) = &origin {
+                super::report::rebase(&mut report, origin);
+            }
+            report
+        })
+        .collect();
+    if q.project.is_some() && reports.is_empty() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    Ok(Json(json!({ "reports": reports })))
+}
+
+#[derive(Deserialize, Default)]
 struct SinceQuery {
     t: Option<i64>,
 }
@@ -1159,6 +1191,7 @@ pub async fn run(addrs: &[SocketAddr], read_only: bool, state: WebServerState) -
         .route("/village", get(village_handler))
         .route("/village/{*path}", get(village_file_handler))
         .route("/api/village", get(api_village_handler))
+        .route("/api/report", get(api_report_handler))
         .route("/api/valley", get(super::valley::api_valley_handler))
         .route("/api/village/since", get(api_village_since_handler))
         .route("/api/swarms", get(api_swarms_handler).post(api_launch_swarm_handler))
@@ -1277,6 +1310,7 @@ mod tests {
             .route("/village", get(village_handler))
             .route("/village/{*path}", get(village_file_handler))
             .route("/api/village", get(api_village_handler))
+            .route("/api/report", get(api_report_handler))
             .route("/api/village/since", get(api_village_since_handler))
             .route("/api/swarms", get(api_swarms_handler).post(api_launch_swarm_handler))
             .route("/api/swarms/{project}/issues", post(crate::web::newissue::api_new_issue_handler))
@@ -1395,6 +1429,41 @@ mod tests {
             .header("content-type", "application/json")
             .body(Body::from(body.to_string()))
             .unwrap()
+    }
+
+    /// #554: a read-only server exports its villages as reports, one per
+    /// village, or the one `?project=` names.
+    #[tokio::test]
+    async fn a_read_only_server_exports_its_villages_as_reports() {
+        let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tools/adapters/example-report.json");
+        let mut state = make_web_state(new_shared_state());
+        state.village = super::super::source::Villages::new(
+            vec![Box::new(super::super::framework::ReportVillages::new(super::super::framework::ReportSpec::File(example)))],
+            Vec::new(),
+        );
+        let app = make_app(state).layer(axum::middleware::from_fn(reject_writes));
+        let get = |uri: &str| {
+            let req = Request::builder().uri(uri).header("host", "village.test:7914").body(Body::empty()).unwrap();
+            let app = app.clone();
+            async move {
+                let resp = app.oneshot(req).await.unwrap();
+                let status = resp.status();
+                (status, serde_json::from_slice::<Value>(&axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap()).unwrap_or_default())
+            }
+        };
+        let (status, all) = get("/api/report").await;
+        assert_eq!(status, StatusCode::OK);
+        let projects: Vec<&str> = all["reports"].as_array().unwrap().iter().map(|r| r["project"].as_str().unwrap()).collect();
+        assert_eq!(projects, ["larkspur", "agentex:larkspur"]);
+        assert!(all["reports"].as_array().unwrap().iter().all(|r| r["schema"] == "agents-village/v1"));
+        // What it serves is what --framework reads.
+        assert_eq!(super::super::framework::parse_reports(&all.to_string()).unwrap().len(), 2);
+
+        let (status, one) = get("/api/report?project=agentex:larkspur").await;
+        assert_eq!(status, StatusCode::OK);
+        let reports = one["reports"].as_array().unwrap();
+        assert_eq!((reports.len(), &reports[0]["plane"]), (1, &json!("runtime")));
+        assert_eq!(get("/api/report?project=ghost").await.0, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

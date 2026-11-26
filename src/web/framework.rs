@@ -301,7 +301,7 @@ pub struct Workstream {
     /// while its key stays the same.
     pub id: String,
     /// Shown as the house's role; defaults to its first agent's name.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub name: String,
     /// The task it is on, by `Task::id`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -356,9 +356,9 @@ pub enum TaskState {
 pub struct Task {
     /// `412`, `#412`, `PROJ-12`, a workflow id.
     pub id: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub title: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub labels: Vec<String>,
     /// `P0` to `P3`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -427,6 +427,32 @@ fn is_zero_usize(n: &usize) -> bool {
     *n == 0
 }
 
+/// A stop as a report gives it.
+impl From<&Stop> for Stage {
+    fn from(s: &Stop) -> Self {
+        Stage {
+            name: s.name.clone(),
+            tasks: ids(&s.issues),
+            source: s.source,
+            sha: s.sha.clone(),
+            tag: s.tag.clone(),
+            url: s.url.clone(),
+            kind: s.kind,
+            deployed_at: s.deployed_at.clone(),
+            deployed_by: s.deployed_by.clone(),
+            deployment_url: s.deployment_url.clone(),
+            cargo: ids(&s.cargo),
+            cargo_more: s.cargo_more,
+            health: s.health.clone(),
+        }
+    }
+}
+
+/// Issue numbers as task ids.
+pub fn ids(numbers: &[u32]) -> Vec<String> {
+    numbers.iter().map(u32::to_string).collect()
+}
+
 /// One deployment to one stage, as a ship between two villages.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct ReportVoyage {
@@ -452,6 +478,24 @@ pub struct ReportVoyage {
     pub tasks_more: bool,
 }
 
+/// A voyage as a report gives it.
+impl From<&Voyage> for ReportVoyage {
+    fn from(v: &Voyage) -> Self {
+        ReportVoyage {
+            from: v.from.clone(),
+            to: v.to.clone(),
+            state: v.state,
+            sha: v.sha.clone(),
+            tag: v.tag.clone(),
+            started_at: v.started_at.clone(),
+            finished_at: v.finished_at.clone(),
+            url: v.url.clone(),
+            tasks: ids(&v.issues),
+            tasks_more: v.issues_more,
+        }
+    }
+}
+
 /// The cargo of stage `i` when a report gives none: its own tasks and every
 /// later stage's (work only reaches a stage after the ones before it), in
 /// stage order from the furthest, once each.
@@ -475,12 +519,12 @@ fn web_url(u: &Option<String>) -> Option<String> {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct ReportPipeline {
     /// The branch or queue finished work lands on.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub integration: String,
     /// `green`, `pending` or `unknown`: whether the gate has passed the latest
     /// work. `absent` when there is no gate, so the first stage takes work
     /// straight from the integration branch.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub gate: String,
     /// Landed, not yet through the first stage.
     #[serde(default)]
@@ -510,13 +554,13 @@ pub struct Report {
     #[serde(default)]
     pub plane: Plane,
     /// `autocoder`, `modernize`, `herdr`, `temporal`, `agentex`, ...
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub framework: String,
     /// A finer name for what the swarm runs, e.g. `Modernize`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow: Option<String>,
     /// Where it lives: a repository path, a server URL.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub location: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coordinator: Option<Workstream>,
@@ -937,7 +981,6 @@ pub fn swarm_report_gated(swarm: &SwarmSnapshot, issues: &[IssueSnapshot], pipel
             ws.title = None;
         }
     }
-    let ids = |v: &[u32]| v.iter().map(u32::to_string).collect::<Vec<_>>();
     // autocoder hands an issue to a merge job (`merging`) and parks it once
     // landed but not yet proven green (`awaiting-integration`): either way it
     // has left the worker and waits at the quay, if git hasn't placed it yet.
@@ -991,44 +1034,11 @@ pub fn swarm_report_gated(swarm: &SwarmSnapshot, issues: &[IssueSnapshot], pipel
             integration: pipeline.integration.clone(),
             gate: pipeline.sentinel.clone(),
             landed,
-            stages: pipeline
-                .stops
-                .iter()
-                .map(|s| Stage {
-                    name: s.name.clone(),
-                    tasks: ids(&s.issues),
-                    source: s.source,
-                    sha: s.sha.clone(),
-                    tag: s.tag.clone(),
-                    url: s.url.clone(),
-                    kind: s.kind,
-                    deployed_at: s.deployed_at.clone(),
-                    deployed_by: s.deployed_by.clone(),
-                    deployment_url: s.deployment_url.clone(),
-                    cargo: ids(&s.cargo),
-                    cargo_more: s.cargo_more,
-                    health: s.health.clone(),
-                })
-                .collect(),
+            stages: pipeline.stops.iter().map(Stage::from).collect(),
             release: pipeline.release.clone(),
             promotion: pipeline.promotion,
             merge,
-            voyages: pipeline
-                .voyages
-                .iter()
-                .map(|v| ReportVoyage {
-                    from: v.from.clone(),
-                    to: v.to.clone(),
-                    state: v.state,
-                    sha: v.sha.clone(),
-                    tag: v.tag.clone(),
-                    started_at: v.started_at.clone(),
-                    finished_at: v.finished_at.clone(),
-                    url: v.url.clone(),
-                    tasks: ids(&v.issues),
-                    tasks_more: v.issues_more,
-                })
-                .collect(),
+            voyages: pipeline.voyages.iter().map(ReportVoyage::from).collect(),
         },
         builds: Vec::new(),
         build: None,
