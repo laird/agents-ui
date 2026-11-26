@@ -141,6 +141,8 @@ Matching ignores case. Anything else counts as `unknown`.
   - `done`: not drawn.
 
   A blocked task is pinned under its blocking label (`needs-design`, `needs-approval` and so on) when it has one.
+- `raised_by`: the `id` of the workstream that raised the task, in a runtime report: the part of the application asking for the work. In a [world](village.md#worlds-the-dev-village-and-the-platform-it-builds), the task's crate floats down the river from that workstream's house. Leave it out when the task was not raised by the application.
+- `verified_at`: when the application confirmed the fix, RFC 3339 (`2026-11-26T09:00:00Z`). Within the last 24 hours, a world counts the task as verified: its crate stops floating and the house that raised it sparkles once. A task in state `done` that carries `verified_at` still reaches the world.
 - `gate`: where the task is in the **merge gate**, once its work has left the worker. Leave it out when the framework has no gate, or can't tell. Fields:
   - `state`:
 

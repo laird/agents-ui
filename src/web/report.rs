@@ -167,7 +167,13 @@ fn tasks(v: &VillageSnapshot, issues: &[IssueSnapshot]) -> Vec<Task> {
         };
         let url = Some(i.url.clone()).filter(|u| !u.is_empty());
         let depends_on = ids(&i.depends_on);
-        push(i.number, Task { title: i.title.clone(), labels: i.labels.clone(), priority: priority(&i.priority), state, url, depends_on, ..Task::default() });
+        let (raised_by, verified_at) = (i.raised_by.clone(), i.verified_at.clone());
+        push(i.number, Task { title: i.title.clone(), labels: i.labels.clone(), priority: priority(&i.priority), state, url, depends_on, raised_by, verified_at, ..Task::default() });
+    }
+    // Done, and verified by the application: a world still counts it.
+    for i in issues.iter().filter(|i| i.state != "open" && i.verified_at.is_some()) {
+        let t = Task { title: i.title.clone(), labels: i.labels.clone(), state: TaskState::Done, raised_by: i.raised_by.clone(), verified_at: i.verified_at.clone(), ..Task::default() };
+        push(i.number, t);
     }
     for c in &v.backlog {
         let t = Task { title: c.title.clone(), priority: c.priority.clone(), url: c.url.clone(), depends_on: ids(&c.waits_on), ..Task::default() };

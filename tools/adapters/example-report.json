@@ -109,7 +109,11 @@
         }
       ],
       "tasks": [
-        { "id": "task-8790", "title": "SupportAgent task-8790", "state": "failed" }
+        { "id": "task-8790", "title": "SupportAgent task-8790", "state": "failed" },
+        { "id": "46", "title": "Summaries cut off mid-sentence", "labels": ["channel:log-analyzer"], "state": "claimed",
+          "raised_by": "task-8815" },
+        { "id": "47", "title": "Refund replies arrive twice", "labels": ["channel:user-feedback"], "state": "done",
+          "raised_by": "task-8812", "verified_at": "2026-11-26T09:00:00Z" }
       ],
       "pipeline": { "gate": "green", "stages": [{ "name": "completed (24h)", "tasks": ["task-8801", "task-8802"] }] },
       "builds": ["1f2e3d4c5b6a"]

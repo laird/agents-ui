@@ -14,9 +14,10 @@ function grid() {
   return g;
 }
 
-test('the font has 0-9 and "+", each 6 by 10, and no two alike', () => {
+test('the font has 0-9, "+" and A-Z, each 6 by 10, and no two alike', () => {
   const keys = Object.keys(FONT2X);
-  assert.deepEqual(keys.sort(), ['+', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'].sort());
+  const letters = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'];
+  assert.deepEqual(keys.sort(), ['+', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', ...letters].sort());
   for (const k of keys) {
     assert.equal(FONT2X[k].length, 10, `${k} is 10 rows`);
     FONT2X[k].forEach(row => assert.match(row, /^[.#]{6}$/, `${k}: ${row}`));

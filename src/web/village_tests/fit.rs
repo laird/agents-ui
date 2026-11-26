@@ -59,7 +59,7 @@ fn village_bar_stays_one_row() {
 
 /// #405: no row of counters under the map; the map shows the counts.
 /// A world keeps what only the row said (its release, the platform's
-/// build IDs) in the bar's line.
+/// build IDs) in the bar's line, and its window's loop counts (#560).
 #[test]
 fn village_has_no_counter_row() {
     let body = &village_source();
@@ -67,7 +67,7 @@ fn village_has_no_counter_row() {
         assert!(!body.contains(gone), "the counter row is back: `{gone}`");
     }
     assert!(body.contains("document.getElementById('workflow').textContent = worldWords(w);"));
-    assert!(body.contains("return `· ${w.dev} builds ${w.platform} · release ${short(w.release)} ${release}${builds ? ` · platform builds ${builds}` : ''}`;"));
+    assert!(body.contains("return `· ${w.dev} builds ${w.platform} · release ${short(w.release)} ${release}${builds ? ` · platform builds ${builds}` : ''}${loop}`;"));
 }
 
 #[test]

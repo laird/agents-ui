@@ -378,6 +378,13 @@ pub struct Task {
     /// report and not done, the task is waiting, not ready to be picked up.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub depends_on: Vec<String>,
+    /// The workstream that raised it, by `Workstream::id`: in a runtime
+    /// report, the part of the application asking for the work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raised_by: Option<String>,
+    /// When the application confirmed the fix, RFC 3339.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -734,7 +741,8 @@ fn note_label(t: &Task) -> String {
         .unwrap_or_else(|| if t.state == TaskState::Failed { "failed" } else { "blocked" }.to_string())
 }
 
-/// Draw a report as a village, with the open tasks as issues for worlds.
+/// Draw a report as a village, with the open tasks as issues for worlds,
+/// and the done ones the application verified, as closed issues.
 pub fn to_village(report: &Report) -> Reading {
     let tasks: HashMap<&str, &Task> = report.tasks.iter().map(|t| (t.id.trim_start_matches('#'), t)).collect();
     let houses: Vec<House> = report.workstreams.iter().map(|ws| house(ws.id.clone(), ws, &tasks)).collect();
@@ -826,17 +834,19 @@ pub fn to_village(report: &Report) -> Reading {
     let issues = report
         .tasks
         .iter()
-        .filter(|t| t.state != TaskState::Done)
+        .filter(|t| t.state != TaskState::Done || t.verified_at.is_some())
         .map(|t| IssueSnapshot {
             number: task_number(&t.id),
             title: t.title.clone(),
-            state: "open".to_string(),
+            state: if t.state == TaskState::Done { "closed" } else { "open" }.to_string(),
             priority: t.priority.clone().unwrap_or_default(),
             labels: t.labels.clone(),
             is_blocked: t.state == TaskState::Blocked,
             is_working: t.state == TaskState::Claimed,
             url: t.url.clone().unwrap_or_default(),
             depends_on: t.depends_on.iter().map(|d| task_number(d)).collect(),
+            raised_by: t.raised_by.clone(),
+            verified_at: t.verified_at.clone(),
             ..Default::default()
         })
         .collect();
@@ -1028,6 +1038,8 @@ pub fn swarm_report_gated(swarm: &SwarmSnapshot, issues: &[IssueSnapshot], pipel
                 parent: None,
                 gate: gates.get(&i.number).cloned(),
                 depends_on: i.depends_on.iter().map(u32::to_string).collect(),
+                raised_by: i.raised_by.clone(),
+                verified_at: i.verified_at.clone(),
             })
             .collect(),
         pipeline: ReportPipeline {
@@ -1636,6 +1648,25 @@ mod tests {
         assert_eq!(run.plane, Plane::Runtime);
         assert_eq!(run.builds, vec!["1f2e3d4c5b6a"]);
         assert!(!run.manager.subagents.is_empty());
+    }
+
+    #[test]
+    fn a_task_says_who_raised_it_and_when_its_fix_was_verified() {
+        let json = r#"{"project":"agentex:shop","plane":"runtime","tasks":[
+            {"id":"70","title":"Summaries too long","labels":["channel:log-analyzer"],"raised_by":"task-8815"},
+            {"id":"71","title":"Replies dropped","state":"done","raised_by":"task-8812","verified_at":"2026-11-20T10:00:00Z"},
+            {"id":"72","title":"Old","state":"done"}
+        ]}"#;
+        let report = &parse_reports(json).unwrap()[0];
+        assert_eq!((report.tasks[0].raised_by.as_deref(), report.tasks[0].verified_at.as_deref()), (Some("task-8815"), None));
+        assert_eq!(report.tasks[1].verified_at.as_deref(), Some("2026-11-20T10:00:00Z"));
+        // A world reads both from the issues; a done task stays one, closed, while it says when it was verified.
+        let issues = to_village(report).issues;
+        let got: Vec<(u32, &str, Option<&str>, Option<&str>)> =
+            issues.iter().map(|i| (i.number, i.state.as_str(), i.raised_by.as_deref(), i.verified_at.as_deref())).collect();
+        assert_eq!(got, vec![(70, "open", Some("task-8815"), None), (71, "closed", Some("task-8812"), Some("2026-11-20T10:00:00Z"))]);
+        // A task without them serializes as it did.
+        assert_eq!(serde_json::to_string(&Task { id: "1".into(), ..Task::default() }).unwrap(), r#"{"id":"1","state":"open"}"#);
     }
 
     #[test]

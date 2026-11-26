@@ -222,7 +222,7 @@ export function tree(c, x, y) {
  * left to read: "+31" came out as "+=fl". Written at 2× (#456) in the 6x10
  * font (glyphs2x.js), in the same cells as the 3x5 one, so it is the size
  * it was. */
-function glyphTag(c, x, y, text, bg, ink = P.o) {
+export function glyphTag(c, x, y, text, bg, ink = P.o) {
   const { w, h } = tagSize(text.length);
   detail(c, x - 1, y - 2, g => {
     rounded(g, 0, 0, 2 * w, 2 * h, { outline: P.o, fill: bg });

@@ -145,6 +145,8 @@ agents-tui --headless --read-only --base-path /ops/village --frame-ancestors "'s
 
 See "Behind a reverse proxy" in `docs/village.md`.
 
+World flags: `--world <dev>=<platform>[@<environment>]` (repeatable) pairs a dev village with the platform it builds, and `--incident-label <label>[,<label>...]` (repeatable; `incident` by default) names the labels that mark an issue the platform raised. A label ending in `:` is a prefix: `--incident-label channel:` matches every label starting with `channel:`, and each crate shows the part after the colon as its channel. See "Worlds" in `docs/village.md`.
+
 Only one runtime flag may be passed at a time. If no runtime flag is provided, `agents-tui` uses the repo's saved default from `.agents-ui.toml` when available, otherwise it starts with `Claude`.
 
 ## Startup Checks
