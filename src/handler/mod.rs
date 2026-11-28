@@ -167,12 +167,34 @@ fn local_hostnames() -> Vec<String> {
         && out.status.success()
     {
         let h = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if !h.is_empty() {
-            names.push(h);
-        }
+        names.extend(own_names(&h));
+    }
+    // macOS: `hostname` is often `Name.local`, or unrelated to the name the
+    // village reports; LocalHostName is the Bonjour name without `.local`.
+    if cfg!(target_os = "macos")
+        && let Ok(out) = std::process::Command::new("scutil").args(["--get", "LocalHostName"]).output()
+        && out.status.success()
+    {
+        names.extend(own_names(String::from_utf8_lossy(&out.stdout).trim()));
     }
     if let Some(json) = run_json("tailscale", &["status", "--json"]) {
         names.extend(tailscale_self_names(&json));
+    }
+    names
+}
+
+/// `name` as given, plus without a trailing `.local` (macOS's Bonjour
+/// suffix), so `host=imac` matches a machine that calls itself `imac.local`.
+fn own_names(name: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    if name.is_empty() {
+        return names;
+    }
+    names.push(name.to_string());
+    if let Some(stem) = name.strip_suffix(".local")
+        && !stem.is_empty()
+    {
+        names.push(stem.to_string());
     }
     names
 }
@@ -256,6 +278,14 @@ mod tests {
         assert!(names.contains(&"nuc-1".to_string()));
         assert!(names.contains(&"nuc-1.tail04f2b7.ts.net".to_string()));
         assert!(names.contains(&"nuc".to_string()), "HostName also counts");
+    }
+
+    #[test]
+    fn own_names_also_drop_the_bonjour_suffix() {
+        assert_eq!(own_names("imac.local"), vec!["imac.local", "imac"]);
+        assert_eq!(own_names("nuc-1"), vec!["nuc-1"]);
+        assert_eq!(own_names(""), Vec::<String>::new());
+        assert_eq!(own_names(".local"), vec![".local"]);
     }
 
     #[test]

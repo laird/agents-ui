@@ -20,8 +20,9 @@ pub const BUNDLE_ID: &str = "com.github.laird.agents-ui.link-handler";
 const LSREGISTER: &str = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
 const URL_TYPES: &str = "<array><dict><key>CFBundleURLName</key><string>agents-ui link</string><key>CFBundleURLSchemes</key><array><string>agents-ui</string></array></dict></array>";
 /// Apps LaunchServices starts get only `/usr/bin:/bin:/usr/sbin:/sbin`, so
-/// the applet adds where Homebrew puts `herdr` and `tailscale`.
-const EXTRA_PATH: &str = "/opt/homebrew/bin:/usr/local/bin";
+/// the applet adds where Homebrew, cargo and user installs put `herdr` and
+/// `tailscale` (the shell expands `$HOME`).
+const EXTRA_PATH: &str = "$HOME/.local/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin";
 
 /// `~/Applications/AgentsUILinkHandler.app`: the user's own Applications
 /// folder, so installing needs no admin rights.
@@ -204,7 +205,7 @@ mod tests {
     fn the_applet_runs_this_binary_with_the_url_quoted_by_applescript() {
         let text = applescript(Path::new("/Users/x/.cargo/bin/agents-tui"));
         assert!(text.contains("on open location theURL"));
-        assert!(text.contains(r#"do shell script "PATH=/opt/homebrew/bin:/usr/local/bin:$PATH '/Users/x/.cargo/bin/agents-tui' open " & quoted form of theURL"#), "{text}");
+        assert!(text.contains(r#"do shell script "PATH=$HOME/.local/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH '/Users/x/.cargo/bin/agents-tui' open " & quoted form of theURL"#), "{text}");
         assert!(text.contains("display alert"), "a refused link says why");
     }
 
