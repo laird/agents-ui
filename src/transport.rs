@@ -2,6 +2,12 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use tokio::process::Command;
 
+/// What every remote command passes to `ssh` before the host (#587): never
+/// prompt (a password or an unknown host key would otherwise ask on the
+/// terminal the TUI holds in raw mode, and hang or garble it), and give up on
+/// an unreachable host after 10s. ssh's own error is what the callers show.
+pub const SSH_OPTIONS: [&str; 4] = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"];
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ServerTransport {
     server: Option<String>,
@@ -39,6 +45,7 @@ impl ServerTransport {
             let command = build_shell_command(program, args, current_dir);
             let ssh = self.ssh_program.as_deref().unwrap_or(Path::new("ssh"));
             Command::new(ssh)
+                .args(SSH_OPTIONS)
                 .arg(server)
                 .arg(&command)
                 .output()
@@ -134,6 +141,20 @@ mod tests {
             command,
             "cd '/srv/repo' && 'tmux' 'list-sessions' '-F' '#{session_name}'"
         );
+    }
+
+    #[tokio::test]
+    async fn ssh_never_prompts_and_gives_up_on_an_unreachable_host() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(crate::testutil::artifact_name("transport-ssh-opts"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ssh = dir.join("ssh");
+        std::fs::write(&ssh, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n").unwrap();
+        std::fs::set_permissions(&ssh, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let out = ServerTransport::with_ssh_program("buildbox", ssh).output("true", &[], None).await.unwrap();
+        let args: Vec<String> = String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect();
+        assert_eq!(args, ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "buildbox", "'true'"]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

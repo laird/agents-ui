@@ -2669,6 +2669,11 @@ mod tests {
         (ServerTransport::with_ssh_program(host, script), log)
     }
 
+    /// How a recorded call to `host` starts: ssh's options, then the host.
+    fn over_ssh(host: &str) -> String {
+        format!("{} {host} ", crate::transport::SSH_OPTIONS.join(" "))
+    }
+
     async fn post_to_remote(uri: &str, body: &str) -> (StatusCode, String) {
         let shared = new_shared_state();
         shared.write().unwrap().push(sample_swarm("test-proj"));
@@ -2691,7 +2696,7 @@ mod tests {
         let (status, calls) =
             post_to_remote("/api/swarms/test-proj/agents/manager/key", r#"{"key":"Escape"}"#).await;
         assert_eq!(status, StatusCode::OK);
-        assert!(calls.starts_with("pane-host "), "/key must go over ssh to the server: {calls:?}");
+        assert!(calls.starts_with(&over_ssh("pane-host")), "/key must go over ssh to the server: {calls:?}");
         assert!(calls.contains("'send-keys'") && calls.contains("'Escape'"), "{calls:?}");
     }
 
@@ -2705,7 +2710,7 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK);
-        assert!(calls.starts_with("pane-host "), "/input must go over ssh to the server: {calls:?}");
+        assert!(calls.starts_with(&over_ssh("pane-host")), "/input must go over ssh to the server: {calls:?}");
         assert!(calls.contains("'send-keys'") && calls.contains("'-l'") && calls.contains("'Up'"), "{calls:?}");
 
         let (status, calls) = post_to_remote(
@@ -2714,7 +2719,7 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK);
-        assert!(calls.starts_with("pane-host ") && calls.contains("'hello'"), "{calls:?}");
+        assert!(calls.starts_with(&over_ssh("pane-host")) && calls.contains("'hello'"), "{calls:?}");
     }
 
     #[tokio::test]
@@ -2725,7 +2730,7 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK);
-        assert!(calls.starts_with("pane-host "), "/keys must go over ssh to the server: {calls:?}");
+        assert!(calls.starts_with(&over_ssh("pane-host")), "/keys must go over ssh to the server: {calls:?}");
         assert!(calls.contains("'send-keys'") && calls.contains("'Up'"), "{calls:?}");
     }
 
