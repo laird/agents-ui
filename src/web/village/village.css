@@ -103,6 +103,15 @@
   @media (pointer: coarse) {
     .dialog li[data-n]:has(button.issue-open) { min-height: 32px; display: flex; align-items: center; flex-wrap: wrap; gap: 0 .3em; }
   }
+  /* The "Needs you" list (#580): a village's name, then its rows, each
+   * clickable everywhere on it, matching the issue-row rule above. */
+  .dialog li.need-group { font: 700 13px var(--mono); color: var(--gold); margin: 10px 0 2px; letter-spacing: .03em; }
+  .dialog li.need-group:first-child { margin-top: 0; }
+  .dialog li[data-need-key] { cursor: pointer; padding: 2px 4px; margin: 0 -4px; border-radius: 3px; }
+  .dialog li[data-need-key]:hover, .dialog li[data-need-key]:focus-within { background: rgba(255,255,255,.08); }
+  @media (pointer: coarse) {
+    .dialog li[data-need-key] { min-height: 32px; display: flex; align-items: center; }
+  }
   /* Next/Previous through the list a detail view (#564) came from (#573). */
   .dialog .issue-nav { display: flex; gap: 8px; margin-bottom: 8px; }
   .dialog .issue-nav button { position: static; font: 700 13px var(--mono); color: var(--ink); background: var(--win-bot); border: 2px solid var(--gold); border-radius: 4px; padding: 3px 10px; cursor: pointer; }

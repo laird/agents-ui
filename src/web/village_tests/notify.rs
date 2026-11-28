@@ -33,6 +33,27 @@ fn village_opens_the_issue_gate_build_or_environment_a_link_names() {
     assert!(deep.contains("return i >= 0 ? { kind: 'alarm', i } : { kind: 'issue', n };"));
 }
 
+/// `#needs` (every village) or `#<project>&needs` (one) opens the "Needs
+/// you" list, grouped by village (#580, for #570); `&open=<key>` opens one
+/// item's dialog already, over the list. A row's own click keeps the list
+/// as the Back slot (#573), so it stays open behind the detail view. What
+/// counts as waiting on you is needswords.js's (node tests it).
+#[test]
+fn village_opens_the_needs_you_list_a_needs_link_names() {
+    let link = village_asset("needs.js").expect("needs.js is embedded").1;
+    assert!(link.contains("window.addEventListener('village:polled'"), "opens after a poll has drawn the village");
+    assert!(link.contains("needsLinkOpened === location.hash"), "once per link: a closed dialog stays closed");
+    assert!(link.contains("state.screensaver"), "never on the screensaver");
+    assert!(link.contains("needsWanted(location.hash)"));
+    assert!(link.contains("openInfo(needsListInfo(groups, scope));"), "the list itself opens as a fresh root");
+    assert!(link.contains("needsOpenKey(location.hash)"), "&open= opens one item's dialog already");
+    assert!(link.contains("pushForDetail();"), "the list stays the Back slot when a row opens its dialog");
+    assert!(link.contains("openInfo(info, true);"), "keepHistory: true, so Back returns to the list");
+    let main = village_asset("modules.js").unwrap().1;
+    assert!(main.contains("import './needs.js';"));
+    assert!(main.contains("import './needswords.js';"));
+}
+
 /// The notifier's decisions and the bar widget's model share one rule for
 /// "needs you"; both run under node, when it is installed.
 #[test]
