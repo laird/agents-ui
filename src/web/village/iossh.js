@@ -7,6 +7,8 @@
  * localStorage. No DOM, so node tests it (tools/village-tests/iossh.test.mjs);
  * dialogs.js wires the click. */
 
+/* Blink's key lets whatever holds it make Blink run a command, so it is kept
+ * only in this browser's localStorage (as #591 asks) and never sent anywhere. */
 export const IOS_SSH_KEY = 'agents-ui.ios-ssh';
 /* Blink's x-callback key: what Blink generates, nothing that could carry more. */
 const BLINK_KEY = /^[A-Za-z0-9_-]{1,64}$/;

@@ -66,7 +66,7 @@ function wireCopy(el) {
  * in the SSH app chosen here (Blink runs the command, Termius only opens the
  * host), or in the browser until one is chosen. The choice is remembered. */
 const iosKnown = () => { try { return parseChoice(localStorage.getItem(IOS_SSH_KEY)); } catch (e) { return null; } };
-const iosMemo = x => { try { if (x) localStorage.setItem(IOS_SSH_KEY, x); else localStorage.removeItem(IOS_SSH_KEY); } catch (e) { /* private mode */ } };
+const iosMemo = x => { try { if (x) localStorage.setItem(IOS_SSH_KEY, x); else localStorage.removeItem(IOS_SSH_KEY); return true; } catch (e) { return false; } };
 function iosAttach(a, box, go) {
   const p = iosPlan(iosKnown(), a), el = attachBox(box);
   if (go) { if (p.kind === 'app') window.location.href = p.url; else if (a.web) window.open(a.web, '_blank', 'noopener'); }
@@ -83,7 +83,8 @@ function iosAttach(a, box, go) {
   el.querySelectorAll('[data-app]').forEach(b => b.addEventListener('click', () => {
     const c = choiceOf(b.dataset.app, el.querySelector('.ios-key').value);
     if (!c) { el.querySelector('.ios-msg').textContent = 'Enter the key from Blink\'s Settings > x-callback-url.'; return; }
-    iosMemo(c); iosAttach(a, box, false);
+    if (!iosMemo(c)) { el.querySelector('.ios-msg').textContent = 'This browser would not save the choice (site data is blocked).'; return; }
+    iosAttach(a, box, true);
   }));
 }
 /* A structured question the agent is waiting on (a numbered menu or y/n):
