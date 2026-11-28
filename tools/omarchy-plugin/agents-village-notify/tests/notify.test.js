@@ -33,14 +33,14 @@ test("the first poll records and says nothing, as the page never sails on load",
   assert.deepStrictEqual(N.step(r.snapshot, recorded, BASE).events, [], "the same state again is never news")
 })
 
-test("a house starts waiting on you: its question, and a link to its dialog", () => {
+test("a house starts waiting on you: its question, and a link to its own issue (#570, #581)", () => {
   const before = N.step(null, doc(village()), BASE).snapshot
   const { events } = N.step(before, doc(village({ houses: [blockedHouse] })), BASE)
   assert.deepStrictEqual(events, [{ kind: "needs", project: "shop", key: "house:/src/shop-wt-2:7",
-    url: BASE + "/village#shop&house=wt-2", title: "shop: wt-2 is waiting on you", body: "#7 Checkout\nProceed with the migration?" }])
+    url: BASE + "/village#shop&issue=7", title: "shop: wt-2 is waiting on you", body: "#7 Checkout\nProceed with the migration?" }])
 })
 
-test("the manager waiting, a board note and a bounce at the gate", () => {
+test("the manager waiting, a board note and a bounce at the gate each link to the right deep link (#570, #581)", () => {
   const before = N.step(null, doc(village()), BASE).snapshot
   const after = village({ manager: { status: "blocked", title: "Allow npm publish?", links: [] },
     board: [{ number: 12, label: "needs-design", title: "Pick a queue", url: "https://github.com/o/shop/issues/12" }],
@@ -48,8 +48,8 @@ test("the manager waiting, a board note and a bounce at the gate", () => {
   const events = N.step(before, doc(after), BASE).events
   assert.deepStrictEqual(events.map(e => [e.kind, e.title, e.url]), [
     ["needs", "shop: Manager is waiting on you", BASE + "/village#shop&house=manager"],
-    ["gate", "shop: merge conflict on #9", BASE + "/village#shop"],
-    ["needs", "shop: #12 is needs-design", BASE + "/village#shop"]
+    ["gate", "shop: merge conflict on #9", BASE + "/village#shop&gate=9"],
+    ["needs", "shop: #12 is needs-design", BASE + "/village#shop&issue=12"]
   ])
   assert.strictEqual(events[2].body, "Pick a queue")
 })
@@ -76,6 +76,8 @@ test("the build breaks, and is fixed; the first colour seen is not news", () => 
   let s = N.step(null, b("green"), BASE).snapshot
   let r = N.step(s, b("red", { tests: ["a", "b"] }), BASE)
   assert.deepStrictEqual(r.events.map(e => [e.title, e.body]), [["shop: build broken", "build red · 2 tests failing"]])
+  // #570, #581: why the build is red, not the bare map.
+  assert.strictEqual(r.events[0].url, BASE + "/village#shop&build")
   r = N.step(r.snapshot, b("running"), BASE)
   assert.deepStrictEqual(r.events, [], "running after red is not fixed yet")
   r = N.step(r.snapshot, b("green"), BASE)
@@ -98,8 +100,11 @@ test("a deploy lands with its version, a promotion says where from, a failure sa
   let s = N.step(null, env("aaaaaaa1", "v1"), BASE).snapshot
   let r = N.step(s, env("bbbbbbb2", "v2", [{ from: "dev", to: "deploy", state: "docked", sha: "bbbbbbb2", tag: "v2" }]), BASE)
   assert.deepStrictEqual(r.events.map(e => [e.title, e.body]), [["shop: v2 deployed to deploy", ""]], "the voyage and its stop are one deploy")
+  // #570, #581: that environment's deploy, not the bare map.
+  assert.strictEqual(r.events[0].url, BASE + "/village#shop&env=deploy")
   r = N.step(r.snapshot, env("bbbbbbb2", "v2", [{ from: "deploy", to: "release", state: "failed", sha: "bbbbbbb2" }]), BASE)
   assert.deepStrictEqual(r.events.map(e => e.title), ["shop: deploy to release failed"])
+  assert.strictEqual(r.events[0].url, BASE + "/village#shop&env=release")
   assert.match(r.events[0].body, /^bbbbbbb did not land/)
   r = N.step(r.snapshot, env("bbbbbbb2", "v2", [{ from: "deploy", to: "release", state: "docked", sha: "bbbbbbb2" }]), BASE)
   assert.deepStrictEqual(r.events.map(e => [e.title, e.body]), [["shop: bbbbbbb deployed to release", "Promoted from deploy."]])
@@ -171,13 +176,15 @@ test("what is sent: one at a time, a burst grouped, nothing in quiet hours or of
   assert.deepStrictEqual(N.notifications(many, N.settingsOf('{"enabled":false}', ""), noon), [])
 })
 
-test("the deep link encodes its parts", () => {
-  assert.strictEqual(N.deepLink(BASE, "my shop", "wt 2"), BASE + "/village#my%20shop&house=wt%202")
-  assert.strictEqual(N.deepLink(BASE, "shop", ""), BASE + "/village#shop")
-})
+// The deep link builder itself (one item vs many, every kind) is tested
+// once, in agents-village/tests/model.test.js: Model.js here is its copy
+// (byte-equality is the test above), so nothing here would test anything new.
 
 test("two houses with one short name: the link names the house by its full id", () => {
-  const twins = village({ houses: [Object.assign({}, blockedHouse, { id: "/a/shop-wt-2" }), Object.assign({}, blockedHouse, { id: "/b/shop-wt-2", issue: 8 })] })
+  // No `issue` on either (#581 links a worker with one straight to it instead): what
+  // disambiguates here is the full id, not whether the link is a house or an issue link.
+  const noIssue = Object.assign({}, blockedHouse, { issue: undefined, issue_title: undefined })
+  const twins = village({ houses: [Object.assign({}, noIssue, { id: "/a/shop-wt-2" }), Object.assign({}, noIssue, { id: "/b/shop-wt-2" })] })
   const before = N.step(null, doc(village()), BASE).snapshot
   assert.deepStrictEqual(N.step(before, doc(twins), BASE).events.map(e => e.url),
     [BASE + "/village#shop&house=%2Fa%2Fshop-wt-2", BASE + "/village#shop&house=%2Fb%2Fshop-wt-2"])

@@ -110,21 +110,37 @@ test("flow strip: backlog, board, houses, gate, quay, each stop", () => {
   assert.deepStrictEqual(M.flow(noGate).map(i => i.label), ["Backlog", "Board", "Houses", "Quay"], "no gate on a remote village")
 })
 
-test("attention: the board, failed gates, blocked houses", () => {
+test("attention: the board, failed gates, blocked houses, their deep links", () => {
   const v = M.villageFor(villages, "agents-ui")
   assert.deepStrictEqual(M.attention(BASE, v), [
-    { key: "gate:370:conflict", kind: "gate", what: "Merge conflict", title: "#370", url: "https://github.com/laird/agents-ui/issues/370" },
-    { key: "board:365:needs-approval", kind: "needs", what: "needs-approval", title: "#365 Record release Deployments from a release-published workflow (needs the workflow token scope)", url: "https://github.com/laird/agents-ui/issues/365" }
+    { key: "gate:370:conflict", kind: "gate", what: "Merge conflict", title: "#370", url: BASE + "/village#agents-ui&gate=370" },
+    { key: "issue:365:needs-approval", kind: "needs", what: "needs-approval", title: "#365 Record release Deployments from a release-published workflow (needs the workflow token scope)", url: BASE + "/village#agents-ui&issue=365" }
   ])
   const blocked = { project: "shop", manager: { status: "blocked", title: "Allow npm publish?", question: { prompt: "Allow  npm\n publish?" }, links: [{ url: "/#/swarm/shop/agent/manager" }] },
     houses: [{ id: "/src/shop-wt-1", role: "worker-1", status: "blocked", issue: 4, issue_title: "Checkout", links: [{ url: "/#/swarm/shop/agent/worker-1" }] }],
     board: [], pipeline: { gates: [{ issue: 9, state: "red-base", landed: true }] } }
   assert.deepStrictEqual(M.attention(BASE, blocked), [
-    { key: "manager", kind: "needs", house: "manager", what: "Manager", title: "Allow npm publish?", question: "Allow npm publish?", url: BASE + "/#/swarm/shop/agent/manager" },
-    { key: "house:/src/shop-wt-1:4", kind: "needs", house: "wt-1", what: "wt-1", title: "#4 Checkout", question: "", url: BASE + "/#/swarm/shop/agent/worker-1" }
+    { key: "manager", kind: "needs", house: "manager", what: "Manager", title: "Allow npm publish?", question: "Allow npm publish?", url: BASE + "/village#shop&house=manager" },
+    // A worker with an issue (#581) links straight to it, not its house: `house` stays for the row's name.
+    { key: "house:/src/shop-wt-1:4", kind: "needs", house: "wt-1", what: "wt-1", title: "#4 Checkout", question: "", url: BASE + "/village#shop&issue=4" }
   ], "a red base that landed anyway needs nobody")
   assert.strictEqual(M.needsYou(blocked), 2, "the red dot counts the same list")
   assert.strictEqual(M.needsYou(v), M.attention(BASE, v).length)
+  // A worker blocked with no issue of its own still links to its house.
+  const noIssue = { project: "shop", houses: [{ id: "/src/shop-wt-2", role: "worker-2", status: "blocked", links: [] }], board: [], pipeline: { gates: [] } }
+  assert.strictEqual(M.attention(BASE, noIssue)[0].url, BASE + "/village#shop&house=wt-2")
+})
+
+test("itemLink and needsLink: every deep-link kind (#570, #581)", () => {
+  assert.strictEqual(M.itemLink(BASE, "shop", { kind: "house", house: "wt-2" }), BASE + "/village#shop&house=wt-2")
+  assert.strictEqual(M.itemLink(BASE, "shop", { kind: "issue", issue: 7 }), BASE + "/village#shop&issue=7")
+  assert.strictEqual(M.itemLink(BASE, "shop", { kind: "gate", issue: 9 }), BASE + "/village#shop&gate=9")
+  assert.strictEqual(M.itemLink(BASE, "shop", { kind: "build" }), BASE + "/village#shop&build")
+  assert.strictEqual(M.itemLink(BASE, "shop", { kind: "env", env: "deploy" }), BASE + "/village#shop&env=deploy")
+  assert.strictEqual(M.itemLink(BASE, "my shop", { kind: "house", house: "wt 2" }), BASE + "/village#my%20shop&house=wt%202", "every part is encoded")
+  assert.strictEqual(M.itemLink(BASE, "shop", null), BASE + "/village#shop", "no item: the bare village link")
+  assert.strictEqual(M.needsLink(BASE, "shop"), BASE + "/village#shop&needs")
+  assert.strictEqual(M.needsLink(BASE, ""), BASE + "/village#needs", "across every village")
 })
 
 test("features carry their build progress", () => {
@@ -287,7 +303,8 @@ test("notify: the same keys as the desktop notifier, per village", () => {
 test("notify: one replaceable notification saying how many, what is new and where to go", () => {
   const all = M.needsNow(BASE, waitingDoc(true))
   const n = M.notice(BASE, all, all)
-  assert.deepStrictEqual(n, { title: "1 needs you", body: "wt-1: #4 Checkout", url: BASE + "/village#shop&house=wt-1" })
+  // One thing total: straight to it. #581's worker has an issue, so its own link, not its house's.
+  assert.deepStrictEqual(n, { title: "1 needs you", body: "wt-1: #4 Checkout", url: BASE + "/village#shop&issue=4" })
   const cmd = M.noticeCommand(n, 0)
   assert.deepStrictEqual(cmd.slice(0, 9), ["omarchy-notification-send", "--app-name", "Agents village", "-u", "critical", "-p", "1 needs you", "wt-1: #4 Checkout", "--exec"],
     "the first: no id to replace; -p prints the one it gets; --exec comes last, the rest is the click's argv")
@@ -298,6 +315,8 @@ test("notify: one replaceable notification saying how many, what is new and wher
   const many = Array.from({ length: 6 }, (_, i) => ({ project: "p", what: "w" + i, title: "t", key: String(i) }))
   assert.deepStrictEqual(M.notice(BASE, many, many).body.split("\n").slice(-1), ["and 2 more"])
   assert.strictEqual(M.notice(BASE, many, many).title, "6 need you")
+  // Several: the Needs-you list (#580), not just the first one's own link.
+  assert.strictEqual(M.notice(BASE, many, many).url, BASE + "/village#p&needs")
 })
 
 test("notify: the widget stays quiet only while the desktop notifier covers it", () => {

@@ -101,7 +101,7 @@ def main():
                 break
             time.sleep(0.1)
         assert "notify-send --app-name=Agents village" in calls and "shop: wt-2 is waiting on you #7 Checkout\nProceed?" in calls, calls
-        assert f"omarchy-launch-webapp {server}/village#shop&house=wt-2" in calls, calls
+        assert f"omarchy-launch-webapp {server}/village#shop&issue=7" in calls, calls
     httpd.shutdown()
     print("Service.qml: loads, reads its settings, notifies on the change only, opens the house it is about")
 

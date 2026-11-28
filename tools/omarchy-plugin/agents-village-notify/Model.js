@@ -33,6 +33,28 @@ function villageUrl(base, project) {
   return base + "/village#" + encodeURIComponent(project)
 }
 
+// Deep links into the village (#570, for #563): one builder for the bar
+// widget, the desktop notifier and, once #579 lands, the village page's own
+// targets, so a click or notification always lands on the right dialog, not
+// the bare map. `item` is one of:
+//   { kind: "house", house }  { kind: "issue", issue }  { kind: "gate", issue }
+//   { kind: "build" }         { kind: "env", env }
+// Anything else (or none) is the bare village link, today's fallback.
+function itemLink(base, project, item) {
+  var url = villageUrl(base, project), k = item && item.kind
+  if (k === "house") return url + "&house=" + encodeURIComponent(item.house)
+  if (k === "issue") return url + "&issue=" + encodeURIComponent(item.issue)
+  if (k === "gate") return url + "&gate=" + encodeURIComponent(item.issue)
+  if (k === "build") return url + "&build"
+  if (k === "env") return url + "&env=" + encodeURIComponent(item.env)
+  return url
+}
+
+// The "Needs you" list (#580): every village, or just `project`'s.
+function needsLink(base, project) {
+  return project ? villageUrl(base, project) + "&needs" : base + "/village#needs"
+}
+
 function villagesOf(doc) {
   return doc && Array.isArray(doc.villages) ? doc.villages : []
 }
@@ -196,30 +218,40 @@ var GATE_WORDS = { failed: "Gate failed", conflict: "Merge conflict", "red-base"
 // the notifier (agents-village-notify) notifies when an item first appears.
 // `key` names the item the same way on every poll, so the two never disagree
 // about what is new; `kind` is "needs" (a person must answer or decide) or
-// "gate" (a merge bounced); `house` is the name a village deep link takes
-// (`/village#<project>&house=<house>`), for the manager and houses.
+// "gate" (a merge bounced); `house` (the manager, or a house with no issue
+// of its own) is also the name a village deep link takes
+// (`/village#<project>&house=<house>`). `url` (#570, #581) already points at
+// the right deep link — itemLink's `&house=`, `&issue=` or `&gate=` — so a
+// caller never has to branch on `house` to build one.
 function attention(base, v) {
   if (!v) return []
   var out = []
   if (v.manager && v.manager.status === "blocked") {
     out.push({ key: "manager", kind: "needs", house: "manager", what: "Manager", title: v.manager.title || "is waiting on you",
-      question: questionOf(v.manager), url: absolute(base, sessionLink(v.manager.links)) })
+      question: questionOf(v.manager), url: itemLink(base, v.project, { kind: "house", house: "manager" }) })
   }
   ;(v.houses || []).forEach(function(h) {
     if (h.status !== "blocked") return
     var name = houseName(v.project, h.id, h.role)
     // Two houses with one short name (worktrees in two folders): the link names the full id.
     var twin = (v.houses || []).some(function(o) { return o !== h && houseName(v.project, o.id, o.role) === name })
-    out.push({ key: "house:" + (h.id || name) + ":" + (h.issue || ""), kind: "needs", house: twin && h.id ? h.id : name, what: name,
-      title: h.issue ? "#" + h.issue + " " + (h.issue_title || "") : "is waiting on you",
-      question: questionOf(h), url: absolute(base, sessionLink(h.links)) })
+    var house = twin && h.id ? h.id : name
+    out.push({ key: "house:" + (h.id || name) + ":" + (h.issue || ""), kind: "needs", house: house, what: name,
+      title: h.issue ? "#" + h.issue + " " + (h.issue_title || "") : "is waiting on you", question: questionOf(h),
+      url: h.issue ? itemLink(base, v.project, { kind: "issue", issue: h.issue }) : itemLink(base, v.project, { kind: "house", house: house }) })
   })
   ;((v.pipeline && v.pipeline.gates) || []).forEach(function(g) {
     if (!GATE_WORDS[g.state] || (g.state === "red-base" && g.landed)) return
-    out.push({ key: "gate:" + g.issue + ":" + g.state, kind: "gate", what: GATE_WORDS[g.state], title: "#" + g.issue, url: g.failure_url || "" })
+    out.push({ key: "gate:" + g.issue + ":" + g.state, kind: "gate", what: GATE_WORDS[g.state], title: "#" + g.issue,
+      url: itemLink(base, v.project, { kind: "gate", issue: g.issue }) })
   })
+  // Blocked issues count as needs-you (#581): one per issue with a blocking
+  // label (the board is exactly that: proposal, needs-*, too-complex,
+  // future, blocked), keyed `issue:<n>:<label>` so a newly blocked issue
+  // notifies once, same as a re-blocked one with a different label.
   ;(v.board || []).forEach(function(n) {
-    out.push({ key: "board:" + n.number + ":" + (n.label || ""), kind: "needs", what: n.label || "blocked", title: "#" + n.number + " " + (n.title || ""), url: n.url || "" })
+    out.push({ key: "issue:" + n.number + ":" + (n.label || ""), kind: "needs", what: n.label || "blocked", title: "#" + n.number + " " + (n.title || ""),
+      url: itemLink(base, v.project, { kind: "issue", issue: n.number }) })
   })
   return out
 }
@@ -409,7 +441,9 @@ function markup(text) {
 
 // The one notification: "<n> need you", what is new, and the village to open.
 // Each replaces the widget's last one (the id the daemon gave it, printed by
-// -p), so they never stack, and no other notification is touched.
+// -p), so they never stack, and no other notification is touched. One item
+// total opens straight to it; several open the Needs-you list (#580) instead,
+// which opens the first fresh one's panel once it draws (#570, #581).
 function notice(base, all, fresh) {
   if (!fresh.length) return null
   var lines = fresh.slice(0, 4).map(function(i) { return i.what + ": " + i.title })
@@ -418,7 +452,7 @@ function notice(base, all, fresh) {
   return {
     title: all.length + (all.length === 1 ? " needs you" : " need you"),
     body: lines.join("\n"),
-    url: villageUrl(base, first.project) + (first.house ? "&house=" + encodeURIComponent(first.house) : "")
+    url: all.length === 1 ? first.url : needsLink(base, first.project)
   }
 }
 
@@ -456,7 +490,7 @@ function moveCursor(cursor, dy, count) {
 
 if (typeof module !== "undefined") {
   module.exports = {
-    parse: parse, baseUrl: baseUrl, absolute: absolute, villageUrl: villageUrl,
+    parse: parse, baseUrl: baseUrl, absolute: absolute, villageUrl: villageUrl, itemLink: itemLink, needsLink: needsLink,
     villageFor: villageFor, swarmFor: swarmFor, needsYou: needsYou, limited: limited, limitWords: limitWords, swarmRows: swarmRows,
     chooseProject: chooseProject, canGoBack: canGoBack, houseName: houseName, houseRows: houseRows, attachUrl: attachUrl,
     flow: flow, attention: attention, features: features, badge: badge, ago: ago, repoUrl: repoUrl,

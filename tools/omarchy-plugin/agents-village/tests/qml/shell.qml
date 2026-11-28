@@ -138,7 +138,7 @@ ShellRoot {
       check("first poll: nothing", joiner.lastNotice, null)
       joiner.apply(Fixtures.swarms, waiting(true))
       check("a house starts waiting", joiner.lastNotice.title, "1 needs you")
-      check("opening its dialog", joiner.lastNotice.url, "http://127.0.0.1:9/village#shop&house=wt-1")
+      check("opening its dialog", joiner.lastNotice.url, "http://127.0.0.1:9/village#shop&issue=4")
       joiner.apply(Fixtures.swarms, waiting(true))
       joiner.apply("", "")
       joiner.apply(Fixtures.swarms, waiting(true))

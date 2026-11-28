@@ -64,12 +64,6 @@ function isQuiet(spec, date) {
   return q[0] < q[1] ? h >= q[0] && h < q[1] : h >= q[0] || h < q[1]
 }
 
-// The village page, opened on a project and, for a house or the manager, on
-// that house's dialog.
-function deepLink(base, project, house) {
-  return base + "/village#" + encodeURIComponent(project) + (house ? "&house=" + encodeURIComponent(house) : "")
-}
-
 function shortSha(sha) {
   return String(sha || "").slice(0, 7)
 }
@@ -111,7 +105,7 @@ function villageSnapshot(v, was, now, opts) {
   var seen = {}
   Object.keys(w.seen || {}).forEach(function(k) { if (now - w.seen[k] < GRACE_MS) seen[k] = w.seen[k] })
   var needs = Model.attention("", v).map(function(a) { return a.key })
-  needs.forEach(function(k) { if (k.indexOf("board:") === 0) seen[k] = now })
+  needs.forEach(function(k) { if (k.indexOf("issue:") === 0) seen[k] = now })
   failedVoyages(v).forEach(function(y) { seen["failed:" + y.to + ":" + y.sha] = now })
   var envs = envsOf(v, w.envs)
   Object.keys(envs).forEach(function(k) { envs[k] = { sha: envs[k].sha, tag: envs[k].tag } })
@@ -135,11 +129,12 @@ function snapshotOf(villagesDoc, opts) {
 // { kind, project, key, title, body, url }.
 function villageEvents(base, v, was, opts) {
   var Model = modelOf(opts), events = [], project = v.project
-  var village = deepLink(base, project, "")
   var oldNeeds = was.needs || [], oldSeen = was.seen || {}, oldEnvs = was.envs || {}
   Model.attention(base, v).forEach(function(a) {
     if (oldNeeds.indexOf(a.key) >= 0 || oldSeen[a.key]) return
-    var e = { kind: a.kind, project: project, key: a.key, url: a.house ? deepLink(base, project, a.house) : village }
+    // attention()'s url is already the right deep link (#570, #581): house,
+    // issue or gate.
+    var e = { kind: a.kind, project: project, key: a.key, url: a.url }
     if (a.kind === "gate") {
       e.title = project + ": " + a.what.toLowerCase() + " on " + a.title
       e.body = "The merge gate handed the work back."
@@ -154,9 +149,9 @@ function villageEvents(base, v, was, opts) {
   })
   var build = Model.buildState(v)
   if (build === "red" && !was.broken && was.known) {
-    events.push({ kind: "build", project: project, key: "build:red", title: project + ": build broken", body: Model.buildWords(v), url: village })
+    events.push({ kind: "build", project: project, key: "build:red", title: project + ": build broken", body: Model.buildWords(v), url: Model.itemLink(base, project, { kind: "build" }) })
   } else if (build === "green" && was.broken) {
-    events.push({ kind: "build", project: project, key: "build:green", title: project + ": build fixed", body: "The integration branch is green again.", url: village })
+    events.push({ kind: "build", project: project, key: "build:green", title: project + ": build fixed", body: "The integration branch is green again.", url: Model.itemLink(base, project, { kind: "build" }) })
   }
   // A deploy is an environment running a new commit. A stop is news only
   // once its environment was known; a docked voyage is news by itself.
@@ -167,14 +162,14 @@ function villageEvents(base, v, was, opts) {
     var now = envs[env], before = oldEnvs[env]
     if (before ? before.sha === now.sha : !docked[env]) return
     var what = now.tag || shortSha(now.sha)
-    events.push({ kind: "deploy", project: project, key: "deploy:" + env + ":" + now.sha, url: village,
+    events.push({ kind: "deploy", project: project, key: "deploy:" + env + ":" + now.sha, url: Model.itemLink(base, project, { kind: "env", env: env }),
       title: project + ": " + what + " deployed to " + env,
       body: now.from && now.from !== "dev" ? "Promoted from " + now.from + "." : "" })
   })
   failedVoyages(v).forEach(function(y) {
     var key = "failed:" + y.to + ":" + y.sha
     if (oldSeen[key]) return
-    events.push({ kind: "deploy", project: project, key: key, url: village, title: project + ": deploy to " + y.to + " failed",
+    events.push({ kind: "deploy", project: project, key: key, url: Model.itemLink(base, project, { kind: "env", env: y.to }), title: project + ": deploy to " + y.to + " failed",
       body: (y.tag || shortSha(y.sha)) + " did not land; " + y.to + " keeps what it ran." })
   })
   return events
@@ -224,7 +219,7 @@ function notifications(events, settings, date) {
 
 if (typeof module !== "undefined") {
   module.exports = {
-    KINDS: KINDS, settingsOf: settingsOf, quietHours: quietHours, isQuiet: isQuiet, deepLink: deepLink,
+    KINDS: KINDS, settingsOf: settingsOf, quietHours: quietHours, isQuiet: isQuiet,
     envsOf: envsOf, markup: markup, GRACE_MS: GRACE_MS, snapshotOf: snapshotOf, villageEvents: villageEvents, step: step, notifications: notifications
   }
 }
