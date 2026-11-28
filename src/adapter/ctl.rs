@@ -92,6 +92,13 @@ pub fn start_args(repo: &Path, workers: u32, agent: &AgentType, plugin_install: 
     args
 }
 
+/// What a launch says when this autocoder cannot start a swarm.
+pub const NO_START: &str = "❌ This autocoder has no `autocoder-ctl start`, which agents-tui starts swarms with. \
+Update the autocoder plugin (`claude plugin update autocoder@plugin-marketplace`) and try again.";
+/// What a launch says on a remote host.
+pub const REMOTE: &str = "❌ agents-tui starts swarms with autocoder-ctl start on this machine, not on a remote host. \
+Start the swarm on that host (`autocoder-ctl.sh start <repo>`, or agents-tui there).";
+
 /// `start`'s arguments with `--mux` added when one was chosen.
 pub fn with_mux(mut args: Vec<String>, mux: Option<&str>) -> Vec<String> {
     if let Some(m) = mux {

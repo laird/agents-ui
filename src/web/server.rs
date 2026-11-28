@@ -730,16 +730,13 @@ pub struct LaunchSwarmBody {
 /// Launch a new swarm.
 /// `POST /api/swarms`
 /// Starts it with `autocoder-ctl start` and answers what that said
-/// (`web::launch`, #583). Without a usable `autocoder-ctl start`, answers at
-/// once and launches with agents-tui's own launcher in a background task.
+/// (`web::launch`, #583). Without a usable `autocoder-ctl start` it answers
+/// `ok: false` saying why (#546: there is no other launcher).
 async fn api_launch_swarm_handler(
     State(state): State<WebServerState>,
     Json(body): Json<LaunchSwarmBody>,
 ) -> Result<Json<Value>, StatusCode> {
-    use crate::adapter::claude::ClaudeAdapter;
-    use crate::adapter::traits::SwarmConfig;
     use crate::model::swarm::AgentType;
-    use crate::transport::ServerTransport;
     use super::launch::{self, Launch};
 
     let repo_path = PathBuf::from(&body.repo_path);
@@ -765,34 +762,17 @@ async fn api_launch_swarm_handler(
         .unwrap_or_else(|| "unknown".to_string());
 
     let script = super::ctl::script(&state.transport);
-    match launch::via_ctl(script.as_deref(), &repo_path, body.num_workers, &agent_type, mux, &project_name).await {
+    let answer = match launch::via_ctl(script.as_deref(), &repo_path, body.num_workers, &agent_type, mux, &project_name).await {
         Launch::Ctl { ok, body } => {
             if ok {
                 // A stop mark from an earlier stop would keep it from healing.
                 crate::config::persistence::clear_swarm_stopped(&project_name);
             }
-            return Ok(Json(body));
+            body
         }
-        Launch::Fallback => {}
-    }
-
-    let config = SwarmConfig {
-        repo_path,
-        agent_type: agent_type.clone(),
-        num_workers: body.num_workers,
-        agents_dir: state.agents_dir.clone(),
-        resume_seeds: None,
+        Launch::Unsupported => launch::cannot_start(state.transport.is_remote(), &project_name),
     };
-
-    tokio::spawn(async move {
-        let adapter = ClaudeAdapter::new(agent_type, ServerTransport::new(None));
-        match adapter.launch_with_progress(&config, |msg| tracing::info!("{msg}")).await {
-            Ok(_swarm) => tracing::info!("Swarm launched for {}", config.repo_path.display()),
-            Err(e) => tracing::error!("Failed to launch swarm for {}: {e:#}", config.repo_path.display()),
-        }
-    });
-
-    Ok(Json(json!({ "ok": true, "project_name": project_name, "via": "agents-tui" })))
+    Ok(Json(answer))
 }
 
 /// Stop all workers in a swarm.

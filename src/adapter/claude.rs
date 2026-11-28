@@ -54,319 +54,6 @@ impl ClaudeAdapter {
         }
     }
 
-    fn format_command_output(output: &std::process::Output) -> String {
-        let mut text = String::new();
-
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !stdout.is_empty() {
-            text.push_str("stdout:\n");
-            text.push_str(&stdout);
-            text.push('\n');
-        }
-
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        if !stderr.is_empty() {
-            text.push_str("stderr:\n");
-            text.push_str(&stderr);
-            text.push('\n');
-        }
-
-        if text.is_empty() {
-            text.push_str("(no output)\n");
-        }
-
-        text
-    }
-
-    async fn ensure_plugin_installed_with_progress<F: Fn(&str)>(&self, progress: &F) -> Result<()> {
-        progress("$ claude plugin list\n");
-        let output = self
-            .output("claude", &["plugin".to_string(), "list".to_string()], None)
-            .await
-            .context("Failed to run 'claude plugin list'. Is claude CLI installed?")?;
-        progress(&Self::format_command_output(&output));
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        if stdout.contains("autocoder") {
-            progress("✅ Autocoder plugin already installed\n");
-            return Ok(());
-        }
-
-        let marketplace_output = self
-            .output(
-                "claude",
-                &[
-                    "plugin".to_string(),
-                    "marketplace".to_string(),
-                    "list".to_string(),
-                ],
-                None,
-            )
-            .await?;
-        progress("$ claude plugin marketplace list\n");
-        progress(&Self::format_command_output(&marketplace_output));
-
-        let marketplace_stdout = String::from_utf8_lossy(&marketplace_output.stdout);
-        if !marketplace_stdout.contains("laird/agents")
-            && !marketplace_stdout.contains("plugin-marketplace")
-        {
-            let add_output = self
-                .output(
-                    "claude",
-                    &[
-                        "plugin".to_string(),
-                        "marketplace".to_string(),
-                        "add".to_string(),
-                        "laird/agents".to_string(),
-                    ],
-                    None,
-                )
-                .await
-                .context("Failed to add marketplace")?;
-            progress("$ claude plugin marketplace add laird/agents\n");
-            progress(&Self::format_command_output(&add_output));
-            if !add_output.status.success() {
-                let stderr = String::from_utf8_lossy(&add_output.stderr);
-                if !stderr.contains("already") {
-                    anyhow::bail!("Failed to add marketplace: {stderr}");
-                }
-            }
-        }
-
-        let install_output = self
-            .output(
-                "claude",
-                &[
-                    "plugin".to_string(),
-                    "install".to_string(),
-                    "autocoder".to_string(),
-                ],
-                None,
-            )
-            .await
-            .context("Failed to install autocoder plugin")?;
-        progress("$ claude plugin install autocoder\n");
-        progress(&Self::format_command_output(&install_output));
-        if !install_output.status.success() {
-            let stderr = String::from_utf8_lossy(&install_output.stderr);
-            anyhow::bail!("Failed to install autocoder plugin: {stderr}");
-        }
-
-        progress("✅ Plugin ready\n");
-        Ok(())
-    }
-
-    async fn ensure_gh_auth_for_repo_with_progress<F: Fn(&str)>(
-        &self,
-        repo_path: &Path,
-        progress: &F,
-    ) {
-        let remote = match self
-            .output(
-                "git",
-                &[
-                    "remote".to_string(),
-                    "get-url".to_string(),
-                    "origin".to_string(),
-                ],
-                Some(repo_path),
-            )
-            .await
-        {
-            Ok(o) if o.status.success() => {
-                progress("$ git remote get-url origin\n");
-                progress(&Self::format_command_output(&o));
-                String::from_utf8_lossy(&o.stdout).trim().to_string()
-            }
-            _ => return,
-        };
-
-        let owner = if let Some(rest) = remote.strip_prefix("https://github.com/") {
-            rest.split('/').next()
-        } else if let Some(rest) = remote.strip_prefix("git@github.com:") {
-            rest.split('/').next()
-        } else {
-            None
-        };
-        let owner = match owner {
-            Some(owner) if !owner.is_empty() => owner.to_string(),
-            _ => return,
-        };
-
-        let current_user = match self
-            .output(
-                "gh",
-                &[
-                    "api".to_string(),
-                    "user".to_string(),
-                    "--jq".to_string(),
-                    ".login".to_string(),
-                ],
-                Some(repo_path),
-            )
-            .await
-        {
-            Ok(o) if o.status.success() => {
-                progress("$ gh api user --jq .login\n");
-                progress(&Self::format_command_output(&o));
-                String::from_utf8_lossy(&o.stdout).trim().to_string()
-            }
-            _ => return,
-        };
-
-        if current_user == owner {
-            progress(&format!(
-                "✅ gh auth already matches repo owner ({owner})\n"
-            ));
-            return;
-        }
-
-        progress(&format!(
-            "⏳ Switching gh auth from {current_user} to {owner}...\n"
-        ));
-        match self
-            .output(
-                "gh",
-                &[
-                    "auth".to_string(),
-                    "switch".to_string(),
-                    "--user".to_string(),
-                    owner.clone(),
-                ],
-                Some(repo_path),
-            )
-            .await
-        {
-            Ok(o) => {
-                progress("$ gh auth switch --user <owner>\n");
-                progress(&Self::format_command_output(&o));
-                if o.status.success() {
-                    progress(&format!("✅ gh auth switched to {owner}\n"));
-                } else {
-                    progress(&format!("⚠️  gh auth switch failed for {owner}\n"));
-                }
-            }
-            Err(e) => progress(&format!("⚠️  Failed to run gh auth switch: {e}\n")),
-        }
-    }
-
-    /// Launch a swarm with progress reporting via a callback.
-    pub async fn launch_with_progress<F: Fn(&str)>(
-        &self,
-        config: &SwarmConfig,
-        progress: F,
-    ) -> Result<Swarm> {
-        let runtime = &config.agent_type;
-        let project_name = Self::project_name(&config.repo_path);
-        let session_name = Self::session_name(runtime, &project_name);
-
-        if session::has_session(&self.transport, &session_name).await {
-            progress("♻️  Found existing session, reconnecting...\n");
-            let swarm = self
-                .build_swarm_from_session(&session_name, config.repo_path.clone(), runtime.clone())
-                .await?;
-            self.ensure_swarm_agents_running(&swarm).await?;
-            return Ok(swarm);
-        }
-
-        if matches!(runtime, AgentType::Claude) {
-            progress("⏳ Checking autocoder plugin...\n");
-            self.ensure_plugin_installed_with_progress(&progress)
-                .await?;
-        }
-
-        progress("⏳ Checking gh auth for repo...\n");
-        self.ensure_gh_auth_for_repo_with_progress(&config.repo_path, &progress)
-            .await;
-
-        progress(&format!(
-            "⏳ Creating {} git worktrees...\n",
-            config.num_workers
-        ));
-        let worktree_paths = self
-            .create_worktrees(&config.repo_path, &project_name, config.num_workers)
-            .await?;
-        progress(&format!("✅ Created {} worktrees\n", worktree_paths.len()));
-
-        progress("⏳ Creating tmux session...\n");
-        self.create_tmux_session(&session_name, &config.repo_path, &worktree_paths)
-            .await?;
-        progress(&format!("✅ tmux session: {session_name}\n"));
-
-        for (i, _wt) in worktree_paths.iter().enumerate() {
-            let n = i + 1; // 1-indexed to match worktree naming (wt-1, wt-2, ...)
-            progress(&format!("⏳ Starting worker-{n}...\n"));
-            let target = self
-                .window_pane_target(&session_name, &format!("worker-{n}"))
-                .await;
-            if let Err(e) = self
-                .launch_agent_in_pane(&target, &session_name, runtime, false)
-                .await
-            {
-                progress(&format!("⚠️  worker-{n} failed: {e}\n"));
-            } else {
-                progress(&format!("✅ worker-{n} started\n"));
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        }
-
-        progress("⏳ Starting manager...\n");
-        let manager_target = self.window_pane_target(&session_name, "review").await;
-        if let Err(e) = self
-            .launch_agent_in_pane(&manager_target, &session_name, runtime, true)
-            .await
-        {
-            progress(&format!("⚠️  Manager failed: {e}\n"));
-        } else {
-            progress("✅ Manager started\n");
-            if !runtime_uses_loop_wrappers(runtime) {
-                if let Some(cmd) = manager_bootstrap_cmd(runtime) {
-                    progress("⏳ Waiting for manager to be ready...\n");
-                    if Self::wait_for_agent_ready(&self.transport, &manager_target).await {
-                        progress(&format!("⏳ Sending {cmd} to manager...\n"));
-                        proxy::send_keys(&self.transport, &manager_target, &cmd)
-                            .await
-                            .ok();
-                        progress("✅ Manager running manage-loop\n");
-                    } else {
-                        progress("⚠️  Manager not ready in time, manage-loop not started\n");
-                    }
-                }
-            }
-        }
-
-        progress("\n🎉 Swarm launched!\n");
-
-        let swarm = self
-            .build_swarm_from_session(&session_name, config.repo_path.clone(), runtime.clone())
-            .await?;
-
-        // Start worker fix-loops after agents have had time to initialize
-        let loop_cmd = runtime.worker_loop_cmd().to_string();
-        if !loop_cmd.is_empty() && !runtime_uses_loop_wrappers(runtime) {
-            let transport = self.transport.clone();
-            let targets: Vec<String> = swarm
-                .workers
-                .iter()
-                .map(|w| w.tmux_target.clone())
-                .collect();
-            tokio::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                for target in &targets {
-                    if let Err(e) = proxy::send_keys(&transport, target, &loop_cmd).await {
-                        tracing::warn!("Failed to send {loop_cmd} to {target}: {e}");
-                    } else {
-                        tracing::info!("Sent {loop_cmd} to worker at {target}");
-                    }
-                }
-            });
-        }
-
-        progress("✅ Workers will start fix-loop after initialization\n");
-
-        Ok(swarm)
-    }
-
     /// Derive the project name from a repo path (last directory component).
     fn project_name(repo_path: &Path) -> String {
         repo_path
@@ -1141,87 +828,120 @@ impl ClaudeAdapter {
         })
     }
 
-    /// Check if the autocoder plugin is installed, and install it if not.
-    async fn ensure_plugin_installed(&self) -> Result<()> {
-        // Check if autocoder plugin is already installed
-        let output = self
-            .output("claude", &["plugin".to_string(), "list".to_string()], None)
-            .await
-            .context("Failed to run 'claude plugin list'. Is claude CLI installed?")?;
+    /// Rebuild a stopped swarm for `resume()`: recreate any worker worktree
+    /// that is gone and reuse the rest, lay out the tmux session, boot every
+    /// agent with its resume seed, and start the manager's and workers' loops.
+    /// Starting a new swarm is `autocoder-ctl start`'s (#544, #583, #546).
+    async fn rebuild(&self, config: &SwarmConfig) -> Result<Swarm> {
+        let runtime = &config.agent_type;
+        let project_name = Self::project_name(&config.repo_path);
+        let session_name = Self::session_name(runtime, &project_name);
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
+        tracing::info!(
+            "Rebuilding swarm: {} workers for {}",
+            config.num_workers,
+            project_name,
+        );
 
-        if stdout.contains("autocoder") {
-            tracing::info!("Autocoder plugin already installed");
-            return Ok(());
+        // Ensure gh is authenticated as the correct user for this repo
+        ensure_gh_auth_for_repo(&config.repo_path).await;
+
+        // 1. Create git worktrees
+        tracing::info!("Creating {} git worktrees", config.num_workers);
+        let worktree_paths = self
+            .create_worktrees(&config.repo_path, &project_name, config.num_workers)
+            .await?;
+        tracing::info!("Created {} worktrees", worktree_paths.len());
+
+        // 2. Create tmux session
+        tracing::info!("⏳ Creating tmux session...\n");
+        self.create_tmux_session(&session_name, &config.repo_path, &worktree_paths)
+            .await?;
+        tracing::info!("tmux session: {session_name}");
+
+        // 3. Launch claude in each worker window (1-indexed)
+        for i in 0..worktree_paths.len() {
+            let n = i + 1;
+            tracing::info!("Starting worker-{n}");
+            let target = self
+                .window_pane_target(&session_name, &format!("worker-{n}"))
+                .await;
+            if let Err(e) = self
+                .launch_agent_in_pane(&target, &session_name, runtime, false)
+                .await
+            {
+                tracing::warn!("Worker {i} launch failed: {e}");
+                tracing::warn!("Failed to launch claude in pane {i}: {e}");
+            } else {
+                tracing::info!("worker-{i} started");
+                self.send_resume_seed(config, &format!("worker-{n}"), &target)
+                    .await;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
 
-        tracing::info!("Autocoder plugin not found, installing...");
-
-        // Step 1: Add the laird/agents marketplace (if not already added)
-        let marketplace_output = self
-            .output(
-                "claude",
-                &[
-                    "plugin".to_string(),
-                    "marketplace".to_string(),
-                    "list".to_string(),
-                ],
-                None,
-            )
-            .await?;
-
-        let marketplace_stdout = String::from_utf8_lossy(&marketplace_output.stdout);
-
-        if !marketplace_stdout.contains("laird/agents")
-            && !marketplace_stdout.contains("plugin-marketplace")
+        // 4. Launch claude in manager pane
+        tracing::info!("⏳ Starting manager...\n");
+        let manager_target = self.window_pane_target(&session_name, "review").await;
+        if let Err(e) = self
+            .launch_agent_in_pane(&manager_target, &session_name, runtime, true)
+            .await
         {
-            tracing::info!("Adding laird/agents marketplace...");
-            let add_output = self
-                .output(
-                    "claude",
-                    &[
-                        "plugin".to_string(),
-                        "marketplace".to_string(),
-                        "add".to_string(),
-                        "laird/agents".to_string(),
-                    ],
-                    None,
-                )
-                .await
-                .context("Failed to add marketplace")?;
-
-            if !add_output.status.success() {
-                let stderr = String::from_utf8_lossy(&add_output.stderr);
-                // Not fatal if it already exists
-                if !stderr.contains("already") {
-                    tracing::warn!("Marketplace add warning: {stderr}");
+            tracing::warn!("Manager launch failed: {e}");
+            tracing::warn!("Failed to launch claude in manager pane: {e}");
+        } else {
+            tracing::info!("✅ Manager started\n");
+            self.send_resume_seed(config, "manager", &manager_target)
+                .await;
+            // Wait for Claude to be ready, then send the manage-loop bootstrap command
+            if !runtime_uses_loop_wrappers(runtime) {
+                if let Some(cmd) = manager_bootstrap_cmd(runtime) {
+                    if Self::wait_for_agent_ready(&self.transport, &manager_target).await {
+                        tracing::info!("Sending manage-loop to manager: {cmd}");
+                        proxy::send_keys(&self.transport, &manager_target, &cmd)
+                            .await
+                            .ok();
+                    } else {
+                        tracing::warn!("Manager not ready in time, skipping manage-loop bootstrap");
+                    }
                 }
             }
         }
 
-        // Step 2: Install the autocoder plugin
-        tracing::info!("Installing autocoder plugin...");
-        let install_output = self
-            .output(
-                "claude",
-                &[
-                    "plugin".to_string(),
-                    "install".to_string(),
-                    "autocoder".to_string(),
-                ],
-                None,
-            )
-            .await
-            .context("Failed to install autocoder plugin")?;
+        tracing::info!("\n🎉 Swarm rebuilt! Waiting for sessions to initialize...\n");
 
-        if !install_output.status.success() {
-            let stderr = String::from_utf8_lossy(&install_output.stderr);
-            anyhow::bail!("Failed to install autocoder plugin: {stderr}");
+        // Resize the tmux session to match the current terminal size
+        if let Err(e) = session::resize_session_to_terminal(&self.transport, &session_name).await {
+            tracing::warn!("Failed to resize session {session_name}: {e}");
         }
 
-        tracing::info!("Autocoder plugin installed successfully");
-        Ok(())
+        // 5. Build swarm model
+        let swarm = self
+            .build_swarm_from_session(&session_name, config.repo_path.clone(), runtime.clone())
+            .await?;
+
+        // Start worker fix-loops after agents have had time to initialize
+        let loop_cmd = runtime.worker_loop_cmd().to_string();
+        if !loop_cmd.is_empty() && !runtime_uses_loop_wrappers(runtime) {
+            let transport = self.transport.clone();
+            let targets: Vec<String> = swarm
+                .workers
+                .iter()
+                .map(|w| w.tmux_target.clone())
+                .collect();
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                for target in &targets {
+                    if let Err(e) = proxy::send_keys(&transport, target, &loop_cmd).await {
+                        tracing::warn!("Failed to send {loop_cmd} to {target}: {e}");
+                    } else {
+                        tracing::info!("Sent {loop_cmd} to worker at {target}");
+                    }
+                }
+            });
+        }
+
+        Ok(swarm)
     }
 
     fn teardown_targets(swarm: &Swarm) -> Vec<String> {
@@ -1313,136 +1033,6 @@ impl ClaudeAdapter {
 }
 
 impl AgentRuntime for ClaudeAdapter {
-    async fn launch(&self, config: &SwarmConfig) -> Result<Swarm> {
-        let runtime = &config.agent_type;
-        let project_name = Self::project_name(&config.repo_path);
-        let session_name = Self::session_name(runtime, &project_name);
-
-        // Clear any stopped tombstone — the user is explicitly launching this swarm.
-        crate::config::persistence::clear_swarm_stopped(&project_name);
-
-        // Check if session already exists
-        if session::has_session(&self.transport, &session_name).await {
-            tracing::info!("♻️  Found existing session, reconnecting...\n");
-            return self
-                .build_swarm_from_session(&session_name, config.repo_path.clone(), runtime.clone())
-                .await;
-        }
-
-        if matches!(runtime, AgentType::Claude) {
-            // Ensure the autocoder plugin is installed
-            tracing::info!("⏳ Checking autocoder plugin...\n");
-            self.ensure_plugin_installed().await?;
-            tracing::info!("✅ Plugin ready\n");
-        }
-
-        tracing::info!(
-            "Launching swarm: {} workers for {}",
-            config.num_workers,
-            project_name,
-        );
-
-        // Ensure gh is authenticated as the correct user for this repo
-        ensure_gh_auth_for_repo(&config.repo_path).await;
-
-        // 1. Create git worktrees
-        tracing::info!("Creating {} git worktrees", config.num_workers);
-        let worktree_paths = self
-            .create_worktrees(&config.repo_path, &project_name, config.num_workers)
-            .await?;
-        tracing::info!("Created {} worktrees", worktree_paths.len());
-
-        // 2. Create tmux session
-        tracing::info!("⏳ Creating tmux session...\n");
-        self.create_tmux_session(&session_name, &config.repo_path, &worktree_paths)
-            .await?;
-        tracing::info!("tmux session: {session_name}");
-
-        // 3. Launch claude in each worker window (1-indexed)
-        for i in 0..worktree_paths.len() {
-            let n = i + 1;
-            tracing::info!("Starting worker-{n}");
-            let target = self
-                .window_pane_target(&session_name, &format!("worker-{n}"))
-                .await;
-            if let Err(e) = self
-                .launch_agent_in_pane(&target, &session_name, runtime, false)
-                .await
-            {
-                tracing::warn!("Worker {i} launch failed: {e}");
-                tracing::warn!("Failed to launch claude in pane {i}: {e}");
-            } else {
-                tracing::info!("worker-{i} started");
-                self.send_resume_seed(config, &format!("worker-{n}"), &target)
-                    .await;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        }
-
-        // 4. Launch claude in manager pane
-        tracing::info!("⏳ Starting manager...\n");
-        let manager_target = self.window_pane_target(&session_name, "review").await;
-        if let Err(e) = self
-            .launch_agent_in_pane(&manager_target, &session_name, runtime, true)
-            .await
-        {
-            tracing::warn!("Manager launch failed: {e}");
-            tracing::warn!("Failed to launch claude in manager pane: {e}");
-        } else {
-            tracing::info!("✅ Manager started\n");
-            self.send_resume_seed(config, "manager", &manager_target)
-                .await;
-            // Wait for Claude to be ready, then send the manage-loop bootstrap command
-            if !runtime_uses_loop_wrappers(runtime) {
-                if let Some(cmd) = manager_bootstrap_cmd(runtime) {
-                    if Self::wait_for_agent_ready(&self.transport, &manager_target).await {
-                        tracing::info!("Sending manage-loop to manager: {cmd}");
-                        proxy::send_keys(&self.transport, &manager_target, &cmd)
-                            .await
-                            .ok();
-                    } else {
-                        tracing::warn!("Manager not ready in time, skipping manage-loop bootstrap");
-                    }
-                }
-            }
-        }
-
-        tracing::info!("\n🎉 Swarm launched! Waiting for sessions to initialize...\n");
-
-        // Resize the tmux session to match the current terminal size
-        if let Err(e) = session::resize_session_to_terminal(&self.transport, &session_name).await {
-            tracing::warn!("Failed to resize session {session_name}: {e}");
-        }
-
-        // 5. Build swarm model
-        let swarm = self
-            .build_swarm_from_session(&session_name, config.repo_path.clone(), runtime.clone())
-            .await?;
-
-        // Start worker fix-loops after agents have had time to initialize
-        let loop_cmd = runtime.worker_loop_cmd().to_string();
-        if !loop_cmd.is_empty() && !runtime_uses_loop_wrappers(runtime) {
-            let transport = self.transport.clone();
-            let targets: Vec<String> = swarm
-                .workers
-                .iter()
-                .map(|w| w.tmux_target.clone())
-                .collect();
-            tokio::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                for target in &targets {
-                    if let Err(e) = proxy::send_keys(&transport, target, &loop_cmd).await {
-                        tracing::warn!("Failed to send {loop_cmd} to {target}: {e}");
-                    } else {
-                        tracing::info!("Sent {loop_cmd} to worker at {target}");
-                    }
-                }
-            });
-        }
-
-        Ok(swarm)
-    }
-
     async fn resume(&self, repo_path: &Path, agent_type: &AgentType) -> Result<(Swarm, Vec<String>)> {
         let project_name = Self::project_name(repo_path);
         let session_name = Self::session_name(agent_type, &project_name);
@@ -1509,12 +1099,10 @@ impl AgentRuntime for ClaudeAdapter {
             resume_seeds: Some(resume_seeds),
         };
 
-        // `launch()` already reuses an existing worktree rather than
-        // recreating it, and reuses an existing tmux session — neither of
-        // which applies here since we just checked there is no session — so
-        // it does exactly what resuming needs: recreate any worktree that
+        // `rebuild()` reuses an existing worktree rather than recreating it,
+        // so it does exactly what resuming needs: recreate any worktree that
         // really is gone, reattach the rest, and boot every agent.
-        let swarm = self.launch(&config).await?;
+        let swarm = self.rebuild(&config).await?;
 
         Ok((swarm, notes))
     }
@@ -3355,7 +2943,7 @@ exit 0
                 resume_seeds: None,
             };
 
-            let swarm = adapter.launch_with_progress(&config, |_| {}).await.unwrap();
+            let swarm = adapter.rebuild(&config).await.unwrap();
             let (manager_markers, worker_markers): (&[&str], &[&str]) = match runtime {
                 // Codex is asserted separately, below: it has two correct
                 // launch paths and which one runs is not predictable from
@@ -3497,7 +3085,7 @@ exit 0
             resume_seeds: None,
         };
 
-        let swarm = adapter.launch_with_progress(&config, |_| {}).await.unwrap();
+        let swarm = adapter.rebuild(&config).await.unwrap();
         wait_for_pane_markers(&adapter, &swarm.manager.tmux_target, &["What can I help"]).await;
         wait_for_pane_markers(&adapter, &swarm.workers[0].tmux_target, &["What can I help"]).await;
 

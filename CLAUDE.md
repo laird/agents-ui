@@ -90,7 +90,7 @@ src/
   main.rs app.rs event.rs tui.rs   # entry point, the terminal UI's state, event loop and raw mode
   model/        # swarms, agent status, issues; recognize.rs: which agents make which swarm (every source shares it)
   tmux/         # tmux sessions, pane capture, send-keys
-  adapter/      # agent runtimes (Claude Code): worktrees, tmux windows, launch
+  adapter/      # agent runtimes (Claude Code): autocoder-ctl verbs (ctl.rs), resume, heal, tmux windows
   ui/           # the terminal UI's screens: repos, a swarm, an agent, dialogs
   config/       # saved swarm state (~/.agents-ui/), keybindings, shortcuts
   service/      # `agents-tui service`: the served UI as a systemd unit or a launchd agent
@@ -153,7 +153,7 @@ modules register (`registry.js`). To add something to the village:
 - Status is inferred from pane content when no `.codex/loops/fix-loop.status` file exists.
 - ANSI colors are preserved via `ansi-to-tui` crate.
 - Keystroke passthrough in agent view — all keys forwarded to tmux pane except: double-Esc (back), Alt+0-9/m (navigation), PgUp/PgDn (scroll).
-- The autocoder plugin is auto-installed via `claude plugin marketplace add laird/agents` + `claude plugin install autocoder` if not present.
+- Swarms are started only with autocoder's `autocoder-ctl start` (`adapter/ctl.rs`), from the TUI and from the web server's `POST /api/swarms` alike; it installs the autocoder plugin when it is missing. agents-tui has no launcher of its own (#546): an autocoder without `start`, or a remote host, is told what to do instead. `resume()` still rebuilds a stopped swarm's worktrees and panes itself.
 - Claude is launched with `--append-system-prompt` to force tmux (not cmux) usage.
 
 ## Automated Testing & Issue Management

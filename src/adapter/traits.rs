@@ -22,9 +22,6 @@ pub struct SwarmConfig {
 /// Trait abstracting over different agent runtimes.
 #[allow(async_fn_in_trait, dead_code)] // Full lifecycle methods for swarm management
 pub trait AgentRuntime {
-    /// Launch a new swarm (manager + workers).
-    async fn launch(&self, config: &SwarmConfig) -> Result<Swarm>;
-
     /// Resume a stopped swarm: reattach to its existing worktrees (found by
     /// name via `git worktree list`, not from any in-memory state) and seed
     /// each agent with its own last handoff. Rejects a swarm that is not

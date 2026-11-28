@@ -6,9 +6,10 @@
 //! agent it actually started on when autocoder picked another one with
 //! capacity (laird/agents#454).
 //!
-//! **Fallback**: no `autocoder-ctl.sh` on this host, a server that drives its
-//! swarms over ssh, or an answer of exit 3 (an autocoder without the verb)
-//! leaves the launch to agents-tui's own launcher (`claude.rs`), as before.
+//! There is no other way to start one (#546 removed agents-tui's own
+//! launcher): no `autocoder-ctl.sh` on this host, or an answer of exit 3 (an
+//! autocoder without the verb), answers `ok: false` saying to update autocoder,
+//! and a server that drives its swarms over ssh says to start it on that host.
 
 use std::path::Path;
 
@@ -25,8 +26,8 @@ pub const MUXES: [&str; 3] = ["tmux", "cmux", "herdr"];
 pub enum Launch {
     /// autocoder-ctl answered: the page's JSON.
     Ctl { ok: bool, body: Value },
-    /// No usable `autocoder-ctl start`: agents-tui launches it itself.
-    Fallback,
+    /// No usable `autocoder-ctl start`.
+    Unsupported,
 }
 
 /// Start the swarm with `script start` (`None`: this host has no script).
@@ -40,9 +41,16 @@ pub async fn via_ctl(
 ) -> Launch {
     let args = ctl::with_mux(ctl::start_args(repo, workers, agent, true), mux);
     match ctl::run(script, &args, repo).await {
-        CtlRun::Unsupported => Launch::Fallback,
+        CtlRun::Unsupported => Launch::Unsupported,
         CtlRun::Done(result) => Launch::Ctl { ok: result.ok, body: answer(&result, agent, project) },
     }
+}
+
+/// The page's JSON when this server cannot start a swarm: `remote`, it
+/// drives its swarms over ssh; otherwise its autocoder lacks `start`.
+pub fn cannot_start(remote: bool, project: &str) -> Value {
+    let why = if remote { ctl::REMOTE } else { ctl::NO_START };
+    json!({ "ok": false, "via": "autocoder-ctl", "project_name": project, "error": why.trim_start_matches("❌ ") })
 }
 
 /// The page's JSON for what `start` answered.
@@ -208,11 +216,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn no_script_or_exit_3_falls_back_to_the_in_app_launcher() {
-        let dir = temp_dir("fallback");
-        assert_eq!(via_ctl(None, &dir, 3, &AgentType::Claude, None, "r").await, Launch::Fallback);
+    async fn no_script_or_exit_3_cannot_start_and_says_to_update() {
+        let dir = temp_dir("unsupported");
+        assert_eq!(via_ctl(None, &dir, 3, &AgentType::Claude, None, "r").await, Launch::Unsupported);
         let script = fake(&dir, r#"{"ok":false,"detail":"not implemented"}"#, "", 3);
-        assert_eq!(via_ctl(Some(&script), &dir, 3, &AgentType::Claude, None, "r").await, Launch::Fallback);
+        assert_eq!(via_ctl(Some(&script), &dir, 3, &AgentType::Claude, None, "r").await, Launch::Unsupported);
         let _ = std::fs::remove_dir_all(&dir);
+        let body = cannot_start(false, "r");
+        assert_eq!(body["ok"], false);
+        assert!(body["error"].as_str().unwrap().starts_with("This autocoder has no `autocoder-ctl start`"));
+        assert!(cannot_start(true, "r")["error"].as_str().unwrap().contains("not on a remote host"));
     }
 }

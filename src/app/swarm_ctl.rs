@@ -1,11 +1,13 @@
 //! The TUI's swarm launch, add-worker and stop through `autocoder-ctl.sh`
-//! (#544, `crate::adapter::ctl`), with the TUI's own launcher in `claude.rs`
-//! as the fallback: on a remote host, when this autocoder lacks the verb
-//! (no script, exit 3), when the swarm's session is already up (the TUI
-//! reconnects to it, as before), and, for add-worker and stop, for a swarm
-//! autocoder has no manifest for (one the TUI launched itself).
+//! (#544, `crate::adapter::ctl`). A swarm is started only with
+//! `autocoder-ctl start` (#546 removed agents-tui's own launcher); a host
+//! without it (an older autocoder, or a remote host, where the script on this
+//! machine cannot act) is told what to do instead. Add-worker and stop keep
+//! the TUI's own code as the fallback: when this autocoder lacks the verb (no
+//! script, exit 3), on a remote host, and for a swarm autocoder has no
+//! manifest for (one the TUI launched itself).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 
@@ -17,34 +19,34 @@ use crate::event::Event;
 use crate::model::swarm::Swarm;
 use crate::transport::ServerTransport;
 
-/// Start the swarm with `autocoder-ctl start`, reporting into the launch
-/// dialog. `false` when the TUI should launch it itself; `true` when
-/// autocoder answered, whether the start worked or not.
+/// Start the swarm with `script start` (`ctl::script()`; `None` when this
+/// host has none), reporting into the launch dialog. A session that is
+/// already up is the swarm, found again by discovery.
 /// `plugin_installed`: the TUI already installed the plugin for the chosen
 /// scope, so `start` must not install it again.
-pub(super) async fn launch_via_ctl(
+pub(super) async fn launch(
     config: &SwarmConfig,
     plugin_installed: bool,
     transport: &ServerTransport,
+    script: Option<&Path>,
     progress: &impl Fn(&str),
     discovered: impl FnOnce(),
-) -> bool {
+) {
     if transport.is_remote() {
-        return false;
+        progress(&format!("{}\n\nPress Esc to go back.\n", ctl::REMOTE));
+        return;
     }
-    // `start` refuses a session that is already up; the TUI reconnects to it.
     let project = config.repo_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let session = format!("{}-{project}", config.agent_type.session_prefix());
     if crate::tmux::session::has_session(transport, &session).await {
-        return false;
+        progress(&format!("♻️  {session} is already running; reconnecting...\n"));
+        discovered();
+        return;
     }
     progress("⏳ Starting the swarm with autocoder-ctl start...\n");
     let args = ctl::start_args(&config.repo_path, config.num_workers, &config.agent_type, !plugin_installed);
-    match ctl::run(ctl::script().as_deref(), &args, &config.repo_path).await {
-        CtlRun::Unsupported => {
-            progress("ℹ️  This autocoder has no `autocoder-ctl start`; using agents-tui's own launcher.\n");
-            false
-        }
+    match ctl::run(script, &args, &config.repo_path).await {
+        CtlRun::Unsupported => progress(&format!("{}\n\nPress Esc to go back.\n", ctl::NO_START)),
         CtlRun::Done(result) => {
             progress(&ctl::report(&result));
             if result.ok {
@@ -55,7 +57,6 @@ pub(super) async fn launch_via_ctl(
             } else {
                 progress("\nPress Esc to go back.\n");
             }
-            true
         }
     }
 }
@@ -161,19 +162,28 @@ mod tests {
         assert_eq!(added_line(&r), "autocoder-ctl add-worker: done");
     }
 
-    #[tokio::test]
-    async fn a_remote_host_launches_with_the_tuis_own_path() {
-        let config = SwarmConfig {
-            repo_path: std::env::temp_dir(),
+    fn config() -> SwarmConfig {
+        SwarmConfig {
+            repo_path: std::env::temp_dir().join(crate::testutil::artifact_name("swarm-ctl-launch")),
             agent_type: crate::model::swarm::AgentType::Claude,
             num_workers: 1,
             agents_dir: std::env::temp_dir(),
             resume_seeds: None,
-        };
+        }
+    }
+
+    #[tokio::test]
+    async fn a_remote_host_is_told_to_start_it_there() {
         let said = std::cell::RefCell::new(String::new());
         let remote = ServerTransport::new(Some("buildbox".to_string()));
-        let handled = launch_via_ctl(&config, false, &remote, &|m: &str| said.borrow_mut().push_str(m), || panic!("no discovery")).await;
-        assert!(!handled);
-        assert!(said.borrow().is_empty());
+        launch(&config(), false, &remote, None, &|m: &str| said.borrow_mut().push_str(m), || panic!("no discovery")).await;
+        assert!(said.borrow().starts_with(ctl::REMOTE), "{}", said.borrow());
+    }
+
+    #[tokio::test]
+    async fn an_autocoder_without_start_is_told_to_update() {
+        let said = std::cell::RefCell::new(String::new());
+        launch(&config(), false, &ServerTransport::default(), None, &|m: &str| said.borrow_mut().push_str(m), || panic!("no discovery")).await;
+        assert!(said.borrow().contains(ctl::NO_START), "{}", said.borrow());
     }
 }

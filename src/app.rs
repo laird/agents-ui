@@ -1805,7 +1805,6 @@ impl App {
         };
         let tx = self.events.tx();
         let pname = project_name.clone();
-        let adapter = ClaudeAdapter::new(agent_type, self.transport.clone());
         let transport = self.transport.clone();
         let agents_dir = self.agents_dir.clone();
 
@@ -1848,35 +1847,15 @@ impl App {
                 }
             }
 
-            // autocoder-ctl start first (#544); the TUI's own launcher if it cannot.
+            // autocoder-ctl start (#544, #546).
             let tx3 = tx.clone();
             let discovered = move || {
                 if let Err(e) = tx3.send(Event::SwarmDiscovered) {
                     tracing::warn!("Failed to send swarm discovered event: {e}");
                 }
             };
-            if swarm_ctl::launch_via_ctl(&config, plugin_installed, &transport, &progress, discovered).await {
-                return;
-            }
-
-            match adapter.launch_with_progress(&config, &progress).await {
-                Ok(swarm) => {
-                    tracing::info!(
-                        "Background launch succeeded: session={}",
-                        swarm.tmux_session
-                    );
-                    progress("✅ Triggering swarm discovery...\n");
-                    if let Err(e) = tx.send(Event::SwarmDiscovered) {
-                        tracing::warn!("Failed to send swarm discovered event: {e}");
-                    }
-                }
-                Err(e) => {
-                    tracing::error!("Background launch failed: {e}");
-                    progress(&format!(
-                        "\n❌ Launch failed: {e}\n\nPress Esc to go back.\n"
-                    ));
-                }
-            }
+            let script = crate::adapter::ctl::script();
+            swarm_ctl::launch(&config, plugin_installed, &transport, script.as_deref(), &progress, discovered).await;
         });
     }
 
