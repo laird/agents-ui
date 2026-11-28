@@ -35,9 +35,13 @@
 //! stopped), and its answer is passed on. What follows is the fallback, for an
 //! autocoder without it.
 //!
-//! Only workers have controls: the manager is a 409. An unknown swarm or role
-//! is a 404 and an unknown action a 422. A `--read-only` server refuses it
-//! before it gets here (403). The response says what was sent (`{ ok, sent }`)
+//! Nudge and restart also work for the manager, from the castle dialog
+//! (#567): the manager's own loop-start (or monitor-loop restart) command,
+//! never its workers'. Release and stop stay workers-only — only a worker
+//! holds an issue to release, and the castle's own Stop swarm covers the
+//! manager. An unknown swarm or role is a 404 and an unknown action a 422.
+//! A `--read-only` server refuses it before it gets here (403). The response
+//! says what was sent (`{ ok, sent }`)
 //! so the page can show it; after a release the village forgets its cached
 //! issues for the repo, so the next poll shows the crate move.
 
@@ -81,17 +85,35 @@ pub fn is_idle(agent: &AgentSnapshot) -> bool {
     !agent.waiting_for_input && agent.state == "Idle"
 }
 
-/// What a nudge types into the worker's pane, or why it can't.
+/// What a nudge types into the agent's pane, or why it can't: the manager's
+/// monitor loop, or a worker's fix loop (#567).
 pub fn nudge_command(agent: &AgentSnapshot, runtime: &AgentType) -> Result<String, Refusal> {
-    if agent.is_manager {
-        return Err((StatusCode::CONFLICT, "only workers can be nudged"));
-    }
     if !is_idle(agent) {
         return Err((StatusCode::CONFLICT, "that worker is busy: wait until it is idle"));
     }
-    supervisor::for_runtime(runtime)
-        .start_worker_loop_command(runtime)
-        .ok_or((StatusCode::CONFLICT, "this runtime has no worker loop to start"))
+    let sup = supervisor::for_runtime(runtime);
+    let cmd = if agent.is_manager { sup.start_manager_loop_command(runtime) } else { sup.start_worker_loop_command(runtime) };
+    cmd.ok_or((StatusCode::CONFLICT, "this runtime has no loop to start"))
+}
+
+/// Only a worker holds an issue to release: one check, shared by the direct
+/// POST, the preview and the autocoder-ctl path, so they can't drift apart
+/// on who release is for (#567 review).
+pub fn release_is_for_workers(agent: &AgentSnapshot) -> Result<(), Refusal> {
+    if agent.is_manager {
+        return Err((StatusCode::CONFLICT, "only workers hold issues"));
+    }
+    Ok(())
+}
+
+/// Only a worker can be stopped from here: the castle's own Stop swarm
+/// covers the manager. One check, shared by `stop_steps` and the
+/// autocoder-ctl path, which does not call `stop_steps` (#567 review).
+fn stop_is_for_workers(agent: &AgentSnapshot) -> Result<(), Refusal> {
+    if agent.is_manager {
+        return Err((StatusCode::CONFLICT, "only workers can be stopped here"));
+    }
+    Ok(())
 }
 
 /// The issue the worker holds: the open issue the tracker shows assigned to
@@ -170,9 +192,7 @@ fn tombstone(agent: &AgentSnapshot) -> Result<(String, String), Refusal> {
 /// stopped), then the pane closed. Through the transport, so it works on a
 /// `--server` host too.
 pub fn stop_steps(agent: &AgentSnapshot) -> Result<Vec<Step>, Refusal> {
-    if agent.is_manager {
-        return Err((StatusCode::CONFLICT, "only workers can be stopped here"));
-    }
+    stop_is_for_workers(agent)?;
     let (dir, file) = tombstone(agent)?;
     let target = agent.tmux_target.as_str();
     let mut steps = vec![run("mkdir", &["-p", &dir]), run("touch", &[&file])];
@@ -187,11 +207,8 @@ pub fn stop_steps(agent: &AgentSnapshot) -> Result<Vec<Step>, Refusal> {
     Ok(steps)
 }
 
-/// Why a worker can't be restarted from here, or its runtime.
+/// Why the agent can't be restarted from here, or its runtime.
 pub fn restart_check(agent: &AgentSnapshot, agent_type: &str) -> Result<AgentType, Refusal> {
-    if agent.is_manager {
-        return Err((StatusCode::CONFLICT, "only workers can be restarted here"));
-    }
     if agent.mux == super::Mux::Herdr {
         return Err((StatusCode::NOT_IMPLEMENTED, "restart isn't supported for herdr panes yet: stop it and start it from herdr"));
     }
@@ -236,7 +253,7 @@ async fn run_steps(transport: &crate::transport::ServerTransport, steps: &[Step]
 }
 
 /// The steps' commands, one a line, for the page to show.
-fn described(steps: &[Step]) -> String {
+pub fn described(steps: &[Step]) -> String {
     steps
         .iter()
         .filter_map(|s| match s {
@@ -291,13 +308,13 @@ async fn restart(state: &WebServerState, swarm: &SwarmSnapshot, agent: &AgentSna
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
     let adapter = crate::adapter::claude::ClaudeAdapter::new(runtime.clone(), t.clone());
-    let launch = adapter.pane_launch_command(runtime, &swarm.tmux_session, false);
+    let launch = adapter.pane_launch_command(runtime, &swarm.tmux_session, agent.is_manager);
     super::pane::send_line(t, &pane, &launch).await.map_err(|e| gateway(e.to_string()))?;
     sent.push(launch);
     // Started again: it is no longer stopped.
     let (_, file) = tombstone(agent).map_err(|(c, m)| (c, m.to_string()))?;
     let _ = t.output("rm", &tmux(&["-f", &file]), None).await;
-    if let Some(cmd) = crate::adapter::claude::ClaudeAdapter::pane_bootstrap_command(runtime, claimed_issue(swarm, agent)) {
+    if let Some(cmd) = crate::adapter::claude::ClaudeAdapter::pane_bootstrap_command(runtime, agent.is_manager, claimed_issue(swarm, agent)) {
         // As revive does: give the runtime a moment to come up first.
         tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
         super::pane::send_line(t, &pane, &cmd).await.map_err(|e| gateway(e.to_string()))?;
@@ -333,21 +350,21 @@ async fn via_ctl(
     action: Action,
 ) -> Option<Result<Json<Value>, (StatusCode, Json<Value>)>> {
     let fail = |(code, msg): Refusal| Some(Err((code, Json(json!({ "error": msg })))));
-    if agent.is_manager {
-        return fail((StatusCode::CONFLICT, "only workers have controls"));
-    }
     let mut issue = None;
     let mut text = None;
     let mut cwd = std::path::PathBuf::from(if swarm.repo_path.is_empty() { &agent.worktree_path } else { &swarm.repo_path });
     match action {
         Action::Nudge => {
-            // Only an idle worker: the text would land in its work or answer its question.
+            // Only an idle agent: the text would land in its work or answer its question.
             match nudge_command(agent, &AgentType::from_name(&swarm.agent_type).unwrap_or(AgentType::Claude)) {
                 Ok(command) => text = Some(command),
                 Err(r) => return fail(r),
             }
         }
         Action::Release => {
+            if let Err(r) = release_is_for_workers(agent) {
+                return fail(r);
+            }
             let Some(number) = claimed_issue(swarm, agent) else { return fail((StatusCode::CONFLICT, "that worker holds no issue")) };
             match still_claimed(state, swarm, number).await {
                 Ok(repo) => cwd = repo,
@@ -355,7 +372,15 @@ async fn via_ctl(
             }
             issue = Some(number);
         }
-        Action::Stop | Action::Restart => {
+        Action::Stop => {
+            if let Err(r) = stop_is_for_workers(agent) {
+                return fail(r);
+            }
+            if let Err(r) = tombstone(agent) {
+                return fail(r);
+            }
+        }
+        Action::Restart => {
             if let Err(r) = tombstone(agent) {
                 return fail(r);
             }
@@ -477,9 +502,7 @@ pub async fn api_control_handler(
             Ok(Json(json!({ "ok": true, "action": "restart", "sent": sent.join("\n") })))
         }
         Action::Release => {
-            if agent.is_manager {
-                return Err(fail((StatusCode::CONFLICT, "only workers hold issues")));
-            }
+            release_is_for_workers(&agent).map_err(fail)?;
             let number = claimed_issue(&swarm, &agent)
                 .ok_or_else(|| fail((StatusCode::CONFLICT, "that worker holds no issue")))?;
             let repo = still_claimed(&state, &swarm, number).await.map_err(fail)?;
@@ -555,14 +578,22 @@ mod tests {
     }
 
     #[test]
-    fn a_busy_or_asking_worker_or_the_manager_is_not_nudged() {
+    fn a_busy_or_asking_worker_is_not_nudged() {
         for state in ["Working #3", "Working", "Starting", "Stopped"] {
             assert_eq!(nudge_command(&worker(state), &AgentType::Claude).unwrap_err().0, StatusCode::CONFLICT, "{state}");
         }
         let asking = AgentSnapshot { waiting_for_input: true, ..worker("Idle") };
         assert_eq!(nudge_command(&asking, &AgentType::Claude).unwrap_err().0, StatusCode::CONFLICT);
+    }
+
+    /// #567: the castle dialog nudges an idle manager too, with its own
+    /// monitor-loop command; a busy one is still refused.
+    #[test]
+    fn an_idle_manager_is_nudged_with_its_monitor_loop() {
         let manager = AgentSnapshot { is_manager: true, ..worker("Idle") };
-        assert_eq!(nudge_command(&manager, &AgentType::Claude).unwrap_err().0, StatusCode::CONFLICT);
+        assert_eq!(nudge_command(&manager, &AgentType::Claude).unwrap(), "/autocoder:monitor-loop");
+        let busy = AgentSnapshot { is_manager: true, ..worker("Working #3") };
+        assert_eq!(nudge_command(&busy, &AgentType::Claude).unwrap_err().0, StatusCode::CONFLICT);
     }
 
     #[test]
@@ -681,17 +712,27 @@ mod tests {
     #[test]
     fn a_restarted_worker_is_told_to_work_its_issue() {
         use crate::adapter::claude::ClaudeAdapter;
-        let with_issue = ClaudeAdapter::pane_bootstrap_command(&AgentType::Claude, Some(12)).unwrap();
+        let with_issue = ClaudeAdapter::pane_bootstrap_command(&AgentType::Claude, false, Some(12)).unwrap();
         assert!(with_issue.contains("12"), "{with_issue}");
-        assert!(ClaudeAdapter::pane_bootstrap_command(&AgentType::Claude, None).is_some(), "no issue: its loop");
+        assert!(ClaudeAdapter::pane_bootstrap_command(&AgentType::Claude, false, None).is_some(), "no issue: its loop");
+    }
+
+    /// #567: a restarted manager is told to monitor its workers, not to work an issue.
+    #[test]
+    fn a_restarted_manager_is_told_to_monitor_workers() {
+        use crate::adapter::claude::ClaudeAdapter;
+        let cmd = ClaudeAdapter::pane_bootstrap_command(&AgentType::Claude, true, None).unwrap();
+        assert!(cmd.contains("monitor"), "{cmd}");
     }
 
     #[test]
     fn stop_and_restart_are_for_workers_with_a_worktree() {
         let mut manager = with_worktree(worker("Idle"), crate::web::Mux::Tmux);
         manager.is_manager = true;
+        // #567: stop stays workers-only (the castle's Stop swarm covers the manager);
+        // restart does not, so the manager can be relaunched from the castle dialog too.
         assert_eq!(stop_steps(&manager).unwrap_err().0, StatusCode::CONFLICT);
-        assert_eq!(restart_check(&manager, "Claude").unwrap_err().0, StatusCode::CONFLICT);
+        assert_eq!(restart_check(&manager, "Claude").unwrap(), AgentType::Claude);
         assert_eq!(stop_steps(&worker("Idle")).unwrap_err().0, StatusCode::CONFLICT, "no worktree: nowhere for the tombstone");
         assert_eq!(serde_json::from_str::<ControlBody>(r#"{"action":"stop"}"#).unwrap().action, Action::Stop);
         assert_eq!(serde_json::from_str::<ControlBody>(r#"{"action":"restart"}"#).unwrap().action, Action::Restart);

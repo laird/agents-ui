@@ -2,13 +2,18 @@
 //   node --test tools/village-tests/
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CONTROLS, confirmWords, controlAnswer, controlChoices, controlUrl, previewUrl } from '../../src/web/village/controlwords.js';
+import { CONTROLS, MANAGER_CONTROLS, confirmWords, controlAnswer, controlChoices, controlUrl, previewUrl } from '../../src/web/village/controlwords.js';
 
 test('the controls live at the agent\'s control path, its parts escaped', () => {
   assert.equal(controlUrl('shop', 'worker-2'), 'api/swarms/shop/agents/worker-2/control');
   assert.equal(controlUrl('my shop', 'w/1'), 'api/swarms/my%20shop/agents/w%2F1/control');
   assert.equal(previewUrl('shop', 'worker-2', 'nudge'), 'api/swarms/shop/agents/worker-2/control?action=nudge');
-  assert.deepEqual(CONTROLS.map(c => c.action), ['nudge', 'release']);
+  assert.deepEqual(CONTROLS.map(c => c.action), ['nudge', 'release', 'stop', 'restart']);
+});
+
+test('#567: the castle dialog offers only Nudge and Restart for the manager, drawn from CONTROLS', () => {
+  assert.deepEqual(MANAGER_CONTROLS, [{ action: 'nudge', label: 'Nudge' }, { action: 'restart', label: 'Restart' }]);
+  assert.ok(MANAGER_CONTROLS.every(mc => CONTROLS.some(c => c.action === mc.action && c.label === mc.label)), 'every entry comes from CONTROLS');
 });
 
 test('a ready action is offered with what it sends; one that can\'t run now is greyed with why', () => {
@@ -34,6 +39,8 @@ test('the confirmation says what will happen before showing what is sent', () =>
   assert.equal(confirmWords('nudge', 'wt-2'), 'Nudge wt-2? This is typed into its session:');
   assert.equal(confirmWords('release', 'wt-2', 42), 'Release #42 from wt-2? This is posted on the issue:');
   assert.equal(confirmWords('release', 'wt-2', null), 'Release its issue from wt-2? This is posted on the issue:');
+  assert.equal(confirmWords('stop', 'wt-2'), 'Stop wt-2? This is sent to its pane:');
+  assert.equal(confirmWords('restart', 'wt-2'), 'Restart wt-2? This is sent to its pane:');
 });
 
 test('what the dialog says after the server answers', () => {
@@ -42,10 +49,15 @@ test('what the dialog says after the server answers', () => {
   assert.equal(controlAnswer(200, null, 'release', 7), 'Released #7: the crate goes back to the docks.');
   assert.equal(controlAnswer(200, null, 'release', null), 'Released its issue: the crate goes back to the docks.');
   assert.equal(controlAnswer(403, {}, 'nudge'), 'This dashboard is read-only: use the TUI.');
-  assert.equal(controlAnswer(404, {}, 'nudge'), 'That worker is gone.');
-  assert.equal(controlAnswer(501, {}, 'restart'), "This server can't do that to a worker.");
+  // Generic wording (#567): this serves the manager too, on MANAGER_CONTROLS.
+  assert.equal(controlAnswer(404, {}, 'nudge'), 'That agent is gone.');
+  assert.equal(controlAnswer(501, {}, 'restart'), "This server can't do that here.");
   assert.equal(controlAnswer(409, { error: 'that worker is busy: wait until it is idle' }, 'nudge'), 'that worker is busy: wait until it is idle');
   assert.equal(controlAnswer(502, {}, 'release'), 'Could not release it (502)');
+  assert.equal(controlAnswer(200, { ok: true }, 'stop'), 'Stopped.');
+  assert.equal(controlAnswer(200, { ok: true, note: '#42 stays claimed: release it to hand it back' }, 'stop'),
+    'Stopped. #42 stays claimed: release it to hand it back.');
+  assert.equal(controlAnswer(200, { ok: true }, 'restart'), 'Restarted: its runtime is relaunching.');
 });
 
 test('#540: autocoder-ctl does it: the call is confirmed and its answer shown', () => {

@@ -11,8 +11,8 @@
  *   empty   its context barrel is drawn empty (barrels.js asks fxContext);
  *   carry   its crate is carried back to the docks (controlplay.js, a trip);
  *   dark    the house goes dark (controlplay.js draws darkHouse over it).
- * Nudge and release exist (controls.rs); restart and stop are here for when
- * #505 adds them. With reduced motion nothing moves: fxToast says it.
+ * All four exist in controls.rs (#504, #505, #567). With reduced motion
+ * nothing moves: fxToast says it.
  * DOM-free: tools/village-tests/controlfx.test.mjs. */
 import { detail } from './detail.js';
 import { px } from './art2x.js';

@@ -1,27 +1,34 @@
-/* ---------- Worker controls on the house dialog (#506, for #488) ----------
- * A worker's house dialog gets Nudge (start its loop now, when it is idle)
- * and Release issue (give up its claim, so the crate goes back to the
- * docks). When the dialog opens it asks the server what each would send
- * (control_preview.rs): an action the server can't run for this house is
- * left out, and one that can't run now is greyed with the reason. A click
- * asks first, showing exactly what will be typed or posted; Send posts it
- * (controls.rs) and says what happened. A read-only server (/api/config)
- * shows no controls. The words and choices are in controlwords.js. */
+/* ---------- Agent controls on the house and castle dialogs (#506, #567, for #488) ----------
+ * A worker's house dialog gets Nudge (start its loop now, when it is idle),
+ * Release issue (give up its claim, so the crate goes back to the docks),
+ * Stop (shut the worker down) and Restart (relaunch it in its pane). The
+ * castle (hall) dialog gets just Nudge and Restart for the manager (#567):
+ * Stop swarm and the rest are swarmcontrols.js, a different API. When the
+ * dialog opens it asks the server what each would send (control_preview.rs):
+ * an action the server can't run for this agent is left out, and one that
+ * can't run now is greyed with the reason. A click asks first, showing
+ * exactly what will be typed or posted; Send posts it (controls.rs) and
+ * says what happened. A read-only server (/api/config) shows no controls.
+ * The words and choices are in controlwords.js. */
 import { registerDialogPart } from './registry.js';
 import { esc } from './panels.js';
-import { confirmWords, controlAnswer, controlChoices, controlUrl, previewUrl, CONTROLS } from './controlwords.js';
+import { confirmWords, controlAnswer, controlChoices, controlUrl, previewUrl, CONTROLS, MANAGER_CONTROLS } from './controlwords.js';
 import { controlDone } from './controlplay.js';
 
 /* Whether this server takes control requests: asked once it answers (a
- * failed ask is asked again next time, not remembered as read-only). */
+ * failed ask is asked again next time, not remembered as read-only). Shared
+ * with swarmcontrols.js, so the castle's two boxes agree. */
 let writable = null;
-function canWrite() {
+export function canWrite() {
   if (!writable) writable = fetch('api/config').then(r => (r.ok ? r.json() : Promise.reject(r.status))).then(c => !c.read_only)
     .catch(() => { writable = null; return false; });
   return writable;
 }
 
-async function askServer(url, init) {
+/* A fetch that never throws: `null` when the server can't be reached, so a
+ * caller can tell that apart from a real HTTP status. Shared with
+ * swarmcontrols.js. */
+export async function askServer(url, init) {
   try {
     const res = await fetch(url, init);
     return { status: res.status, body: await res.json().catch(() => ({})) };
@@ -33,12 +40,12 @@ async function askServer(url, init) {
 /* The dialog this part last filled: a slow answer for an earlier one is dropped. */
 let ctlToken = 0;
 
-async function fillControls(box, c, token) {
+async function fillControls(box, c, token, actions) {
   if (!(await canWrite()) || token !== ctlToken) return;
   const previews = {};
-  await Promise.all(CONTROLS.map(async ({ action }) => { previews[action] = await askServer(previewUrl(c.project, c.role, action)); }));
+  await Promise.all(actions.map(async ({ action }) => { previews[action] = await askServer(previewUrl(c.project, c.role, action)); }));
   if (token !== ctlToken) return;
-  const choices = controlChoices(previews);
+  const choices = controlChoices(previews, actions);
   if (!choices.length) return;
   const offer = () => {
     box.innerHTML = `<div class="opts">${choices.map(ch =>
@@ -75,5 +82,6 @@ registerDialogPart(info => {
   const box = old.cloneNode(false);
   old.replaceWith(box);
   const token = ++ctlToken;
-  if (info.controls) fillControls(box, info.controls, token);
+  if (info.controls) fillControls(box, info.controls, token, CONTROLS);
+  else if (info.managerControls) fillControls(box, info.managerControls, token, MANAGER_CONTROLS);
 }, 30);

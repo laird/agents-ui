@@ -261,7 +261,11 @@ registerHit({ kind: 'hall', dialog(o, sc, theme) {
   const m = v.manager, s = sessionOf(m), swarm = s && s.url.replace(/\/agent\/[^/]+$/, '');
   return { title: `${theme.labels.hall} · manager`, line: m.issue ? `#${m.issue} ${m.issue_title || ''}` : (m.issue_title || 'The manager of this swarm'),
     meta: [`Status: ${m.status}`, limitWords(m), contextWords(m), `Crew: ${m.crew.join(', ') || '—'}`, ...(m.subagents || []).map(sa => `${runtime ? 'Worker' : 'Sub-agent'}: ${subWords(sa, v)}`), m.action ? `Now: ${m.action}` : null],
-    links: withAttach(v, m, [...(m.links || []), link('Swarm view', swarm), runtime ? null : commitsLink(repoUrl(v), v.pipeline.integration)]), house: m };
+    links: withAttach(v, m, [...(m.links || []), link('Swarm view', swarm), runtime ? null : commitsLink(repoUrl(v), v.pipeline.integration)]), house: m,
+    // Nudge/Restart for the manager (controls.js); Stop swarm, Resume, Add
+    // worker and Switch agent for the whole swarm (#567, swarmcontrols.js).
+    managerControls: runtime ? null : { project: v.project, role: m.role, name: 'the manager', issue: null },
+    swarmControls: runtime ? null : { project: v.project } };
 } });
 registerHit({ kind: 'house', dialog(o, sc) {
   const v = sc.v, runtime = isRuntime(v), work = workOf(v);

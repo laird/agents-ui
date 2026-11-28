@@ -646,12 +646,16 @@ impl ClaudeAdapter {
         self.command_with_local_path(&runtime_supervisor(runtime).launch_command(runtime, session_name, is_manager))
     }
 
-    /// What a relaunched worker is told once its runtime is up, as revive
-    /// sends it: work `issue` when it holds one, else start its loop. None
-    /// for a runtime whose loop wrapper starts the work itself.
-    pub fn pane_bootstrap_command(runtime: &AgentType, issue: Option<u32>) -> Option<String> {
+    /// What a relaunched agent is told once its runtime is up, as revive
+    /// sends it: the manager starts its monitor loop; a worker works `issue`
+    /// when it holds one, else starts its loop. None for a runtime whose
+    /// loop wrapper starts the work itself.
+    pub fn pane_bootstrap_command(runtime: &AgentType, is_manager: bool, issue: Option<u32>) -> Option<String> {
         if runtime_uses_loop_wrappers(runtime) {
             return None;
+        }
+        if is_manager {
+            return manager_bootstrap_cmd(runtime);
         }
         match issue {
             Some(n) => worker_dispatch_cmd(runtime, n),

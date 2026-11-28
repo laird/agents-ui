@@ -1,6 +1,7 @@
-//! Worker controls on the house dialog (#506, for #488): Nudge and Release,
-//! previewed, confirmed, and hidden on a read-only server. The words and
-//! choices are tested under node (controlwords.test.mjs).
+//! Worker controls on the house dialog (#506, #567, for #488): Nudge,
+//! Release, Stop and Restart, previewed, confirmed, and hidden on a
+//! read-only server. The words and choices are tested under node
+//! (controlwords.test.mjs).
 
 use super::*;
 
@@ -24,7 +25,7 @@ fn a_workers_house_dialog_offers_its_controls() {
     assert!(controls.contains("<button data-go=\"${esc(ch.action)}\">Send</button><button data-no=\"1\">Cancel</button>"));
     assert!(controls.contains("{ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: d.go }) }"));
     let words = village_asset("controlwords.js").unwrap().1;
-    assert!(words.contains("if (status === 501) return \"This server can't do that to a worker.\";"));
+    assert!(words.contains("if (status === 501) return \"This server can't do that here.\";"));
 }
 
 #[test]
@@ -46,7 +47,7 @@ fn a_controls_result_shows_on_the_house_at_once() {
     assert!(lifecycle.contains("rest = fxRest(fxOn(v.project, h, t), restOf(h, wall));"));
     let barrels = village_asset("barrels.js").unwrap().1;
     assert!(barrels.contains("fxContext(fxOn(v.project, h, t), h.context_pct)"));
-    // One table keyed by action, restart and stop ready for #505.
+    // One table keyed by action: nudge, release, restart and stop (#505, #567).
     let fx = village_asset("controlfx.js").unwrap().1;
     for action in ["nudge: {", "release: {", "restart: {", "stop: {"] {
         assert!(fx.contains(action), "{action}");

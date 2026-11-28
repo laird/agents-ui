@@ -1615,11 +1615,14 @@ mod tests {
         // Holds no issue: nothing to release.
         assert_eq!(status("p", "worker-1", r#"{"action":"release"}"#).await, StatusCode::CONFLICT);
         assert_eq!(status("p", "manager", r#"{"action":"release"}"#).await, StatusCode::CONFLICT);
-        // Stop and restart (#505): only workers; a worker with no worktree can't be marked stopped.
+        // Stop (#505) stays workers-only; a worker with no worktree can't be marked stopped.
         assert_eq!(status("p", "manager", r#"{"action":"stop"}"#).await, StatusCode::CONFLICT);
-        assert_eq!(status("p", "manager", r#"{"action":"restart"}"#).await, StatusCode::CONFLICT);
         assert_eq!(status("p", "worker-4", r#"{"action":"stop"}"#).await, StatusCode::CONFLICT);
         assert_eq!(status("p", "worker-4", r#"{"action":"restart"}"#).await, StatusCode::CONFLICT);
+        // Restart (#567) no longer refuses the manager outright — restart_check's own
+        // unit tests (controls.rs) prove that; its CONFLICT here is this test harness
+        // having no real tmux pane to find, same as it would be for any agent.
+        assert_eq!(status("p", "manager", r#"{"action":"restart"}"#).await, StatusCode::CONFLICT);
         // A herdr pane can't be restarted from the server yet: said so, not attempted.
         assert_eq!(status("p", "worker-3", r#"{"action":"restart"}"#).await, StatusCode::NOT_IMPLEMENTED);
     }
@@ -1647,7 +1650,12 @@ mod tests {
         assert_eq!(body["action"], "nudge");
         assert!(body["sent"].as_str().is_some_and(|s| !s.is_empty()));
         assert_eq!(get("/api/swarms/p/agents/worker-1/control?action=release").await.0, StatusCode::CONFLICT);
-        assert_eq!(get("/api/swarms/p/agents/worker-1/control?action=restart").await.0, StatusCode::NOT_IMPLEMENTED);
+        // #567: restart and stop are implemented now; an unknown action is still a 501.
+        let (restart_status, restart_body) = get("/api/swarms/p/agents/worker-1/control?action=restart").await;
+        assert_eq!(restart_status, StatusCode::OK);
+        assert!(restart_body["sent"].as_str().is_some_and(|s| !s.is_empty()));
+        assert_eq!(get("/api/swarms/p/agents/worker-1/control?action=stop").await.0, StatusCode::OK);
+        assert_eq!(get("/api/swarms/p/agents/worker-1/control?action=bogus").await.0, StatusCode::NOT_IMPLEMENTED);
         assert_eq!(get("/api/swarms/ghost/agents/worker-1/control?action=nudge").await.0, StatusCode::NOT_FOUND);
     }
 
