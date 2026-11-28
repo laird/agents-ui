@@ -83,7 +83,6 @@ mod tests {
     fn served(mount: Mount) -> Router {
         let state = WebServerState {
             swarms: crate::web::new_shared_state(),
-            agents_dir: "/tmp/test-agents".into(),
             transport: Default::default(),
             village: Default::default(),
             swarm_sources: Default::default(),

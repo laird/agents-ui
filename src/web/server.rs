@@ -48,7 +48,6 @@ pub const DEFAULT_PORT: u16 = 7878;
 #[derive(Clone)]
 pub struct WebServerState {
     pub swarms: SharedWebState,
-    pub agents_dir: PathBuf,
     /// Transport used for live tmux pane captures in the pane endpoint.
     pub transport: ServerTransport,
     /// The village view's sources.
@@ -1335,7 +1334,6 @@ mod tests {
     fn make_web_state(shared: SharedWebState) -> WebServerState {
         WebServerState {
             swarms: shared,
-            agents_dir: PathBuf::from("/tmp/test-agents"),
             transport: ServerTransport::default(),
             village: Default::default(),
             swarm_sources: Default::default(),

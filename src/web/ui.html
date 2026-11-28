@@ -1323,7 +1323,7 @@
         const data = await r.json().catch(() => ({}));
         if (r.ok && data.ok) {
           // Through autocoder-ctl start (#583), `message` says the session, the agent
-          // it started on and any prompt waiting; agents-tui's own launcher sends none.
+          // it started on and any prompt waiting.
           state.launch.status = { ok: true, msg: data.message || ('Swarm launching for ' + (data.project_name || repoPath) + '! Refresh in a few seconds.') };
           state.launch.repoPath = '';
           // Refresh swarms after a short delay to pick up the new swarm

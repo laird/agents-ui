@@ -854,7 +854,7 @@ impl ClaudeAdapter {
         tracing::info!("Created {} worktrees", worktree_paths.len());
 
         // 2. Create tmux session
-        tracing::info!("⏳ Creating tmux session...\n");
+        tracing::info!("Creating tmux session");
         self.create_tmux_session(&session_name, &config.repo_path, &worktree_paths)
             .await?;
         tracing::info!("tmux session: {session_name}");
@@ -870,10 +870,9 @@ impl ClaudeAdapter {
                 .launch_agent_in_pane(&target, &session_name, runtime, false)
                 .await
             {
-                tracing::warn!("Worker {i} launch failed: {e}");
-                tracing::warn!("Failed to launch claude in pane {i}: {e}");
+                tracing::warn!("worker-{n} launch failed: {e}");
             } else {
-                tracing::info!("worker-{i} started");
+                tracing::info!("worker-{n} started");
                 self.send_resume_seed(config, &format!("worker-{n}"), &target)
                     .await;
             }
@@ -881,16 +880,15 @@ impl ClaudeAdapter {
         }
 
         // 4. Launch claude in manager pane
-        tracing::info!("⏳ Starting manager...\n");
+        tracing::info!("Starting manager");
         let manager_target = self.window_pane_target(&session_name, "review").await;
         if let Err(e) = self
             .launch_agent_in_pane(&manager_target, &session_name, runtime, true)
             .await
         {
             tracing::warn!("Manager launch failed: {e}");
-            tracing::warn!("Failed to launch claude in manager pane: {e}");
         } else {
-            tracing::info!("✅ Manager started\n");
+            tracing::info!("Manager started");
             self.send_resume_seed(config, "manager", &manager_target)
                 .await;
             // Wait for Claude to be ready, then send the manage-loop bootstrap command
@@ -908,7 +906,7 @@ impl ClaudeAdapter {
             }
         }
 
-        tracing::info!("\n🎉 Swarm rebuilt! Waiting for sessions to initialize...\n");
+        tracing::info!("Swarm rebuilt; waiting for sessions to initialize");
 
         // Resize the tmux session to match the current terminal size
         if let Err(e) = session::resize_session_to_terminal(&self.transport, &session_name).await {

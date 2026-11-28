@@ -518,11 +518,9 @@ async fn main() -> Result<()> {
         });
 
         // HTTP server
-        let agents_dir = crate::scripts::launcher::resolve_agents_dir();
         let transport = crate::transport::ServerTransport::new(cli.server.clone());
         let web_server_state = web::server::WebServerState {
             swarms: shared.clone(),
-            agents_dir,
             transport,
             village: village_cache(&cli),
             swarm_sources: std::sync::Arc::new(cli.sources.swarm_sources()),
@@ -586,7 +584,6 @@ async fn run_headless(cli: &CliOptions) -> Result<()> {
 
     let state = web::server::WebServerState {
         swarms: shared,
-        agents_dir: crate::scripts::launcher::resolve_agents_dir(),
         transport: ServerTransport::new(cli.server.clone()),
         village: village_cache(&cli),
         swarm_sources: std::sync::Arc::new(cli.sources.swarm_sources()),
