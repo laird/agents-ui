@@ -6,10 +6,12 @@
  * `proposal` label as the TUI's approve key does, closes the issue, or
  * comments. An approved crate leaves the board for the docks on the next
  * poll (through autocoder-ctl when installed, #541). A read-only server
- * answers 403, and the dialog says so. */
+ * gets none of these buttons at all (#565, readonly.js), not just a 403
+ * after a click. */
 import { registerDialogPart } from './registry.js';
 import { esc } from './panels.js';
 import { answerWords, bulkPicks, bulkWords, decisionUrl, isProposal, pickWords } from './decide.js';
+import { canWrite } from './readonly.js';
 
 async function decide(project, n, action, comment) {
   try {
@@ -86,15 +88,23 @@ function bulkBox(root, project, picks, rows) {
   });
 }
 
+/* The dialog this ask last filled: a slow answer for an earlier one is dropped. */
+let proposalsToken = 0;
+
 registerDialogPart(info => {
   // A fresh box each time, so no listener is left from the last dialog.
   const old = document.getElementById('d-act');
-  old.replaceWith(old.cloneNode(false));
+  const box = old.cloneNode(false);
+  old.replaceWith(box);
   if (!info.decide) return;
-  const project = info.decide, notes = (info.items || []).filter(isProposal), rows = new Map();
-  for (const note of notes) {
-    const li = document.querySelector(`#d-meta li[data-n="${note.number}"]`);
-    if (li) { decideRow(li, project, note); rows.set(note.number, li); }
-  }
-  bulkBox(document.getElementById('d-act'), project, bulkPicks(notes), rows);
+  const mine = ++proposalsToken;
+  canWrite().then(writable => {
+    if (!writable || mine !== proposalsToken) return;
+    const project = info.decide, notes = (info.items || []).filter(isProposal), rows = new Map();
+    for (const note of notes) {
+      const li = document.querySelector(`#d-meta li[data-n="${note.number}"]`);
+      if (li) { decideRow(li, project, note); rows.set(note.number, li); }
+    }
+    bulkBox(box, project, bulkPicks(notes), rows);
+  });
 }, 20);

@@ -16,9 +16,11 @@ fn a_workers_house_dialog_offers_its_controls() {
     // A fresh box per dialog; a slow answer for an earlier dialog is dropped.
     assert!(controls.contains("const token = ++ctlToken;"));
     assert!(controls.contains("if (token !== ctlToken) return;"));
-    // Read-only: nothing shown.
-    assert!(controls.contains("fetch('api/config')") && controls.contains("!c.read_only"));
+    // Read-only: nothing shown (readonly.js, #565, shared with proposals.js and newissue.js).
+    assert!(controls.contains("import { canWrite } from './readonly.js';"));
     assert!(controls.contains("if (!(await canWrite()) || token !== ctlToken) return;"));
+    let readonly = village_asset("readonly.js").unwrap().1;
+    assert!(readonly.contains("fetch('api/config')") && readonly.contains("!c.read_only"));
     // Each action is previewed first (GET), confirmed showing what is sent, then posted.
     assert!(controls.contains("previews[action] = await askServer(previewUrl(c.project, c.role, action));"));
     assert!(controls.contains("<pre class=\"sent\">${esc(ch.sent)}</pre>"));

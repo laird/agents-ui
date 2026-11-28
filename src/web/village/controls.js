@@ -14,16 +14,7 @@ import { registerDialogPart } from './registry.js';
 import { esc } from './panels.js';
 import { confirmWords, controlAnswer, controlChoices, controlUrl, previewUrl, CONTROLS, MANAGER_CONTROLS } from './controlwords.js';
 import { controlDone } from './controlplay.js';
-
-/* Whether this server takes control requests: asked once it answers (a
- * failed ask is asked again next time, not remembered as read-only). Shared
- * with swarmcontrols.js, so the castle's two boxes agree. */
-let writable = null;
-export function canWrite() {
-  if (!writable) writable = fetch('api/config').then(r => (r.ok ? r.json() : Promise.reject(r.status))).then(c => !c.read_only)
-    .catch(() => { writable = null; return false; });
-  return writable;
-}
+import { canWrite } from './readonly.js';
 
 /* A fetch that never throws: `null` when the server can't be reached, so a
  * caller can tell that apart from a real HTTP status. Shared with

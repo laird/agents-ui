@@ -26,4 +26,7 @@ fn a_decision_posts_to_the_swarms_issue_and_a_403_says_read_only() {
     let body = &village_source();
     assert!(body.contains("`api/swarms/${encodeURIComponent(project)}/issues/${encodeURIComponent(n)}/decision`"));
     assert!(body.contains("if (status === 403) return 'This dashboard is read-only: decide on GitHub.';"));
+    // #565: no buttons at all on a read-only server, not just a 403 after a click.
+    assert!(body.contains("import { canWrite } from './readonly.js';"));
+    assert!(body.contains("canWrite().then(writable => {\n    if (!writable || mine !== proposalsToken) return;"));
 }

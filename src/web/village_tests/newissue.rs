@@ -9,11 +9,13 @@ fn new_issue_is_offered_beside_the_repo_link_and_on_the_board() {
     assert!(html.contains("<button id=\"new-issue\" class=\"new-issue-btn\" hidden"));
     assert!(html.contains("<div id=\"d-form\"></div>"));
     let body = &village_source();
-    // Shown only while a development village is (a runtime has no backlog to file into).
-    assert!(body.contains("registerOverlay(() => { topButton.hidden = !filingVillage(); });"));
+    // Shown only while a development village is (a runtime has no backlog to
+    // file into) and the server is not read-only (#565, readonly.js).
+    assert!(body.contains("canWrite().then(writable => { topButton.hidden = !v || !writable; });"));
     assert!(body.contains("return sc && sc.v && sc.v.plane !== 'runtime' ? sc.v : null;"));
-    // The board's dialog offers it under its list.
+    // The board's dialog offers it under its list, hidden the same way.
     assert!(body.contains("const v = info.decide && state.villages.find(x => x.project === info.decide);"));
+    assert!(body.contains("if (!writable || mine !== newIssueToken) return;"));
 }
 
 #[test]

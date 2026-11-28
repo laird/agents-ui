@@ -8,6 +8,7 @@ mod controls;
 mod coins;
 mod core;
 mod counting;
+mod decisions;
 mod envrow;
 mod fit;
 mod gatehouse;

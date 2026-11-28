@@ -4,12 +4,14 @@
  * changed). It posts to the server (newissue.rs), which runs the tracker's
  * create in the swarm's repo. No `proposal` label, so the issue goes straight
  * into the queue, and its crate joins the backlog on the next poll. A
- * read-only server answers 403, and the form links to GitHub instead. */
+ * read-only server gets neither button at all (#565, readonly.js), not
+ * just a 403 after a click. */
 import { state } from './state.js';
 import { registerDialogPart, registerOverlay } from './registry.js';
 import { esc } from './panels.js';
 import { openInfo, repoUrl } from './dialogs.js';
 import { ISSUE_PRIORITIES, ISSUE_TYPES, filedWords, issueRequest, newIssueUrl } from './issueform.js';
+import { canWrite } from './readonly.js';
 
 /* The village "New issue" files into: the shown development village, else none. */
 function filingVillage() {
@@ -22,7 +24,10 @@ topButton.addEventListener('click', () => {
   const v = filingVillage();
   if (v) openInfo({ title: 'New issue', line: `Filed in ${v.project}, straight into the queue`, newIssue: v });
 });
-registerOverlay(() => { topButton.hidden = !filingVillage(); });
+registerOverlay(() => {
+  const v = filingVillage();
+  canWrite().then(writable => { topButton.hidden = !v || !writable; });
+});
 
 const options = (list, chosen) => list.map(x => `<option${x === chosen ? ' selected' : ''}>${x}</option>`).join('');
 
@@ -56,6 +61,9 @@ function issueForm(box, v) {
   });
 }
 
+/* The dialog this ask last filled: a slow answer for an earlier one is dropped. */
+let newIssueToken = 0;
+
 registerDialogPart(info => {
   // A fresh box each time, so no listener is left from the last dialog.
   const old = document.getElementById('d-form');
@@ -65,6 +73,10 @@ registerDialogPart(info => {
   // The board's dialog offers it too, under its list.
   const v = info.decide && state.villages.find(x => x.project === info.decide);
   if (!v) return;
-  box.innerHTML = '<div class="opts"><button data-new="1">New issue</button></div>';
-  box.querySelector('[data-new]').addEventListener('click', () => issueForm(box, v));
+  const mine = ++newIssueToken;
+  canWrite().then(writable => {
+    if (!writable || mine !== newIssueToken) return;
+    box.innerHTML = '<div class="opts"><button data-new="1">New issue</button></div>';
+    box.querySelector('[data-new]').addEventListener('click', () => issueForm(box, v));
+  });
 }, 40);

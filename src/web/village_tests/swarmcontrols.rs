@@ -21,8 +21,8 @@ fn the_manager_gets_only_nudge_and_restart() {
     // Derived from CONTROLS (not hand-copied), so a label change can't drift (#567 review).
     assert!(words.contains("export const MANAGER_CONTROLS = CONTROLS.filter(({ action }) => action === 'nudge' || action === 'restart');"));
     let controls = village_asset("controls.js").unwrap().1;
-    // Shared with swarmcontrols.js, so the two boxes agree on read-only.
-    assert!(controls.contains("export function canWrite()"));
+    // Read-only check shared with swarmcontrols.js (readonly.js, #565, so the two boxes agree).
+    assert!(controls.contains("import { canWrite } from './readonly.js';"));
     assert!(controls.contains("export async function askServer("));
     assert!(controls.contains("if (info.controls) fillControls(box, info.controls, token, CONTROLS);"));
     assert!(controls.contains("else if (info.managerControls) fillControls(box, info.managerControls, token, MANAGER_CONTROLS);"));
@@ -35,7 +35,8 @@ fn swarm_controls_hit_the_dashboards_own_routes() {
     assert!(words.contains("${swarmUrl(project)}/resume"));
     assert!(words.contains("${swarmUrl(project)}/workers"));
     let controls = village_asset("swarmcontrols.js").unwrap().1;
-    assert!(controls.contains("import { askServer, canWrite } from './controls.js';"));
+    assert!(controls.contains("import { askServer } from './controls.js';"));
+    assert!(controls.contains("import { canWrite } from './readonly.js';"));
     // Stop and Resume ask first, showing the question before sending.
     assert!(controls.contains("swarmConfirmWords(action, project)"));
     assert!(controls.contains("method: action === 'stop' ? 'DELETE' : 'POST'"));

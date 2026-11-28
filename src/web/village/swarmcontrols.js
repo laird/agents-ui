@@ -4,11 +4,12 @@
  * and Switch agent (for the *next* worker). These act on the whole swarm
  * (server.rs), not one house, so they are a separate box (`d-swarmctl`)
  * from the per-agent controls (controls.js). A read-only server shows
- * nothing, same check as controls.js (`canWrite`, shared so the two boxes
- * never disagree). The words and routes are in swarmwords.js. */
+ * nothing, same check as controls.js (`canWrite`, readonly.js, #565, so the
+ * two boxes never disagree). The words and routes are in swarmwords.js. */
 import { registerDialogPart } from './registry.js';
 import { esc } from './panels.js';
-import { askServer, canWrite } from './controls.js';
+import { askServer } from './controls.js';
+import { canWrite } from './readonly.js';
 import { DEFAULT_AGENT_TYPES, resumeUrl, swarmAnswer, swarmConfirmWords, swarmUrl, workersUrl } from './swarmwords.js';
 
 /* The swarm's own record from `/api/swarms` (not the village model, which
