@@ -149,8 +149,13 @@ pub fn has_manifest(repo: &Path, session: &str) -> bool {
 /// Run on a remote host (#585): the newest `autocoder-ctl.sh` its autocoder
 /// plugin installed (ranked by the version directory alone, not the whole
 /// path, so a marketplace's name never decides), with the verb's arguments
-/// as `$@`. Exit 127 when it has none.
-const REMOTE_RUN: &str = r#"f=$(ls -d "$HOME"/.claude/plugins/cache/*/autocoder/*/scripts/autocoder-ctl.sh 2>/dev/null | awk -F/ '{print $(NF-2) "\t" $0}' | sort -V -k1,1 | tail -n 1 | cut -f2-); [ -n "$f" ] || exit 127; exec bash "$f" "$@""#;
+/// as `$@`. Only version directories count (a stray commit-named one never
+/// wins). Exit 127, saying [`REMOTE_NONE`], when it has none.
+const REMOTE_RUN: &str = r#"f=$(ls -d "$HOME"/.claude/plugins/cache/*/autocoder/*/scripts/autocoder-ctl.sh 2>/dev/null | awk -F/ '$(NF-2) ~ /^[0-9]/ {print $(NF-2) "\t" $0}' | sort -V -k1,1 | tail -n 1 | cut -f2-); [ -n "$f" ] || { echo "autocoder-ctl: none installed" >&2; exit 127; }; exec bash "$f" "$@""#;
+/// What [`REMOTE_RUN`] says when the host has no `autocoder-ctl.sh`, so a
+/// 127 from inside the script (a command missing on the remote PATH) is not
+/// taken for that.
+const REMOTE_NONE: &str = "autocoder-ctl: none installed";
 
 /// The command [`run_remote`] sends over ssh: each argument its own word
 /// (the transport quotes them), the verb's after `$0`.
@@ -161,15 +166,15 @@ pub fn remote_argv(args: &[String]) -> Vec<String> {
 }
 
 /// Run a verb in `cwd` on the transport's remote host. An answer of exit 3
-/// (the verb is not in that autocoder) or 127 (no autocoder there) is
+/// (the verb is not in that autocoder) or no autocoder there is
 /// [`CtlRun::Unsupported`].
 pub async fn run_remote(transport: &crate::transport::ServerTransport, args: &[String], cwd: &Path) -> CtlRun {
     let action = args.first().map(String::as_str).unwrap_or("");
     let out = tokio::time::timeout(TIMEOUT, transport.output("env", &remote_argv(args), Some(cwd)))
         .await
-        .unwrap_or_else(|_| Err(anyhow::anyhow!("no answer in {}s", TIMEOUT.as_secs())));
+        .unwrap_or_else(|_| Err(anyhow::anyhow!("no answer in {}s; it may still be running there", TIMEOUT.as_secs())));
     match out {
-        Ok(out) if out.status.code() == Some(127) => CtlRun::Unsupported,
+        Ok(out) if out.status.code() == Some(127) && String::from_utf8_lossy(&out.stderr).contains(REMOTE_NONE) => CtlRun::Unsupported,
         Ok(out) => parse_result(action, &out.stdout, &out.stderr, out.status.code()),
         Err(e) => CtlRun::Done(CtlResult {
             action: action.to_string(),
@@ -399,7 +404,8 @@ mod tests {
         let dir = temp_dir("remote");
         let home = dir.join("home");
         // Two versions in two marketplaces: the version decides, not the name.
-        for (market, ver, says) in [("zzz-market", "4.9.0", "old"), ("aaa-market", "4.73.0", "new")] {
+        // A commit-named directory is not a version and never wins.
+        for (market, ver, says) in [("zzz-market", "4.9.0", "old"), ("aaa-market", "4.73.0", "new"), ("aaa-market", "f00dfeed", "sha")] {
             let scripts = home.join(format!(".claude/plugins/cache/{market}/autocoder/{ver}/scripts"));
             std::fs::create_dir_all(&scripts).unwrap();
             std::fs::write(
@@ -425,6 +431,16 @@ mod tests {
         std::fs::create_dir_all(&home).unwrap();
         let transport = crate::transport::ServerTransport::with_ssh_program("buildbox", fake_ssh(&dir, &home));
         assert_eq!(run_on(&transport, None, &stop_swarm_args(&dir), &dir).await, CtlRun::Unsupported);
+        // Exit 3 there: that autocoder lacks the verb.
+        let scripts = home.join(".claude/plugins/cache/m/autocoder/4.0.0/scripts");
+        std::fs::create_dir_all(&scripts).unwrap();
+        std::fs::write(scripts.join("autocoder-ctl.sh"), r#"echo '{"ok":false,"detail":"not implemented"}'; exit 3"#).unwrap();
+        assert_eq!(run_on(&transport, None, &stop_swarm_args(&dir), &dir).await, CtlRun::Unsupported);
+        // A 127 from inside the script is its failure, not "no autocoder".
+        std::fs::write(scripts.join("autocoder-ctl.sh"), "echo 'tmux: command not found' >&2; exit 127").unwrap();
+        let CtlRun::Done(r) = run_on(&transport, None, &stop_swarm_args(&dir), &dir).await else { panic!("taken for no autocoder") };
+        assert!(!r.ok);
+        assert_eq!(r.detail.as_str(), Some("tmux: command not found"));
         assert!(no_start(Some("buildbox")).starts_with("❌ The autocoder on buildbox has no `autocoder-ctl start`"));
         let _ = std::fs::remove_dir_all(&dir);
     }
