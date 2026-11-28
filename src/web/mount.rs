@@ -88,6 +88,7 @@ mod tests {
             village: Default::default(),
             swarm_sources: Default::default(),
             since: Default::default(),
+            public_host: String::new(),
         };
         app(false, &mount, state)
     }

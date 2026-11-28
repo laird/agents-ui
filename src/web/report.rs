@@ -340,8 +340,17 @@ mod tests {
         assert!(json["tasks"].as_array().unwrap().iter().all(|t| t.get("priority").is_none()), "`—` is no priority");
         assert!(!json.to_string().contains("\"\""), "no empty strings standing in for what it can't say: {json}");
 
+        // mux/pane (#549) are this server's own plumbing to its agents'
+        // panes, not part of the agents-village/v1 exchange format: a report
+        // read back through `--framework` never carries them.
+        let strip_pane = |mut h: crate::web::village::House| {
+            h.mux = None;
+            h.pane = None;
+            h
+        };
         let (a, b) = (&first.village, &reparse(&first).village);
-        assert_eq!((&b.manager, &b.houses), (&a.manager, &a.houses));
+        let a_houses: Vec<_> = a.houses.iter().cloned().map(strip_pane).collect();
+        assert_eq!((strip_pane(b.manager.clone()), b.houses.clone()), (strip_pane(a.manager.clone()), a_houses));
         assert_eq!(b.houses[0].kind, crate::web::village::HouseKind::Bug, "its issue's labels still decide the building");
         assert_eq!((&b.backlog, &b.board, &b.pipeline.quay, &b.pipeline.stops), (&a.backlog, &a.board, &a.pipeline.quay, &a.pipeline.stops));
     }

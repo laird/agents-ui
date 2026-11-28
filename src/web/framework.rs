@@ -293,6 +293,12 @@ pub struct Agent {
     /// when the runtime says when it lifts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<crate::model::status::UsageLimit>,
+    /// How to reach its pane directly (#549): `tmux` or `herdr`, and which
+    /// target. Absent for a workflow or sub-agent with no pane of its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mux: Option<crate::model::swarm::Mux>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -704,6 +710,9 @@ fn house(id: String, ws: &Workstream, tasks: &HashMap<&str, &Task>) -> House {
         subagents: ws.helpers.iter().map(helper).collect(),
         action: if status == HouseStatus::Working { ws.action } else { None },
         links,
+        // The same agent the session link above points to (#549).
+        mux: ws.agents.first().and_then(|a| a.mux),
+        pane: ws.agents.first().and_then(|a| a.pane.clone()),
         question: if status == HouseStatus::Blocked { ws.question.clone() } else { None },
         answer_url: ws.answer_url.clone(),
         branch: ws.branch.clone(),
@@ -953,6 +962,8 @@ fn swarm_workstream(id: String, crew: &[&super::AgentSnapshot], project: &str) -
                         a.limit.clone().or_else(|| crate::model::status::parse_limit(&a.pane_content))
                     },
                     state,
+                    mux: Some(a.mux),
+                    pane: (!a.tmux_target.is_empty()).then(|| a.tmux_target.clone()),
                     ..Agent::default()
                 }
             })
@@ -1590,6 +1601,47 @@ mod tests {
         assert_eq!(links, vec![("Agent session", "./#/swarm/shop/agent/worker-2"), ("GitHub issue #43", "https://github.com/acme/shop/issues/43")]);
         assert_eq!(v.board[0].url.as_deref(), Some("https://github.com/acme/shop/issues/45"));
         assert_eq!(session_link("my repo", "worker-1").url, "./#/swarm/my%20repo/agent/worker-1");
+    }
+
+    /// #549: a house carries its first agent's mux and pane, straight from
+    /// what discovery read (a tmux target, or a herdr pane id).
+    #[test]
+    fn houses_carry_their_first_agents_mux_and_pane() {
+        let agent = |role: &str, mux: crate::model::swarm::Mux, pane: &str| crate::web::AgentSnapshot {
+            id: format!("shop/{role}"),
+            role: role.to_string(),
+            state: "Idle".to_string(),
+            health: "Healthy".to_string(),
+            mux,
+            tmux_target: pane.to_string(),
+            ..Default::default()
+        };
+        let herdr = SwarmSnapshot {
+            project_name: "shop".into(),
+            manager: agent("manager", crate::model::swarm::Mux::Herdr, "w1F:p1"),
+            ..Default::default()
+        };
+        let v = to_village(&swarm_report(&herdr, &[], &Pipeline::default())).village;
+        assert_eq!(v.manager.mux, Some(crate::model::swarm::Mux::Herdr));
+        assert_eq!(v.manager.pane.as_deref(), Some("w1F:p1"));
+
+        let tmux = SwarmSnapshot {
+            project_name: "shop".into(),
+            manager: agent("manager", crate::model::swarm::Mux::Tmux, "claude-shop:0.0"),
+            ..Default::default()
+        };
+        let v = to_village(&swarm_report(&tmux, &[], &Pipeline::default())).village;
+        assert_eq!(v.manager.mux, Some(crate::model::swarm::Mux::Tmux));
+        assert_eq!(v.manager.pane.as_deref(), Some("claude-shop:0.0"));
+
+        // A snapshot without a pane to read yet (discovery in progress) has none.
+        let unread = SwarmSnapshot {
+            project_name: "shop".into(),
+            manager: agent("manager", crate::model::swarm::Mux::Tmux, ""),
+            ..Default::default()
+        };
+        let v = to_village(&swarm_report(&unread, &[], &Pipeline::default())).village;
+        assert_eq!(v.manager.pane, None);
     }
 
     const PERMISSION: &str = "\u{1b}[2m✓ 214 tests passed\u{1b}[0m\n╭──────────────────────────────╮\n│ Bash command                 │\n│   npm publish                │\n│ Do you want to proceed?      │\n│ \u{1b}[36m❯ 1. Yes\u{1b}[0m                    │\n│   2. Yes, and don't ask again │\n│   3. No, and tell Claude what to do differently (esc) │\n╰──────────────────────────────╯\n";

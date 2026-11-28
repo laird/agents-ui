@@ -60,6 +60,10 @@ struct CliOptions {
     frameworks: Vec<String>,
     /// The path prefix and frame policy the web UI is served with (`--base-path`, `--frame-ancestors`).
     mount: web::mount::Mount,
+    /// The tailnet or SSH name of the machine whose herdr/tmux hosts this
+    /// swarm, for a village's "Open in herdr" link (`--public-host`, #549).
+    /// `None` means use the local hostname.
+    public_host: Option<String>,
 }
 
 fn parse_cli_options<I, S>(args: I) -> Result<CliOptions>
@@ -87,6 +91,7 @@ where
     let mut sources = web::source::SourceConfig::default();
     let mut frameworks = Vec::new();
     let mut mount = web::mount::Mount::default();
+    let mut public_host = None;
 
     let mut iter = args.into_iter().skip(1);
     while let Some(arg) = iter.next() {
@@ -238,6 +243,15 @@ where
             value if value.starts_with("--frame-ancestors=") => {
                 mount.frame_ancestors = Some(web::mount::frame_ancestors(value.trim_start_matches("--frame-ancestors=")).map_err(anyhow::Error::msg)?);
             }
+            "--public-host" => {
+                let Some(value) = iter.next() else {
+                    anyhow::bail!("--public-host requires a name, e.g. nuc-1");
+                };
+                public_host = Some(value.as_ref().to_string());
+            }
+            value if value.starts_with("--public-host=") => {
+                public_host = Some(value.trim_start_matches("--public-host=").to_string());
+            }
             _ => {}
         }
     }
@@ -283,7 +297,7 @@ where
         web_port = Some(web::server::DEFAULT_PORT);
     }
 
-    Ok(CliOptions { agent_type, server, web_port, headless, temporal, temporal_url, temporal_ui, kubernetes, web_bind, read_only, worlds, incident_labels, sources, frameworks, mount })
+    Ok(CliOptions { agent_type, server, web_port, headless, temporal, temporal_url, temporal_ui, kubernetes, web_bind, read_only, worlds, incident_labels, sources, frameworks, mount, public_host })
 }
 
 /// `AGENTS_UI_BASE_PATH` and `AGENTS_UI_FRAME_ANCESTORS` as flags placed
@@ -506,6 +520,7 @@ async fn main() -> Result<()> {
             village: village_cache(&cli),
             swarm_sources: std::sync::Arc::new(cli.sources.swarm_sources()),
             since: Default::default(),
+            public_host: cli.public_host.clone().unwrap_or_else(web::server::local_hostname),
         };
         let (addrs, read_only, mount) = (web_addrs(&cli, port), cli.read_only, cli.mount.clone());
         tokio::spawn(async move {
@@ -569,6 +584,7 @@ async fn run_headless(cli: &CliOptions) -> Result<()> {
         village: village_cache(&cli),
         swarm_sources: std::sync::Arc::new(cli.sources.swarm_sources()),
         since: Default::default(),
+        public_host: cli.public_host.clone().unwrap_or_else(web::server::local_hostname),
     };
 
     // Unlike the TUI path, this awaits the server instead of detaching it --
@@ -615,6 +631,7 @@ mod tests {
                 sources: Default::default(),
                 frameworks: Vec::new(),
                 mount: Default::default(),
+                public_host: None,
             }
         );
     }
@@ -641,6 +658,16 @@ mod tests {
         assert_eq!(flag_wins.mount.base_path, "/from/flag");
         assert_eq!(parse_cli_options(with_env_flags(args(&[]), |_| None)).unwrap().mount, Default::default());
         assert_eq!(parse_cli_options(with_env_flags(args(&[]), |_| Some(String::new()))).unwrap().mount, Default::default());
+    }
+
+    #[test]
+    fn public_host_flag_overrides_the_local_hostname() {
+        assert_eq!(parse_cli_options(["agents-tui"]).unwrap().public_host, None);
+        let cli = parse_cli_options(["agents-tui", "--public-host", "nuc-1"]).unwrap();
+        assert_eq!(cli.public_host, Some("nuc-1".to_string()));
+        let cli = parse_cli_options(["agents-tui", "--public-host=nuc-1.tailnet"]).unwrap();
+        assert_eq!(cli.public_host, Some("nuc-1.tailnet".to_string()));
+        assert!(parse_cli_options(["agents-tui", "--public-host"]).is_err());
     }
 
     #[test]
@@ -792,6 +819,7 @@ mod tests {
                 sources: Default::default(),
                 frameworks: Vec::new(),
                 mount: Default::default(),
+                public_host: None,
             }
         );
 
@@ -814,6 +842,7 @@ mod tests {
                 sources: Default::default(),
                 frameworks: Vec::new(),
                 mount: Default::default(),
+                public_host: None,
             }
         );
     }

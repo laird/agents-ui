@@ -57,6 +57,23 @@ pub struct WebServerState {
     pub swarm_sources: std::sync::Arc<Vec<Box<dyn super::source::SwarmSource>>>,
     /// The last `/api/village/since` answer, kept a minute (#479).
     pub since: std::sync::Arc<super::since::SinceCache>,
+    /// Stamped on every village this server serves (#549): the local
+    /// hostname, or `--public-host`'s override.
+    pub public_host: String,
+}
+
+/// The local hostname, or empty when it can't be read. No crate dependency
+/// for this: shells out to `hostname`, same as the rest of this codebase
+/// reaches system state it has no Rust binding for.
+pub fn local_hostname() -> String {
+    std::process::Command::new("hostname")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_default()
 }
 
 async fn index_handler() -> Html<&'static str> {
@@ -84,7 +101,10 @@ async fn api_village_handler(State(state): State<WebServerState>) -> Json<Value>
         .read()
         .map(|s| s.clone())
         .unwrap_or_default();
-    let snapshot = state.village.snapshot(&state.transport, &swarms).await;
+    let mut snapshot = state.village.snapshot(&state.transport, &swarms).await;
+    for village in &mut snapshot.villages {
+        village.host = state.public_host.clone();
+    }
     Json(json!(snapshot))
 }
 
@@ -1313,6 +1333,7 @@ mod tests {
             village: Default::default(),
             swarm_sources: Default::default(),
             since: Default::default(),
+            public_host: "test-host".to_string(),
         }
     }
 
@@ -1792,6 +1813,20 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["villages"], serde_json::json!([]));
         assert_eq!(json["worlds"], serde_json::json!([]));
+    }
+
+    /// #549: every village carries the server's own host, for the village
+    /// page's "Open in herdr" link — `make_web_state` sets it to "test-host".
+    #[tokio::test]
+    async fn api_village_stamps_the_servers_public_host() {
+        let shared = std::sync::Arc::new(std::sync::RwLock::new(vec![sample_swarm("p")]));
+        let app = make_app(make_web_state(shared));
+        let req = Request::builder().uri("/api/village").body(Body::empty()).unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["villages"][0]["host"], "test-host");
     }
 
     #[tokio::test]

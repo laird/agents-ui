@@ -159,6 +159,14 @@ pub struct House {
     /// Where to drill in: the agent's session, its issue, its workflow.
     #[serde(default)]
     pub links: Vec<super::framework::Link>,
+    /// How its first agent's pane is reached directly (#549), from the same
+    /// agent `links`' session link comes from: `tmux` or `herdr`, and which
+    /// target. Absent when the source doesn't say (Temporal, Kubernetes, an
+    /// outside `--framework` report).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mux: Option<crate::model::swarm::Mux>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane: Option<String>,
     /// A structured question its agent is waiting on, shown as buttons.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub question: Option<super::framework::Question>,
@@ -497,6 +505,11 @@ pub struct VillageSnapshot {
     /// The framework it came from: `autocoder`, `herdr`, `temporal`, ...
     #[serde(default)]
     pub framework: String,
+    /// The tailnet or SSH name of the machine whose herdr or tmux hosts this
+    /// swarm (#549): the local hostname, or `--public-host`'s override.
+    /// Stamped on every snapshot at the server, not built here.
+    #[serde(default)]
+    pub host: String,
     /// `Autocoder` or `Modernize`: from the swarm, or inferred from a
     /// `modernize:*` sub-agent.
     pub workflow: Option<String>,
