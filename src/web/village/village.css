@@ -94,6 +94,8 @@
   .dialog .attach-cmds .cmd { display: flex; gap: 6px; align-items: center; }
   .dialog .attach-cmds code { flex: 1; font: 12px var(--mono); background: rgba(0,0,0,.25); padding: 4px 6px; border-radius: 4px; user-select: all; overflow-wrap: anywhere; }
   .dialog .attach-cmds .retry { align-self: flex-start; }
+  .dialog .attach-cmds .ios-key { flex: 1; min-width: 0; font: 12px var(--mono); }
+  .dialog .attach-cmds .ios-change { align-self: flex-start; }
   .dialog ul { list-style: none; margin: 6px 0 0; padding: 0; max-height: 40vh; overflow: auto; }
   .dialog li { font: 14px/1.5 var(--mono); }
   /* A row naming an issue is clickable everywhere on it, not just its #N

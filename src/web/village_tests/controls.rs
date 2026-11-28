@@ -80,3 +80,18 @@ fn an_agents_dialog_opens_it_in_herdr_with_a_web_terminal_fallback() {
     assert!(dialogs.contains("if (plan === 'fallback') { e.preventDefault(); attachFallback(a, box, true); return; }"));
     assert!(village_asset("village.css").unwrap().1.contains(".dialog .attach-cmds {"));
 }
+
+/// "Open in herdr" on iOS (#591): no agents-ui:// handler there, so the click
+/// opens the chosen SSH app (or the browser until one is chosen) and never
+/// waits on a handler. The links and the choice are tested under node
+/// (iossh.test.mjs).
+#[test]
+fn on_ios_an_agents_pane_opens_in_the_chosen_ssh_app() {
+    let dialogs = village_asset("dialogs.js").unwrap().1;
+    assert!(dialogs.contains("if (isIOS(navigator)) { e.preventDefault(); iosAttach(a, box, true); return; }"));
+    assert!(dialogs.contains("if (p.kind === 'app') window.location.href = p.url; else if (a.web) window.open(a.web, '_blank', 'noopener');"));
+    assert!(dialogs.contains("iosMemo(null); iosAttach(a, box, false);"), "the choice can be changed");
+    let ios = village_asset("iossh.js").unwrap().1;
+    assert!(ios.contains("`blinkshell://run?key=${encodeURIComponent(choice.key)}&cmd=${encodeURIComponent(cmd)}`"));
+    assert!(village_asset("village.css").unwrap().1.contains(".dialog .attach-cmds .ios-key {"));
+}

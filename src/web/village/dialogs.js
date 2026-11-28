@@ -11,6 +11,7 @@ import { cv, shownScale, shownScenes, themeAt } from './layout.js';
 import { toScene } from './detail.js';
 import { esc } from './panels.js';
 import { ATTACH_WAIT, HANDLER_KEY, SESSION, attachPlan } from './herdrlink.js';
+import { IOS_SSH_KEY, choiceOf, iosPlan, isIOS, parseChoice } from './iossh.js';
 
 export const dialog = document.getElementById('dialog');
 document.getElementById('close').addEventListener('click', () => { dialog.hidden = true; });
@@ -31,6 +32,7 @@ export function links(list) {
 const attachKnown = () => { try { return localStorage.getItem(HANDLER_KEY); } catch (e) { return null; } };
 const attachMemo = x => { try { if (x) localStorage.setItem(HANDLER_KEY, x); else localStorage.removeItem(HANDLER_KEY); } catch (e) { /* private mode */ } };
 function attachClick(e, a, box) {
+  if (isIOS(navigator)) { e.preventDefault(); iosAttach(a, box, true); return; }
   const plan = attachPlan(attachKnown());
   if (plan === 'open') return;
   if (plan === 'fallback') { e.preventDefault(); attachFallback(a, box, true); return; }
@@ -45,15 +47,44 @@ function attachClick(e, a, box) {
 }
 function attachFallback(a, box, now) {
   if (a.web) window.open(a.web, '_blank', 'noopener');
-  const el = box.querySelector('.attach-cmds') || box.appendChild(Object.assign(document.createElement('div'), { className: 'attach-cmds' }));
+  const el = attachBox(box);
   el.innerHTML = `<p class="dim">${now ? 'No agents-ui:// handler answered last time' : 'No agents-ui:// handler answered'}${a.web ? ', so this opens in the browser' : ''}. To attach from a terminal:</p>`
-    + a.cmds.map(c => `<div class="cmd"><code>${esc(c)}</code><button type="button" data-copy="${esc(c)}">Copy</button></div>`).join('')
+    + cmdRows(a.cmds)
     + '<button type="button" class="retry">Try the handler again</button>';
+  wireCopy(el);
+  el.querySelector('.retry').addEventListener('click', () => { attachMemo(null); el.remove(); });
+}
+const attachBox = box => box.querySelector('.attach-cmds') || box.appendChild(Object.assign(document.createElement('div'), { className: 'attach-cmds' }));
+const cmdRows = cmds => cmds.map(c => `<div class="cmd"><code>${esc(c)}</code><button type="button" data-copy="${esc(c)}">Copy</button></div>`).join('');
+function wireCopy(el) {
   el.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', () => {
     const done = () => { b.textContent = 'Copied'; };
     if (navigator.clipboard) navigator.clipboard.writeText(b.dataset.copy).then(done, () => { b.textContent = 'Select and copy'; });
   }));
-  el.querySelector('.retry').addEventListener('click', () => { attachMemo(null); el.remove(); });
+}
+/* On iOS (iossh.js, #591) there is no agents-ui:// handler: the pane opens
+ * in the SSH app chosen here (Blink runs the command, Termius only opens the
+ * host), or in the browser until one is chosen. The choice is remembered. */
+const iosKnown = () => { try { return parseChoice(localStorage.getItem(IOS_SSH_KEY)); } catch (e) { return null; } };
+const iosMemo = x => { try { if (x) localStorage.setItem(IOS_SSH_KEY, x); else localStorage.removeItem(IOS_SSH_KEY); } catch (e) { /* private mode */ } };
+function iosAttach(a, box, go) {
+  const p = iosPlan(iosKnown(), a), el = attachBox(box);
+  if (go) { if (p.kind === 'app') window.location.href = p.url; else if (a.web) window.open(a.web, '_blank', 'noopener'); }
+  el.innerHTML = (p.kind === 'app'
+    ? `<p class="dim">${go ? 'Opening' : 'Opens'} in ${esc(p.app)}${p.app === 'Termius' ? ', which can only open the host: paste this there' : ', which runs'}:</p>${cmdRows([p.cmd])}`
+      + '<button type="button" class="ios-change">Change SSH app</button>'
+    : `<p class="dim">${go && a.web ? 'This opens in the browser. ' : ''}To open panes in an SSH app instead, choose one (Blink's key is in its Settings &gt; x-callback-url):</p>${cmdRows([p.cmd])}`
+      + '<div class="cmd"><input class="ios-key" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Blink key">'
+      + '<button type="button" data-app="blink">Use Blink</button><button type="button" data-app="termius">Use Termius</button></div>'
+      + '<p class="dim ios-msg" role="status"></p>');
+  wireCopy(el);
+  const change = el.querySelector('.ios-change');
+  if (change) change.addEventListener('click', () => { iosMemo(null); iosAttach(a, box, false); });
+  el.querySelectorAll('[data-app]').forEach(b => b.addEventListener('click', () => {
+    const c = choiceOf(b.dataset.app, el.querySelector('.ios-key').value);
+    if (!c) { el.querySelector('.ios-msg').textContent = 'Enter the key from Blink\'s Settings > x-callback-url.'; return; }
+    iosMemo(c); iosAttach(a, box, false);
+  }));
 }
 /* A structured question the agent is waiting on (a numbered menu or y/n):
  * one button per option. The server checks the same question is still on

@@ -15,8 +15,10 @@ const HOST = /^[A-Za-z0-9][A-Za-z0-9.-]*$/;
 const PANE = { herdr: /^w[0-9A-Za-z]+:p[0-9]+$/, tmux: /^[A-Za-z0-9._-]+:[0-9]+\.[0-9]+$/ };
 
 /* Where house (or manager) `h` of village `v` can be attached to:
- * { mux, url, cmds } — the agents-ui:// link and the commands that do the
- * same by hand — or null when the village doesn't say where its pane is. */
+ * { mux, host, pane, url, cmds } — the agents-ui:// link and the commands
+ * that do the same by hand — or null when the village doesn't say where its
+ * pane is. `host` and `pane` have passed HOST and PANE (iossh.js builds an
+ * SSH app's link from them). */
 export function attachOf(v, h) {
   const host = v && v.host, mux = h && h.mux, pane = h && h.pane;
   if (!host || !HOST.test(host) || !PANE[mux] || !PANE[mux].test(pane || '')) return null;
@@ -25,7 +27,7 @@ export function attachOf(v, h) {
   const cmds = mux === 'herdr'
     ? [`herdr --remote ${host}`, `herdr --machine ${host} agent focus ${pane}`]
     : [`ssh -t ${host} tmux attach -t ${pane.split(':')[0]} \\; select-pane -t ${pane}`];
-  return { mux, url, cmds };
+  return { mux, host, pane, url, cmds };
 }
 
 /* An agent dialog's links with "Open in herdr" first and the web terminal

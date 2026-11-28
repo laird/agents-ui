@@ -140,6 +140,12 @@ this machine, a tailnet peer or a saved herdr machine, and attaches with
 `herdr agent attach <pane>` (over `ssh -t` for another host). Without a
 handler, the page opens the web terminal instead.
 
+**iOS** has no handler: the link opens the web terminal until you choose an
+SSH app under it. **Blink** runs `ssh -t <host> herdr agent attach <pane>`
+itself (give the page the key from Blink's Settings > x-callback-url);
+**Termius** only opens `ssh://<host>`, so the page shows the command to paste.
+The page remembers the choice, and **Change SSH app** clears it.
+
 ## CLI Options
 
 Supported flags:
