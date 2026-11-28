@@ -1262,6 +1262,7 @@ pub(super) fn app(read_only: bool, mount: &super::mount::Mount, state: WebServer
         )
         .route("/api/swarms/{project}/flaky", post(super::flaky::api_file_handler))
         .route("/api/swarms/{project}/issues/{number}/travel", get(super::travel::api_travel_handler))
+        .route("/api/swarms/{project}/issues/{number}", get(super::issue::api_issue_handler))
         .route(
             "/api/swarms/{project}/agents/{role}/control",
             post(super::controls::api_control_handler).get(super::control_preview::api_control_preview_handler),
@@ -1377,6 +1378,7 @@ mod tests {
             )
             .route("/api/swarms/{project}/flaky", post(crate::web::flaky::api_file_handler))
             .route("/api/swarms/{project}/issues/{number}/travel", get(crate::web::travel::api_travel_handler))
+            .route("/api/swarms/{project}/issues/{number}", get(crate::web::issue::api_issue_handler))
             .route(
                 "/api/swarms/{project}/agents/{role}/control",
                 post(crate::web::controls::api_control_handler).get(crate::web::control_preview::api_control_preview_handler),
@@ -1655,6 +1657,14 @@ mod tests {
     async fn the_travel_log_is_read_only_and_needs_a_swarm() {
         let app = make_app(make_web_state(new_shared_state())).layer(axum::middleware::from_fn(reject_writes));
         let resp = app.oneshot(Request::builder().uri("/api/swarms/ghost/issues/7/travel").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// #564: the issue dialog's own read is read-only too.
+    #[tokio::test]
+    async fn the_issue_detail_is_read_only_and_needs_a_swarm() {
+        let app = make_app(make_web_state(new_shared_state())).layer(axum::middleware::from_fn(reject_writes));
+        let resp = app.oneshot(Request::builder().uri("/api/swarms/ghost/issues/7").body(Body::empty()).unwrap()).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 
