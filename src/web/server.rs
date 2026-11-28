@@ -739,7 +739,8 @@ async fn api_launch_swarm_handler(
     use super::launch::{self, Launch};
 
     let repo_path = PathBuf::from(&body.repo_path);
-    if !repo_path.exists() {
+    // Where the swarms run: over ssh, the path is the remote host's (#585).
+    if !state.transport.dir_exists(&repo_path).await {
         return Err(StatusCode::BAD_REQUEST);
     }
 
@@ -761,7 +762,7 @@ async fn api_launch_swarm_handler(
         .unwrap_or_else(|| "unknown".to_string());
 
     let script = super::ctl::script(&state.transport);
-    let answer = match launch::via_ctl(script.as_deref(), &repo_path, body.num_workers, &agent_type, mux, &project_name).await {
+    let answer = match launch::via_ctl(&state.transport, script.as_deref(), &repo_path, body.num_workers, &agent_type, mux, &project_name).await {
         Launch::Ctl { ok, body } => {
             if ok {
                 // A stop mark from an earlier stop would keep it from healing.
@@ -769,7 +770,7 @@ async fn api_launch_swarm_handler(
             }
             body
         }
-        Launch::Unsupported => launch::cannot_start(state.transport.is_remote(), &project_name),
+        Launch::Unsupported => launch::cannot_start(state.transport.server(), &project_name),
     };
     Ok(Json(answer))
 }

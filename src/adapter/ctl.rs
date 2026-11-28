@@ -95,9 +95,14 @@ pub fn start_args(repo: &Path, workers: u32, agent: &AgentType, plugin_install: 
 /// What a launch says when this autocoder cannot start a swarm.
 pub const NO_START: &str = "❌ This autocoder has no `autocoder-ctl start`, which agents-tui starts swarms with. \
 Update the autocoder plugin (`claude plugin update autocoder@plugin-marketplace`) and try again.";
-/// What a launch says on a remote host.
-pub const REMOTE: &str = "❌ agents-tui starts swarms with autocoder-ctl start on this machine, not on a remote host. \
-Start the swarm on that host (`autocoder-ctl.sh start <repo>`, or agents-tui there).";
+
+/// [`NO_START`], naming the remote host it is about when there is one.
+pub fn no_start(host: Option<&str>) -> String {
+    match host {
+        Some(h) => NO_START.replacen("This autocoder", &format!("The autocoder on {h}"), 1),
+        None => NO_START.to_string(),
+    }
+}
 
 /// `start`'s arguments with `--mux` added when one was chosen.
 pub fn with_mux(mut args: Vec<String>, mux: Option<&str>) -> Vec<String> {
@@ -139,6 +144,52 @@ pub fn has_manifest(repo: &Path, session: &str) -> bool {
             common.parent().map(|main| main.join(&file).is_file())
         })
         .unwrap_or(false)
+}
+
+/// Run on a remote host (#585): the newest `autocoder-ctl.sh` its autocoder
+/// plugin installed (ranked by the version directory alone, not the whole
+/// path, so a marketplace's name never decides), with the verb's arguments
+/// as `$@`. Exit 127 when it has none.
+const REMOTE_RUN: &str = r#"f=$(ls -d "$HOME"/.claude/plugins/cache/*/autocoder/*/scripts/autocoder-ctl.sh 2>/dev/null | awk -F/ '{print $(NF-2) "\t" $0}' | sort -V -k1,1 | tail -n 1 | cut -f2-); [ -n "$f" ] || exit 127; exec bash "$f" "$@""#;
+
+/// The command [`run_remote`] sends over ssh: each argument its own word
+/// (the transport quotes them), the verb's after `$0`.
+pub fn remote_argv(args: &[String]) -> Vec<String> {
+    let mut argv: Vec<String> = ["AUTOCODER_CTL_ACTOR=agents-tui", "bash", "-c", REMOTE_RUN, "autocoder-ctl"].map(str::to_string).to_vec();
+    argv.extend(args.iter().cloned());
+    argv
+}
+
+/// Run a verb in `cwd` on the transport's remote host. An answer of exit 3
+/// (the verb is not in that autocoder) or 127 (no autocoder there) is
+/// [`CtlRun::Unsupported`].
+pub async fn run_remote(transport: &crate::transport::ServerTransport, args: &[String], cwd: &Path) -> CtlRun {
+    let action = args.first().map(String::as_str).unwrap_or("");
+    let out = tokio::time::timeout(TIMEOUT, transport.output("env", &remote_argv(args), Some(cwd)))
+        .await
+        .unwrap_or_else(|_| Err(anyhow::anyhow!("no answer in {}s", TIMEOUT.as_secs())));
+    match out {
+        Ok(out) if out.status.code() == Some(127) => CtlRun::Unsupported,
+        Ok(out) => parse_result(action, &out.stdout, &out.stderr, out.status.code()),
+        Err(e) => CtlRun::Done(CtlResult {
+            action: action.to_string(),
+            ok: false,
+            exit: None,
+            detail: serde_json::Value::String(format!("could not run autocoder-ctl on {}: {e}", transport.server().unwrap_or("the remote host"))),
+            prompts: Vec::new(),
+            notes: Vec::new(),
+        }),
+    }
+}
+
+/// Run a verb where the transport's swarms are: [`run_remote`] on a remote
+/// host, else `script` (this machine's, [`script`]) here.
+pub async fn run_on(transport: &crate::transport::ServerTransport, script: Option<&Path>, args: &[String], cwd: &Path) -> CtlRun {
+    if transport.is_remote() {
+        run_remote(transport, args, cwd).await
+    } else {
+        run(script, args, cwd).await
+    }
 }
 
 /// Run `bash <script> <args>` in `cwd`. `None` for the script means none is
@@ -331,6 +382,50 @@ mod tests {
         std::fs::write(dir.join(".autocoder/swarm/claude-r.json"), "{}").unwrap();
         assert!(has_manifest(&dir, "claude-r"));
         assert!(!has_manifest(&dir, "claude-other"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A stand-in `ssh` that runs the remote command here, with `HOME` as
+    /// the remote host's home.
+    fn fake_ssh(dir: &Path, home: &Path) -> PathBuf {
+        let ssh = dir.join("ssh");
+        std::fs::write(&ssh, format!("#!/bin/sh\nshift\nHOME='{}' exec sh -c \"$1\"\n", home.display())).unwrap();
+        std::process::Command::new("chmod").args(["+x", &ssh.to_string_lossy()]).status().unwrap();
+        ssh
+    }
+
+    #[tokio::test]
+    async fn starts_on_a_remote_host_with_its_newest_autocoder_ctl() {
+        let dir = temp_dir("remote");
+        let home = dir.join("home");
+        // Two versions in two marketplaces: the version decides, not the name.
+        for (market, ver, says) in [("zzz-market", "4.9.0", "old"), ("aaa-market", "4.73.0", "new")] {
+            let scripts = home.join(format!(".claude/plugins/cache/{market}/autocoder/{ver}/scripts"));
+            std::fs::create_dir_all(&scripts).unwrap();
+            std::fs::write(
+                scripts.join("autocoder-ctl.sh"),
+                format!(r#"printf '{{"ok":true,"action":"%s","detail":{{"which":"{says}","repo":"%s","actor":"%s"}}}}' "$1" "$2" "$AUTOCODER_CTL_ACTOR""#),
+            )
+            .unwrap();
+        }
+        let transport = crate::transport::ServerTransport::with_ssh_program("buildbox", fake_ssh(&dir, &home));
+        let args = start_args(Path::new("/src/my repo"), 2, &AgentType::Claude, true);
+        let CtlRun::Done(r) = run_on(&transport, None, &args, &dir).await else { panic!("unsupported") };
+        assert!(r.ok, "{r:?}");
+        assert_eq!(r.detail["which"], "new");
+        assert_eq!(r.detail["repo"], "/src/my repo", "an argument with a space stays one argument");
+        assert_eq!(r.detail["actor"], "agents-tui");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn a_remote_host_without_autocoder_cannot_start() {
+        let dir = temp_dir("remote-none");
+        let home = dir.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let transport = crate::transport::ServerTransport::with_ssh_program("buildbox", fake_ssh(&dir, &home));
+        assert_eq!(run_on(&transport, None, &stop_swarm_args(&dir), &dir).await, CtlRun::Unsupported);
+        assert!(no_start(Some("buildbox")).starts_with("❌ The autocoder on buildbox has no `autocoder-ctl start`"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

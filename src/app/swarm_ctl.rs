@@ -1,8 +1,8 @@
 //! The TUI's swarm launch, add-worker and stop through `autocoder-ctl.sh`
 //! (#544, `crate::adapter::ctl`). A swarm is started only with
-//! `autocoder-ctl start` (#546 removed agents-tui's own launcher); a host
-//! without it (an older autocoder, or a remote host, where the script on this
-//! machine cannot act) is told what to do instead. Add-worker and stop keep
+//! `autocoder-ctl start` (#546 removed agents-tui's own launcher), on a
+//! remote host over ssh with that host's own script (#585); a host without
+//! it (an older autocoder, or none) is told to update it. Add-worker and stop keep
 //! the TUI's own code as the fallback: when this autocoder lacks the verb (no
 //! script, exit 3), on a remote host, and for a swarm autocoder has no
 //! manifest for (one the TUI launched itself).
@@ -32,10 +32,6 @@ pub(super) async fn launch(
     progress: &impl Fn(&str),
     discovered: impl FnOnce(),
 ) {
-    if transport.is_remote() {
-        progress(&format!("{}\n\nPress Esc to go back.\n", ctl::REMOTE));
-        return;
-    }
     let project = config.repo_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let session = format!("{}-{project}", config.agent_type.session_prefix());
     if crate::tmux::session::has_session(transport, &session).await {
@@ -45,8 +41,8 @@ pub(super) async fn launch(
     }
     progress("⏳ Starting the swarm with autocoder-ctl start...\n");
     let args = ctl::start_args(&config.repo_path, config.num_workers, &config.agent_type, !plugin_installed);
-    match ctl::run(script, &args, &config.repo_path).await {
-        CtlRun::Unsupported => progress(&format!("{}\n\nPress Esc to go back.\n", ctl::NO_START)),
+    match ctl::run_on(transport, script, &args, &config.repo_path).await {
+        CtlRun::Unsupported => progress(&format!("{}\n\nPress Esc to go back.\n", ctl::no_start(transport.server()))),
         CtlRun::Done(result) => {
             progress(&ctl::report(&result));
             if result.ok {
@@ -170,14 +166,6 @@ mod tests {
             agents_dir: std::env::temp_dir(),
             resume_seeds: None,
         }
-    }
-
-    #[tokio::test]
-    async fn a_remote_host_is_told_to_start_it_there() {
-        let said = std::cell::RefCell::new(String::new());
-        let remote = ServerTransport::new(Some("buildbox".to_string()));
-        launch(&config(), false, &remote, None, &|m: &str| said.borrow_mut().push_str(m), || panic!("no discovery")).await;
-        assert!(said.borrow().starts_with(ctl::REMOTE), "{}", said.borrow());
     }
 
     #[tokio::test]

@@ -153,7 +153,7 @@ modules register (`registry.js`). To add something to the village:
 - Status is inferred from pane content when no `.codex/loops/fix-loop.status` file exists.
 - ANSI colors are preserved via `ansi-to-tui` crate.
 - Keystroke passthrough in agent view — all keys forwarded to tmux pane except: double-Esc (back), Alt+0-9/m (navigation), PgUp/PgDn (scroll).
-- Swarms are started only with autocoder's `autocoder-ctl start` (`adapter/ctl.rs`), from the TUI and from the web server's `POST /api/swarms` alike; it installs the autocoder plugin when it is missing. agents-tui has no launcher of its own (#546): an autocoder without `start`, or a remote host, is told what to do instead. `resume()` still rebuilds a stopped swarm's worktrees and panes itself.
+- Swarms are started only with autocoder's `autocoder-ctl start` (`adapter/ctl.rs`), from the TUI and from the web server's `POST /api/swarms` alike; it installs the autocoder plugin when it is missing. On a remote host (`--server`) it runs that host's own `autocoder-ctl.sh` over ssh (#585). agents-tui has no launcher of its own (#546): an autocoder without `start` is told to update. `resume()` still rebuilds a stopped swarm's worktrees and panes itself.
 - Claude is launched with `--append-system-prompt` to force tmux (not cmux) usage.
 
 ## Automated Testing & Issue Management

@@ -6,10 +6,11 @@
 //! agent it actually started on when autocoder picked another one with
 //! capacity (laird/agents#454).
 //!
-//! There is no other way to start one (#546 removed agents-tui's own
-//! launcher): no `autocoder-ctl.sh` on this host, or an answer of exit 3 (an
-//! autocoder without the verb), answers `ok: false` saying to update autocoder,
-//! and a server that drives its swarms over ssh says to start it on that host.
+//! A server that drives its swarms over ssh runs the remote host's own
+//! `autocoder-ctl.sh` there (#585). There is no other way to start one (#546
+//! removed agents-tui's own launcher): no `autocoder-ctl.sh`, or an answer of
+//! exit 3 (an autocoder without the verb), answers `ok: false` saying to
+//! update autocoder.
 
 use std::path::Path;
 
@@ -32,6 +33,7 @@ pub enum Launch {
 
 /// Start the swarm with `script start` (`None`: this host has no script).
 pub async fn via_ctl(
+    transport: &crate::transport::ServerTransport,
     script: Option<&Path>,
     repo: &Path,
     workers: u32,
@@ -40,16 +42,16 @@ pub async fn via_ctl(
     project: &str,
 ) -> Launch {
     let args = ctl::with_mux(ctl::start_args(repo, workers, agent, true), mux);
-    match ctl::run(script, &args, repo).await {
+    match ctl::run_on(transport, script, &args, repo).await {
         CtlRun::Unsupported => Launch::Unsupported,
         CtlRun::Done(result) => Launch::Ctl { ok: result.ok, body: answer(&result, agent, project) },
     }
 }
 
-/// The page's JSON when this server cannot start a swarm: `remote`, it
-/// drives its swarms over ssh; otherwise its autocoder lacks `start`.
-pub fn cannot_start(remote: bool, project: &str) -> Value {
-    let why = if remote { ctl::REMOTE } else { ctl::NO_START };
+/// The page's JSON when this server cannot start a swarm: the autocoder
+/// where its swarms run (this machine, or `host` over ssh) lacks `start`.
+pub fn cannot_start(host: Option<&str>, project: &str) -> Value {
+    let why = ctl::no_start(host);
     json!({ "ok": false, "via": "autocoder-ctl", "project_name": project, "error": why.trim_start_matches("❌ ") })
 }
 
@@ -111,6 +113,10 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
+    fn local() -> crate::transport::ServerTransport {
+        crate::transport::ServerTransport::default()
+    }
+
     fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(crate::testutil::artifact_name(&format!("launch-{name}")));
         std::fs::create_dir_all(&dir).unwrap();
@@ -141,7 +147,7 @@ mod tests {
         let dir = temp_dir("ok");
         let out = r#"{"ok":true,"action":"start","target":"/r","detail":{"started":true,"session":"claude-r","agent":"claude","prompts":[{"role":"worker","worker":1,"pane":"claude-r:1.1","kind":"trust","text":"Do you trust the files in this folder?"}]}}"#;
         let script = fake(&dir, out, "", 0);
-        let Launch::Ctl { ok, body } = via_ctl(Some(&script), &dir, 3, &AgentType::Claude, Some("herdr"), "r").await else {
+        let Launch::Ctl { ok, body } = via_ctl(&local(), Some(&script), &dir, 3, &AgentType::Claude, Some("herdr"), "r").await else {
             panic!("fell back")
         };
         assert!(ok);
@@ -166,7 +172,7 @@ mod tests {
         let out = r#"{"ok":true,"action":"start","detail":{"started":true,"session":"codex-r","agent":"codex","prompts":[]}}"#;
         let note = "⚠️  claude is out of quota until Sat 14:00; starting on codex instead (AUTOCODER_STRICT_AGENT=1 keeps claude).";
         let script = fake(&dir, out, note, 0);
-        let Launch::Ctl { body, .. } = via_ctl(Some(&script), &dir, 2, &AgentType::Claude, None, "r").await else { panic!() };
+        let Launch::Ctl { body, .. } = via_ctl(&local(), Some(&script), &dir, 2, &AgentType::Claude, None, "r").await else { panic!() };
         assert!(!args(&dir).contains(&"--mux".to_string()), "no --mux unless one was chosen");
         assert_eq!(body["agent"]["started"], "codex");
         assert_eq!(body["agent"]["reason"].as_str(), Some(note));
@@ -180,7 +186,7 @@ mod tests {
         let out = r#"{"ok":true,"action":"start","detail":{"started":true,"session":"claude-r","agent":"claude","prompts":[]}}"#;
         let note = "⚠️  claude is out of quota, and no other configured agent can run either; starting on claude anyway.";
         let script = fake(&dir, out, note, 0);
-        let Launch::Ctl { body, .. } = via_ctl(Some(&script), &dir, 2, &AgentType::Claude, None, "r").await else { panic!() };
+        let Launch::Ctl { body, .. } = via_ctl(&local(), Some(&script), &dir, 2, &AgentType::Claude, None, "r").await else { panic!() };
         assert_eq!(body["agent"]["reason"].as_str(), Some(note));
         assert_eq!(body["message"].as_str().unwrap(), format!("Started claude-r. {note} Refresh in a few seconds."));
         let _ = std::fs::remove_dir_all(&dir);
@@ -191,7 +197,7 @@ mod tests {
         let dir = temp_dir("refused");
         let out = r#"{"ok":false,"action":"start","detail":{"started":false,"reason":"a swarm session for this repo is already running; use add-worker, or stop-swarm first"}}"#;
         let script = fake(&dir, out, "", 1);
-        let Launch::Ctl { ok, body } = via_ctl(Some(&script), &dir, 3, &AgentType::Codex, None, "r").await else { panic!() };
+        let Launch::Ctl { ok, body } = via_ctl(&local(), Some(&script), &dir, 3, &AgentType::Codex, None, "r").await else { panic!() };
         assert!(!ok);
         assert_eq!(
             body["error"].as_str(),
@@ -218,13 +224,13 @@ mod tests {
     #[tokio::test]
     async fn no_script_or_exit_3_cannot_start_and_says_to_update() {
         let dir = temp_dir("unsupported");
-        assert_eq!(via_ctl(None, &dir, 3, &AgentType::Claude, None, "r").await, Launch::Unsupported);
+        assert_eq!(via_ctl(&local(), None, &dir, 3, &AgentType::Claude, None, "r").await, Launch::Unsupported);
         let script = fake(&dir, r#"{"ok":false,"detail":"not implemented"}"#, "", 3);
-        assert_eq!(via_ctl(Some(&script), &dir, 3, &AgentType::Claude, None, "r").await, Launch::Unsupported);
+        assert_eq!(via_ctl(&local(), Some(&script), &dir, 3, &AgentType::Claude, None, "r").await, Launch::Unsupported);
         let _ = std::fs::remove_dir_all(&dir);
-        let body = cannot_start(false, "r");
+        let body = cannot_start(None, "r");
         assert_eq!(body["ok"], false);
         assert!(body["error"].as_str().unwrap().starts_with("This autocoder has no `autocoder-ctl start`"));
-        assert!(cannot_start(true, "r")["error"].as_str().unwrap().contains("not on a remote host"));
+        assert!(cannot_start(Some("buildbox"), "r")["error"].as_str().unwrap().starts_with("The autocoder on buildbox has no"));
     }
 }
