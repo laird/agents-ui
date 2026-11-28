@@ -3,27 +3,47 @@
 //! already gathered (this machine's names, tailnet peers, saved herdr
 //! machines), so it can be tested without a real network or herdr server.
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HostKind {
     /// Matches one of this machine's own names.
     Local,
     /// Matches a tailnet peer or a saved herdr machine: a host `open` will
-    /// act on remotely.
-    Known,
+    /// act on remotely, over ssh to this target (#593).
+    Known(String),
+}
+
+/// A name a remote machine is known by, and the ssh target that reaches it.
+/// A tailnet name is its own target; a saved herdr machine's `label` (a
+/// human name such as "Build machine") reaches its `target`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KnownHost {
+    pub name: String,
+    pub target: String,
+}
+
+impl KnownHost {
+    /// A name that is also its own ssh target.
+    pub fn itself(name: &str) -> Self {
+        KnownHost { name: name.to_string(), target: name.to_string() }
+    }
 }
 
 /// `host`, matched case-insensitively against `local_names` first, then
 /// `known_hosts`. `None` when it matches neither -- `open` must refuse to
-/// run anything against a host it doesn't recognize, since every name here
-/// ends up as an argument to `ssh`.
-pub fn classify(host: &str, local_names: &[String], known_hosts: &[String]) -> Option<HostKind> {
+/// run anything against a host it doesn't recognize, since a known host's
+/// target ends up as an argument to `ssh`. A host or target starting with
+/// `-` is never accepted: ssh would read it as an option (#593).
+pub fn classify(host: &str, local_names: &[String], known_hosts: &[KnownHost]) -> Option<HostKind> {
+    if host.starts_with('-') {
+        return None;
+    }
     if local_names.iter().any(|n| n.eq_ignore_ascii_case(host)) {
         return Some(HostKind::Local);
     }
-    if known_hosts.iter().any(|n| n.eq_ignore_ascii_case(host)) {
-        return Some(HostKind::Known);
-    }
-    None
+    known_hosts
+        .iter()
+        .find(|k| k.name.eq_ignore_ascii_case(host) && !k.target.is_empty() && !k.target.starts_with('-'))
+        .map(|k| HostKind::Known(k.target.clone()))
 }
 
 /// A tailnet peer's (or this machine's own) `DNSName` from `tailscale status
@@ -54,19 +74,32 @@ mod tests {
 
     #[test]
     fn matches_a_known_remote_host() {
-        let known = vec!["workbox".to_string()];
-        assert_eq!(classify("workbox", &[], &known), Some(HostKind::Known));
+        let known = vec![KnownHost::itself("workbox")];
+        assert_eq!(classify("WorkBox", &[], &known), Some(HostKind::Known("workbox".into())));
+    }
+
+    #[test]
+    fn a_herdr_label_reaches_its_machines_target() {
+        let known = vec![KnownHost { name: "Build machine".into(), target: "workbox".into() }];
+        assert_eq!(classify("build machine", &[], &known), Some(HostKind::Known("workbox".into())));
     }
 
     #[test]
     fn local_wins_when_a_host_is_in_both_lists() {
-        let v = vec!["shared".to_string()];
-        assert_eq!(classify("shared", &v, &v), Some(HostKind::Local));
+        assert_eq!(classify("shared", &["shared".to_string()], &[KnownHost::itself("shared")]), Some(HostKind::Local));
     }
 
     #[test]
     fn an_unrecognized_host_is_refused() {
-        assert_eq!(classify("attacker.example.com", &["nuc-1".to_string()], &["workbox".to_string()]), None);
+        assert_eq!(classify("attacker.example.com", &["nuc-1".to_string()], &[KnownHost::itself("workbox")]), None);
+    }
+
+    #[test]
+    fn a_host_or_target_ssh_would_read_as_an_option_is_refused() {
+        let known = vec![KnownHost::itself("-oProxyCommand=x"), KnownHost { name: "box".into(), target: "-F/tmp/c".into() }];
+        assert_eq!(classify("-oProxyCommand=x", &[], &known), None);
+        assert_eq!(classify("box", &[], &known), None);
+        assert_eq!(classify("-x", &["-x".to_string()], &[]), None, "not even as a local name");
     }
 
     #[test]

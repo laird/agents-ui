@@ -2,7 +2,7 @@
 //! `agents-ui://attach?host=nuc-1&mux=herdr&pane=w1F:p1&project=agents-ui&role=wt-1`
 //! (laird/agents-ui#549). Nothing here runs a command: `parse` only shapes
 //! and rejects malformed input. `host` still needs checking against known
-//! machines once the environment is available (see `handler::classify_host`).
+//! machines once the environment is available (see `handler::host::classify`).
 
 use std::fmt;
 

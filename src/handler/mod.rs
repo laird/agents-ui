@@ -200,11 +200,12 @@ fn own_names(name: &str) -> Vec<String> {
 }
 
 /// Every tailnet peer's names (short and FQDN), plus every saved herdr
-/// machine's label and target -- the hosts `open` will act on remotely.
-fn known_remote_hosts() -> Vec<String> {
+/// machine's label and target -- the hosts `open` will act on remotely,
+/// each with the ssh target that reaches it.
+fn known_remote_hosts() -> Vec<host::KnownHost> {
     let mut hosts = Vec::new();
     if let Some(json) = run_json("tailscale", &["status", "--json"]) {
-        hosts.extend(tailscale_peer_names(&json));
+        hosts.extend(tailscale_peer_names(&json).iter().map(|n| host::KnownHost::itself(n)));
     }
     if let Some(json) = run_json("herdr", &["machine", "list", "--json"]) {
         hosts.extend(herdr_machine_names(&json));
@@ -249,13 +250,17 @@ fn dns_and_short_names(entry: Option<&serde_json::Value>) -> Vec<String> {
 }
 
 /// `herdr machine list --json`'s `label` and `target` fields: the names a
-/// human already chose to identify a saved machine by.
-fn herdr_machine_names(machines: &serde_json::Value) -> Vec<String> {
+/// human already chose to identify a saved machine by. Both reach the
+/// machine's `target`, since a label is not an ssh host (#593); a machine
+/// with no target is left out.
+fn herdr_machine_names(machines: &serde_json::Value) -> Vec<host::KnownHost> {
     let Some(list) = machines.as_array() else { return Vec::new() };
+    let text = |m: &serde_json::Value, key: &str| m.get(key).and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(str::to_string);
     list.iter()
-        .flat_map(|m| [m.get("label"), m.get("target")])
-        .filter_map(|v| v.and_then(|v| v.as_str()).map(str::to_string))
-        .filter(|s| !s.is_empty())
+        .filter_map(|m| Some((text(m, "label"), text(m, "target")?)))
+        .flat_map(|(label, target)| {
+            label.map(|name| host::KnownHost { name, target: target.clone() }).into_iter().chain([host::KnownHost::itself(&target)])
+        })
         .collect()
 }
 
@@ -298,15 +303,16 @@ mod tests {
 
     #[test]
     fn herdr_machine_names_reads_label_and_target() {
-        let v: serde_json::Value = serde_json::from_str(r#"[{"label": "Build machine", "target": "workbox", "id": "abc123"}]"#).unwrap();
+        let v: serde_json::Value = serde_json::from_str(r#"[{"label": "Build machine", "target": "workbox", "id": "abc123"}, {"label": "No target"}]"#).unwrap();
         let names = herdr_machine_names(&v);
-        assert_eq!(names, vec!["Build machine", "workbox"]);
+        let workbox = |name: &str| host::KnownHost { name: name.into(), target: "workbox".into() };
+        assert_eq!(names, vec![workbox("Build machine"), workbox("workbox")], "the label reaches the target; no target, no host");
     }
 
     #[test]
     fn an_empty_or_malformed_herdr_machine_list_is_no_hosts() {
-        assert_eq!(herdr_machine_names(&serde_json::json!([])), Vec::<String>::new());
-        assert_eq!(herdr_machine_names(&serde_json::json!("not an array")), Vec::<String>::new());
+        assert_eq!(herdr_machine_names(&serde_json::json!([])), Vec::<host::KnownHost>::new());
+        assert_eq!(herdr_machine_names(&serde_json::json!("not an array")), Vec::<host::KnownHost>::new());
     }
 
     #[test]

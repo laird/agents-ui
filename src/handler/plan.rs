@@ -20,18 +20,19 @@ pub struct Plan {
 /// `herdr agent attach` is local-only: herdr's own `--machine` forwarding
 /// excludes `attach` (CLI reference, "Agents"), so a remote host instead
 /// runs it directly over an interactive SSH exec -- the same pattern this
-/// link's tmux branch already uses for a tmux swarm.
+/// link's tmux branch already uses for a tmux swarm. ssh goes to the known
+/// host's target (a herdr machine's, not its label), after `--` (#593).
 pub fn plan(url: &AttachUrl, host: HostKind) -> Plan {
     match (host, url.mux) {
         (HostKind::Local, Mux::Herdr) => Plan { program: "herdr".into(), args: vec!["agent".into(), "attach".into(), url.pane.clone()] },
         (HostKind::Local, Mux::Tmux) => Plan { program: "tmux".into(), args: vec!["attach".into(), "-t".into(), url.pane.clone()] },
-        (HostKind::Known, Mux::Herdr) => Plan {
+        (HostKind::Known(target), Mux::Herdr) => Plan {
             program: "ssh".into(),
-            args: vec!["-t".into(), url.host.clone(), "herdr".into(), "agent".into(), "attach".into(), url.pane.clone()],
+            args: vec!["-t".into(), "--".into(), target, "herdr".into(), "agent".into(), "attach".into(), url.pane.clone()],
         },
-        (HostKind::Known, Mux::Tmux) => Plan {
+        (HostKind::Known(target), Mux::Tmux) => Plan {
             program: "ssh".into(),
-            args: vec!["-t".into(), url.host.clone(), "tmux".into(), "attach".into(), "-t".into(), url.pane.clone()],
+            args: vec!["-t".into(), "--".into(), target, "tmux".into(), "attach".into(), "-t".into(), url.pane.clone()],
         },
     }
 }
@@ -62,16 +63,24 @@ mod tests {
 
     #[test]
     fn remote_herdr_runs_over_ssh_not_the_shared_focus_pointer() {
-        let p = plan(&url(Mux::Herdr, "w1F:p1"), HostKind::Known);
+        let p = plan(&url(Mux::Herdr, "w1F:p1"), HostKind::Known("nuc-1".into()));
         assert_eq!(p.program, "ssh");
-        assert_eq!(p.args, vec!["-t", "nuc-1", "herdr", "agent", "attach", "w1F:p1"]);
+        assert_eq!(p.args, vec!["-t", "--", "nuc-1", "herdr", "agent", "attach", "w1F:p1"]);
         assert!(!p.args.iter().any(|a| a == "focus"), "must never call the shared agent.focus");
     }
 
     #[test]
     fn remote_tmux_runs_over_ssh() {
-        let p = plan(&url(Mux::Tmux, "claude-shop:1.0"), HostKind::Known);
+        let p = plan(&url(Mux::Tmux, "claude-shop:1.0"), HostKind::Known("nuc-1".into()));
         assert_eq!(p.program, "ssh");
-        assert_eq!(p.args, vec!["-t", "nuc-1", "tmux", "attach", "-t", "claude-shop:1.0"]);
+        assert_eq!(p.args, vec!["-t", "--", "nuc-1", "tmux", "attach", "-t", "claude-shop:1.0"]);
+    }
+
+    #[test]
+    fn a_herdr_label_link_sshes_to_the_machines_target() {
+        let mut link = url(Mux::Herdr, "w1F:p1");
+        link.host = "Build machine".into();
+        let p = plan(&link, HostKind::Known("workbox".into()));
+        assert_eq!(p.args, vec!["-t", "--", "workbox", "herdr", "agent", "attach", "w1F:p1"]);
     }
 }
