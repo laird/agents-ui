@@ -92,10 +92,11 @@ export function openInfo(info) {
   // Each fact on its own line, then the list: joined, they ran together
   // ("Runs: no Deployment and no branchNothing here.").
   const meta = (info.meta || []).filter(Boolean).map(m => `<span class="fact">${esc(m)}</span>`).join('');
-  // #N opens the issue dialog in the village (issuedialog.js, #564); its
-  // GitHub link stays, now secondary.
+  // An item with a URL opens the issue dialog in the village (issuedialog.js,
+  // #564); its GitHub link stays, now secondary. One with none (a runtime
+  // village's workstream, not a GitHub issue) stays plain text, as before.
   const items = info.items && (info.items.length
-    ? `<ul>${info.items.map(i => `<li data-n="${esc(i.number)}"><button class="issue-open" type="button" data-n="${esc(i.number)}">#${i.number}</button> ${esc(i.title || '')}${i.label ? ' · ' + esc(i.label) : ''}${i.priority ? ' · ' + esc(i.priority) : ''}${(i.waits_on || []).length ? ' · waits on ' + i.waits_on.map(d => '#' + d).join(', ') : ''}${i.url ? ` <a class="sub-link" href="${esc(i.url)}" target="_blank" rel="noopener">on GitHub ↗</a>` : ''}</li>`).join('')}</ul>`
+    ? `<ul>${info.items.map(i => `<li data-n="${esc(i.number)}">${i.url ? `<button class="issue-open" type="button" data-n="${esc(i.number)}">#${i.number}</button>` : '#' + i.number} ${esc(i.title || '')}${i.label ? ' · ' + esc(i.label) : ''}${i.priority ? ' · ' + esc(i.priority) : ''}${(i.waits_on || []).length ? ' · waits on ' + i.waits_on.map(d => '#' + d).join(', ') : ''}${i.url ? ` <a class="sub-link" href="${esc(i.url)}" target="_blank" rel="noopener">on GitHub ↗</a>` : ''}</li>`).join('')}</ul>`
     : '<span class="fact">Nothing here.</span>');
   document.getElementById('d-meta').innerHTML = [meta, items].filter(Boolean).join('');
   ask(info.house || {});

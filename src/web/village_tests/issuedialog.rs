@@ -13,10 +13,12 @@ fn dialogs_offer_an_issues_own_dialog() {
     assert!(village_asset("modules.js").unwrap().1.contains("import './issuedialog.js';"));
     assert!(village_asset("modules.js").unwrap().1.contains("import './markdown.js';"));
     assert!(village_asset("modules.js").unwrap().1.contains("import './issuewords.js';"));
-    // Every list item's #N is a button, not a direct GitHub link; the
-    // GitHub link stays, now secondary.
+    // A list item with a URL gets #N as a button, not a direct GitHub link;
+    // the GitHub link stays, now secondary. One with none (a runtime
+    // village's workstream) stays plain text: no fake affordance.
     let dialogs = village_asset("dialogs.js").unwrap().1;
     assert!(dialogs.contains("<button class=\"issue-open\" type=\"button\" data-n=\"${esc(i.number)}\">#${i.number}</button>"));
+    assert!(dialogs.contains("i.url ? `<button"));
     assert!(dialogs.contains("on GitHub ↗"));
     let issuedialog = village_asset("issuedialog.js").unwrap().1;
     // Any list row's button opens the issue dialog on the server's detail.

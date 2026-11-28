@@ -6,6 +6,8 @@
  * reaches the page. No DOM, so node tests it
  * (tools/village-tests/markdown.test.mjs); issuedialog.js calls it. */
 
+// Not panels.js's esc: that module pulls in layout.js, which touches `document`
+// at import time, so a DOM-free node test importing this file would fail.
 const mdEsc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 
 /* Only a scheme a click can safely follow; anything else (a bare
