@@ -15,9 +15,9 @@
 //!
 //! Each goes through autocoder-ctl's `approve` / `reject` verbs where it has
 //! them (#541, as `proposals.rs` does); an approval *with* a note, and every
-//! `answer` (autocoder-ctl has no verb for it yet — filed in laird/agents,
-//! since the workflow belongs there and agents-ui is only the view), fall
-//! back to `gh` directly. Only an open issue carrying one of the labels above
+//! `answer` (autocoder-ctl has no verb for it yet — the workflow belongs in
+//! laird/agents, not here, so that repo is where a verb for it should be
+//! proposed), fall back to `gh` directly. Only an open issue carrying one of the labels above
 //! can be decided here: anything else is a 409. A `--read-only` server
 //! refuses it before it gets here (403), same as `/decision`.
 
