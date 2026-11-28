@@ -147,6 +147,23 @@ fn village_node_tests_pass() {
     }
 }
 
+#[test]
+fn hidden_always_hides_in_the_village() {
+    // A rule like `.chat { display: flex }` outranks the browser's own `[hidden]`
+    // rule, so a panel built hidden (the chat, its form, a warning) showed on every
+    // page load. One global rule makes `hidden` win over any class.
+    let css = village_asset("village.css").unwrap().1;
+    assert!(
+        css.contains("[hidden] { display: none !important; }"),
+        "village.css must make [hidden] beat every display rule"
+    );
+    // The chat panel is built hidden, as is its form, so nothing shows until a
+    // Chat button opens it.
+    let chat = village_asset("chat.js").unwrap().1;
+    assert!(chat.contains("panel.hidden = true;"), "the chat panel starts hidden");
+    assert!(chat.contains("<form id=\"chat-form\" hidden>"), "the chat form starts hidden");
+}
+
 /// The dialog's title keeps clear of its close × (#438).
 #[test]
 fn village_dialog_title_leaves_room_for_the_close_button() {

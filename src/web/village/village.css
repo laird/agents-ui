@@ -1,4 +1,8 @@
   /* SNES-style menu windows around a pixel-art canvas. One dark look on purpose. */
+  /* `hidden` always hides. A class that sets `display` (flex, grid, block) would
+     otherwise beat the browser's own [hidden] rule and show the element: the
+     chat panel stood open, empty, on every page load until this rule. */
+  [hidden] { display: none !important; }
   :root {
     color-scheme: dark;
     --night: #0c1028;
