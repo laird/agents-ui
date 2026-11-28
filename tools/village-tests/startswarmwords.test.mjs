@@ -2,13 +2,12 @@
 //   node --test tools/village-tests/
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { AGENT_TYPES_URL, DEFAULT_WORKERS, LAUNCH_AGENT_TYPES, LAUNCH_URL, LOOKING, READ_ONLY, REPOS_URL, launchAnswer, launchRequest } from '../../src/web/village/startswarmwords.js';
+import { AGENT_TYPES_URL, DEFAULT_WORKERS, LAUNCH_URL, LOOKING, READ_ONLY, REPOS_URL, launchAnswer, launchRequest } from '../../src/web/village/startswarmwords.js';
 
 test('the routes and defaults match the dashboard\'s own launch panel', () => {
   assert.equal(LAUNCH_URL, 'api/swarms');
   assert.equal(AGENT_TYPES_URL, 'api/agent-types');
   assert.equal(REPOS_URL, 'api/repos');
-  assert.deepEqual(LAUNCH_AGENT_TYPES, ['Claude', 'Codex', 'Droid', 'Gemini']);
   assert.equal(DEFAULT_WORKERS, 3);
 });
 

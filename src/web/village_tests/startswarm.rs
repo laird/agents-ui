@@ -20,9 +20,18 @@ fn data_js_hands_the_empty_state_to_startswarm() {
 fn the_form_is_hidden_on_a_read_only_server_and_reuses_the_dashboards_routes() {
     let page = village_asset("startswarm.js").unwrap().1;
     assert!(page.contains("import { canWrite } from './readonly.js';"));
-    assert!(page.contains("if (!(await canWrite())) { box.textContent = READ_ONLY; return; }"));
-    // One build per empty spell: a 3s poll must never wipe out what someone is mid-typing.
-    assert!(page.contains("if (filling) return;"));
+    assert!(page.contains("if (mine === emptyToken) box.textContent = READ_ONLY;"));
+    // One build per empty spell (`emptyStarted`); a build still in flight from
+    // a spell that already ended never lands on top of a fresh one or on top
+    // of what someone is mid-typing (`emptyToken`, #578 review). Prefixed so
+    // it can't collide with swarmcontrols.js's own `token` in the replay
+    // bundle, which flattens every module into one script (#578 review).
+    assert!(page.contains("if (emptyStarted) return;"));
+    assert!(page.contains("if (mine !== emptyToken) return;"));
+    assert!(page.contains("emptyStarted = false;\n  emptyToken++;"));
+    // The agent-type fallback is imported, not re-declared, so it can't drift
+    // from swarmcontrols.js's (#578 review, after #567's MANAGER_CONTROLS finding).
+    assert!(page.contains("import { DEFAULT_AGENT_TYPES } from './swarmwords.js';"));
     let words = village_asset("startswarmwords.js").unwrap().1;
     assert!(words.contains("export const LAUNCH_URL = 'api/swarms';"));
     assert!(words.contains("export const AGENT_TYPES_URL = 'api/agent-types';"));

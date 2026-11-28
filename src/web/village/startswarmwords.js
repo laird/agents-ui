@@ -8,7 +8,6 @@
 export const LAUNCH_URL = 'api/swarms';
 export const AGENT_TYPES_URL = 'api/agent-types';
 export const REPOS_URL = 'api/repos';
-export const LAUNCH_AGENT_TYPES = ['Claude', 'Codex', 'Droid', 'Gemini'];
 export const DEFAULT_WORKERS = 3;
 
 /* The text the empty state shows before anyone knows whether this server
