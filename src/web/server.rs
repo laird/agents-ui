@@ -1260,6 +1260,10 @@ pub(super) fn app(read_only: bool, mount: &super::mount::Mount, state: WebServer
             "/api/swarms/{project}/issues/{number}/decision",
             post(super::proposals::api_decision_handler),
         )
+        .route(
+            "/api/swarms/{project}/issues/{number}/decide",
+            post(super::decisions::api_decide_handler),
+        )
         .route("/api/swarms/{project}/flaky", post(super::flaky::api_file_handler))
         .route("/api/swarms/{project}/issues/{number}/travel", get(super::travel::api_travel_handler))
         .route("/api/swarms/{project}/issues/{number}", get(super::issue::api_issue_handler))
@@ -1376,6 +1380,10 @@ mod tests {
                 "/api/swarms/{project}/issues/{number}/decision",
                 post(crate::web::proposals::api_decision_handler),
             )
+            .route(
+                "/api/swarms/{project}/issues/{number}/decide",
+                post(crate::web::decisions::api_decide_handler),
+            )
             .route("/api/swarms/{project}/flaky", post(crate::web::flaky::api_file_handler))
             .route("/api/swarms/{project}/issues/{number}/travel", get(crate::web::travel::api_travel_handler))
             .route("/api/swarms/{project}/issues/{number}", get(crate::web::issue::api_issue_handler))
@@ -1452,6 +1460,15 @@ mod tests {
         Request::builder()
             .method("POST")
             .uri(format!("/api/swarms/{project}/issues/7/decision"))
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    fn decide(project: &str, body: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/swarms/{project}/issues/7/decide"))
             .header("content-type", "application/json")
             .body(Body::from(body.to_string()))
             .unwrap()
@@ -1542,6 +1559,26 @@ mod tests {
         let wordless = app.clone().oneshot(decision("p", r#"{"action":"changes","comment":" "}"#)).await.unwrap();
         assert_eq!(wordless.status(), StatusCode::UNPROCESSABLE_ENTITY);
         let unknown = app.oneshot(decision("p", r#"{"action":"delete"}"#)).await.unwrap();
+        assert!(unknown.status().is_client_error());
+    }
+
+    /// #565: a blocked (non-proposal) issue's Approve/Answer/Reject buttons
+    /// go through this sibling endpoint, same read-only and 404 rules.
+    #[tokio::test]
+    async fn a_read_only_server_refuses_issue_decisions() {
+        let shared = std::sync::Arc::new(std::sync::RwLock::new(vec![sample_swarm("p")]));
+        let app = make_app(make_web_state(shared)).layer(axum::middleware::from_fn(reject_writes));
+        let resp = app.oneshot(decide("p", r#"{"action":"approve"}"#)).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn an_issue_decision_needs_a_swarm_and_an_answers_words() {
+        let shared = std::sync::Arc::new(std::sync::RwLock::new(vec![sample_swarm("p")]));
+        let app = make_app(make_web_state(shared));
+        let ghost = app.clone().oneshot(decide("ghost", r#"{"action":"approve"}"#)).await.unwrap();
+        assert_eq!(ghost.status(), StatusCode::NOT_FOUND);
+        let unknown = app.oneshot(decide("p", r#"{"action":"delete"}"#)).await.unwrap();
         assert!(unknown.status().is_client_error());
     }
 
