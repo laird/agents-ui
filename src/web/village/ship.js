@@ -183,8 +183,8 @@ function releaseLink(v, s, words = 'Release') {
 /* Why nothing says what a stop runs, in plain words, and where the docs are. */
 function unknownWords(v, i) {
   const st = v.pipeline.stops[i], br = v.pipeline.integration || 'the integration branch';
-  if (i === 0 && v.pipeline.sentinel === 'unknown')
-    return `No ${st.name} ref yet, so nothing has been verified green. Run autocoder's sentinel (main-sentinel.sh), or, with no sentinel, mark the first environment "requires": "integration" in .autocoder.json.`;
+  if (i === 0 && v.pipeline.sentinel === 'unknown' || st.kind === 'gate')
+    return `No ${st.name} ref and no Deployment: nothing says what runs here. Run autocoder's sentinel (main-sentinel.sh) to create it, or record a Deployment. With no sentinel, mark the first environment "requires": "integration" in .autocoder.json.`;
   return `Nothing says what ${st.name} runs: there is no successful GitHub Deployment to it and no env/${st.name} branch. Record a deployment (autocoder's deploy.sh records one), or configure the environment in .autocoder.json.`;
 }
 function docsLink(v) {
@@ -228,8 +228,11 @@ registerHit({ kind: 'ship', dialog(o, sc, theme) {
     return { title: `${theme.labels.ship} · ${theme.labels.sails}`, line: `Shipped ${name || 'a release'} to ${last.name}`, items: issueItems(v, gone), links: [releaseLink(v, last)] };
   }
   const cargo = cargoOf(v), n = cargo.length, repo = repoUrl(v), br = v.pipeline.integration;
+  const from = stops[cargoStop(v)], runtime = v.plane === 'runtime';
   return { title: `${theme.labels.ship} · next release`, line: `Next release: ${n} ${n === 1 ? work : work + 's'}${name ? ' since ' + name : ''}`,
-    meta: [`${theme.labels.sails.charAt(0).toUpperCase() + theme.labels.sails.slice(1)} when ${last.name} is next deployed`],
+    meta: [`${theme.labels.sails.charAt(0).toUpperCase() + theme.labels.sails.slice(1)} when ${last.name} is next deployed`,
+      // The stop it loads from is in fog (#569): say why, as that stop's dialog does.
+      from && from.source === 'unknown' && !runtime ? `Loads from ${from.name}, which is unknown. ${unknownWords(v, cargoStop(v))}` : null],
     items: issueItems(v, cargo),
     links: [releaseLink(v, last, 'Last release'), repo && last.tag && br ? link(`Changes since ${last.tag}`, `${repo}/compare/${encodeURIComponent(last.tag)}...${encodeURIComponent(br)}`) : null] };
 } });

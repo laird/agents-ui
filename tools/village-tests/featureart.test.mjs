@@ -16,7 +16,7 @@ const { THEMES } = await import(V + 'themes/registry.js');
 await import(V + 'themes/medieval.js'); await import(V + 'themes/modern.js'); await import(V + 'themes/future.js');
 const { blink } = await import(V + 'palette.js');
 const { drawBanner } = await import(V + 'bannerart.js');
-const { bargeArt, fogArt } = await import(V + 'featureart.js');
+const { bargeArt, fogArt, fogAlpha, fogWash, FOG_EDGE } = await import(V + 'featureart.js');
 
 /* The 1× art's scene box, [x0, y0, x1, y1] (x1, y1 exclusive), for each
  * sprite drawn at (20, 20). The barge's is its hull, mast and flag (its
@@ -85,6 +85,30 @@ for (const [name, T] of Object.entries(THEMES)) {
       // Layered: more than the wash alone.
       assert.ok(c.rects.length / TIMES.length > 6, 'no wisps over the wash');
     }
+  });
+}
+
+/* How many of the wash's boxes cover scene point (x, y), and so how opaque it is there. */
+const washAt = (rects, col, x, y) => rects.filter(r => r.col === col && x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h).length;
+for (const [name, T] of Object.entries(THEMES)) {
+  test(`${name}: the fog is translucent, thin at its edge and never opaque (#569)`, () => {
+    state.T = T; state.reduce = true;
+    const c = canvas(); fogArt(c, 100, 50, 32, 60, 0);
+    const wash = fogWash(T);
+    // Its edge is one faint box, its middle all of them, and still see-through.
+    assert.equal(washAt(c.rects, wash, 100.1, 50.1), 1, 'the very edge');
+    assert.equal(washAt(c.rects, wash, 116, 80), FOG_EDGE, 'the middle');
+    assert.ok(fogAlpha(0) <= 0.1, `edge alpha ${fogAlpha(0)}`);
+    assert.ok(fogAlpha(FOG_EDGE) >= 0.3 && fogAlpha(FOG_EDGE) <= 0.5, `middle alpha ${fogAlpha(FOG_EDGE)}`);
+    for (let d = 1; d <= FOG_EDGE; d++) assert.ok(fogAlpha(d) >= fogAlpha(d - 1), 'thickens inward');
+    // No fill in the fog is anywhere near opaque.
+    for (const r of c.rects) {
+      const a = Number((/rgba\([^)]*,\s*([\d.]+)\)/.exec(r.col) || [])[1]);
+      assert.ok(a < 0.5, `${r.col} is too opaque`);
+    }
+    // The wisps keep off the soft edge.
+    for (const r of c.rects.filter(r => r.col !== wash)) assert.ok(r.x >= 102 && r.x + r.w <= 130 && r.y >= 52 && r.y + r.h <= 108, `a wisp at the edge: ${JSON.stringify(r)}`);
+    state.reduce = false;
   });
 }
 

@@ -2,7 +2,7 @@
 //   node --test tools/village-tests/
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { canalNames, envHouses, envLabel, inRow, versionOf } from '../../src/web/village/envlabels.js';
+import { canalNames, envHouses, envLabel, inRow, stopName, versionOf } from '../../src/web/village/envlabels.js';
 
 const NOW = Date.parse('2026-11-09T12:00:00Z');
 const dev = stops => ({ plane: 'dev', pipeline: { stops } });
@@ -57,4 +57,12 @@ test('no feature, no houses; past the room the rest is a +N', () => {
   assert.equal(envHouses(many, 'capital').more, 2);
   assert.equal(envHouses(many, 'town').houses.length, 4);
   assert.equal(envHouses(many, 'town').more, 1);
+});
+
+test('a fogged stop is named as unknown on the canal (#569)', () => {
+  const n = canalNames(dev([{ name: 'master-green', kind: 'gate', source: 'unknown', issues: [] }, { name: 'deploy', issues: [] }]));
+  assert.deepEqual(n.locks, ['master-green · unknown']);
+  assert.equal(stopName({ name: 'master-green', source: 'branch' }), 'master-green');
+  const r = canalNames({ plane: 'runtime', pipeline: { stops: [{ name: 'build', issues: [] }, { name: 'prod', source: 'unknown', issues: [] }] } });
+  assert.deepEqual(r, { locks: ['build'], castle: 'prod · unknown' });
 });

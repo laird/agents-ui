@@ -36,8 +36,11 @@ export function envLabel(s, now = Date.now()) {
  * on the same terms. Returns { locks: [name or null per lock], castle }. */
 export function canalNames(v) {
   const stops = (v && v.pipeline && v.pipeline.stops) || [], last = stops[stops.length - 1];
-  return { locks: stops.slice(0, -1).map(s => (inRow(v, s) ? null : s.name)), castle: last && !inRow(v, last) ? last.name : null };
+  return { locks: stops.slice(0, -1).map(s => (inRow(v, s) ? null : stopName(s))), castle: last && !inRow(v, last) ? stopName(last) : null };
 }
+/* A stop's name on the canal; a fogged one (nothing reports what it runs,
+ * #569) says so: "master-green · unknown". */
+export const stopName = s => (s.source === 'unknown' ? `${s.name} · unknown` : s.name);
 
 /* The houses of an environment village: one per feature it runs (its cargo
  * grouped as cargoGroups does), up to `room`, each flying its feature's

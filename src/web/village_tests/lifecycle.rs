@@ -44,7 +44,14 @@ fn village_html_dialogs_explain_unknown_stops_the_whole_quay_and_houses_by_branc
     assert!(!body.contains("filter(Boolean).map(esc).join(' · ')"));
     // An unknown stop says why in plain words, and links to the docs.
     assert!(body.contains("function unknownWords(v, i)"));
-    assert!(body.contains("so nothing has been verified green. Run autocoder's sentinel"));
+    assert!(body.contains("return `No ${st.name} ref and no Deployment: nothing says what runs here. Run autocoder's sentinel (main-sentinel.sh) to create it, or record a Deployment."));
+    // A fogged stop is labelled as unknown, and the ship says so when it loads from one (#569).
+    assert!(body.contains("export const stopName = s => (s.source === 'unknown' ? `${s.name} · unknown` : s.name);"));
+    assert!(body.contains("locks: stops.slice(0, -1).map(s => (inRow(v, s) ? null : stopName(s)))"));
+    assert!(body.contains("from && from.source === 'unknown' && !runtime ? `Loads from ${from.name}, which is unknown. ${unknownWords(v, cargoStop(v))}` : null"));
+    // The fog itself is translucent with a soft edge, not a white box.
+    assert!(body.contains("export const FOG_EDGE = 8, FOG_STEP = 0.06;"));
+    assert!(body.contains("for (let k = 0; k < FOG_EDGE && 2 * k < W && 2 * k < H; k++) px(g, k, k, W - 2 * k, H - 2 * k, wash);"));
     assert!(body.contains("there is no successful GitHub Deployment to it and no env/${st.name} branch"));
     assert!(body.contains("/docs/village.md#environments"));
     assert!(body.contains("unknown ? unknownWords(v, o.i) : null"));

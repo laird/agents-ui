@@ -95,20 +95,29 @@ export function bargeArt(c, x, y, col, t) {
   detail(c, x, y, g => draw(g, col, t));
 }
 
-/* The fog wash per theme, shared with the key. */
-export const fogCol = th => th === MODERN ? 'rgba(170,176,196,.75)' : th === FUTURE ? 'rgba(60,52,110,.78)' : 'rgba(206,210,230,.72)';
-const WISP = th => th === MODERN ? ['rgba(226,228,238,.5)', 'rgba(150,156,176,.35)']
-  : th === FUTURE ? ['rgba(150,128,232,.45)', 'rgba(30,24,70,.35)'] : ['rgba(250,251,255,.55)', 'rgba(176,182,210,.4)'];
+/* The fog over a stop nothing reports (#569): translucent, so the ship, the
+ * river and the lighthouse show through it, and soft at its edges. The wash
+ * is FOG_EDGE boxes, each inset a detail pixel inside the last and each
+ * FOG_STEP opaque: one at the very edge, all of them over the middle. */
+export const FOG_EDGE = 8, FOG_STEP = 0.06;
+/* How opaque the wash is `d` detail pixels in from its edge. */
+export const fogAlpha = d => 1 - (1 - FOG_STEP) ** Math.min(FOG_EDGE, Math.max(0, Math.floor(d) + 1));
+const FOG_RGB = th => th === MODERN ? '170,176,196' : th === FUTURE ? '60,52,110' : '206,210,230';
+/* One of the wash's boxes, in theme `th`. */
+export const fogWash = th => `rgba(${FOG_RGB(th)},${FOG_STEP})`;
+const WISP = th => th === MODERN ? ['rgba(226,228,238,.32)', 'rgba(150,156,176,.22)']
+  : th === FUTURE ? ['rgba(150,128,232,.3)', 'rgba(30,24,70,.22)'] : ['rgba(250,251,255,.36)', 'rgba(176,182,210,.26)'];
 
-/* Fog over a w×h scene box at (x, y): the wash, and layers of soft wisps
- * drifting slowly across it, each its own way, all kept inside the box. In
- * theme `th` (the key draws it for the theme it shows). */
+/* Fog over a w×h scene box at (x, y): the soft-edged wash, and layers of
+ * faint wisps drifting slowly across it, each its own way, kept clear of
+ * the box's edge so it stays soft. In theme `th` (the key draws it for the
+ * theme it shows). */
 export function fogArt(c, x, y, w, h, t, th = state.T) {
-  const W = 2 * w, H = 2 * h, [light, dark] = WISP(th);
-  const run = (g, a, b, j, col) => { a = Math.max(0, a); b = Math.min(W, b); if (b > a && j >= 0 && j < H) px(g, a, j, b - a, 1, col); };
+  const W = 2 * w, H = 2 * h, [light, dark] = WISP(th), wash = fogWash(th);
+  const m = Math.min(FOG_EDGE >> 1, W >> 2, H >> 2);
+  const run = (g, a, b, j, col) => { a = Math.max(m, a); b = Math.min(W - m, b); if (b > a && j >= m && j < H - m) px(g, a, j, b - a, 1, col); };
   detail(c, x, y, g => {
-    px(g, 0, 0, W, H, fogCol(th));
-    px(g, 0, 0, W, 2, 'rgba(255,255,255,.14)');
+    for (let k = 0; k < FOG_EDGE && 2 * k < W && 2 * k < H; k++) px(g, k, k, W - 2 * k, H - 2 * k, wash);
     for (let i = 0, Y = 6; Y + 4 <= H; i++, Y += 14) for (let n = 0; n < 2; n++) {
       const L = 16 + ((i * 7 + n * 11) % 3) * 6, span = W + L;
       const drift = state.reduce ? 0 : (i % 2 ? -1 : 1) * t / (170 + i * 50);
