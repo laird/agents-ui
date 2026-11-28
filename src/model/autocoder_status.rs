@@ -35,6 +35,22 @@ pub enum Activity {
     Unknown,
 }
 
+/// A worker row's note on what autocoder itself says (#545b): the activity
+/// word, then its reason when one was given. `unknown` is spelled out, never
+/// folded into `idle` -- a worker ctl can't read a pane for is not known to
+/// be idle.
+pub fn activity_note(activity: Activity, reason: Option<&str>) -> String {
+    let word = match activity {
+        Activity::Busy => "busy",
+        Activity::Idle => "idle",
+        Activity::Unknown => "unknown",
+    };
+    match reason {
+        Some(r) if !r.is_empty() => format!("{word}: {r}"),
+        _ => word.to_string(),
+    }
+}
+
 /// One worker as `autocoder-ctl.sh status` lists it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CtlWorker {
@@ -43,6 +59,10 @@ pub struct CtlWorker {
     pub worktree: PathBuf,
     pub issue: Option<u32>,
     pub activity: Activity,
+    /// worker-idle's reason for the `activity` verdict (`docs/autocoder-ctl.md`
+    /// "Status for UIs"), e.g. "activity marker in pane" or "idle sentinel".
+    /// `None` when the manifest gave none.
+    pub reason: Option<String>,
 }
 
 /// What `status` answered.
@@ -60,6 +80,8 @@ pub enum CtlStatus {
 pub struct WorkerReport {
     pub issue: Option<u32>,
     pub activity: Activity,
+    /// autocoder-ctl's reason for `activity` (#545b).
+    pub reason: Option<String>,
 }
 
 /// Read `status`'s stdout, given its exit code.
@@ -94,6 +116,7 @@ pub fn parse_ctl_status(stdout: &str, exit: Option<i32>) -> CtlStatus {
                     Some("idle") => Activity::Idle,
                     _ => Activity::Unknown,
                 },
+                reason: w.get("reason").and_then(|v| v.as_str()).map(str::to_string),
             })
         })
         .collect();
@@ -234,7 +257,7 @@ pub fn reports(workers: &[CtlWorker], life: Option<&Lifecycle>) -> HashMap<PathB
                         .max()
                 }),
             };
-            (w.worktree.clone(), WorkerReport { issue, activity: w.activity })
+            (w.worktree.clone(), WorkerReport { issue, activity: w.activity, reason: w.reason.clone() })
         })
         .collect()
 }
@@ -301,6 +324,19 @@ fn ask(repo: &Path) -> Option<HashMap<PathBuf, WorkerReport>> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn activity_note_spells_out_unknown_instead_of_folding_it_into_idle() {
+        assert_eq!(activity_note(Activity::Unknown, Some("no pane")), "unknown: no pane");
+        assert_eq!(activity_note(Activity::Idle, Some("idle sentinel")), "idle: idle sentinel");
+        assert_eq!(activity_note(Activity::Busy, Some("spinner")), "busy: spinner");
+    }
+
+    #[test]
+    fn activity_note_without_a_reason_is_just_the_word() {
+        assert_eq!(activity_note(Activity::Unknown, None), "unknown");
+        assert_eq!(activity_note(Activity::Idle, Some("")), "idle");
+    }
+
     const STATUS: &str = r#"{"ok": true, "action": "status", "target": "/src/r", "detail": {"swarms": 1, "workers": [
         {"session": "claude-r", "number": 1, "worktree": "/src/r-wt-1", "pane": "%3", "state": "running",
          "branch": "feature/issue-41", "issue": 41, "activity": "busy", "reason": "spinner"},
@@ -310,12 +346,17 @@ mod tests {
          "branch": "master-wt-3", "issue": null, "activity": "idle", "reason": "idle sentinel"}]}}"#;
 
     fn worker(n: u32, issue: Option<u32>, activity: Activity) -> CtlWorker {
+        worker_with_reason(n, issue, activity, None)
+    }
+
+    fn worker_with_reason(n: u32, issue: Option<u32>, activity: Activity, reason: Option<&str>) -> CtlWorker {
         CtlWorker {
             session: "claude-r".into(),
             number: n,
             worktree: PathBuf::from(format!("/src/r-wt-{n}")),
             issue,
             activity,
+            reason: reason.map(str::to_string),
         }
     }
 
@@ -335,9 +376,9 @@ mod tests {
         assert_eq!(
             ws,
             vec![
-                worker(1, Some(41), Activity::Busy),
-                worker(2, None, Activity::Unknown),
-                worker(3, None, Activity::Idle)
+                worker_with_reason(1, Some(41), Activity::Busy, Some("spinner")),
+                worker_with_reason(2, None, Activity::Unknown, Some("no pane")),
+                worker_with_reason(3, None, Activity::Idle, Some("idle sentinel"))
             ]
         );
     }
@@ -441,7 +482,7 @@ not json"#;
         let r = reports(&ws, Some(&life));
         assert_eq!(r[Path::new("/src/r-wt-1")].issue, Some(41), "takes the issue it claimed instead");
         assert_eq!(r[Path::new("/src/r-wt-2")].issue, Some(70));
-        assert_eq!(r[Path::new("/src/r-wt-3")], WorkerReport { issue: Some(60), activity: Activity::Idle });
+        assert_eq!(r[Path::new("/src/r-wt-3")], WorkerReport { issue: Some(60), activity: Activity::Idle, reason: None });
     }
 
     #[test]
@@ -469,8 +510,14 @@ not json"#;
     }
 
     #[test]
+    fn a_workers_reason_passes_through_to_its_report() {
+        let r = reports(&[worker_with_reason(1, Some(38), Activity::Idle, Some("idle sentinel"))], None);
+        assert_eq!(r[Path::new("/src/r-wt-1")].reason, Some("idle sentinel".to_string()));
+    }
+
+    #[test]
     fn without_the_log_the_branch_names_the_issue() {
         let r = reports(&[worker(1, Some(38), Activity::Busy)], None);
-        assert_eq!(r[Path::new("/src/r-wt-1")], WorkerReport { issue: Some(38), activity: Activity::Busy });
+        assert_eq!(r[Path::new("/src/r-wt-1")], WorkerReport { issue: Some(38), activity: Activity::Busy, reason: None });
     }
 }

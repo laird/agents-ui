@@ -875,11 +875,11 @@ fn truncate(s: &str, max: usize) -> String {
 }
 
 /// Build the dimmed detail line of a two-line agent row: state, then each
-/// other field `" · "`-joined, in the order state/issue/worktree/needs
-/// input/completed/restarts. Fields that don't apply are omitted entirely --
-/// never a dangling separator or a literal "None". Mirrors the web's
-/// `renderAgentRow` (`src/web/ui.html`), plus the worktree basename it
-/// doesn't yet show.
+/// other field `" · "`-joined, in the order state/issue/worktree/autocoder
+/// note/needs input/completed/restarts. Fields that don't apply are omitted
+/// entirely -- never a dangling separator or a literal "None". Mirrors the
+/// web's `renderAgentRow` (`src/web/ui.html`), plus the worktree basename and
+/// the autocoder note it doesn't yet show.
 ///
 /// Branch (also new, from issue #328) isn't included yet: `AgentInfo` has no
 /// branch field until #328 lands.
@@ -908,6 +908,10 @@ fn build_detail_line(agent: &AgentInfo, max_title_chars: usize) -> String {
 
     if let Some(name) = agent.worktree_path.file_name().and_then(|n| n.to_str()) {
         parts.push(name.to_string());
+    }
+
+    if let Some(note) = agent.activity_reason.as_deref().filter(|n| !n.is_empty()) {
+        parts.push(format!("autocoder: {note}"));
     }
 
     if agent.waiting_for_input {
@@ -996,6 +1000,7 @@ mod tests {
             completed_issue_count: 0,
             health: crate::model::swarm::WorkerHealth::default(),
             mux: Default::default(),
+            activity_reason: None,
         }
     }
 
@@ -1052,6 +1057,20 @@ mod tests {
         let mut agent = make_agent("worker-3", false, "", AgentState::Idle);
         agent.worktree_path = PathBuf::from("/home/user/repos/example-app-wt-3");
         assert_eq!(build_detail_line(&agent, 40), "Idle · example-app-wt-3");
+    }
+
+    #[test]
+    fn detail_line_shows_autocoders_activity_note() {
+        let mut agent = make_agent("worker-1", false, "", AgentState::Idle);
+        agent.activity_reason = Some("unknown: no pane".to_string());
+        assert_eq!(build_detail_line(&agent, 40), "Idle · autocoder: unknown: no pane");
+    }
+
+    #[test]
+    fn detail_line_omits_an_empty_autocoder_note() {
+        let mut agent = make_agent("worker-1", false, "", AgentState::Idle);
+        agent.activity_reason = Some(String::new());
+        assert_eq!(build_detail_line(&agent, 40), "Idle");
     }
 
     #[test]

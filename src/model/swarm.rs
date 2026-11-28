@@ -289,6 +289,11 @@ pub struct AgentInfo {
     /// (`tmux_target` is a herdr pane id, read and typed into via
     /// `web::pane`).
     pub mux: Mux,
+    /// What autocoder-ctl's `status` says this worker is doing, and why
+    /// (#545b): `autocoder_status::activity_note`, e.g. "busy: spinner" or
+    /// "unknown: no pane". `None` when autocoder gave no answer, or this is
+    /// the manager (ctl reports workers only).
+    pub activity_reason: Option<String>,
 }
 
 /// Where an agent's terminal lives.
@@ -601,6 +606,7 @@ mod tests {
             completed_issue_count: 0,
             health: WorkerHealth::default(),
             mux: Default::default(),
+            activity_reason: None,
         }
     }
 
@@ -636,6 +642,7 @@ mod tests {
             completed_issue_count: 0,
             health: WorkerHealth::default(),
             mux: Default::default(),
+            activity_reason: None,
         };
         let mut cache = IssueCache::default();
         cache.issues = issues;
@@ -1025,6 +1032,7 @@ mod tests {
             completed_issue_count: 0,
             health: WorkerHealth::default(),
             mux: Default::default(),
+            activity_reason: None,
         }
     }
 

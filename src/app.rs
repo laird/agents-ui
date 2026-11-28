@@ -1778,6 +1778,7 @@ impl App {
             completed_issue_count: 0,
                 health: crate::model::swarm::WorkerHealth::default(),
                 mux: Default::default(),
+                activity_reason: None,
             },
             workers: Vec::new(),
             issue_cache: crate::model::issue::IssueCache::default(),
@@ -5460,6 +5461,10 @@ impl App {
                 worker.current_issue_title = report.issue.and_then(|n| {
                     swarm.issue_cache.issues.iter().find(|i| i.number == n).map(|i| i.title.clone())
                 });
+                worker.activity_reason = Some(crate::model::autocoder_status::activity_note(
+                    report.activity,
+                    report.reason.as_deref(),
+                ));
                 match (report.activity, report.issue) {
                     (crate::model::autocoder_status::Activity::Busy, Some(n)) => {
                         worker.status.state =

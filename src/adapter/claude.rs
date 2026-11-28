@@ -2,7 +2,9 @@
 //! `recognized_tests`: the terminal view's swarms come from the shared recognizer (`/api/swarms`'s).
 
 use anyhow::{Context, Result};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use tokio::process::Command;
 
 use crate::adapter::supervisor;
@@ -17,11 +19,15 @@ use super::traits::{AgentRuntime, SwarmConfig};
 pub struct ClaudeAdapter {
     runtime: AgentType,
     transport: ServerTransport,
+    /// Repos `discover()` has shown live, across calls: where a dormant
+    /// swarm (#545c, mirrors `web::dormant`'s #398 for the TUI) is still
+    /// looked for after its swarm stops appearing live.
+    dormant_known: Arc<Mutex<BTreeSet<PathBuf>>>,
 }
 
 impl ClaudeAdapter {
     pub fn new(runtime: AgentType, transport: ServerTransport) -> Self {
-        Self { runtime, transport }
+        Self { runtime, transport, dormant_known: Arc::new(Mutex::new(BTreeSet::new())) }
     }
 
     async fn output(
@@ -1044,6 +1050,7 @@ impl ClaudeAdapter {
             completed_issue_count: 0,
             health: crate::model::swarm::WorkerHealth::default(),
             mux: Default::default(),
+            activity_reason: None,
         };
 
         let mut workers = Vec::new();
@@ -1095,6 +1102,7 @@ impl ClaudeAdapter {
             completed_issue_count: 0,
                     health: crate::model::swarm::WorkerHealth::default(),
                     mux: Default::default(),
+                    activity_reason: None,
                 });
                 worker_num += 1;
             }
@@ -1222,6 +1230,81 @@ impl ClaudeAdapter {
                 .map(|worker| worker.tmux_target.clone()),
         );
         targets
+    }
+
+    /// Swarms whose manifest the TUI knows about but has no live agent for
+    /// (#545c): the repos list and worker status still drop these today.
+    /// Mirrors `web::dormant::DormantSwarms::add`'s #398 for the TUI's own
+    /// swarm list; `live` is `discover()`'s swarms so far, so a live swarm's
+    /// manifest is never shadowed by a dormant duplicate.
+    async fn dormant_swarms(&self, live: &[Swarm]) -> Vec<Swarm> {
+        let mut known = match self.dormant_known.lock() {
+            Ok(known) => known,
+            Err(_) => return Vec::new(),
+        };
+        known.extend(live.iter().map(|s| crate::model::recognize::canonical(&s.repo_path.to_string_lossy())));
+        known.extend(saved_repos());
+        let mut dormant = Vec::new();
+        for root in dormant_candidates(&known, live) {
+            if let Some(swarm) = self.dormant_swarm(&root, &crate::model::recognize::read_manifests(&self.transport, &root).await) {
+                dormant.push(swarm);
+            }
+        }
+        dormant
+    }
+
+    /// The swarm `root`'s manifests describe when nothing in it runs. `None`
+    /// when it has no manifest.
+    fn dormant_swarm(&self, root: &Path, manifests: &[crate::model::recognize::SwarmManifest]) -> Option<Swarm> {
+        let first = manifests.first()?;
+        let project_name = Self::project_name(root);
+        // The manifest's own session names its runtime (`claude-shop`,
+        // `codex-shop`); falling back to this adapter's would badge every
+        // dormant swarm as whatever runtime the TUI happens to be running.
+        let agent_type = parse_agent_session_name(&first.session).map_or(self.runtime.clone(), |(t, _)| t);
+        let state = match manifests.iter().find_map(|m| m.state.as_deref()) {
+            Some(s) => format!("Dormant: {s}"),
+            None => "Dormant".to_string(),
+        };
+        let manager = AgentInfo {
+            id: format!("{project_name}/manager"),
+            role: "manager".to_string(),
+            branch: None,
+            worktree_path: root.to_path_buf(),
+            // Empty, not a real pane target: a non-empty tmux_target would
+            // make revive_dropped_agents treat this fake manager as a pane.
+            tmux_target: String::new(),
+            status: AgentStatus { timestamp: None, state: status::AgentState::Unknown(state) },
+            is_manager: true,
+            // Empty: refresh_statuses re-infers status from a non-empty
+            // pane_content every tick, which would overwrite the state above.
+            pane_content: String::new(),
+            dispatched_issue: None,
+            current_issue: None,
+            current_issue_title: None,
+            waiting_for_input: false,
+            resurrection_attempts: 0,
+            completed_issue_count: 0,
+            health: crate::model::swarm::WorkerHealth::default(),
+            mux: Default::default(),
+            activity_reason: None,
+        };
+        Some(Swarm {
+            repo_path: root.to_path_buf(),
+            project_name,
+            agent_type,
+            workflow: None,
+            // Empty, not the manifest's session name: prune_dead_swarms
+            // treats an empty tmux_session as a swarm still launching and
+            // leaves it alone; a real-looking name with no live tmux
+            // session would be pruned the moment it was added.
+            tmux_session: String::new(),
+            manager,
+            workers: Vec::new(),
+            issue_cache: Default::default(),
+            // No live agents to heal or revive.
+            stopped: true,
+        })
     }
 }
 
@@ -1488,6 +1571,8 @@ impl AgentRuntime for ClaudeAdapter {
             }
         }
 
+        swarms.extend(self.dormant_swarms(&swarms).await);
+
         Ok(swarms)
     }
 
@@ -1620,6 +1705,7 @@ impl AgentRuntime for ClaudeAdapter {
             completed_issue_count: 0,
             health: crate::model::swarm::WorkerHealth::default(),
             mux: Default::default(),
+            activity_reason: None,
         })
     }
 
@@ -2470,6 +2556,27 @@ pub(crate) fn recognized(snapshots: &[crate::web::SwarmSnapshot], runtime: &Agen
     out
 }
 
+/// The known repos no swarm in `live` already stands for: where to look for
+/// a dormant one (#545c, mirrors `web::dormant::candidates`'s #398).
+fn dormant_candidates(known: &BTreeSet<PathBuf>, live: &[Swarm]) -> Vec<PathBuf> {
+    let shown: BTreeSet<PathBuf> =
+        live.iter().map(|s| crate::model::recognize::canonical(&s.repo_path.to_string_lossy())).collect();
+    known.iter().filter(|r| !shown.contains(*r)).cloned().collect()
+}
+
+/// The repos of every saved swarm (`~/.agents-ui/`), mirroring
+/// `web::dormant::saved_repos`'s #398.
+fn saved_repos() -> Vec<PathBuf> {
+    use crate::config::persistence::{list_saved_swarms, load_swarm_state};
+    list_saved_swarms()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|name| load_swarm_state(name).ok().flatten())
+        .filter(|s| !s.repo_path.is_empty())
+        .map(|s| crate::model::recognize::canonical(&s.repo_path))
+        .collect()
+}
+
 /// An agent of a recognized swarm, as the terminal view tracks it. Its state
 /// comes from the view's own watchers and status files from here on.
 fn agent_info(a: &crate::web::AgentSnapshot) -> AgentInfo {
@@ -2490,6 +2597,7 @@ fn agent_info(a: &crate::web::AgentSnapshot) -> AgentInfo {
         completed_issue_count: 0,
         health: crate::model::swarm::WorkerHealth::default(),
         mux: a.mux,
+        activity_reason: None,
     }
 }
 
@@ -2522,17 +2630,104 @@ fn project_session_names(project_name: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ClaudeAdapter, extract_issue_number_from_branch, generic_worker_bootstrap_cmd,
-        generic_worker_ongoing_cmd, is_bare_shell_prompt, is_feedback_prompt,
-        manager_bootstrap_cmd, manager_ongoing_cmd, pane_agent_is_idle, pane_needs_runtime_launch,
-        pane_has_runtime_mismatch, pane_runtime_hint,
+        ClaudeAdapter, dormant_candidates, extract_issue_number_from_branch,
+        generic_worker_bootstrap_cmd, generic_worker_ongoing_cmd, is_bare_shell_prompt,
+        is_feedback_prompt, manager_bootstrap_cmd, manager_ongoing_cmd, pane_agent_is_idle,
+        pane_needs_runtime_launch, pane_has_runtime_mismatch, pane_runtime_hint,
         parse_agent_session_name, project_session_names, worker_dispatch_cmd,
     };
     use crate::adapter::traits::AgentRuntime;
     use crate::model::issue::IssueCache;
-    use crate::model::status::{AgentStatus, PaneActivity, classify_pane_activity};
+    use crate::model::recognize::parse_manifests;
+    use crate::model::status::{AgentState, AgentStatus, PaneActivity, classify_pane_activity};
     use crate::model::swarm::{AgentInfo, AgentType, Swarm};
-    use std::path::PathBuf;
+    use std::collections::BTreeSet;
+    use std::path::{Path, PathBuf};
+
+    fn adapter() -> ClaudeAdapter {
+        ClaudeAdapter::new(AgentType::Claude, crate::transport::ServerTransport::default())
+    }
+
+    const MANIFEST: &str = r#"{"version":1,"session":"claude-shop","projectRoot":"/src/shop","state":"paused",
+        "workers":[],"manager":{"herdrPane":"w5:p1","tmuxTarget":null}}"#;
+
+    #[test]
+    fn a_manifest_with_nothing_live_is_a_dormant_swarm() {
+        let s = adapter().dormant_swarm(Path::new("/src/shop"), &parse_manifests(MANIFEST)).unwrap();
+        assert_eq!(s.project_name, "shop");
+        assert_eq!(s.repo_path, PathBuf::from("/src/shop"));
+        assert_eq!(s.manager.status.state.to_string(), "Dormant: paused", "the manifest's state");
+        assert!(s.workers.is_empty());
+        assert_eq!(s.tmux_session, "", "a real-looking name would get pruned by prune_dead_swarms");
+        assert!(s.stopped, "no live agents: never healed or revived");
+        assert_eq!(s.manager.pane_content, "", "non-empty content would be re-inferred over the state above");
+        assert_eq!(s.manager.tmux_target, "", "a real-looking target would look like a live pane to revive_dropped_agents");
+    }
+
+    #[test]
+    fn a_dormant_swarms_runtime_comes_from_its_manifest_not_the_adapters() {
+        // The adapter here runs Claude, but the manifest names a codex session.
+        let m = parse_manifests(r#"{"session":"codex-shop","manager":{}}"#);
+        let s = adapter().dormant_swarm(Path::new("/src/shop"), &m).unwrap();
+        assert_eq!(s.agent_type, AgentType::Codex);
+    }
+
+    #[test]
+    fn a_manifest_without_a_state_is_just_dormant() {
+        let m = parse_manifests(r#"{"session":"claude-shop","manager":{}}"#);
+        assert_eq!(adapter().dormant_swarm(Path::new("/src/shop"), &m).unwrap().manager.status.state.to_string(), "Dormant");
+    }
+
+    #[test]
+    fn no_manifest_and_nothing_live_is_no_swarm() {
+        assert!(adapter().dormant_swarm(Path::new("/src/shop"), &[]).is_none());
+        assert!(adapter().dormant_swarm(Path::new("/src/shop"), &parse_manifests("not json")).is_none());
+    }
+
+    #[test]
+    fn a_live_swarm_wins_over_its_manifest() {
+        let known = BTreeSet::from([PathBuf::from("/src/shop"), PathBuf::from("/src/billing")]);
+        let live = |repo_path: &str| Swarm { repo_path: PathBuf::from(repo_path), ..test_swarm() };
+        assert_eq!(dormant_candidates(&known, &[live("/src/shop")]), vec![PathBuf::from("/src/billing")]);
+        assert_eq!(dormant_candidates(&known, &[live("/src/shop"), live("/src/billing")]), Vec::<PathBuf>::new());
+        assert_eq!(dormant_candidates(&known, &[]).len(), 2);
+    }
+
+    fn test_swarm() -> Swarm {
+        Swarm {
+            repo_path: PathBuf::new(),
+            project_name: "shop".to_string(),
+            agent_type: AgentType::Claude,
+            workflow: None,
+            tmux_session: "claude-shop".to_string(),
+            manager: test_agent("manager", true),
+            workers: Vec::new(),
+            issue_cache: IssueCache::default(),
+            stopped: false,
+        }
+    }
+
+    fn test_agent(id: &str, is_manager: bool) -> AgentInfo {
+        AgentInfo {
+            id: id.to_string(),
+            role: id.to_string(),
+            worktree_path: PathBuf::new(),
+            branch: None,
+            tmux_target: String::new(),
+            status: AgentStatus { timestamp: None, state: AgentState::Idle },
+            is_manager,
+            pane_content: String::new(),
+            dispatched_issue: None,
+            current_issue: None,
+            current_issue_title: None,
+            waiting_for_input: false,
+            resurrection_attempts: 0,
+            completed_issue_count: 0,
+            health: crate::model::swarm::WorkerHealth::default(),
+            mux: Default::default(),
+            activity_reason: None,
+        }
+    }
 
     #[test]
     fn empty_pane_is_unknown() {
@@ -4019,6 +4214,7 @@ exit 0
                 completed_issue_count: 0,
                 health: crate::model::swarm::WorkerHealth::default(),
                 mux: Default::default(),
+                activity_reason: None,
             },
             workers: vec![
                 AgentInfo {
@@ -4038,6 +4234,7 @@ exit 0
                     completed_issue_count: 0,
                     health: crate::model::swarm::WorkerHealth::default(),
                     mux: Default::default(),
+                    activity_reason: None,
                 },
                 AgentInfo {
                     id: "demo/worker-2".to_string(),
@@ -4056,6 +4253,7 @@ exit 0
                     completed_issue_count: 0,
                     health: crate::model::swarm::WorkerHealth::default(),
                     mux: Default::default(),
+                    activity_reason: None,
                 },
             ],
             issue_cache: IssueCache::default(),
