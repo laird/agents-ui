@@ -23,6 +23,7 @@ import { tokenWords } from './coins.js';
 import { fxOn, fxRest } from './controlfx.js';
 import { limitWords, limited } from './limits.js';
 import { houseName, issueItems, issueLabel, issueOf, link, repoUrl, sessionOf } from './dialogs.js';
+import { withAttach } from './herdrlink.js';
 import { houseLabel, managerSub } from './houselabel.js';
 import { branchLinks, commitsLink } from './ghlinks.js';
 import { ALARM, alarm, boardAlert, boardFrame, failed, ring } from './alarms.js';
@@ -256,7 +257,7 @@ registerHit({ kind: 'hall', dialog(o, sc, theme) {
   const m = v.manager, s = sessionOf(m), swarm = s && s.url.replace(/\/agent\/[^/]+$/, '');
   return { title: `${theme.labels.hall} · manager`, line: m.issue ? `#${m.issue} ${m.issue_title || ''}` : (m.issue_title || 'The manager of this swarm'),
     meta: [`Status: ${m.status}`, limitWords(m), contextWords(m), `Crew: ${m.crew.join(', ') || '—'}`, ...(m.subagents || []).map(sa => `${runtime ? 'Worker' : 'Sub-agent'}: ${subWords(sa, v)}`), m.action ? `Now: ${m.action}` : null],
-    links: [...(m.links || []), link('Swarm view', swarm), runtime ? null : commitsLink(repoUrl(v), v.pipeline.integration)], house: m };
+    links: withAttach(v, m, [...(m.links || []), link('Swarm view', swarm), runtime ? null : commitsLink(repoUrl(v), v.pipeline.integration)]), house: m };
 } });
 registerHit({ kind: 'house', dialog(o, sc) {
   const v = sc.v, runtime = isRuntime(v), work = workOf(v);
@@ -271,7 +272,7 @@ registerHit({ kind: 'house', dialog(o, sc) {
       `Status: ${h.status}${h.action && h.action !== h.status ? ' · ' + h.action : ''}${h.priority ? ' · ' + h.priority : ''}`,
       since ? `${h.status.charAt(0).toUpperCase() + h.status.slice(1)} since ${since}` : null, limitWords(h), contextWords(h), ...tokenWords(h),
       `Crew: ${h.crew.join(', ') || '—'}`, ...(h.subagents || []).map(sa => `${runtime ? 'Agent' : 'Sub-agent'}: ${subWords(sa, v)}`)],
-    links: [...(h.links || []), issue, ...(runtime ? [] : branchLinks(repo, h.branch, h.links, br)), compare], house: h,
+    links: withAttach(v, h, [...(h.links || []), issue, ...(runtime ? [] : branchLinks(repo, h.branch, h.links, br)), compare]), house: h,
     // Worker controls (#506, controls.js): the server says which it can run.
     controls: runtime ? null : { project: v.project, role: h.role, name: houseName(v, h), issue: h.issue || null, house: h.id } };
 } });
@@ -279,7 +280,7 @@ registerHit({ kind: 'person', dialog(o, sc) {
   const v = sc.v, h = v.houses[o.i]; if (!h) return null;
   return { title: `${o.who || h.role} · agent`, line: h.issue ? `Working on #${h.issue} ${h.issue_title || ''}` : `Status: ${h.status}`,
     meta: [`Lives in ${houseName(v, h)}`, `Status: ${h.status}`, limitWords(h), h.action ? `Now: ${h.action}` : null],
-    links: [sessionOf(h), h.issue ? link(issueLabel(h.issue), issueOf(v, h.issue).url) : null] };
+    links: withAttach(v, h, [sessionOf(h), h.issue ? link(issueLabel(h.issue), issueOf(v, h.issue).url) : null]) };
 } });
 registerHit({ kind: 'sub', dialog(o, sc) {
   const v = sc.v, runtime = isRuntime(v);

@@ -52,3 +52,28 @@ fn a_controls_result_shows_on_the_house_at_once() {
         assert!(fx.contains(action), "{action}");
     }
 }
+
+/// "Open in herdr" (#575, for #549): first in an agent's dialog, the web
+/// terminal kept as "View in browser", and a fallback when no handler answers.
+/// The link and the commands are tested under node (herdrlink.test.mjs).
+#[test]
+fn an_agents_dialog_opens_it_in_herdr_with_a_web_terminal_fallback() {
+    let lifecycle = village_asset("lifecycle.js").unwrap().1;
+    assert!(lifecycle.contains("links: withAttach(v, h, [...(h.links || []), issue,"), "the house");
+    assert!(lifecycle.contains("links: withAttach(v, m, [...(m.links || []), link('Swarm view', swarm)"), "the manager's hall");
+    assert!(lifecycle.contains("links: withAttach(v, h, [sessionOf(h),"), "the agent walking about");
+    let link = village_asset("herdrlink.js").unwrap().1;
+    assert!(link.contains("const url = 'agents-ui://attach?' + Object.entries(q)"));
+    assert!(link.contains("s ? { label: 'View in browser', url: s.url } : null"));
+    let dialogs = village_asset("dialogs.js").unwrap().1;
+    // Handed to the handler in the same tab (no new tab), each other link in a new one.
+    assert!(dialogs.contains("? `<a href=\"${esc(l.url)}\" data-attach=\"${i}\">${esc(l.label)}</a>`"));
+    // No handler: the page keeps its focus, so after the wait it opens the web
+    // terminal and shows copyable commands; what happened is remembered.
+    assert!(dialogs.contains("window.addEventListener('blur', on); document.addEventListener('visibilitychange', on);"));
+    assert!(dialogs.contains("attachMemo(answered ? 'yes' : 'none');"));
+    assert!(dialogs.contains("if (a.web) window.open(a.web, '_blank', 'noopener');"));
+    assert!(dialogs.contains("<button type=\"button\" data-copy=\"${esc(c)}\">Copy</button>"));
+    assert!(dialogs.contains("if (plan === 'fallback') { e.preventDefault(); attachFallback(a, box, true); return; }"));
+    assert!(village_asset("village.css").unwrap().1.contains(".dialog .attach-cmds {"));
+}

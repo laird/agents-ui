@@ -10,14 +10,50 @@ import { DIALOG_PARTS, HITS, hitAt, registerOverlay } from './registry.js';
 import { cv, shownScale, shownScenes, themeAt } from './layout.js';
 import { toScene } from './detail.js';
 import { esc } from './panels.js';
+import { ATTACH_WAIT, HANDLER_KEY, SESSION, attachPlan } from './herdrlink.js';
 
 export const dialog = document.getElementById('dialog');
 document.getElementById('close').addEventListener('click', () => { dialog.hidden = true; });
 /* Drill in: each link opens the tool behind the picture (the agent's session,
  * its issue, its workflow) in a new tab. */
 export function links(list) {
-  document.getElementById('d-links').innerHTML = (list || [])
-    .map(l => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)} ↗</a>`).join('');
+  const box = document.getElementById('d-links');
+  list = list || [];
+  box.innerHTML = list.map((l, i) => (l.attach
+    ? `<a href="${esc(l.url)}" data-attach="${i}">${esc(l.label)}</a>`
+    : `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)} ↗</a>`)).join('');
+  list.forEach((l, i) => { if (l.attach) box.querySelector(`[data-attach="${i}"]`).addEventListener('click', e => attachClick(e, l.attach, box)); });
+}
+/* "Open in herdr" (herdrlink.js, #575): hand the agents-ui:// link to the
+ * handler `agents-tui open` registers. With none, the page keeps its focus:
+ * after ATTACH_WAIT it opens the web terminal instead and shows the
+ * commands to attach by hand. Which happened is remembered. */
+const attachKnown = () => { try { return localStorage.getItem(HANDLER_KEY); } catch (e) { return null; } };
+const attachMemo = x => { try { if (x) localStorage.setItem(HANDLER_KEY, x); else localStorage.removeItem(HANDLER_KEY); } catch (e) { /* private mode */ } };
+function attachClick(e, a, box) {
+  const plan = attachPlan(attachKnown());
+  if (plan === 'open') return;
+  if (plan === 'fallback') { e.preventDefault(); attachFallback(a, box, true); return; }
+  let answered = false;
+  const on = () => { answered = true; };
+  window.addEventListener('blur', on); document.addEventListener('visibilitychange', on);
+  setTimeout(() => {
+    window.removeEventListener('blur', on); document.removeEventListener('visibilitychange', on);
+    attachMemo(answered ? 'yes' : 'none');
+    if (!answered) attachFallback(a, box, false);
+  }, ATTACH_WAIT);
+}
+function attachFallback(a, box, now) {
+  if (a.web) window.open(a.web, '_blank', 'noopener');
+  const el = box.querySelector('.attach-cmds') || box.appendChild(Object.assign(document.createElement('div'), { className: 'attach-cmds' }));
+  el.innerHTML = `<p class="dim">${now ? 'No agents-ui:// handler answered last time' : 'No agents-ui:// handler answered'}${a.web ? ', so this opens in the browser' : ''}. To attach from a terminal:</p>`
+    + a.cmds.map(c => `<div class="cmd"><code>${esc(c)}</code><button type="button" data-copy="${esc(c)}">Copy</button></div>`).join('')
+    + '<button type="button" class="retry">Try the handler again</button>';
+  el.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', () => {
+    const done = () => { b.textContent = 'Copied'; };
+    if (navigator.clipboard) navigator.clipboard.writeText(b.dataset.copy).then(done, () => { b.textContent = 'Select and copy'; });
+  }));
+  el.querySelector('.retry').addEventListener('click', () => { attachMemo(null); el.remove(); });
 }
 /* A structured question the agent is waiting on (a numbered menu or y/n):
  * one button per option. The server checks the same question is still on
@@ -66,7 +102,7 @@ export function issueOf(v, n) {
 }
 export const issueLabel = n => `GitHub issue #${n}`;
 export const issueItems = (v, ns) => ns.map(n => ({ number: n, ...issueOf(v, n) }));
-export const sessionOf = h => (h.links || []).find(l => /^\/#\/swarm\/[^/]+\/agent\//.test(l.url));
+export const sessionOf = h => (h.links || []).find(l => SESSION.test(l.url));
 export const isSha = s => /^[0-9a-f]{7,40}$/i.test(String(s || ''));
 /* A house's name: its worktree's folder, less the project prefix (shop-wt-2 → wt-2). */
 export function houseName(v, h) {

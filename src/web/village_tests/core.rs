@@ -117,7 +117,8 @@ fn village_html_links_only_what_it_knows() {
     assert!(body.contains("url: (c && c.url) || (own && own.url) || (repo ? `${repo}/issues/${n}` : null)"));
     assert!(body.contains("const link = (label, url) => (url ? { label, url } : null);"));
     // Houses, people and sub-agents link to the agent session view.
-    assert!(body.contains(r"const sessionOf = h => (h.links || []).find(l => /^\/#\/swarm\/[^/]+\/agent\//.test(l.url));"));
+    assert!(body.contains("const sessionOf = h => (h.links || []).find(l => SESSION.test(l.url));"));
+    assert!(body.contains(r"export const SESSION = /^\.?\/#\/swarm\/[^/]+\/agent\//;"), "the relative links of #552 too");
     assert!(body.contains("link('Swarm view', swarm)"));
     assert!(body.contains("label: 'Parent agent session'"));
     // Environments link to their deployments or commit; the quay to the integration branch.

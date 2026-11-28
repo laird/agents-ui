@@ -76,6 +76,10 @@
   .dialog .links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
   .dialog .links a { font: 700 13px var(--mono); color: #241400; background: var(--gold); border-radius: 4px; padding: 5px 10px; text-decoration: none; }
   .dialog .links a:hover { filter: brightness(1.1); }
+  .dialog .attach-cmds { flex-basis: 100%; display: flex; flex-direction: column; gap: 6px; }
+  .dialog .attach-cmds .cmd { display: flex; gap: 6px; align-items: center; }
+  .dialog .attach-cmds code { flex: 1; font: 12px var(--mono); background: rgba(0,0,0,.25); padding: 4px 6px; border-radius: 4px; user-select: all; overflow-wrap: anywhere; }
+  .dialog .attach-cmds .retry { align-self: flex-start; }
   .dialog ul { list-style: none; margin: 6px 0 0; padding: 0; max-height: 40vh; overflow: auto; }
   .dialog li { font: 14px/1.5 var(--mono); }
   .dialog li a { color: var(--gold); }
