@@ -193,8 +193,17 @@ export function placeKeys() {
         kbuttons.set(key, b); kbox.appendChild(b);
       }
       b.project = sc.v.project; b.obj = h.o; b.theme = theme;
-      b.setAttribute('aria-label', [info.title, info.line].filter(Boolean).join(': '));
-      Object.assign(b.style, { left: ox0 + (ox + h.x) * s + 'px', top: oy0 + (oy + h.y) * s + 'px', width: h.w * s + 'px', height: h.h * s + 'px' });
+      const label = [info.title, info.line].filter(Boolean).join(': ');
+      b.setAttribute('aria-label', label);
+      b.title = label;
+      // A small sprite still gets a real keyboard target: at least 24 CSS px
+      // (#568), centred over its drawn hit rect rather than just its corner.
+      const w = Math.max(24, h.w * s), ht = Math.max(24, h.h * s);
+      Object.assign(b.style, {
+        left: ox0 + (ox + h.x) * s - (w - h.w * s) / 2 + 'px',
+        top: oy0 + (oy + h.y) * s - (ht - h.h * s) / 2 + 'px',
+        width: w + 'px', height: ht + 'px',
+      });
     });
   });
   for (const [key, b] of kbuttons) if (!keep.has(key)) { b.remove(); kbuttons.delete(key); }

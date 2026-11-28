@@ -178,7 +178,12 @@ fn village_html_reaches_every_object_by_keyboard() {
     assert!(body.contains("registerOverlay(placeBanners, 10);") && body.contains("registerOverlay(placeKeys, 30);"));
     assert!(body.contains("OVERLAYS.forEach(o => o.fn());"));
     assert!(body.contains(".hk:focus-visible"));
-    assert!(body.contains("b.setAttribute('aria-label', [info.title, info.line].filter(Boolean).join(': '));"));
+    // The full title shown by name on a keyboard focus too (#568): the same
+    // text in `aria-label` (for assistive tech) and `title` (the visible tooltip).
+    assert!(body.contains("const label = [info.title, info.line].filter(Boolean).join(': ');"));
+    assert!(body.contains("b.setAttribute('aria-label', label);"));
+    assert!(body.contains("b.title = label;"));
+    assert!(body.contains(".hk:focus-visible::after { content: attr(title);"));
 }
 
 #[test]

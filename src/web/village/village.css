@@ -48,7 +48,7 @@
   }
   .title a { font-weight: 400; font-size: 12px; text-transform: none; letter-spacing: 0; }
   select { background: var(--win-bot); color: var(--ink); border: 2px solid var(--win-inner); border-radius: 4px; font: 13px var(--mono); padding: 4px 6px; }
-  .status { font: 12px var(--mono); color: var(--ink-dim); }
+  .status { font: 13px var(--mono); color: var(--ink-dim); }
   .vname { color: var(--ink); text-transform: none; letter-spacing: 0; overflow-wrap: anywhere; }
   .vname[hidden], .title a[hidden] { display: none; }
   .zoom { display: inline-flex; gap: 2px; }
@@ -86,13 +86,13 @@
   .dialog .opts button:disabled { opacity: .5; cursor: default; }
   /* A proposal's decision under it on the board (proposals.js). */
   .dialog .decide { margin: 2px 0 8px; }
-  .dialog .decide .opts button, #d-act .opts button, #d-ctl .opts button, #d-flaky button { font-size: 12px; padding: 3px 8px; }
+  .dialog .decide .opts button, #d-act .opts button, #d-ctl .opts button, #d-flaky button { font-size: 14px; padding: 3px 8px; }
   .dialog .decide .ask { display: flex; gap: 6px; margin-top: 4px; }
   .dialog .decide textarea { flex: 1; font: 13px var(--mono); color: var(--ink); background: var(--win-bot); border: 2px solid var(--gold); border-radius: 4px; }
-  .dialog .decide .ask button { position: static; font: 700 12px var(--mono); color: var(--ink); background: var(--win-bot); border: 2px solid var(--gold); border-radius: 4px; padding: 3px 8px; cursor: pointer; }
+  .dialog .decide .ask button { position: static; font: 700 14px var(--mono); color: var(--ink); background: var(--win-bot); border: 2px solid var(--gold); border-radius: 4px; padding: 3px 8px; cursor: pointer; }
   .dialog li.decided { opacity: .7; }
   /* Filing an issue (newissue.js): the form, and its button beside the repo link. */
-  .new-issue-btn { font: 700 12px var(--mono); color: var(--ink); background: var(--win-bot); border: 2px solid var(--gold); border-radius: 4px; padding: 2px 8px; cursor: pointer; }
+  .new-issue-btn { font: 700 14px var(--mono); color: var(--ink); background: var(--win-bot); border: 2px solid var(--gold); border-radius: 4px; padding: 2px 8px; cursor: pointer; }
   .dialog .new-issue { display: grid; gap: 6px; margin-top: 8px; }
   .dialog .new-issue label { display: grid; gap: 2px; font: 13px var(--mono); color: var(--ink-dim); }
   .dialog .new-issue input, .dialog .new-issue textarea, .dialog .new-issue select { font: 14px var(--mono); color: var(--ink); background: var(--win-bot); border: 2px solid var(--gold); border-radius: 4px; padding: 4px; }
@@ -105,7 +105,7 @@
    * and the strip under the map for the feature being followed. */
   .viewport { position: relative; }
   .fbanners { position: absolute; inset: 0; pointer-events: none; }
-  .fb { position: absolute; transform: translateX(-50%); pointer-events: auto; max-width: 118px; font: 700 11px/1.25 var(--mono); color: var(--ink); background: rgba(6,8,20,.82); border: 2px solid var(--fc); border-radius: 4px; padding: 2px 6px; cursor: pointer; text-align: center; }
+  .fb { position: absolute; transform: translateX(-50%); pointer-events: auto; max-width: 118px; font: 700 13px/1.25 var(--mono); color: var(--ink); background: rgba(6,8,20,.82); border: 2px solid var(--fc); border-radius: 4px; padding: 2px 6px; cursor: pointer; text-align: center; }
   .fb small { display: block; font-weight: 400; color: var(--ink-dim); }
   .fb[aria-pressed="true"] { background: var(--fc); color: #0c1028; }
   .fb[aria-pressed="true"] small { color: #0c1028; }
@@ -130,12 +130,15 @@
   /* The ring in the target's theme colour (keynav.js), on a dark band so it
    * reads on grass, asphalt and deck alike (#478). */
   .hk:focus-visible { opacity: 1; outline: 3px solid var(--focus, var(--gold)); outline-offset: 1px; box-shadow: 0 0 0 5px rgba(6,8,20,.85); }
+  /* The full title (no ellipsis), shown while a small sprite's keyboard
+   * target has focus (#568) — `title` is the same text as the `aria-label`. */
+  .hk:focus-visible::after { content: attr(title); position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%); margin-bottom: 6px; padding: 2px 6px; font: 700 13px var(--mono); color: var(--ink); background: rgba(6,8,20,.92); border: 1px solid var(--gold); border-radius: 4px; white-space: nowrap; z-index: 6; }
   .al { position: absolute; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 700 var(--lf, 11px)/1.2 var(--mono); color: var(--gold); background: rgba(6,8,20,.78); border: 1px solid var(--gold); border-radius: 3px; padding: 1px 5px; }
   .al small { font-weight: 400; color: var(--ink-dim); }
   .alabels.compact small { display: none; }
   /* The BUILD BROKEN sign over the quay (weather.js). */
   /* A crate the gate handed back (#433): why, and how often. */
-  .al.bounce { color: #fff; background: #b02020; border-color: #ff6a5a; font-size: calc(var(--lf, 11px) - 2px); padding: 0 3px; }
+  .al.bounce { color: #fff; background: #b02020; border-color: #ff6a5a; font-size: max(11px, calc(var(--lf, 11px) - 2px)); padding: 0 3px; }
   .al.buildsign { color: #fff; background: #c02020; border-color: #ff6060; font-weight: bold; letter-spacing: .06em; }
   .al.buildsign small { color: #ffe0e0; letter-spacing: 0; font-weight: normal; }
   /* The overview (#481): each island's name, and why it is red or amber, centred on its top. */
@@ -144,20 +147,20 @@
   .al.ov-red small { color: #ff8070; }
   .al.ov-amber small { color: #f8c060; }
   /* The valley's environment grid (#512): environments, repos and versions. */
-  .al.ov-grid { transform: translate(-50%, 0); color: var(--ink); font-size: calc(var(--lf, 11px) - 2px); padding: 0 3px; }
+  .al.ov-grid { transform: translate(-50%, 0); color: var(--ink); font-size: max(11px, calc(var(--lf, 11px) - 2px)); padding: 0 3px; }
   /* A ship waiting at a consumer's dock in the valley (#511): the version it waits to take. */
-  .al.ov-ship { transform: translate(-50%, 0); color: #fff; background: #8a2a20; border-color: #ff8070; font-size: calc(var(--lf, 11px) - 2px); padding: 0 3px; }
-  .al.ghost { color: var(--ink); border-color: #a8b8d0; font-size: calc(var(--lf, 11px) - 2px); padding: 0 3px; white-space: normal; text-align: center; }
+  .al.ov-ship { transform: translate(-50%, 0); color: #fff; background: #8a2a20; border-color: #ff8070; font-size: max(11px, calc(var(--lf, 11px) - 2px)); padding: 0 3px; }
+  .al.ghost { color: var(--ink); border-color: #a8b8d0; font-size: max(11px, calc(var(--lf, 11px) - 2px)); padding: 0 3px; white-space: normal; text-align: center; }
   .al.ghost span + span::before { content: '· '; }
   #d-travel h3 { margin: .6em 0 .2em; font-size: 1em; }
   #d-travel ol.travel { margin: .2em 0; padding-left: 1.4em; }
   #d-travel li.slow { color: var(--gold); font-weight: 700; }
   #d-travel li.now { font-style: italic; }
   #d-travel .opts button, .dialog li button.travel-log { font-size: 12px; padding: 3px 8px; }
-  .dialog li button.travel-log { position: static; margin-left: .5em; font: 700 11px var(--mono); color: var(--ink); background: var(--win-bot); border: 1px solid var(--gold); border-radius: 3px; padding: 0 6px; cursor: pointer; }
+  .dialog li button.travel-log { position: static; margin-left: .5em; font: 700 13px var(--mono); color: var(--ink); background: var(--win-bot); border: 1px solid var(--gold); border-radius: 3px; padding: 0 6px; cursor: pointer; }
   #d-ctl pre.sent { white-space: pre-wrap; max-height: 12em; overflow: auto; margin: .3em 0; padding: .4em .6em; font: inherit; font-size: .9em; background: rgba(0,0,0,.25); border-left: 3px solid var(--gold); }
-  .al.flag { font-size: calc(var(--lf, 11px) - 1px); color: var(--ink); border-width: 2px; padding: 0 3px; white-space: normal; text-align: center; }
-  .al.house { font-size: calc(var(--lf, 11px) - 1px); color: var(--ink); border-color: var(--win-inner); padding: 0 3px; }
+  .al.flag { font-size: max(11px, calc(var(--lf, 11px) - 1px)); color: var(--ink); border-width: 2px; padding: 0 3px; white-space: normal; text-align: center; }
+  .al.house { font-size: max(11px, calc(var(--lf, 11px) - 1px)); color: var(--ink); border-color: var(--win-inner); padding: 0 3px; }
   .al.house { white-space: normal; text-align: center; }
   .al.house span { white-space: nowrap; }
   .al.house small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -187,7 +190,7 @@
   .legend canvas { width: 42px; height: 42px; flex: none; cursor: default; background: var(--frame-shadow); border-radius: 3px; }
   .legend canvas.big { width: 60px; height: 60px; }
   /* Said where open ground was clicked, then gone. */
-  .hint { position: absolute; transform: translate(-50%, -130%); pointer-events: none; z-index: 3; font: 700 12px var(--mono); color: var(--ink); background: rgba(6,8,20,.92); border: 2px solid var(--gold); border-radius: 4px; padding: 3px 8px; white-space: nowrap; }
+  .hint { position: absolute; transform: translate(-50%, -130%); pointer-events: none; z-index: 3; font: 700 13px var(--mono); color: var(--ink); background: rgba(6,8,20,.92); border: 2px solid var(--gold); border-radius: 4px; padding: 3px 8px; white-space: nowrap; }
   .hint.below { transform: translate(-50%, 40%); }
   .hint[hidden] { display: none; }
   .labels-toggle { font: 13px var(--mono); color: var(--ink-dim); white-space: nowrap; }
@@ -213,7 +216,7 @@
   .dialog dd { margin: 0; }
   /* The environment row's mini-map: a box per village, framed while in view, a dot per ship under sail. */
   .minimap { display: flex; gap: 4px; margin-bottom: 6px; overflow-x: auto; }
-  .minimap .mm { flex: 0 0 auto; font: 700 11px/1.2 var(--mono); color: var(--ink); background: rgba(6,8,20,.6); border: 1px solid var(--hc); border-left-width: 4px; border-radius: 3px; padding: 2px 6px; cursor: pointer; }
+  .minimap .mm { flex: 0 0 auto; font: 700 13px/1.2 var(--mono); color: var(--ink); background: rgba(6,8,20,.6); border: 1px solid var(--hc); border-left-width: 4px; border-radius: 3px; padding: 2px 6px; cursor: pointer; }
   .minimap .mm.in { outline: 2px solid var(--gold); outline-offset: 1px; }
   .minimap .mm i { display: inline-block; width: 5px; height: 5px; margin-left: 4px; border-radius: 50%; background: var(--gold); vertical-align: middle; }
   /* The screensaver (screensaver.js): the map fitted to the whole display, a

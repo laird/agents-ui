@@ -39,8 +39,13 @@ fn village_html_hides_feature_labels_until_their_flag_is_clicked() {
 #[test]
 fn village_html_keeps_labels_clear_of_the_art_and_each_other() {
     let body = &village_source();
-    // Size follows the map; subtitles drop below 3x.
-    assert!(body.contains("abox.style.setProperty('--lf', Math.round(Math.max(9, Math.min(14, 2 + 2.5 * s))) + 'px');"));
+    // Size follows the map, never below the readable floor (#568); subtitles
+    // drop below 3x.
+    assert!(body.contains("import { lfPx } from './labelsize.js';"));
+    assert!(body.contains("abox.style.setProperty('--lf', lfPx(s) + 'px');"));
+    let labelsize = village_asset("labelsize.js").unwrap().1;
+    assert!(!labelsize.contains("document"), "labelsize.js stays DOM-free, so node can test it");
+    assert!(labelsize.contains("export const LABEL_FLOOR = 12;"));
     assert!(body.contains("abox.classList.toggle('compact', s < 3);"));
     assert!(body.contains(".alabels.compact small { display: none; }"));
     // The board label sits under the board; the harbour's left of the lighthouse.
