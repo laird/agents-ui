@@ -72,6 +72,29 @@ test("houses: worktree, branch, issue, status, session link", () => {
   assert.deepStrictEqual(M.houseRows(BASE, null, null), [])
 })
 
+test("a house with a host/mux/pane gets an agents-ui:// link instead of the web session (#577)", () => {
+  const v = { host: "nuc-1", project: "agents-ui", houses: [] }
+  const h = { role: "worker-2", mux: "herdr", pane: "w1F:p1", links: [{ label: "Agent session", url: "/#/swarm/agents-ui/agent/worker-2" }] }
+  assert.strictEqual(M.attachUrl(v, h), "agents-ui://attach?host=nuc-1&mux=herdr&pane=w1F%3Ap1&project=agents-ui&role=worker-2")
+  const rows = M.houseRows(BASE, { ...v, houses: [{ id: "/src/agents-ui-wt-2", ...h }] }, null)
+  assert.strictEqual(rows[0].url, M.attachUrl(v, h))
+})
+
+test("attachUrl falls back to nothing without a host, a mux, or a matching pane shape", () => {
+  const v = { host: "nuc-1", project: "agents-ui" }
+  assert.strictEqual(M.attachUrl({ project: "agents-ui" }, { mux: "herdr", pane: "w1:p1" }), "", "no host: an older server")
+  assert.strictEqual(M.attachUrl(v, { pane: "w1:p1" }), "", "no mux")
+  assert.strictEqual(M.attachUrl(v, { mux: "herdr", pane: "not-a-pane" }), "", "pane doesn't match herdr's shape")
+  assert.strictEqual(M.attachUrl(v, { mux: "tmux", pane: "w1:p1" }), "", "pane doesn't match tmux's shape")
+  assert.strictEqual(M.attachUrl(v, { mux: "tmux", pane: "claude-shop:0.0" }), "agents-ui://attach?host=nuc-1&mux=tmux&pane=claude-shop%3A0.0&project=agents-ui&role=", "a valid tmux target")
+})
+
+test("a house with no host/mux/pane still gets the web session link (an older server)", () => {
+  const v = M.villageFor(villages, "agents-ui")
+  const rows = M.houseRows(BASE, v, M.swarmFor(swarms, "agents-ui"))
+  assert.strictEqual(rows[0].url, BASE + "/#/swarm/agents-ui/agent/worker-2")
+})
+
 test("flow strip: backlog, board, houses, gate, quay, each stop", () => {
   const v = M.villageFor(villages, "agents-ui")
   assert.deepStrictEqual(M.flow(v), [

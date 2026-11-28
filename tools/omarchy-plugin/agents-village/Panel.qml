@@ -196,6 +196,15 @@ Panel {
 
   function openUrl(url) {
     if (url === "") return
+    // A house whose village says where its pane is (#574) gets an
+    // agents-ui://attach link (#577, Model.houseRows); open it with the
+    // installed handler instead of the browser, same as the village page's
+    // own "Open in herdr" action (#575). Falls back to the browser below
+    // when the village has no host/mux/pane (an older server, or none set).
+    if (url.indexOf("agents-ui://") === 0) {
+      Quickshell.execDetached(["xdg-open", url])
+      return
+    }
     Quickshell.execDetached(["omarchy-launch-browser", url])
   }
   // The full village as a web app when Omarchy can make one, else in the browser.

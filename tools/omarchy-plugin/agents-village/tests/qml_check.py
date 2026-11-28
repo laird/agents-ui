@@ -35,6 +35,12 @@ two_villages = json.loads(json.dumps(villages))
 two_villages["villages"].append({"project": "shop", "framework": "modernize", "board": [], "backlog": [],
                                  "houses": [{"id": "/src/shop-wt-1", "role": "worker-1", "status": "blocked", "links": []}],
                                  "pipeline": {"quay": [], "stops": []}})
+# A house whose village says where its pane is (#574): its row's url is an
+# agents-ui://attach link (#577), not the web session link.
+villages_with_attach = json.loads(json.dumps(villages))
+villages_with_attach["villages"][0]["host"] = "nuc-1"
+villages_with_attach["villages"][0]["houses"][0]["mux"] = "herdr"
+villages_with_attach["villages"][0]["houses"][0]["pane"] = "w1F:p1"
 
 env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
 for name in ("WAYLAND_DISPLAY", "DISPLAY", "QT_QPA_PLATFORMTHEME"):
@@ -50,7 +56,7 @@ with tempfile.TemporaryDirectory(prefix="agents-village-qml-") as directory:
     (harness / "Fixtures.js").write_text("".join(
         f"var {name} = {json.dumps(json.dumps(doc))}\n"
         for name, doc in (("swarms", swarms), ("villages", villages), ("twoSwarms", two_swarms), ("twoVillages", two_villages),
-                          ("buildRunning", build_running), ("buildRed", build_red))))
+                          ("buildRunning", build_running), ("buildRed", build_red), ("villagesWithAttach", villages_with_attach))))
     (harness / "Commons").symlink_to(SHELL / "Commons")
     shutil.copytree(SHELL / "Ui", harness / "Ui", symlinks=True)
     shutil.copy(ROOT / "tests/qml/KeyboardPanel.qml", harness / "Ui/KeyboardPanel.qml")
@@ -65,7 +71,7 @@ with tempfile.TemporaryDirectory(prefix="agents-village-qml-") as directory:
     stubs = harness / "bin"
     stubs.mkdir()
     calls = harness / "calls"
-    for name in ("omarchy-notification-send", "omarchy-launch-or-focus-tui", "swarm", "omarchy-launch-browser", "omarchy-launch-webapp"):
+    for name in ("omarchy-notification-send", "omarchy-launch-or-focus-tui", "swarm", "omarchy-launch-browser", "omarchy-launch-webapp", "xdg-open"):
         (stubs / name).write_text(f'#!/bin/sh\nprintf "%s\\n" "{name} $*" >> "{calls}"\n')
         (stubs / name).chmod(0o755)
     env["PATH"] = f"{stubs}:{os.environ['PATH']}"
@@ -107,4 +113,10 @@ assert notes[0].startswith("omarchy-notification-send --app-name Agents village 
 assert " 1 needs you wt-1: #4 Checkout --exec " in notes[0], notes[0]
 joins = [l for l in ran.splitlines() if l.startswith("omarchy-launch-or-focus-tui ")]
 assert joins == ["omarchy-launch-or-focus-tui --app-id=org.omarchy.swarm-box-join swarm box"], "join runs for box only:\n" + ran
+# A house with a host/mux/pane opens its agents-ui://attach link via
+# xdg-open (#577), never the browser.
+opens = [l for l in ran.splitlines() if l.startswith("xdg-open ")]
+assert opens == ["xdg-open agents-ui://attach?host=nuc-1&mux=herdr&pane=w1F%3Ap1&project=agents-ui&role=worker-2"], "attach house opens via xdg-open:\n" + ran
+browser_for_attach_house = [l for l in ran.splitlines() if l.startswith("omarchy-launch-browser ") and "agents-ui://" in l]
+assert not browser_for_attach_house, "an attach house must never also fall back to the browser:\n" + ran
 print(f'{{"qml_checks": {len(checks)}, "failed": 0}}')

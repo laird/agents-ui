@@ -40,6 +40,10 @@ ShellRoot {
       id: pinned
       settings: ({ serverUrl: "http://127.0.0.1:9", village: "shop" })
     }
+    BarPanel {
+      id: attach
+      settings: ({ serverUrl: "http://127.0.0.1:9" })
+    }
 
     Component.onCompleted: {
       console.log("one swarm")
@@ -148,6 +152,11 @@ ShellRoot {
       quiet.apply(Fixtures.swarms, waiting(false))
       quiet.apply(Fixtures.swarms, waiting(true))
       check("notify off: worked out, not sent", quiet.lastNotice.title, "1 needs you")
+
+      console.log("a house with a host/mux/pane")
+      attach.apply(Fixtures.swarms, Fixtures.villagesWithAttach)
+      check("its row's url is the attach link, not the web session", attach.houses[0].url, "agents-ui://attach?host=nuc-1&mux=herdr&pane=w1F%3Ap1&project=agents-ui&role=worker-2")
+      attach.openUrl(attach.houses[0].url)
 
       console.log("server down")
       one.apply("", "")

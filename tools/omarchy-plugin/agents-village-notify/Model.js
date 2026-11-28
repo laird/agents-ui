@@ -129,6 +129,24 @@ function sessionLink(links) {
   return l ? l.url : ""
 }
 
+// Only names that can't carry anything else end up in an agents-ui:// link
+// (#577, mirrors src/web/village/herdrlink.js's HOST/PANE): a host name, a
+// herdr pane id (w1F:p1), or a tmux target (claude-shop:0.0).
+var ATTACH_HOST = /^[A-Za-z0-9][A-Za-z0-9.-]*$/
+var ATTACH_PANE = { herdr: /^w[0-9A-Za-z]+:p[0-9]+$/, tmux: /^[A-Za-z0-9._-]+:[0-9]+\.[0-9]+$/ }
+
+// The agents-ui://attach link for house `h` of village `v`, opening its
+// pane directly in herdr or tmux (#577, mirrors herdrlink.js's attachOf),
+// or "" when the village doesn't say where its pane is -- the caller then
+// falls back to the web session link, same as an older server that
+// predates #574 always did.
+function attachUrl(v, h) {
+  var host = v && v.host, mux = h && h.mux, pane = h && h.pane
+  if (!host || !ATTACH_HOST.test(host) || !ATTACH_PANE[mux] || !ATTACH_PANE[mux].test(pane || "")) return ""
+  var q = { host: host, mux: mux, pane: pane, project: v.project || "", role: h.role || "" }
+  return "agents-ui://attach?" + Object.keys(q).map(function(k) { return k + "=" + encodeURIComponent(q[k]) }).join("&")
+}
+
 // One row per worker: worktree, branch, issue, status, context, and where a click goes.
 function houseRows(base, v, swarm) {
   if (!v) return []
@@ -144,7 +162,7 @@ function houseRows(base, v, swarm) {
       status: h.status || "unknown",
       context: w && w.context_pct !== null && w.context_pct !== undefined ? Number(w.context_pct) : null,
       limit: limitWords(h),
-      url: absolute(base, sessionLink(h.links))
+      url: attachUrl(v, h) || absolute(base, sessionLink(h.links))
     }
   })
 }
@@ -440,7 +458,7 @@ if (typeof module !== "undefined") {
   module.exports = {
     parse: parse, baseUrl: baseUrl, absolute: absolute, villageUrl: villageUrl,
     villageFor: villageFor, swarmFor: swarmFor, needsYou: needsYou, limited: limited, limitWords: limitWords, swarmRows: swarmRows,
-    chooseProject: chooseProject, canGoBack: canGoBack, houseName: houseName, houseRows: houseRows,
+    chooseProject: chooseProject, canGoBack: canGoBack, houseName: houseName, houseRows: houseRows, attachUrl: attachUrl,
     flow: flow, attention: attention, features: features, badge: badge, ago: ago, repoUrl: repoUrl,
     releaseKey: releaseKey, questionOf: questionOf,
     validMachine: validMachine, joinCommand: joinCommand, joinState: joinState, needsNow: needsNow, freshNeeds: freshNeeds,
