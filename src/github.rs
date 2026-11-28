@@ -602,7 +602,7 @@ mod tests {
         // #594: the decision dialogs check the issue's labels, flaky searches
         // and reads before it writes, and breakage reads job logs.
         for (name, src) in [("decisions.rs", include_str!("web/decisions.rs")), ("proposals.rs", include_str!("web/proposals.rs"))] {
-            assert!(!src.contains(".output(view.program"), "src/web/{name} views the issue with transport.read");
+            assert!(src.contains(".read(view.program") && !src.contains(".output(view.program"), "src/web/{name} views the issue with transport.read");
         }
         let flaky = include_str!("web/flaky.rs");
         assert!(flaky.contains("ask(read(client.search_open_issues(") && flaky.contains("ask(read(client.view_issue_json("), "src/web/flaky.rs searches and views with transport.read");
