@@ -14,7 +14,7 @@ import { restOf } from './rest.js';
 import { QUIET_ACTIONS, actionSign, drawAction, person, wander } from './people.js';
 import { landedTokenWords } from './landedtokens.js';
 import { registerHit, registerLabels, registerLayer, tap } from './registry.js';
-import { LW, slotPos } from './layout.js';
+import { LW, shownScale, slotPos } from './layout.js';
 import { ARRIVE_IN, SAIL_OUT, UNLOAD, pickup, tripAt } from './trips.js';
 import { workOf } from './ship.js';
 import { crateState, whereWaitedOn } from './docks.js';
@@ -26,7 +26,7 @@ import { houseName, issueItems, issueLabel, issueOf, link, repoUrl, sessionOf } 
 import { withAttach } from './herdrlink.js';
 import { houseLabel, managerSub } from './houselabel.js';
 import { branchLinks, commitsLink } from './ghlinks.js';
-import { ALARM, alarm, boardAlert, boardFrame, failed, ring } from './alarms.js';
+import { ALARM, alarm, alarmTap, boardAlert, boardFrame, failed, ring } from './alarms.js';
 
 /* Where a house's sub-agents stand: two beside the door, then a row on the
  * lane in front. Past that, a "+N" badge counts the rest, so every running
@@ -104,7 +104,7 @@ registerLayer({ z: 70, draw(c, scene, t) {
   const { v, lay, at, bound } = scene, { hallX, lots } = lay;
   const bubbles = scene.bubbles = [], sleepers = scene.sleepers = [], alarms = scene.alarms = [], wall = Date.now();
   // Waiting on you is the loudest mark; the quiet bubbles are for the rest (#439).
-  if (v.manager.status === 'blocked') alarms.push([hallX + 25, 0]);
+  if (v.manager.status === 'blocked') alarms.push([hallX + 25, 0, -1]);
   else if (['done', 'unknown', 'stalled'].includes(v.manager.status)) bubbles.push([hallX + 26, 18, v.manager.status]);
   v.houses.forEach((h, i) => {
     const lot = lots[i]; if (!lot) return;
@@ -168,7 +168,7 @@ registerLayer({ z: 70, draw(c, scene, t) {
     }
     if (st === 'working' && h.action) actionSign(c, lot.x + 4, lot.y - 4, h.action);
     if (subs.length > SUB_SLOTS.length) { const more = subs.length - SUB_SLOTS.length, { w, h } = badgeSize(more); badge(c, lot.x + 12, lot.y + 4, more); tap(lot.x + 11, lot.y + 2, w, h, { kind: 'house', i }); }
-    if (st === 'blocked') alarms.push([lot.x + 8 - (ALARM.w >> 1), lot.y - ALARM.h - 2]);
+    if (st === 'blocked') alarms.push([lot.x + 8 - (ALARM.w >> 1), lot.y - ALARM.h - 2, i]);
     else if (ICONS[st] && rest !== 'asleep' && rest !== 'limited') bubbles.push([lot.x + 4, lot.y - 3, st]);
   });
 } });
@@ -197,8 +197,12 @@ registerLayer({ z: 120, draw(c, { at }, t) {
 registerLayer({ z: 130, draw(c, { bubbles, sleepers, alarms }, t) {
   (sleepers || []).forEach(([x, y, dt]) => zzz(c, x, y, t + dt));
   bubbles.forEach(([x, y, s]) => (s === 'stalled' ? failed : bubble)(c, x, y, s));
-  // Last, over everything: who is waiting on you.
-  (alarms || []).forEach(([x, y], k) => alarm(c, x, y, t + k * 120));
+  // Last, over everything: who is waiting on you, each "!" its own click (#571, alarmhit.js).
+  const s = shownScale();
+  (alarms || []).forEach(([x, y, i], k) => {
+    alarm(c, x, y, t + k * 120);
+    const r = alarmTap(x, y, s); tap(r.x, r.y, r.w, r.h, { kind: 'alarm', i });
+  });
 } });
 
 /* ---------- Dialogs ---------- */

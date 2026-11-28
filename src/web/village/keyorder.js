@@ -22,13 +22,14 @@ const AREA = {
 };
 const CRATE_AREA = { gate: 4, quay: 5, ship: 5, backlog: 6, env: 7, voyage: 7 };
 const OTHER = 8;
-/* Within a house: the house, then who is in it, then its work. */
-const WITHIN = { house: 0, hall: 0, person: 1, sub: 2, crate: 3, gatecrate: 4 };
+/* Within a house: its "!" (#571), the house, then who is in it, then its work. */
+const WITHIN = { alarm: -1, house: 0, hall: 0, person: 1, sub: 2, crate: 3, gatecrate: 4 };
 
 const HALL = -1;
 /* Which house an object belongs to (HALL for the castle), or null. */
 export function owner(o, v) {
   if (o.kind === 'hall') return HALL;
+  if (o.kind === 'alarm') return o.i < 0 ? HALL : (o.i ?? null);
   if (o.kind === 'sub') return o.house ?? null;
   if (o.kind === 'house' || o.kind === 'person' || (o.kind === 'crate' && o.at === 'house')) return o.i ?? null;
   if (o.kind === 'gatecrate' && o.at === 'house') {

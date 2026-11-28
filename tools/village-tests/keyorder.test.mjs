@@ -104,3 +104,10 @@ test('1-9 in a question dialog: a numbered menu by number, yes/no by place', () 
   assert.equal(optionFor('y', ['y', 'n']), -1);
   assert.equal(optionFor('0', ['1']), -1);
 });
+
+test('a "!" leads its house in Tab order, and its owner is that house or the hall (#571)', () => {
+  assert.equal(owner({ kind: 'alarm', i: 1 }, v), 1);
+  assert.equal(owner({ kind: 'alarm', i: -1 }, v), -1);
+  const order = keyOrder([at({ kind: 'house', i: 0 }, 10, 50), at({ kind: 'house', i: 1 }, 30, 50), at({ kind: 'crate', i: 1, at: 'house', n: 11 }, 31, 55), at({ kind: 'alarm', i: 1 }, 32, 20)]);
+  assert.deepEqual(names(order).slice(0, 3), ['alarm1', 'house1', 'crate1']);
+});

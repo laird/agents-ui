@@ -25,7 +25,7 @@ fn dialogs_offer_an_issues_own_dialog() {
     assert!(issuedialog.contains("document.querySelectorAll('#d-meta li[data-n] button.issue-open')"));
     assert!(issuedialog.contains("const res = await fetch(issueUrl(project, n));"));
     // A single-subject dialog's own issue, the same number travel.js already finds.
-    assert!(issuedialog.contains("const n = info.travel || (info.house && info.house.issue) || null;"));
+    assert!(issuedialog.contains("const n = info.openIssue || info.travel || (info.house && info.house.issue) || null;"));
     // A platform's workloads aren't issues.
     assert!(issuedialog.contains("if (!v || v.plane === 'runtime') return;"));
     // A slow answer for an earlier click is dropped, as travel.js's own fetch is.

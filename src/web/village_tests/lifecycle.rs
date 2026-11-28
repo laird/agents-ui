@@ -167,10 +167,10 @@ fn village_html_shows_each_crates_priority_epic_state_and_number() {
 fn village_draws_trouble_loudest() {
     let body = &village_source();
     // Waiting on you: a "!" over the house or the hall and a ring at the door, drawn last.
-    assert!(body.contains("if (st === 'blocked') alarms.push([lot.x + 8 - (ALARM.w >> 1), lot.y - ALARM.h - 2]);"));
-    assert!(body.contains("if (v.manager.status === 'blocked') alarms.push([hallX + 25, 0]);"));
+    assert!(body.contains("if (st === 'blocked') alarms.push([lot.x + 8 - (ALARM.w >> 1), lot.y - ALARM.h - 2, i]);"));
+    assert!(body.contains("if (v.manager.status === 'blocked') alarms.push([hallX + 25, 0, -1]);"));
     assert!(body.contains("if (st === 'blocked') ring(c, lot.x + 8, lot.y + 19, tt);"));
-    assert!(body.contains("(alarms || []).forEach(([x, y], k) => alarm(c, x, y, t + k * 120));"));
+    assert!(body.contains("(alarms || []).forEach(([x, y, i], k) => {\n    alarm(c, x, y, t + k * 120);"));
     // Failed is red and crossed; busy is smoke from the chimney.
     assert!(body.contains("bubbles.forEach(([x, y, s]) => (s === 'stalled' ? failed : bubble)(c, x, y, s));"));
     assert!(body.contains("if ((st === 'working' || (h.subagents || []).length) && !state.reduce) puffs("));
@@ -226,4 +226,31 @@ fn village_limited_workers_wait_at_a_dry_well() {
     assert!(body.contains(".al.house.limited { border-color: #3890e0; }"));
     // The Key explains it.
     assert!(body.contains("registerKey({ group: 'Beside a house: a usage limit', order: 70, rows: theme => ["));
+}
+
+/// A red "!" is its own click (#571, for #563): a blocked house's opens the
+/// issue it works on in #564's dialog, its question first; the manager's,
+/// the hall's question. Where each goes and the tap's size are tested under
+/// node (alarms.test.mjs, keyorder.test.mjs).
+#[test]
+fn clicking_a_red_bang_opens_what_it_waits_on_you_about() {
+    let lifecycle = village_asset("lifecycle.js").unwrap().1;
+    assert!(lifecycle.contains("const r = alarmTap(x, y, s); tap(r.x, r.y, r.w, r.h, { kind: 'alarm', i });"));
+    assert!(lifecycle.contains("alarms.push([hallX + 25, 0, -1]);"), "the manager's");
+    assert!(lifecycle.contains("alarms.push([lot.x + 8 - (ALARM.w >> 1), lot.y - ALARM.h - 2, i]);"), "a blocked house's");
+    let hit = village_asset("alarmhit.js").unwrap().1;
+    // A blocked house: the issue's dialog, with its house (so ask() shows the question and its buttons) and what it waits on first.
+    assert!(hit.contains("showIssueDialog(v.project, t.n, { house: h, meta: [waitingWords(h)] });"));
+    // No issue, or the manager: that dialog, with what it waits on first and the issue the manager's question names.
+    assert!(hit.contains("return { ...info, meta: [waitingWords(who), ...(info.meta || [])], openIssue: t.kind === 'hall' ? t.issue : null };"));
+    assert!(hit.contains("registerHit({ kind: 'alarm',"));
+    let issue = village_asset("issuedialog.js").unwrap().1;
+    assert!(issue.contains("export async function showIssueDialog(project, n, top = {}) {"));
+    assert!(issue.contains("openInfo({ ...top, title: issueTitleWords(d), line: issueLineWords(d), links: [link('On GitHub', d.url)], project, issueDetail: d, opened: n });"));
+    assert!(issue.contains("${info.openIssue ? `Open #${n}` : 'Open issue'}"));
+    // The question goes above the issue's body in the dialog.
+    let html = village_asset("index.html").unwrap().1;
+    assert!(html.find("id=\"d-q\"").unwrap() < html.find("id=\"d-issue\"").unwrap());
+    // Keyboard: first in its house's Tab order, and Enter acts as a click does.
+    assert!(village_asset("keyorder.js").unwrap().1.contains("const WITHIN = { alarm: -1, house: 0,"));
 }

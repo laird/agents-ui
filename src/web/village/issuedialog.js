@@ -19,9 +19,11 @@ import { blockedReasonWords, issueLineWords, issueTitleWords, issueUrl, labelChi
 /* The dialog this fetch last filled: a slow answer for an earlier click is dropped. */
 let issueToken = 0;
 
-async function showIssueDialog(project, n) {
+/* Issue `n`'s dialog. `top` goes first in it: a "!"'s house (its question,
+ * answered with ask()) and what it waits on (alarmhit.js, #571). */
+export async function showIssueDialog(project, n, top = {}) {
   const mine = ++issueToken;
-  openInfo({ title: `#${n}`, line: 'Loading…', project });
+  openInfo({ ...top, title: `#${n}`, line: 'Loading…', project, opened: n });
   let d = null, status = 0;
   try {
     const res = await fetch(issueUrl(project, n));
@@ -29,8 +31,8 @@ async function showIssueDialog(project, n) {
     if (res.ok) d = await res.json();
   } catch { /* unreachable: said below */ }
   if (mine !== issueToken) return;
-  if (!d) { openInfo({ title: `#${n}`, line: status ? "Couldn't read this issue from GitHub." : "Can't reach agents-tui.", project }); return; }
-  openInfo({ title: issueTitleWords(d), line: issueLineWords(d), links: [link('On GitHub', d.url)], project, issueDetail: d });
+  if (!d) { openInfo({ ...top, title: `#${n}`, line: status ? "Couldn't read this issue from GitHub." : "Can't reach agents-tui.", project, opened: n }); return; }
+  openInfo({ ...top, title: issueTitleWords(d), line: issueLineWords(d), links: [link('On GitHub', d.url)], project, issueDetail: d, opened: n });
 }
 
 function chipHtml(c) {
@@ -59,10 +61,11 @@ registerDialogPart(info => {
   document.querySelectorAll('#d-meta li[data-n] button.issue-open').forEach(b => {
     b.addEventListener('click', () => showIssueDialog(project, Number(b.dataset.n)));
   });
-  // A single-subject dialog's own issue (the same number travel.js uses).
-  const n = info.travel || (info.house && info.house.issue) || null;
-  if (n) {
-    box.innerHTML = '<div class="opts"><button type="button">Open issue</button></div>';
+  // A single-subject dialog's own issue (the same number travel.js uses), or
+  // the one a manager's question names (#571); none while it is that issue's.
+  const n = info.openIssue || info.travel || (info.house && info.house.issue) || null;
+  if (n && n !== info.opened) {
+    box.innerHTML = `<div class="opts"><button type="button">${info.openIssue ? `Open #${n}` : 'Open issue'}</button></div>`;
     box.querySelector('button').addEventListener('click', () => showIssueDialog(project, n));
   }
 }, 45);

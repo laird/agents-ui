@@ -8,7 +8,8 @@ import assert from 'node:assert/strict';
 // state.js reads the reduced-motion preference when it loads.
 globalThis.window = { matchMedia: () => ({ matches: false }) };
 const { state } = await import('../../src/web/village/state.js');
-const { ALARM, BUBBLE, RED, RED_D, alarm, boardAlert, boardFrame, failed, lamp, ring } = await import('../../src/web/village/alarms.js');
+const { ALARM, ALARM_TAP, BUBBLE, RED, RED_D, alarm, alarmTap, alarmTarget, boardAlert, boardFrame, failed, lamp, ring, waitingWords } = await import('../../src/web/village/alarms.js');
+const { PHONE_MIN } = await import('../../src/web/village/fitscale.js');
 const { bubble } = await import('../../src/web/village/scenery.js');
 
 /* A canvas that records the box every drawing covers, in scene pixels, and
@@ -82,4 +83,37 @@ test('every mark is drawn on the 2× grid, in half pixels', () => {
     assert.ok(c.rects.length > 0);
     assert.ok(c.rects.some(q => [q.x, q.y, q.w, q.h].some(v => v % 1 !== 0)), 'something is finer than a scene pixel');
   }
+});
+
+/* ---------- A click on a "!" (#571) ---------- */
+test('each "!" is a click of at least 24 CSS px, centred on its sign, down to a map shrunk to 3/4', () => {
+  for (const scale of [0.75, 1, 1.5, PHONE_MIN, 3, 4]) {
+    const r = alarmTap(100, 40, scale);
+    assert.ok(r.w * scale >= ALARM_TAP && r.h * scale >= ALARM_TAP, `${r.w}x${r.h} at ${scale}x`);
+    // It covers the whole sign and its tail.
+    assert.ok(r.x <= 100 && r.y <= 40 && r.x + r.w >= 100 + ALARM.w && r.y + r.h >= 40 + ALARM.h + 2, JSON.stringify(r));
+    // Centred: as much on each side, to a scene pixel.
+    assert.ok(Math.abs((100 - r.x) - (r.x + r.w - 100 - ALARM.w)) <= 1);
+  }
+  // Shrunk further, it stops growing rather than cover the next house.
+  const tiny = alarmTap(100, 40, 0.1);
+  assert.ok(tiny.w <= 32 && tiny.h <= 32);
+});
+
+test("a blocked house's \"!\" opens its issue; a house with none, the house; the manager's, the hall and the issue it asks about", () => {
+  const v = { manager: { status: 'blocked', question: { prompt: 'Merge #42 now?' } }, houses: [{ status: 'blocked', issue: 7 }, { status: 'blocked' }] };
+  assert.deepEqual(alarmTarget(v, 0), { kind: 'issue', i: 0, n: 7 });
+  assert.deepEqual(alarmTarget(v, 1), { kind: 'house', i: 1 });
+  assert.deepEqual(alarmTarget(v, -1), { kind: 'hall', issue: 42 });
+  assert.deepEqual(alarmTarget({ ...v, manager: { status: 'blocked' } }, -1), { kind: 'hall', issue: null });
+  // A platform's workloads aren't issues: the house's own dialog.
+  assert.deepEqual(alarmTarget({ ...v, plane: 'runtime' }, 0), { kind: 'house', i: 0 });
+  assert.equal(alarmTarget(v, 5), null);
+});
+
+test('what it waits on comes first, unless its question is already there to answer', () => {
+  assert.equal(waitingWords({ question: { prompt: 'Allow Bash?' }, answer_url: '/a' }), null);
+  assert.equal(waitingWords({ question: { prompt: 'Allow Bash?' } }), 'Waiting on you: Allow Bash?');
+  assert.equal(waitingWords({ action: 'needs permission' }), 'Waiting on you: needs permission. Answer in its session.');
+  assert.equal(waitingWords({ action: 'blocked' }), 'Waiting on you. Answer in its session.');
 });

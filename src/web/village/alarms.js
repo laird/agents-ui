@@ -43,6 +43,38 @@ export function alarm(c, x, y, t) {
     bitmap(g, 8, 6, BANG, P.white);
   });
 }
+/* Where a click on a "!" lands (#571): a box centred on the sign, at least
+ * ALARM_TAP CSS px each way at the scale it is shown at (#568), but no more
+ * than ALARM_TAP_MAX scene px, so on a map shrunk to fit it never covers the
+ * houses beside it. The sign is drawn at (x, y); its tail adds 2 below. */
+export const ALARM_TAP = 24, ALARM_TAP_MAX = 32;
+export function alarmTap(x, y, scale) {
+  const need = Math.ceil(ALARM_TAP / (scale > 0 ? scale : 1)), sw = ALARM.w, sh = ALARM.h + 2;
+  const w = Math.min(ALARM_TAP_MAX, Math.max(sw, need)), h = Math.min(ALARM_TAP_MAX, Math.max(sh, need));
+  return { x: x + Math.floor((sw - w) / 2), y: y + Math.floor((sh - h) / 2), w, h };
+}
+/* What a click on the "!" over house `who` (-1: the manager's hall) opens:
+ * the issue that house works on (#564's dialog, with the question first),
+ * the house itself when it has no issue (or is a platform's workload), or
+ * the hall, with the issue its question names (`#N`) when it names one. */
+export function alarmTarget(v, who) {
+  const runtime = v.plane === 'runtime';
+  if (who < 0) {
+    const m = v.manager || {}, n = /#(\d+)/.exec(`${(m.question && m.question.prompt) || ''} ${m.action || ''}`);
+    return { kind: 'hall', issue: !runtime && n ? Number(n[1]) : null };
+  }
+  const h = (v.houses || [])[who];
+  if (!h) return null;
+  return h.issue && !runtime ? { kind: 'issue', i: who, n: h.issue } : { kind: 'house', i: who };
+}
+/* What an agent waits on, in words, put first in the dialog; null when its
+ * question is on screen with answer buttons (dialogs.js ask()) already. */
+export function waitingWords(h) {
+  if (!h) return null;
+  if (h.question && h.answer_url) return null;
+  if (h.question) return `Waiting on you: ${h.question.prompt}`;
+  return `Waiting on you${h.action && h.action !== 'blocked' ? ': ' + h.action : ''}. Answer in its session.`;
+}
 /* A ring on the ground round a door at cx, cy (an ellipse 22 by 7). */
 export function ring(c, cx, cy, t) {
   const col = state.reduce || blink(t + 190, 380) ? RED : P.gold;
