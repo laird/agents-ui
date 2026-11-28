@@ -6919,7 +6919,14 @@ mod tests {
             .await
             .unwrap();
         locked.available_repos = vec![repo_path.clone()];
-        locked.select_repo_row(0).await.unwrap();
+        // A `Some` initial_agent_type makes `App::new` discover real swarms
+        // (tmux, herdr) on whatever machine the test runs on (#572): the row
+        // for our one available repo sits right after however many of those
+        // this machine happens to have, not necessarily at a hardcoded 0 —
+        // which is what made this test fail on a machine already running
+        // other agents-ui swarms (it reliably found at least one here).
+        let available_row = locked.swarms.len();
+        locked.select_repo_row(available_row).await.unwrap();
         assert!(matches!(
             locked.screen,
             Screen::NewSwarm {
