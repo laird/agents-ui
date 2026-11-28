@@ -4,9 +4,12 @@ use tokio::process::Command;
 
 /// What every remote command passes to `ssh` before the host (#587): never
 /// prompt (a password or an unknown host key would otherwise ask on the
-/// terminal the TUI holds in raw mode, and hang or garble it), and give up on
-/// an unreachable host after 10s. ssh's own error is what the callers show.
-pub const SSH_OPTIONS: [&str; 4] = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"];
+/// terminal the TUI holds in raw mode, and hang or garble it; a host not yet
+/// in `known_hosts` now fails until someone runs `ssh <host>` once), give up
+/// when the TCP connect takes more than 10s, and end the options with `--`
+/// so a `--server` value starting with `-` is never read as one. ssh's own
+/// error is what the callers show.
+pub const SSH_OPTIONS: [&str; 5] = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "--"];
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ServerTransport {
@@ -153,7 +156,7 @@ mod tests {
         std::fs::set_permissions(&ssh, std::fs::Permissions::from_mode(0o755)).unwrap();
         let out = ServerTransport::with_ssh_program("buildbox", ssh).output("true", &[], None).await.unwrap();
         let args: Vec<String> = String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect();
-        assert_eq!(args, ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "buildbox", "'true'"]);
+        assert_eq!(args, ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "--", "buildbox", "'true'"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
