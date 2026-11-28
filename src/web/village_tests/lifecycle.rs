@@ -245,8 +245,8 @@ fn clicking_a_red_bang_opens_what_it_waits_on_you_about() {
     assert!(hit.contains("return { ...info, meta: [waitingWords(who), ...(info.meta || [])], openIssue: t.kind === 'hall' ? t.issue : null };"));
     assert!(hit.contains("registerHit({ kind: 'alarm',"));
     let issue = village_asset("issuedialog.js").unwrap().1;
-    assert!(issue.contains("export async function showIssueDialog(project, n, top = {}) {"));
-    assert!(issue.contains("openInfo({ ...top, title: issueTitleWords(d), line: issueLineWords(d), links: [link('On GitHub', d.url)], project, issueDetail: d, opened: n });"));
+    assert!(issue.contains("export async function showIssueDialog(project, n, top = {}, keepHistory = false) {"));
+    assert!(issue.contains("openInfo({ ...top, title: issueTitleWords(d), line: issueLineWords(d), links: [link('On GitHub', d.url)], project, issueDetail: d, opened: n }, keepHistory);"));
     assert!(issue.contains("${info.openIssue ? `Open #${n}` : 'Open issue'}"));
     // The question goes above the issue's body in the dialog.
     let html = village_asset("index.html").unwrap().1;

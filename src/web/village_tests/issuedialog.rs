@@ -21,8 +21,11 @@ fn dialogs_offer_an_issues_own_dialog() {
     assert!(dialogs.contains("i.url ? `<button"));
     assert!(dialogs.contains("on GitHub ↗"));
     let issuedialog = village_asset("issuedialog.js").unwrap().1;
-    // Any list row's button opens the issue dialog on the server's detail.
-    assert!(issuedialog.contains("document.querySelectorAll('#d-meta li[data-n] button.issue-open')"));
+    // Any list row (not just its button) opens the issue dialog on the
+    // server's detail (#573); the GitHub link inside it keeps its own target.
+    assert!(issuedialog.contains("document.querySelectorAll('#d-meta li[data-n]')"));
+    assert!(issuedialog.contains("if (!li.querySelector('button.issue-open')) return;"));
+    assert!(issuedialog.contains("if (e.target.closest('a.sub-link')) return;"));
     assert!(issuedialog.contains("const res = await fetch(issueUrl(project, n));"));
     // A single-subject dialog's own issue, the same number travel.js already finds.
     assert!(issuedialog.contains("const n = info.openIssue || info.travel || (info.house && info.house.issue) || null;"));
@@ -60,4 +63,34 @@ fn discuss_with_manager_opens_a_chat_panel_with_the_prefill() {
     assert!(lifecycle.contains("chat: sessionOf(h) ? { role: h.role, name: o.who || h.role } : null };"));
     assert!(village_asset("index.html").unwrap().1.contains("<div id=\"d-chat\"></div>"));
     assert!(village_asset("village.css").unwrap().1.contains(".chat pre {"));
+}
+
+/// #573: a row opens the detail panel over the list, Back/Esc returns to it
+/// scrolled where it was, and Next/Previous move through it without closing.
+#[test]
+fn a_detail_view_goes_back_to_the_list_it_opened_from() {
+    let dialogs = village_asset("dialogs.js").unwrap().1;
+    assert!(village_asset("index.html").unwrap().1.contains("<button id=\"d-back\" hidden"));
+    // A fresh root (any map click or hover) clears the Back slot; only a
+    // `pushForDetail` + `keepHistory` call (issuedialog.js) keeps it.
+    assert!(dialogs.contains("export function pushForDetail()"));
+    assert!(dialogs.contains("export function previousItems()"));
+    assert!(dialogs.contains("export function goBack()"));
+    assert!(dialogs.contains("if (!keepHistory) previous = null;"));
+    assert!(dialogs.contains("backBtn.hidden = !previous;"));
+    // Esc goes back a level instead of always closing outright.
+    assert!(dialogs.contains("document.addEventListener('keydown', e => { if (e.key === 'Escape') goBack(); });"));
+    // The list's own scroll position (its `<ul>`, which is what actually
+    // scrolls: village.css) is restored, not the dialog's.
+    assert!(dialogs.contains("(document.querySelector('#d-meta ul') || {}).scrollTop || 0"));
+    assert!(dialogs.contains("ul.scrollTop = p.scroll;"));
+
+    let issuedialog = village_asset("issuedialog.js").unwrap().1;
+    // The two entry points (a list row, a single-subject's own issue) push
+    // the Back slot; Next/Previous (inside an open detail) never does.
+    assert!(issuedialog.contains("pushForDetail();\n      showIssueDialog(project, Number(li.dataset.n), {}, true);"));
+    assert!(issuedialog.contains("() => { pushForDetail(); showIssueDialog(project, n, {}, true); }"));
+    assert!(issuedialog.contains("No `pushForDetail` here"));
+    assert!(issuedialog.contains("class=\"nav-prev\""));
+    assert!(issuedialog.contains("class=\"nav-next\""));
 }

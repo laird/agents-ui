@@ -121,8 +121,41 @@ export function explain(o, sc, theme) {
   if (info && !info.project && sc && sc.v) info.project = sc.v.project;
   return info;
 }
-/* The dialog for one object, or a list such as the board. */
-export function openInfo(info) {
+/* One level of "back" (#573): a list dialog an issue's own detail (#564)
+ * was opened from, so Back/Esc returns to it, scrolled where it was, and
+ * Next/Previous can move through it without losing this slot. A plain
+ * `openInfo` call (any map click or hover) clears it, since that is always
+ * a fresh root, not a continuation; only `pushForDetail` followed by a
+ * `keepHistory` call (issuedialog.js) keeps it. */
+let current = null, previous = null;
+const backBtn = document.getElementById('d-back');
+backBtn.addEventListener('click', () => goBack());
+/* The list `info` an issue detail is about to be opened from, with where
+ * its (scrollable) `<ul>` was scrolled, so it looks the same on Back. */
+export function pushForDetail() {
+  previous = { info: current, scroll: (document.querySelector('#d-meta ul') || {}).scrollTop || 0 };
+}
+/* `info.items` of the list a detail view came from, for Next/Previous
+ * (issuedialog.js) — null outside of one (a single-subject's own issue, or
+ * no detail open at all). */
+export function previousItems() {
+  return (previous && previous.info.items) || null;
+}
+export function goBack() {
+  if (!previous) { dialog.hidden = true; return; }
+  const p = previous;
+  previous = null;
+  openInfo(p.info);
+  const ul = document.querySelector('#d-meta ul');
+  if (ul) ul.scrollTop = p.scroll;
+}
+/* The dialog for one object, or a list such as the board. `keepHistory`
+ * (issuedialog.js only) keeps the Back slot `pushForDetail` just set,
+ * instead of clearing it as a fresh root normally does. */
+export function openInfo(info, keepHistory) {
+  if (!keepHistory) previous = null;
+  current = info;
+  backBtn.hidden = !previous;
   document.getElementById('d-title').textContent = info.title;
   document.getElementById('d-line').textContent = info.line || '';
   // Each fact on its own line, then the list: joined, they ran together
@@ -131,6 +164,8 @@ export function openInfo(info) {
   // An item with a URL opens the issue dialog in the village (issuedialog.js,
   // #564); its GitHub link stays, now secondary. One with none (a runtime
   // village's workstream, not a GitHub issue) stays plain text, as before.
+  // The whole row is the click target (#573), at least 32px tall on touch
+  // (village.css); the GitHub link keeps its own target inside it.
   const items = info.items && (info.items.length
     ? `<ul>${info.items.map(i => `<li data-n="${esc(i.number)}">${i.url ? `<button class="issue-open" type="button" data-n="${esc(i.number)}">#${i.number}</button>` : '#' + i.number} ${esc(i.title || '')}${i.label ? ' · ' + esc(i.label) : ''}${i.priority ? ' · ' + esc(i.priority) : ''}${(i.waits_on || []).length ? ' · waits on ' + i.waits_on.map(d => '#' + d).join(', ') : ''}${i.url ? ` <a class="sub-link" href="${esc(i.url)}" target="_blank" rel="noopener">on GitHub ↗</a>` : ''}</li>`).join('')}</ul>`
     : '<span class="fact">Nothing here.</span>');
@@ -205,7 +240,7 @@ function groundHint(e) {
   clearTimeout(hintTimer);
   hintTimer = setTimeout(() => { hintEl.hidden = true; }, 2500);
 }
-document.addEventListener('keydown', e => { if (e.key === 'Escape') dialog.hidden = true; });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') goBack(); });
 
 /* One keyboard target per object drawn in the last frame, kept across polls
  * (by what it is, not where) so focus survives a refresh. Kinds registered

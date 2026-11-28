@@ -71,6 +71,10 @@
   .dialog { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); width: min(560px, calc(100vw - 32px)); padding: 14px 16px; z-index: 10; }
   /* Room for the close × (absolute, top right): a long title wraps before it, never under it. */
   .dialog h2 { margin: 0 0 4px; padding-right: 26px; overflow-wrap: anywhere; font: 700 14px var(--mono); color: var(--gold); letter-spacing: .04em; }
+  /* Back to the list a detail view (#564) was opened from (#573): top left,
+   * the close × keeps the right. Room for it in the title only while shown. */
+  #d-back { position: absolute; top: 8px; left: 10px; background: none; border: 0; color: var(--ink); font: 700 13px var(--mono); cursor: pointer; }
+  #d-back:not([hidden]) ~ #d-title { padding-left: 54px; }
   .dialog p { margin: 4px 0; font: 15px/1.4 var(--mono); }
   .dialog .dim { color: var(--ink-dim); font-size: 13px; }
   .dialog .links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
@@ -92,6 +96,18 @@
   .dialog .attach-cmds .retry { align-self: flex-start; }
   .dialog ul { list-style: none; margin: 6px 0 0; padding: 0; max-height: 40vh; overflow: auto; }
   .dialog li { font: 14px/1.5 var(--mono); }
+  /* A row naming an issue is clickable everywhere on it, not just its #N
+   * button (#573): at least 32 CSS px tall on touch, so a tap lands on it. */
+  .dialog li[data-n]:has(button.issue-open) { cursor: pointer; padding: 2px 4px; margin: 0 -4px; border-radius: 3px; }
+  .dialog li[data-n]:has(button.issue-open):hover, .dialog li[data-n]:has(button.issue-open):focus-within { background: rgba(255,255,255,.08); }
+  @media (pointer: coarse) {
+    .dialog li[data-n]:has(button.issue-open) { min-height: 32px; display: flex; align-items: center; flex-wrap: wrap; gap: 0 .3em; }
+  }
+  /* Next/Previous through the list a detail view (#564) came from (#573). */
+  .dialog .issue-nav { display: flex; gap: 8px; margin-bottom: 8px; }
+  .dialog .issue-nav button { position: static; font: 700 13px var(--mono); color: var(--ink); background: var(--win-bot); border: 2px solid var(--gold); border-radius: 4px; padding: 3px 10px; cursor: pointer; }
+  .dialog .issue-nav button:hover:not(:disabled) { background: var(--gold); color: #241400; }
+  .dialog .issue-nav button:disabled { opacity: .4; cursor: default; }
   .dialog li a { color: var(--gold); }
   .dialog .q { font: 700 15px/1.4 var(--mono); color: var(--ink); margin: 10px 0 6px; }
   .dialog .opts { display: flex; flex-wrap: wrap; gap: 8px; }
