@@ -1317,8 +1317,9 @@
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify({ repo_path: repoPath, agent_type: agentType, num_workers: numWorkers }),
         });
-        // A bad repo path, agent type or mux (400) and a read-only server (403)
-        // answer with no body (#584): say what that means, as the village does.
+        // A bad repo path, agent type or mux (400) answers with no body, so
+        // parse only when there is one (#584) and say what it means, as the
+        // village does. A read-only server (403) answers its own `error`.
         const data = await r.json().catch(() => ({}));
         if (r.ok && data.ok) {
           // Through autocoder-ctl start (#583), `message` says the session, the agent
@@ -1328,7 +1329,7 @@
           // Refresh swarms after a short delay to pick up the new swarm
           setTimeout(() => { refresh(); }, 4000);
         } else {
-          const why = r.status === 403 ? 'This dashboard is read-only: launch from the agents-tui terminal.'
+          const why = r.status === 403 ? (data.error || 'This dashboard is read-only: launch from the agents-tui terminal.')
             : r.status === 400 ? "That repository path doesn't exist on this server, or the agent type is unknown."
             : (data.error || ('Launch failed (HTTP ' + r.status + ')'));
           state.launch.status = { ok: false, msg: why };

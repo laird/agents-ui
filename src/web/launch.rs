@@ -201,7 +201,7 @@ mod tests {
         assert!(ui.contains("(data.error || ('Launch failed (HTTP '"), "the failure");
         // A bare 400 or 403 has no body to parse (#584).
         assert!(ui.contains("const data = await r.json().catch(() => ({}));"));
-        assert!(ui.contains("r.status === 403 ? 'This dashboard is read-only"));
+        assert!(ui.contains("r.status === 403 ? (data.error || 'This dashboard is read-only"));
         assert!(ui.contains("r.status === 400 ? \"That repository path doesn't exist"));
         let words = include_str!("village/startswarmwords.js");
         assert!(words.contains("body.ok && body.message) return { ok: true, words: body.message }"));
