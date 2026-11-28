@@ -2590,14 +2590,7 @@ mod tests {
     }
 
     fn write_executable(path: &std::path::Path, contents: &str) {
-        std::fs::write(path, contents).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(path).unwrap().permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(path, perms).unwrap();
-        }
+        crate::testutil::write_executable(path, contents);
     }
 
     /// Writes a `tmux` shim into `bin_dir` that transparently redirects every

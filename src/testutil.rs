@@ -199,6 +199,9 @@ pub fn write_executable(path: &std::path::Path, body: &str) {
         .stdin(std::process::Stdio::piped())
         .spawn()
         .expect("spawn sh to write the executable");
-    child.stdin.take().unwrap().write_all(body.as_bytes()).unwrap();
-    assert!(child.wait().unwrap().success(), "could not write {}", path.display());
+    // A failed write (cat gone) shows as the exit status below, not a bare
+    // "Broken pipe".
+    let wrote = child.stdin.take().unwrap().write_all(body.as_bytes());
+    let status = child.wait().unwrap();
+    assert!(status.success() && wrote.is_ok(), "could not write {}: {status}, {wrote:?}", path.display());
 }

@@ -6,10 +6,13 @@ use tokio::process::Command;
 /// prompt (a password or an unknown host key would otherwise ask on the
 /// terminal the TUI holds in raw mode, and hang or garble it; a host not yet
 /// in `known_hosts` now fails until someone runs `ssh <host>` once), give up
-/// when the TCP connect takes more than 10s, drop a connection whose host
-/// stops answering for 30s (two missed keepalives 15s apart, #589), and end
-/// the options with `--` so a `--server` value starting with `-` is never
-/// read as one. ssh's own error is what the callers show.
+/// when the connect (and banner exchange) takes more than 10s, drop a
+/// connection whose host stops answering for 30s (two missed keepalives 15s
+/// apart: a dead link or a host gone away, #589), and end the options with
+/// `--` so a `--server` value starting with `-` is never read as one. ssh's
+/// own error is what the callers show. A remote command that hangs while its
+/// host is alive is not caught here: sshd answers the keepalives. Bounding
+/// that is each caller's (#590).
 pub const SSH_OPTIONS: [&str; 9] = [
     "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=2", "--",
 ];
@@ -54,8 +57,6 @@ impl ServerTransport {
                 .args(SSH_OPTIONS)
                 .arg(server)
                 .arg(&command)
-                // A caller's own timeout (ctl::run_remote) ends ssh too.
-                .kill_on_drop(true)
                 .output()
                 .await
                 .with_context(|| format!("Failed to run remote command over ssh: {server}"))
@@ -163,32 +164,6 @@ mod tests {
             args,
             ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=2", "--", "buildbox", "'true'"]
         );
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// #589: a caller that gives up (a timeout) ends ssh too, rather than
-    /// leaving it running against a stalled host.
-    #[tokio::test]
-    async fn a_caller_that_gives_up_ends_ssh() {
-        let dir = std::env::temp_dir().join(crate::testutil::artifact_name("transport-ssh-drop"));
-        std::fs::create_dir_all(&dir).unwrap();
-        let (ssh, pid) = (dir.join("ssh"), dir.join("pid"));
-        crate::testutil::write_executable(&ssh, &format!("#!/bin/sh\necho $$ > '{}'\nexec sleep 30\n", pid.display()));
-        let transport = ServerTransport::with_ssh_program("stalled", ssh);
-        let gave_up = tokio::time::timeout(std::time::Duration::from_millis(500), transport.output("true", &[], None)).await;
-        assert!(gave_up.is_err(), "the stand-in ssh never answers");
-        let pid = std::fs::read_to_string(&pid).unwrap().trim().to_string();
-        // Killed but not yet reaped is a zombie ("Z"): it has ended.
-        let alive = || {
-            let out = std::process::Command::new("ps").args(["-o", "stat=", "-p", &pid]).output().unwrap();
-            let stat = String::from_utf8_lossy(&out.stdout);
-            out.status.success() && !stat.trim().starts_with('Z')
-        };
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while alive() && std::time::Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
-        assert!(!alive(), "ssh {pid} still running after its caller gave up");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
