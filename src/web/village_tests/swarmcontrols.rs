@@ -10,7 +10,7 @@ use super::*;
 fn the_hall_dialog_offers_manager_and_swarm_controls() {
     let lifecycle = village_asset("lifecycle.js").unwrap().1;
     assert!(lifecycle.contains("managerControls: runtime ? null : { project: v.project, role: m.role, name: 'the manager', issue: null },"));
-    assert!(lifecycle.contains("swarmControls: runtime ? null : { project: v.project } };"));
+    assert!(lifecycle.contains("swarmControls: runtime ? null : { project: v.project },"));
     assert!(village_asset("index.html").unwrap().1.contains("<div id=\"d-swarmctl\"></div>"));
     assert!(village_asset("modules.js").unwrap().1.contains("import './swarmcontrols.js';"));
 }

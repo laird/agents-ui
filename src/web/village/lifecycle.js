@@ -265,7 +265,9 @@ registerHit({ kind: 'hall', dialog(o, sc, theme) {
     // Nudge/Restart for the manager (controls.js); Stop swarm, Resume, Add
     // worker and Switch agent for the whole swarm (#567, swarmcontrols.js).
     managerControls: runtime ? null : { project: v.project, role: m.role, name: 'the manager', issue: null },
-    swarmControls: runtime ? null : { project: v.project } };
+    swarmControls: runtime ? null : { project: v.project },
+    // Chat with it in a panel over the map (#566, chat.js), when it has a session to read.
+    chat: s ? { role: m.role, name: 'manager', label: 'Chat with manager' } : null };
 } });
 registerHit({ kind: 'house', dialog(o, sc) {
   const v = sc.v, runtime = isRuntime(v), work = workOf(v);
@@ -281,6 +283,7 @@ registerHit({ kind: 'house', dialog(o, sc) {
       since ? `${h.status.charAt(0).toUpperCase() + h.status.slice(1)} since ${since}` : null, limitWords(h), contextWords(h), ...tokenWords(h),
       `Crew: ${h.crew.join(', ') || '—'}`, ...(h.subagents || []).map(sa => `${runtime ? 'Agent' : 'Sub-agent'}: ${subWords(sa, v)}`)],
     links: withAttach(v, h, [...(h.links || []), issue, ...(runtime ? [] : branchLinks(repo, h.branch, h.links, br)), compare]), house: h,
+    chat: sessionOf(h) ? { role: h.role, name: houseName(v, h) } : null,
     // Worker controls (#506, controls.js): the server says which it can run.
     controls: runtime ? null : { project: v.project, role: h.role, name: houseName(v, h), issue: h.issue || null, house: h.id } };
 } });
@@ -288,7 +291,8 @@ registerHit({ kind: 'person', dialog(o, sc) {
   const v = sc.v, h = v.houses[o.i]; if (!h) return null;
   return { title: `${o.who || h.role} · agent`, line: h.issue ? `Working on #${h.issue} ${h.issue_title || ''}` : `Status: ${h.status}`,
     meta: [`Lives in ${houseName(v, h)}`, `Status: ${h.status}`, limitWords(h), h.action ? `Now: ${h.action}` : null],
-    links: withAttach(v, h, [sessionOf(h), h.issue ? link(issueLabel(h.issue), issueOf(v, h.issue).url) : null]) };
+    links: withAttach(v, h, [sessionOf(h), h.issue ? link(issueLabel(h.issue), issueOf(v, h.issue).url) : null]),
+    chat: sessionOf(h) ? { role: h.role, name: o.who || h.role } : null };
 } });
 registerHit({ kind: 'sub', dialog(o, sc) {
   const v = sc.v, runtime = isRuntime(v);
