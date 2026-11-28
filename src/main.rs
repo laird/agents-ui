@@ -1,10 +1,11 @@
-//! Entry point: argument parsing, logging, the terminal UI or `--headless` server, and the `service` subcommand.
+//! Entry point: argument parsing, logging, the terminal UI or `--headless` server, and the `service`/`open`/`handler` subcommands.
 
 mod adapter;
 mod app;
 mod config;
 mod event;
 mod github;
+mod handler;
 mod handoff;
 mod model;
 mod project_management;
@@ -410,6 +411,12 @@ async fn main() -> Result<()> {
         // `agents-tui service install|uninstall|status|restart`: the served
         // agents-tui as a user service (src/service/).
         Some("service") => std::process::exit(service::run(&args[2..], &mut std::io::stdout())),
+        // `agents-tui open <agents-ui://attach?...>`: the village's link
+        // handler (src/handler/).
+        Some("open") => std::process::exit(handler::run_open(&args[2..], &mut std::io::stdout())),
+        // `agents-tui handler install [--dry-run]`: register `open` as this
+        // desktop's `agents-ui://` handler (src/handler/).
+        Some("handler") => std::process::exit(handler::run_install(&args[2..], &mut std::io::stdout())),
         // `service status` reports the version of the binary a unit runs.
         Some("--version" | "-V") => {
             println!("agents-tui {}", env!("CARGO_PKG_VERSION"));
