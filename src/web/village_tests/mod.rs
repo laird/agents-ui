@@ -13,6 +13,7 @@ mod fit;
 mod gatehouse;
 mod ghlinks;
 mod ghpanel;
+mod issuedialog;
 mod labels_key;
 mod lifecycle;
 mod newissue;

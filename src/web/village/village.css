@@ -159,6 +159,21 @@
   #d-travel .opts button, .dialog li button.travel-log { font-size: 12px; padding: 3px 8px; }
   .dialog li button.travel-log { position: static; margin-left: .5em; font: 700 13px var(--mono); color: var(--ink); background: var(--win-bot); border: 1px solid var(--gold); border-radius: 3px; padding: 0 6px; cursor: pointer; }
   #d-ctl pre.sent { white-space: pre-wrap; max-height: 12em; overflow: auto; margin: .3em 0; padding: .4em .6em; font: inherit; font-size: .9em; background: rgba(0,0,0,.25); border-left: 3px solid var(--gold); }
+  /* The issue dialog (#564): labels, body and comments ≥ 14px throughout. */
+  .dialog li button.issue-open { position: static; margin-right: .3em; font: 700 14px var(--mono); color: var(--ink); background: var(--win-bot); border: 1px solid var(--gold); border-radius: 3px; padding: 1px 7px; cursor: pointer; }
+  .dialog li button.issue-open:hover { background: var(--gold); color: #241400; }
+  .dialog .sub-link { font-size: 14px; }
+  #d-issue { margin-top: 8px; font-size: 14px; }
+  #d-issue .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+  #d-issue .chip { display: inline-block; font: 700 14px var(--mono); color: #241400; background: var(--ink-dim); border-radius: 3px; padding: 2px 8px; }
+  #d-issue .body :is(h1, h2, h3, h4, h5, h6) { margin: .6em 0 .2em; font-size: 1em; color: var(--gold); }
+  #d-issue .body p, #d-issue .body li { margin: .3em 0; font-size: 14px; }
+  #d-issue .body code { background: rgba(0,0,0,.25); padding: 0 3px; border-radius: 2px; }
+  #d-issue .body pre { white-space: pre-wrap; padding: .4em .6em; background: rgba(0,0,0,.25); border-left: 3px solid var(--gold); overflow: auto; }
+  #d-issue .blocked { margin: .6em 0; font-size: 14px; }
+  #d-issue details summary { cursor: pointer; font-size: 14px; }
+  #d-issue .comment { margin: .4em 0; font-size: 14px; }
+  #d-issue .comment .who { color: var(--ink-dim); }
   .al.flag { font-size: max(11px, calc(var(--lf, 11px) - 1px)); color: var(--ink); border-width: 2px; padding: 0 3px; white-space: normal; text-align: center; }
   .al.house { font-size: max(11px, calc(var(--lf, 11px) - 1px)); color: var(--ink); border-color: var(--win-inner); padding: 0 3px; }
   .al.house { white-space: normal; text-align: center; }
