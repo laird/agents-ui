@@ -129,6 +129,13 @@
   .dialog .new-issue .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
   .dialog .new-issue button, #d-form .opts button { position: static; font: 700 13px var(--mono); color: var(--ink); background: var(--win-bot); border: 2px solid var(--gold); border-radius: 4px; padding: 4px 10px; cursor: pointer; }
   .dialog .new-issue a { color: var(--gold); }
+  /* Start swarm from the empty state (startswarm.js, #578): same look as
+   * the new-issue form, left-aligned against .empty's own centered text. */
+  .empty .start-swarm { display: grid; gap: 6px; margin: 12px auto 0; max-width: 360px; text-align: left; }
+  .empty .start-swarm label { display: grid; gap: 2px; font: 13px var(--mono); color: var(--ink-dim); }
+  .empty .start-swarm input, .empty .start-swarm select { font: 14px var(--mono); color: var(--ink); background: var(--win-bot); border: 2px solid var(--gold); border-radius: 4px; padding: 4px; }
+  .empty .start-swarm .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; justify-content: center; }
+  .empty .start-swarm button { font: 700 13px var(--mono); color: var(--ink); background: var(--win-bot); border: 2px solid var(--gold); border-radius: 4px; padding: 4px 10px; cursor: pointer; }
   .dialog button { position: absolute; top: 8px; right: 10px; background: none; border: 0; color: var(--ink); font: 700 16px var(--mono); cursor: pointer; }
   :focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
   /* Features: a label under each banner (a real button, so Tab reaches it),

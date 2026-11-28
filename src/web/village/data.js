@@ -22,6 +22,7 @@ import { OVERVIEW_NAME, overviewIslands, overviewWords } from './overviewmodel.j
 import { sizeOverview } from './overview.js';
 import { selectValley, valleyWanted } from './valley.js';
 import { arrangeDocks } from './docks.js';
+import { fillEmpty, resetEmpty } from './startswarm.js';
 
 const pick = document.getElementById('pick');
 let themeName = 'medieval';
@@ -143,8 +144,10 @@ async function poll() {
     else {
       document.getElementById('empty').hidden = villages.length > 0;
       cv.hidden = villages.length === 0;
-      if (!villages.length) document.getElementById('empty').textContent = 'No swarms running. Start one from the dashboard or the agents-tui terminal.';
-      else select(want.includes('@') && want.split('@')[0] === pick.value ? want : pick.value || names[0]);
+      // No villages at all: there is no repo to be "in" (#578), so the empty
+      // state offers Start swarm itself instead of just saying there is none.
+      if (!villages.length) fillEmpty(document.getElementById('empty'));
+      else { resetEmpty(); select(want.includes('@') && want.split('@')[0] === pick.value ? want : pick.value || names[0]); }
     }
     // The shown village's build, in words (weather.js draws it).
     const world = worlds.find(w => w.name === pick.value);

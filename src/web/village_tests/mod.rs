@@ -23,6 +23,7 @@ mod notify;
 mod proposals;
 mod screensaver;
 mod shipped;
+mod startswarm;
 mod swarmcontrols;
 mod themes;
 mod valley;
