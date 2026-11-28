@@ -152,7 +152,7 @@ pub fn job_id(url: &str) -> Option<u64> {
 /// have been read: a job's log is read once, in the background, and the
 /// poll after has it. A log that can't be read reads as empty, and is tried
 /// again after [`RETRY`]; a read that takes longer than [`READ_LIMIT`] is
-/// given up.
+/// given up, and its `gh` killed (#594).
 pub fn job_logs(transport: &ServerTransport, dir: &Path, jobs: &[(String, u64)]) -> Vec<(String, String)> {
     let logs = LOGS.get_or_init(Default::default);
     let mut out = Vec::new();
@@ -171,9 +171,9 @@ pub fn job_logs(transport: &ServerTransport, dir: &Path, jobs: &[(String, u64)])
         let transport = transport.clone();
         tokio::spawn(async move {
             let args = vec!["api".to_string(), format!("repos/{{owner}}/{{repo}}/actions/jobs/{}/logs", key.1)];
-            let read = tokio::time::timeout(READ_LIMIT, transport.output("gh", &args, Some(&key.0))).await;
+            let read = transport.read_within(READ_LIMIT, "gh", &args, Some(&key.0)).await;
             let log = match read {
-                Ok(Ok(o)) if o.status.success() => {
+                Ok(o) if o.status.success() => {
                     let text = String::from_utf8_lossy(&o.stdout).into_owned();
                     let mut cut = text.len().saturating_sub(LOG_KEEP);
                     while !text.is_char_boundary(cut) {

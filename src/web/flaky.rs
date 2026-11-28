@@ -505,6 +505,13 @@ pub async fn api_file_handler(
         let (transport, repo) = (state.transport.clone(), repo.clone());
         async move { transport.output(cmd.program, &cmd.args, Some(&repo)).await }
     };
+    // The search and the view only read, so a stuck gh gives up instead of
+    // holding FILING for every later click (#594); the comment and the create
+    // write, and run unbounded.
+    let read = |cmd: crate::project_management::ProjectCommand| {
+        let (transport, repo) = (state.transport.clone(), repo.clone());
+        async move { transport.read(cmd.program, &cmd.args, Some(&repo)).await }
+    };
     let ask = |out: anyhow::Result<std::process::Output>, what: &str| match out {
         Ok(o) if o.status.success() => Ok(o.stdout),
         Ok(o) => {
@@ -515,10 +522,10 @@ pub async fn api_file_handler(
         Err(_) => Err(fail(StatusCode::BAD_GATEWAY, "could not reach the tracker")),
     };
     let title = issue_title(&test);
-    let list = ask(run(client.search_open_issues(&format!("\"{title}\" in:title"), "number,title", 20)).await, "the search")?;
+    let list = ask(read(client.search_open_issues(&format!("\"{title}\" in:title"), "number,title", 20)).await, "the search")?;
     let (action, number) = match open_issue_for(&list, &test) {
         Some(n) => {
-            let view = ask(run(client.view_issue_json(n, "body,comments")).await, "reading the issue")?;
+            let view = ask(read(client.view_issue_json(n, "body,comments")).await, "reading the issue")?;
             let new = unreported(&f, &view);
             if new.is_empty() {
                 return Ok(axum::Json(json!({ "ok": true, "action": "unchanged", "number": n })));

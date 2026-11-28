@@ -599,6 +599,15 @@ mod tests {
             assert!(gh_api.contains("transport.read(\"gh\""), "src/web/{name}'s gh_api reads with transport.read");
         }
         assert!(!include_str!("web/since.rs").contains("output(\"gh\""), "src/web/since.rs lists with transport.read");
+        // #594: the decision dialogs check the issue's labels, flaky searches
+        // and reads before it writes, and breakage reads job logs.
+        for (name, src) in [("decisions.rs", include_str!("web/decisions.rs")), ("proposals.rs", include_str!("web/proposals.rs"))] {
+            assert!(!src.contains(".output(view.program"), "src/web/{name} views the issue with transport.read");
+        }
+        let flaky = include_str!("web/flaky.rs");
+        assert!(flaky.contains("ask(read(client.search_open_issues(") && flaky.contains("ask(read(client.view_issue_json("), "src/web/flaky.rs searches and views with transport.read");
+        let breakage = include_str!("web/breakage.rs");
+        assert!(breakage.contains("read_within(READ_LIMIT") && !breakage.contains("timeout(READ_LIMIT, transport.output"), "src/web/breakage.rs kills a job-log read that runs out of time");
     }
 
     use super::{

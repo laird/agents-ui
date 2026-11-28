@@ -125,7 +125,7 @@ pub async fn api_decision_handler(
     let view = client.view_issue_json(number, "state,labels");
     let out = state
         .transport
-        .output(view.program, &view.args, Some(&repo))
+        .read(view.program, &view.args, Some(&repo))
         .await
         .map_err(|_| fail(StatusCode::BAD_GATEWAY, "could not ask the tracker"))?;
     let seen: Value = serde_json::from_slice(&out.stdout).unwrap_or(Value::Null);
