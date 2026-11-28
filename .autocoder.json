@@ -1,5 +1,8 @@
 {
   "issueSource": "github",
+  "managerModel": "opus",
+  "workerModel": "claude-sonnet-5",
+  "fastModel": "haiku",
   "environments": [
     {"name": "deploy", "requires": "integration",
      "label": "agents-tui",
