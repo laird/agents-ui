@@ -426,10 +426,12 @@ pub async fn locate(transport: &ServerTransport, repo: &Path, environment: &str,
     found.filter(|d| is_sha(&d.sha))
 }
 
-/// `gh api <path>` in `repo`: its output, or `None` when it fails.
+/// `gh api <path>` in `repo`: its output, or `None` when it fails or takes
+/// longer than the read timeout (#592). Only for GETs: it is killed at that
+/// timeout.
 pub(super) async fn gh_api(transport: &ServerTransport, repo: &Path, path: &str) -> Option<String> {
     let args = vec!["api".to_string(), path.to_string()];
-    let out = transport.output("gh", &args, Some(repo)).await.ok()?;
+    let out = transport.read("gh", &args, Some(repo)).await.ok()?;
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 

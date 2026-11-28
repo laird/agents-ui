@@ -577,8 +577,9 @@ mod tests {
         assert!(crate::github::parse_merge_comments(b"not json").is_empty());
     }
 
-    /// The web pages' `gh` calls only read, so they give up after the read
-    /// timeout instead of holding a page when `gh` hangs (#592).
+    /// These web pages' `gh` calls only read, so they give up after the read
+    /// timeout instead of holding a page when `gh` hangs (#592). A guard, not
+    /// a proof: it checks which helper each file names.
     #[test]
     fn web_pages_read_gh_with_a_timeout() {
         for (name, src) in [
@@ -588,8 +589,13 @@ mod tests {
             ("issue.rs", include_str!("web/issue.rs")),
         ] {
             assert!(src.contains("gh_repo_read("), "src/web/{name} reads gh with gh_repo_read");
-            assert!(!src.contains("gh_repo_output("), "src/web/{name} only reads: use gh_repo_read, not the unbounded gh_repo_output");
+            assert!(!src.contains("gh_repo_output("), "src/web/{name}: use gh_repo_read for a read, not the unbounded gh_repo_output");
         }
+        // Their deployments (and the build page's check runs) come from `gh api` GETs.
+        let deployments = include_str!("web/deployments.rs");
+        let gh_api = &deployments[deployments.find("async fn gh_api(").expect("deployments.rs has gh_api")..];
+        let gh_api = &gh_api[..gh_api.find("\n}\n").expect("gh_api ends")];
+        assert!(gh_api.contains("transport.read(\"gh\""), "deployments::gh_api reads with transport.read");
     }
 
     use super::{
