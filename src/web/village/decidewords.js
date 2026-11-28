@@ -4,10 +4,11 @@
  * it (decisions.rs decides the same two groups). No DOM, so node tests it
  * (tools/village-tests/decidewords.test.mjs); decisions.js puts it there. */
 
-/* Gets Approve or Reject. */
-const APPROVE_LABELS = ['needs-approval', 'too-complex', 'future', 'blocked'];
+/* Gets Approve or Reject. Exported so issuewords.js's BLOCKING list (#564)
+ * can't drift from which labels this dialog actually decides. */
+export const APPROVE_LABELS = ['needs-approval', 'too-complex', 'future', 'blocked'];
 /* Gets Answer or Reject. */
-const ANSWER_LABELS = ['needs-clarification', 'needs-design', 'needs-feedback'];
+export const ANSWER_LABELS = ['needs-clarification', 'needs-design', 'needs-feedback'];
 
 /* Where a decision on issue `n` of village `project` is posted. */
 export const decideUrl = (project, n) => `api/swarms/${encodeURIComponent(project)}/issues/${n}/decide`;

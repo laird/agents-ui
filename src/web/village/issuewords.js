@@ -7,13 +7,18 @@
  * (tools/village-tests/issuewords.test.mjs); issuedialog.js draws it. */
 import { NOTECOL } from './palette.js';
 import { GLYPH_WORDS } from './cvdmarks.js';
+import { APPROVE_LABELS, ANSWER_LABELS } from './decidewords.js';
 
 export const issueUrl = (project, n) => `api/swarms/${encodeURIComponent(project)}/issues/${n}`;
 
 /* A human-judgement gate, not a status the swarm set itself (merging,
  * awaiting-integration, working, subtask, decomposed are the swarm's own
- * bookkeeping, not something a person needs to resolve). */
-const BLOCKING = ['needs-design', 'needs-clarification', 'needs-approval', 'too-complex', 'future', 'proposal'];
+ * bookkeeping, not something a person needs to resolve). The decidable ones
+ * (#565) come from decidewords.js, so this list can't drift from which
+ * labels the issue dialog's Approve/Answer/Reject buttons actually cover;
+ * `proposal` is decided through its own flow (proposals.js) but still gets
+ * the chip and the "why it's blocked" section here. */
+const BLOCKING = [...APPROVE_LABELS, ...ANSWER_LABELS, 'proposal'];
 
 /* Labels with a blocking one first (stable past that), each with its
  * board colour and glyph when it has one. */

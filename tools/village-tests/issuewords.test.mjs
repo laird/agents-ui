@@ -21,6 +21,15 @@ test('a blocking label leads, with its colour and glyph', () => {
   assert.equal(chips[1].color, null);
 });
 
+/* #565's review: decisions.js offers Approve/Reject or Answer/Reject for
+ * every label decidewords.js groups, so each of those must also be
+ * "blocking" here, or the dialog shows the buttons with no stated reason. */
+test('every decidable label (#565) is also a blocking one here', () => {
+  for (const name of ['needs-approval', 'too-complex', 'future', 'blocked', 'needs-clarification', 'needs-design', 'needs-feedback']) {
+    assert.equal(labelChips([name])[0].blocking, true, name);
+  }
+});
+
 test('why it is blocked, or the stand-in words', () => {
   assert.equal(blockedReasonWords({ blocked_reason: '🚫 **Blocked**: need a decision' }), '🚫 **Blocked**: need a decision');
   assert.equal(blockedReasonWords({ blocked_reason: null }), 'no reason recorded');

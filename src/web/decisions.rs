@@ -28,11 +28,9 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::autocoder_ctl::{self, CtlOutcome};
+use super::proposals::MAX_COMMENT_BYTES;
 use super::server::WebServerState;
 use crate::project_management::{ProjectCommand, ProjectManagementClient};
-
-/// The longest comment accepted, in bytes (same limit as `/decision`).
-pub const MAX_COMMENT_BYTES: usize = 4000;
 
 /// Gets Approve or Reject.
 const APPROVE_LABELS: &[&str] = &["needs-approval", "too-complex", "future", "blocked"];
@@ -67,15 +65,24 @@ fn label_group(name: &str) -> Option<&'static str> {
     }
 }
 
-/// The first label `gh issue view --json state,labels` shows that this
-/// endpoint decides, on an open issue; `None` otherwise (closed, no such
-/// label, or only a proposal's — that stays `/decision`'s).
+/// The label `gh issue view --json state,labels` shows that this endpoint
+/// decides, on an open issue; `None` otherwise (closed, no such label, or
+/// only a proposal's — that stays `/decision`'s). Nothing stops an issue
+/// from carrying a label from each group at once, so an approve-group label
+/// always wins when both are present — the same tie-break decideGroup()
+/// (decidewords.js) uses, so the dialog's buttons and this endpoint never
+/// disagree about which group decides it.
 pub fn decidable_label(view: &Value) -> Option<String> {
     let open = view["state"].as_str().is_some_and(|s| s.eq_ignore_ascii_case("open"));
     if !open {
         return None;
     }
-    view["labels"].as_array()?.iter().filter_map(|l| l["name"].as_str().or(l.as_str())).find(|n| label_group(n).is_some()).map(str::to_string)
+    let names: Vec<&str> = view["labels"].as_array()?.iter().filter_map(|l| l["name"].as_str().or(l.as_str())).collect();
+    names
+        .iter()
+        .find(|n| APPROVE_LABELS.contains(n))
+        .or_else(|| names.iter().find(|n| ANSWER_LABELS.contains(n)))
+        .map(|s| s.to_string())
 }
 
 /// The tracker commands a decision runs, in order; or why it can't run.
@@ -254,6 +261,18 @@ mod tests {
         assert_eq!(decidable_label(&json!({ "state": "CLOSED", "labels": [{ "name": "needs-approval" }] })), None);
         assert_eq!(decidable_label(&json!({ "state": "OPEN", "labels": [] })), None);
         assert_eq!(decidable_label(&Value::Null), None);
+    }
+
+    /// Nothing stops an issue from carrying a label from each group at once;
+    /// an approve-group label must win whichever order GitHub lists them in,
+    /// the same tie-break decideGroup() (decidewords.js) uses, or a click on
+    /// the Approve button the dialog showed gets a 422 (#565 review).
+    #[test]
+    fn an_approve_label_wins_over_an_answer_label_whatever_order_they_come_in() {
+        let answer_first = json!({ "state": "OPEN", "labels": [{ "name": "needs-design" }, { "name": "too-complex" }] });
+        assert_eq!(decidable_label(&answer_first).as_deref(), Some("too-complex"));
+        let approve_first = json!({ "state": "OPEN", "labels": [{ "name": "too-complex" }, { "name": "needs-design" }] });
+        assert_eq!(decidable_label(&approve_first).as_deref(), Some("too-complex"));
     }
 
     #[test]
