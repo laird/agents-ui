@@ -49,8 +49,9 @@ pub async fn via_ctl(
 pub fn answer(result: &CtlResult, requested: &AgentType, project: &str) -> Value {
     let asked = requested.script_flag();
     let started = result.detail.get("agent").and_then(Value::as_str).filter(|a| !a.is_empty()).unwrap_or(asked);
-    // Why it is not the agent asked for: the launcher's own note, when it left one.
-    let reason = (started != asked).then(|| result.notes.first().cloned()).flatten();
+    // The launcher's own note on its choice: why it is not the agent asked
+    // for, or why it started that one anyway when nothing else could run.
+    let reason = result.notes.iter().find(|n| n.contains(" instead")).or(result.notes.first()).cloned();
     let mut body = json!({
         "ok": result.ok,
         "via": "autocoder-ctl",
@@ -62,7 +63,9 @@ pub fn answer(result: &CtlResult, requested: &AgentType, project: &str) -> Value
     if result.ok {
         body["message"] = json!(started_words(result, asked, started, reason.as_deref(), project));
     } else {
-        body["error"] = json!(failure(result));
+        // A prompt a half-started swarm waits on is still the user's to answer.
+        let shown = std::iter::once(failure(result)).chain(ctl::prompt_lines(&result.prompts));
+        body["error"] = json!(shown.collect::<Vec<_>>().join(" "));
     }
     body
 }
@@ -160,6 +163,18 @@ mod tests {
         assert_eq!(body["agent"]["started"], "codex");
         assert_eq!(body["agent"]["reason"].as_str(), Some(note));
         assert_eq!(body["message"].as_str().unwrap(), format!("Started codex-r on codex instead of claude. {note} Refresh in a few seconds."));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn a_start_on_the_agent_asked_for_still_shows_the_launchers_warning() {
+        let dir = temp_dir("anyway");
+        let out = r#"{"ok":true,"action":"start","detail":{"started":true,"session":"claude-r","agent":"claude","prompts":[]}}"#;
+        let note = "⚠️  claude is out of quota, and no other configured agent can run either; starting on claude anyway.";
+        let script = fake(&dir, out, note, 0);
+        let Launch::Ctl { body, .. } = via_ctl(Some(&script), &dir, 2, &AgentType::Claude, None, "r").await else { panic!() };
+        assert_eq!(body["agent"]["reason"].as_str(), Some(note));
+        assert_eq!(body["message"].as_str().unwrap(), format!("Started claude-r. {note} Refresh in a few seconds."));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
