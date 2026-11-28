@@ -116,6 +116,30 @@ restarts this unit. That environment's name is the first entry in
 
 The binary is written to `target/debug/agents-tui` or `target/release/agents-tui`.
 
+### Open an agent's pane from the village
+
+An agent's dialog in the village has **Open in herdr** (or tmux): an
+`agents-ui://attach?...` link that opens that agent's pane in a terminal on
+your computer. Register this binary as the link's handler once:
+
+```bash
+agents-tui handler install            # --dry-run shows what it would do
+```
+
+- **Linux:** writes `~/.local/share/applications/agents-tui-open.desktop` and
+  registers it with `xdg-mime`. The pane opens in `omarchy-launch-terminal`,
+  `xdg-terminal-exec`, `$TERMINAL`, or a common emulator.
+- **macOS:** builds `~/Applications/AgentsUILinkHandler.app` (an AppleScript
+  applet, with its source kept in
+  `~/Library/Application Support/agents-tui/link-handler.applescript`),
+  declares the scheme, signs it ad hoc and registers it with LaunchServices.
+  The pane opens in Ghostty when it is installed, else Terminal.
+
+The handler runs `agents-tui open <url>`, which refuses a host that is not
+this machine, a tailnet peer or a saved herdr machine, and attaches with
+`herdr agent attach <pane>` (over `ssh -t` for another host). Without a
+handler, the page opens the web terminal instead.
+
 ## CLI Options
 
 Supported flags:

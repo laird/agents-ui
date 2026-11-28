@@ -1,7 +1,7 @@
 //! `agents-tui handler install` (#576): registers this binary as the Linux
 //! desktop handler for the `agents-ui://` scheme, via a `.desktop` file
-//! (`xdg-mime default ... x-scheme-handler/agents-ui`). macOS and Windows
-//! handlers are future subtasks of laird/agents-ui#549.
+//! (`xdg-mime default ... x-scheme-handler/agents-ui`). The macOS handler
+//! is `macos.rs` (#582); Windows is a future subtask of laird/agents-ui#549.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};

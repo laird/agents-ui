@@ -1,7 +1,8 @@
 //! The `agents-ui://` link handler (#576, laird/agents-ui#549 slice c):
 //! `agents-tui open <url>` opens a village agent's pane on this desktop,
 //! and `agents-tui handler install` registers this binary as the system's
-//! handler for that scheme (Linux; macOS and Windows are future subtasks).
+//! handler for that scheme: a `.desktop` file on Linux ([`install`]), a
+//! small handler app on macOS ([`macos`], #582). Windows is future work.
 //!
 //! Every field from the link is validated before anything runs ([`url`]):
 //! `host` must match this machine, a saved herdr machine, or a tailnet peer
@@ -21,6 +22,7 @@
 
 mod host;
 mod install;
+mod macos;
 mod plan;
 mod terminal;
 mod url;
@@ -58,6 +60,9 @@ fn open(link: &url::AttachUrl) -> Result<(), String> {
     let kind = host::classify(&link.host, &local_names, &known_hosts)
         .ok_or_else(|| format!("'{}' is not this machine, a saved herdr machine, or a reachable tailnet peer -- refusing to run anything against it", link.host))?;
     let p = plan::plan(link, kind);
+    if cfg!(target_os = "macos") {
+        return macos::spawn(&p.program, &p.args, find_on_path, dirs::home_dir().as_deref());
+    }
     terminal::spawn(&p.program, &p.args, on_path, std::env::var("TERMINAL").ok().as_deref())
 }
 
@@ -78,8 +83,11 @@ pub fn run_install(args: &[String], out: &mut dyn Write) -> i32 {
             }
         }
     }
+    if cfg!(target_os = "macos") {
+        return run_install_macos(dry_run, out);
+    }
     if !cfg!(target_os = "linux") {
-        let _ = writeln!(out, "agents-tui handler install is for Linux (macOS and Windows are future work; see laird/agents-ui#549).");
+        let _ = writeln!(out, "agents-tui handler install is for Linux and macOS (Windows is future work; see laird/agents-ui#549).");
         return 1;
     }
     let Some(data_local_dir) = dirs::data_local_dir() else {
@@ -109,6 +117,39 @@ pub fn run_install(args: &[String], out: &mut dyn Write) -> i32 {
         }
     }
 }
+
+fn run_install_macos(dry_run: bool, out: &mut dyn Write) -> i32 {
+    let Some(home) = dirs::home_dir() else {
+        let _ = writeln!(out, "can't find your home directory");
+        return 1;
+    };
+    let exe = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(e) => {
+            let _ = writeln!(out, "can't find this binary: {e}");
+            return 1;
+        }
+    };
+    let run = |program: &str, run_args: &[String]| -> Result<(), String> {
+        let out = std::process::Command::new(program).args(run_args).output().map_err(|e| format!("could not run {program}: {e}"))?;
+        if out.status.success() {
+            Ok(())
+        } else {
+            Err(format!("{program} failed: {}", String::from_utf8_lossy(&out.stderr).trim()))
+        }
+    };
+    match macos::install(&exe, &home, dry_run, run, out) {
+        Ok(()) => 0,
+        Err(e) => {
+            let _ = writeln!(out, "agents-tui handler install: {e}");
+            1
+        }
+    }
+}
+
+/// The Mac App Store and standalone Tailscale apps ship their CLI inside
+/// the app bundle, not on `PATH`.
+const MACOS_TAILSCALE: &str = "/Applications/Tailscale.app/Contents/MacOS/Tailscale";
 
 fn find_on_path(program: &str) -> Option<std::path::PathBuf> {
     std::env::split_paths(&std::env::var_os("PATH")?).map(|d| d.join(program)).find(|p| p.is_file())
@@ -150,7 +191,12 @@ fn known_remote_hosts() -> Vec<String> {
 }
 
 fn run_json(program: &str, args: &[&str]) -> Option<serde_json::Value> {
-    let out = std::process::Command::new(program).args(args).output().ok()?;
+    let resolved = match find_on_path(program) {
+        Some(p) => p,
+        None if cfg!(target_os = "macos") && program == "tailscale" => std::path::PathBuf::from(MACOS_TAILSCALE),
+        None => std::path::PathBuf::from(program),
+    };
+    let out = std::process::Command::new(resolved).args(args).output().ok()?;
     if !out.status.success() {
         return None;
     }
