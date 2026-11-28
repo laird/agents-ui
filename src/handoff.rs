@@ -203,7 +203,7 @@ pub async fn collect_git_state(
     }
 
     let dirty = transport
-        .output(
+        .read(
             "git",
             &["status".to_string(), "--porcelain".to_string()],
             Some(worktree),
@@ -223,7 +223,7 @@ pub async fn collect_git_state(
     // `--not <branch>` rather than `branch..HEAD` so this still reports
     // something useful when the integration branch is not an ancestor.
     let unpushed = transport
-        .output(
+        .read(
             "git",
             &[
                 "log".to_string(),
@@ -473,7 +473,7 @@ pub async fn current_branch(transport: &ServerTransport, worktree: &Path) -> Opt
         return None;
     }
     let out = transport
-        .output(
+        .read(
             "git",
             &[
                 "rev-parse".to_string(),
@@ -589,7 +589,7 @@ pub async fn write_all(
 /// the wrong branch would report every commit as unpushed.
 pub async fn integration_branch(transport: &ServerTransport, repo_path: &Path) -> String {
     let out = transport
-        .output(
+        .read(
             "git",
             &[
                 "symbolic-ref".to_string(),

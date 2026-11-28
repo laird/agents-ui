@@ -420,7 +420,7 @@ async fn get(transport: &ServerTransport, url: &str) -> Option<String> {
         .iter()
         .map(|s| s.to_string())
         .collect();
-    let out = transport.output("curl", &args, None).await.ok()?;
+    let out = transport.read("curl", &args, None).await.ok()?;
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 

@@ -70,7 +70,7 @@ pub async fn check_gh_auth(transport: &ServerTransport) -> Option<GhError> {
     }
 
     let output = transport
-        .output("gh", &["auth".to_string(), "status".to_string()], None)
+        .read("gh", &["auth".to_string(), "status".to_string()], None)
         .await;
 
     match output {
@@ -124,7 +124,7 @@ pub fn repo_web_url(remote: &str) -> Option<String> {
 /// `None` when there is no origin or it isn't on GitHub.
 pub async fn origin_web_url(transport: &ServerTransport, repo_path: &Path) -> Option<String> {
     let args = ["remote", "get-url", "origin"].map(String::from);
-    let output = transport.output("git", &args, Some(repo_path)).await.ok()?;
+    let output = transport.read("git", &args, Some(repo_path)).await.ok()?;
     output
         .status
         .success()
@@ -135,7 +135,7 @@ pub async fn origin_web_url(transport: &ServerTransport, repo_path: &Path) -> Op
 /// Return the list of logged-in gh usernames (one per line from `gh auth status`).
 async fn list_gh_users(transport: &ServerTransport) -> Vec<String> {
     let Ok(o) = transport
-        .output(
+        .read(
             "gh",
             &["auth".to_string(), "status".to_string()],
             None,
@@ -162,7 +162,7 @@ async fn list_gh_users(transport: &ServerTransport) -> Vec<String> {
 /// Return the currently active gh username, or None on failure.
 async fn current_gh_user(transport: &ServerTransport, repo_path: &Path) -> Option<String> {
     let o = transport
-        .output(
+        .read(
             "gh",
             &[
                 "api".to_string(),
@@ -202,7 +202,7 @@ async fn switch_gh_user(transport: &ServerTransport, user: &str) -> bool {
 /// Return true if the current active gh account can reach `repo_path`'s origin repo.
 async fn gh_can_access_repo(transport: &ServerTransport, repo_path: &Path) -> bool {
     transport
-        .output(
+        .read(
             "gh",
             &[
                 "repo".to_string(),
@@ -231,7 +231,7 @@ pub async fn ensure_gh_auth_for_repo(transport: &ServerTransport, repo_path: &Pa
     }
 
     let remote = match transport
-        .output(
+        .read(
             "git",
             &[
                 "remote".to_string(),
@@ -282,6 +282,9 @@ pub async fn ensure_gh_auth_for_repo(transport: &ServerTransport, repo_path: &Pa
 }
 
 /// Run a repo-scoped `gh` command after ensuring the matching GitHub profile is active.
+/// Not timed out: use it for a command that changes something (a comment, a
+/// label, an approval), which must not be killed partway, and
+/// [`gh_repo_read`] for one that only reads.
 pub async fn gh_repo_output(
     transport: &ServerTransport,
     repo_path: &Path,
@@ -291,12 +294,24 @@ pub async fn gh_repo_output(
     transport.output("gh", args, Some(repo_path)).await
 }
 
+/// [`gh_repo_output`] for a `gh` command that only reads: it gives up after
+/// [`crate::transport::READ_TIMEOUT`] instead of holding the board when `gh`
+/// hangs on a host that still answers ssh (#590).
+pub async fn gh_repo_read(
+    transport: &ServerTransport,
+    repo_path: &Path,
+    args: &[String],
+) -> Result<std::process::Output> {
+    ensure_gh_auth_for_repo(transport, repo_path).await;
+    transport.read("gh", args, Some(repo_path)).await
+}
+
 /// Fetch open issues for the repo at the given path using `gh`.
 pub async fn fetch_issues(
     transport: &ServerTransport,
     repo_path: &Path,
 ) -> std::result::Result<Vec<GitHubIssue>, GhError> {
-    let output = gh_repo_output(
+    let output = gh_repo_read(
         transport,
         repo_path,
         &[
@@ -328,7 +343,7 @@ pub async fn fetch_closed_issues(transport: &ServerTransport, repo_path: &Path) 
         .iter()
         .map(|s| s.to_string())
         .collect();
-    let output = gh_repo_output(transport, repo_path, &args).await.map_err(|e| GhError::Transient(e.to_string()))?;
+    let output = gh_repo_read(transport, repo_path, &args).await.map_err(|e| GhError::Transient(e.to_string()))?;
     if !output.status.success() {
         return Err(classify_gh_error(&String::from_utf8_lossy(&output.stderr)));
     }
@@ -345,7 +360,7 @@ pub async fn fetch_merge_comments(transport: &ServerTransport, repo_path: &Path)
         .iter()
         .map(|s| s.to_string())
         .collect();
-    let output = gh_repo_output(transport, repo_path, &args).await.map_err(|e| GhError::Transient(e.to_string()))?;
+    let output = gh_repo_read(transport, repo_path, &args).await.map_err(|e| GhError::Transient(e.to_string()))?;
     if !output.status.success() {
         return Err(classify_gh_error(&String::from_utf8_lossy(&output.stderr)));
     }
@@ -457,7 +472,7 @@ pub async fn fetch_feature_link(
     repo_path: &Path,
     parent: u32,
 ) -> Option<FeatureLink> {
-    let output = gh_repo_output(transport, repo_path, &feature_link_args(parent))
+    let output = gh_repo_read(transport, repo_path, &feature_link_args(parent))
         .await
         .map_err(|e| tracing::debug!("feature link #{parent}: {e}"))
         .ok()?;
@@ -488,7 +503,7 @@ pub async fn fetch_feature_parents(transport: &ServerTransport, repo_path: &Path
     .map(|s| s.to_string())
     .chain(std::iter::once(format!("query={FEATURE_PARENTS_QUERY}")))
     .collect();
-    match gh_repo_output(transport, repo_path, &args).await {
+    match gh_repo_read(transport, repo_path, &args).await {
         Ok(o) if o.status.success() => (feature_parents_from_json(&o.stdout), closed_feature_parents_from_json(&o.stdout)),
         Ok(o) => {
             tracing::debug!("feature parents: {}", String::from_utf8_lossy(&o.stderr).trim());

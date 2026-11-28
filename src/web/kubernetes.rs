@@ -350,7 +350,7 @@ impl KubeVillages {
             all.extend(["--context".to_string(), c.clone()]);
         }
         all.extend(args.iter().map(|s| s.to_string()));
-        let out = transport.output("kubectl", &all, None).await.map_err(|e| format!("{e:#}"))?;
+        let out = transport.read("kubectl", &all, None).await.map_err(|e| format!("{e:#}"))?;
         if !out.status.success() {
             return Err(String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("kubectl failed").trim().to_string());
         }

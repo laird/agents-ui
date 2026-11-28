@@ -226,7 +226,7 @@ pub async fn gather(transport: &ServerTransport, cwds: &[PathBuf]) -> Vec<RepoFa
             .iter()
             .map(|s| s.to_string())
             .collect();
-        let Ok(out) = transport.output("git", &args, Some(cwd)).await else { continue };
+        let Ok(out) = transport.read("git", &args, Some(cwd)).await else { continue };
         if !out.status.success() {
             continue;
         }
@@ -236,7 +236,7 @@ pub async fn gather(transport: &ServerTransport, cwds: &[PathBuf]) -> Vec<RepoFa
             continue;
         }
         let args: Vec<String> = ["worktree", "list", "--porcelain"].iter().map(|s| s.to_string()).collect();
-        let Ok(out) = transport.output("git", &args, Some(cwd)).await else { continue };
+        let Ok(out) = transport.read("git", &args, Some(cwd)).await else { continue };
         if !out.status.success() {
             continue;
         }
@@ -289,7 +289,7 @@ pub fn parse_manifests(text: &str) -> Vec<SwarmManifest> {
 /// they can't be read).
 pub async fn read_manifests(transport: &ServerTransport, root: &Path) -> Vec<SwarmManifest> {
     let cat = ["-c".to_string(), "cat .autocoder/swarm/*.json 2>/dev/null".to_string()];
-    match transport.output("sh", &cat, Some(root)).await {
+    match transport.read("sh", &cat, Some(root)).await {
         Ok(out) => parse_manifests(&String::from_utf8_lossy(&out.stdout)),
         Err(_) => Vec::new(),
     }
@@ -308,7 +308,7 @@ pub async fn process_marker(transport: &ServerTransport, pids: &[u32]) -> Option
 done; }; walk "$@""#;
     let mut args = vec!["-c".to_string(), WALK.to_string(), "sh".to_string()];
     args.extend(pids.iter().map(u32::to_string));
-    let out = transport.output("sh", &args, None).await.ok()?;
+    let out = transport.read("sh", &args, None).await.ok()?;
     let marker = String::from_utf8_lossy(&out.stdout).trim().to_string();
     (!marker.is_empty()).then_some(marker)
 }
