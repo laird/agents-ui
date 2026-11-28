@@ -91,7 +91,8 @@ async fn gh_list(transport: &ServerTransport, repo: &Path, what: &str, query: &s
         .iter()
         .map(|s| s.to_string())
         .collect();
-    let out = transport.output("gh", &args, Some(repo)).await.ok()?;
+    // A read: it gives up after the read timeout (#592).
+    let out = transport.read("gh", &args, Some(repo)).await.ok()?;
     if !out.status.success() {
         return None;
     }

@@ -591,11 +591,14 @@ mod tests {
             assert!(src.contains("gh_repo_read("), "src/web/{name} reads gh with gh_repo_read");
             assert!(!src.contains("gh_repo_output("), "src/web/{name}: use gh_repo_read for a read, not the unbounded gh_repo_output");
         }
-        // Their deployments (and the build page's check runs) come from `gh api` GETs.
-        let deployments = include_str!("web/deployments.rs");
-        let gh_api = &deployments[deployments.find("async fn gh_api(").expect("deployments.rs has gh_api")..];
-        let gh_api = &gh_api[..gh_api.find("\n}\n").expect("gh_api ends")];
-        assert!(gh_api.contains("transport.read(\"gh\""), "deployments::gh_api reads with transport.read");
+        // Deployments, releases, tags and the build page's check runs come
+        // from each file's own `gh api` GET helper.
+        for (name, src) in [("deployments.rs", include_str!("web/deployments.rs")), ("build.rs", include_str!("web/build.rs"))] {
+            let gh_api = &src[src.find("async fn gh_api(").unwrap_or_else(|| panic!("src/web/{name} has gh_api"))..];
+            let gh_api = &gh_api[..gh_api.find("\n}\n").expect("gh_api ends")];
+            assert!(gh_api.contains("transport.read(\"gh\""), "src/web/{name}'s gh_api reads with transport.read");
+        }
+        assert!(!include_str!("web/since.rs").contains("output(\"gh\""), "src/web/since.rs lists with transport.read");
     }
 
     use super::{

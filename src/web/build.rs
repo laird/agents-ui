@@ -294,9 +294,11 @@ pub fn combine(sources: impl IntoIterator<Item = Option<Build>>) -> Build {
 // Reading it
 // ---------------------------------------------------------------------------
 
+/// `gh api <path>` (a GET): `None` when it fails or takes longer than the
+/// read timeout (#592).
 async fn gh_api(transport: &ServerTransport, repo: &Path, path: &str) -> Option<String> {
     let args = vec!["api".to_string(), "--allow-escape-sequences".to_string(), path.to_string()];
-    let out = transport.output("gh", &args, Some(repo)).await.ok()?;
+    let out = transport.read("gh", &args, Some(repo)).await.ok()?;
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
