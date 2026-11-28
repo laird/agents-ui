@@ -70,9 +70,10 @@ impl ServerTransport {
         self.read_within(READ_TIMEOUT, program, args, current_dir).await
     }
 
-    /// Run a read-only command, giving up after `limit`. The process (`ssh`,
-    /// or the local program) is killed when it runs out of time: a read can
-    /// be asked again, and a stuck one would otherwise outlive its caller.
+    /// Run a read-only command, giving up after `limit`. The process it
+    /// started (`ssh`, or the local program) is killed when it runs out of
+    /// time, since a read can be asked again. Over ssh that frees this side
+    /// only: the stuck command on the host is left to its own fate.
     pub async fn read_within(
         &self,
         limit: std::time::Duration,
@@ -224,7 +225,15 @@ mod tests {
             .unwrap_err();
         assert!(started.elapsed() < std::time::Duration::from_secs(10), "it waited {:?}", started.elapsed());
         assert_eq!(format!("{err:#}"), "Failed to run remote command over ssh: buildbox: no answer in 500ms");
-        let pid = std::fs::read_to_string(&pid_file).unwrap().trim().to_string();
+        let mut pid = String::new();
+        for _ in 0..50 {
+            pid = std::fs::read_to_string(&pid_file).unwrap_or_default().trim().to_string();
+            if !pid.is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        assert!(!pid.is_empty(), "the stand-in ssh never started");
         // Killed: gone, or a zombie until tokio reaps it.
         let mut alive = true;
         for _ in 0..50 {

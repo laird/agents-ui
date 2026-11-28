@@ -296,7 +296,9 @@ pub async fn gh_repo_output(
 
 /// [`gh_repo_output`] for a `gh` command that only reads: it gives up after
 /// [`crate::transport::READ_TIMEOUT`] instead of holding the board when `gh`
-/// hangs on a host that still answers ssh (#590).
+/// hangs on a host that still answers ssh (#590). The profile check before it
+/// bounds its own reads, but a `gh auth switch` it makes is not timed out:
+/// that changes the active account and must not be killed partway.
 pub async fn gh_repo_read(
     transport: &ServerTransport,
     repo_path: &Path,

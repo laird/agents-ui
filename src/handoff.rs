@@ -205,7 +205,9 @@ pub async fn collect_git_state(
     let dirty = transport
         .read(
             "git",
-            &["status".to_string(), "--porcelain".to_string()],
+            // No index.lock: a status killed at its timeout (#590) must not
+            // leave one behind for the worker's next git command.
+            &["--no-optional-locks".to_string(), "status".to_string(), "--porcelain".to_string()],
             Some(worktree),
         )
         .await
