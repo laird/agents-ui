@@ -145,7 +145,7 @@ static DETAILS: LazyLock<TtlCache<(PathBuf, u32), Option<IssueDetail>>> = LazyLo
 /// Read issue `n` of `repo`; `None` when `gh` can't show it.
 async fn read(transport: &crate::transport::ServerTransport, repo: &Path, n: u32) -> Option<IssueDetail> {
     let args: Vec<String> = ["issue", "view", &n.to_string(), "--json", ISSUE_FIELDS].iter().map(|s| s.to_string()).collect();
-    let out = crate::github::gh_repo_output(transport, repo, &args).await.ok()?;
+    let out = crate::github::gh_repo_read(transport, repo, &args).await.ok()?;
     if !out.status.success() {
         return None;
     }

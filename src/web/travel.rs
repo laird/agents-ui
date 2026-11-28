@@ -313,7 +313,7 @@ static LOGS: LazyLock<TtlCache<(PathBuf, u32), Option<TravelLog>>> = LazyLock::n
 /// can't show the issue.
 async fn read(transport: &crate::transport::ServerTransport, repo: &Path, n: u32) -> Option<TravelLog> {
     let args: Vec<String> = ["issue", "view", &n.to_string(), "--json", ISSUE_FIELDS].iter().map(|s| s.to_string()).collect();
-    let out = crate::github::gh_repo_output(transport, repo, &args).await.ok()?;
+    let out = crate::github::gh_repo_read(transport, repo, &args).await.ok()?;
     if !out.status.success() {
         return None;
     }

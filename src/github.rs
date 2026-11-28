@@ -577,6 +577,21 @@ mod tests {
         assert!(crate::github::parse_merge_comments(b"not json").is_empty());
     }
 
+    /// The web pages' `gh` calls only read, so they give up after the read
+    /// timeout instead of holding a page when `gh` hangs (#592).
+    #[test]
+    fn web_pages_read_gh_with_a_timeout() {
+        for (name, src) in [
+            ("crossrepo.rs", include_str!("web/crossrepo.rs")),
+            ("github.rs", include_str!("web/github.rs")),
+            ("travel.rs", include_str!("web/travel.rs")),
+            ("issue.rs", include_str!("web/issue.rs")),
+        ] {
+            assert!(src.contains("gh_repo_read("), "src/web/{name} reads gh with gh_repo_read");
+            assert!(!src.contains("gh_repo_output("), "src/web/{name} only reads: use gh_repo_read, not the unbounded gh_repo_output");
+        }
+    }
+
     use super::{
         GhError, classify_gh_error, feature_link_args, parse_issues_json, repo_owner_from_remote,
         repo_web_url,

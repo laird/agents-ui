@@ -344,7 +344,7 @@ pub async fn fetch(transport: &ServerTransport, repo: &Path, integration: &str) 
     .map(|s| s.to_string())
     .collect();
     let gh = |args: Vec<String>| async move {
-        let out = crate::github::gh_repo_output(transport, repo, &args).await.ok()?;
+        let out = crate::github::gh_repo_read(transport, repo, &args).await.ok()?;
         out.status.success().then_some(out.stdout)
     };
     let issues = gh(args);

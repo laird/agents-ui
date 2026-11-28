@@ -387,7 +387,7 @@ async fn read_repo(transport: &ServerTransport, dir: &Path) -> RepoRead {
         return RepoRead::default();
     }
     let args: Vec<String> = ["issue", "list", "--state", "all", "--limit", "300", "--json", "number,title,state,stateReason,body"].map(String::from).to_vec();
-    let mut issues = match crate::github::gh_repo_output(transport, dir, &args).await {
+    let mut issues = match crate::github::gh_repo_read(transport, dir, &args).await {
         Ok(out) if out.status.success() => serde_json::from_slice::<Vec<CrossIssue>>(&out.stdout).ok(),
         _ => None,
     };
@@ -395,7 +395,7 @@ async fn read_repo(transport: &ServerTransport, dir: &Path) -> RepoRead {
     if let (Some(list), Some((owner, name))) = (issues.as_mut(), slug.as_deref().and_then(|s| s.split_once('/'))) {
         let args: Vec<String> =
             vec!["api".into(), "graphql".into(), "-f".into(), format!("query={NATIVE_QUERY}"), "-f".into(), format!("owner={owner}"), "-f".into(), format!("name={name}")];
-        if let Ok(out) = crate::github::gh_repo_output(transport, dir, &args).await
+        if let Ok(out) = crate::github::gh_repo_read(transport, dir, &args).await
             && out.status.success()
             && let Some(native) = parse_native(&out.stdout)
         {
