@@ -395,8 +395,7 @@ mod tests {
     fn fake_ssh(dir: &Path, home: &Path) -> PathBuf {
         let ssh = dir.join("ssh");
         // The command is ssh's last argument, after its options and the host.
-        std::fs::write(&ssh, format!("#!/bin/sh\nfor c; do :; done\nHOME='{}' exec sh -c \"$c\"\n", home.display())).unwrap();
-        std::process::Command::new("chmod").args(["+x", &ssh.to_string_lossy()]).status().unwrap();
+        crate::testutil::write_executable(&ssh, &format!("#!/bin/sh\nfor c; do :; done\nHOME='{}' exec sh -c \"$c\"\n", home.display()));
         ssh
     }
 

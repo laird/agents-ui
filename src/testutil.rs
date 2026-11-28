@@ -185,3 +185,20 @@ fn reap_stale_tmux_sessions() {
             .ok();
     }
 }
+
+/// Write an executable a test then runs (a stand-in `ssh`, ...), from a
+/// child process. Writing it here would race any other test thread's fork:
+/// the child inherits the open write handle for a moment, and running the
+/// file then fails with ETXTBSY, "Text file busy" (#589). A file this
+/// process never opened for writing cannot be busy.
+pub fn write_executable(path: &std::path::Path, body: &str) {
+    use std::io::Write;
+    let mut child = std::process::Command::new("sh")
+        .args(["-c", "cat > \"$1\" && chmod 755 \"$1\"", "sh"])
+        .arg(path)
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn sh to write the executable");
+    child.stdin.take().unwrap().write_all(body.as_bytes()).unwrap();
+    assert!(child.wait().unwrap().success(), "could not write {}", path.display());
+}

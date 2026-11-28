@@ -2655,7 +2655,6 @@ mod tests {
     /// A remote transport whose `ssh` is a script that records each call's
     /// arguments, one line per call, and succeeds (#550).
     fn recording_remote(host: &str) -> (ServerTransport, PathBuf) {
-        use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir().join(format!(
             "agents-ui-ssh-{}-{}",
             std::process::id(),
@@ -2664,8 +2663,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let log = dir.join("calls.log");
         let script = dir.join("ssh");
-        std::fs::write(&script, format!("#!/bin/sh\necho \"$*\" >> '{}'\n", log.display())).unwrap();
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        crate::testutil::write_executable(&script, &format!("#!/bin/sh\necho \"$*\" >> '{}'\n", log.display()));
         (ServerTransport::with_ssh_program(host, script), log)
     }
 
