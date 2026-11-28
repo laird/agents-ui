@@ -32,6 +32,13 @@ test('what the form says after the server answers', () => {
   assert.deepEqual(launchAnswer(502, {}), { ok: false, words: 'Launch failed (HTTP 502)' });
 });
 
+test('a start through autocoder-ctl says what it said (#583)', () => {
+  const message = 'Started codex-shop on codex instead of claude. ⚠️  claude is out of quota; starting on codex instead. Refresh in a few seconds.';
+  assert.deepEqual(launchAnswer(200, { ok: true, via: 'autocoder-ctl', message }), { ok: true, words: message });
+  const error = 'autocoder-ctl start failed: a swarm session for this repo is already running; use add-worker, or stop-swarm first';
+  assert.deepEqual(launchAnswer(200, { ok: false, via: 'autocoder-ctl', error }), { ok: false, words: error });
+});
+
 test('the looking and read-only messages name the same two ways to start one', () => {
   assert.ok(LOOKING.includes('the dashboard or the agents-tui terminal'));
   assert.ok(READ_ONLY.includes('the dashboard or the agents-tui terminal'));

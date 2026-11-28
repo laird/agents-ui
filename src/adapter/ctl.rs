@@ -38,6 +38,9 @@ pub struct CtlResult {
     /// `detail`: the verb's data on success, a sentence on failure.
     pub detail: serde_json::Value,
     pub prompts: Vec<Prompt>,
+    /// The launcher's own notes on stderr: why it started a different agent
+    /// than the one asked for (laird/agents#454, "starting on <agent> instead").
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -65,7 +68,12 @@ pub fn parse_result(action: &str, stdout: &[u8], stderr: &[u8], exit: Option<i32
             Prompt { role: s("role"), worker: p.get("worker").and_then(|v| v.as_u64()), pane: s("pane"), kind: s("kind"), text: s("text") }
         })
         .collect();
-    CtlRun::Done(CtlResult { action: action.to_string(), ok, exit, detail, prompts })
+    let notes = String::from_utf8_lossy(stderr)
+        .lines()
+        .filter(|l| l.contains("starting on "))
+        .map(shown)
+        .collect();
+    CtlRun::Done(CtlResult { action: action.to_string(), ok, exit, detail, prompts, notes })
 }
 
 /// `start <repo> --workers N --agent A [--no-plugin-install]`.
@@ -80,6 +88,14 @@ pub fn start_args(repo: &Path, workers: u32, agent: &AgentType, plugin_install: 
     ];
     if !plugin_install {
         args.push("--no-plugin-install".to_string());
+    }
+    args
+}
+
+/// `start`'s arguments with `--mux` added when one was chosen.
+pub fn with_mux(mut args: Vec<String>, mux: Option<&str>) -> Vec<String> {
+    if let Some(m) = mux {
+        args.extend(["--mux".to_string(), m.to_string()]);
     }
     args
 }
@@ -146,6 +162,7 @@ pub async fn run(script: Option<&Path>, args: &[String], cwd: &Path) -> CtlRun {
             exit: None,
             detail: serde_json::Value::String(format!("could not run {}: {e}", script.display())),
             prompts: Vec::new(),
+            notes: Vec::new(),
         }),
     }
 }

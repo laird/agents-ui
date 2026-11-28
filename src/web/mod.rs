@@ -19,6 +19,7 @@ pub mod herdr;
 pub mod issue;
 pub mod issue_events;
 pub mod kubernetes;
+pub mod launch;
 pub mod merge_events;
 pub mod mount;
 pub mod newissue;

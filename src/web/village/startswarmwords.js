@@ -26,8 +26,11 @@ export function launchRequest(repoPath, agentType, numWorkers) {
 
 /* What the form says once the server answers. `api_launch_swarm_handler`
  * sends a bare 400 (no body) for a repo path that doesn't exist on the
- * server or an agent type it doesn't know. */
+ * server or an agent type it doesn't know. A start through autocoder-ctl
+ * (#583, web/launch.rs) answers `message` (the session, the agent it is on
+ * when autocoder chose another, any prompt waiting) or `error`. */
 export function launchAnswer(status, body) {
+  if (status === 200 && body && body.ok && body.message) return { ok: true, words: body.message };
   if (status === 200 && body && body.ok) {
     return { ok: true, words: `Launching${body.project_name ? ' for ' + body.project_name : ''}! Refresh in a few seconds.` };
   }

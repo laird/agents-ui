@@ -722,11 +722,16 @@ pub struct LaunchSwarmBody {
     pub repo_path: String,
     pub agent_type: String,
     pub num_workers: u32,
+    /// `tmux`, `cmux` or `herdr`; none lets autocoder choose.
+    #[serde(default)]
+    pub mux: Option<String>,
 }
 
 /// Launch a new swarm.
 /// `POST /api/swarms`
-/// Returns 202 Accepted immediately; the swarm launches in a background task.
+/// Starts it with `autocoder-ctl start` and answers what that said
+/// (`web::launch`, #583). Without a usable `autocoder-ctl start`, answers at
+/// once and launches with agents-tui's own launcher in a background task.
 async fn api_launch_swarm_handler(
     State(state): State<WebServerState>,
     Json(body): Json<LaunchSwarmBody>,
@@ -735,6 +740,7 @@ async fn api_launch_swarm_handler(
     use crate::adapter::traits::SwarmConfig;
     use crate::model::swarm::AgentType;
     use crate::transport::ServerTransport;
+    use super::launch::{self, Launch};
 
     let repo_path = PathBuf::from(&body.repo_path);
     if !repo_path.exists() {
@@ -748,11 +754,27 @@ async fn api_launch_swarm_handler(
         "Gemini" => AgentType::Gemini,
         _ => return Err(StatusCode::BAD_REQUEST),
     };
+    let mux = body.mux.as_deref().filter(|m| !m.is_empty());
+    if mux.is_some_and(|m| !launch::MUXES.contains(&m)) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
 
     let project_name = repo_path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "unknown".to_string());
+
+    let script = super::ctl::script(&state.transport);
+    match launch::via_ctl(script.as_deref(), &repo_path, body.num_workers, &agent_type, mux, &project_name).await {
+        Launch::Ctl { ok, body } => {
+            if ok {
+                // A stop mark from an earlier stop would keep it from healing.
+                crate::config::persistence::clear_swarm_stopped(&project_name);
+            }
+            return Ok(Json(body));
+        }
+        Launch::Fallback => {}
+    }
 
     let config = SwarmConfig {
         repo_path,
@@ -770,7 +792,7 @@ async fn api_launch_swarm_handler(
         }
     });
 
-    Ok(Json(json!({ "ok": true, "project_name": project_name })))
+    Ok(Json(json!({ "ok": true, "project_name": project_name, "via": "agents-tui" })))
 }
 
 /// Stop all workers in a swarm.
@@ -2322,6 +2344,19 @@ mod tests {
             .uri("/api/swarms")
             .header("content-type", "application/json")
             .body(Body::from(r#"{"repo_path":"/tmp","agent_type":"InvalidAgent","num_workers":3}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn api_launch_swarm_rejects_an_unknown_mux() {
+        let app = make_app(make_web_state(new_shared_state()));
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/swarms")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"repo_path":"/tmp","agent_type":"Claude","num_workers":3,"mux":"screen"}"#))
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
